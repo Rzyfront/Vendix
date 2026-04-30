@@ -90,25 +90,6 @@ export function variantTrackInventoryOverrideValidator(
 }
 
 /**
- * Validator: services cannot have variants
- */
-export function serviceHasNoVariantsValidator(
-  productTypeKey = 'product_type',
-  hasVariantsKey = 'hasVariants'
-): ValidatorFn {
-  return (control: AbstractControl): ValidationErrors | null => {
-    const group = control as FormGroup;
-    const productType = group.get(productTypeKey)?.value;
-    const hasVariants = group.get(hasVariantsKey)?.value;
-
-    if (productType === 'service' && hasVariants === true) {
-      return { serviceHasNoVariants: true };
-    }
-    return null;
-  };
-}
-
-/**
  * Cross-field validator: sale price vs base price for FormGroup
  */
 export function salePriceLessThanBasePriceValidator(

@@ -1773,18 +1773,6 @@ export class ProductCreatePageComponent {
       return;
     }
 
-    // Block SERVICE products from having variants
-    if (
-      this.productForm.get('product_type')?.value === 'service' &&
-      this.hasVariants
-    ) {
-      this.toastService.error(
-        'Los productos tipo SERVICIO no pueden tener variantes. Desactiva las variantes o cambia el tipo de producto.',
-        'Configuración inválida',
-      );
-      return;
-    }
-
     // Variant-specific validations
     if (this.hasVariants) {
       // Must have at least one variant

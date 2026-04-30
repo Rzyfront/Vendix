@@ -107,7 +107,10 @@ export class SubscriptionMetricsController {
       }
       const periodStart = new Date(start);
       const periodEnd = new Date(end);
-      if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
+      if (
+        Number.isNaN(periodStart.getTime()) ||
+        Number.isNaN(periodEnd.getTime())
+      ) {
         throw new BadRequestException('Invalid start/end dates');
       }
       if (periodEnd.getTime() <= periodStart.getTime()) {
@@ -116,8 +119,7 @@ export class SubscriptionMetricsController {
       return { periodStart, periodEnd };
     }
 
-    const days =
-      preset === 'last_365' ? 365 : preset === 'last_90' ? 90 : 30;
+    const days = preset === 'last_365' ? 365 : preset === 'last_90' ? 90 : 30;
     const periodEnd = now;
     const periodStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
     return { periodStart, periodEnd };

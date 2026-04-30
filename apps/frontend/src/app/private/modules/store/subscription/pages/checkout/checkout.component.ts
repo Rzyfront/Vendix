@@ -12,7 +12,7 @@ import {
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
-import { CheckoutPreviewResponse } from '../../interfaces/store-subscription.interface';
+import { CheckoutPreviewResponse, SubscriptionPlan } from '../../interfaces/store-subscription.interface';
 import {
   WompiCheckoutService,
   WompiWidgetConfig,
@@ -45,7 +45,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
     StickyHeaderComponent,
   ],
   template: `
-    <div class="w-full max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+    <div class="w-full space-y-6">
       <!-- Header -->
       <app-sticky-header
         [title]="headerTitle()"
@@ -193,38 +193,86 @@ const COUPON_REASON_COPY: Record<string, string> = {
         }
 
         <div class="grid grid-cols-1 lg:grid-cols-[1fr_400px] gap-6">
-          <!-- Left: Plan summary + proration kind -->
+          <!-- Left: Plan detail + proration kind -->
           <app-card>
             <div class="p-5 md:p-6 space-y-5">
-              <div class="flex items-start justify-between gap-4">
-                <div>
-                  <p class="text-xs uppercase tracking-wide text-text-secondary mb-1">Tipo de cambio</p>
-                  <span
-                    class="inline-block text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full"
-                    [class.bg-green-100]="p.kind === 'upgrade'"
-                    [class.text-green-800]="p.kind === 'upgrade'"
-                    [class.bg-blue-100]="p.kind === 'same-tier'"
-                    [class.text-blue-800]="p.kind === 'same-tier'"
-                    [class.bg-amber-100]="p.kind === 'downgrade'"
-                    [class.text-amber-800]="p.kind === 'downgrade'"
-                    [class.bg-blue-100]="p.kind === 're_subscribe'"
-                    [class.text-blue-800]="p.kind === 're_subscribe'"
-                  >
-                    {{ kindLabel(p.kind) }}
-                  </span>
+              <!-- Plan detail header -->
+              @if (selectedPlan(); as sp) {
+                <div class="flex flex-col sm:flex-row gap-4">
+                  <div class="flex-1 min-w-0 space-y-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <h2 class="text-lg md:text-xl font-extrabold text-text-primary truncate">{{ sp.name }}</h2>
+                      @if (sp.is_popular) {
+                        <span class="text-[10px] uppercase tracking-wide font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 shrink-0">
+                          Recomendado
+                        </span>
+                      }
+                    </div>
+                    @if (sp.description) {
+                      <p class="text-xs md:text-sm text-text-secondary leading-relaxed">{{ sp.description }}</p>
+                    }
+                    @if (sp.features.length > 0) {
+                      <ul class="flex flex-wrap gap-x-4 gap-y-1">
+                        @for (f of sp.features; track f.key) {
+                          <li class="flex items-center gap-1.5 text-xs text-text-primary">
+                            <app-icon
+                              [name]="f.enabled ? 'check-circle-2' : 'minus'"
+                              [size]="14"
+                              [class.text-primary-600]="f.enabled"
+                              [class.opacity-40]="!f.enabled"
+                              class="shrink-0"
+                            ></app-icon>
+                            <span [class.text-text-secondary]="!f.enabled">{{ f.label }}</span>
+                            @if (f.limit !== null && f.limit !== undefined) {
+                              <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-medium">
+                                {{ f.limit }}{{ f.unit ? ' ' + f.unit : '' }}
+                              </span>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </div>
+                  <div class="sm:border-l sm:border-border sm:pl-4 flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0">
+                    <div class="text-right">
+                      <span class="text-2xl md:text-3xl font-extrabold text-primary leading-none">
+                        {{ sp.base_price | currency:sp.currency:'symbol':'1.0-0' }}
+                      </span>
+                      <p class="text-xs text-text-secondary mt-1">/{{ cycleLabel(sp.billing_cycle) }}</p>
+                    </div>
+                    @if (sp.is_free) {
+                      <span class="text-[10px] uppercase tracking-wide font-bold px-2 py-0.5 rounded-full bg-green-100 text-green-800">
+                        Sin costo
+                      </span>
+                    }
+                  </div>
                 </div>
+                <div class="border-t border-border"></div>
+              }
+
+              <!-- Change type — compact inline -->
+              <div class="flex items-center gap-2">
                 <app-icon
                   [name]="p.kind === 'upgrade' ? 'trending-up' : p.kind === 'downgrade' ? 'trending-down' : p.kind === 're_subscribe' ? 'refresh-cw' : 'arrow-right-left'"
-                  [size]="24"
-                  class="text-text-secondary"
+                  [size]="14"
+                  [class.text-green-600]="p.kind === 'upgrade'"
+                  [class.text-blue-600]="p.kind === 'same-tier'"
+                  [class.text-amber-600]="p.kind === 'downgrade'"
+                  [class.text-blue-600]="p.kind === 're_subscribe'"
                 ></app-icon>
+                <span
+                  class="text-xs font-semibold"
+                  [class.text-green-700]="p.kind === 'upgrade'"
+                  [class.text-blue-700]="p.kind === 'same-tier'"
+                  [class.text-amber-700]="p.kind === 'downgrade'"
+                  [class.text-blue-700]="p.kind === 're_subscribe'"
+                >
+                  {{ kindLabel(p.kind) }}
+                </span>
               </div>
 
               @if (isResubscribe()) {
-                <!-- Re-subscribe variant: only show the new plan price, no
-                     "current plan" comparison (the prior subscription is
-                     cancelled/expired and has no remaining value). -->
-                <div class="p-4 bg-primary/10 rounded-xl border border-primary/20">
+                <div class="p-3 bg-primary/10 rounded-xl border border-primary/20">
                   <p class="text-xs text-text-secondary mb-1">Plan a contratar</p>
                   <p class="text-lg font-bold text-primary">{{ asNumber(p.new_effective_price) | currency }}</p>
                   <p class="text-xs text-primary mt-1">por ciclo</p>
@@ -237,33 +285,61 @@ const COUPON_REASON_COPY: Record<string, string> = {
                   </p>
                 </div>
               } @else {
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="p-4 bg-gray-50 rounded-xl">
-                    <p class="text-xs text-text-secondary mb-1">Plan actual</p>
-                    <p class="text-lg font-bold text-text-primary">{{ asNumber(p.old_effective_price) | currency }}</p>
-                    <p class="text-xs text-text-secondary mt-1">por ciclo</p>
+                <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[10px] uppercase tracking-wide text-text-secondary">Actual</p>
+                    <p class="text-sm font-bold text-text-primary truncate">{{ asNumber(p.old_effective_price) | currency }}<span class="font-normal text-text-secondary">/ciclo</span></p>
                   </div>
-                  <div class="p-4 bg-primary/10 rounded-xl border border-primary/20">
-                    <p class="text-xs text-text-secondary mb-1">Nuevo plan</p>
-                    <p class="text-lg font-bold text-primary">{{ asNumber(p.new_effective_price) | currency }}</p>
-                    <p class="text-xs text-primary mt-1">por ciclo</p>
+                  <app-icon name="arrow-right" [size]="16" class="text-text-secondary shrink-0"></app-icon>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[10px] uppercase tracking-wide text-text-secondary">Nuevo</p>
+                    <p class="text-sm font-bold text-primary truncate">{{ asNumber(p.new_effective_price) | currency }}<span class="font-normal text-primary/70">/ciclo</span></p>
                   </div>
                 </div>
 
-                @if (p.days_remaining < p.cycle_days) {
-                  <div class="flex items-start gap-3 p-3 bg-blue-50 border border-blue-100 rounded-lg">
-                    <app-icon name="info" [size]="18" class="text-blue-600 mt-0.5"></app-icon>
+                @if (daysRemainingInCycle() < currentCycleDays()) {
+                  <div class="flex items-start gap-2 p-2.5 bg-blue-50 border border-blue-100 rounded-lg">
+                    <app-icon name="info" [size]="14" class="text-blue-600 mt-0.5 shrink-0"></app-icon>
                     <p class="text-xs text-blue-900">
-                      Quedan <strong>{{ p.days_remaining }}</strong> días del ciclo actual de {{ p.cycle_days }} días.
-                      El cobro se prorratea proporcionalmente.
+                      Quedan <strong>{{ daysRemainingInCycle() }}</strong>/{{ currentCycleDays() }} días del ciclo — cobro prorrateado.
                     </p>
                   </div>
                 }
               }
+
+              <!-- G8 — Política de cobro y suscripción (paid plan).
+                   Cubre: cobro recurrente automatizado, fecha del próximo
+                   cobro (data-driven cuando hay invoice), no-reembolso,
+                   posibilidad de cancelar la auto-renovación desde el panel.
+                   S3.5 — Always visible: the commit either charges now or
+                   voids a scheduled cancel (which restores future charges),
+                   so the recurring-billing terms apply in both cases. The
+                   no-refund checkbox is skipped at the CTA level when
+                   chargeNow=0. -->
+              <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 md:p-4 space-y-3">
+                <div class="flex items-start gap-2">
+                  <app-icon name="info" [size]="16" class="text-amber-700 mt-0.5 shrink-0"></app-icon>
+                  <div class="space-y-2 min-w-0">
+                    <h3 class="text-xs font-semibold text-amber-900">Política de cobro y suscripción</h3>
+                    <ul class="text-xs text-amber-900 leading-relaxed space-y-1.5 list-disc pl-4">
+                      <li>
+                        <strong>Cobro recurrente:</strong>
+                        se cobra automáticamente al final de cada ciclo.
+                      </li>
+                      <li>
+                        <strong>No reembolsable:</strong>
+                        los pagos no admiten devolución.
+                      </li>
+                      <li>
+                        <strong>Cancelación:</strong>
+                        puedes cancelar la auto-renovación cuando quieras desde tu panel.
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
             </div>
           </app-card>
-
-          <!-- Right: Breakdown card (sticky on desktop) -->
           <app-card customClasses="lg:sticky lg:top-24 lg:self-start">
             <div class="p-5 md:p-6 space-y-4">
               <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Resumen</h3>
@@ -274,6 +350,24 @@ const COUPON_REASON_COPY: Record<string, string> = {
                     <span class="text-sm text-text-secondary">Crédito por tiempo restante</span>
                     <span class="text-sm font-medium text-green-600">
                       -{{ asNumber(p.credit_to_apply_next_cycle) | currency }}
+                    </span>
+                  </div>
+                }
+                @if (prorationDiscount() > 0) {
+                  <div class="flex justify-between items-center" role="listitem">
+                    <span class="text-sm text-text-secondary">
+                      Plan {{ targetCycleDays() }} días
+                    </span>
+                    <span class="text-sm font-medium text-text-primary">
+                      {{ asNumber(p.new_effective_price) | currency }}
+                    </span>
+                  </div>
+                  <div class="flex justify-between items-center" role="listitem">
+                    <span class="text-sm text-text-secondary">
+                      Descuento prorrateado ({{ daysRemainingInCycle() }} de {{ currentCycleDays() }} días no usados)
+                    </span>
+                    <span class="text-sm font-medium text-green-600">
+                      -{{ prorationDiscount() | currency }}
                     </span>
                   </div>
                 }
@@ -307,58 +401,23 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 </p>
               }
 
-              <!-- G8 — Política de cobro y suscripción (paid plan).
-                   Cubre: cobro recurrente automatizado, fecha del próximo
-                   cobro (data-driven cuando hay invoice), no-reembolso,
-                   posibilidad de cancelar la auto-renovación desde el panel.
-                   S3.5 — Always visible: the commit either charges now or
-                   voids a scheduled cancel (which restores future charges),
-                   so the recurring-billing terms apply in both cases. The
-                   no-refund checkbox is skipped at the CTA level when
-                   chargeNow=0. -->
-              <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 md:p-4 space-y-3">
-                <div class="flex items-start gap-2">
-                  <app-icon name="info" [size]="16" class="text-amber-700 mt-0.5 shrink-0"></app-icon>
-                  <div class="space-y-2 min-w-0">
-                    <h3 class="text-xs font-semibold text-amber-900">Política de cobro y suscripción</h3>
-                    <ul class="text-xs text-amber-900 leading-relaxed space-y-1.5 list-disc pl-4">
-                      <li>
-                        <strong>Cobro recurrente:</strong>
-                        se cobra automáticamente al final de cada ciclo.
-                      </li>
-                      <li>
-                        <strong>No reembolsable:</strong>
-                        los pagos no admiten devolución.
-                      </li>
-                      <li>
-                        <strong>Cancelación:</strong>
-                        puedes cancelar la auto-renovación cuando quieras desde tu panel.
-                      </li>
-                    </ul>
-                    <a
-                      [routerLink]="'/legal/terminos'"
-                      fragment="pagos-y-reembolsos"
-                      target="_blank"
-                      class="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline pt-1"
-                    >
-                      Ver términos completos
-                      <app-icon name="external-link" [size]="12"></app-icon>
-                    </a>
-                  </div>
-                </div>
-                <label class="flex items-start gap-2 cursor-pointer pt-2 border-t border-amber-200">
-                  <input
-                    type="checkbox"
-                    [checked]="noRefundAcknowledged()"
-                    (change)="toggleAck($event)"
-                    class="mt-0.5 w-4 h-4 rounded border-amber-300 text-primary focus:ring-primary"
-                    aria-describedby="no-refund-policy-paid"
-                  />
-                  <span id="no-refund-policy-paid" class="text-xs text-text-primary leading-tight">
-                    He leído y acepto la política de cobro recurrente, no-reembolso y los términos de servicio.
-                  </span>
-                </label>
-              </div>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  [checked]="noRefundAcknowledged()"
+                  (change)="toggleAck($event)"
+                  class="w-4 h-4 rounded border-border text-primary focus:ring-primary shrink-0"
+                />
+                <span class="text-xs text-text-secondary leading-tight">
+                  Acepto la
+                  <a
+                    [routerLink]="'/legal/terminos'"
+                    fragment="pagos-y-reembolsos"
+                    target="_blank"
+                    class="font-medium text-primary hover:underline"
+                  >política de cobro y términos de servicio</a>.
+                </span>
+              </label>
 
               <div class="pt-2 space-y-2">
                 <app-button
@@ -484,8 +543,16 @@ export class CheckoutComponent implements OnInit {
   readonly loadingPreview = signal(false);
   readonly committing = signal(false);
   readonly hasError = signal(false);
+  readonly selectedPlan = signal<SubscriptionPlan | null>(null);
   // G8 — checkbox obligatorio de aceptación de política de no-reembolso.
   readonly noRefundAcknowledged = signal(false);
+
+  // RNC-PaidPlan — Tracks whether the Wompi widget produced a terminal payment
+  // outcome (APPROVED or PENDING). When the user closes the widget without
+  // either, the `onClosed` handler invokes `cancelPendingChange()` so the
+  // backend doesn't keep the subscription stuck in `pending_payment` with
+  // `pending_plan_id` set indefinitely.
+  private readonly paymentSucceeded = signal(false);
 
   // S2.1 — Coupon redemption form + facade signals.
   readonly couponControl = new FormControl<string>('', {
@@ -544,6 +611,51 @@ export class CheckoutComponent implements OnInit {
   readonly chargeNow = computed(() => {
     const inv = this.preview()?.proration?.invoice_to_issue ?? this.preview()?.invoice ?? null;
     return inv ? this.asNumber(inv.total) : 0;
+  });
+
+  // Difference between the plan's full cycle price and what is actually
+  // charged today. Surfaces the prorated savings in the summary so the user
+  // sees both the "list price" and the discount applied for the unused days.
+  // Returns 0 when there is no discount (downgrade / re_subscribe / first
+  // charge of a fresh cycle).
+  readonly prorationDiscount = computed(() => {
+    const p = this.proration();
+    if (!p) return 0;
+    const fullPrice = this.asNumber(p.new_effective_price);
+    const charge = this.chargeNow();
+    if (fullPrice <= 0 || charge <= 0) return 0;
+    return Math.max(0, Math.round(fullPrice - charge));
+  });
+
+  // Single source of truth: cycle_days and days_remaining come from the
+  // backend's ProrationPreview. The same numbers used to compute the
+  // discount $ are exposed on the wire so the UI can label the breakdown
+  // without reproducing the math (which previously drifted because the FE
+  // was deriving cycleDays from billing_cycle while BE derived it from
+  // (period_end - period_start)).
+  readonly currentCycleDays = computed(
+    () => this.proration()?.cycle_days ?? 0,
+  );
+
+  readonly daysRemainingInCycle = computed(
+    () => this.proration()?.days_remaining ?? 0,
+  );
+
+  readonly daysConsumedInCycle = computed(
+    () => Math.max(0, this.currentCycleDays() - this.daysRemainingInCycle()),
+  );
+
+  // Target-plan cycle length is the only piece backend doesn't echo because
+  // it's not part of the proration: it's a property of the plan the user is
+  // buying. Read it from `selectedPlan().billing_cycle` (same map the BE
+  // uses internally via `billingCycleDays`).
+  readonly targetCycleDays = computed(() => {
+    const cycle = this.selectedPlan()?.billing_cycle as string | undefined;
+    if (cycle === 'yearly' || cycle === 'annual') return 365;
+    if (cycle === 'monthly') return 30;
+    if (cycle === 'quarterly') return 90;
+    if (cycle === 'semiannual') return 180;
+    return this.currentCycleDays();
   });
 
   // RNC-15 — Trial → paid plan path. The backend returns kind='re_subscribe'
@@ -609,6 +721,20 @@ export class CheckoutComponent implements OnInit {
       this.facade.validateCoupon(queryCoupon);
     }
     this.loadPreview(planId, existing?.code ?? queryCoupon ?? undefined);
+    this.loadSelectedPlan(planId);
+  }
+
+  private loadSelectedPlan(planId: string): void {
+    this.subscriptionService.getPlans()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res.success && res.data) {
+            const plan = res.data.find(p => String(p.id) === String(planId)) ?? null;
+            this.selectedPlan.set(plan);
+          }
+        },
+      });
   }
 
   private loadPreview(planId: string, couponCode?: string): void {
@@ -660,6 +786,27 @@ export class CheckoutComponent implements OnInit {
   confirmCheckout(): void {
     const planId = this.route.snapshot.paramMap.get('planId');
     if (!planId) return;
+
+    // Idempotency probe — Plan separado vs pagado (RNC-PaidPlan):
+    // Si el backend ya emitió un invoice para este mismo planId como
+    // pending_change, ir directo al retry-payment en lugar de crear otro.
+    // Esto evita duplicar invoices cuando el usuario hace clic "Confirmar"
+    // por segunda vez tras cerrar el widget de Wompi sin completar el pago.
+    const currentSub: any = this.facade.current();
+    if (
+      currentSub?.pending_plan_id != null &&
+      String(currentSub.pending_plan_id) === String(planId) &&
+      currentSub?.pending_change_invoice_id != null
+    ) {
+      // Ya existe un invoice pendiente para este plan — redirigir a la
+      // página de suscripción donde el usuario puede completar el pago
+      // con el botón "Completar pago" (retryPayment).
+      this.toastService.info(
+        'Ya tienes un cambio de plan en proceso. Completa el pago pendiente.',
+      );
+      this.router.navigate(['/admin/subscription']);
+      return;
+    }
 
     // S3.4 — Trial plan-swap is free and deferred (no charge today).
     // Free plans likewise emit no charge. The no-refund acknowledgement
@@ -761,8 +908,13 @@ export class CheckoutComponent implements OnInit {
     config: WompiWidgetConfig,
     invoiceId: number | null = null,
   ): Promise<void> {
+    // Defensive reset — the user may re-open the widget after closing it
+    // once. Without this, a previous APPROVED/PENDING flag would leak across
+    // sessions and skip the cleanup on a true abandonment.
+    this.paymentSucceeded.set(false);
     await this.wompiCheckoutService.openWidget(config, {
       onApproved: () => {
+        this.paymentSucceeded.set(true);
         this.committing.set(false);
         // Always refresh first; the response might already be `active` if
         // the synchronous webhook fast-path won, otherwise polling catches
@@ -783,6 +935,10 @@ export class CheckoutComponent implements OnInit {
         );
       },
       onPending: () => {
+        // PSE/transferencia in-flight — backend awaits webhook, do NOT cancel
+        // the pending change on close. Cron reconciles after 60min if the
+        // webhook never arrives.
+        this.paymentSucceeded.set(true);
         this.committing.set(false);
         this.facade.loadCurrent();
         this.facade.pollSubscriptionUntilActive({ invoiceId });
@@ -793,10 +949,25 @@ export class CheckoutComponent implements OnInit {
       },
       onClosed: () => {
         this.committing.set(false);
-        this.facade.loadCurrent();
-        this.toastService.warning(
-          'El pago fue cancelado. Tu suscripción quedó pendiente de pago.',
-        );
+        if (this.paymentSucceeded()) {
+          this.facade.loadCurrent();
+          return;
+        }
+        // True abandonment — wipe the pending change server-side so the
+        // subscription returns to its previous state. If the HTTP call
+        // fails, fall back to the cron's 60-minute reconciler.
+        this.subscriptionService.cancelPendingChange().subscribe({
+          next: () => {
+            this.facade.loadCurrent();
+            this.toastService.info('Cambio cancelado');
+          },
+          error: () => {
+            this.facade.loadCurrent();
+            this.toastService.warning(
+              'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
+            );
+          },
+        });
       },
       onError: () => {
         this.committing.set(false);
@@ -816,6 +987,19 @@ export class CheckoutComponent implements OnInit {
     if (value === null || value === undefined) return 0;
     const n = typeof value === 'string' ? parseFloat(value) : value;
     return isNaN(n) ? 0 : n;
+  }
+
+  cycleLabel(cycle: string): string {
+    switch (cycle) {
+      case 'monthly': return 'mes';
+      case 'quarterly': return 'trimestre';
+      case 'semiannual': return 'semestre';
+      case 'annual':
+      case 'yearly':
+        return 'año';
+      case 'lifetime': return 'pago único';
+      default: return cycle;
+    }
   }
 
   kindLabel(

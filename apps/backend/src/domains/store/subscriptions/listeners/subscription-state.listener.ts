@@ -142,7 +142,7 @@ export class SubscriptionStateListener {
           : null;
       const code =
         metadata && typeof metadata.pending_coupon_code === 'string'
-          ? (metadata.pending_coupon_code as string)
+          ? metadata.pending_coupon_code
           : null;
       if (!code) return;
 
@@ -273,14 +273,12 @@ export class SubscriptionStateListener {
         return;
       }
 
-      const isPending =
-        SubscriptionStateListener.PROMOTABLE_PENDING.includes(
-          sub.state as string,
-        );
-      const isRecovery =
-        SubscriptionStateListener.PROMOTABLE_RECOVERY.includes(
-          sub.state as string,
-        );
+      const isPending = SubscriptionStateListener.PROMOTABLE_PENDING.includes(
+        sub.state as string,
+      );
+      const isRecovery = SubscriptionStateListener.PROMOTABLE_RECOVERY.includes(
+        sub.state as string,
+      );
 
       if (!isPending && !isRecovery) {
         this.logger.debug({
@@ -434,8 +432,13 @@ export class SubscriptionStateListener {
       const { fromState, toState } = payload;
 
       // Welcome — first activation from draft or trial.
-      if ((fromState === 'draft' || fromState === 'trial') && toState === 'active') {
-        const subscriptionId = await this.resolveSubscriptionId(payload.storeId);
+      if (
+        (fromState === 'draft' || fromState === 'trial') &&
+        toState === 'active'
+      ) {
+        const subscriptionId = await this.resolveSubscriptionId(
+          payload.storeId,
+        );
         await this.enqueueEmail('subscription.welcome.email', {
           subscriptionId,
           storeId: payload.storeId,
@@ -447,7 +450,9 @@ export class SubscriptionStateListener {
 
       // Cancellation — must include the no-refund disclaimer flag for G10.
       if (toState === 'cancelled') {
-        const subscriptionId = await this.resolveSubscriptionId(payload.storeId);
+        const subscriptionId = await this.resolveSubscriptionId(
+          payload.storeId,
+        );
         await this.enqueueEmail('subscription.cancellation.email', {
           subscriptionId,
           storeId: payload.storeId,
@@ -464,7 +469,9 @@ export class SubscriptionStateListener {
         toState === 'active' &&
         ['cancelled', 'expired', 'suspended', 'blocked'].includes(fromState)
       ) {
-        const subscriptionId = await this.resolveSubscriptionId(payload.storeId);
+        const subscriptionId = await this.resolveSubscriptionId(
+          payload.storeId,
+        );
         await this.enqueueEmail('subscription.reactivation.email', {
           subscriptionId,
           storeId: payload.storeId,
@@ -511,9 +518,7 @@ export class SubscriptionStateListener {
         removeOnFail: { count: 50 },
       });
     } catch (err: any) {
-      this.logger.warn(
-        `Failed to enqueue ${jobName}: ${err?.message ?? err}`,
-      );
+      this.logger.warn(`Failed to enqueue ${jobName}: ${err?.message ?? err}`);
     }
   }
 }

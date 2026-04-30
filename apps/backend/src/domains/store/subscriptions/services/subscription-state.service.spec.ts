@@ -53,6 +53,28 @@ describe('SubscriptionStateService', () => {
     }
   });
 
+  // ADR-2: active → pending_payment must be a legal transition (mid-cycle upgrade flow)
+  it('legal transition active → pending_payment persists new state + creates event', async () => {
+    prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'active' }]);
+    prismaMock.store_subscriptions.update.mockResolvedValue({
+      id: 100,
+      state: 'pending_payment',
+    });
+
+    const result = await service.transition(10, 'pending_payment', {
+      reason: 'mid_cycle_upgrade',
+    });
+
+    expect(prismaMock.$transaction).toHaveBeenCalled();
+    const updArg = prismaMock.store_subscriptions.update.mock.calls[0][0];
+    expect(updArg.data.state).toBe('pending_payment');
+
+    const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(evtArg.data.from_state).toBe('active');
+    expect(evtArg.data.to_state).toBe('pending_payment');
+    expect(result.state).toBe('pending_payment');
+  });
+
   it('legal transition active → grace_soft persists new state + creates event', async () => {
     prismaMock.$queryRaw.mockResolvedValue([{ id: 100, state: 'active' }]);
     prismaMock.store_subscriptions.update.mockResolvedValue({

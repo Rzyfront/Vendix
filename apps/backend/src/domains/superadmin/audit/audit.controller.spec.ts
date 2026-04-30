@@ -201,7 +201,7 @@ describe('AuditController', () => {
         expect.objectContaining({
           from_date: expect.any(Date),
           to_date: expect.any(Date),
-        }) as any,
+        }),
       );
     });
 
@@ -357,7 +357,7 @@ describe('AuditController', () => {
       await controller.getAuditStats(query.fromDate);
 
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
-        expect.any(Date) as any,
+        expect.any(Date),
         undefined,
       );
     });
@@ -386,7 +386,7 @@ describe('AuditController', () => {
 
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
         undefined,
-        expect.any(Date) as any,
+        expect.any(Date),
       );
     });
 
@@ -412,8 +412,8 @@ describe('AuditController', () => {
       await controller.getAuditStats(query.fromDate, query.toDate);
 
       expect(mockAuditService.getAuditStats).toHaveBeenCalledWith(
-        expect.any(Date) as any,
-        expect.any(Date) as any,
+        expect.any(Date),
+        expect.any(Date),
       );
     });
   });

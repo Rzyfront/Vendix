@@ -64,7 +64,12 @@ export class SubscriptionWebhookService {
     // transaction.updated path uses, keyed by Wompi event id (or
     // `cb_<txnId>` when the dispute payload re-uses the original transaction id).
     if (this.isChargebackEvent(body, txn)) {
-      await this.handleChargebackEvent({ subscriptionId, invoiceId, body, txn });
+      await this.handleChargebackEvent({
+        subscriptionId,
+        invoiceId,
+        body,
+        txn,
+      });
       return;
     }
 
@@ -114,140 +119,153 @@ export class SubscriptionWebhookService {
       paymentId: number | null;
     };
 
-    const txResult = await this.prisma
-      .withoutScope()
-      .$transaction(
-        async (tx) => {
-          // Step 1: Deduplication INSERT — must be first so the lock is
-          // acquired before any reads, preventing both workers from
-          // continuing past this point simultaneously.
-          if (dedupTxnId) {
-            const inserted = await tx.$executeRaw<number>(
-              Prisma.sql`
+    const txResult = await this.prisma.withoutScope().$transaction(
+      async (tx) => {
+        // Step 1: Deduplication INSERT — must be first so the lock is
+        // acquired before any reads, preventing both workers from
+        // continuing past this point simultaneously.
+        if (dedupTxnId) {
+          const inserted = await tx.$executeRaw<number>(
+            Prisma.sql`
                 INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
                 VALUES ('wompi_platform', ${dedupTxnId}, 'transaction.updated', NOW())
                 ON CONFLICT (processor, event_id) DO NOTHING
               `,
+          );
+          if (inserted === 0) {
+            this.logger.log(
+              `Duplicate Wompi webhook detected for transaction ${dedupTxnId} (invoice ${invoiceId}), returning 200`,
             );
-            if (inserted === 0) {
-              this.logger.log(
-                `Duplicate Wompi webhook detected for transaction ${dedupTxnId} (invoice ${invoiceId}), returning 200`,
+            return {
+              isDuplicate: true,
+              paymentNotFound: false,
+              updatedPayment: null,
+              paymentId: null,
+            } satisfies TxResult;
+          }
+        }
+
+        // Step 2: Resolve the payment row this webhook refers to.
+        //
+        // Lookup priority (most specific -> fallback):
+        //  1. `gateway_reference` matches `txn.reference`
+        //  2. `gateway_reference` matches `txn.id`
+        //  3. `metadata->>'reference'` matches `txn.reference`
+        //  4. Latest pending row for this invoice
+        //  5. Any row for this invoice (absolute last resort)
+        let payment: Awaited<
+          ReturnType<typeof tx.subscription_payments.findFirst>
+        > = null;
+
+        if (txnReference) {
+          payment = await tx.subscription_payments.findFirst({
+            where: { invoice_id: invoiceId, gateway_reference: txnReference },
+            orderBy: { id: 'desc' },
+          });
+        }
+
+        if (!payment && txnId) {
+          payment = await tx.subscription_payments.findFirst({
+            where: { invoice_id: invoiceId, gateway_reference: txnId },
+            orderBy: { id: 'desc' },
+          });
+        }
+
+        if (!payment && txnReference) {
+          payment = await tx.subscription_payments.findFirst({
+            where: {
+              invoice_id: invoiceId,
+              metadata: { path: ['reference'], equals: txnReference },
+            },
+            orderBy: { id: 'desc' },
+          });
+        }
+
+        if (!payment) {
+          payment = await tx.subscription_payments.findFirst({
+            where: { invoice_id: invoiceId, state: 'pending' },
+            orderBy: { id: 'desc' },
+          });
+        }
+
+        if (!payment) {
+          payment = await tx.subscription_payments.findFirst({
+            where: { invoice_id: invoiceId },
+            orderBy: { id: 'desc' },
+          });
+        }
+
+        if (!payment) {
+          this.logger.warn(
+            `No subscription_payments row found for invoice ${invoiceId} (sub ${subscriptionId})`,
+          );
+          return {
+            isDuplicate: false,
+            paymentNotFound: true,
+            updatedPayment: null,
+            paymentId: null,
+          } satisfies TxResult;
+        }
+
+        // Step 3: Mutate payment state — pass `tx` so all writes stay
+        // inside THIS transaction (no nested $transaction opened).
+        let updatedPayment: Awaited<
+          ReturnType<typeof this.paymentService.markPaymentSucceededFromWebhook>
+        > = null;
+
+        switch (wompiStatus) {
+          case 'APPROVED': {
+            updatedPayment =
+              await this.paymentService.markPaymentSucceededFromWebhook(
+                {
+                  paymentId: payment.id,
+                  invoiceId,
+                  transactionId: txn.id,
+                  gatewayResponse: txn,
+                },
+                tx,
               );
-              return { isDuplicate: true, paymentNotFound: false, updatedPayment: null, paymentId: null } satisfies TxResult;
-            }
+            break;
           }
-
-          // Step 2: Resolve the payment row this webhook refers to.
-          //
-          // Lookup priority (most specific -> fallback):
-          //  1. `gateway_reference` matches `txn.reference`
-          //  2. `gateway_reference` matches `txn.id`
-          //  3. `metadata->>'reference'` matches `txn.reference`
-          //  4. Latest pending row for this invoice
-          //  5. Any row for this invoice (absolute last resort)
-          let payment: Awaited<
-            ReturnType<typeof tx.subscription_payments.findFirst>
-          > = null;
-
-          if (txnReference) {
-            payment = await tx.subscription_payments.findFirst({
-              where: { invoice_id: invoiceId, gateway_reference: txnReference },
-              orderBy: { id: 'desc' },
-            });
+          case 'DECLINED':
+          case 'ERROR': {
+            updatedPayment =
+              await this.paymentService.markPaymentFailedFromWebhook(
+                {
+                  paymentId: payment.id,
+                  invoiceId,
+                  reason: txn.status_message ?? wompiStatus,
+                },
+                tx,
+              );
+            break;
           }
-
-          if (!payment && txnId) {
-            payment = await tx.subscription_payments.findFirst({
-              where: { invoice_id: invoiceId, gateway_reference: txnId },
-              orderBy: { id: 'desc' },
-            });
-          }
-
-          if (!payment && txnReference) {
-            payment = await tx.subscription_payments.findFirst({
-              where: {
-                invoice_id: invoiceId,
-                metadata: { path: ['reference'], equals: txnReference },
-              },
-              orderBy: { id: 'desc' },
-            });
-          }
-
-          if (!payment) {
-            payment = await tx.subscription_payments.findFirst({
-              where: { invoice_id: invoiceId, state: 'pending' },
-              orderBy: { id: 'desc' },
-            });
-          }
-
-          if (!payment) {
-            payment = await tx.subscription_payments.findFirst({
-              where: { invoice_id: invoiceId },
-              orderBy: { id: 'desc' },
-            });
-          }
-
-          if (!payment) {
-            this.logger.warn(
-              `No subscription_payments row found for invoice ${invoiceId} (sub ${subscriptionId})`,
+          case 'VOIDED': {
+            this.logger.log(
+              `Wompi VOIDED webhook for invoice ${invoiceId}; mapping to failure`,
             );
-            return { isDuplicate: false, paymentNotFound: true, updatedPayment: null, paymentId: null } satisfies TxResult;
-          }
-
-          // Step 3: Mutate payment state — pass `tx` so all writes stay
-          // inside THIS transaction (no nested $transaction opened).
-          let updatedPayment: Awaited<
-            ReturnType<typeof this.paymentService.markPaymentSucceededFromWebhook>
-          > = null;
-
-          switch (wompiStatus) {
-            case 'APPROVED': {
-              updatedPayment =
-                await this.paymentService.markPaymentSucceededFromWebhook(
-                  {
-                    paymentId: payment.id,
-                    invoiceId,
-                    transactionId: txn.id,
-                    gatewayResponse: txn,
-                  },
-                  tx,
-                );
-              break;
-            }
-            case 'DECLINED':
-            case 'ERROR': {
-              updatedPayment =
-                await this.paymentService.markPaymentFailedFromWebhook(
-                  {
-                    paymentId: payment.id,
-                    invoiceId,
-                    reason: txn.status_message ?? wompiStatus,
-                  },
-                  tx,
-                );
-              break;
-            }
-            case 'VOIDED': {
-              this.logger.log(
-                `Wompi VOIDED webhook for invoice ${invoiceId}; mapping to failure`,
+            updatedPayment =
+              await this.paymentService.markPaymentFailedFromWebhook(
+                {
+                  paymentId: payment.id,
+                  invoiceId,
+                  reason: 'voided',
+                },
+                tx,
               );
-              updatedPayment =
-                await this.paymentService.markPaymentFailedFromWebhook(
-                  {
-                    paymentId: payment.id,
-                    invoiceId,
-                    reason: 'voided',
-                  },
-                  tx,
-                );
-              break;
-            }
+            break;
           }
+        }
 
-          return { isDuplicate: false, paymentNotFound: false, updatedPayment, paymentId: payment.id } satisfies TxResult;
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-      );
+        return {
+          isDuplicate: false,
+          paymentNotFound: false,
+          updatedPayment,
+          paymentId: payment.id,
+        } satisfies TxResult;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
 
     // ── Post-commit side effects ──────────────────────────────────────────
     // All side effects below run AFTER the transaction commits so they always
@@ -365,26 +383,24 @@ export class SubscriptionWebhookService {
 
     // Idempotent dedup INSERT inside a transaction so concurrent redeliveries
     // serialize on (processor, event_id).
-    const dedupResult = await this.prisma
-      .withoutScope()
-      .$transaction(
-        async (tx) => {
-          if (dedupKey) {
-            const inserted = await tx.$executeRaw<number>(
-              Prisma.sql`
+    const dedupResult = await this.prisma.withoutScope().$transaction(
+      async (tx) => {
+        if (dedupKey) {
+          const inserted = await tx.$executeRaw<number>(
+            Prisma.sql`
                 INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
                 VALUES ('wompi_platform', ${dedupKey}, 'chargeback', NOW())
                 ON CONFLICT (processor, event_id) DO NOTHING
               `,
-            );
-            if (inserted === 0) {
-              return { duplicate: true };
-            }
+          );
+          if (inserted === 0) {
+            return { duplicate: true };
           }
-          return { duplicate: false };
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
-      );
+        }
+        return { duplicate: false };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
 
     if (dedupResult.duplicate) {
       this.logger.log(

@@ -28,7 +28,9 @@ export class StoreDomainsService {
     config: Record<string, any>;
   }) {
     // Blocklist check — reject brand/financial/gov patterns
-    const blockResult = await this.blocklist.isBlocked(create_domain_dto.hostname);
+    const blockResult = await this.blocklist.isBlocked(
+      create_domain_dto.hostname,
+    );
     if (blockResult.blocked) {
       throw new VendixHttpException(
         ErrorCodes.ORG_DOMAIN_003,
@@ -41,7 +43,14 @@ export class StoreDomainsService {
     const existing_domain = await this.prisma.domain_settings.findFirst({
       where: {
         hostname: create_domain_dto.hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 
@@ -50,7 +59,8 @@ export class StoreDomainsService {
     }
 
     const domain_type = (create_domain_dto.domain_type || 'store') as any;
-    const ownership = (create_domain_dto.ownership || 'vendix_subdomain') as any;
+    const ownership = (create_domain_dto.ownership ||
+      'vendix_subdomain') as any;
 
     // Vendix subdomains: Vendix controla el DNS, activación inmediata.
     // Custom domains: SIEMPRE pending_ownership — sólo prueba DNS desbloquea active.
@@ -216,7 +226,8 @@ export class StoreDomainsService {
       // Sólo elevar a 'active' si la propiedad ya está probada
       // (vendix_subdomain o ya estaba activo). Custom domains en pending_*
       // deben pasar por verify() antes — no atajos vía is_primary.
-      const isVendixSubdomain = existing_domain.ownership === 'vendix_subdomain';
+      const isVendixSubdomain =
+        existing_domain.ownership === 'vendix_subdomain';
       if (isVendixSubdomain || existing_domain.status === 'active') {
         update_data.status = 'active';
       }

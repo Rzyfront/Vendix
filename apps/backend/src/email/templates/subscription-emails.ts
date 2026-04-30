@@ -194,7 +194,9 @@ export const SubscriptionEmailTemplates = {
            <a href="${data.reactivateUrl}" style="display:inline-block;background:#2F6F4E;color:#FFFFFF;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:600;">Reactivar suscripción</a>
          </p>`
       : '';
-    const noRefundHtml = data.includeNoRefundNotice ? NO_REFUND_NOTICE_HTML : '';
+    const noRefundHtml = data.includeNoRefundNotice
+      ? NO_REFUND_NOTICE_HTML
+      : '';
     const body = `
       <p style="font-size:18px;font-weight:600;margin-top:0;">Confirmamos la cancelación de tu suscripción.</p>
       <p>Hemos procesado la cancelación del plan <strong>${data.planName}</strong> para la tienda <strong>${data.storeName}</strong>.</p>
@@ -213,7 +215,11 @@ export const SubscriptionEmailTemplates = {
       noRefundText +
       (data.reactivateUrl ? `\nReactivar: ${data.reactivateUrl}\n` : '') +
       `\nSoporte: ${SUPPORT_EMAIL}`;
-    return { subject, html: wrapHtml('Cancelación de suscripción', body), text };
+    return {
+      subject,
+      html: wrapHtml('Cancelación de suscripción', body),
+      text,
+    };
   },
 
   /** subscription.reactivation.email */
@@ -228,7 +234,9 @@ export const SubscriptionEmailTemplates = {
     const text =
       `Bienvenido de vuelta a ${COMPANY_NAME}\n\n` +
       `Plan: ${data.planName} — Tienda: ${data.storeName}\n` +
-      (data.nextRenewalDate ? `Próxima renovación: ${data.nextRenewalDate}\n` : '') +
+      (data.nextRenewalDate
+        ? `Próxima renovación: ${data.nextRenewalDate}\n`
+        : '') +
       `\nSoporte: ${SUPPORT_EMAIL}`;
     return { subject, html: wrapHtml('Bienvenido de vuelta', body), text };
   },
@@ -345,7 +353,11 @@ export const SubscriptionEmailTemplates = {
       ${data.retryUrl ? `<p style="text-align:center;margin:24px 0;"><a href="${data.retryUrl}" style="display:inline-block;background:#B91C1C;color:#FFFFFF;padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;">Pagar ahora</a></p>` : ''}
     `;
     const text = `${subject}\n\nPlan: ${data.planName} — Tienda: ${data.storeName}\n${data.amountDue ? `Monto pendiente: ${data.amountDue} ${data.currency || ''}\n` : ''}${data.retryUrl ? `Pagar ahora: ${data.retryUrl}\n` : ''}\nSoporte: ${SUPPORT_EMAIL}`;
-    return { subject, html: wrapHtml('Acción requerida: pago vencido', body), text };
+    return {
+      subject,
+      html: wrapHtml('Acción requerida: pago vencido', body),
+      text,
+    };
   },
 
   /** subscription.suspended.email — TODO: enqueue origin pendiente (G6) */

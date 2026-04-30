@@ -1,0 +1,108 @@
+meta {
+  name: Wompi Recurrent Flow (Tokenize + Charge)
+  type: http
+  seq: 47
+  # Wompi Phase 8 (final) — exercises the full COF/MIT recurrent flow
+  # introduced in Fases 1-7:
+  #   1) GET /payment-methods/widget-config        → captures acceptance tokens
+  #   2) POST /payment-methods/tokenize             → creates payment_source_id
+  #   3) POST /retry-payment                         → drives a recurrent charge
+  #
+  # SKIPPED in CI because Wompi sandbox tokenization requires a live `tok_*`
+  # produced by the WidgetCheckout (browser SDK). Generating one from a
+  # backend-only Bruno run would either:
+  #   • hit Wompi sandbox with a fake tok_* and get rejected with
+  #     SUBSCRIPTION_TOKEN_INVALID (no signal),
+  #   • or — worse — succeed against a mock and give false confidence.
+  #
+  # To run locally end-to-end:
+  #   1. Open Vendix admin → Subscription → "Add card" widget.
+  #   2. Open DevTools → Network and copy the `card_token`,
+  #      `acceptance_token`, `personal_auth_token` from the widget callback.
+  #   3. Set them in environment:
+  #        wompi_card_token, wompi_acceptance_token, wompi_personal_auth_token
+  #   4. Set `meta.skip = false` and run the request.
+  #
+  # See unit coverage:
+  #   apps/backend/src/domains/store/subscriptions/services/
+  #     subscription-payment-methods.service.spec.ts (tokenize)
+  #     subscription-payment.service.spec.ts        (chargeInvoice recurrent)
+}
+
+post {
+  url: {{url}}/store/subscriptions/payment-methods/tokenize
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "card_token": "{{wompi_card_token}}",
+    "acceptance_token": "{{wompi_acceptance_token}}",
+    "personal_auth_token": "{{wompi_personal_auth_token}}",
+    "type": "card",
+    "last4": "4242",
+    "brand": "VISA",
+    "expiry_month": "12",
+    "expiry_year": "29",
+    "card_holder": "Bruno Test"
+  }
+}
+
+vars:post-response {
+  pm_id_from_tokenize: res.body.data.id
+  provider_payment_source_id: res.body.data.providerPaymentSourceId
+}
+
+tests {
+  test("Tokenize → 201 Created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("providerPaymentSourceId is a non-empty string (Wompi numeric ID)", function() {
+    const pm = res.body.data;
+    expect(pm).to.have.property("providerPaymentSourceId");
+    expect(pm.providerPaymentSourceId).to.be.a("string");
+    expect(pm.providerPaymentSourceId.length).to.be.greaterThan(0);
+    // Wompi payment_source ids are numeric strings; tolerate widening to alnum.
+    expect(pm.providerPaymentSourceId).to.match(/^[A-Za-z0-9_-]+$/);
+  });
+
+  test("PM payload exposes the saved card metadata", function() {
+    const pm = res.body.data;
+    expect(pm).to.have.property("id");
+    expect(pm).to.have.property("last4");
+    expect(pm.last4).to.equal("4242");
+    expect(pm).to.have.property("type");
+    expect(pm.type).to.equal("card");
+  });
+
+  test("Idempotent re-tokenize returns the SAME providerPaymentSourceId", function() {
+    // Documented expectation only — assert covered by the unit spec
+    // `tokenize is idempotent under same card_token`. Re-running this .bru
+    // with the same vars MUST upsert, not duplicate.
+    expect(res.body.data.providerPaymentSourceId).to.be.a("string");
+  });
+}
+
+# Follow-up requests (run sequentially in Bruno UI):
+#
+# Step 2 — Trigger recurrent charge:
+#   POST {{url}}/store/subscriptions/retry-payment
+#   Body: {}
+#   Asserts:
+#     • res.status === 200
+#     • res.body.data.payment_id is present
+#     • Backend logs `WOMPI_CHARGE_PATH path=recurrent` (grep stdout)
+#     • Backend does NOT log `WOMPI_LEGACY_TOKEN_USED`
+#
+# The HTTP response from retry-payment does not surface the chargePath; the
+# only assertion mechanism is the structured log line emitted in
+# subscription-payment.service.ts (`WOMPI_CHARGE_PATH path=recurrent|legacy|
+# no_pm|recurrent_failover`). For automated assertion, scrape pino logs or
+# add an integration test that injects a logger spy.

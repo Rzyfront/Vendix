@@ -439,7 +439,10 @@ export class SubscriptionAccessService {
       };
     });
 
-    const total_due = invoices_overdue.reduce((acc, i) => acc + i.amount_due, 0);
+    const total_due = invoices_overdue.reduce(
+      (acc, i) => acc + i.amount_due,
+      0,
+    );
 
     // features_lost / features_kept: compute degradation impact for the
     // current state. We resolve via the cached resolver and then partition
@@ -454,6 +457,8 @@ export class SubscriptionAccessService {
         state,
         planId: null,
         planCode: '',
+        paidPlanId: null,
+        pendingPlanId: null,
         partnerOrgId: null,
         overlayActive: false,
         overlayExpiresAt: null,
@@ -491,15 +496,14 @@ export class SubscriptionAccessService {
     // (or alongside) "Pagar ahora" while in a grace_* window.
     let payment_method_invalid = false;
     try {
-      const activeCount = await this.prisma
-        .subscription_payment_methods.count({
-          where: { store_id: storeId, state: 'active' },
-        });
+      const activeCount = await this.prisma.subscription_payment_methods.count({
+        where: { store_id: storeId, state: 'active' },
+      });
       if (activeCount === 0) {
         payment_method_invalid = true;
       } else {
-        const activeDefault = await this.prisma
-          .subscription_payment_methods.findFirst({
+        const activeDefault =
+          await this.prisma.subscription_payment_methods.findFirst({
             where: {
               store_id: storeId,
               state: 'active',

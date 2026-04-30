@@ -317,7 +317,11 @@ describe('SubscriptionAccessService', () => {
         const keys = args.slice(1, 1 + numKeys) as string[];
         const argv = args.slice(1 + numKeys) as string[];
         const KEYS = { 1: keys[0], 2: keys[1] };
-        const ARGV = { 1: argv[0], 2: parseInt(argv[1], 10), 3: parseInt(argv[2], 10) };
+        const ARGV = {
+          1: argv[0],
+          2: parseInt(argv[1], 10),
+          3: parseInt(argv[2], 10),
+        };
 
         // Simulate: SISMEMBER, SADD, EXPIRE, INCRBY, EXPIRE.
         const dedupSet = sets.get(KEYS[2]) ?? new Set<string>();
@@ -413,10 +417,7 @@ describe('SubscriptionAccessService', () => {
   // ──────────────────────────────────────────────────────────────────
 
   describe('getDunningStateForCurrentStore', () => {
-    function buildPrismaMock(
-      sub: any,
-      invoices: any[] = [],
-    ): any {
+    function buildPrismaMock(sub: any, invoices: any[] = []): any {
       return {
         store_subscriptions: {
           findUnique: jest.fn().mockResolvedValue(sub),

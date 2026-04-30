@@ -9,12 +9,18 @@ import {
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { PaymentEncryptionService } from '../../services/payment-encryption.service';
 import { WompiClientFactory } from './wompi.factory';
+import { WompiInvalidAcceptanceTokenError } from './wompi.client';
+import {
+  ErrorCodes,
+  VendixHttpException,
+} from '../../../../../common/errors';
 import {
   WompiConfig,
   WompiEnvironment,
   WompiTransactionStatus,
   WompiTransactionData,
   WompiPaymentMethodData,
+  WompiPaymentSourceData,
   WompiCreateTransactionRequest,
 } from './wompi.types';
 
@@ -42,16 +48,6 @@ export class WompiProcessor extends BasePaymentProcessor {
       const { acceptance_token: acceptanceToken, personal_auth_token } =
         await client.getAcceptanceTokens();
 
-      const paymentMethodData = paymentData.metadata
-        ?.paymentMethod as WompiPaymentMethodData;
-      if (!paymentMethodData) {
-        return {
-          success: false,
-          status: 'failed',
-          message: 'Payment method data is required in metadata.paymentMethod',
-        };
-      }
-
       const reference =
         typeof paymentData.metadata?.reference === 'string' &&
         paymentData.metadata.reference.length > 0
@@ -63,6 +59,94 @@ export class WompiProcessor extends BasePaymentProcessor {
         this.formatAmount(paymentData.amount),
         paymentData.currency || 'COP',
       );
+
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
+      // ── COF / MIT branch ──────────────────────────────────────────────
+      // If a stored payment_source_id is supplied (recurrent SaaS billing),
+      // charge against it with `recurrent: true`. This is mutually exclusive
+      // with `payment_method` in the Wompi API. The original legal trail
+      // (acceptance_token shown to user when registering the COF) is already
+      // persisted on the payment_method record, so re-fetching a fresh
+      // acceptance_token here is safe.
+      if (paymentData.metadata?.payment_source_id !== undefined) {
+        const rawId = paymentData.metadata.payment_source_id;
+        const paymentSourceId = Number(rawId);
+        if (!Number.isFinite(paymentSourceId) || paymentSourceId <= 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PAYMENT_SOURCE_NOT_FOUND,
+            'Invalid payment_source_id in metadata',
+            { paymentSourceId: rawId },
+          );
+        }
+
+        const cofRequest: WompiCreateTransactionRequest = {
+          acceptance_token: acceptanceToken,
+          accept_personal_auth: personal_auth_token,
+          amount_in_cents: this.formatAmount(paymentData.amount),
+          currency: paymentData.currency || 'COP',
+          customer_email:
+            paymentData.metadata?.customerEmail ||
+            `cof-${paymentData.storeId}@vendix.app`,
+          reference,
+          payment_source_id: paymentSourceId,
+          recurrent: true,
+          signature: integritySignature,
+          // NOTE: no `payment_method` — Wompi rejects when both are present.
+        };
+
+        try {
+          const response = await client.createTransaction(
+            cofRequest,
+            idempotencyKey,
+          );
+          const txn = response.data;
+          const cofResult = this.mapCofTransactionResult(
+            txn,
+            reference,
+            integritySignature,
+            wompiConfig.public_key,
+          );
+          if (cofResult) return cofResult;
+
+          return {
+            success:
+              txn.status !== WompiTransactionStatus.ERROR &&
+              txn.status !== WompiTransactionStatus.DECLINED,
+            transactionId: txn.id,
+            gatewayReference: reference,
+            status: this.mapWompiStatus(txn.status),
+            message: txn.status_message || `Wompi transaction ${txn.status}`,
+            gatewayResponse: txn,
+            nextAction: {
+              type: 'none',
+              data: {
+                reference,
+                integritySignature,
+                publicKey: wompiConfig.public_key,
+              },
+            },
+          };
+        } catch (error: any) {
+          const mapped = this.mapCofErrorToResult(error, reference);
+          if (mapped) return mapped;
+          throw error;
+        }
+      }
+
+      // ── Legacy inline-token branch (one-shot widget tokenization) ─────
+      const paymentMethodData = paymentData.metadata
+        ?.paymentMethod as WompiPaymentMethodData;
+      if (!paymentMethodData) {
+        return {
+          success: false,
+          status: 'failed',
+          message: 'Payment method data is required in metadata.paymentMethod',
+        };
+      }
 
       const request: WompiCreateTransactionRequest = {
         acceptance_token: acceptanceToken,
@@ -77,11 +161,6 @@ export class WompiProcessor extends BasePaymentProcessor {
         redirect_url: paymentData.returnUrl,
         signature: integritySignature,
       };
-
-      const idempotencyKey =
-        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
-          ? paymentData.idempotencyKey
-          : crypto.randomUUID();
 
       const response = await client.createTransaction(request, idempotencyKey);
       const txn = response.data;
@@ -105,7 +184,77 @@ export class WompiProcessor extends BasePaymentProcessor {
         },
       };
     } catch (error) {
+      // Re-throw VendixHttpException so the global filter maps it correctly.
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
       return this.handleError(error, 'processPayment');
+    }
+  }
+
+  // ── Card-On-File / Recurrent (MIT) ─────────────
+
+  /**
+   * Tokenizes a card on Wompi's `/payment_sources` endpoint, creating a
+   * persistent CARD payment_source that can be charged later via
+   * `payment_source_id` + `recurrent: true` (no SCA / 3DS roundtrip).
+   *
+   * The widget-supplied `acceptanceToken` and `personalAuthToken` MUST be
+   * forwarded bit-exact (legal trail). This method does NOT re-fetch them.
+   */
+  async createPaymentSourceFromCardToken(input: {
+    storeId: number;
+    cardTokenFromWidget: string;
+    acceptanceToken: string;
+    personalAuthToken: string;
+    customerEmail: string;
+    wompiConfig: WompiConfig;
+    idempotencyKey: string;
+  }): Promise<{
+    paymentSourceId: string;
+    acceptanceTokenUsed: string;
+    publicData: WompiPaymentSourceData['public_data'];
+  }> {
+    const client = this.factory.getClient(
+      `store-${input.storeId}-pm`,
+      input.wompiConfig,
+    );
+
+    try {
+      const response = await client.createPaymentSource(
+        {
+          type: 'CARD',
+          token: input.cardTokenFromWidget,
+          customer_email: input.customerEmail,
+          acceptance_token: input.acceptanceToken,
+          accept_personal_auth: input.personalAuthToken,
+        },
+        input.idempotencyKey,
+      );
+
+      const data = response.data;
+      if (data.status !== 'AVAILABLE') {
+        throw new VendixHttpException(
+          ErrorCodes.PAYMENT_SOURCE_NOT_AVAILABLE,
+          `Wompi payment_source returned status=${data.status}`,
+          { status: data.status, paymentSourceId: data.id },
+        );
+      }
+
+      return {
+        paymentSourceId: String(data.id),
+        acceptanceTokenUsed: input.acceptanceToken,
+        publicData: data.public_data,
+      };
+    } catch (error) {
+      if (error instanceof WompiInvalidAcceptanceTokenError) {
+        throw new VendixHttpException(
+          ErrorCodes.PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN,
+          error.message,
+          { gatewayStatus: error.statusCode },
+        );
+      }
+      throw error;
     }
   }
 
@@ -343,6 +492,73 @@ export class WompiProcessor extends BasePaymentProcessor {
   }
 
   // ── Helpers privados ────────────────────────
+
+  /**
+   * Maps a COF transaction response into a `PaymentResult`. Returns `null`
+   * when the transaction does not match a known terminal-failure case so the
+   * caller falls back to the standard mapping.
+   *
+   * Wompi marks revoked / unknown payment_source charges with
+   * `status_message` containing `INVALID_PAYMENT_SOURCE` (or similar). When
+   * detected we surface a stable `errorCode` so the SaaS billing layer can
+   * trigger PM-revoked dunning.
+   */
+  private mapCofTransactionResult(
+    txn: WompiTransactionData,
+    reference: string,
+    integritySignature: string,
+    publicKey: string,
+  ): PaymentResult | null {
+    const reason = (txn.status_message || '').toUpperCase();
+    const isTerminal =
+      txn.status === WompiTransactionStatus.DECLINED ||
+      txn.status === WompiTransactionStatus.ERROR;
+
+    if (isTerminal && reason.includes('INVALID_PAYMENT_SOURCE')) {
+      return {
+        success: false,
+        transactionId: txn.id,
+        gatewayReference: reference,
+        status: 'failed',
+        message: txn.status_message || 'Payment source rejected by gateway',
+        errorCode: 'PAYMENT_SOURCE_REVOKED',
+        gatewayResponse: txn,
+        nextAction: {
+          type: 'none',
+          data: { reference, integritySignature, publicKey },
+        },
+      };
+    }
+    return null;
+  }
+
+  /**
+   * Maps a thrown error from a COF transaction into a failed PaymentResult
+   * when the underlying gateway response indicates the payment_source is
+   * gone (404) or revoked. Returns `null` to delegate to the default
+   * `handleError` path otherwise.
+   */
+  private mapCofErrorToResult(
+    error: any,
+    reference: string,
+  ): PaymentResult | null {
+    const message = String(error?.message ?? '');
+    const upper = message.toUpperCase();
+    const looks404 = /404|NOT[_ ]FOUND/.test(upper);
+    const looksRevoked = upper.includes('INVALID_PAYMENT_SOURCE');
+
+    if (looks404 || looksRevoked) {
+      return {
+        success: false,
+        gatewayReference: reference,
+        status: 'failed',
+        message: message || 'Payment source revoked by issuer',
+        errorCode: 'PAYMENT_SOURCE_REVOKED',
+        gatewayResponse: error,
+      };
+    }
+    return null;
+  }
 
   private resolveConfig(paymentData: PaymentData): WompiConfig {
     const creds = paymentData.metadata?.wompiConfig || this.config.credentials;

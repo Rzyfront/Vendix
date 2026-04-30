@@ -48,12 +48,14 @@ interface PaymentFailedEventPayload {
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
   draft: ['pending_payment', 'trial', 'active', 'no_plan'],
-  pending_payment: ['active', 'blocked', 'cancelled', 'expired'],
+  pending_payment: ['active', 'blocked', 'cancelled', 'expired', 'no_plan'],
   // RNC-15 anti-arrastre: trial → pending_payment is allowed when the user
   // upgrades from a trial (free) to a paid plan via checkout. The charge runs
   // and on Wompi APPROVED the listener flips pending_payment → active.
   trial: ['active', 'pending_payment', 'blocked', 'cancelled', 'expired'],
-  active: ['grace_soft', 'cancelled', 'expired', 'no_plan'],
+  // ADR-7: active → pending_payment allowed for mid-cycle paid plan changes.
+  // plan_id only mutates in confirmPendingChange() after gateway confirmation.
+  active: ['grace_soft', 'cancelled', 'expired', 'no_plan', 'pending_payment'],
   grace_soft: ['active', 'grace_hard', 'cancelled', 'no_plan'],
   grace_hard: ['active', 'suspended', 'cancelled', 'expired'],
   suspended: ['active', 'blocked', 'cancelled'],
@@ -69,6 +71,8 @@ export interface TransitionOptions {
   triggeredByJob?: string;
   payload?: Record<string, unknown>;
   lockReason?: string;
+  graceSoftUntil?: Date;
+  graceHardUntil?: Date;
 }
 
 /**
@@ -119,7 +123,8 @@ export class SubscriptionStateService {
     }
 
     const result = await this.prisma.$transaction(
-      async (tx: any) => this.transitionInTxInternal(tx, storeId, toState, opts),
+      async (tx: any) =>
+        this.transitionInTxInternal(tx, storeId, toState, opts),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
 
@@ -236,12 +241,25 @@ export class SubscriptionStateService {
         ? (opts.lockReason ?? 'admin_manual')
         : undefined;
 
+    const graceData: Record<string, any> = {};
+    if (toState === 'grace_soft') {
+      graceData.grace_soft_until = opts.graceSoftUntil ?? undefined;
+    }
+    if (toState === 'grace_hard') {
+      graceData.grace_hard_until = opts.graceHardUntil ?? undefined;
+    }
+    if (toState === 'active' || toState === 'trial') {
+      graceData.grace_soft_until = null;
+      graceData.grace_hard_until = null;
+    }
+
     const updatedRow = await tx.store_subscriptions.update({
       where: { id: current.id },
       data: {
         state: toState,
         lock_reason: lockReason ?? undefined,
         updated_at: new Date(),
+        ...graceData,
       },
     });
 
@@ -506,9 +524,10 @@ export class SubscriptionStateService {
       const autoConvert = metadata?.auto_convert_at_end !== false;
 
       if (autoConvert) {
-        const hasActivePM = await this.prisma.subscription_payment_methods.findFirst({
-          where: { store_subscription_id: sub.id, state: 'active' },
-        });
+        const hasActivePM =
+          await this.prisma.subscription_payment_methods.findFirst({
+            where: { store_subscription_id: sub.id, state: 'active' },
+          });
         if (hasActivePM) {
           await this.transition(sub.store_id, 'active', {
             reason: 'Trial ended — auto-convert with valid PM',
@@ -522,7 +541,8 @@ export class SubscriptionStateService {
       }
 
       await this.transition(sub.store_id, 'expired', {
-        reason: 'Trial period ended without payment method or auto_convert=false',
+        reason:
+          'Trial period ended without payment method or auto_convert=false',
         triggeredByJob: 'subscription-state-engine',
         payload: { trial_ends_at: sub.trial_ends_at },
       });
@@ -574,6 +594,8 @@ export class SubscriptionStateService {
         await this.transition(sub.store_id, targetState, {
           reason,
           triggeredByJob: 'subscription-state-engine',
+          graceSoftUntil: softDeadline,
+          graceHardUntil: hardDeadline,
           payload: {
             current_period_end: sub.current_period_end,
             soft_deadline: softDeadline.toISOString(),
@@ -591,7 +613,8 @@ export class SubscriptionStateService {
       const expiredSince = sub.current_period_end ?? sub.updated_at;
       if (expiredSince) {
         const cancelThreshold = new Date(
-          new Date(expiredSince).getTime() + cancellationDay * 24 * 60 * 60 * 1000,
+          new Date(expiredSince).getTime() +
+            cancellationDay * 24 * 60 * 60 * 1000,
         );
         if (now >= cancelThreshold) {
           await this.transition(sub.store_id, 'cancelled', {

@@ -16,6 +16,20 @@ import { SubscriptionPlan } from '../../interfaces/store-subscription.interface'
 import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
 import { PricingCardSelectEvent } from '../../../../../../shared/components/pricing-card/pricing-card.component';
 
+type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
+
+const CYCLE_ORDER: BillingCycle[] = [
+  'monthly', 'quarterly', 'semiannual', 'annual', 'lifetime',
+];
+
+const CYCLE_LABEL: Record<BillingCycle, string> = {
+  monthly: 'Mensual',
+  quarterly: 'Trimestral',
+  semiannual: 'Semestral',
+  annual: 'Anual',
+  lifetime: 'Pago único',
+};
+
 // S2.1 — Same reason → copy mapping as in checkout component.
 const COUPON_REASON_COPY: Record<string, string> = {
   not_found: 'Cupón no encontrado',
@@ -37,7 +51,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
     ReactiveFormsModule,
   ],
   template: `
-    <div class="w-full max-w-7xl mx-auto px-4 py-6 lg:py-10 space-y-8">
+    <div class="w-full max-w-7xl mx-auto px-4 py-2 lg:py-4 space-y-5">
       <!-- Hero header -->
       <header class="text-center space-y-3 max-w-2xl mx-auto">
         <span class="inline-block bg-primary-100 text-primary-700 text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full">
@@ -51,11 +65,65 @@ const COUPON_REASON_COPY: Record<string, string> = {
         </p>
       </header>
 
+      <!-- Billing cycle switcher -->
+      @if (!loading() && availableCycles().length > 1) {
+        <div class="flex justify-center">
+          <div
+            role="tablist"
+            aria-label="Ciclo de facturación"
+            class="inline-flex flex-wrap gap-1.5 bg-gray-200/80 rounded-xl p-1.5"
+          >
+            @for (c of availableCycles(); track c) {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="selectedCycle() === c"
+                (click)="selectCycle(c)"
+                class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
+                [class.bg-white]="selectedCycle() === c"
+                [class.shadow-md]="selectedCycle() === c"
+                [class.text-primary-700]="selectedCycle() === c"
+                [class.text-text-secondary]="selectedCycle() !== c"
+                [class.hover:text-text-primary]="selectedCycle() !== c"
+                [class.hover:bg-white/50]="selectedCycle() !== c"
+              >
+                {{ cycleLabel(c) }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+
       <!-- Loading: skeletons -->
       @if (loading()) {
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6">
           @for (i of [0, 1, 2]; track i) {
             <app-pricing-card [plan]="skeletonPlan" [loading]="true"></app-pricing-card>
+          }
+        </div>
+      }
+
+      <!-- Empty -->
+      @if (!loading() && plans().length === 0) {
+        <app-empty-state
+          icon="package"
+          iconColor="primary"
+          title="No hay planes disponibles"
+          description="Contacta a tu partner o al equipo de Vendix para activar planes en tu cuenta."
+          [showActionButton]="false"
+        ></app-empty-state>
+      }
+
+      <!-- Catalog -->
+      @if (!loading() && plans().length > 0) {
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch pt-2">
+          @for (plan of visiblePlans(); track plan.id) {
+            <app-pricing-card
+              [plan]="plan"
+              [subscriptionStatus]="subscriptionStatus()"
+              ctaLabel="Seleccionar plan"
+              (select)="selectPlan($event)"
+            ></app-pricing-card>
           }
         </div>
       }
@@ -114,31 +182,6 @@ const COUPON_REASON_COPY: Record<string, string> = {
           </div>
         }
       </div>
-
-      <!-- Empty -->
-      @if (!loading() && plans().length === 0) {
-        <app-empty-state
-          icon="package"
-          iconColor="primary"
-          title="No hay planes disponibles"
-          description="Contacta a tu partner o al equipo de Vendix para activar planes en tu cuenta."
-          [showActionButton]="false"
-        ></app-empty-state>
-      }
-
-      <!-- Catalog -->
-      @if (!loading() && plans().length > 0) {
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6">
-          @for (plan of plans(); track plan.id) {
-            <app-pricing-card
-              [plan]="plan"
-              [subscriptionStatus]="subscriptionStatus()"
-              ctaLabel="Seleccionar plan"
-              (select)="selectPlan($event)"
-            ></app-pricing-card>
-          }
-        </div>
-      }
     </div>
   `,
 })
@@ -157,6 +200,27 @@ export class PlanCatalogComponent implements OnInit {
    * disabled with "Plan actual". */
   readonly subscriptionStatus = this.facade.status;
   readonly retryingPayment = signal(false);
+
+  readonly selectedCycle = signal<BillingCycle | null>(null);
+
+  readonly availableCycles = computed<BillingCycle[]>(() => {
+    const present = new Set(this.plans().map(p => p.billing_cycle as BillingCycle));
+    return CYCLE_ORDER.filter(c => present.has(c));
+  });
+
+  readonly visiblePlans = computed(() => {
+    const cycle = this.selectedCycle();
+    if (!cycle) return this.plans();
+    return this.plans().filter(p => p.billing_cycle === cycle);
+  });
+
+  cycleLabel(c: BillingCycle): string {
+    return CYCLE_LABEL[c];
+  }
+
+  selectCycle(c: BillingCycle): void {
+    this.selectedCycle.set(c);
+  }
 
   // S2.1 — Coupon UI state. Local to this component (no NgRx) since the
   // catalog dispatch only routes to checkout; the checkout page reads the
@@ -202,15 +266,11 @@ export class PlanCatalogComponent implements OnInit {
       .subscribe({
         next: (res) => {
           if (res.success && res.data) {
-            const currentSub = this.facade.current();
-            const plans = res.data.map((p: any) => ({
-              ...p,
-              is_current:
-                p.is_current === true ||
-                currentSub?.plan_id === p.id ||
-                currentSub?.plan_id === String(p.id),
-            }));
-            this.plans.set(plans);
+            this.plans.set(res.data);
+            const cycles = this.availableCycles();
+            if (cycles.length > 0 && !this.selectedCycle()) {
+              this.selectedCycle.set(cycles.includes('monthly') ? 'monthly' : cycles[0]);
+            }
           }
           this.loading.set(false);
         },

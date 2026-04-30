@@ -281,7 +281,10 @@ export class PaymentMethodExpiryNotifierJob {
     for (const pm of candidates) {
       try {
         if (!pm.expiry_month || !pm.expiry_year) continue;
-        const expiresOn = this.computeExpiryDate(pm.expiry_month, pm.expiry_year);
+        const expiresOn = this.computeExpiryDate(
+          pm.expiry_month,
+          pm.expiry_year,
+        );
         if (!expiresOn) continue;
 
         // Only invalidate if expiry is strictly in the past.

@@ -40,7 +40,7 @@ export interface PricingCardSelectEvent {
   imports: [ButtonComponent, IconComponent, CurrencyPipe],
   template: `
     <article
-      class="relative flex flex-col h-full rounded-2xl transition-all duration-300"
+      class="relative flex flex-col h-full min-w-0 rounded-2xl overflow-hidden transition-all duration-300"
       [class.shadow-sm]="!isPopular()"
       [class.shadow-2xl]="isPopular()"
       [class.bg-white]="!isPopular() && !loading()"
@@ -61,31 +61,31 @@ export interface PricingCardSelectEvent {
     >
       <!-- Loading skeleton -->
       @if (loading()) {
-        <div class="p-6 space-y-4 animate-pulse">
-          <div class="h-6 w-1/2 bg-gray-200 rounded"></div>
+        <div class="p-4 md:p-6 space-y-3 animate-pulse">
+          <div class="h-5 w-1/2 bg-gray-200 rounded"></div>
           <div class="h-3 w-3/4 bg-gray-200 rounded"></div>
-          <div class="h-10 w-2/3 bg-gray-200 rounded mt-6"></div>
-          <div class="space-y-2 mt-4">
+          <div class="h-8 w-2/3 bg-gray-200 rounded mt-4"></div>
+          <div class="space-y-2 mt-3">
             <div class="h-3 bg-gray-200 rounded"></div>
             <div class="h-3 bg-gray-200 rounded"></div>
             <div class="h-3 w-5/6 bg-gray-200 rounded"></div>
             <div class="h-3 w-4/6 bg-gray-200 rounded"></div>
           </div>
-          <div class="h-10 bg-gray-200 rounded mt-6"></div>
+          <div class="h-9 bg-gray-200 rounded mt-4"></div>
         </div>
       } @else {
         <!-- Ribbon for popular -->
         @if (isPopular()) {
-          <span class="absolute -top-3 right-6 z-10 bg-amber-400 text-amber-900 text-[10px] uppercase tracking-wide font-bold px-3 py-1 rounded-full shadow-md">
+          <span class="absolute top-2 right-4 md:top-3 md:right-6 z-10 bg-amber-400 text-amber-900 text-[9px] md:text-[10px] uppercase tracking-wide font-bold px-2 md:px-3 py-0.5 md:py-1 rounded-full shadow-md">
             Recomendado
           </span>
         }
 
         <!-- Header -->
-        <div class="p-6 pb-4 space-y-2">
-          <div class="flex items-center gap-2 flex-wrap">
+        <div class="p-4 md:p-6 pb-3 md:pb-4 pt-8 md:pt-10 space-y-1.5 md:space-y-2">
+          <div class="flex items-center gap-1.5 md:gap-2 flex-wrap min-w-0">
             <h3
-              class="text-xl font-extrabold"
+              class="text-base md:text-xl font-extrabold truncate min-w-0"
               [class.text-text-primary]="!isPopular()"
               [class.text-white]="isPopular()"
             >
@@ -93,7 +93,7 @@ export interface PricingCardSelectEvent {
             </h3>
             @if (isCurrent()) {
               <span
-                class="text-[10px] uppercase tracking-wide font-bold px-2 py-0.5 rounded-full"
+                class="text-[9px] md:text-[10px] uppercase tracking-wide font-bold px-1.5 md:px-2 py-0.5 rounded-full shrink-0"
                 [class.bg-primary-100]="!isPopular()"
                 [class.text-primary-700]="!isPopular()"
                 [class.bg-white\\/20]="isPopular()"
@@ -104,7 +104,7 @@ export interface PricingCardSelectEvent {
             }
             @if ((plan().trial_days ?? 0) > 0) {
               <span
-                class="text-[10px] uppercase tracking-wide font-bold px-2 py-0.5 rounded-full"
+                class="text-[9px] md:text-[10px] uppercase tracking-wide font-bold px-1.5 md:px-2 py-0.5 rounded-full shrink-0"
                 [class.bg-amber-100]="!isPopular()"
                 [class.text-amber-800]="!isPopular()"
                 [class.bg-white\\/20]="isPopular()"
@@ -116,7 +116,7 @@ export interface PricingCardSelectEvent {
           </div>
           @if (plan().description) {
             <p
-              class="text-sm leading-relaxed"
+              class="text-xs md:text-sm leading-relaxed line-clamp-2"
               [class.text-text-secondary]="!isPopular()"
               [class.text-white\\/85]="isPopular()"
             >
@@ -126,17 +126,17 @@ export interface PricingCardSelectEvent {
         </div>
 
         <!-- Price -->
-        <div class="px-6 py-2">
-          <div class="flex items-baseline gap-2">
+        <div class="px-4 md:px-6 py-1.5 md:py-2">
+          <div class="flex items-baseline gap-1.5 md:gap-2 min-w-0">
             <span
-              class="text-4xl font-extrabold leading-none"
+              class="text-2xl md:text-4xl font-extrabold leading-none truncate"
               [class.text-text-primary]="!isPopular()"
               [class.text-white]="isPopular()"
             >
               {{ asNumber(plan().base_price) | currency:plan().currency:'symbol':'1.0-0' }}
             </span>
             <span
-              class="text-sm"
+              class="text-xs md:text-sm shrink-0"
               [class.text-text-secondary]="!isPopular()"
               [class.text-white\\/80]="isPopular()"
             >
@@ -146,19 +146,19 @@ export interface PricingCardSelectEvent {
         </div>
 
         <!-- Features -->
-        <ul class="px-6 py-4 space-y-2.5 flex-1">
+        <ul class="px-4 md:px-6 py-3 md:py-4 space-y-2 md:space-y-2.5 flex-1">
           @for (f of plan().features; track f.key) {
-            <li class="flex items-start gap-2 text-sm">
+            <li class="flex items-start gap-1.5 md:gap-2 text-xs md:text-sm min-w-0">
               <app-icon
                 [name]="f.enabled ? 'check' : 'minus'"
-                [size]="16"
+                [size]="14"
                 [class.text-primary-600]="f.enabled && !isPopular()"
                 [class.text-white]="f.enabled && isPopular()"
                 [class.opacity-40]="!f.enabled"
                 class="mt-0.5 shrink-0"
               ></app-icon>
               <span
-                class="flex-1"
+                class="flex-1 min-w-0 truncate"
                 [class.text-text-primary]="f.enabled && !isPopular()"
                 [class.text-white]="f.enabled && isPopular()"
                 [class.text-text-secondary]="!f.enabled && !isPopular()"
@@ -168,7 +168,7 @@ export interface PricingCardSelectEvent {
               </span>
               @if (f.limit !== null && f.limit !== undefined) {
                 <span
-                  class="text-[11px] px-2 py-0.5 rounded-md font-medium"
+                  class="text-[10px] md:text-[11px] px-1.5 md:px-2 py-0.5 rounded-md font-medium shrink-0"
                   [class.bg-gray-100]="!isPopular()"
                   [class.text-gray-700]="!isPopular()"
                   [class.bg-white\\/20]="isPopular()"
@@ -182,7 +182,7 @@ export interface PricingCardSelectEvent {
         </ul>
 
         <!-- CTA -->
-        <div class="p-6 pt-2">
+        <div class="p-4 md:p-6 md:pt-2 pt-2">
           <app-button
             [variant]="isPopular() ? 'secondary' : isPendingRetry() ? 'primary' : isCurrent() ? 'outline' : 'primary'"
             [disabled]="isCurrent() && !isPendingRetry()"

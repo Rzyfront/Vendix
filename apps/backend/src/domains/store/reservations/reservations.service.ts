@@ -138,6 +138,17 @@ export class ReservationsService {
       throw new NotFoundException('Producto/servicio no encontrado');
     }
 
+    // Validate product_variant_id if provided
+    if (dto.product_variant_id) {
+      const variantOk = await this.prisma.product_variants.findFirst({
+        where: { id: dto.product_variant_id, product_id: dto.product_id },
+        select: { id: true },
+      });
+      if (!variantOk) {
+        throw new BadRequestException('Variant does not belong to product');
+      }
+    }
+
     if (!product.requires_booking) {
       throw new BadRequestException(
         'Este producto/servicio no requiere reserva',
@@ -259,6 +270,7 @@ export class ReservationsService {
             notes: dto.notes,
             order_id: dto.order_id,
             provider_id: resolvedProviderId,
+            product_variant_id: dto.product_variant_id ?? null,
             created_by_user_id: context?.user_id,
             updated_at: new Date(),
           },

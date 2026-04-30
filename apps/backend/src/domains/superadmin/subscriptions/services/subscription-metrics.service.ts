@@ -81,10 +81,7 @@ export class SubscriptionMetricsService {
   }
 
   // ─── Churn ─────────────────────────────────────────────────────────
-  async getChurnRate(
-    periodStart: Date,
-    periodEnd: Date,
-  ): Promise<ChurnResult> {
+  async getChurnRate(periodStart: Date, periodEnd: Date): Promise<ChurnResult> {
     // Cancellations within the period via subscription_events
     const cancelledEvents = await this.prisma.subscription_events.findMany({
       where: {
@@ -208,7 +205,9 @@ export class SubscriptionMetricsService {
     const planNameById = new Map(plans.map((p) => [p.id, p.name] as const));
 
     const by_plan = byPlanRows
-      .filter((row): row is typeof row & { plan_id: number } => row.plan_id !== null)
+      .filter(
+        (row): row is typeof row & { plan_id: number } => row.plan_id !== null,
+      )
       .map((row) => ({
         plan_id: row.plan_id,
         plan_name: planNameById.get(row.plan_id) ?? `Plan #${row.plan_id}`,

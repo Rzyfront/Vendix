@@ -59,7 +59,10 @@ export class SaasMetricsSnapshotJob {
           state: { in: ['active', 'grace_soft', 'grace_hard'] },
           plan_id: { not: null },
         },
-        select: { effective_price: true, plan: { select: { billing_cycle: true } } },
+        select: {
+          effective_price: true,
+          plan: { select: { billing_cycle: true } },
+        },
       });
 
     let mrr = new Prisma.Decimal(0);
@@ -112,17 +115,15 @@ export class SaasMetricsSnapshotJob {
       });
 
     // New subscriptions from prev month
-    const newSubs = await this.prisma
-      .withoutScope()
-      .subscription_events.count({
-        where: {
-          type: 'activated',
-          created_at: {
-            gte: prevMonth,
-            lt: now,
-          },
+    const newSubs = await this.prisma.withoutScope().subscription_events.count({
+      where: {
+        type: 'activated',
+        created_at: {
+          gte: prevMonth,
+          lt: now,
         },
-      });
+      },
+    });
 
     // Trial conversions
     const trialConversions = await this.prisma
@@ -153,8 +154,7 @@ export class SaasMetricsSnapshotJob {
         },
         _sum: { amount: true },
       });
-    const totalRevenue =
-      revenueResult._sum?.amount ?? new Prisma.Decimal(0);
+    const totalRevenue = revenueResult._sum?.amount ?? new Prisma.Decimal(0);
 
     // Partner payouts for prev month
     const payoutResult = await this.prisma
@@ -169,7 +169,8 @@ export class SaasMetricsSnapshotJob {
         },
         _sum: { total_amount: true },
       });
-    const partnerPayouts = payoutResult._sum.total_amount ?? new Prisma.Decimal(0);
+    const partnerPayouts =
+      payoutResult._sum.total_amount ?? new Prisma.Decimal(0);
 
     await this.prisma.withoutScope().saas_metrics_snapshot.upsert({
       where: { year_month: yearMonth },

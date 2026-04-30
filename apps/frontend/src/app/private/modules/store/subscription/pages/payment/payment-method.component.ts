@@ -90,6 +90,19 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
                           Por vencer
                         </span>
                       }
+                      <!--
+                        Fase 4 (Wompi recurrent migration) — badge shown
+                        when the card has been registered as a Wompi
+                        payment_source (COF). The field is populated by
+                        the new tokenize endpoint shipping in Fase 5;
+                        defensive optional-chain so legacy PMs without
+                        the field simply do not render the badge.
+                      -->
+                      @if (method?.providerPaymentSourceId) {
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700 font-medium">
+                          Verificada para cobros recurrentes
+                        </span>
+                      }
                     </div>
                   </div>
                 </div>

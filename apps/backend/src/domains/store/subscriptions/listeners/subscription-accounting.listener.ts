@@ -123,37 +123,33 @@ export class SubscriptionAccountingListener {
           `total=${total} vendix=${vendixShare} partner=${partnerShare}`,
       );
 
-      this.eventEmitter.emit(
-        'accounting.saas_subscription_payment.succeeded',
-        {
-          // Identity
-          invoiceId,
-          invoiceNumber: invoice.invoice_number,
-          paymentId,
-          subscriptionId: invoice.store_subscription_id,
-          dedupKey,
-          // Entry date for fiscal-period resolution.
-          entryDate: invoice.issued_at ?? new Date(),
-          currency: invoice.currency,
-          // Store-cliente side (SaaS expense)
-          store: {
-            organization_id: storeOrgId,
-            store_id: invoice.store_id,
-            amount: total,
-          },
-          // Vendix platform side (revenue + partner payable split)
-          platform: platformOrgId
-            ? {
-                organization_id: platformOrgId,
-                amount_total: total,
-                vendix_share: vendixShare,
-                partner_share: partnerShare,
-                partner_organization_id:
-                  invoice.partner_organization_id ?? null,
-              }
-            : null,
+      this.eventEmitter.emit('accounting.saas_subscription_payment.succeeded', {
+        // Identity
+        invoiceId,
+        invoiceNumber: invoice.invoice_number,
+        paymentId,
+        subscriptionId: invoice.store_subscription_id,
+        dedupKey,
+        // Entry date for fiscal-period resolution.
+        entryDate: invoice.issued_at ?? new Date(),
+        currency: invoice.currency,
+        // Store-cliente side (SaaS expense)
+        store: {
+          organization_id: storeOrgId,
+          store_id: invoice.store_id,
+          amount: total,
         },
-      );
+        // Vendix platform side (revenue + partner payable split)
+        platform: platformOrgId
+          ? {
+              organization_id: platformOrgId,
+              amount_total: total,
+              vendix_share: vendixShare,
+              partner_share: partnerShare,
+              partner_organization_id: invoice.partner_organization_id ?? null,
+            }
+          : null,
+      });
     } catch (err: any) {
       this.logger.error(
         `SubscriptionAccountingListener failed: ${err?.message ?? err}`,
@@ -193,9 +189,7 @@ export class SubscriptionAccountingListener {
       }
     } catch (e: any) {
       // Read-only lookup; never break the listener on a missing row/table.
-      this.logger.debug(
-        `platform_settings lookup failed: ${e?.message ?? e}`,
-      );
+      this.logger.debug(`platform_settings lookup failed: ${e?.message ?? e}`);
     }
 
     return null;

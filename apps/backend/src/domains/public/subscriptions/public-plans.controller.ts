@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  HttpCode,
-  HttpStatus,
-  Logger,
-} from '@nestjs/common';
+import { Controller, Get, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../../common/decorators/public.decorator';
 import { ResponseService, SuccessResponse } from '@common/responses';
@@ -47,6 +41,9 @@ export class PublicPlansController {
 
     const plans = await this.publicPlansService.findAll();
 
-    return this.responseService.success(plans, 'Subscription plans retrieved successfully');
+    return this.responseService.success(
+      plans,
+      'Subscription plans retrieved successfully',
+    );
   }
 }

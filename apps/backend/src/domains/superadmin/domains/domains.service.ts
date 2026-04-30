@@ -19,7 +19,14 @@ export class DomainsService {
     const existingDomain = await this.prisma.domain_settings.findFirst({
       where: {
         hostname: createDomainSettingDto.hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 

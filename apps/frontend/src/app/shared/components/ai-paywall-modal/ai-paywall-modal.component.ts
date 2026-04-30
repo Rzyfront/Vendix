@@ -29,6 +29,7 @@ const SEVERITY_BADGE: Record<PaywallSeverity, BadgeVariant> = {
   warning: 'warning',
   info: 'info',
   upsell: 'success',
+  success: 'success',
 };
 
 const CATEGORY_ICON: Record<PaywallCategory, string> = {
@@ -57,11 +58,36 @@ const CATEGORIES_WITH_BENEFITS: ReadonlySet<PaywallCategory> = new Set([
           <div class="paywall-hero-bg"></div>
           <div class="paywall-hero-icon">
             <span class="paywall-hero-halo" aria-hidden="true"></span>
-            <app-icon
-              [name]="iconName()"
-              [size]="44"
-              class="relative z-10 text-white drop-shadow-sm"
-            />
+            @if (severityKey() === 'success') {
+              <svg
+                class="paywall-success-checkmark relative z-10"
+                viewBox="0 0 52 52"
+                aria-hidden="true"
+              >
+                <circle
+                  cx="26"
+                  cy="26"
+                  r="25"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M14 27 l8 8 l16 -16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            } @else {
+              <app-icon
+                [name]="iconName()"
+                [size]="44"
+                class="relative z-10 text-white drop-shadow-sm"
+              />
+            }
           </div>
           @if (badgeLabel()) {
             <div class="paywall-hero-badge">
@@ -109,22 +135,26 @@ const CATEGORIES_WITH_BENEFITS: ReadonlySet<PaywallCategory> = new Set([
             {{ extraActionLabel() }}
           </button>
         }
-        <app-button
-          variant="ghost"
-          size="md"
-          (click)="dismiss()"
-          [class]="'paywall-secondary-btn'"
-        >
-          {{ resolvedSecondaryLabel() }}
-        </app-button>
-        <app-button
-          variant="primary"
-          size="md"
-          (click)="primaryAction()"
-          [class]="'paywall-primary-btn paywall-primary-' + severityKey()"
-        >
-          {{ resolvedPrimaryText() }}
-        </app-button>
+        @if (showSecondaryCta()) {
+          <app-button
+            variant="ghost"
+            size="md"
+            (click)="dismiss()"
+            [class]="'paywall-secondary-btn'"
+          >
+            {{ resolvedSecondaryLabel() }}
+          </app-button>
+        }
+        @if (showPrimaryCta()) {
+          <app-button
+            variant="primary"
+            size="md"
+            (click)="primaryAction()"
+            [class]="'paywall-primary-btn paywall-primary-' + severityKey()"
+          >
+            {{ resolvedPrimaryText() }}
+          </app-button>
+        }
       </div>
     </app-modal>
   `,
@@ -160,6 +190,26 @@ export class AiPaywallModalComponent {
   readonly showExtraAction = computed(
     () => (this.extraActionLabel() ?? '').trim().length > 0,
   );
+
+  /**
+   * Hide the primary CTA when the variant supplies an empty label (e.g. the
+   * payment-success microinteraction auto-dismisses without user action).
+   */
+  readonly showPrimaryCta = computed(
+    () => (this.resolvedPrimaryText() ?? '').trim().length > 0,
+  );
+
+  /**
+   * Hide the secondary CTA when the variant explicitly sets an empty
+   * `secondaryCtaLabel`. We can't rely on the resolved value because it
+   * falls back to `dismissText()` ("Cerrar"); only treat the variant's
+   * explicit `''` as "hide".
+   */
+  readonly showSecondaryCta = computed(() => {
+    const config = this.variantConfig();
+    if (config && config.secondaryCtaLabel === '') return false;
+    return (this.resolvedSecondaryLabel() ?? '').trim().length > 0;
+  });
 
   readonly resolvedTitle = computed(() => {
     const config = this.variantConfig();

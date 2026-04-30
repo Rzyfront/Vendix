@@ -91,11 +91,18 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // BLOCK: Services cannot have variants
-      if (product.product_type === 'service') {
+      // Cross-validation: service-specific fields only for service products
+      const isService = product.product_type === 'service';
+      const hasServiceFields =
+        createVariantDto.service_duration_minutes !== undefined ||
+        createVariantDto.service_pricing_type !== undefined ||
+        createVariantDto.buffer_minutes !== undefined ||
+        createVariantDto.preparation_time_minutes !== undefined;
+
+      if (!isService && hasServiceFields) {
         throw new VendixHttpException(
-          ErrorCodes.PROD_SVC_001,
-          'Services cannot have variants',
+          ErrorCodes.PROD_VALIDATE_004,
+          'Service-specific fields can only be set on service product variants',
         );
       }
 

@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Post, Put, Delete, Query, Param, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Query,
+  Param,
+  Res,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
@@ -104,17 +114,25 @@ export class StoreSubscriptionsController {
     if (storeId) {
       const currentSub = await this.prisma.store_subscriptions.findUnique({
         where: { store_id: storeId },
-        select: { plan_id: true, state: true },
+        select: { paid_plan_id: true, plan_id: true, state: true },
       });
-      // A cancelled/expired subscription's plan is no longer "current" — the
-      // lifecycle ended, so we want the card to render as a fresh purchase
-      // option (re-subscribe path D in the checkout controller). Treating it
-      // as current would disable the CTA and trap the user.
+      // A subscription is "live" only when the lifecycle is in a paid/granted
+      // state. Cancelled, expired, no_plan and pending_payment must NOT mark
+      // any plan as current. The canonical "current plan" is `paid_plan_id`
+      // (the plan the customer has actually paid for); we fall back to
+      // `plan_id` only for trial subscriptions where paid_plan_id is null by
+      // design.
+      const NON_LIVE_STATES = new Set([
+        'cancelled',
+        'expired',
+        'no_plan',
+        'pending_payment',
+      ]);
       const isLiveSubscription =
-        currentSub != null &&
-        currentSub.state !== 'cancelled' &&
-        currentSub.state !== 'expired';
-      currentPlanId = isLiveSubscription ? currentSub!.plan_id : null;
+        currentSub != null && !NON_LIVE_STATES.has(currentSub.state as string);
+      currentPlanId = isLiveSubscription
+        ? (currentSub.paid_plan_id ?? currentSub.plan_id)
+        : null;
     }
 
     const data = plans.map((p) => {
@@ -168,7 +186,10 @@ export class StoreSubscriptionsController {
   async getPlanByRedemptionCode(@Param('code') code: string) {
     const plan = await this.redemptionService.getPlanByRedemptionCode(code);
     if (!plan) {
-      throw new VendixHttpException(ErrorCodes.PROMO_001, 'Invalid redemption code');
+      throw new VendixHttpException(
+        ErrorCodes.PROMO_001,
+        'Invalid redemption code',
+      );
     }
     return this.responseService.success(plan, 'Plan found');
   }
@@ -185,6 +206,13 @@ export class StoreSubscriptionsController {
       where: { store_id: storeId },
       include: {
         plan: true,
+        // paid_plan / pending_plan are needed by the unified UI-state selector
+        // so banners can render `fromPlanName → toPlanName` correctly. Without
+        // these relations the frontend falls back to `plan.name` for both
+        // sides and renders "Starter → Starter" when the user is changing
+        // plans mid-cycle.
+        paid_plan: true,
+        pending_plan: true,
         partner_override: { include: { base_plan: true } },
       },
     });
@@ -216,7 +244,8 @@ export class StoreSubscriptionsController {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const data = await this.accessService.getDunningStateForCurrentStore(storeId);
+    const data =
+      await this.accessService.getDunningStateForCurrentStore(storeId);
     return this.responseService.success(data, 'Dunning state retrieved');
   }
 
@@ -464,7 +493,10 @@ export class StoreSubscriptionsController {
       triggeredByUserId: context?.user_id,
     });
 
-    return this.responseService.success(result, 'Scheduled cancellation reverted');
+    return this.responseService.success(
+      result,
+      'Scheduled cancellation reverted',
+    );
   }
 
   /**
@@ -498,7 +530,9 @@ export class StoreSubscriptionsController {
 
   @Post('support-request')
   @SkipSubscriptionGate()
-  async supportRequest(@Body() dto: { reason: string; message: string; contact_email?: string }) {
+  async supportRequest(
+    @Body() dto: { reason: string; message: string; contact_email?: string },
+  ) {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -626,10 +660,7 @@ export class StoreSubscriptionsController {
     );
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${filename}"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Length', buffer.length.toString());
     res.send(buffer);
   }

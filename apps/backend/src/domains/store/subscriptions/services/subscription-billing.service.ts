@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   Prisma,
   subscription_billing_cycle_enum,
+  subscription_change_kind_enum,
   subscription_invoices,
 } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
@@ -72,7 +73,13 @@ export class SubscriptionBillingService {
    */
   async issueInvoice(
     storeSubscriptionId: number,
-    opts: { prorated?: boolean; proratedAmount?: Prisma.Decimal } = {},
+    opts: {
+      prorated?: boolean;
+      proratedAmount?: Prisma.Decimal;
+      fromPlanId?: number | null;
+      toPlanId?: number | null;
+      changeKind?: subscription_change_kind_enum | null;
+    } = {},
   ): Promise<subscription_invoices | null> {
     if (!Number.isInteger(storeSubscriptionId) || storeSubscriptionId <= 0) {
       throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
@@ -158,7 +165,8 @@ export class SubscriptionBillingService {
             // off `issued` the partner_commissions row stays in `accrued` —
             // we mark it `voided` so the monthly batch skips it.
             const existingMeta =
-              existingPending.metadata && typeof existingPending.metadata === 'object'
+              existingPending.metadata &&
+              typeof existingPending.metadata === 'object'
                 ? (existingPending.metadata as Record<string, unknown>)
                 : {};
             await tx.subscription_invoices.update({
@@ -370,6 +378,9 @@ export class SubscriptionBillingService {
               prorated: !!opts.prorated,
               credit_applied: creditApplied.toFixed(2),
             } as Prisma.InputJsonValue,
+            from_plan_id: opts.fromPlanId ?? null,
+            to_plan_id: opts.toPlanId ?? null,
+            change_kind: opts.changeKind ?? null,
           },
         });
 
@@ -407,7 +418,8 @@ export class SubscriptionBillingService {
 
         // Accrue partner commission (state=accrued) when applicable.
         // RNC-41: promotional plans NEVER accrue commission.
-        const isPromotionalPlan = sub.plan.plan_type === 'promotional' || sub.plan.is_promotional;
+        const isPromotionalPlan =
+          sub.plan.plan_type === 'promotional' || sub.plan.is_promotional;
         if (
           pricing.partner_org_id !== null &&
           pricing.margin_amount.greaterThan(DECIMAL_ZERO) &&

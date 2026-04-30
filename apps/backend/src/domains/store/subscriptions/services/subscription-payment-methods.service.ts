@@ -5,7 +5,16 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { TokenizePaymentMethodDto } from '../dto/tokenize-payment-method.dto';
-import { PlatformGatewayService } from '../../../superadmin/subscriptions/gateway/platform-gateway.service';
+import {
+  PlatformGatewayService,
+  DecryptedCreds,
+} from '../../../superadmin/subscriptions/gateway/platform-gateway.service';
+import { WompiProcessor } from '../../payments/processors/wompi/wompi.processor';
+import { WompiClientFactory } from '../../payments/processors/wompi/wompi.factory';
+import {
+  WompiConfig,
+  WompiEnvironment,
+} from '../../payments/processors/wompi/wompi.types';
 
 export interface TokenizeWidgetConfig {
   public_key: string;
@@ -15,6 +24,16 @@ export interface TokenizeWidgetConfig {
   signature_integrity: string;
   redirect_url: string;
   customer_email: string;
+  /**
+   * Wompi acceptance_token presented to the user. The frontend must echo it
+   * back through the tokenize endpoint so the backend can forward it bit-exact
+   * to `/payment_sources` (legal trail for COF / MIT charges).
+   */
+  acceptance_token: string;
+  /**
+   * Wompi personal_auth (presigned_personal_data_auth.acceptance_token).
+   */
+  personal_auth_token: string;
 }
 
 @Injectable()
@@ -24,6 +43,8 @@ export class SubscriptionPaymentMethodsService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly platformGw: PlatformGatewayService,
+    private readonly wompiProcessor: WompiProcessor,
+    private readonly wompiClientFactory: WompiClientFactory,
   ) {}
 
   async listForStore() {
@@ -63,10 +84,23 @@ export class SubscriptionPaymentMethodsService {
         expiry_year: m.expiry_year,
         state: m.state,
         consecutive_failures: Number(meta.consecutive_failures ?? 0),
+        // Wompi Phase 5 — when present, the row already migrated to the
+        // payment_source flow (recurrent:true charges available). The
+        // frontend uses it to show the "Verificada para cobros recurrentes"
+        // badge.
+        providerPaymentSourceId: m.provider_payment_source_id ?? null,
       };
     });
   }
 
+  /**
+   * Wompi Phase 5 — exchanges the widget-supplied `card_token` (tok_*) for a
+   * long-lived `payment_source_id` and persists it as a recurring PM.
+   *
+   * Replaces the legacy `tokenize` flow that stored only the short-lived
+   * `tok_*` directly on `provider_token` (which Wompi expires within minutes
+   * and cannot be charged with `recurrent:true`).
+   */
   async tokenize(dto: TokenizePaymentMethodDto) {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) {
@@ -83,48 +117,190 @@ export class SubscriptionPaymentMethodsService {
       );
     }
 
-    // If setting as default, unset any existing default
-    if (dto.is_default) {
-      await this.prisma.subscription_payment_methods.updateMany({
-        where: { store_id: storeId, is_default: true },
-        data: { is_default: false, updated_at: new Date() },
-      });
-    }
+    return this.tokenizeAndRegister(storeId, subscription.id, dto);
+  }
 
-    let created: Awaited<
-      ReturnType<typeof this.prisma.subscription_payment_methods.create>
-    >;
+  /**
+   * Core tokenize flow (called from `tokenize` and `replace`).
+   *
+   * Steps:
+   *  1. Resolve platform Wompi credentials (multi-tenant: SaaS-level keys, not
+   *     per-store).
+   *  2. Compute a deterministic idempotency key derived from `card_token` so a
+   *     widget retry / double-click does not create duplicate `payment_sources`
+   *     on the gateway side.
+   *  3. Call `WompiProcessor.createPaymentSourceFromCardToken` to exchange the
+   *     short-lived `tok_*` for a long-lived `payment_source_id`.
+   *  4. Acquire an advisory transaction lock on
+   *     hash(store_id || payment_source_id) so concurrent requests (eg. webhook
+   *     re-delivery + widget callback) don't both insert the same row.
+   *  5. Upsert idempotently by `(store_id, provider_payment_source_id, active)`.
+   */
+  private async tokenizeAndRegister(
+    storeId: number,
+    subscriptionId: number,
+    dto: TokenizePaymentMethodDto,
+  ) {
+    // ── 1. Resolve Wompi credentials (platform-level, not per-store).
+    const wompiConfig = await this.resolveWompiConfig();
 
+    // Customer email — Wompi requires a non-empty email. Use the synthetic
+    // `saas-<storeId>@vendix.app` consistent with `prepareWidgetConfig` so
+    // the merchant view aligns. The `stores` model has no email column; the
+    // user-facing billing email is per-organization (out of scope here).
+    const customerEmail = `saas-${storeId}@vendix.app`;
+
+    // ── 2. Stable idempotency key derived from the card_token.
+    //   Same widget tokenization + same store ⇒ same key ⇒ Wompi returns the
+    //   same payment_source instead of creating a duplicate. The hash slice
+    //   stays under Wompi's 64-char idempotency-key limit comfortably.
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(dto.card_token)
+      .digest('hex')
+      .slice(0, 16);
+    const idempotencyKey = `pm:tokenize:${storeId}:${tokenHash}`;
+
+    // ── 3. Exchange tok_* for payment_source_id.
+    let psid: string;
+    let acceptanceTokenUsed: string;
+    let publicData: any;
     try {
-      created = await this.prisma.subscription_payment_methods.create({
-        data: {
-          store_id: storeId,
-          store_subscription_id: subscription.id,
-          type: dto.type ?? 'card',
-          provider: 'wompi',
-          provider_token: dto.provider_token,
-          last4: dto.last4 ?? null,
-          brand: dto.brand ?? null,
-          expiry_month: dto.expiry_month ?? null,
-          expiry_year: dto.expiry_year ?? null,
-          card_holder: dto.card_holder ?? null,
-          is_default: dto.is_default ?? false,
-          state: subscription_payment_method_state_enum.active,
+      const result = await this.wompiProcessor.createPaymentSourceFromCardToken(
+        {
+          storeId,
+          cardTokenFromWidget: dto.card_token,
+          acceptanceToken: dto.acceptance_token,
+          personalAuthToken: dto.personal_auth_token,
+          customerEmail,
+          wompiConfig,
+          idempotencyKey,
         },
-      });
+      );
+      psid = result.paymentSourceId;
+      acceptanceTokenUsed = result.acceptanceTokenUsed;
+      publicData = result.publicData ?? {};
     } catch (error: unknown) {
+      // VendixHttpException raised by the processor (PAYMENT_SOURCE_*) bubbles
+      // through unchanged. Generic gateway errors get mapped to the legacy
+      // SUBSCRIPTION_TOKEN_INVALID / CARD_DECLINED / PROVIDER_UNAVAILABLE
+      // codes the frontend already handles.
+      if (error instanceof VendixHttpException) throw error;
       this._mapWompiError(error);
       throw error;
     }
 
-    return {
-      id: String(created.id),
-      type: created.type,
-      last4: created.last4,
-      brand: created.brand,
-      is_default: created.is_default,
-      created_at: created.created_at.toISOString(),
-    };
+    // ── 4 + 5. Idempotent upsert under advisory lock.
+    return this.prisma.$transaction(async (tx) => {
+      // Advisory lock keyed by (store_id, payment_source_id) hash. Prevents
+      // a webhook handler race from inserting the same row twice. Auto
+      // released at COMMIT/ROLLBACK.
+      const lockKeySrc = `${storeId}:${psid}`;
+      const lockKey =
+        // bigint — use the first 8 hex chars of the SHA-1 to fit pg's bigint range
+        BigInt(
+          '0x' +
+            crypto.createHash('sha1').update(lockKeySrc).digest('hex').slice(0, 15),
+        );
+      await tx.$executeRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(${lockKey}::bigint)`,
+      );
+
+      // Idempotent: same (store, payment_source_id) already saved? Reuse it.
+      const existing = await tx.subscription_payment_methods.findFirst({
+        where: {
+          store_id: storeId,
+          provider_payment_source_id: psid,
+          state: subscription_payment_method_state_enum.active,
+        },
+      });
+      if (existing) {
+        // Return the existing row so the frontend reflects the saved card.
+        return this._mapPmResponse(existing);
+      }
+
+      // First-PM-for-store ⇒ default. Otherwise honour the dto flag and
+      // demote previous defaults atomically.
+      const activeCount = await tx.subscription_payment_methods.count({
+        where: {
+          store_id: storeId,
+          state: subscription_payment_method_state_enum.active,
+        },
+      });
+      const inheritsDefault = activeCount === 0 || dto.is_default === true;
+      if (inheritsDefault) {
+        await tx.subscription_payment_methods.updateMany({
+          where: {
+            store_id: storeId,
+            is_default: true,
+            state: subscription_payment_method_state_enum.active,
+          },
+          data: { is_default: false, updated_at: new Date() },
+        });
+      }
+
+      const extra = (publicData?.extra ?? publicData) as
+        | Record<string, unknown>
+        | undefined;
+      const last4 =
+        dto.last4 ??
+        ((extra?.last_four as string | undefined) ??
+          (publicData?.last_four as string | undefined) ??
+          null);
+      const brand =
+        dto.brand ??
+        ((extra?.brand as string | undefined) ??
+          (publicData?.brand as string | undefined) ??
+          null);
+      const expMonth =
+        dto.expiry_month ??
+        ((extra?.exp_month as string | undefined) ??
+          (publicData?.exp_month as string | undefined) ??
+          null);
+      const expYear =
+        dto.expiry_year ??
+        ((extra?.exp_year as string | undefined) ??
+          (publicData?.exp_year as string | undefined) ??
+          null);
+      const cardHolder =
+        dto.card_holder ??
+        ((extra?.card_holder as string | undefined) ??
+          (extra?.name as string | undefined) ??
+          null);
+
+      const created = await tx.subscription_payment_methods.create({
+        data: {
+          store_id: storeId,
+          store_subscription_id: subscriptionId,
+          type: dto.type ?? 'card',
+          provider: 'wompi',
+          // legacy mirror — readers that still look at provider_token (eg.
+          // chargeInvoice retry path before Fase 6) can keep working until
+          // Fase 7 enforces full migration.
+          provider_token: psid,
+          provider_payment_source_id: psid,
+          acceptance_token_used: acceptanceTokenUsed,
+          cof_registered_at: new Date(),
+          last4: last4 ? String(last4).slice(-4) : null,
+          brand: brand ? String(brand) : null,
+          expiry_month: expMonth ? String(expMonth).padStart(2, '0').slice(0, 2) : null,
+          expiry_year: expYear ? String(expYear).slice(0, 4) : null,
+          card_holder: cardHolder ? String(cardHolder) : null,
+          is_default: inheritsDefault,
+          state: subscription_payment_method_state_enum.active,
+          metadata: {
+            source: 'tokenize_widget',
+            registered_at: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
+
+      this.logger.log(
+        `PAYMENT_METHOD_TOKENIZED store=${storeId} sub=${subscriptionId} pm=${created.id} psid=${psid} default=${inheritsDefault}`,
+      );
+
+      return this._mapPmResponse(created);
+    });
   }
 
   async setDefault(id: string) {
@@ -175,12 +351,9 @@ export class SubscriptionPaymentMethodsService {
   /**
    * G11 — Replace a payment method with a freshly-tokenized one.
    *
-   * Soft-deletes the old method (state='replaced') so payment history that
-   * references its id stays intact, and creates a brand new method that
-   * inherits the `is_default` flag if the old one was the default.
-   *
-   * NOTE: `replaced_at` and `replaced_by_id` are stored in `metadata` until
-   * the schema gains dedicated columns — see TODO(G11-schema-gap).
+   * Wompi Phase 5: instead of mutating `provider_token`, the new card is
+   * tokenized through `tokenizeAndRegister` (creating a fresh
+   * payment_source). The old PM is then soft-deleted (state='replaced').
    */
   async replace(oldId: string, dto: TokenizePaymentMethodDto) {
     const storeId = RequestContextService.getStoreId();
@@ -216,60 +389,37 @@ export class SubscriptionPaymentMethodsService {
       );
     }
 
-    // Determine if the new PM should inherit the default flag.
     const inheritsDefault = oldMethod.is_default || dto.is_default === true;
 
+    // Tokenize first (calls Wompi outside the soft-delete tx — safer if the
+    // gateway rejects, the old PM stays untouched).
+    const newPmDto: TokenizePaymentMethodDto = {
+      ...dto,
+      is_default: inheritsDefault,
+    };
+    const created = await this.tokenizeAndRegister(
+      storeId,
+      subscription.id,
+      newPmDto,
+    );
+
+    // Soft-delete the old PM and audit.
+    const newPmId = parseInt(created.id, 10);
     return this.prisma.$transaction(async (tx) => {
-      // 1) Clear other defaults if the new one will be default.
-      if (inheritsDefault) {
-        await tx.subscription_payment_methods.updateMany({
-          where: { store_id: storeId, is_default: true },
-          data: { is_default: false, updated_at: new Date() },
-        });
-      }
-
-      // 2) Create the new method.
-      let created;
-      try {
-        created = await tx.subscription_payment_methods.create({
-          data: {
-            store_id: storeId,
-            store_subscription_id: subscription.id,
-            type: dto.type ?? oldMethod.type ?? 'card',
-            provider: 'wompi',
-            provider_token: dto.provider_token,
-            last4: dto.last4 ?? null,
-            brand: dto.brand ?? null,
-            expiry_month: dto.expiry_month ?? null,
-            expiry_year: dto.expiry_year ?? null,
-            card_holder: dto.card_holder ?? null,
-            is_default: inheritsDefault,
-            state: subscription_payment_method_state_enum.active,
-            metadata: {
-              replaces_id: oldMethod.id,
-            } as Prisma.InputJsonValue,
-          },
-        });
-      } catch (error: unknown) {
-        this._mapWompiError(error);
-        throw error;
-      }
-
-      // 3) Soft-delete the old method (preserve payment history references).
       const oldMeta =
         (oldMethod.metadata as Record<string, unknown> | null) ?? {};
+      const replacedAt = new Date();
       const nextOldMeta = {
         ...oldMeta,
-        replaced_at: new Date().toISOString(),
-        replaced_by_id: created.id,
+        replaced_at: replacedAt.toISOString(),
+        replaced_by_id: newPmId,
       } as Prisma.InputJsonValue;
 
-      const replacedAt = new Date();
       await tx.subscription_payment_methods.update({
         where: { id: oldMethod.id },
         data: {
           state: subscription_payment_method_state_enum.replaced,
-          replaced_by_id: created.id,
+          replaced_by_id: newPmId,
           replaced_at: replacedAt,
           is_default: false,
           metadata: nextOldMeta,
@@ -277,7 +427,20 @@ export class SubscriptionPaymentMethodsService {
         },
       });
 
-      // 4) Audit row in subscription_events. Reuse `state_transition`; the
+      // Mirror the linkage on the new row so audit lineage is bidirectional.
+      await tx.subscription_payment_methods.update({
+        where: { id: newPmId },
+        data: {
+          metadata: {
+            source: 'tokenize_widget',
+            replaces_id: oldMethod.id,
+            registered_at: replacedAt.toISOString(),
+          } as Prisma.InputJsonValue,
+          updated_at: replacedAt,
+        },
+      });
+
+      // Audit row in subscription_events. Reuse `state_transition`; the
       // canonical event type enum has no `payment_method_replaced` value
       // yet (see schema enum). payload.reason='payment_method_replaced'
       // makes it queryable.
@@ -288,24 +451,17 @@ export class SubscriptionPaymentMethodsService {
           payload: {
             reason: 'payment_method_replaced',
             old_payment_method_id: oldMethod.id,
-            new_payment_method_id: created.id,
+            new_payment_method_id: newPmId,
             inherits_default: inheritsDefault,
           } as Prisma.InputJsonValue,
         },
       });
 
       this.logger.log(
-        `PAYMENT_METHOD_REPLACED store=${storeId} oldPm=${oldMethod.id} newPm=${created.id} default=${inheritsDefault}`,
+        `PAYMENT_METHOD_REPLACED store=${storeId} oldPm=${oldMethod.id} newPm=${newPmId} default=${inheritsDefault}`,
       );
 
-      return {
-        id: String(created.id),
-        type: created.type,
-        last4: created.last4,
-        brand: created.brand,
-        is_default: created.is_default,
-        created_at: created.created_at.toISOString(),
-      };
+      return created;
     });
   }
 
@@ -445,6 +601,16 @@ export class SubscriptionPaymentMethodsService {
       wompiConfig.integrity_secret,
     );
 
+    // Wompi Phase 5 — fetch acceptance + personal_auth tokens so the widget
+    // can echo them back through the tokenize endpoint. Without these the
+    // backend cannot create a long-lived `payment_source_id` for COF/MIT.
+    const client = this.wompiClientFactory.getClient(
+      `pm-widget-${storeId}`,
+      this._toWompiConfig(wompiConfig),
+    );
+    const { acceptance_token, personal_auth_token } =
+      await client.getAcceptanceTokens();
+
     return {
       public_key: wompiConfig.public_key,
       currency,
@@ -452,8 +618,59 @@ export class SubscriptionPaymentMethodsService {
       reference,
       signature_integrity: signatureIntegrity,
       redirect_url: opts.redirectUrl ?? '',
-      customer_email:
-        opts.customerEmail ?? `saas-${storeId}@vendix.app`,
+      customer_email: opts.customerEmail ?? `saas-${storeId}@vendix.app`,
+      acceptance_token,
+      personal_auth_token,
+    };
+  }
+
+  // ── Helpers ──────────────────────────────────────────────────────
+
+  /**
+   * Resolves platform-level Wompi credentials (used for SaaS billing) and
+   * casts them to the `WompiConfig` shape consumed by the processor / client.
+   */
+  private async resolveWompiConfig(): Promise<WompiConfig> {
+    const creds = await this.platformGw.getActiveCredentials('wompi');
+    if (!creds) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_003,
+        'Credenciales de pasarela de plataforma no configuradas',
+      );
+    }
+    return this._toWompiConfig(creds);
+  }
+
+  private _toWompiConfig(creds: DecryptedCreds): WompiConfig {
+    return {
+      public_key: creds.public_key,
+      private_key: creds.private_key,
+      events_secret: creds.events_secret,
+      integrity_secret: creds.integrity_secret,
+      // PlatformGatewayEnvironmentEnum and WompiEnvironment overlap by string
+      // value (sandbox / production). Cast through unknown for safety.
+      environment: (creds.environment as unknown as WompiEnvironment) ??
+        WompiEnvironment.SANDBOX,
+    };
+  }
+
+  private _mapPmResponse(m: {
+    id: number;
+    type: string;
+    last4: string | null;
+    brand: string | null;
+    is_default: boolean;
+    created_at: Date;
+    provider_payment_source_id?: string | null;
+  }) {
+    return {
+      id: String(m.id),
+      type: m.type,
+      last4: m.last4,
+      brand: m.brand,
+      is_default: m.is_default,
+      created_at: m.created_at.toISOString(),
+      providerPaymentSourceId: m.provider_payment_source_id ?? null,
     };
   }
 
@@ -476,10 +693,7 @@ export class SubscriptionPaymentMethodsService {
     };
 
     const httpStatus =
-      err.status ??
-      err.statusCode ??
-      err.response?.status ??
-      0;
+      err.status ?? err.statusCode ?? err.response?.status ?? 0;
 
     const wompiErrorCode = (
       err.code ??

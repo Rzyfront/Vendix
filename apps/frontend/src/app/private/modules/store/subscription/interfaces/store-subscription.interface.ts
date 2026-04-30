@@ -5,7 +5,7 @@ export interface SubscriptionPlan {
   description: string;
   base_price: number;
   currency: string;
-  billing_cycle: 'monthly' | 'yearly';
+  billing_cycle: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
   features: PlanFeature[];
   is_current: boolean;
   is_popular: boolean;
@@ -27,12 +27,43 @@ export interface PlanFeature {
   unit: string | null;
 }
 
+/**
+ * Pending plan change kinds as returned by the backend enum
+ * `subscription_change_kind_enum`.
+ */
+export type SubscriptionChangeKind =
+  | 'initial'
+  | 'renewal'
+  | 'upgrade'
+  | 'downgrade'
+  | 'resubscribe'
+  | 'trial_conversion';
+
+/**
+ * Subscription states as returned by the backend enum
+ * `store_subscription_state_enum`.
+ */
+export type StoreSubscriptionState =
+  | 'draft'
+  | 'trial'
+  | 'active'
+  | 'grace_soft'
+  | 'grace_hard'
+  | 'suspended'
+  | 'blocked'
+  | 'cancelled'
+  | 'expired'
+  | 'pending_payment'
+  | 'no_plan';
+
 export interface CurrentSubscription {
   id: string;
   plan_id: string;
   plan_name: string;
   plan_code: string;
   status: 'active' | 'trialing' | 'past_due' | 'cancelled' | 'expired' | 'blocked' | 'grace_soft' | 'grace_hard' | 'none';
+  /** Backend field: `store_subscriptions.state` (canonical enum). */
+  state?: StoreSubscriptionState;
   effective_price: number;
   currency: string;
   billing_cycle: 'monthly' | 'yearly';
@@ -41,7 +72,40 @@ export interface CurrentSubscription {
   next_billing_at: string | null;
   trial_ends_at: string | null;
   cancelled_at: string | null;
+  scheduled_cancel_at?: string | null;
   features: Record<string, FeatureUsage>;
+  // ── Plan Seleccionado vs Plan Pagado ─────────────────────────────────────
+  /**
+   * The plan whose features/price the store is currently billed on.
+   * Set once a payment clears. Null when on a free or trial plan with no
+   * prior payment.
+   */
+  paid_plan_id?: number | null;
+  /**
+   * The plan the store has selected but not yet activated (e.g. a deferred
+   * downgrade scheduled for the next billing cycle). Null when there is no
+   * pending plan change.
+   */
+  pending_plan_id?: number | null;
+  /**
+   * The subscription_invoices.id tied to the pending plan change. Null when
+   * no plan-change invoice has been issued yet.
+   */
+  pending_change_invoice_id?: number | null;
+  /**
+   * The kind of pending plan change (upgrade, downgrade, etc.).
+   * Maps to `subscription_change_kind_enum` in the DB.
+   */
+  pending_change_kind?: SubscriptionChangeKind | null;
+  /**
+   * ISO timestamp of when the pending plan change was initiated.
+   */
+  pending_change_started_at?: string | null;
+  /**
+   * The state the subscription should revert to if the pending change is
+   * cancelled. Maps to `store_subscription_state_enum`.
+   */
+  pending_revert_state?: StoreSubscriptionState | null;
 }
 
 export interface FeatureUsage {
@@ -231,6 +295,17 @@ export interface PaymentMethod {
   expiry_year?: string | null;
   state?: 'active' | 'invalid' | 'replaced' | 'removed' | string;
   consecutive_failures?: number;
+  /**
+   * Fase 4 (Wompi recurrent migration) — populated by the backend once
+   * the card has been registered as a Wompi `payment_source` (COF) via
+   * the new tokenize endpoint. When present, the UI surfaces a
+   * "Verificada para cobros recurrentes" badge so the user knows the
+   * card will be charged automatically on renewal.
+   *
+   * Optional + defensive: legacy methods registered before Fase 5
+   * shipped will not have this field.
+   */
+  providerPaymentSourceId?: string | null;
 }
 
 export interface ApiResponse<T> {

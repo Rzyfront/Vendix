@@ -28,7 +28,9 @@ import { PlatformGatewayEnvironmentEnum } from '../../../superadmin/subscription
 import { SubscriptionBillingService } from './subscription-billing.service';
 import { PartnerCommissionsService } from './partner-commissions.service';
 import { SubscriptionStateService } from './subscription-state.service';
+import { SubscriptionResolverService } from './subscription-resolver.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { isLegacyInlineTokenAllowed } from '../../payments/config/wompi-rollout.config';
 
 /**
  * States from which a successful payment should synchronously promote the
@@ -85,6 +87,7 @@ export class SubscriptionPaymentService {
     private readonly billing: SubscriptionBillingService,
     private readonly commissionsService: PartnerCommissionsService,
     private readonly stateService: SubscriptionStateService,
+    private readonly resolver: SubscriptionResolverService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
     private readonly platformGw: PlatformGatewayService,
@@ -286,9 +289,7 @@ export class SubscriptionPaymentService {
    * guarantees parity: a charge confirmed via this path is indistinguishable
    * from one confirmed via the actual Wompi webhook.
    */
-  async syncInvoiceFromGateway(
-    invoiceId: number,
-  ): Promise<{
+  async syncInvoiceFromGateway(invoiceId: number): Promise<{
     status: 'paid' | 'failed' | 'pending' | 'no_transaction';
     already_paid?: boolean;
     transaction_id?: string;
@@ -446,7 +447,11 @@ export class SubscriptionPaymentService {
       this.logger.log(
         `syncInvoiceFromGateway: APPROVED applied for invoice ${invoiceId} via pull (txn=${txn.id})`,
       );
-      return { status: 'paid', transaction_id: txn.id, payment_status: 'succeeded' };
+      return {
+        status: 'paid',
+        transaction_id: txn.id,
+        payment_status: 'succeeded',
+      };
     }
 
     if (status === 'DECLINED' || status === 'ERROR' || status === 'VOIDED') {
@@ -643,6 +648,177 @@ export class SubscriptionPaymentService {
   }
 
   // ------------------------------------------------------------------
+  // ADR-2: Single confirmation point for pending plan changes
+  // ------------------------------------------------------------------
+
+  /**
+   * ADR-2: Single confirmation point for all pending plan changes.
+   * Called from: webhook APPROVED, free-plan synchronous path, Wompi polling.
+   *
+   * Invariant: after this method returns, state=active, plan_id=paid_plan_id,
+   * all pending_* fields are null.
+   */
+  async confirmPendingChange(
+    invoice: {
+      id: number;
+      store_subscription_id: number;
+      to_plan_id: number | null;
+      from_plan_id: number | null;
+      change_kind: string | null;
+    },
+    tx: Prisma.TransactionClient,
+  ): Promise<any> {
+    // 1. Read the sub with plan and partner_override included
+    const sub = await tx.store_subscriptions.findUniqueOrThrow({
+      where: { id: invoice.store_subscription_id },
+      include: {
+        plan: true,
+        partner_override: { include: { base_plan: true } },
+      },
+    });
+
+    // 2. Guard: stale webhook or mismatch
+    if (
+      sub.pending_plan_id == null ||
+      invoice.to_plan_id == null ||
+      sub.pending_plan_id !== invoice.to_plan_id
+    ) {
+      this.logger.warn(
+        JSON.stringify({
+          event: 'CONFIRM_PENDING_MISMATCH',
+          sub_pending: sub.pending_plan_id,
+          invoice_to: invoice.to_plan_id,
+          invoice_id: invoice.id,
+        }),
+      );
+      return sub;
+    }
+
+    // 3. Fetch target plan
+    const targetPlan = await tx.subscription_plans.findUniqueOrThrow({
+      where: { id: sub.pending_plan_id },
+      include: { partner_overrides: false },
+    });
+
+    // 4. Compute new pricing using the target plan shape
+    const pricingInput = {
+      plan: {
+        id: targetPlan.id,
+        base_price: targetPlan.base_price,
+        max_partner_margin_pct: targetPlan.max_partner_margin_pct,
+      },
+      partner_override: sub.partner_override as any,
+    };
+    const newPricing = this.billing.computePricing(pricingInput);
+
+    // 5. Determine if period should reset.
+    // Plan-change policy: every upgrade/downgrade also restarts the cycle so
+    // the new plan starts with a fresh full window (matches the full-price
+    // charge applied server-side by SubscriptionProrationService — no credit,
+    // no carry-over of consumed days).
+    const changeKind = String(
+      invoice.change_kind ?? sub.pending_change_kind ?? '',
+    );
+    const shouldResetPeriod = [
+      'initial',
+      'resubscribe',
+      'trial_conversion',
+      'renewal',
+      'upgrade',
+      'downgrade',
+    ].includes(changeKind);
+
+    // 6. Calculate new period if needed
+    const now = new Date();
+    let newPeriodEnd: Date | undefined;
+    if (shouldResetPeriod) {
+      const cycleDays = this.billingCycleDays(targetPlan.billing_cycle);
+      newPeriodEnd = new Date(now.getTime() + cycleDays * DAY_MS);
+    }
+
+    // 7. Update the subscription (use UncheckedUpdateInput for scalar FK fields)
+    const round2 = (d: Prisma.Decimal) => d.toDecimalPlaces(2, 6);
+    const updateData: Prisma.store_subscriptionsUncheckedUpdateInput = {
+      plan_id: sub.pending_plan_id,
+      paid_plan_id: sub.pending_plan_id,
+      effective_price: round2(newPricing.effective_price),
+      vendix_base_price: round2(newPricing.base_price),
+      partner_margin_amount: round2(newPricing.margin_amount),
+      // Clear pending fields
+      pending_plan_id: null,
+      pending_change_invoice_id: null,
+      pending_change_kind: null,
+      pending_change_started_at: null,
+      pending_revert_state: null,
+      // Clear scheduled downgrade (upgrade cancels deferred downgrade)
+      scheduled_plan_id: null,
+      scheduled_plan_change_at: null,
+      // Clear grace fields when confirming payment
+      grace_soft_until: null,
+      grace_hard_until: null,
+      suspend_at: null,
+      updated_at: now,
+    };
+
+    if (shouldResetPeriod && newPeriodEnd) {
+      updateData.current_period_start = now;
+      updateData.current_period_end = newPeriodEnd;
+      updateData.next_billing_at = newPeriodEnd;
+      // Clear trial fields if coming from trial
+      if (
+        sub.state === 'pending_payment' &&
+        sub.pending_revert_state === 'trial'
+      ) {
+        updateData.trial_ends_at = null;
+      }
+    }
+
+    const updated = await tx.store_subscriptions.update({
+      where: { id: sub.id },
+      data: updateData,
+    });
+
+    // 8. Transition state via stateService
+    await this.stateService.transitionInTx(tx, sub.store_id, 'active', {
+      reason: `plan_confirmed_invoice_${invoice.id}`,
+      payload: {
+        from_plan_id: invoice.from_plan_id,
+        to_plan_id: invoice.to_plan_id,
+        change_kind: changeKind,
+        invoice_id: invoice.id,
+      },
+    });
+
+    // 9. Emit event
+    try {
+      this.eventEmitter.emit('subscription.plan.changed', {
+        storeId: sub.store_id,
+        subscriptionId: sub.id,
+        fromPlanId: invoice.from_plan_id,
+        toPlanId: invoice.to_plan_id,
+        kind: changeKind,
+        mode: 'committed',
+        invoiceId: invoice.id,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `subscription.plan.changed emit failed for invoice ${invoice.id}: ${e?.message ?? e}`,
+      );
+    }
+
+    // 10. Invalidate Redis cache
+    try {
+      await this.resolver.invalidate(sub.store_id);
+    } catch (e: any) {
+      this.logger.warn(
+        `resolver.invalidate failed for store ${sub.store_id}: ${e?.message ?? e}`,
+      );
+    }
+
+    return updated;
+  }
+
+  // ------------------------------------------------------------------
   // Core charge / refund
   // ------------------------------------------------------------------
 
@@ -703,6 +879,93 @@ export class SubscriptionPaymentService {
     // from store/POS/eCommerce in Wompi reports and webhooks.
     const reference = `vendix_saas_${invoice.store_subscription_id}_${invoiceId}_${Date.now()}`;
 
+    // Wompi Phase 6 — Build the per-attempt payment payload. Branching:
+    //   • PM has provider_payment_source_id → COF / MIT (`payment_source_id`
+    //     + `recurrent: true` inside WompiProcessor.processPayment). This is
+    //     the production-grade flow: PCI-DSS compliant, MIT-flagged, eligible
+    //     for Visa Account Updater.
+    //   • Legacy PM (only `provider_token`, no `payment_source_id`) → inline
+    //     `payment_method.token` flow. Preserved behind `legacyInlineTokenAllowed()`
+    //     until Fase 7 wires the env-flag rampa. When the flag goes false,
+    //     unmigrated PMs throw PAYMENT_METHOD_NOT_MIGRATED so the customer
+    //     re-enters card data and gets re-tokenized via /payment_sources.
+    //   • No reusable PM → standard SaaS flow (no PM metadata, falls through
+    //     to processor's legacy branch which will fail without `paymentMethod`
+    //     — caller is expected to use prepareWidgetCharge() instead).
+    const baseMetadata: Record<string, unknown> = {
+      subscription_payment: true,
+      subscriptionId: invoice.store_subscription_id,
+      invoiceId,
+      invoice_number: invoice.invoice_number,
+      reference,
+      // Tells WompiProcessor to use these creds INSTEAD of looking up
+      // store_payment_methods.custom_config (which doesn't apply for SaaS).
+      wompiConfig: this.toProcessorWompiConfig(wompiConfig),
+    };
+
+    let chargeMetadata: Record<string, unknown>;
+    if (reusablePm && reusablePm.provider_payment_source_id) {
+      // ── Recurrent (COF/MIT) path — Wompi Phase 6 ──────────────────────
+      chargeMetadata = {
+        ...baseMetadata,
+        payment_source_id: reusablePm.provider_payment_source_id,
+        // SaaS internal contact mirrors what was registered with the COF.
+        // Wompi requires `customer_email` on /transactions; processor falls
+        // back to `cof-{storeId}@vendix.app` when absent.
+        customerEmail: `saas-${invoice.store_id}@vendix.app`,
+        saved_payment_method_id: reusablePm.id,
+      };
+    } else if (reusablePm) {
+      if (!this.legacyInlineTokenAllowed()) {
+        // Fase 7 enforce gate — unmigrated PMs are blocked. Customer must
+        // re-tokenize via the widget so the next charge has a payment_source_id.
+        throw new VendixHttpException(
+          ErrorCodes.PAYMENT_METHOD_NOT_MIGRATED,
+          'Payment method requires re-tokenization to Wompi payment_source',
+          { paymentMethodId: reusablePm.id },
+        );
+      }
+      // ── Legacy inline-token path (pre-Fase 6 PMs) ──────────────────────
+      chargeMetadata = {
+        ...baseMetadata,
+        paymentMethod: {
+          type: 'CARD',
+          token: reusablePm.provider_token,
+          installments: 1,
+        },
+        saved_payment_method_id: reusablePm.id,
+        use_legacy_inline_token: true,
+      };
+    } else {
+      // No reusable PM at all — pass-through. Processor will fail without
+      // a paymentMethod, caller should have used prepareWidgetCharge().
+      chargeMetadata = { ...baseMetadata };
+    }
+
+    // Telemetry — comparable approval-rate signal across the rollout (Fase 7
+    // rampa). Logged on every attempt so ops can graph
+    // success/failure-by-path without parsing structured payment metadata.
+    this.logger.log(
+      `WOMPI_CHARGE_PATH path=${
+        reusablePm?.provider_payment_source_id
+          ? 'recurrent'
+          : reusablePm
+            ? 'legacy'
+            : 'no_pm'
+      } subscriptionId=${invoice.store_subscription_id} invoiceId=${invoiceId} pmId=${reusablePm?.id ?? 'none'}`,
+    );
+
+    // Fase 7 — Structured warning to track legacy PMs still in use during
+    // the rollout. Easy to grep / aggregate from logs while
+    // `WOMPI_RECURRENT_ENFORCE=false`. Once the migration cohort is at
+    // 100% and the warning rate is ~zero, the enforce flag can be flipped.
+    if (reusablePm && !reusablePm.provider_payment_source_id) {
+      this.logger.warn(
+        `WOMPI_LEGACY_TOKEN_USED subscriptionId=${invoice.store_subscription_id} invoiceId=${invoiceId} pmId=${reusablePm.id} ` +
+          `(re-tokenization required before WOMPI_RECURRENT_ENFORCE flip)`,
+      );
+    }
+
     const paymentData: PaymentData = {
       orderId: invoiceId,
       amount: total.toNumber(),
@@ -711,29 +974,7 @@ export class SubscriptionPaymentService {
       // resolved via PlatformGatewayService.
       storeId: invoice.store_id,
       idempotencyKey,
-      metadata: {
-        subscription_payment: true,
-        subscriptionId: invoice.store_subscription_id,
-        invoiceId,
-        invoice_number: invoice.invoice_number,
-        reference,
-        // Tells WompiProcessor to use these creds INSTEAD of looking up
-        // store_payment_methods.custom_config (which doesn't apply for SaaS).
-        wompiConfig: this.toProcessorWompiConfig(wompiConfig),
-        // G11 — When a reusable saved card is present, pass its tokenized
-        // payment_method shape directly to the processor so renewals do
-        // NOT prompt the user to re-enter card data.
-        ...(reusablePm
-          ? {
-              paymentMethod: {
-                type: 'CARD',
-                token: reusablePm.provider_token,
-                installments: 1,
-              },
-              saved_payment_method_id: reusablePm.id,
-            }
-          : {}),
-      },
+      metadata: chargeMetadata,
     };
 
     const payment = await this.prisma.subscription_payments.create({
@@ -747,9 +988,7 @@ export class SubscriptionPaymentService {
           idempotency_key: idempotencyKey,
           reference,
           attempt: attemptCounter,
-          ...(reusablePm
-            ? { saved_payment_method_id: reusablePm.id }
-            : {}),
+          ...(reusablePm ? { saved_payment_method_id: reusablePm.id } : {}),
         } as unknown as Prisma.InputJsonValue,
       },
     });
@@ -773,6 +1012,27 @@ export class SubscriptionPaymentService {
           result.transactionId,
           result.gatewayResponse,
         );
+      }
+
+      // Wompi Phase 6 / Tactical Gap #4 — Issuer-revoked payment_source.
+      // The processor surfaces `errorCode='PAYMENT_SOURCE_REVOKED'` for both
+      // PAYMENT_SOURCE_REVOKED and INVALID_PAYMENT_SOURCE; the SaaS layer
+      // also accepts the raw INVALID_PAYMENT_SOURCE shape defensively. This
+      // is NOT a card-holder failure — bumping consecutive_failures would
+      // incorrectly trigger dunning. Mark PM revoked, attempt failover.
+      if (
+        reusablePm &&
+        (result.errorCode === 'PAYMENT_SOURCE_REVOKED' ||
+          result.errorCode === 'INVALID_PAYMENT_SOURCE')
+      ) {
+        return this.handleRevokedPaymentSource({
+          payment,
+          invoice,
+          invoiceId,
+          revokedPm: reusablePm,
+          errorCode: result.errorCode,
+          failureMessage: result.message ?? 'Payment source revoked',
+        });
       }
 
       // G11 — Track consecutive failures on the saved payment method.
@@ -803,6 +1063,208 @@ export class SubscriptionPaymentService {
   }
 
   /**
+   * Wompi Phase 6 / Tactical Gap #4 — Handle a charge attempt that was
+   * rejected because the issuer revoked the stored `payment_source` (Wompi
+   * `INVALID_PAYMENT_SOURCE` / `PAYMENT_SOURCE_REVOKED`).
+   *
+   * Policy:
+   *   1. Mark the revoked PM as invalid with `consecutive_failures=0` and
+   *      `replaced_at=now`. Counter is NOT bumped — this is an issuer event,
+   *      not a card-holder dunning trigger.
+   *      Note: enum has no `revoked` value; we use `invalid` and tag the
+   *      semantic via `subscription_events.payload.reason='payment_source_revoked'`.
+   *   2. Emit a `payment_method_revoked` audit event (subscription_events).
+   *   3. Failover — if another active PM with `provider_payment_source_id`
+   *      exists for the same subscription, promote it to default and retry
+   *      the charge ONCE inline. If that also fails, leave the invoice in
+   *      pending and let the reconciliation cron retry on the next dunning
+   *      cycle.
+   *   4. If no fallback PM, mark the payment as failed and return — the
+   *      cron / customer flow will pick it up.
+   */
+  private async handleRevokedPaymentSource(input: {
+    payment: subscription_payments;
+    invoice: any;
+    invoiceId: number;
+    revokedPm: { id: number; provider_payment_source_id: string | null };
+    errorCode: string;
+    failureMessage: string;
+  }): Promise<subscription_payments> {
+    const { payment, invoice, invoiceId, revokedPm, errorCode, failureMessage } =
+      input;
+    const subscriptionId = invoice.store_subscription_id;
+    const storeId = invoice.store_id;
+
+    this.logger.warn(
+      `WOMPI_PM_REVOKED subscriptionId=${subscriptionId} storeId=${storeId} pmId=${revokedPm.id} errorCode=${errorCode}`,
+    );
+
+    // 1+2. Atomic invalidate + audit event. We deliberately do NOT call
+    // bumpPaymentMethodFailure here — that path increments the counter.
+    let fallbackPmId: number | null = null;
+    try {
+      await this.prisma.$transaction(async (tx: any) => {
+        await tx.subscription_payment_methods.update({
+          where: { id: revokedPm.id },
+          data: {
+            // Enum has no `revoked` value (active|invalid|removed|replaced);
+            // use `invalid` and rely on the event payload below to tag the
+            // semantic as "revoked by issuer" for ops/dunning consumers.
+            state: subscription_payment_method_state_enum.invalid,
+            consecutive_failures: 0,
+            is_default: false,
+            replaced_at: new Date(),
+            updated_at: new Date(),
+          },
+        });
+
+        // Promote a sibling active PM with a payment_source_id (failover
+        // requires the COF/MIT flow to work end-to-end without prompting
+        // the user). Prefer payment_source-enabled candidates.
+        const fallback = await tx.subscription_payment_methods.findFirst({
+          where: {
+            store_subscription_id: subscriptionId,
+            state: subscription_payment_method_state_enum.active,
+            id: { not: revokedPm.id },
+            provider_payment_source_id: { not: null },
+          },
+          orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
+        });
+        if (fallback) {
+          await tx.subscription_payment_methods.updateMany({
+            where: {
+              store_id: fallback.store_id,
+              is_default: true,
+              state: subscription_payment_method_state_enum.active,
+            },
+            data: { is_default: false, updated_at: new Date() },
+          });
+          await tx.subscription_payment_methods.update({
+            where: { id: fallback.id },
+            data: { is_default: true, updated_at: new Date() },
+          });
+          fallbackPmId = fallback.id;
+        }
+
+        await tx.subscription_events.create({
+          data: {
+            store_subscription_id: subscriptionId,
+            type: 'payment_method_revoked',
+            payload: {
+              reason: 'payment_source_revoked',
+              payment_method_id: revokedPm.id,
+              error_code: errorCode,
+              fallback_promoted_id: fallbackPmId,
+            } as Prisma.InputJsonValue,
+            triggered_by_job: 'subscription-payment-service',
+          },
+        });
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `handleRevokedPaymentSource: failed to invalidate pm=${revokedPm.id}: ${e?.message ?? e}`,
+      );
+    }
+
+    // Best-effort domain event (banner / cache bust).
+    try {
+      this.eventEmitter.emit('payment_method.revoked', {
+        subscriptionId,
+        storeId,
+        paymentMethodId: revokedPm.id,
+        errorCode,
+        fallbackPromotedId: fallbackPmId,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `payment_method.revoked emit failed pm=${revokedPm.id}: ${e?.message ?? e}`,
+      );
+    }
+
+    // 3. Inline single-shot failover when a usable fallback is available.
+    if (fallbackPmId) {
+      const fallbackPm = await this.prisma.subscription_payment_methods.findUnique({
+        where: { id: fallbackPmId },
+      });
+      if (fallbackPm?.provider_payment_source_id) {
+        this.logger.log(
+          `WOMPI_CHARGE_PATH path=recurrent_failover subscriptionId=${subscriptionId} invoiceId=${invoiceId} pmId=${fallbackPmId}`,
+        );
+
+        const wompiConfig = await this.platformGw.getActiveCredentials('wompi');
+        if (wompiConfig) {
+          const retryAttempt =
+            (await this.prisma.subscription_payments.count({
+              where: { invoice_id: invoiceId },
+            })) + 1;
+          const retryPaymentData: PaymentData = {
+            orderId: invoiceId,
+            amount: new Prisma.Decimal(invoice.total).toNumber(),
+            currency: invoice.currency,
+            storeId,
+            idempotencyKey: `sub_inv_${invoiceId}_att_${retryAttempt}_failover`,
+            metadata: {
+              subscription_payment: true,
+              subscriptionId,
+              invoiceId,
+              invoice_number: invoice.invoice_number,
+              reference: `vendix_saas_${subscriptionId}_${invoiceId}_${Date.now()}_failover`,
+              wompiConfig: this.toProcessorWompiConfig(wompiConfig),
+              payment_source_id: fallbackPm.provider_payment_source_id,
+              customerEmail: `saas-${storeId}@vendix.app`,
+              saved_payment_method_id: fallbackPm.id,
+              failover_from_pm_id: revokedPm.id,
+            },
+          };
+
+          try {
+            const retryResult =
+              await this.wompiProcessor.processPayment(retryPaymentData);
+            if (retryResult.success) {
+              await this.resetPaymentMethodFailures(fallbackPm.id);
+              return this.handleChargeSuccess(
+                payment.id,
+                invoiceId,
+                invoice,
+                retryResult.transactionId,
+                retryResult.gatewayResponse,
+              );
+            }
+            // Retry also failed — log and fall through to handleChargeFailure
+            // (no second retry to keep the flow bounded; cron will pick up).
+            this.logger.warn(
+              `WOMPI_FAILOVER_FAILED subscriptionId=${subscriptionId} invoiceId=${invoiceId} fallbackPmId=${fallbackPmId} message=${retryResult.message ?? 'unknown'}`,
+            );
+          } catch (e: any) {
+            this.logger.warn(
+              `WOMPI_FAILOVER_THREW subscriptionId=${subscriptionId} invoiceId=${invoiceId} fallbackPmId=${fallbackPmId} error=${e?.message ?? e}`,
+            );
+          }
+        }
+      }
+    }
+
+    // 4. No (working) fallback — mark payment failed and let the cron retry.
+    return this.handleChargeFailure(payment.id, invoiceId, failureMessage);
+  }
+
+  /**
+   * Wompi Phase 7 — Returns whether legacy inline-token charges are still
+   * allowed for PMs without `provider_payment_source_id`.
+   *
+   * Delegates to {@link isLegacyInlineTokenAllowed} (reads
+   * `WOMPI_RECURRENT_ENFORCE`). Default is log-only (`true`); flipping the
+   * env flag to `'true'` switches to enforce mode and legacy PMs are rejected
+   * with `PAYMENT_METHOD_NOT_MIGRATED`.
+   *
+   * Exposed as a class method (not a constant) so tests can stub it via
+   * `jest.spyOn(service as any, 'legacyInlineTokenAllowed')`.
+   */
+  private legacyInlineTokenAllowed(): boolean {
+    return isLegacyInlineTokenAllowed();
+  }
+
+  /**
    * G11 / S3.5 — Returns the active default payment method for a subscription
    * if it is usable for an automatic renewal charge:
    *   - state = 'active'
@@ -811,12 +1273,15 @@ export class SubscriptionPaymentService {
    *
    * Returns null if no eligible PM is found; callers fall back to the
    * Wompi widget flow.
+   *
+   * Wompi Phase 6 — also returns `provider_payment_source_id` (when present)
+   * so chargeInvoice can route to the COF / `recurrent: true` branch instead
+   * of the legacy inline-token path.
    */
-  private async resolveReusablePaymentMethod(
-    subscriptionId: number,
-  ): Promise<{
+  private async resolveReusablePaymentMethod(subscriptionId: number): Promise<{
     id: number;
     provider_token: string;
+    provider_payment_source_id: string | null;
   } | null> {
     const pm = await this.prisma.subscription_payment_methods.findFirst({
       where: {
@@ -847,7 +1312,11 @@ export class SubscriptionPaymentService {
     // S3.5 — Consecutive failures guard (real column).
     if ((pm.consecutive_failures ?? 0) >= MAX_CONSECUTIVE_FAILURES) return null;
 
-    return { id: pm.id, provider_token: pm.provider_token };
+    return {
+      id: pm.id,
+      provider_token: pm.provider_token,
+      provider_payment_source_id: pm.provider_payment_source_id ?? null,
+    };
   }
 
   /**
@@ -1033,9 +1502,7 @@ export class SubscriptionPaymentService {
    * webhook flows where the payment row was created earlier (charge() or
    * prepareWidgetCharge) and the PM linkage lives in `metadata`.
    */
-  private extractSavedPaymentMethodId(
-    metadata: unknown,
-  ): number | null {
+  private extractSavedPaymentMethodId(metadata: unknown): number | null {
     if (!metadata || typeof metadata !== 'object') return null;
     const meta = metadata as Record<string, unknown>;
     const id = meta.saved_payment_method_id ?? meta.payment_method_id;
@@ -1144,7 +1611,9 @@ export class SubscriptionPaymentService {
     // If an external transaction is provided (e.g. from the atomic webhook
     // dedup flow), execute writes directly inside it — no nested $transaction.
     // Otherwise open a new transaction (charge() / handleZeroInvoice paths).
-    const executeWrites = async (tx: Prisma.TransactionClient): Promise<subscription_payments> => {
+    const executeWrites = async (
+      tx: Prisma.TransactionClient,
+    ): Promise<subscription_payments> => {
       const now = new Date();
 
       const updatedPayment = await tx.subscription_payments.update({
@@ -1201,118 +1670,143 @@ export class SubscriptionPaymentService {
       // promotion here, INSIDE the same tx that flips payment->succeeded
       // and invoice->paid, guarantees atomicity.
       //
+      // ADR-2: When invoice.to_plan_id is set, this is a "pending-change flow"
+      // (upgrade, initial, resubscribe, trial_conversion, renewal with plan
+      // change). confirmPendingChange() handles plan promotion, period reset,
+      // state transition and cache invalidation atomically.
+      //
+      // When invoice.to_plan_id is null, this is the legacy flow (renewal of
+      // existing plan, grace reactivation). The original promotion logic runs.
+      //
       // Errors are logged and swallowed (not propagated): the payment is
       // already confirmed by the gateway; we must not roll back to "pending"
       // because of a state-transition issue. The reconciliation cron picks
       // up any drift left by this best-effort path.
       if (invoice.store_id) {
         try {
-          const subRow = await tx.store_subscriptions.findUnique({
-            where: { id: invoice.store_subscription_id },
-            select: {
-              state: true,
-              current_period_end: true,
-              plan: { select: { billing_cycle: true } },
-            },
-          });
-          const currentState = subRow?.state as string | undefined;
-          if (
-            currentState &&
-            PROMOTABLE_ON_PAYMENT_SUCCESS.includes(
-              currentState as (typeof PROMOTABLE_ON_PAYMENT_SUCCESS)[number],
-            )
-          ) {
-            // RNC-22 — Reactivation from grace/suspended discounts the days
-            // already consumed in grace. Only applies when the previous
-            // billing period actually ended before the payment landed
-            // (current_period_end < paid_at). Pure new-cycle states
-            // (pending_payment, draft, expired, no_plan, cancelled) get a
-            // clean cycle per RNC-21 and never enter this branch.
-            const isGraceReactivation =
-              currentState === 'grace_soft' ||
-              currentState === 'grace_hard' ||
-              currentState === 'suspended';
-
-            if (
-              isGraceReactivation &&
-              subRow?.current_period_end &&
-              subRow.plan?.billing_cycle
-            ) {
-              const previousPeriodEnd = new Date(subRow.current_period_end);
-              if (previousPeriodEnd.getTime() < now.getTime()) {
-                const cycleMs = this.billingCycleMs(subRow.plan.billing_cycle);
-                const cycleDays = Math.max(1, Math.round(cycleMs / DAY_MS));
-                // Days fully consumed in grace, clamped to [0, cycleDays].
-                const daysInGraceRaw = Math.floor(
-                  (now.getTime() - previousPeriodEnd.getTime()) / DAY_MS,
-                );
-                const daysInGrace = Math.max(
-                  0,
-                  Math.min(cycleDays, daysInGraceRaw),
-                );
-
-                // New period: paid_at + (cycle - days_in_grace).
-                const effectiveDaysGranted = cycleDays - daysInGrace;
-                const newPeriodEnd = new Date(
-                  now.getTime() + effectiveDaysGranted * DAY_MS,
-                );
-
-                await tx.store_subscriptions.update({
-                  where: { id: invoice.store_subscription_id },
-                  data: {
-                    current_period_start: now,
-                    current_period_end: newPeriodEnd,
-                    next_billing_at: newPeriodEnd,
-                    grace_soft_until: null,
-                    grace_hard_until: null,
-                    suspend_at: null,
-                    updated_at: now,
-                  },
-                });
-
-                await tx.subscription_events.create({
-                  data: {
-                    store_subscription_id: invoice.store_subscription_id,
-                    type: 'state_transition',
-                    payload: {
-                      reason: 'reactivation_with_grace_discount',
-                      previous_state: currentState,
-                      payment_id: paymentId,
-                      invoice_id: invoiceId,
-                      days_in_grace: daysInGrace,
-                      cycle_days: cycleDays,
-                      original_period_end: previousPeriodEnd.toISOString(),
-                      new_period_end: newPeriodEnd.toISOString(),
-                      paid_at: now.toISOString(),
-                    } as Prisma.InputJsonValue,
-                    triggered_by_job: 'subscription-payment-service',
-                  },
-                });
-
-                this.logger.log(
-                  `RNC-22 grace-discount applied sub=${invoice.store_subscription_id} ` +
-                    `previous_state=${currentState} days_in_grace=${daysInGrace} ` +
-                    `original_period_end=${previousPeriodEnd.toISOString()} ` +
-                    `new_period_end=${newPeriodEnd.toISOString()}`,
-                );
-              }
-            }
-
-            await this.stateService.transitionInTx(
-              tx,
-              invoice.store_id,
-              'active',
+          if (invoice.to_plan_id != null) {
+            // ── New pending-change flow (ADR-2) ──────────────────────────
+            await this.confirmPendingChange(
               {
-                reason: `payment_${paymentId}_approved`,
-                triggeredByJob: 'webhook',
-                payload: {
-                  invoice_id: invoiceId,
-                  payment_id: paymentId,
-                  previous_state: currentState,
-                  source: 'handle_charge_success_sync',
-                },
+                id: invoiceId,
+                store_subscription_id: invoice.store_subscription_id,
+                to_plan_id: invoice.to_plan_id,
+                from_plan_id: invoice.from_plan_id ?? null,
+                change_kind: invoice.change_kind ?? null,
               },
+              tx,
             );
+          } else {
+            // ── Legacy flow (renewal / grace reactivation) ───────────────
+            const subRow = await tx.store_subscriptions.findUnique({
+              where: { id: invoice.store_subscription_id },
+              select: {
+                state: true,
+                current_period_end: true,
+                plan: { select: { billing_cycle: true } },
+              },
+            });
+            const currentState = subRow?.state as string | undefined;
+            if (
+              currentState &&
+              PROMOTABLE_ON_PAYMENT_SUCCESS.includes(
+                currentState as (typeof PROMOTABLE_ON_PAYMENT_SUCCESS)[number],
+              )
+            ) {
+              // RNC-22 — Reactivation from grace/suspended discounts the days
+              // already consumed in grace. Only applies when the previous
+              // billing period actually ended before the payment landed
+              // (current_period_end < paid_at). Pure new-cycle states
+              // (pending_payment, draft, expired, no_plan, cancelled) get a
+              // clean cycle per RNC-21 and never enter this branch.
+              const isGraceReactivation =
+                currentState === 'grace_soft' ||
+                currentState === 'grace_hard' ||
+                currentState === 'suspended';
+
+              if (
+                isGraceReactivation &&
+                subRow?.current_period_end &&
+                subRow.plan?.billing_cycle
+              ) {
+                const previousPeriodEnd = new Date(subRow.current_period_end);
+                if (previousPeriodEnd.getTime() < now.getTime()) {
+                  const cycleMs = this.billingCycleMs(
+                    subRow.plan.billing_cycle,
+                  );
+                  const cycleDays = Math.max(1, Math.round(cycleMs / DAY_MS));
+                  // Days fully consumed in grace, clamped to [0, cycleDays].
+                  const daysInGraceRaw = Math.floor(
+                    (now.getTime() - previousPeriodEnd.getTime()) / DAY_MS,
+                  );
+                  const daysInGrace = Math.max(
+                    0,
+                    Math.min(cycleDays, daysInGraceRaw),
+                  );
+
+                  // New period: paid_at + (cycle - days_in_grace).
+                  const effectiveDaysGranted = cycleDays - daysInGrace;
+                  const newPeriodEnd = new Date(
+                    now.getTime() + effectiveDaysGranted * DAY_MS,
+                  );
+
+                  await tx.store_subscriptions.update({
+                    where: { id: invoice.store_subscription_id },
+                    data: {
+                      current_period_start: now,
+                      current_period_end: newPeriodEnd,
+                      next_billing_at: newPeriodEnd,
+                      grace_soft_until: null,
+                      grace_hard_until: null,
+                      suspend_at: null,
+                      updated_at: now,
+                    },
+                  });
+
+                  await tx.subscription_events.create({
+                    data: {
+                      store_subscription_id: invoice.store_subscription_id,
+                      type: 'state_transition',
+                      payload: {
+                        reason: 'reactivation_with_grace_discount',
+                        previous_state: currentState,
+                        payment_id: paymentId,
+                        invoice_id: invoiceId,
+                        days_in_grace: daysInGrace,
+                        cycle_days: cycleDays,
+                        original_period_end: previousPeriodEnd.toISOString(),
+                        new_period_end: newPeriodEnd.toISOString(),
+                        paid_at: now.toISOString(),
+                      } as Prisma.InputJsonValue,
+                      triggered_by_job: 'subscription-payment-service',
+                    },
+                  });
+
+                  this.logger.log(
+                    `RNC-22 grace-discount applied sub=${invoice.store_subscription_id} ` +
+                      `previous_state=${currentState} days_in_grace=${daysInGrace} ` +
+                      `original_period_end=${previousPeriodEnd.toISOString()} ` +
+                      `new_period_end=${newPeriodEnd.toISOString()}`,
+                  );
+                }
+              }
+
+              await this.stateService.transitionInTx(
+                tx,
+                invoice.store_id,
+                'active',
+                {
+                  reason: `payment_${paymentId}_approved`,
+                  triggeredByJob: 'webhook',
+                  payload: {
+                    invoice_id: invoiceId,
+                    payment_id: paymentId,
+                    previous_state: currentState,
+                    source: 'handle_charge_success_sync',
+                  },
+                },
+              );
+            }
           }
         } catch (txStateErr: any) {
           // The payment is approved by the gateway; never propagate a
@@ -1472,36 +1966,46 @@ export class SubscriptionPaymentService {
     if (!storeId) return;
     if (!gatewayResponse || typeof gatewayResponse !== 'object') return;
 
+    // Wompi shape: `transaction.payment_method.type` (current API). The
+    // legacy `payment_method_type` top-level key is also accepted.
     const paymentMethodType = String(
-      gatewayResponse.payment_method_type ?? '',
+      gatewayResponse.payment_method?.type ??
+        gatewayResponse.payment_method_type ??
+        gatewayResponse.type ??
+        '',
     ).toUpperCase();
-    if (paymentMethodType !== 'CARD') {
-      // We only persist recurring CARD tokens. Wallets like NEQUI / PSE
-      // are one-shot per Wompi's contract — re-prompt the user each time.
+    // Empty type => assume CARD (best-effort: the gateway response is
+    // optional in some retry paths). Wallets like NEQUI / PSE are one-shot
+    // per Wompi's contract — re-prompt the user each time.
+    if (paymentMethodType && paymentMethodType !== 'CARD') {
       return;
     }
 
-    const paymentMethod = gatewayResponse.payment_method ?? {};
-    const extra = paymentMethod.extra ?? {};
-
-    // Recurring token: Wompi exposes it on the transaction body when the
-    // merchant has tokenization enabled. Different widget versions surface
-    // it on different fields — accept the most common shapes.
-    const providerToken: string | null =
-      gatewayResponse.payment_method_token ??
-      paymentMethod.token ??
-      paymentMethod.payment_method_token ??
+    // Wompi Phase 5 — extract `payment_source_id` (long-lived) instead of
+    // the short-lived recurring token. Wompi exposes it on the transaction
+    // body as `payment_source.id` when a card was saved server-side via
+    // `/payment_sources` (or as the top-level `payment_source_id` field on
+    // some webhook shapes).
+    const rawPsId =
+      gatewayResponse?.payment_source_id ??
+      gatewayResponse?.payment_source?.id ??
       null;
 
-    if (!providerToken) {
-      // No recurring token — nothing reusable to save. The user must
-      // re-enter the card next time. This is fine: the invoice is still
-      // paid, and we just don't get a saved PM. Logged so ops can see it.
-      this.logger.debug(
-        `auto-register PM skipped sub=${subscriptionId} invoice paid but no provider_token in Wompi payload`,
+    if (rawPsId == null) {
+      // Legacy fallback path — happens when the SaaS charge ran via the
+      // inline-token flow (no payment_source created server-side yet).
+      // Should be 0 occurrences after Fase 7 enforce. Log so ops can see it.
+      this.logger.warn(
+        `auto-register PM: missing payment_source_id sub=${subscriptionId} payment=${paymentId} ` +
+          `(legacy fallback path; should be 0 occurrences after Fase 7 enforce)`,
       );
       return;
     }
+
+    const paymentSourceId = String(rawPsId);
+
+    const paymentMethod = gatewayResponse.payment_method ?? {};
+    const extra = paymentMethod.extra ?? {};
 
     const last4: string | null =
       typeof extra.last_four === 'string'
@@ -1510,18 +2014,10 @@ export class SubscriptionPaymentService {
           ? paymentMethod.last_four
           : null;
 
-    if (!last4) {
-      this.logger.debug(
-        `auto-register PM skipped sub=${subscriptionId} no last_four in Wompi payload`,
-      );
-      return;
-    }
-
-    const brand: string | null = (extra.brand ?? paymentMethod.brand ?? null) as
-      | string
-      | null;
-    const expMonthRaw =
-      extra.exp_month ?? paymentMethod.exp_month ?? null;
+    const brand: string | null = (extra.brand ??
+      paymentMethod.brand ??
+      null) as string | null;
+    const expMonthRaw = extra.exp_month ?? paymentMethod.exp_month ?? null;
     const expYearRaw = extra.exp_year ?? paymentMethod.exp_year ?? null;
     const expiry_month =
       expMonthRaw !== null && expMonthRaw !== undefined
@@ -1531,17 +2027,20 @@ export class SubscriptionPaymentService {
       expYearRaw !== null && expYearRaw !== undefined
         ? String(expYearRaw).slice(0, 4)
         : null;
-    const cardHolder: string | null =
-      (extra.name ?? extra.card_holder ?? paymentMethod.name ?? null) as
-        | string
-        | null;
+    const cardHolder: string | null = (extra.name ??
+      extra.card_holder ??
+      paymentMethod.name ??
+      null) as string | null;
 
-    // Idempotency — if the same recurring token is already saved for this
-    // store, treat the second webhook as a no-op (refresh updated_at only).
+    // Idempotency — keyed by (store_id, provider_payment_source_id). Webhook
+    // re-delivery (or a widget callback racing with the webhook) hits this
+    // branch and is a no-op. The advisory lock used by the manual tokenize
+    // path is not needed here: the call site is already inside a
+    // subscription_payments transaction.
     const existing = await tx.subscription_payment_methods.findFirst({
       where: {
         store_id: storeId,
-        provider_token: providerToken,
+        provider_payment_source_id: paymentSourceId,
         state: subscription_payment_method_state_enum.active,
       },
     });
@@ -1554,7 +2053,7 @@ export class SubscriptionPaymentService {
         data: { updated_at: nowDate },
       });
       this.logger.log(
-        `auto-register PM dedup sub=${subscriptionId} reused pm=${existing.id} last4=${last4}`,
+        `auto-register PM dedup sub=${subscriptionId} reused pm=${existing.id} psid=${paymentSourceId}`,
       );
       return;
     }
@@ -1577,7 +2076,14 @@ export class SubscriptionPaymentService {
         store_subscription_id: subscriptionId,
         type: 'card',
         provider: 'wompi',
-        provider_token: providerToken,
+        // Legacy mirror — readers that still consult provider_token (eg.
+        // Fase 5 reusable-PM lookup before Fase 6 swaps to payment_source_id)
+        // keep working with the new shape.
+        provider_token: paymentSourceId,
+        provider_payment_source_id: paymentSourceId,
+        acceptance_token_used:
+          (gatewayResponse?.acceptance_token as string | undefined) ?? null,
+        cof_registered_at: nowDate,
         last4,
         brand,
         expiry_month,
@@ -1602,6 +2108,7 @@ export class SubscriptionPaymentService {
           reason: 'payment_method_auto_registered',
           payment_method_id: created.id,
           payment_id: paymentId,
+          payment_source_id: paymentSourceId,
           last_four: last4,
           brand,
         } as Prisma.InputJsonValue,
@@ -1610,7 +2117,7 @@ export class SubscriptionPaymentService {
     });
 
     this.logger.log(
-      `PAYMENT_METHOD_AUTO_REGISTERED sub=${subscriptionId} pm=${created.id} last4=${last4} brand=${brand ?? 'unknown'}`,
+      `PAYMENT_METHOD_AUTO_REGISTERED sub=${subscriptionId} pm=${created.id} psid=${paymentSourceId} last4=${last4 ?? 'n/a'} brand=${brand ?? 'unknown'}`,
     );
   }
 
@@ -1631,6 +2138,52 @@ export class SubscriptionPaymentService {
       },
     });
 
+    // ADR-2: If there's an active pending change on the subscription, revert it.
+    // This clears pending_* fields and transitions the sub back to the state
+    // it was in before the change was initiated (pending_revert_state).
+    try {
+      const subForRevert = await client.store_subscriptions.findFirst({
+        where: { pending_change_invoice_id: invoiceId },
+        select: {
+          id: true,
+          store_id: true,
+          state: true,
+          pending_revert_state: true,
+        },
+      });
+
+      if (
+        subForRevert &&
+        subForRevert.state === 'pending_payment' &&
+        subForRevert.pending_revert_state
+      ) {
+        await client.store_subscriptions.update({
+          where: { id: subForRevert.id },
+          data: {
+            pending_plan_id: null,
+            pending_change_invoice_id: null,
+            pending_change_kind: null,
+            pending_change_started_at: null,
+            pending_revert_state: null,
+            updated_at: new Date(),
+          },
+        });
+        await this.stateService.transitionInTx(
+          client as Prisma.TransactionClient,
+          subForRevert.store_id,
+          subForRevert.pending_revert_state as any,
+          {
+            reason: `payment_failed_invoice_${invoiceId}`,
+            payload: { invoice_id: invoiceId },
+          },
+        );
+      }
+    } catch (revertErr: any) {
+      this.logger.warn(
+        `ADR-2 pending-change revert failed on payment failure invoice=${invoiceId}: ${revertErr?.message ?? revertErr}`,
+      );
+    }
+
     // Emit AFTER the write (whether inside external tx or standalone).
     // When called with an external tx, the emit fires before tx commits —
     // this is safe because subscription.payment.failed is best-effort
@@ -1642,6 +2195,14 @@ export class SubscriptionPaymentService {
     });
 
     return updatedPayment;
+  }
+
+  /**
+   * ADR-2 helper — billing cycle duration in days.
+   * Mirrors SubscriptionProrationService.billingCycleDays().
+   */
+  private billingCycleDays(cycle: string): number {
+    return Math.ceil(this.billingCycleMs(cycle) / DAY_MS);
   }
 
   /**

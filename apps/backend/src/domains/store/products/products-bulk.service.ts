@@ -192,19 +192,13 @@ export class ProductsBulkService {
           if (key) {
             const raw =
               cellValue === undefined || cellValue === null ? '' : cellValue;
-            const val =
-              typeof raw === 'string' ? raw.trim() : raw;
+            const val = typeof raw === 'string' ? raw.trim() : raw;
 
-            if (
-              val === '' ||
-              val === null ||
-              val === undefined
-            ) {
+            if (val === '' || val === null || val === undefined) {
               return;
             }
 
-            const strVal =
-              typeof val === 'string' ? val : String(val);
+            const strVal = typeof val === 'string' ? val : String(val);
 
             if (
               strVal.toUpperCase() === 'NULL' ||
@@ -578,8 +572,7 @@ export class ProductsBulkService {
       ) {
         item.warnings.push({
           code: 'BOOKING_NO_MODALITY',
-          message:
-            'Si requiere reserva, se recomienda definir modalidad.',
+          message: 'Si requiere reserva, se recomienda definir modalidad.',
           field: 'service_modality',
         });
       }
@@ -616,8 +609,7 @@ export class ProductsBulkService {
       ) {
         item.warnings.push({
           code: 'BATCH_REQUIRES_INVENTORY',
-          message:
-            'Manejo de lotes requiere control de inventario activo.',
+          message: 'Manejo de lotes requiere control de inventario activo.',
           field: 'requires_batch_tracking',
         });
       }
@@ -628,8 +620,7 @@ export class ProductsBulkService {
           code: 'STOCK_FIELD_DEPRECATED',
           message:
             'El stock será ignorado en futuras versiones. Usa Inventario > POP > Carga masiva para ingresar mercancía con costo y respaldo contable.',
-          field:
-            product.stock_quantity > 0 ? 'stock_quantity' : 'cost_price',
+          field: product.stock_quantity > 0 ? 'stock_quantity' : 'cost_price',
         });
       }
 
@@ -673,7 +664,7 @@ export class ProductsBulkService {
       ];
 
       for (const field of FIELDS_TO_TRACK) {
-        const value = (product as any)[field];
+        const value = product[field];
         if (value === undefined) continue; // sparse: not provided → don't touch
         if (value === this.NULL_MARKER) {
           nulledFields.push(field);
@@ -1049,7 +1040,8 @@ export class ProductsBulkService {
           'Precio Venta': 250000,
           'Precio Compra': 100000,
           Margen: 150,
-          Descripción: 'Consultoría estratégica virtual por sesión de 90 minutos.',
+          Descripción:
+            'Consultoría estratégica virtual por sesión de 90 minutos.',
           Marca: '',
           Categorías: 'Servicios, Consultoría',
           'Tipo Precio': '',
@@ -1064,7 +1056,8 @@ export class ProductsBulkService {
           'Modo Reserva': 'libre',
           'Buffer (min)': 10,
           'Es Recurrente': 'no',
-          'Instrucciones Servicio': 'Conexión por Zoom 5 minutos antes de la sesión.',
+          'Instrucciones Servicio':
+            'Conexión por Zoom 5 minutos antes de la sesión.',
           'Tiempo Preparación (min)': 10,
           'Stock Mínimo': '',
           'Stock Máximo': '',
@@ -1198,7 +1191,8 @@ export class ProductsBulkService {
           'Modo Reserva': '',
           'Buffer (min)': 0,
           'Es Recurrente': 'sí',
-          'Instrucciones Servicio': 'Coordinar visita técnica con anticipación de 24 horas.',
+          'Instrucciones Servicio':
+            'Coordinar visita técnica con anticipación de 24 horas.',
           'Tiempo Preparación (min)': 30,
           'Stock Mínimo': '',
           'Stock Máximo': '',
@@ -1322,7 +1316,10 @@ export class ProductsBulkService {
       const productData = products[rowIndex];
       const rowNumber = rowIndex + 2; // header = fila 1
       try {
-        if ((productData.stock_quantity ?? 0) > 0 || (productData.cost_price ?? 0) > 0) {
+        if (
+          (productData.stock_quantity ?? 0) > 0 ||
+          (productData.cost_price ?? 0) > 0
+        ) {
           this.logger.warn('PRODUCT_BULK_DEPRECATED_STOCK_FIELD', {
             storeId,
             sku: productData.sku,
@@ -1684,11 +1681,19 @@ export class ProductsBulkService {
       const v = product.service_pricing_type.toLowerCase().trim();
       if (v === 'por hora' || v === 'per_hour') {
         product.service_pricing_type = 'per_hour';
-      } else if (v === 'por sesión' || v === 'por sesion' || v === 'per_session') {
+      } else if (
+        v === 'por sesión' ||
+        v === 'por sesion' ||
+        v === 'per_session'
+      ) {
         product.service_pricing_type = 'per_session';
       } else if (v === 'paquete' || v === 'package') {
         product.service_pricing_type = 'package';
-      } else if (v === 'suscripción' || v === 'suscripcion' || v === 'subscription') {
+      } else if (
+        v === 'suscripción' ||
+        v === 'suscripcion' ||
+        v === 'subscription'
+      ) {
         product.service_pricing_type = 'subscription';
       }
     }
@@ -1922,8 +1927,7 @@ export class ProductsBulkService {
     product: BulkProductItemDto,
     storeId: number,
   ): any {
-    const resolveValue = (val: any) =>
-      val === this.NULL_MARKER ? null : val;
+    const resolveValue = (val: any) => (val === this.NULL_MARKER ? null : val);
 
     const dto: any = {
       name: product.name,
@@ -1939,9 +1943,7 @@ export class ProductsBulkService {
             ? null
             : undefined,
       category_ids:
-        product.category_ids === this.NULL_MARKER
-          ? []
-          : product.category_ids,
+        product.category_ids === this.NULL_MARKER ? [] : product.category_ids,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       weight:
@@ -1988,8 +1990,7 @@ export class ProductsBulkService {
   }
 
   private mapToUpdateProductDto(product: BulkProductItemDto): any {
-    const resolveValue = (val: any) =>
-      val === this.NULL_MARKER ? null : val;
+    const resolveValue = (val: any) => (val === this.NULL_MARKER ? null : val);
 
     const dto: any = {};
 
@@ -2044,7 +2045,9 @@ export class ProductsBulkService {
     }
 
     if (product.available_for_ecommerce !== undefined) {
-      dto.available_for_ecommerce = resolveValue(product.available_for_ecommerce);
+      dto.available_for_ecommerce = resolveValue(
+        product.available_for_ecommerce,
+      );
     }
 
     if (product.product_type !== undefined) {

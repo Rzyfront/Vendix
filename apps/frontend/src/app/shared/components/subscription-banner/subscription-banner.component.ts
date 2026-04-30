@@ -155,47 +155,120 @@ export class SubscriptionBannerComponent implements OnInit {
   });
 
   readonly level = computed<BannerLevel>(() => {
-    // G11 — surface PM warnings ONLY when the subscription itself is not
-    // already in a `warning`/`danger`/`terminal` state — those messages take
-    // priority because the user already sees a CTA to pay/regularize/reactivate.
-    const subLevel = this.facade.bannerLevel();
-    if (
-      subLevel === 'warning' ||
-      subLevel === 'danger' ||
-      subLevel === 'terminal'
-    ) {
-      return subLevel;
+    // The banner only renders when `visible()` matches a known UI-state kind
+    // (expiring_soon / grace_*). Drive severity from the SAME selector so the
+    // CSS modifier always matches a defined palette — otherwise we render
+    // `sub-banner--none`, which has no background/border/color and produces a
+    // ghost banner with only icons visible.
+    const ui = this.facade.subscriptionUiState();
+    if (ui.kind === 'grace_hard') return 'danger';
+    if (ui.kind === 'grace_soft') return 'warning';
+    if (ui.kind === 'expiring_soon') {
+      return ui.daysUntilRenewal <= 1 ? 'danger' : 'warning';
     }
+    // PM warnings only matter while subscription is healthy. They reach the
+    // banner only if `visible()` is later expanded to allow them — kept here
+    // for forward-compat.
     const pm = this.pmWarning();
     if (pm === 'invalid') return 'danger';
     if (pm === 'expiring') return 'warning';
-    return subLevel;
+    return 'none';
   });
 
-  readonly visible = computed(
-    () =>
-      // S1.2 — Banner is STORE-only. Hide it for ORG_ADMIN / SUPER_ADMIN
-      // / logout (currentStoreId === null) regardless of any cached state.
-      this.currentStoreId() !== null &&
-      !this.dismissed() &&
-      this.level() !== 'none',
-  );
+  readonly visible = computed(() => {
+    // S1.2 — Banner is STORE-only. Hide it for ORG_ADMIN / SUPER_ADMIN
+    // / logout (currentStoreId === null) regardless of any cached state.
+    if (this.currentStoreId() === null) return false;
+    if (this.dismissed()) return false;
+    // RNC-PaidPlan — Top alert is now driven by the unified subscription UI
+    // state (ADR-4). Only `expiring_soon` and `grace_*` surface here; pending
+    // changes and terminal states are absorbed by the local subscription
+    // module banners so the user never sees two simultaneous messages about
+    // the same concern.
+    const ui = this.facade.subscriptionUiState();
+    return (
+      ui.kind === 'expiring_soon' ||
+      ui.kind === 'grace_soft' ||
+      ui.kind === 'grace_hard'
+    );
+  });
 
   readonly copy = computed<BannerCopy>(() => {
-    const subLevel = this.facade.bannerLevel();
-    const pm = this.pmWarning();
+    // Drive copy from the unified UI-state selector (same source as
+    // `visible()`/`level()`) so kind ↔ message ↔ palette stay coherent.
+    const ui = this.facade.subscriptionUiState();
+    const scheduledCancelAt = this.facade.scheduledCancelAt();
+    const status = this.facade.status();
+    const isScheduledCancel =
+      !!scheduledCancelAt &&
+      (status === 'active' || status === 'trialing' || status === 'trial');
 
-    // G11 — PM banner copy wins when subscription is healthy.
-    if ((subLevel === 'none' || subLevel === 'info') && pm) {
-      if (pm === 'invalid') {
+    if (ui.kind === 'expiring_soon') {
+      // Scheduled cancel wins over the renewal-soon copy: explicit user action
+      // takes priority and needs a concrete date + how to revert.
+      if (isScheduledCancel && scheduledCancelAt) {
+        const cancelDate = new Date(scheduledCancelAt).toLocaleDateString(
+          'es-CO',
+          { day: 'numeric', month: 'short', year: 'numeric' },
+        );
         return {
-          title: 'Tu tarjeta no es válida',
-          detail: 'Actualízala para evitar la suspensión de tu suscripción.',
-          ctaText: 'Cambiar tarjeta',
-          iconName: 'alert-octagon',
+          title: 'Tu suscripción se cancelará el ' + cancelDate,
+          detail:
+            'Tu plan sigue activo hasta esa fecha. Puedes reactivar la renovación cuando quieras.',
+          ctaText: 'Gestionar',
+          iconName: 'alert-triangle',
         };
       }
-      // expiring
+      const d = ui.daysUntilRenewal;
+      return {
+        title:
+          d <= 1
+            ? 'Tu suscripción se renueva mañana'
+            : 'Tu suscripción se renueva pronto',
+        detail:
+          d <= 1
+            ? 'Asegúrate de tener saldo o un método de pago válido para evitar interrupciones.'
+            : `Te quedan ${d} días. Verifica tu método de pago para evitar interrupciones.`,
+        ctaText: 'Gestionar',
+        iconName: 'alert-triangle',
+      };
+    }
+
+    if (ui.kind === 'grace_soft') {
+      return {
+        title: 'Tu suscripción está en período de gracia',
+        detail:
+          ui.daysRemaining > 0
+            ? `Te quedan ${ui.daysRemaining} días para regularizar el pago.`
+            : 'Regulariza el pago para evitar la suspensión.',
+        ctaText: 'Pagar ahora',
+        iconName: 'alert-triangle',
+      };
+    }
+
+    if (ui.kind === 'grace_hard') {
+      return {
+        title: 'Tu suscripción entró en gracia crítica',
+        detail:
+          ui.daysRemaining > 0
+            ? `Te quedan ${ui.daysRemaining} días antes de la suspensión total.`
+            : 'Regulariza el pago de inmediato para recuperar el acceso.',
+        ctaText: 'Regularizar',
+        iconName: 'alert-octagon',
+      };
+    }
+
+    // PM warning fallback (only reachable if `visible()` is widened later).
+    const pm = this.pmWarning();
+    if (pm === 'invalid') {
+      return {
+        title: 'Tu tarjeta no es válida',
+        detail: 'Actualízala para evitar la suspensión de tu suscripción.',
+        ctaText: 'Cambiar tarjeta',
+        iconName: 'alert-octagon',
+      };
+    }
+    if (pm === 'expiring') {
       return {
         title: 'Tu tarjeta vence pronto',
         detail: 'Cámbiala para evitar interrupciones en el cobro.',
@@ -204,71 +277,7 @@ export class SubscriptionBannerComponent implements OnInit {
       };
     }
 
-    const status = this.facade.status();
-    const days = this.facade.daysUntilDue();
-    const scheduledCancelAt = this.facade.scheduledCancelAt();
-    const isScheduledCancel =
-      !!scheduledCancelAt &&
-      (status === 'active' || status === 'trialing' || status === 'trial');
-
-    switch (this.level()) {
-      case 'info':
-        return {
-          title: 'Tu suscripción está activa',
-          detail: days > 0 ? `Próxima renovación en ${days} días.` : '',
-          ctaText: 'Gestionar',
-          iconName: 'shield-check',
-        };
-      case 'warning':
-        // Scheduled cancel takes priority over the trial-ending-soon copy
-        // because it represents an explicit user action — they need to know
-        // the date and how to revert if they change their mind.
-        if (isScheduledCancel && scheduledCancelAt) {
-          const cancelDate = new Date(scheduledCancelAt).toLocaleDateString(
-            'es-CO',
-            { day: 'numeric', month: 'short', year: 'numeric' },
-          );
-          return {
-            title: 'Tu suscripción se cancelará el ' + cancelDate,
-            detail:
-              'Tu plan sigue activo hasta esa fecha. Puedes reactivar la renovación cuando quieras.',
-            ctaText: 'Gestionar',
-            iconName: 'alert-triangle',
-          };
-        }
-        return {
-          title: status === 'grace_hard'
-            ? 'Tu suscripción entró en período de gracia'
-            : 'Tu suscripción vence pronto',
-          detail: days > 0
-            ? `Te quedan ${days} días. Renueva para evitar interrupciones.`
-            : 'Renueva ahora para evitar interrupciones en tu servicio.',
-          ctaText: 'Pagar ahora',
-          iconName: 'alert-triangle',
-        };
-      case 'danger':
-        return {
-          title: status === 'grace_hard' || status === 'grace_soft'
-            ? 'Tu suscripción está en período de gracia'
-            : 'Tu suscripción está vencida',
-          detail: 'Regulariza el pago para recuperar el acceso completo.',
-          ctaText: 'Regularizar',
-          iconName: 'alert-octagon',
-        };
-      case 'terminal':
-        return {
-          title:
-            status === 'cancelled'
-              ? 'Tu suscripción está cancelada'
-              : 'Tu suscripción ha expirado',
-          detail:
-            'Reactívala eligiendo un plan para recuperar el acceso completo.',
-          ctaText: 'Elegir plan',
-          iconName: 'alert-octagon',
-        };
-      default:
-        return { title: '', detail: '', ctaText: '', iconName: 'info' };
-    }
+    return { title: '', detail: '', ctaText: '', iconName: 'info' };
   });
 
   readonly ctaLink = computed(() => {

@@ -27,8 +27,16 @@ import {
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { WompiCardWidgetComponent } from '../wompi-card-widget/wompi-card-widget.component';
 
+/**
+ * Fase 4 (Wompi recurrent migration) — payload emitted by
+ * `app-wompi-card-widget` after a successful card tokenization. Mirrors
+ * `WompiTokenizeResult` but kept as a local alias to avoid the modal
+ * needing to know about the widget's exported types.
+ */
 interface TokenizedCard {
-  provider_token: string;
+  card_token: string;
+  acceptance_token: string;
+  personal_auth_token: string;
   type: string;
   last4?: string;
   brand?: string;
@@ -305,7 +313,9 @@ export class PaymentMethodEditModalComponent {
 
     this.mutating.set(true);
     const payload = {
-      provider_token: event.provider_token,
+      card_token: event.card_token,
+      acceptance_token: event.acceptance_token,
+      personal_auth_token: event.personal_auth_token,
       type: event.type,
       last4: event.last4,
       brand: event.brand,

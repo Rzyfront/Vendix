@@ -73,8 +73,16 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
                   <div class="footer-info-header">
                     <app-icon name="tag" [size]="9"></app-icon>
                     <span class="footer-info-label">Plan</span>
+                    @if (hasPendingChange()) {
+                      <span class="pending-plan-badge" title="Cambio de plan pendiente de pago">
+                        <app-icon name="clock" [size]="9"></app-icon>
+                      </span>
+                    }
                   </div>
                   <span class="footer-info-value">{{ planDisplayName() }}</span>
+                  @if (hasPendingChange()) {
+                    <span class="pending-plan-label">Cambio pendiente</span>
+                  }
                 </div>
               </div>
             </div>
@@ -171,7 +179,21 @@ export class StoreAdminLayoutComponent {
     // the sidebar footer. Backend strips `plan` from the `current` payload
     // when state='no_plan' so this fallback is the canonical render.
     if (!sub || sub.state === 'no_plan') return 'Sin plan activo';
-    return sub?.plan?.name ?? 'Sin plan activo';
+    // RNC-PaidPlan — Always reflect the PAID plan; never the pending one.
+    // `paid_plan_id == null` means the user is mid initial-purchase, so
+    // there is no plan to display.
+    if (sub.paid_plan_id == null) return 'Sin plan activo';
+    return sub.paid_plan?.name ?? sub.plan?.name ?? 'Sin plan activo';
+  });
+
+  /**
+   * RNC-PaidPlan — Drives the "CAMBIO PENDIENTE" sidebar badge. Reads from
+   * the unified subscription selector so it stays in lockstep with the
+   * banners on the subscription page.
+   */
+  readonly hasPendingChange = computed(() => {
+    const kind = this.subscriptionFacade.subscriptionUiState().kind;
+    return kind === 'pending_initial_payment' || kind === 'pending_change_abandoned';
   });
 
   // --- Panel UI menu items ---

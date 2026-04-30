@@ -20,6 +20,7 @@ import {
   IsNotEmpty,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum ProductState {
   ACTIVE = 'active',
@@ -760,6 +761,35 @@ export class CreateProductVariantDto {
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+
+  @ApiPropertyOptional({
+    description: 'Override of service duration in minutes',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  service_duration_minutes?: number;
+
+  @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
+  @IsOptional()
+  @IsEnum(['per_session', 'package', 'subscription'])
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+
+  @ApiPropertyOptional({
+    description: 'Override of buffer minutes between bookings',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  buffer_minutes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Override of preparation time before service',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  preparation_time_minutes?: number;
 }
 
 export class UpdateProductVariantDto {
@@ -834,6 +864,35 @@ export class UpdateProductVariantDto {
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+
+  @ApiPropertyOptional({
+    description: 'Override of service duration in minutes',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  service_duration_minutes?: number;
+
+  @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
+  @IsOptional()
+  @IsEnum(['per_session', 'package', 'subscription'])
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+
+  @ApiPropertyOptional({
+    description: 'Override of buffer minutes between bookings',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  buffer_minutes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Override of preparation time before service',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  preparation_time_minutes?: number;
 }
 
 export class UpdateProductWithVariantsDto {

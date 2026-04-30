@@ -210,8 +210,7 @@ export class EmailNotificationsProcessor extends WorkerHost {
       invoiceNumber: invoice.invoice_number,
       amount: invoice.total.toFixed(2),
       currency: invoice.currency,
-      planName:
-        invoice.store_subscription?.plan?.name || 'Suscripción Vendix',
+      planName: invoice.store_subscription?.plan?.name || 'Suscripción Vendix',
       periodStart: invoice.period_start
         ? new Date(invoice.period_start).toLocaleDateString('es-CO')
         : 'N/A',
@@ -416,9 +415,7 @@ export class EmailNotificationsProcessor extends WorkerHost {
 
     const recipient = store.organizations?.email;
     if (!recipient) {
-      this.logger.warn(
-        `EMAIL_SKIP reason=no_org_email storeId=${storeId}`,
-      );
+      this.logger.warn(`EMAIL_SKIP reason=no_org_email storeId=${storeId}`);
       return null;
     }
 

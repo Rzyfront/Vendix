@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, computed, effect, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, computed, effect, signal, untracked } from '@angular/core';
 import { DatePipe, CurrencyPipe, DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -54,51 +54,96 @@ import {
       ></app-sticky-header>
 
       <div class="max-w-6xl mx-auto px-4 py-6 lg:py-8 space-y-6">
-        <!-- Phase 4 — Pending payment banner. Shown when the subscription
-             was committed but the gateway hasn't confirmed payment yet
-             (state = pending_payment). Mobile-first, accessible, with a
-             primary "Completar pago" CTA that re-opens the Wompi widget. -->
-        @if (status() === 'pending_payment') {
-          <div
-            class="rounded-2xl border-l-4 border-amber-500 bg-amber-50 p-4 md:p-5 shadow-sm"
-            role="status"
-            aria-live="polite"
-          >
-            <div class="flex flex-col sm:flex-row sm:items-start gap-4">
-              <div class="flex items-start gap-3 flex-1 min-w-0">
-                <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
-                  <app-icon name="alert-triangle" [size]="20" class="text-amber-700"></app-icon>
+        <!-- RNC-PaidPlan — Unified subscription state banner. Driven by
+             facade.subscriptionUiState (single source of truth). Mutually
+             exclusive cases — only one banner is ever rendered. -->
+        @switch (uiState().kind) {
+          @case ('pending_initial_payment') {
+            <div
+              class="rounded-2xl border-l-4 border-amber-500 bg-amber-50 p-4 md:p-5 shadow-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+                <div class="flex items-start gap-3 flex-1 min-w-0">
+                  <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <app-icon name="alert-triangle" [size]="20" class="text-amber-700"></app-icon>
+                  </div>
+                  <div class="space-y-1 min-w-0">
+                    <h3 class="text-sm md:text-base font-bold text-amber-900">
+                      Completa tu pago para activar tu plan {{ pendingPlanLabel() }}
+                    </h3>
+                    <p class="text-xs md:text-sm text-amber-900/85 leading-relaxed">
+                      Si ya pagaste, espera unos segundos mientras confirmamos con la pasarela.
+                    </p>
+                  </div>
                 </div>
-                <div class="space-y-1 min-w-0">
-                  <h3 class="text-sm md:text-base font-bold text-amber-900">
-                    Tu suscripción tiene un pago pendiente
-                  </h3>
-                  <p class="text-xs md:text-sm text-amber-900/85 leading-relaxed">
-                    Complétalo para activar tu plan. Si ya pagaste, espera
-                    unos segundos mientras confirmamos con la pasarela.
-                  </p>
+                <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:shrink-0">
+                  <app-button
+                    variant="primary"
+                    [loading]="retryingPayment()"
+                    [disabled]="retryingPayment() || cancellingPendingChange()"
+                    (clicked)="retryPayment()"
+                  >
+                    <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                    Completar pago
+                  </app-button>
+                  <app-button
+                    variant="ghost"
+                    [loading]="cancellingPendingChange()"
+                    [disabled]="retryingPayment() || cancellingPendingChange()"
+                    (clicked)="cancelPendingChange()"
+                  >
+                    Cancelar
+                  </app-button>
                 </div>
-              </div>
-              <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:shrink-0">
-                <app-button
-                  variant="primary"
-                  [loading]="retryingPayment()"
-                  [disabled]="retryingPayment()"
-                  (clicked)="retryPayment()"
-                >
-                  <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
-                  Completar pago
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  [disabled]="retryingPayment()"
-                  (clicked)="goToPlans()"
-                >
-                  Cancelar y elegir otro plan
-                </app-button>
               </div>
             </div>
-          </div>
+          }
+
+          @case ('pending_change_abandoned') {
+            <div
+              class="rounded-2xl border-l-4 border-amber-400 bg-amber-50 p-4 md:p-5 shadow-sm"
+              role="status"
+              aria-live="polite"
+            >
+              <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+                <div class="flex items-start gap-3 flex-1 min-w-0">
+                  <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <app-icon name="clock" [size]="20" class="text-amber-700"></app-icon>
+                  </div>
+                  <div class="space-y-1 min-w-0">
+                    <h3 class="text-sm md:text-base font-bold text-amber-900">
+                      Tienes un cambio de plan pendiente
+                    </h3>
+                    <p class="text-xs md:text-sm text-amber-900/85 leading-relaxed">
+                      {{ pendingChangeFromLabel() }} → {{ pendingChangeToLabel() }}.
+                      Puedes retomar el pago o cancelar el cambio para conservar tu plan actual.
+                    </p>
+                  </div>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:shrink-0">
+                  <app-button
+                    variant="primary"
+                    [loading]="retryingPendingChange()"
+                    [disabled]="retryingPendingChange() || cancellingPendingChange()"
+                    (clicked)="retryPendingChange()"
+                  >
+                    <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                    Completar pago
+                  </app-button>
+                  <app-button
+                    variant="ghost"
+                    [loading]="cancellingPendingChange()"
+                    [disabled]="retryingPendingChange() || cancellingPendingChange()"
+                    (clicked)="cancelPendingChange()"
+                  >
+                    Cancelar cambio
+                  </app-button>
+                </div>
+              </div>
+            </div>
+          }
         }
 
         <!-- Loading -->
@@ -138,7 +183,7 @@ import {
                 <!-- Plan avatar -->
                 <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center shrink-0">
                   <app-icon
-                    [name]="isTerminal() ? 'alert-octagon' : (isTrial() ? 'hourglass' : 'sparkles')"
+                    [name]="isTerminal() ? 'alert-octagon' : (isGrace() ? 'alert-triangle' : (isTrial() ? 'hourglass' : 'sparkles'))"
                     [size]="28"
                     class="text-white"
                   ></app-icon>
@@ -168,8 +213,8 @@ import {
               </div>
 
               <!-- Scheduled cancellation notice — shown when the user
-                   triggered "cancel at end of cycle" but the period has not
-                   ended yet, so the plan is technically still active. -->
+                    triggered "cancel at end of cycle" but the period has not
+                    ended yet, so the plan is technically still active. -->
               @if (scheduledCancelAt(); as cancelAt) {
                 <div class="flex items-start gap-2 bg-amber-400/20 backdrop-blur border border-amber-200/40 rounded-lg px-3 py-2">
                   <app-icon name="alert-triangle" [size]="16" class="text-amber-100 mt-0.5 shrink-0"></app-icon>
@@ -181,13 +226,29 @@ import {
                 </div>
               }
 
+              <!-- Grace period notice — shown when payment is overdue and the
+                   subscription entered grace_soft or grace_hard. Orange banner
+                   inside the hero card to make the urgency impossible to miss. -->
+              @if (isGrace()) {
+                <div class="flex items-start gap-2 bg-orange-400/25 backdrop-blur border border-orange-200/40 rounded-lg px-3 py-2">
+                  <app-icon name="alert-triangle" [size]="16" class="text-orange-100 mt-0.5 shrink-0"></app-icon>
+                  <span class="text-xs text-orange-50 leading-relaxed">
+                    <span class="font-bold">
+                      {{ status() === 'grace_hard' ? 'Período de gracia final' : 'Tu suscripción está en período de gracia' }}.
+                    </span>
+                    {{ graceDaysOverdue() > 0 ? 'Tienes ' + graceDaysOverdue() + ' día(s) de pago vencido.' : 'Se pasó la fecha de pago.' }}
+                    Regulariza tu pago para evitar la suspensión.
+                  </span>
+                </div>
+              }
+
               <!-- Metadata chips -->
               <div class="flex flex-wrap gap-2 pt-3 border-t border-white/20">
-                @if (current()?.next_billing_at && !scheduledCancelAt()) {
+                @if (nextBillingAt() && !scheduledCancelAt()) {
                   <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-1.5 rounded-lg border border-white/20">
                     <app-icon name="calendar" [size]="14" class="text-white/90"></app-icon>
                     <span class="text-xs text-white/90">
-                      Próximo cobro: <span class="font-semibold">{{ current()?.next_billing_at | date:'mediumDate' }}</span>
+                      Próximo cobro: <span class="font-semibold">{{ nextBillingAt() | date:'mediumDate' }}</span>
                     </span>
                   </div>
                 }
@@ -202,15 +263,15 @@ import {
           </div>
 
           <!-- Quick stats row (mobile horizontal scroll, desktop grid) -->
-          <div class="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-3 snap-x snap-mandatory">
+          <div class="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 snap-x snap-mandatory">
             <!-- Trial card (only when trial) -->
             @if (isTrial() && current()?.trial_ends_at) {
-              <app-card customClasses="border-l-4 border-amber-500 min-w-[260px] sm:min-w-0 snap-start">
-                <div class="p-4 space-y-3">
+              <app-card customClasses="h-full border-l-4 border-amber-500 min-w-[260px] sm:min-w-0 snap-start">
+                <div class="p-2 space-y-1.5 h-full flex flex-col justify-between">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
-                      <div class="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center">
-                        <app-icon name="hourglass" [size]="16" class="text-amber-600"></app-icon>
+                      <div class="w-7 h-7 rounded-lg bg-amber-50 flex items-center justify-center">
+                        <app-icon name="hourglass" [size]="14" class="text-amber-600"></app-icon>
                       </div>
                       <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                         Período de Prueba
@@ -221,9 +282,9 @@ import {
                     <p class="text-3xl font-extrabold text-amber-600 leading-none">{{ daysRemaining() }}</p>
                     <p class="text-xs text-text-secondary">días</p>
                   </div>
-                  <div class="w-full bg-amber-100 rounded-full h-2 overflow-hidden">
+                  <div class="w-full bg-amber-100 rounded-full h-1.5 overflow-hidden">
                     <div
-                      class="h-2 rounded-full transition-all bg-gradient-to-r from-amber-400 to-amber-600"
+                      class="h-1.5 rounded-full transition-all bg-gradient-to-r from-amber-400 to-amber-600"
                       [style.width.%]="trialProgress()"
                     ></div>
                   </div>
@@ -231,37 +292,98 @@ import {
               </app-card>
             }
 
-            <!-- Features active -->
-            <app-card customClasses="min-w-[260px] sm:min-w-0 snap-start">
-              <div class="p-4 space-y-3">
-                <div class="flex items-center gap-2">
-                  <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                    <app-icon name="sparkles" [size]="16" class="text-primary-600"></app-icon>
+            <!-- Cycle consumption card (active subs only — analogue of trial card).
+                 Tier-driven palette: green while fresh, amber past 75%, red in
+                 the last 7 days so the renewal cue is impossible to miss. -->
+            @if (isActive() && !isTrial() && cycleTotalDays() > 0) {
+              <app-card
+                [customClasses]="
+                  'h-full border-l-4 min-w-[260px] sm:min-w-0 snap-start ' +
+                  (cycleProgressTier() === 'critical'
+                    ? 'border-red-500'
+                    : cycleProgressTier() === 'warn'
+                      ? 'border-amber-500'
+                      : 'border-emerald-500')
+                "
+              >
+                <div class="p-2 space-y-1.5 h-full flex flex-col justify-between">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <div
+                        class="w-7 h-7 rounded-lg flex items-center justify-center"
+                        [class]="
+                          cycleProgressTier() === 'critical'
+                            ? 'bg-red-50'
+                            : cycleProgressTier() === 'warn'
+                              ? 'bg-amber-50'
+                              : 'bg-emerald-50'
+                        "
+                      >
+                        <app-icon
+                          name="activity"
+                          [size]="14"
+                          [class]="
+                            cycleProgressTier() === 'critical'
+                              ? 'text-red-600'
+                              : cycleProgressTier() === 'warn'
+                                ? 'text-amber-600'
+                                : 'text-emerald-600'
+                          "
+                        ></app-icon>
+                      </div>
+                      <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
+                        Consumo del Ciclo
+                      </span>
+                    </div>
                   </div>
-                  <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
-                    Funciones IA
-                  </span>
-                </div>
-                <div class="flex items-baseline gap-1.5">
-                  <p class="text-3xl font-extrabold text-primary-600 leading-none">{{ enabledCount() }}</p>
-                  <p class="text-xs text-text-secondary">de {{ featuresList().length }} activas</p>
-                </div>
-                <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div class="flex items-baseline gap-1.5">
+                    <p
+                      class="text-3xl font-extrabold leading-none"
+                      [class]="
+                        cycleProgressTier() === 'critical'
+                          ? 'text-red-600'
+                          : cycleProgressTier() === 'warn'
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
+                      "
+                    >
+                      {{ cycleDaysConsumed() }}
+                    </p>
+                    <p class="text-xs text-text-secondary">de {{ cycleTotalDays() }} días</p>
+                  </div>
                   <div
-                    class="h-2 rounded-full transition-all bg-gradient-to-r from-primary-400 to-primary-600"
-                    [style.width.%]="featureCoverage()"
-                  ></div>
+                    class="w-full rounded-full h-1.5 overflow-hidden"
+                    [class]="
+                      cycleProgressTier() === 'critical'
+                        ? 'bg-red-100'
+                        : cycleProgressTier() === 'warn'
+                          ? 'bg-amber-100'
+                          : 'bg-emerald-100'
+                    "
+                  >
+                    <div
+                      class="h-1.5 rounded-full transition-all bg-gradient-to-r"
+                      [class]="
+                        cycleProgressTier() === 'critical'
+                          ? 'from-red-400 to-red-600'
+                          : cycleProgressTier() === 'warn'
+                            ? 'from-amber-400 to-amber-600'
+                            : 'from-emerald-400 to-emerald-600'
+                      "
+                      [style.width.%]="cycleProgress()"
+                    ></div>
+                  </div>
                 </div>
-              </div>
-            </app-card>
+              </app-card>
+            }
 
             <!-- Next billing card -->
-            @if (current()?.next_billing_at; as next) {
-              <app-card customClasses="min-w-[260px] sm:min-w-0 snap-start">
-                <div class="p-4 space-y-3">
+            @if (nextBillingAt(); as next) {
+              <app-card customClasses="h-full min-w-[260px] sm:min-w-0 snap-start">
+                <div class="p-2 space-y-1.5 h-full flex flex-col justify-between">
                   <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                      <app-icon name="calendar" [size]="16" class="text-blue-600"></app-icon>
+                    <div class="w-7 h-7 rounded-lg bg-blue-50 flex items-center justify-center">
+                      <app-icon name="calendar" [size]="14" class="text-blue-600"></app-icon>
                     </div>
                     <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                       Próximo cobro
@@ -284,12 +406,12 @@ import {
             }
 
             <!-- Status filler when no trial and no next billing (rare) -->
-            @if (!isTrial() && !current()?.next_billing_at) {
-              <app-card customClasses="min-w-[260px] sm:min-w-0 snap-start">
-                <div class="p-4 space-y-3">
+            @if (!isTrial() && !nextBillingAt()) {
+              <app-card customClasses="h-full min-w-[260px] sm:min-w-0 snap-start">
+                <div class="p-2 h-full flex flex-col justify-between">
                   <div class="flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                      <app-icon name="check-circle" [size]="16" class="text-green-600"></app-icon>
+                    <div class="w-7 h-7 rounded-lg bg-green-50 flex items-center justify-center">
+                      <app-icon name="check-circle" [size]="14" class="text-green-600"></app-icon>
                     </div>
                     <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
                       Estado
@@ -446,6 +568,7 @@ export class MySubscriptionComponent implements OnInit {
   private subscriptionService = inject(StoreSubscriptionService);
   private wompiCheckoutService = inject(WompiCheckoutService);
   private accessService = inject(SubscriptionAccessService);
+  private destroyRef = inject(DestroyRef);
 
   /**
    * Tracks the last subscription state that already triggered the paywall
@@ -457,6 +580,16 @@ export class MySubscriptionComponent implements OnInit {
    * blocking state will surface a fresh modal.
    */
   private readonly lastStatePresented = signal<string | null>(null);
+
+  /**
+   * Tracks the previous status observed by the success-transition effect so
+   * we can detect the `pending_payment → active` edge and trigger the
+   * celebratory paywall microinteraction exactly once per transition.
+   */
+  private readonly previousStatus = signal<string | null>(null);
+
+  /** Active timer id for the auto-dismiss of the success modal. */
+  private successDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // Auto-open the paywall modal whenever the subscription enters a
@@ -490,11 +623,62 @@ export class MySubscriptionComponent implements OnInit {
       });
       this.lastStatePresented.set(state);
     });
+
+    // Payment-success microinteraction. Detects the `pending_payment →
+    // active` transition (driven by polling /sync-from-gateway) and shows a
+    // brief celebratory paywall variant before auto-dismissing in 2.5s.
+    // First-load with status === 'active' (no prior pending_payment seen)
+    // does NOT trigger because previousStatus starts null.
+    effect(() => {
+      const current = this.status();
+      // Read/write `previousStatus` outside the tracking context to avoid
+      // a self-triggering loop — the effect should re-run only when
+      // `status()` changes.
+      const previous = untracked(() => this.previousStatus());
+      if (
+        current === 'active' &&
+        previous === 'pending_payment'
+      ) {
+        const sub: any = untracked(() => this.current());
+        const planName: string =
+          sub?.plan_name ?? sub?.plan?.name ?? 'tu plan';
+        this.accessService.openPaywallForPaymentSuccess(planName);
+        // Clear any prior pending dismiss before scheduling a new one.
+        if (this.successDismissTimer !== null) {
+          clearTimeout(this.successDismissTimer);
+        }
+        this.successDismissTimer = setTimeout(() => {
+          this.accessService.closePaywall();
+          this.successDismissTimer = null;
+        }, 2500);
+      }
+      // Always update at the end so the next run sees the latest value.
+      untracked(() => this.previousStatus.set(current));
+    });
+
+    this.destroyRef.onDestroy(() => {
+      if (this.successDismissTimer !== null) {
+        clearTimeout(this.successDismissTimer);
+        this.successDismissTimer = null;
+      }
+    });
   }
 
   /** Phase 4 — local UI state for the retry-payment CTA so the button can
    * surface a loading state while the backend mints a fresh widget config. */
   readonly retryingPayment = signal(false);
+
+  /** RNC-PaidPlan — UI state para los CTAs del panel de cambio pendiente. */
+  readonly retryingPendingChange = signal(false);
+  readonly cancellingPendingChange = signal(false);
+
+  /**
+   * RNC-PaidPlan — Tracks whether the most recent Wompi widget session
+   * produced a terminal payment outcome (APPROVED or PENDING). Used by the
+   * `onClosed` handler to decide whether the user truly abandoned the
+   * payment — in which case the pending change is wiped server-side.
+   */
+  private readonly paymentSucceeded = signal(false);
 
   readonly current = this.facade.current;
   readonly loading = this.facade.loading;
@@ -502,6 +686,22 @@ export class MySubscriptionComponent implements OnInit {
   readonly featureMatrix = this.facade.featureMatrix;
   readonly isActive = this.facade.isActive;
   readonly isTrial = this.facade.isTrial;
+  /** RNC-PaidPlan — Unified UI state, see SubscriptionFacade.subscriptionUiState. */
+  readonly uiState = this.facade.subscriptionUiState;
+
+  /** Banner label helpers — narrow the discriminated union for the template. */
+  readonly pendingPlanLabel = computed(() => {
+    const ui = this.uiState();
+    return ui.kind === 'pending_initial_payment' ? ui.planName : '';
+  });
+  readonly pendingChangeFromLabel = computed(() => {
+    const ui = this.uiState();
+    return ui.kind === 'pending_change_abandoned' ? ui.fromPlanName : '';
+  });
+  readonly pendingChangeToLabel = computed(() => {
+    const ui = this.uiState();
+    return ui.kind === 'pending_change_abandoned' ? ui.toPlanName : '';
+  });
 
   readonly activeGradient =
     'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
@@ -511,6 +711,22 @@ export class MySubscriptionComponent implements OnInit {
   // user that the subscription is no longer providing access.
   readonly cancelledGradient =
     'linear-gradient(135deg, #f87171 0%, #b91c1c 60%, #7f1d1d 100%)';
+  readonly graceGradient =
+    'linear-gradient(135deg, #fb923c 0%, #ea580c 60%, #9a3412 100%)';
+
+  readonly isGrace = computed(() => {
+    const s = this.status();
+    return s === 'grace_soft' || s === 'grace_hard';
+  });
+
+  readonly graceDaysOverdue = computed(() => {
+    const sub: any = this.current();
+    if (!sub) return 0;
+    const periodEnd = sub.current_period_end;
+    if (!periodEnd) return 0;
+    const diff = Date.now() - new Date(periodEnd).getTime();
+    return Math.max(0, Math.ceil(diff / this.DAY_MS));
+  });
 
   readonly isTerminal = computed(() => {
     const s = this.status();
@@ -539,6 +755,7 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly heroGradient = computed(() => {
     if (this.isTerminal()) return this.cancelledGradient;
+    if (this.isGrace()) return this.graceGradient;
     if (this.isTrial()) return this.trialGradient;
     return this.activeGradient;
   });
@@ -549,14 +766,23 @@ export class MySubscriptionComponent implements OnInit {
     return sub?.plan_name ?? sub?.plan?.name ?? 'Sin Plan';
   });
 
+  // `billing_cycle` lives on the related plan, not on the subscription row
+  // itself. Read both shapes so older mappers and direct Prisma includes work.
+  // Normalize 'annual' → 'yearly' so downstream checks have a single canonical
+  // value; backend enum exposes 'annual' but the rest of the codebase (DTOs,
+  // proration, plans listing) standardizes on 'yearly'.
+  private readonly billingCycle = computed<string | undefined>(() => {
+    const sub: any = this.current();
+    const raw = sub?.billing_cycle ?? sub?.plan?.billing_cycle ?? sub?.paid_plan?.billing_cycle;
+    return raw === 'annual' ? 'yearly' : raw;
+  });
+
   readonly cycleSuffix = computed(() => {
-    const cycle = this.current()?.billing_cycle;
-    return cycle === 'yearly' ? 'año' : 'mes';
+    return this.billingCycle() === 'yearly' ? 'año' : 'mes';
   });
 
   readonly cycleLabel = computed(() => {
-    const cycle = this.current()?.billing_cycle;
-    return cycle === 'yearly' ? 'Anual' : 'Mensual';
+    return this.billingCycle() === 'yearly' ? 'Anual' : 'Mensual';
   });
 
   readonly daysRemaining = computed(() => {
@@ -566,11 +792,19 @@ export class MySubscriptionComponent implements OnInit {
     return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
   });
 
+  // Single source of truth for "next billing date": `current_period_end`.
+  // The `next_billing_at` column drifts whenever plan changes happen
+  // mid-cycle (it's recalculated only on confirmed payments), and using it
+  // produced a card showing "365 días restantes" while the cycle bar showed
+  // "20 días" — same concept, two different timestamps. Reading from
+  // `current_period_end` ties this card to the same field that drives the
+  // cycle progress bar and proration math.
+  readonly nextBillingAt = computed(
+    () => this.current()?.current_period_end ?? null,
+  );
+
   readonly daysToNextBilling = computed(() => {
-    const next = this.current()?.next_billing_at;
-    if (!next) return 0;
-    const diff = new Date(next).getTime() - Date.now();
-    return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+    return Math.max(0, this.cycleTotalDays() - this.cycleDaysConsumed());
   });
 
   readonly trialProgress = computed(() => {
@@ -582,9 +816,60 @@ export class MySubscriptionComponent implements OnInit {
     return Math.min(100, Math.max(0, (elapsed / total) * 100));
   });
 
+  // Cycle consumption — `billing_cycle` is the canonical source of truth for
+  // the total length (monthly=30, yearly=365). Days consumed are derived from
+  // `current_period_end - now` so the calc stays correct even if
+  // `current_period_start` drifts (e.g. proration sets it forward, or test
+  // data manipulation leaves it at an old value).
+  private readonly DAY_MS = 1000 * 60 * 60 * 24;
+
+  readonly cycleTotalDays = computed(() => {
+    const cycle = this.billingCycle();
+    if (cycle === 'yearly') return 365;
+    if (cycle === 'monthly') return 30;
+    const start = this.current()?.current_period_start;
+    const end = this.current()?.current_period_end;
+    if (!start || !end) return 0;
+    const ms = new Date(end).getTime() - new Date(start).getTime();
+    return Math.max(0, Math.round(ms / this.DAY_MS));
+  });
+
+  readonly cycleDaysConsumed = computed(() => {
+    const total = this.cycleTotalDays();
+    const end = this.current()?.current_period_end;
+    if (!end || !total) return 0;
+    const remainingMs = new Date(end).getTime() - Date.now();
+    const remaining = Math.max(0, Math.ceil(remainingMs / this.DAY_MS));
+    return Math.min(total, Math.max(0, total - remaining));
+  });
+
+  // Continuous percentage in ms. Total period is derived from `billing_cycle`
+  // (monthly/yearly) so the bar reflects the contractual cycle, not the raw
+  // `end - start` window which can be skewed by proration or test data.
+  readonly cycleProgress = computed(() => {
+    const totalDays = this.cycleTotalDays();
+    const end = this.current()?.current_period_end;
+    if (!end || !totalDays) return 0;
+    const totalMs = totalDays * this.DAY_MS;
+    const remainingMs = new Date(end).getTime() - Date.now();
+    const elapsedMs = totalMs - remainingMs;
+    return Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
+  });
+
+  // Color tier — driven by % to behave correctly for short cycles too. The
+  // 7-day rule kicks in only when the cycle itself is at least 14 days long,
+  // so a 5-day test cycle does not get pinned to critical from day 0.
+  readonly cycleProgressTier = computed<'fresh' | 'warn' | 'critical'>(() => {
+    const progress = this.cycleProgress();
+    if (progress >= 90) return 'critical';
+    if (progress >= 75) return 'warn';
+    const total = this.cycleTotalDays();
+    if (total >= 14 && total - this.cycleDaysConsumed() <= 7) return 'critical';
+    return 'fresh';
+  });
+
   readonly featuresList = computed(() => {
     const matrix = this.featureMatrix();
-    if (!matrix || typeof matrix !== 'object') return [];
     const featureMeta: Record<string, { label: string; icon: string }> = {
       text_generation: { label: 'Generación de Texto', icon: 'pen-line' },
       streaming_chat: { label: 'Chat en Streaming', icon: 'message-square' },
@@ -593,27 +878,29 @@ export class MySubscriptionComponent implements OnInit {
       rag_embeddings: { label: 'RAG / Embeddings', icon: 'database' },
       async_queue: { label: 'Procesamiento Asíncrono', icon: 'layers' },
     };
-    return Object.entries(matrix).map(([key, feature]: [string, any]) => {
-      const meta = featureMeta[key] || { label: key, icon: 'sparkles' };
+    return Object.entries(featureMeta).map(([key, meta]) => {
+      const feature = matrix?.[key];
+      const enabled = feature?.enabled === true;
       return {
         key,
         label: meta.label,
         icon: meta.icon,
-        enabled: feature.enabled === true,
-        used: feature.used ?? 0,
-        limit:
-          feature.monthly_tokens_cap ??
-          feature.daily_messages_cap ??
-          feature.indexed_docs_cap ??
-          feature.monthly_jobs_cap ??
-          null,
-        unit: feature.monthly_tokens_cap
+        enabled,
+        used: feature?.used ?? 0,
+        limit: enabled
+          ? (feature.monthly_tokens_cap ??
+              feature.daily_messages_cap ??
+              feature.indexed_docs_cap ??
+              feature.monthly_jobs_cap ??
+              null)
+          : null,
+        unit: enabled && feature?.monthly_tokens_cap
           ? 'tokens'
-          : feature.daily_messages_cap
+          : enabled && feature?.daily_messages_cap
             ? 'msgs'
-            : feature.indexed_docs_cap
+            : enabled && feature?.indexed_docs_cap
               ? 'docs'
-              : feature.monthly_jobs_cap
+              : enabled && feature?.monthly_jobs_cap
                 ? 'jobs'
                 : null,
       };
@@ -793,8 +1080,10 @@ export class MySubscriptionComponent implements OnInit {
           // loop can call /sync-from-gateway each cycle.
           const invoiceId =
             typeof data?.invoice?.id === 'number' ? data.invoice.id : null;
+          this.paymentSucceeded.set(false);
           this.wompiCheckoutService.openWidget(data.widget, {
             onApproved: () => {
+              this.paymentSucceeded.set(true);
               this.facade.loadCurrent();
               this.facade.pollSubscriptionUntilActive({ invoiceId });
               this.toastService.info('Verificando confirmación de pago…');
@@ -806,6 +1095,7 @@ export class MySubscriptionComponent implements OnInit {
               );
             },
             onPending: () => {
+              this.paymentSucceeded.set(true);
               this.facade.loadCurrent();
               this.facade.pollSubscriptionUntilActive({ invoiceId });
               this.toastService.info(
@@ -813,10 +1103,22 @@ export class MySubscriptionComponent implements OnInit {
               );
             },
             onClosed: () => {
-              this.facade.loadCurrent();
-              this.toastService.warning(
-                'El pago fue cancelado. Tu suscripción sigue pendiente.',
-              );
+              if (this.paymentSucceeded()) {
+                this.facade.loadCurrent();
+                return;
+              }
+              this.subscriptionService.cancelPendingChange().subscribe({
+                next: () => {
+                  this.facade.loadCurrent();
+                  this.toastService.info('Cambio cancelado');
+                },
+                error: () => {
+                  this.facade.loadCurrent();
+                  this.toastService.warning(
+                    'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
+                  );
+                },
+              });
             },
             onError: () => {
               this.facade.loadCurrent();
@@ -832,6 +1134,100 @@ export class MySubscriptionComponent implements OnInit {
           // (SUBSCRIPTION_010 / DUNNING_001) — refresh state so the banner
           // disappears if so.
           this.facade.loadCurrent();
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  /**
+   * RNC-PaidPlan — Reintenta el pago del cambio de plan pendiente.
+   * Usa el mismo endpoint de retry-payment que el pending_payment banner,
+   * ya que backend asocia el invoice al pending_change_invoice_id.
+   */
+  retryPendingChange(): void {
+    if (this.retryingPendingChange()) return;
+    this.retryingPendingChange.set(true);
+    const returnUrl = `${window.location.origin}/admin/subscription`;
+    this.subscriptionService
+      .retryPayment({ returnUrl })
+      .subscribe({
+        next: (data) => {
+          this.retryingPendingChange.set(false);
+          const invoiceId =
+            typeof data?.invoice?.id === 'number' ? data.invoice.id : null;
+          this.paymentSucceeded.set(false);
+          this.wompiCheckoutService.openWidget(data.widget, {
+            onApproved: () => {
+              this.paymentSucceeded.set(true);
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info('Verificando confirmación de pago…');
+            },
+            onDeclined: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'El pago fue rechazado. Intenta con otro método de pago.',
+              );
+            },
+            onPending: () => {
+              this.paymentSucceeded.set(true);
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info(
+                'Pago pendiente de confirmación. Verificando…',
+              );
+            },
+            onClosed: () => {
+              if (this.paymentSucceeded()) {
+                this.facade.loadCurrent();
+                return;
+              }
+              this.subscriptionService.cancelPendingChange().subscribe({
+                next: () => {
+                  this.facade.loadCurrent();
+                  this.toastService.info('Cambio cancelado');
+                },
+                error: () => {
+                  this.facade.loadCurrent();
+                  this.toastService.warning(
+                    'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
+                  );
+                },
+              });
+            },
+            onError: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'No se pudo abrir el widget de pago. Intenta de nuevo.',
+              );
+            },
+          });
+        },
+        error: (err) => {
+          this.retryingPendingChange.set(false);
+          this.facade.loadCurrent();
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  /**
+   * RNC-PaidPlan — Cancela el cambio de plan pendiente.
+   * Anula el pending_plan_id y el invoice asociado en el backend.
+   */
+  cancelPendingChange(): void {
+    if (this.cancellingPendingChange()) return;
+    this.cancellingPendingChange.set(true);
+    this.subscriptionService
+      .cancelPendingChange()
+      .subscribe({
+        next: () => {
+          this.cancellingPendingChange.set(false);
+          this.facade.loadCurrent();
+          this.toastService.success('Cambio de plan cancelado. Continúas con tu plan actual.');
+        },
+        error: (err) => {
+          this.cancellingPendingChange.set(false);
           this.toastService.error(extractApiErrorMessage(err));
         },
       });
@@ -882,6 +1278,12 @@ export class MySubscriptionComponent implements OnInit {
   }
 
   getStatusLabel(): string {
+    // RNC-PaidPlan — `pending_change_abandoned` keeps the paid plan active;
+    // the canonical label is "Activa". This override ensures the badge does
+    // not flip to "Pago Pendiente" while the user still holds their plan.
+    if (this.uiState().kind === 'pending_change_abandoned') {
+      return 'Activa';
+    }
     const labels: Record<string, string> = {
       active: 'Activa',
       trialing: 'En Prueba',

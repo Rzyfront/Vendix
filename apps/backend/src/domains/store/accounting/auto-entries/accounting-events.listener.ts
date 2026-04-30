@@ -1201,8 +1201,7 @@ export class AccountingEventsListener {
       event.entryDate instanceof Date
         ? event.entryDate
         : new Date(event.entryDate);
-    const description =
-      `Pago suscripción SaaS — Factura ${event.invoiceNumber ?? `#${event.invoiceId}`}`;
+    const description = `Pago suscripción SaaS — Factura ${event.invoiceNumber ?? `#${event.invoiceId}`}`;
 
     // ── Store-cliente side: SaaS expense ────────────────────────────────
     if (

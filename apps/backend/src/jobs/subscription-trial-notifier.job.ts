@@ -34,9 +34,7 @@ export class SubscriptionTrialNotifierJob {
   @Cron('0 9 * * *')
   async handleTrialNotifications(): Promise<void> {
     if (this.isRunning) {
-      this.logger.warn(
-        'Subscription trial notifier already running, skipping',
-      );
+      this.logger.warn('Subscription trial notifier already running, skipping');
       return;
     }
     this.isRunning = true;
@@ -56,21 +54,17 @@ export class SubscriptionTrialNotifierJob {
   /** Visible for tests. */
   async runOnce(): Promise<{ enqueued: number; skipped: number }> {
     const now = new Date();
-    const threeDaysFromNow = new Date(
-      now.getTime() + 3 * 24 * 60 * 60 * 1000,
-    );
+    const threeDaysFromNow = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const subs = await this.prisma
-      .withoutScope()
-      .store_subscriptions.findMany({
-        where: {
-          state: 'trial',
-          trial_ends_at: { gte: now, lte: threeDaysFromNow },
-        },
-        select: { id: true, store_id: true, trial_ends_at: true },
-        take: 200,
-      });
+    const subs = await this.prisma.withoutScope().store_subscriptions.findMany({
+      where: {
+        state: 'trial',
+        trial_ends_at: { gte: now, lte: threeDaysFromNow },
+      },
+      select: { id: true, store_id: true, trial_ends_at: true },
+      take: 200,
+    });
 
     if (subs.length === 0) {
       return { enqueued: 0, skipped: 0 };

@@ -38,7 +38,14 @@ export class PublicDomainsService {
     const domain = await this.globalPrisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
       include: {
         organization: {
@@ -290,7 +297,14 @@ export class PublicDomainsService {
     const existing = await this.globalPrisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 

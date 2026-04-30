@@ -22,7 +22,11 @@ describe('SubscriptionRenewalBillingJob', () => {
   let config: { get: jest.Mock };
   let emitter: { emit: jest.Mock };
 
-  const subRow = { id: 10, store_id: 5, scheduled_cancel_at: null as Date | null };
+  const subRow = {
+    id: 10,
+    store_id: 5,
+    scheduled_cancel_at: null as Date | null,
+  };
   const invoice = {
     id: 100,
     period_end: new Date('2026-05-01T00:00:00Z'),

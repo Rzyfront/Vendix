@@ -212,7 +212,14 @@ export class DomainsService implements OnModuleInit {
     const domain = await this.prisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
       include: {
         organization: true,
@@ -248,7 +255,14 @@ export class DomainsService implements OnModuleInit {
     const existing = await this.prisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 
@@ -278,7 +292,14 @@ export class DomainsService implements OnModuleInit {
     const existing = await this.prisma.domain_settings.findFirst({
       where: {
         hostname: data.hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 
@@ -629,7 +650,14 @@ export class DomainsService implements OnModuleInit {
     const exists = await this.prisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
       },
     });
 

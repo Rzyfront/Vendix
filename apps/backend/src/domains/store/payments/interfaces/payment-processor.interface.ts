@@ -44,6 +44,15 @@ export interface PaymentResult {
   gatewayReference?: string;
   status: payments_state_enum;
   message?: string;
+  /**
+   * Stable, machine-readable failure code surfaced by processors when the
+   * gateway returns a known terminal error that callers must react to
+   * (e.g. SaaS billing dunning on revoked card-on-file).
+   *
+   * Free-form by design: each processor documents its own vocabulary.
+   * Wompi values: `PAYMENT_SOURCE_REVOKED`, etc.
+   */
+  errorCode?: string;
   gatewayResponse?: any;
   nextAction?: {
     type: 'redirect' | '3ds' | 'await' | 'none';

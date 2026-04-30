@@ -229,8 +229,7 @@ describe('SubscriptionBillingService', () => {
 
         // Update metadata for the next cycle based on what the service wrote.
         if (expected.remaining !== undefined) {
-          const updateCalls =
-            prismaMock.store_subscriptions.update.mock.calls;
+          const updateCalls = prismaMock.store_subscriptions.update.mock.calls;
           const lastUpdate = updateCalls.slice(-1)[0][0];
           expect(lastUpdate.data.metadata.pending_credit).toBe(
             expected.remaining,
@@ -241,9 +240,7 @@ describe('SubscriptionBillingService', () => {
           if (expected.applied !== '0.00') {
             const lastUpdate =
               prismaMock.store_subscriptions.update.mock.calls.slice(-1)[0][0];
-            expect(
-              lastUpdate.data.metadata.pending_credit,
-            ).toBeUndefined();
+            expect(lastUpdate.data.metadata.pending_credit).toBeUndefined();
             currentMetadata = lastUpdate.data.metadata;
           } else {
             // No credit case: service should not update metadata (no credit

@@ -10,7 +10,29 @@ import {
   WompiWebhookEvent,
   WompiCreatePaymentLinkRequest,
   WompiPaymentLinkResponse,
+  WompiCreatePaymentSourceRequest,
+  WompiPaymentSourceResponse,
 } from './wompi.types';
+
+/**
+ * Thrown when Wompi rejects a /payment_sources call because the
+ * acceptance_token sent does not match the one currently signed by the merchant
+ * (expired, regenerated, or tampered). The frontend MUST re-fetch acceptance
+ * tokens and retry — the same tok_* card token can be reused only if Wompi
+ * has not yet consumed it.
+ */
+export class WompiInvalidAcceptanceTokenError extends Error {
+  readonly code = 'WOMPI_INVALID_ACCEPTANCE_TOKEN';
+  readonly statusCode: number;
+  readonly responseBody: unknown;
+
+  constructor(message: string, statusCode: number, responseBody: unknown) {
+    super(message);
+    this.name = 'WompiInvalidAcceptanceTokenError';
+    this.statusCode = statusCode;
+    this.responseBody = responseBody;
+  }
+}
 
 /**
  * Immutable Wompi API client. Instances are created via WompiClientFactory
@@ -38,7 +60,15 @@ export class WompiClient {
   private async request<T>(
     method: string,
     path: string,
-    options?: { body?: any; bearerToken?: string; idempotencyKey?: string },
+    options?: {
+      body?: any;
+      bearerToken?: string;
+      idempotencyKey?: string;
+      /** Header name for the idempotency key. Defaults to `Idempotency-Key`
+       *  (used by /transactions). Wompi's /payment_sources endpoint expects
+       *  the canonical `X-Wompi-Idempotency-Key` header. */
+      idempotencyHeader?: string;
+    },
   ): Promise<T> {
     this.ensureConfigured();
 
@@ -51,7 +81,8 @@ export class WompiClient {
     };
 
     if (options?.idempotencyKey) {
-      headers['Idempotency-Key'] = options.idempotencyKey;
+      const headerName = options.idempotencyHeader ?? 'Idempotency-Key';
+      headers[headerName] = options.idempotencyKey;
     }
 
     const fetchOptions: RequestInit = { method, headers };
@@ -66,6 +97,28 @@ export class WompiClient {
 
     if (!response.ok) {
       this.logger.error(`Wompi API error: ${response.status}`, data);
+
+      // Specific 401 case for /payment_sources: invalid acceptance token.
+      // Wompi returns reason "INVALID_ACCEPTANCE_TOKEN" (or the message contains it).
+      const reason: unknown = data?.error?.reason ?? data?.error?.type;
+      const message: unknown = data?.error?.message ?? data?.error?.messages;
+      const reasonStr = typeof reason === 'string' ? reason : '';
+      const messageStr =
+        typeof message === 'string' ? message : JSON.stringify(message ?? '');
+
+      if (
+        response.status === 401 &&
+        (reasonStr.includes('INVALID_ACCEPTANCE_TOKEN') ||
+          messageStr.includes('INVALID_ACCEPTANCE_TOKEN') ||
+          messageStr.toLowerCase().includes('acceptance_token'))
+      ) {
+        throw new WompiInvalidAcceptanceTokenError(
+          messageStr || 'Invalid acceptance token',
+          response.status,
+          data,
+        );
+      }
+
       throw new Error(
         data?.error?.message ??
           data?.error?.reason ??
@@ -114,6 +167,46 @@ export class WompiClient {
       'POST',
       `/transactions/${transactionId}/void`,
       { idempotencyKey },
+    );
+  }
+
+  // ── Payment Sources (Card-On-File) ──────────
+
+  /**
+   * Creates a persistent payment_source from a `tok_*` card token tokenized in
+   * the widget. The `acceptance_token` MUST be EXACTLY the one shown to the
+   * user when they accepted the terms (legal trail) — do NOT re-fetch a fresh
+   * one for this call.
+   *
+   * Idempotent via `X-Wompi-Idempotency-Key` header (Wompi convention).
+   *
+   * @throws {WompiInvalidAcceptanceTokenError} on 401 INVALID_ACCEPTANCE_TOKEN
+   */
+  async createPaymentSource(
+    data: WompiCreatePaymentSourceRequest,
+    idempotencyKey: string,
+  ): Promise<WompiPaymentSourceResponse> {
+    return this.request<WompiPaymentSourceResponse>(
+      'POST',
+      '/payment_sources',
+      {
+        body: data,
+        idempotencyKey,
+        idempotencyHeader: 'X-Wompi-Idempotency-Key',
+      },
+    );
+  }
+
+  /**
+   * Retrieves a payment_source by id. Useful for verifying status
+   * (`AVAILABLE` | `ERROR` | `PENDING`) after creation or before charging.
+   */
+  async getPaymentSource(
+    id: string | number,
+  ): Promise<WompiPaymentSourceResponse> {
+    return this.request<WompiPaymentSourceResponse>(
+      'GET',
+      `/payment_sources/${id}`,
     );
   }
 

@@ -185,37 +185,39 @@ describe('SubscriptionStateListener — onPaymentSucceeded (G12)', () => {
       process.env.SUBSCRIPTION_EVENT_DRIVEN_STATE = 'true';
     });
 
-    it.each([
-      ['grace_soft'],
-      ['grace_hard'],
-      ['suspended'],
-      ['blocked'],
-    ])('promotes %s → active', async (state) => {
-      listener = await buildListener(state);
+    it.each([['grace_soft'], ['grace_hard'], ['suspended'], ['blocked']])(
+      'promotes %s → active',
+      async (state) => {
+        listener = await buildListener(state);
 
-      await listener.onPaymentSucceeded({
-        invoiceId: 11,
-        paymentId: 22,
-        subscriptionId: 100,
-        storeId: 50,
-        source: 'webhook',
-      });
+        await listener.onPaymentSucceeded({
+          invoiceId: 11,
+          paymentId: 22,
+          subscriptionId: 100,
+          storeId: 50,
+          source: 'webhook',
+        });
 
-      expect(transition).toHaveBeenCalledTimes(1);
-      const [storeId, target, opts] = transition.mock.calls[0];
-      expect(storeId).toBe(50);
-      expect(target).toBe('active');
-      expect(opts.reason).toBe('payment_succeeded_webhook');
-      expect(opts.triggeredByJob).toBe('subscription-state-listener');
-      expect(opts.payload.previous_state).toBe(state);
+        expect(transition).toHaveBeenCalledTimes(1);
+        const [storeId, target, opts] = transition.mock.calls[0];
+        expect(storeId).toBe(50);
+        expect(target).toBe('active');
+        expect(opts.reason).toBe('payment_succeeded_webhook');
+        expect(opts.triggeredByJob).toBe('subscription-state-listener');
+        expect(opts.payload.previous_state).toBe(state);
 
-      // Email enqueue happens in enforce mode.
-      expect(queueAdd).toHaveBeenCalledWith(
-        'payment.confirmed.email',
-        expect.objectContaining({ invoiceId: 11, paymentId: 22, storeId: 50 }),
-        expect.any(Object),
-      );
-    });
+        // Email enqueue happens in enforce mode.
+        expect(queueAdd).toHaveBeenCalledWith(
+          'payment.confirmed.email',
+          expect.objectContaining({
+            invoiceId: 11,
+            paymentId: 22,
+            storeId: 50,
+          }),
+          expect.any(Object),
+        );
+      },
+    );
 
     it('still promotes pending_payment → active (G3 baseline preserved)', async () => {
       listener = await buildListener('pending_payment');

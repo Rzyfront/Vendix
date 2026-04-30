@@ -233,9 +233,12 @@ export class DnsResolverService {
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         reject(
-          Object.assign(new Error(`DNS query timeout after ${ms}ms: ${label}`), {
-            code: 'ETIMEOUT',
-          }),
+          Object.assign(
+            new Error(`DNS query timeout after ${ms}ms: ${label}`),
+            {
+              code: 'ETIMEOUT',
+            },
+          ),
         );
       }, ms);
       p.then(

@@ -60,7 +60,9 @@ export class SubscriptionManualPaymentService {
             manual_payment: true,
             recorded_by_user_id: opts.recordedByUserId,
             bank_reference: opts.bankReference,
-            excess_amount: excess.greaterThan(DECIMAL_ZERO) ? excess.toFixed(2) : null,
+            excess_amount: excess.greaterThan(DECIMAL_ZERO)
+              ? excess.toFixed(2)
+              : null,
           } as Prisma.InputJsonValue,
         },
       });
@@ -77,7 +79,7 @@ export class SubscriptionManualPaymentService {
       // Apply excess as pending_credit for next invoice (RNC-13)
       if (excess.greaterThan(DECIMAL_ZERO)) {
         const sub = invoice.store_subscription;
-        const metadata = sub.metadata as Record<string, unknown> | null ?? {};
+        const metadata = (sub.metadata as Record<string, unknown> | null) ?? {};
         const existingCreditRaw = metadata['pending_credit'];
         const existingCredit =
           typeof existingCreditRaw === 'string' ||

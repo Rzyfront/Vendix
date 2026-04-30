@@ -139,11 +139,11 @@ export class PromotionalApplyService {
         currency: promoPlan.currency,
         promo_priority: promoPlan.promo_priority,
       },
-      overlay_features: this.coerceFeatures(promoPlan.ai_feature_flags) as Record<
-        string,
-        unknown
-      >,
-      duration_days: typeof rules.duration_days === 'number' ? rules.duration_days : null,
+      overlay_features: this.coerceFeatures(
+        promoPlan.ai_feature_flags,
+      ) as Record<string, unknown>,
+      duration_days:
+        typeof rules.duration_days === 'number' ? rules.duration_days : null,
       starts_at: rules.starts_at ?? null,
       expires_at: rules.ends_at ?? null,
     };
@@ -169,7 +169,10 @@ export class PromotionalApplyService {
       where: { redemption_code: normalized },
     });
     if (!promoPlan) {
-      throw new VendixHttpException(ErrorCodes.PROMO_001, 'Cupón no encontrado');
+      throw new VendixHttpException(
+        ErrorCodes.PROMO_001,
+        'Cupón no encontrado',
+      );
     }
 
     const sub = await this.prisma.store_subscriptions.findUnique({
@@ -249,7 +252,9 @@ export class PromotionalApplyService {
     );
 
     // RNC-39: no_plan rows have no base plan to derive features from.
-    const baseFeatures = this.coerceFeatures(sub.plan?.ai_feature_flags ?? null);
+    const baseFeatures = this.coerceFeatures(
+      sub.plan?.ai_feature_flags ?? null,
+    );
     let resolvedFeatures: ResolvedFeatures = baseFeatures;
 
     if (sub.partner_override?.feature_overrides) {
@@ -310,7 +315,9 @@ export class PromotionalApplyService {
     }
 
     // RNC-39: no_plan rows have no base plan to derive features from.
-    const baseFeatures = this.coerceFeatures(sub.plan?.ai_feature_flags ?? null);
+    const baseFeatures = this.coerceFeatures(
+      sub.plan?.ai_feature_flags ?? null,
+    );
     let resolvedFeatures: ResolvedFeatures = baseFeatures;
 
     if (sub.partner_override?.feature_overrides) {

@@ -11,10 +11,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
  * Rate-limited at the controller level via @Throttle (100 req/min/IP).
  */
 @Module({
-  imports: [
-    PrismaModule,
-    ResponseModule,
-  ],
+  imports: [PrismaModule, ResponseModule],
   controllers: [PublicPlansController],
   providers: [PublicPlansService],
 })

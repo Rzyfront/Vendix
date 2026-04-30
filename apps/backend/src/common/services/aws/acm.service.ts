@@ -111,10 +111,7 @@ export class AcmService {
 
       return { certificateArn: response.CertificateArn };
     } catch (error) {
-      this.handleAwsError(
-        error,
-        `requestCertificate(${params.domainName})`,
-      );
+      this.handleAwsError(error, `requestCertificate(${params.domainName})`);
     }
   }
 
@@ -134,7 +131,8 @@ export class AcmService {
         throw new NotFoundException(`Certificate ${arn} not found`);
       }
 
-      const status = (cert.Status ?? 'PENDING_VALIDATION') as AcmCertificateStatus;
+      const status = (cert.Status ??
+        'PENDING_VALIDATION') as AcmCertificateStatus;
 
       const domainValidationOptions: AcmDomainValidationOption[] = (
         cert.DomainValidationOptions ?? []

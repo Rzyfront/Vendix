@@ -31,7 +31,8 @@ export type PaywallCode =
   | 'STATE_SUSPENDED'
   | 'STATE_BLOCKED'
   | 'STATE_CANCELLED'
-  | 'STATE_EXPIRED';
+  | 'STATE_EXPIRED'
+  | 'STATE_PAYMENT_SUCCEEDED';
 
 /**
  * Subscription states that, when surfaced inside the panel (e.g. on entering
@@ -73,7 +74,7 @@ export interface PaywallDetails {
  * `<app-ai-paywall-modal>`. Decoupled from the backend code so the same
  * severity can be reused across different `PaywallCode`s.
  */
-export type PaywallSeverity = 'critical' | 'warning' | 'info' | 'upsell';
+export type PaywallSeverity = 'critical' | 'warning' | 'info' | 'upsell' | 'success';
 
 /**
  * Functional grouping of the variants — used to decide layout details such
@@ -383,6 +384,22 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     badgeLabel: 'Plan expirado',
     secondaryCtaLabel: 'Cerrar',
   },
+  // ── Payment confirmation success — celebratory transitional state ─────────
+  // Auto-dismiss microinteraction shown briefly when polling detects the
+  // subscription has transitioned from `pending_payment` to `active`. Both
+  // CTAs are hidden by the modal template (see `showPrimaryCta()` /
+  // `showSecondaryCta()`); the host schedules a `closePaywall()` after ~2.5s.
+  STATE_PAYMENT_SUCCEEDED: {
+    title: '¡Bienvenido a {planName}!',
+    description: 'Tu plan está activo. Disfruta todas las funciones.',
+    ctaLabel: '',
+    ctaRoute: '/admin/subscription',
+    severity: 'success',
+    category: 'upgrade',
+    iconName: 'check-circle',
+    badgeLabel: 'Pago confirmado',
+    secondaryCtaLabel: '',
+  },
 };
 
 /**
@@ -495,6 +512,30 @@ export class SubscriptionAccessService {
       code: variantKey,
       variant: this.interpolateVariant(baseVariant, enrichedDetails),
       details: enrichedDetails,
+    });
+    this.isOpen.set(true);
+  }
+
+  /**
+   * Open the celebratory payment-success microinteraction. Used by the
+   * subscription panel right after polling detects a `pending_payment →
+   * active` transition. The host is responsible for scheduling the
+   * auto-dismiss (typically ~2.5s) — this method only sets the variant.
+   *
+   * Bypasses the `isOpen` dedupe so the success state can replace any
+   * previously open paywall (e.g. the warning shown while waiting).
+   */
+  openPaywallForPaymentSuccess(planName: string | null | undefined): void {
+    const safeName = (planName ?? '').toString().trim() || 'tu plan';
+    const baseVariant = PAYWALL_VARIANTS.STATE_PAYMENT_SUCCEEDED;
+    const variant: PaywallVariant = {
+      ...baseVariant,
+      title: baseVariant.title.replace('{planName}', safeName),
+    };
+    this.state.set({
+      code: 'STATE_PAYMENT_SUCCEEDED',
+      variant,
+      details: { plan_name: safeName },
     });
     this.isOpen.set(true);
   }

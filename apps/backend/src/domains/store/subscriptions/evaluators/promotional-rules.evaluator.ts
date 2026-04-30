@@ -2,10 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import {
-  PromoEligibilityResult,
-  PromoRules,
-} from '../types/promo.types';
+import { PromoEligibilityResult, PromoRules } from '../types/promo.types';
 
 interface PromoCondition {
   field: string;
@@ -128,7 +125,9 @@ export class PromotionalRulesEvaluator {
 
     // 3. Plan type
     if (rules.plan_type_required) {
-      if ((promoPlan.plan_type as unknown as string) !== rules.plan_type_required) {
+      if (
+        (promoPlan.plan_type as unknown as string) !== rules.plan_type_required
+      ) {
         reasons.push('plan_type_mismatch');
       }
     }

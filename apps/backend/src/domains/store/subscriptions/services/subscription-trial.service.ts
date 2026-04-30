@@ -148,7 +148,9 @@ export class SubscriptionTrialService {
           auto_renew: false,
           resolved_features: Prisma.JsonNull,
           resolved_at: new Date(),
-          metadata: { reason: 'secondary_store_no_trial' } as Prisma.InputJsonValue,
+          metadata: {
+            reason: 'secondary_store_no_trial',
+          } as Prisma.InputJsonValue,
         },
       });
       return null;

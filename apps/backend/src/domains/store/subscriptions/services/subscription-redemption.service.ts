@@ -23,7 +23,10 @@ export class SubscriptionRedemptionService {
     });
 
     if (!plan) {
-      throw new VendixHttpException(ErrorCodes.PROMO_001, 'Invalid redemption code');
+      throw new VendixHttpException(
+        ErrorCodes.PROMO_001,
+        'Invalid redemption code',
+      );
     }
 
     if (plan.plan_type !== 'promotional' && !plan.is_promotional) {
@@ -51,7 +54,10 @@ export class SubscriptionRedemptionService {
 
     // Check global max_redemptions if set
     const promoRules = plan.promo_rules as Record<string, unknown> | null;
-    if (promoRules?.max_redemptions && typeof promoRules.max_redemptions === 'number') {
+    if (
+      promoRules?.max_redemptions &&
+      typeof promoRules.max_redemptions === 'number'
+    ) {
       const count = await this.prisma.redemption_consumptions.count({
         where: { plan_id: plan.id },
       });

@@ -981,7 +981,14 @@ export class OnboardingWizardService {
           await this.prismaService.domain_settings.findFirst({
             where: {
               hostname: storeHostname,
-              status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+              status: {
+                notIn: [
+                  'disabled',
+                  'failed_ownership',
+                  'failed_certificate',
+                  'failed_alias',
+                ],
+              },
             },
           });
 
@@ -1047,13 +1054,21 @@ export class OnboardingWizardService {
       const customDomain = setupAppConfigDto.custom_domain.toLowerCase().trim();
 
       // Check for ownership conflict
-      const existingCustom =
-        await this.prismaService.domain_settings.findFirst({
+      const existingCustom = await this.prismaService.domain_settings.findFirst(
+        {
           where: {
             hostname: customDomain,
-            status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+            status: {
+              notIn: [
+                'disabled',
+                'failed_ownership',
+                'failed_certificate',
+                'failed_alias',
+              ],
+            },
           },
-        });
+        },
+      );
 
       if (
         existingCustom &&

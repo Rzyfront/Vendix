@@ -276,14 +276,7 @@ export class ProductsService {
           }
 
           // Crear variantes si se proporcionan
-          // BLOCK: SERVICE products cannot have variants
           if (variants && variants.length > 0) {
-            if (createProductDto.product_type === ProductType.SERVICE) {
-              throw new VendixHttpException(
-                ErrorCodes.PROD_SVC_VARIANTS_001,
-                'Los productos tipo SERVICIO no pueden tener variantes',
-              );
-            }
             for (const variantData of variants) {
               const { variant_image_url, ...variantFields } = variantData;
               const createdVariant =
@@ -1202,15 +1195,6 @@ export class ProductsService {
 
       // Validate: variants require product to have SKU
       if (updateProductDto.variants && updateProductDto.variants.length > 0) {
-        // BLOCK: SERVICE products cannot have variants
-        const effectiveProductType =
-          updateProductDto.product_type ?? existingProduct.product_type;
-        if (effectiveProductType === ProductType.SERVICE) {
-          throw new VendixHttpException(
-            ErrorCodes.PROD_SVC_VARIANTS_001,
-            'Los productos tipo SERVICIO no pueden tener variantes',
-          );
-        }
         const productSku = updateProductDto.sku || existingProduct.sku;
         if (!productSku || productSku.trim() === '') {
           throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_002);

@@ -1017,10 +1017,16 @@ model product_variants {
   sale_price               Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
   track_inventory_override Boolean?
+  // Service-specific overrides (null = inherit from parent product)
+  service_duration_minutes Int?
+  service_pricing_type     service_pricing_type_enum?
+  buffer_minutes           Int?
+  preparation_time_minutes Int?
   attributes               Json?
   image_id                 Int?
   created_at               DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
+  bookings                 bookings[]
   inventory_adjustments    inventory_adjustments[]
   inventory_batches        inventory_batches[]
   inventory_movements      inventory_movements[]
@@ -4830,6 +4836,7 @@ model bookings {
   store_id                  Int
   customer_id               Int
   product_id                Int
+  product_variant_id        Int?
   booking_number            String              @db.VarChar(50)
   date                      DateTime            @db.Date
   start_time                String              @db.VarChar(5)
@@ -4851,6 +4858,7 @@ model bookings {
   store      stores             @relation(fields: [store_id], references: [id])
   customer   users              @relation("bookings_customer", fields: [customer_id], references: [id])
   product    products           @relation(fields: [product_id], references: [id])
+  product_variants   product_variants? @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   order      orders?            @relation(fields: [order_id], references: [id])
   created_by users?             @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
   provider   service_providers? @relation(fields: [provider_id], references: [id])
@@ -4864,7 +4872,7 @@ model bookings {
   @@unique([store_id, booking_number])
   @@index([store_id, date])
   @@index([store_id, status])
-  @@index([store_id, product_id, date])
+  @@index([store_id, product_id, product_variant_id, date])
   @@index([customer_id])
   @@index([provider_id])
   @@index([order_id])
@@ -5797,6 +5805,15 @@ enum notification_severity_enum {
   blocker
 }
 
+enum subscription_change_kind_enum {
+  initial
+  renewal
+  upgrade
+  downgrade
+  resubscribe
+  trial_conversion
+}
+
 model subscription_plans {
   id                      Int                             @id @default(autoincrement())
   code                    String                          @unique @db.VarChar(64)
@@ -5832,6 +5849,10 @@ model subscription_plans {
   store_subscriptions     store_subscriptions[]           @relation("store_sub_base_plan")
   promotional_store_subs  store_subscriptions[]           @relation("store_sub_promo_plan")
   scheduled_store_subs    store_subscriptions[]           @relation("store_sub_scheduled_plan")
+  paid_plan_subs          store_subscriptions[]           @relation("sub_paid_plan")
+  pending_plan_subs       store_subscriptions[]           @relation("sub_pending_plan")
+  invoice_from_subs       subscription_invoices[]         @relation("invoice_from_plan")
+  invoice_to_subs         subscription_invoices[]         @relation("invoice_to_plan")
   redemption_consumptions redemption_consumptions[]
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
@@ -5883,9 +5904,15 @@ model store_subscriptions {
   scheduled_cancel_at      DateTime?                     @db.Timestamp(6)
   // RNC-16/17: deferred plan change (downgrade end-of-period). Renewal cron
   // applies the swap when scheduled_plan_change_at <= now, then clears both.
-  scheduled_plan_change_at DateTime?                     @db.Timestamptz(6)
-  scheduled_plan_id        Int?
-  cancelled_at             DateTime?                     @db.Timestamp(6)
+  scheduled_plan_change_at  DateTime?                     @db.Timestamptz(6)
+  scheduled_plan_id         Int?
+  paid_plan_id              Int?
+  pending_plan_id           Int?
+  pending_change_invoice_id Int?
+  pending_change_kind       subscription_change_kind_enum?
+  pending_change_started_at DateTime?
+  pending_revert_state      store_subscription_state_enum?
+  cancelled_at              DateTime?                     @db.Timestamp(6)
   effective_price          Decimal                       @db.Decimal(12, 2)
   vendix_base_price        Decimal                       @db.Decimal(12, 2)
   partner_margin_amount    Decimal                       @default(0) @db.Decimal(12, 2)
@@ -5902,10 +5929,13 @@ model store_subscriptions {
   updated_at               DateTime                      @default(now()) @db.Timestamp(6)
 
   store            stores                         @relation(fields: [store_id], references: [id])
-  plan             subscription_plans?            @relation("store_sub_base_plan", fields: [plan_id], references: [id])
-  promotional_plan subscription_plans?            @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
-  scheduled_plan   subscription_plans?            @relation("store_sub_scheduled_plan", fields: [scheduled_plan_id], references: [id], onDelete: SetNull)
-  partner_override partner_plan_overrides?        @relation(fields: [partner_override_id], references: [id])
+  plan                   subscription_plans?            @relation("store_sub_base_plan", fields: [plan_id], references: [id])
+  promotional_plan       subscription_plans?            @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
+  scheduled_plan         subscription_plans?            @relation("store_sub_scheduled_plan", fields: [scheduled_plan_id], references: [id], onDelete: SetNull)
+  paid_plan              subscription_plans?            @relation("sub_paid_plan", fields: [paid_plan_id], references: [id], onDelete: SetNull)
+  pending_plan           subscription_plans?            @relation("sub_pending_plan", fields: [pending_plan_id], references: [id], onDelete: SetNull)
+  pending_change_invoice subscription_invoices?         @relation("sub_pending_invoice", fields: [pending_change_invoice_id], references: [id], onDelete: SetNull)
+  partner_override       partner_plan_overrides?        @relation(fields: [partner_override_id], references: [id])
   replaced_by      store_subscriptions?           @relation("store_sub_lineage", fields: [replaced_by_id], references: [id])
   replaces         store_subscriptions[]          @relation("store_sub_lineage")
   invoices         subscription_invoices[]
@@ -5921,6 +5951,8 @@ model store_subscriptions {
   @@index([next_billing_at])
   @@index([promotional_plan_id])
   @@index([scheduled_plan_change_at])
+  @@index([paid_plan_id])
+  @@index([pending_plan_id])
 }
 
 model subscription_invoices {
@@ -5945,14 +5977,23 @@ model subscription_invoices {
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
 
-  store_subscription store_subscriptions         @relation(fields: [store_subscription_id], references: [id])
-  payments           subscription_payments[]
-  commission         partner_commissions?
-  commission_accrual commission_accrual_pending?
+  from_plan_id Int?
+  from_plan    subscription_plans?            @relation("invoice_from_plan", fields: [from_plan_id], references: [id], onDelete: SetNull)
+  to_plan_id   Int?
+  to_plan      subscription_plans?            @relation("invoice_to_plan", fields: [to_plan_id], references: [id], onDelete: SetNull)
+  change_kind  subscription_change_kind_enum?
+
+  store_subscription            store_subscriptions         @relation(fields: [store_subscription_id], references: [id])
+  pending_for_subscriptions     store_subscriptions[]       @relation("sub_pending_invoice")
+  payments                      subscription_payments[]
+  commission                    partner_commissions?
+  commission_accrual            commission_accrual_pending?
 
   @@index([state, due_at])
   @@index([store_id])
   @@index([partner_organization_id, state])
+  @@index([from_plan_id])
+  @@index([to_plan_id])
 }
 
 model subscription_payments {
@@ -6032,6 +6073,9 @@ model subscription_payment_methods {
   replaced_by_id        Int?
   replaced_at           DateTime?                              @db.Timestamp(6)
   metadata              Json?
+  provider_payment_source_id String?                           @db.VarChar(64)
+  acceptance_token_used      String?                           @db.Text
+  cof_registered_at          DateTime?                         @db.Timestamp(6)
   created_at            DateTime                               @default(now()) @db.Timestamp(6)
   updated_at            DateTime                               @default(now()) @db.Timestamp(6)
 
@@ -6042,6 +6086,7 @@ model subscription_payment_methods {
 
   @@index([store_id, state])
   @@index([store_subscription_id, is_default])
+  @@index([store_id, provider_payment_source_id], map: "idx_spm_store_psid")
 }
 
 model subscription_events {

@@ -18,8 +18,29 @@ import {
 import { WompiService } from '../../../../../../shared/services/wompi.service';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 
+/**
+ * Fase 4 (Wompi recurrent migration) — emitted by the widget after a
+ * successful card tokenization. The shape mirrors what the backend
+ * `POST /subscriptions/payment-methods/tokenize` endpoint expects so the
+ * server can register the card as a Wompi `payment_source` (COF) using
+ * the user-accepted legal tokens.
+ *
+ * IMPORTANT contract notes:
+ *  - `card_token` is the `tok_*` from `transaction.payment_method.token`
+ *    (the actual card token), NEVER `transaction.id` (the transaction id).
+ *  - `acceptance_token` / `personal_auth_token` MUST be bit-exact to the
+ *    ones the user saw + accepted in the widget. The frontend echoes back
+ *    the values received in `widgetConfig` because Wompi requires the
+ *    exact token strings on the `payment_sources` POST (any mutation
+ *    fails with "acceptance_token does not correspond to merchant key").
+ */
 export interface WompiTokenizeResult {
-  provider_token: string;
+  /** tok_* from the payment_method.token of the Wompi widget result. */
+  card_token: string;
+  /** Bit-exact acceptance_token shown to the user in the widget. */
+  acceptance_token: string;
+  /** Bit-exact personal data auth token shown to the user. */
+  personal_auth_token: string;
   type: string;
   last4?: string;
   brand?: string;
@@ -36,6 +57,14 @@ export interface WompiWidgetConfig {
   signature_integrity: string;
   redirect_url: string;
   customer_email: string;
+  /**
+   * Provided by the backend `prepareWidgetConfig` (Fase 5). The widget
+   * displays these to the user via the Wompi legal-acceptance checkbox
+   * and the FE echoes them back inside `WompiTokenizeResult` so the
+   * tokenize endpoint can register the COF source bit-exact.
+   */
+  acceptance_token?: string;
+  personal_auth_token?: string;
 }
 
 @Component({
@@ -217,8 +246,28 @@ export class WompiCardWidgetComponent {
           const paymentMethod = transaction.payment_method ?? {};
           const extra = paymentMethod.extra ?? {};
 
+          // Fase 4 (Wompi recurrent migration): emit the actual `tok_*`
+          // card token (paymentMethod.token), NOT transaction.id. We also
+          // echo back the acceptance/personal_auth tokens received in
+          // widgetConfig so the backend can register the card as a
+          // Wompi `payment_source` (COF). Wompi requires these strings
+          // bit-exact (any mutation fails with "acceptance_token does
+          // not correspond to merchant key").
+          //
+          // Some Wompi sandbox responses surface the card token under
+          // `payment_method_token` instead of `payment_method.token`, so
+          // we fall back defensively. Format is whatever Wompi returns —
+          // we never reformat or assume `tok_*` prefix.
+          const cardToken =
+            paymentMethod.token ??
+            transaction.payment_method_token ??
+            '';
+
           this.tokenized.emit({
-            provider_token: transaction.id,
+            card_token: cardToken,
+            acceptance_token: this.widgetConfig?.acceptance_token ?? '',
+            personal_auth_token:
+              this.widgetConfig?.personal_auth_token ?? '',
             type: 'card',
             last4: extra.last_four ?? '',
             brand: extra.brand ?? '',

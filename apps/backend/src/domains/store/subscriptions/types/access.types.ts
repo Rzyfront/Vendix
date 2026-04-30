@@ -49,6 +49,10 @@ export interface ResolvedSubscription {
   state: store_subscription_state_enum;
   planId: number | null;
   planCode: string;
+  /** The plan for which a payment has been confirmed. Source of truth for feature gating. */
+  paidPlanId: number | null;
+  /** The plan the store has selected but not yet paid (upgrade pending payment). */
+  pendingPlanId: number | null;
   partnerOrgId: number | null;
   overlayActive: boolean;
   overlayExpiresAt: Date | null;

@@ -45,6 +45,11 @@ export class CreateBookingDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
+  product_variant_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
   order_id?: number;
 
   @IsOptional()

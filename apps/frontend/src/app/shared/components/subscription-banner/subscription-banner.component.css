@@ -110,6 +110,14 @@
 
 /* ===== Severity palettes ===== */
 
+/* Defense in depth: if level() ever returns 'none' while visible() is true,
+   collapse the element rather than render a transparent ghost banner. The
+   correct fix lives in the component logic (level/copy aligned with the
+   unified UI-state selector); this rule only protects against future drift. */
+.sub-banner--none {
+  display: none;
+}
+
 .sub-banner--info {
   background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
   border-color: rgba(59, 130, 246, 0.25);

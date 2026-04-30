@@ -73,7 +73,9 @@ describe('SubscriptionWebhookReconcilerJob', () => {
         id: 100,
         store_subscription_id: 7,
         store_id: 5,
-        payments: [{ id: 1, gateway_reference: 'vendix_saas_ref_1', metadata: null }],
+        payments: [
+          { id: 1, gateway_reference: 'vendix_saas_ref_1', metadata: null },
+        ],
       },
     ]);
     getTransactionByReferenceWithConfig.mockResolvedValue({
@@ -91,7 +93,10 @@ describe('SubscriptionWebhookReconcilerJob', () => {
       invoiceId: 100,
       body: {
         data: {
-          transaction: expect.objectContaining({ id: 'wompi_txn_999', status: 'APPROVED' }),
+          transaction: expect.objectContaining({
+            id: 'wompi_txn_999',
+            status: 'APPROVED',
+          }),
         },
       },
     });

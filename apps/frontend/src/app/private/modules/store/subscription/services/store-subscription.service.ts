@@ -208,8 +208,20 @@ export class StoreSubscriptionService {
     return this.http.get<ApiResponse<any>>(this.getApiUrl('payment-methods/widget-config'));
   }
 
+  /**
+   * Fase 4 (Wompi recurrent migration) — register a new tokenized card.
+   *
+   * Payload contract (mirrors backend `TokenizePaymentMethodDto`):
+   *  - `card_token`: the `tok_*` from the Wompi widget
+   *    (`transaction.payment_method.token`), NOT `transaction.id`.
+   *  - `acceptance_token` + `personal_auth_token`: bit-exact strings the
+   *    user accepted in the widget. Required by Wompi to register the
+   *    card as a recurrent `payment_source` (COF).
+   */
   addPaymentMethod(data: {
-    provider_token: string;
+    card_token: string;
+    acceptance_token: string;
+    personal_auth_token: string;
     type?: string;
     last4?: string;
     brand?: string;
@@ -264,13 +276,32 @@ export class StoreSubscriptionService {
   }
 
   /**
+   * RNC-PaidPlan — Cancela un cambio de plan pendiente de pago.
+   * Revierte pending_plan_id a null y anula el invoice pendiente.
+   * Backend endpoint: DELETE /store/subscriptions/checkout/pending-change
+   *
+   * Errores esperados:
+   *  - SUBSCRIPTION_001 (404) — no existe subscripción activa
+   *  - SUBSCRIPTION_010 (409) — no hay cambio pendiente que cancelar
+   */
+  cancelPendingChange(): Observable<{ success: boolean; reverted_to_state: string }> {
+    return this.http
+      .delete<ApiResponse<{ success: boolean; reverted_to_state: string }>>(
+        this.getApiUrl('checkout/pending-change'),
+      )
+      .pipe(map((res) => res.data as { success: boolean; reverted_to_state: string }));
+  }
+
+  /**
    * G11 — Replace a tokenized payment method (soft-delete old, create new).
    * Backend transfers the `is_default` flag and audits the replacement.
    */
   replacePaymentMethod(
     id: string,
     data: {
-      provider_token: string;
+      card_token: string;
+      acceptance_token: string;
+      personal_auth_token: string;
       type?: string;
       last4?: string;
       brand?: string;

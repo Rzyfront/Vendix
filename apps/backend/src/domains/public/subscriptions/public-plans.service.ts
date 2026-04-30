@@ -24,9 +24,10 @@ function pickPublicFeatures(
 ): Record<string, unknown> {
   if (!matrix || typeof matrix !== 'object') return {};
   return Object.fromEntries(
-    PUBLIC_AI_FEATURE_KEYS
-      .filter((key) => key in matrix)
-      .map((key) => [key, matrix[key]]),
+    PUBLIC_AI_FEATURE_KEYS.filter((key) => key in matrix).map((key) => [
+      key,
+      matrix[key],
+    ]),
   );
 }
 

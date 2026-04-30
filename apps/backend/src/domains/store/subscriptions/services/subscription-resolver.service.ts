@@ -22,6 +22,10 @@ interface CachedPayload {
   state: ResolvedSubscription['state'] | null;
   planId: number | null;
   planCode: string | null;
+  /** The plan for which a payment has been confirmed. Source of truth for feature gating. */
+  paidPlanId: number | null;
+  /** The plan the store has selected but not yet paid (upgrade pending payment). */
+  pendingPlanId: number | null;
   partnerOrgId: number | null;
   overlayActive: boolean;
   overlayExpiresAt: string | null;
@@ -114,6 +118,8 @@ export class SubscriptionResolverService {
         state: payload.state ?? 'draft',
         planId: payload.planId ?? null,
         planCode: payload.planCode ?? '',
+        paidPlanId: payload.paidPlanId ?? null,
+        pendingPlanId: payload.pendingPlanId ?? null,
         partnerOrgId: payload.partnerOrgId,
         overlayActive: payload.overlayActive,
         overlayExpiresAt: payload.overlayExpiresAt
@@ -145,6 +151,8 @@ export class SubscriptionResolverService {
         state: resolved.state,
         planId: resolved.planId,
         planCode: resolved.planCode,
+        paidPlanId: resolved.paidPlanId,
+        pendingPlanId: resolved.pendingPlanId,
         partnerOrgId: resolved.partnerOrgId,
         overlayActive: resolved.overlayActive,
         overlayExpiresAt: resolved.overlayExpiresAt
@@ -196,6 +204,8 @@ export class SubscriptionResolverService {
         state: 'draft',
         planId: null,
         planCode: '',
+        paidPlanId: null,
+        pendingPlanId: null,
         partnerOrgId: null,
         overlayActive: false,
         overlayExpiresAt: null,
@@ -216,6 +226,8 @@ export class SubscriptionResolverService {
         state: sub.state,
         planId: null,
         planCode: '',
+        paidPlanId: sub.paid_plan_id ?? null,
+        pendingPlanId: sub.pending_plan_id ?? null,
         partnerOrgId: sub.partner_override?.organization_id ?? null,
         overlayActive: false,
         overlayExpiresAt: null,
@@ -260,8 +272,12 @@ export class SubscriptionResolverService {
       found: true,
       storeId,
       state: sub.state,
-      planId: sub.plan_id,
+      // ADR: paid_plan_id is the source of truth for feature gating.
+      // Trial carve-out: trial subs have no paid invoice yet; use plan_id (trial grant).
+      planId: sub.paid_plan_id ?? (sub.state === 'trial' ? sub.plan_id : null),
       planCode: sub.plan.code,
+      paidPlanId: sub.paid_plan_id ?? null,
+      pendingPlanId: sub.pending_plan_id ?? null,
       partnerOrgId: sub.partner_override?.organization_id ?? null,
       overlayActive,
       overlayExpiresAt,

@@ -7,9 +7,7 @@ import { Job } from 'bullmq';
 import { EmailNotificationsProcessor } from './email-notifications.processor';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { EmailService } from '../email/email.service';
-import {
-  __NO_REFUND_NOTICE__,
-} from '../email/templates/subscription-emails';
+import { __NO_REFUND_NOTICE__ } from '../email/templates/subscription-emails';
 
 describe('EmailNotificationsProcessor', () => {
   let processor: EmailNotificationsProcessor;
@@ -261,9 +259,7 @@ describe('EmailNotificationsProcessor', () => {
         storeId: 10,
       });
 
-      await expect(processor.process(job)).rejects.toThrow(
-        /EMAIL_SEND_FAILED/,
-      );
+      await expect(processor.process(job)).rejects.toThrow(/EMAIL_SEND_FAILED/);
     });
 
     it('returns success:false for unknown job names without throwing', async () => {

@@ -281,6 +281,46 @@
   animation: paywall-pulse-soft 1.8s ease-in-out infinite;
 }
 
+/* ===== Success — celebratory transitional state ===== */
+
+.severity-success {
+  --paywall-bg-from: #d1fae5;
+  --paywall-bg-to: #ffffff;
+  --paywall-glow: rgba(16, 185, 129, 0.45);
+  --paywall-icon-bg: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --paywall-icon-shadow: rgba(16, 185, 129, 0.6);
+  --paywall-halo: rgba(16, 185, 129, 0.45);
+  --paywall-benefits-bg: rgba(16, 185, 129, 0.08);
+  --paywall-benefits-border: rgba(16, 185, 129, 0.25);
+  --paywall-check-bg: rgba(16, 185, 129, 0.18);
+  --paywall-check-color: #059669;
+  --paywall-cta-gradient: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  --paywall-cta-shadow: rgba(16, 185, 129, 0.55);
+}
+
+.severity-success .paywall-hero-halo {
+  animation: paywall-halo-success 1.2s ease-out forwards;
+}
+
+/* SVG checkmark — draw-on effect via stroke-dashoffset. */
+.paywall-success-checkmark {
+  width: 56px;
+  height: 56px;
+  color: #ffffff;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+}
+
+.paywall-success-checkmark circle,
+.paywall-success-checkmark path {
+  stroke-dasharray: 200;
+  stroke-dashoffset: 200;
+  animation: paywall-success-draw 0.7s ease-out forwards;
+}
+
+.paywall-success-checkmark path {
+  animation-delay: 0.3s;
+}
+
 /* ===== Animations ===== */
 
 @keyframes paywall-halo-pulse {
@@ -293,10 +333,28 @@
   50% { box-shadow: 0 22px 48px -14px var(--paywall-icon-shadow, rgba(239, 68, 68, 0.85)); }
 }
 
-/* Reduced motion: no halo pulse, no critical pulse. */
+/* Burst-like radial pulse for the payment-success microinteraction. Plays
+   once, decays — pairs with the checkmark draw-on. */
+@keyframes paywall-halo-success {
+  0%   { opacity: 0.9; transform: scale(0.6); }
+  40%  { opacity: 1;   transform: scale(1.25); }
+  100% { opacity: 0.55; transform: scale(1); }
+}
+
+@keyframes paywall-success-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Reduced motion: no halo pulse, no critical pulse, no success burst. */
 @media (prefers-reduced-motion: reduce) {
   .paywall-hero-halo,
-  .severity-critical .paywall-hero-icon {
+  .severity-critical .paywall-hero-icon,
+  .severity-success .paywall-hero-halo {
+    animation: none;
+  }
+  .paywall-success-checkmark circle,
+  .paywall-success-checkmark path {
+    stroke-dashoffset: 0;
     animation: none;
   }
 }

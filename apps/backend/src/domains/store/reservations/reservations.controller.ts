@@ -87,7 +87,10 @@ export class ReservationsController {
       productId,
       query.date_from,
       query.date_to,
-      providerId ? parseInt(providerId, 10) : undefined,
+      {
+        provider_id: providerId ? parseInt(providerId, 10) : undefined,
+        product_variant_id: query.product_variant_id,
+      },
     );
     return this.responseService.success(
       result,

@@ -47,8 +47,7 @@ export class CloudFrontService {
   private readonly client: CloudFrontClient;
 
   constructor(private readonly configService: ConfigService) {
-    const region =
-      this.configService.get<string>('AWS_REGION') || 'us-east-1';
+    const region = this.configService.get<string>('AWS_REGION') || 'us-east-1';
     this.client = new CloudFrontClient({ region });
   }
 
@@ -120,7 +119,10 @@ export class CloudFrontService {
         status: response.Distribution.Status ?? 'Unknown',
       };
     } catch (error) {
-      this.handleAwsError(error, `updateDistribution(${params.distributionId})`);
+      this.handleAwsError(
+        error,
+        `updateDistribution(${params.distributionId})`,
+      );
     }
   }
 
@@ -128,9 +130,7 @@ export class CloudFrontService {
    * Returns deployment status + current aliases for the distribution.
    * Use this to wait for Status === 'Deployed' after a config change.
    */
-  async getDistribution(
-    distributionId: string,
-  ): Promise<DistributionStatus> {
+  async getDistribution(distributionId: string): Promise<DistributionStatus> {
     try {
       const response = await this.client.send(
         new GetDistributionCommand({ Id: distributionId }),
@@ -215,7 +215,8 @@ export class CloudFrontService {
         updatedConfig.ViewerCertificate = {
           ...(config.ViewerCertificate ?? {}),
           ACMCertificateArn: acmCertificateArn,
-          SSLSupportMethod: config.ViewerCertificate?.SSLSupportMethod ?? 'sni-only',
+          SSLSupportMethod:
+            config.ViewerCertificate?.SSLSupportMethod ?? 'sni-only',
           MinimumProtocolVersion:
             config.ViewerCertificate?.MinimumProtocolVersion ?? 'TLSv1.2_2021',
           CloudFrontDefaultCertificate: false,
@@ -257,8 +258,11 @@ export class CloudFrontService {
 
     // Unreachable in practice — loop above either returns or throws — but guard
     // against the type-narrowing edge so TypeScript is happy without `!`.
-    throw lastError ?? new InternalServerErrorException(
-      `addAliasesToDistribution exhausted ${UPDATE_MAX_ATTEMPTS} attempts`,
+    throw (
+      lastError ??
+      new InternalServerErrorException(
+        `addAliasesToDistribution exhausted ${UPDATE_MAX_ATTEMPTS} attempts`,
+      )
     );
   }
 
@@ -298,9 +302,7 @@ export class CloudFrontService {
           `CloudFront invalid argument: ${message}`,
         );
       case 'AccessDenied':
-        throw new BadRequestException(
-          `CloudFront access denied: ${message}`,
-        );
+        throw new BadRequestException(`CloudFront access denied: ${message}`);
       default:
         throw new InternalServerErrorException(
           `CloudFront operation failed (${name}): ${message}`,

@@ -1,8 +1,4 @@
-import {
-  CanActivate,
-  ExecutionContext,
-  Injectable,
-} from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '../../context/request-context.service';

@@ -527,30 +527,29 @@
             >
             </app-setting-toggle>
 
-            <!-- Row 2: Variantes + Inventario (solo productos físicos) -->
-            @if (!isService) {
-              <div>
-                <app-setting-toggle
-                  [ngModel]="hasVariants"
-                  (ngModelChange)="toggleVariants($event)"
-                  [ngModelOptions]="{ standalone: true }"
-                  label="Este producto tiene variantes"
-                  description="Agrega opciones como tamaño, color o material"
+            <!-- Row 2: Variantes + Inventario -->
+            <div>
+              <app-setting-toggle
+                [ngModel]="hasVariants"
+                (ngModelChange)="toggleVariants($event)"
+                [ngModelOptions]="{ standalone: true }"
+                label="Este producto tiene variantes"
+                [description]="isService ? 'Agrega opciones como duración o precio' : 'Agrega opciones como tamaño, color o material'"
+              >
+              </app-setting-toggle>
+              @if (
+                !hasVariants &&
+                (!productForm.get("sku")?.value ||
+                  productForm.get("sku")?.value.trim() === "")
+              ) {
+                <p
+                  class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
                 >
-                </app-setting-toggle>
-                @if (
-                  !hasVariants &&
-                  (!productForm.get("sku")?.value ||
-                    productForm.get("sku")?.value.trim() === "")
-                ) {
-                  <p
-                    class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
-                  >
-                    <app-icon name="alert-triangle" size="10"></app-icon>
-                    Configura un SKU para habilitar variantes
-                  </p>
-                }
-              </div>
+                  <app-icon name="alert-triangle" size="10"></app-icon>
+                  Configura un SKU para habilitar variantes
+                </p>
+              }
+            </div>
 
               <app-setting-toggle
                 formControlName="track_inventory"
@@ -562,20 +561,6 @@
                 "
               >
               </app-setting-toggle>
-            } @else {
-              <div
-                class="flex items-center gap-2 px-3 py-2.5 mt-3 bg-purple-50 rounded-xl border border-purple-200 md:col-span-2"
-              >
-                <app-icon
-                  name="briefcase"
-                  size="16"
-                  class="text-purple-600"
-                ></app-icon>
-                <span class="text-sm text-purple-700 font-medium"
-                  >Servicio — siempre disponible</span
-                >
-              </div>
-            }
           </div>
         </section>
 

@@ -310,6 +310,61 @@ interface WebhookEvent {
 
 ---
 
+## Wompi Recurrent Charges: `transaction.id` is NOT a recurring token
+
+### Anti-pattern (DO NOT)
+
+Reusing a Wompi `transaction.id` from the first APPROVED transaction as `payment_method.token` for subsequent charges. Works in sandbox by accident; production may reject it. Violates PCI-DSS COF/MIT framing — exposes merchant to chargeback codes 4837/4863.
+
+### Correct pattern (Wompi recurring billing)
+
+**1. Tokenization (one-time, user-present):**
+
+1. Frontend opens `WidgetCheckout` with `acceptance_token` + `personal_auth_token` from backend `prepareWidgetConfig`.
+2. Widget returns `paymentMethod.token` (`tok_*` — the real card token, NOT `transaction.id`) plus the `acceptance_token`/`personal_auth_token` shown to the user.
+3. Backend calls `WompiClient.createPaymentSource({ type: 'CARD', token, acceptance_token, accept_personal_auth, customer_email }, idempotencyKey)`.
+4. Backend persists `provider_payment_source_id` (stable, MIT-compliant) AND `acceptance_token_used` (legal trail of consent — same `acceptance_token` shown to the user, NOT a fresh one).
+
+**2. Recurring charge (merchant-initiated, no SCA):**
+
+- POST `/v1/transactions` with `{ payment_source_id, recurrent: true }`. Do NOT include `payment_method` (mutually exclusive).
+- The `acceptance_token` requested for this transaction can be a fresh one — the legal trail of the COF is already on the payment method record.
+
+**3. Schema requirement:**
+
+`subscription_payment_methods` must have:
+
+- `provider_payment_source_id varchar(64)` — the stable ID for charges
+- `acceptance_token_used text` — the consent trail
+- `cof_registered_at timestamp(6)` — when COF was registered
+
+### Error handling
+
+| Wompi response | Map to | Action |
+|---|---|---|
+| `INVALID_PAYMENT_SOURCE` (any HTTP) | `errorCode='PAYMENT_SOURCE_REVOKED'` | Mark PM `state='invalid'`, `consecutive_failures=0`, `replaced_at=now()`. Emit `payment_method_revoked` event. **Do NOT bump counter** — it's an issuer revocation, not a customer fail. Failover to another active PM if exists. |
+| `404` on `/payment_sources/:id` | `errorCode='PAYMENT_SOURCE_NOT_FOUND'` | Same as above. |
+| `401 INVALID_ACCEPTANCE_TOKEN` on `/payment_sources` | `WompiInvalidAcceptanceTokenError` → `PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN` | Token expired (TTL 30min). Refetch via `prepareWidgetConfig` and retry tokenization. |
+
+### Rollout
+
+Behind env flag `WOMPI_RECURRENT_ENFORCE`:
+
+- `false` (default, log-only): legacy PMs (`provider_token` only) continue working with structured warning `WOMPI_LEGACY_TOKEN_USED`. Used during migration ramp.
+- `true` (enforce): legacy PMs throw `PAYMENT_METHOD_NOT_MIGRATED` (HTTP 412), forcing re-tokenization.
+
+Telemetry: log line `WOMPI_CHARGE_PATH path=recurrent|legacy|no_pm|recurrent_failover` per charge attempt — used to compare approval rates between paths during ramp (target: `recurrent.approval_rate >= legacy.approval_rate + 5%`).
+
+### Reference
+
+- Plan: `~/.claude/plans/analiza-el-sistema-de-soft-harp.md`
+- Processor: `apps/backend/src/domains/store/payments/processors/wompi/wompi.processor.ts`
+- Config flag: `apps/backend/src/domains/store/payments/config/wompi-rollout.config.ts`
+- Charge logic: `apps/backend/src/domains/store/subscriptions/services/subscription-payment.service.ts` (look for `chargeInvoice` and `handleRevokedPaymentSource`)
+- Bruno tests: `bruno/subscriptions/47-wompi-recurrent-flow.bru`, `48-wompi-webhook-idempotent.bru`, `49-wompi-recurrent-revoked.bru`
+
+---
+
 ## Related Skills
 
 - `vendix-backend` — General NestJS patterns

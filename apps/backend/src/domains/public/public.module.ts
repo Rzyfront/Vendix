@@ -15,10 +15,6 @@ import { PublicPlansModule } from './subscriptions/public-plans.module';
  * - PublicPlansModule: SaaS pricing plans (rate-limited, public-safe fields only)
  */
 @Module({
-  imports: [
-    PublicDomainsModule,
-    PublicSeoModule,
-    PublicPlansModule,
-  ],
+  imports: [PublicDomainsModule, PublicSeoModule, PublicPlansModule],
 })
 export class PublicDomainModule {}

@@ -4,10 +4,7 @@ import { Prisma } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import {
-  InvoiceLineItem,
-  InvoiceSplitBreakdown,
-} from '../types/billing.types';
+import { InvoiceLineItem, InvoiceSplitBreakdown } from '../types/billing.types';
 
 /**
  * S3.1 — Generates a customer-facing PDF for SaaS subscription invoices.
@@ -35,7 +32,10 @@ export class SubscriptionInvoicePdfService {
 
   constructor(private readonly prisma: GlobalPrismaService) {}
 
-  async generatePdf(invoiceId: number, storeId: number): Promise<{
+  async generatePdf(
+    invoiceId: number,
+    storeId: number,
+  ): Promise<{
     buffer: Buffer;
     filename: string;
   }> {
@@ -211,8 +211,7 @@ export class SubscriptionInvoicePdfService {
         const badgeText = this.stateLabel(ctx.invoice.state).toUpperCase();
         const badgeWidth = 110;
         const badgeHeight = 26;
-        const badgeX =
-          doc.page.width - doc.page.margins.right - badgeWidth;
+        const badgeX = doc.page.width - doc.page.margins.right - badgeWidth;
         doc
           .save()
           .roundedRect(badgeX, metaTop, badgeWidth, badgeHeight, 4)
@@ -411,11 +410,7 @@ export class SubscriptionInvoicePdfService {
 
     // Header
     const headerTop = doc.y;
-    doc
-      .save()
-      .rect(left, headerTop, tableWidth, 22)
-      .fill('#F1F5F9')
-      .restore();
+    doc.save().rect(left, headerTop, tableWidth, 22).fill('#F1F5F9').restore();
     doc
       .fillColor('#475569')
       .font('Helvetica-Bold')
@@ -545,11 +540,9 @@ export class SubscriptionInvoicePdfService {
     });
 
     if (this.toDecimal(money.amount_paid).gt(0)) {
-      drawRow(
-        'Pagado',
-        this.formatMoney(money.amount_paid, money.currency),
-        { bold: true },
-      );
+      drawRow('Pagado', this.formatMoney(money.amount_paid, money.currency), {
+        bold: true,
+      });
       const balance = this.toDecimal(money.total).sub(
         this.toDecimal(money.amount_paid),
       );

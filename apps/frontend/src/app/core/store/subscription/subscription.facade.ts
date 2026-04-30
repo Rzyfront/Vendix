@@ -6,6 +6,52 @@ import * as SubscriptionSelectors from './subscription.selectors';
 import { SubscriptionState } from './subscription.reducer';
 import { DunningState, AppliedCoupon, CouponValidationReason } from './subscription.actions';
 
+/**
+ * Discriminated union describing the single, mutually-exclusive subscription
+ * UI state. Consumed by banners, pills, top alerts, and sidebar — every
+ * surface reads `subscriptionUiState().kind` instead of computing its own
+ * combination of flags. Resolution is a strict cascade (first-match-wins) so
+ * two surfaces never disagree about what the user should see.
+ */
+export type SubscriptionUiState =
+  | { kind: 'healthy' }
+  | { kind: 'pending_initial_payment'; planName: string; invoiceId: number | null }
+  | {
+      kind: 'pending_change_abandoned';
+      fromPlanName: string;
+      toPlanName: string;
+      invoiceId: number | null;
+    }
+  | { kind: 'grace_soft'; daysRemaining: number }
+  | { kind: 'grace_hard'; daysRemaining: number }
+  | { kind: 'expiring_soon'; daysUntilRenewal: number }
+  | { kind: 'cancelled' }
+  | { kind: 'no_plan' };
+
+const EXPIRING_SOON_THRESHOLD_DAYS = 7;
+
+function daysBetween(future: string | Date | null | undefined): number {
+  if (!future) return 0;
+  const ts = typeof future === 'string' ? new Date(future).getTime() : future.getTime();
+  if (Number.isNaN(ts)) return 0;
+  return Math.max(0, Math.ceil((ts - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
+const DAY_MS = 1000 * 60 * 60 * 24;
+
+function graceDeadline(
+  sub: any,
+  untilField: string,
+  fallbackDaysField: string,
+): Date | null {
+  if (sub[untilField]) return new Date(sub[untilField]);
+  const periodEnd = sub.current_period_end;
+  if (!periodEnd) return null;
+  const plan: any = sub.paid_plan ?? sub.plan;
+  const days = Number(plan?.[fallbackDaysField] ?? 0);
+  return new Date(new Date(periodEnd).getTime() + days * DAY_MS);
+}
+
 @Injectable({ providedIn: 'root' })
 export class SubscriptionFacade {
   private store = inject(Store<SubscriptionState>);
@@ -110,6 +156,79 @@ export class SubscriptionFacade {
   readonly isInGrace = computed(() => {
     const s = this.status();
     return s === 'grace_soft' || s === 'grace_hard';
+  });
+
+  /**
+   * RNC-PaidPlan — Single source of truth for "what should the UI tell the
+   * user about their subscription right now". Cascade order is significant:
+   * grace and terminal lifecycle states win over any pending-change concern
+   * because they describe a more disruptive condition. See ADR-1 in the
+   * implementation plan for the rationale.
+   */
+  readonly subscriptionUiState = computed<SubscriptionUiState>(() => {
+    const sub: any = this.current();
+    if (!sub) return { kind: 'healthy' };
+
+    const state = sub.state ?? this.status();
+
+    if (state === 'grace_hard') {
+      return {
+        kind: 'grace_hard',
+        daysRemaining: daysBetween(graceDeadline(sub, 'grace_hard_until', 'grace_period_hard_days')),
+      };
+    }
+    if (state === 'grace_soft') {
+      return {
+        kind: 'grace_soft',
+        daysRemaining: daysBetween(graceDeadline(sub, 'grace_soft_until', 'grace_period_soft_days')),
+      };
+    }
+    if (state === 'cancelled' || state === 'expired') {
+      return { kind: 'cancelled' };
+    }
+    if (state === 'no_plan') {
+      return { kind: 'no_plan' };
+    }
+
+    const paidPlanId = sub.paid_plan_id ?? null;
+    const pendingPlanId = sub.pending_plan_id ?? null;
+    const pendingInvoiceId =
+      typeof sub.pending_change_invoice_id === 'number'
+        ? sub.pending_change_invoice_id
+        : null;
+    const planName: string =
+      sub.paid_plan?.name ?? sub.plan?.name ?? sub.plan_name ?? 'Plan';
+    const pendingPlanName: string =
+      sub.pending_plan?.name ?? planName;
+
+    if (paidPlanId == null && pendingPlanId != null) {
+      return {
+        kind: 'pending_initial_payment',
+        planName: pendingPlanName,
+        invoiceId: pendingInvoiceId,
+      };
+    }
+    if (
+      paidPlanId != null &&
+      pendingPlanId != null &&
+      pendingPlanId !== paidPlanId
+    ) {
+      return {
+        kind: 'pending_change_abandoned',
+        fromPlanName: planName,
+        toPlanName: pendingPlanName,
+        invoiceId: pendingInvoiceId,
+      };
+    }
+
+    if (state === 'active') {
+      const daysUntilRenewal = daysBetween(sub.next_billing_at);
+      if (daysUntilRenewal > 0 && daysUntilRenewal <= EXPIRING_SOON_THRESHOLD_DAYS) {
+        return { kind: 'expiring_soon', daysUntilRenewal };
+      }
+    }
+
+    return { kind: 'healthy' };
   });
 
   /**

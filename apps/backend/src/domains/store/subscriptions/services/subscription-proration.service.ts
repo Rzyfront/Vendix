@@ -90,6 +90,72 @@ export class SubscriptionProrationService {
     return this.apply(subscriptionId, newPlanId);
   }
 
+  /**
+   * Returns pricing baseline for the subscription's currently confirmed paid
+   * plan. Loads `paid_plan_id`'s plan and computes effective price applying
+   * the same partner_override as the live subscription. The plan's base price
+   * (with margin) is the canonical "what the customer pays per cycle"; we
+   * deliberately do NOT use the last invoice total here — invoices for
+   * upgrade/downgrade store prorated DELTAS, not nominal prices, so reading
+   * `invoice.total` would give a wrong baseline whenever the most recent
+   * invoice was a mid-cycle change.
+   *
+   * Returns null when there is no confirmed paid plan (paid_plan_id is null),
+   * which the caller treats as a free origin per RNC-15.
+   */
+  async getPaidBaseline(
+    _subId: number,
+    paidPlanId: number | null,
+    partnerOverride?: {
+      organization_id: number;
+      margin_pct: Prisma.Decimal;
+      fixed_surcharge: Prisma.Decimal;
+      is_active: boolean;
+      base_plan: {
+        id: number;
+        base_price: Prisma.Decimal;
+        max_partner_margin_pct: Prisma.Decimal;
+      } | null;
+    } | null,
+  ): Promise<{
+    planId: number | null;
+    effectivePrice: Prisma.Decimal;
+    basePrice: Prisma.Decimal;
+    marginAmount: Prisma.Decimal;
+  } | null> {
+    if (!paidPlanId) return null;
+
+    const paidPlan = await this.prisma.subscription_plans.findUnique({
+      where: { id: paidPlanId },
+    });
+    if (!paidPlan) return null;
+
+    const subShape = {
+      plan: {
+        id: paidPlan.id,
+        base_price: paidPlan.base_price,
+        max_partner_margin_pct: paidPlan.max_partner_margin_pct,
+      },
+      partner_override: partnerOverride
+        ? {
+            organization_id: partnerOverride.organization_id,
+            margin_pct: partnerOverride.margin_pct,
+            fixed_surcharge: partnerOverride.fixed_surcharge,
+            is_active: partnerOverride.is_active,
+            base_plan: partnerOverride.base_plan,
+          }
+        : null,
+    };
+    const pricing = this.billing.computePricing(subShape);
+
+    return {
+      planId: paidPlan.id,
+      effectivePrice: pricing.effective_price,
+      basePrice: paidPlan.base_price,
+      marginAmount: pricing.margin_amount,
+    };
+  }
+
   async preview(
     subscriptionId: number,
     newPlanId: number,
@@ -132,7 +198,9 @@ export class SubscriptionProrationService {
     // signal.
     if (sub.state === 'no_plan' || !sub.plan_id || !sub.plan) {
       const now = new Date();
-      const cycleDays = this.billingCycleDays(newPlan.billing_cycle ?? 'monthly');
+      const cycleDays = this.billingCycleDays(
+        newPlan.billing_cycle ?? 'monthly',
+      );
       const targetIsFree = newPlan.is_free === true;
       const invoiceToIssue: InvoicePreview | null = targetIsFree
         ? null
@@ -181,7 +249,13 @@ export class SubscriptionProrationService {
       };
     }
 
-    const currentPricing = this.billing.computePricing(sub);
+    // ADR-3: use last paid invoice as baseline — it is immutable and auditable.
+    // Replaces computePricing(sub) which reads the mutable effective_price snapshot.
+    const paidBaseline = await this.getPaidBaseline(
+      subscriptionId,
+      (sub as any).paid_plan_id ?? null,
+      sub.partner_override,
+    );
 
     // Re-subscribe path: cancelled/expired subscriptions admit a single legal
     // exit to `pending_payment` via the checkout commit. There is no live
@@ -267,8 +341,7 @@ export class SubscriptionProrationService {
           base_price: newPlan.base_price.toFixed(2),
         },
         trial_ends_at: sub.trial_ends_at.toISOString(),
-        message:
-          'Cambio de plan durante trial. Sin cobro hasta fin del trial.',
+        message: 'Cambio de plan durante trial. Sin cobro hasta fin del trial.',
       };
 
       const trialCycleDays = Math.max(
@@ -281,9 +354,7 @@ export class SubscriptionProrationService {
       );
       const trialDaysRemaining = Math.max(
         0,
-        Math.ceil(
-          (sub.trial_ends_at.getTime() - now.getTime()) / DAY_MS,
-        ),
+        Math.ceil((sub.trial_ends_at.getTime() - now.getTime()) / DAY_MS),
       );
 
       return {
@@ -291,7 +362,9 @@ export class SubscriptionProrationService {
         mode: 'trial_plan_swap',
         days_remaining: trialDaysRemaining,
         cycle_days: trialCycleDays,
-        old_effective_price: currentPricing.effective_price.toFixed(2),
+        old_effective_price: (
+          paidBaseline?.effectivePrice ?? DECIMAL_ZERO
+        ).toFixed(2),
         new_effective_price: newPricing.effective_price.toFixed(2),
         proration_amount: DECIMAL_ZERO.toFixed(2),
         applies_immediately: false,
@@ -315,7 +388,9 @@ export class SubscriptionProrationService {
       sub.trial_ends_at.getTime() > now.getTime() &&
       !targetIsFree
     ) {
-      const cycleDays = this.billingCycleDays(newPlan.billing_cycle ?? 'monthly');
+      const cycleDays = this.billingCycleDays(
+        newPlan.billing_cycle ?? 'monthly',
+      );
       return {
         kind: 're_subscribe',
         mode: 're_subscribe',
@@ -335,57 +410,123 @@ export class SubscriptionProrationService {
     // RNC-15 — Anti-arrastre: if source plan is free/promotional (is_free=true),
     // NO credit or proration is calculated. Upgrade charges full remaining delta.
     // Uses the explicit `is_free` flag (replaces heuristic `base_price <= 0`).
+    // ADR-3: also treat as free origin when no paid invoice exists.
     const isFreeOrigin =
+      paidBaseline === null ||
+      paidBaseline.effectivePrice.lessThanOrEqualTo(DECIMAL_ZERO) ||
       sub.plan.is_free === true ||
       sub.plan.plan_type === 'promotional' ||
       sub.plan.is_promotional;
 
-    const kind = this.determineKind(
-      currentPricing.effective_price,
-      newPricing.effective_price,
-    );
+    // ADR-3: baseline from last paid invoice (immutable), fallback to zero for free origin
+    const baselinePrice = paidBaseline?.effectivePrice ?? DECIMAL_ZERO;
+
+    const kind = this.determineKind(baselinePrice, newPricing.effective_price);
 
     const periodEnd = sub.current_period_end ?? new Date();
-    const daysRemaining = isFreeOrigin
-      ? 0
-      : Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / DAY_MS));
+    // Cycle length is contractual (plan.billing_cycle), NOT derived from
+    // (period_end - period_start). The latter drifts whenever
+    // current_period_start is mutated by mid-cycle resets, manual ops, or
+    // test fixtures, which silently breaks proration math (it produced
+    // unused = baseline × daysRemaining / 6 instead of /30 for a monthly
+    // plan whose start was reset to today).
     const cycleDays = isFreeOrigin
       ? 1
-      : Math.max(
-          1,
-          Math.ceil(
-            ((sub.current_period_end ?? now).getTime() -
-              (sub.current_period_start ?? now).getTime()) /
-              DAY_MS,
-          ),
-        );
-
-    const priceDiff = newPricing.effective_price.minus(
-      currentPricing.effective_price,
+      : this.billingCycleDays(sub.plan.billing_cycle ?? 'monthly');
+    const rawDaysRemaining = Math.max(
+      0,
+      Math.ceil((periodEnd.getTime() - now.getTime()) / DAY_MS),
     );
-    // When free origin, proration = full price (no credit for remaining days)
-    const prorationAmount = this.round2(
-      isFreeOrigin
-        ? newPricing.effective_price
-        : priceDiff
+    const daysRemaining = isFreeOrigin
+      ? 0
+      : Math.min(rawDaysRemaining, cycleDays);
+
+    const priceDiff = newPricing.effective_price.minus(baselinePrice);
+
+    // Plan-change policy:
+    //   • Upgrade  → charge `newPrice - unusedValueOfCurrent`. The unused
+    //     portion of the current cycle (in value) is credited so the user
+    //     doesn't "lose" what they already paid. Floor at 0 for safety.
+    //   • Downgrade from monthly → charge full new plan price, no credit.
+    //   • Downgrade from YEARLY → apply credit too. A yearly customer paid
+    //     up-front for 365 days; ignoring their unused balance on a downgrade
+    //     would slash up to 11 months of value, which is commercially
+    //     indefensible (would generate chargebacks/churn). The user's stated
+    //     "no credit on downgrade" rule was scoped to monthly-to-monthly
+    //     where unused value is at most 1 month.
+    //   • Same-tier → priceDiff = 0, charges 0.
+    //   • Free origin → no baseline value to credit, charge full new price.
+    const isUpgrade = kind === 'upgrade';
+    const isDowngrade = kind === 'downgrade';
+    const isPlanChange = isUpgrade || isDowngrade;
+    const currentCycleIsYearly =
+      (sub.plan?.billing_cycle ?? 'monthly') === 'yearly';
+
+    // Unused value of the current cycle: baselinePrice × (daysRemaining /
+    // cycleDays). Only meaningful when there IS a paid baseline (not free
+    // origin) and there are days left in the cycle.
+    const unusedValueOfCurrent =
+      isFreeOrigin || daysRemaining <= 0 || cycleDays <= 0
+        ? DECIMAL_ZERO
+        : baselinePrice
             .times(new Prisma.Decimal(daysRemaining))
-            .dividedBy(new Prisma.Decimal(cycleDays)),
-    );
+            .dividedBy(new Prisma.Decimal(cycleDays));
 
-    let creditToApply = DECIMAL_ZERO;
-    if (prorationAmount.lessThan(DECIMAL_ZERO)) {
-      creditToApply = prorationAmount.abs();
+    let prorationAmount: Prisma.Decimal;
+    let creditApplied: Prisma.Decimal = DECIMAL_ZERO;
+    if (isUpgrade && !isFreeOrigin) {
+      const charge = newPricing.effective_price.minus(unusedValueOfCurrent);
+      prorationAmount = this.round2(
+        charge.greaterThan(DECIMAL_ZERO) ? charge : DECIMAL_ZERO,
+      );
+      creditApplied = unusedValueOfCurrent;
+    } else if (isDowngrade && currentCycleIsYearly && !isFreeOrigin) {
+      // Yearly→anything downgrade: protect the customer's bulk-paid balance.
+      const charge = newPricing.effective_price.minus(unusedValueOfCurrent);
+      prorationAmount = this.round2(
+        charge.greaterThan(DECIMAL_ZERO) ? charge : DECIMAL_ZERO,
+      );
+      creditApplied = unusedValueOfCurrent;
+    } else if (isDowngrade || isFreeOrigin) {
+      prorationAmount = this.round2(newPricing.effective_price);
+    } else {
+      // same-tier or no-change: pure delta proration (yields 0 when prices
+      // match exactly).
+      prorationAmount = this.round2(
+        priceDiff
+          .times(new Prisma.Decimal(daysRemaining))
+          .dividedBy(new Prisma.Decimal(cycleDays)),
+      );
     }
 
+    // No credit ever — neither for downgrades nor for over-charges. The
+    // policy is "what you pay today is what you pay, no refund, no rollover".
+    const creditToApply = DECIMAL_ZERO;
+
+    const downgradeWithCredit =
+      isDowngrade && currentCycleIsYearly && !isFreeOrigin;
     let invoicePreview: InvoicePreview | null = null;
     if (prorationAmount.greaterThan(DECIMAL_ZERO)) {
+      const lineDescription = isUpgrade
+        ? `Upgrade a plan ${newPlan.code} (con crédito por días no usados)`
+        : downgradeWithCredit
+          ? `Downgrade a plan ${newPlan.code} (con crédito por anual no consumido)`
+          : isDowngrade
+            ? `Cambio a plan ${newPlan.code} (ciclo nuevo, sin crédito)`
+            : `Plan ${newPlan.code} (${newPlan.billing_cycle})`;
+      // Cycle resets server-side on confirmPendingChange, so the period the
+      // user is actually paying for starts NOW and ends after one full cycle.
+      const cycleDaysFresh = this.billingCycleDays(
+        newPlan.billing_cycle ?? 'monthly',
+      );
+      const freshPeriodEnd = new Date(now.getTime() + cycleDaysFresh * DAY_MS);
       invoicePreview = {
         total: this.round2(prorationAmount).toFixed(2),
         period_start: now.toISOString(),
-        period_end: periodEnd.toISOString(),
+        period_end: (isPlanChange ? freshPeriodEnd : periodEnd).toISOString(),
         line_items: [
           {
-            description: `Proration upgrade — plan ${newPlan.code}`,
+            description: lineDescription,
             quantity: 1,
             unit_price: prorationAmount.toFixed(2),
             total: prorationAmount.toFixed(2),
@@ -393,7 +534,10 @@ export class SubscriptionProrationService {
               plan_id: newPlan.id,
               plan_code: newPlan.code,
               billing_cycle: newPlan.billing_cycle,
-              prorated: true,
+              prorated: false,
+              plan_change: isPlanChange,
+              kind,
+              unused_credit_applied: this.round2(creditApplied).toFixed(2),
             },
           },
         ],
@@ -422,7 +566,9 @@ export class SubscriptionProrationService {
       mode: kind,
       days_remaining: daysRemaining,
       cycle_days: cycleDays,
-      old_effective_price: currentPricing.effective_price.toFixed(2),
+      old_effective_price: (
+        paidBaseline?.effectivePrice ?? DECIMAL_ZERO
+      ).toFixed(2),
       new_effective_price: newPricing.effective_price.toFixed(2),
       proration_amount: prorationAmount.toFixed(2),
       applies_immediately: true,
@@ -805,9 +951,9 @@ export class SubscriptionProrationService {
 
     if (!sub.scheduled_plan_change_at || !sub.scheduled_plan_id) {
       // Idempotent: nothing scheduled. Return the row as-is.
-      return (await this.prisma.store_subscriptions.findUniqueOrThrow({
+      return await this.prisma.store_subscriptions.findUniqueOrThrow({
         where: { id: subscriptionId },
-      })) as store_subscriptions;
+      });
     }
 
     const now = new Date();

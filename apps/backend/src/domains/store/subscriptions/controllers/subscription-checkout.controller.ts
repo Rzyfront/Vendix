@@ -1,4 +1,11 @@
-import { Body, Controller, Param, ParseIntPipe, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Param,
+  ParseIntPipe,
+  Post,
+} from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -311,6 +318,78 @@ export class SubscriptionCheckoutController {
     });
   }
 
+  /**
+   * Void a pending plan change invoice and clear all pending_* fields on the
+   * subscription. Idempotent: safe to call when there's nothing pending.
+   */
+  private async voidPendingChange(
+    sub: { id: number; pending_change_invoice_id: number | null },
+    tx?: any,
+  ): Promise<void> {
+    const client = tx ?? this.prisma;
+    if (sub.pending_change_invoice_id) {
+      await client.subscription_invoices.update({
+        where: { id: sub.pending_change_invoice_id },
+        data: { state: 'void' },
+      });
+      await client.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          pending_plan_id: null,
+          pending_change_invoice_id: null,
+          pending_change_kind: null,
+          pending_change_started_at: null,
+          pending_revert_state: null,
+        },
+      });
+    }
+  }
+
+  /**
+   * Derive the change kind (initial / resubscribe / trial_conversion /
+   * upgrade / downgrade) by comparing the current plan price to the new one.
+   */
+  private async deriveChangeKind(
+    sub: { state: string; plan_id: number | null; paid_plan_id: number | null },
+    newPlanId: number,
+  ): Promise<string> {
+    if (!sub.plan_id && !sub.paid_plan_id) return 'initial';
+    if (sub.state === 'cancelled' || sub.state === 'expired')
+      return 'resubscribe';
+    if (sub.state === 'trial') return 'trial_conversion';
+
+    // Compare normalized monthly-equivalent prices to determine upgrade vs
+    // downgrade. Comparing raw `base_price` across cycles is wrong: a yearly
+    // plan's raw price is ~12× a monthly plan's, so a switch from monthly to
+    // yearly of the SAME tier would always classify as upgrade (and vice
+    // versa for yearly→monthly). Normalizing by cycle-months gives the true
+    // tier comparison the policy actually means.
+    const [currentPlan, newPlan] = await Promise.all([
+      sub.paid_plan_id
+        ? this.prisma.subscription_plans.findUnique({
+            where: { id: sub.paid_plan_id },
+            select: { base_price: true, billing_cycle: true },
+          })
+        : null,
+      this.prisma.subscription_plans.findUnique({
+        where: { id: newPlanId },
+        select: { base_price: true, billing_cycle: true },
+      }),
+    ]);
+
+    if (!currentPlan || !newPlan) return 'upgrade';
+
+    const cycleMonths = (cycle: string | null | undefined): number =>
+      cycle === 'yearly' ? 12 : 1;
+    const currentMonthly = new Prisma.Decimal(currentPlan.base_price).dividedBy(
+      cycleMonths(currentPlan.billing_cycle),
+    );
+    const newMonthly = new Prisma.Decimal(newPlan.base_price).dividedBy(
+      cycleMonths(newPlan.billing_cycle),
+    );
+    return newMonthly.greaterThan(currentMonthly) ? 'upgrade' : 'downgrade';
+  }
+
   @Permissions('subscriptions:write')
   @Post('commit')
   async commit(@Body() dto: CheckoutCommitDto) {
@@ -384,6 +463,49 @@ export class SubscriptionCheckoutController {
       couponCode = dto.coupon_code.trim();
     }
 
+    // Idempotency probe: if the store already has a pending change for the
+    // SAME plan and an `issued` invoice, reuse the existing widget instead
+    // of creating a duplicate. Prevents double-billing on retried commits.
+    const subWithPending = sub as any;
+    if (
+      sub &&
+      subWithPending.pending_plan_id === dto.planId &&
+      subWithPending.pending_change_invoice_id
+    ) {
+      const existingInvoice =
+        await this.prisma.subscription_invoices.findUnique({
+          where: { id: subWithPending.pending_change_invoice_id as number },
+          select: { id: true, state: true, total: true, currency: true },
+        });
+      if (existingInvoice?.state === 'issued') {
+        const customerEmail = await this.resolveCustomerEmail(
+          context?.user_id ?? null,
+        );
+        const { widget } = await this.payment.prepareWidgetCharge(
+          existingInvoice.id,
+          {
+            customerEmail,
+            redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+          },
+        );
+        return this.responseService.success(
+          { widget, invoiceId: existingInvoice.id, reused: true },
+          'Plan change already in progress — existing widget returned',
+        );
+      }
+    }
+
+    // If a DIFFERENT plan is pending, void it first so we don't accumulate
+    // stale pending invoices.
+    if (
+      sub &&
+      subWithPending.pending_plan_id != null &&
+      subWithPending.pending_plan_id !== dto.planId &&
+      subWithPending.pending_change_invoice_id
+    ) {
+      await this.voidPendingChange(subWithPending);
+    }
+
     // S3.8b — Bug 1 fix: Free-plan switch while a previous subscription is
     // stuck in `pending_payment`. The legacy path-E branch below assumed the
     // target was paid and emitted a new invoice, leaving the user trapped in
@@ -439,13 +561,29 @@ export class SubscriptionCheckoutController {
         );
       }
 
-      const invoice = await this.billing.issueInvoice(created.id);
+      const invoice = await this.billing.issueInvoice(created.id, {
+        fromPlanId: null,
+        toPlanId: dto.planId,
+        changeKind: 'initial',
+      });
       if (!invoice) {
         return this.responseService.success(
           { subscription: created, widget: null },
           'Checkout committed (no invoice issued)',
         );
       }
+
+      // Stamp pending_* fields so confirmPendingChange can mutate plan after gateway confirms.
+      await this.prisma.store_subscriptions.update({
+        where: { id: created.id },
+        data: {
+          pending_plan_id: dto.planId,
+          pending_change_invoice_id: invoice.id,
+          pending_change_kind: 'initial',
+          pending_change_started_at: new Date(),
+          pending_revert_state: 'no_plan' as any,
+        },
+      });
 
       // G8 — persistir aceptación de no-reembolso en metadata de la factura.
       await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
@@ -492,7 +630,7 @@ export class SubscriptionCheckoutController {
         reason: 're_subscribe_checkout',
         triggeredByUserId: context?.user_id ?? undefined,
         payload: {
-          from_plan_id: sub.plan_id,
+          from_plan_id: (sub as any).paid_plan_id ?? sub.plan_id,
           to_plan_id: dto.planId,
           previous_state: sub.state,
         },
@@ -522,7 +660,11 @@ export class SubscriptionCheckoutController {
 
       // 4. Issue fresh invoice — pricing snapshot already updated by
       //    applyResubscribe so issueInvoice picks up the new plan amount.
-      const invoice = await this.billing.issueInvoice(reactivated.id);
+      const invoice = await this.billing.issueInvoice(reactivated.id, {
+        fromPlanId: (sub as any).paid_plan_id ?? sub.plan_id,
+        toPlanId: dto.planId,
+        changeKind: 'resubscribe',
+      });
       if (!invoice) {
         // Free plan re-subscribe (rare). Promote straight to active because
         // there is no charge to wait for.
@@ -544,7 +686,19 @@ export class SubscriptionCheckoutController {
         );
       }
 
-      // 5. Persist no-refund acknowledgement and prepare Wompi widget.
+      // 5. Stamp pending_* fields so confirmPendingChange can mutate plan after gateway confirms.
+      await this.prisma.store_subscriptions.update({
+        where: { id: reactivated.id },
+        data: {
+          pending_plan_id: dto.planId,
+          pending_change_invoice_id: invoice.id,
+          pending_change_kind: 'resubscribe',
+          pending_change_started_at: new Date(),
+          pending_revert_state: sub.state as any,
+        },
+      });
+
+      // 6. Persist no-refund acknowledgement and prepare Wompi widget.
       await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
       const customerEmail = await this.resolveCustomerEmail(
         context?.user_id ?? null,
@@ -580,7 +734,18 @@ export class SubscriptionCheckoutController {
     // same plan). We just need to refresh pricing via applyResubscribe before
     // calling it so the new plan's price is reflected.
     if (sub.state === 'pending_payment' && !isFreePlan) {
-      if (sub.plan_id !== dto.planId) {
+      // Source of truth for "what plan was the user trying to buy" during
+      // pending_payment is `pending_plan_id`, not `plan_id`. For mid-cycle
+      // changes `plan_id` still holds the old paid plan; for fresh purchases
+      // it's null. Comparing against `pending_plan_id` correctly distinguishes
+      // a retry of the same selection from an actual selection change.
+      const subPending = sub as any;
+      const previousPendingPlanId: number | null =
+        subPending.pending_plan_id ?? null;
+      const planChangedWhilePending =
+        previousPendingPlanId != null && previousPendingPlanId !== dto.planId;
+
+      if (planChangedWhilePending) {
         // Plan changed while pending — refresh pricing/period so the next
         // invoice reflects the latest selection. issueInvoice() will detect
         // the plan mismatch on the existing pending row and void it.
@@ -589,7 +754,11 @@ export class SubscriptionCheckoutController {
 
       // issueInvoice handles both reuse (same plan, idempotent retries) and
       // void+create (plan changed). Always non-null for a paid plan.
-      const invoice = await this.billing.issueInvoice(sub.id);
+      const invoice = await this.billing.issueInvoice(sub.id, {
+        fromPlanId: subPending.paid_plan_id ?? sub.plan_id,
+        toPlanId: dto.planId,
+        changeKind: planChangedWhilePending ? 'resubscribe' : undefined,
+      });
 
       if (!invoice) {
         // Defensive: a paid plan must always produce an invoice.
@@ -598,6 +767,24 @@ export class SubscriptionCheckoutController {
           'Could not issue invoice for pending_payment subscription',
         );
       }
+
+      // Stamp pending_* fields for confirmPendingChange to act upon after gateway confirms.
+      // Pending kind: if there was no previous pending selection or paid plan,
+      // this is a fresh `initial`. Otherwise it's a resubscribe-style switch.
+      const isFreshInitial =
+        previousPendingPlanId == null && !subPending.paid_plan_id;
+      await this.prisma.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          pending_plan_id: dto.planId,
+          pending_change_invoice_id: invoice.id,
+          pending_change_kind: (isFreshInitial
+            ? 'initial'
+            : 'resubscribe') as any,
+          pending_change_started_at: new Date(),
+          pending_revert_state: 'cancelled' as any,
+        },
+      });
 
       await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
       const customerEmail = await this.resolveCustomerEmail(
@@ -629,14 +816,13 @@ export class SubscriptionCheckoutController {
     // applyResubscribe(), issue a fresh invoice for the new plan's full price,
     // and prepare the Wompi widget. The promotion to `active` happens via the
     // SubscriptionStateListener once Wompi reports APPROVED — never before.
-    const isTrialToPaid =
-      !!(
-        sub &&
-        sub.state === 'trial' &&
-        sub.trial_ends_at &&
-        sub.trial_ends_at.getTime() > Date.now() &&
-        !isFreePlan
-      );
+    const isTrialToPaid = !!(
+      sub &&
+      sub.state === 'trial' &&
+      sub.trial_ends_at &&
+      sub.trial_ends_at.getTime() > Date.now() &&
+      !isFreePlan
+    );
     if (isTrialToPaid) {
       // Validate platform Wompi credentials BEFORE mutating state, so a
       // misconfigured environment surfaces a clean error and the trial is
@@ -682,7 +868,11 @@ export class SubscriptionCheckoutController {
       }
 
       // 4. Issue invoice for the new plan's full price.
-      const invoice = await this.billing.issueInvoice(reactivated.id);
+      const invoice = await this.billing.issueInvoice(reactivated.id, {
+        fromPlanId: null,
+        toPlanId: dto.planId,
+        changeKind: 'trial_conversion',
+      });
       if (!invoice) {
         // Defensive: a paid plan must always produce an invoice.
         throw new VendixHttpException(
@@ -691,7 +881,19 @@ export class SubscriptionCheckoutController {
         );
       }
 
-      // 5. Persist no-refund acknowledgement and prepare Wompi widget.
+      // 5. Stamp pending_* fields so confirmPendingChange can mutate plan after gateway confirms.
+      await this.prisma.store_subscriptions.update({
+        where: { id: reactivated.id },
+        data: {
+          pending_plan_id: dto.planId,
+          pending_change_invoice_id: invoice.id,
+          pending_change_kind: 'trial_conversion',
+          pending_change_started_at: new Date(),
+          pending_revert_state: 'trial' as any,
+        },
+      });
+
+      // 6. Persist no-refund acknowledgement and prepare Wompi widget.
       await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
       const customerEmail = await this.resolveCustomerEmail(
         context?.user_id ?? null,
@@ -741,91 +943,161 @@ export class SubscriptionCheckoutController {
       );
     }
 
-    // S3.6 — When the target plan is paid, we may need to charge a proration
-    // amount post-apply. Validate the platform gateway is configured BEFORE
-    // touching `proration.apply()` so the user gets a clean error and the
-    // current plan is left untouched. Without this pre-check, apply() commits
-    // the plan change first and only THEN charge() throws — leaving the
-    // subscription on the new plan with an unpaid proration invoice.
-    if (!isFreePlan) {
-      const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
-      if (!wompiCreds) {
-        throw new VendixHttpException(
-          ErrorCodes.SUBSCRIPTION_GATEWAY_003,
-          'Credenciales de pasarela de plataforma no configuradas',
-        );
-      }
-    }
-
-    // S3.6 — Atomicity guard around apply + charge. If the charge throws
-    // after `apply()` has committed, revert the plan change to oldPlanId so
-    // the user is not stuck on a plan they did not pay for. The revert reuses
-    // `proration.apply()` so the same audit trail (`plan_changed`) is emitted
-    // with the original plan, making the rollback observable.
-    const oldPlanId = sub.plan_id;
-    const updated = await this.proration.apply(sub.id, dto.planId);
-
-    // S3.6 — Skip the charge step entirely when downgrading to a free plan.
-    // proration.apply() for paid → free produces a NEGATIVE proration_amount
-    // (credit) and emits no new invoice; only `pending_credit` accumulates in
-    // metadata. The legacy `findFirst({ state: 'issued' })` query below was
-    // catching unrelated older invoices and trying to charge them — which is
-    // both wrong semantically and triggers SUBSCRIPTION_GATEWAY_003 when the
-    // platform gateway isn't configured for free flows.
-    if (!isFreePlan) {
-      const prorationAmount = await this.prisma.subscription_invoices.findFirst({
-        where: { store_subscription_id: sub.id, state: 'issued' },
-        orderBy: { created_at: 'desc' },
+    // S3.6 — Free-plan downgrade: activate synchronously (no charge, no widget).
+    // proration.apply() for paid → free produces a credit; no invoice is emitted.
+    if (isFreePlan) {
+      const updated = await this.proration.apply(sub.id, dto.planId);
+      // Clear any stale pending fields when moving to free.
+      await this.prisma.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          paid_plan_id: dto.planId,
+          pending_plan_id: null,
+          pending_change_invoice_id: null,
+          pending_change_kind: null,
+          pending_change_started_at: null,
+          pending_revert_state: null,
+        },
       });
-
-      if (prorationAmount) {
-        // G8 — persistir aceptación de no-reembolso en la factura prorrateada.
-        await this.mergeInvoiceAckMetadata(
-          prorationAmount.id,
-          acknowledgmentMetadata,
+      if (couponCode) {
+        await this.safeApplyCoupon(
+          storeId,
+          couponCode,
+          context?.user_id ?? null,
         );
-
-        const total = new Prisma.Decimal(prorationAmount.total);
-        if (total.greaterThan(DECIMAL_ZERO)) {
-          try {
-            await this.payment.charge(prorationAmount.id);
-          } catch (chargeErr) {
-            // Revert plan change. We do NOT swallow `chargeErr` — re-throw
-            // after the revert so the user sees the original failure.
-            try {
-              // RNC-39: oldPlanId may be null when the previous state was
-              // no_plan. In that case there is nothing to revert to — leave
-              // the plan change in place and rely on the void invoice + thrown
-              // error to surface the failure to the user.
-              if (oldPlanId !== null && oldPlanId !== dto.planId) {
-                await this.proration.apply(sub.id, oldPlanId);
-              }
-              await this.prisma.subscription_invoices.update({
-                where: { id: prorationAmount.id },
-                data: { state: 'void' },
-              });
-            } catch {
-              // Best-effort revert: if it fails the original error still
-              // surfaces; an operator-visible plan_changed audit row remains.
-            }
-            throw chargeErr;
-          }
-        }
       }
-    }
-
-    // S2.1 — Existing-subscription path: subscription is already `active`
-    // (proration only fires on active subs), so apply the coupon overlay
-    // synchronously.
-    if (couponCode) {
-      await this.safeApplyCoupon(
-        storeId,
-        couponCode,
-        context?.user_id ?? null,
+      await this.resolver.invalidate(storeId);
+      return this.responseService.success(
+        { subscription: updated, widget: null, mode: 'free_plan_activated' },
+        'Checkout committed (free plan)',
       );
     }
 
-    return this.responseService.success(updated, 'Checkout committed');
+    // S3.6 — Mid-cycle plan change for paid plans (upgrade or downgrade to paid).
+    // Instead of apply() + charge() synchronously (which has a rollback race),
+    // we issue the invoice, stamp pending_* fields, transition to pending_payment,
+    // and return the Wompi widget. confirmPendingChange() completes the mutation
+    // once the gateway confirms.
+    //
+    // Downgrade to paid plan: still goes through the widget flow (proration
+    // credit may apply, but any balance owed triggers a charge).
+    // Scheduled downgrades (end-of-cycle) are handled separately by the billing
+    // scheduler and do NOT pass through this path.
+    const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
+    if (!wompiCreds) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_003,
+        'Credenciales de pasarela de plataforma no configuradas',
+      );
+    }
+
+    const changeKind = await this.deriveChangeKind(
+      {
+        state: sub.state,
+        plan_id: sub.plan_id,
+        paid_plan_id: (sub as any).paid_plan_id ?? null,
+      },
+      dto.planId,
+    );
+
+    // Preview proration to get the prorated amount for the invoice opts.
+    const proratedAmount = previewResult.proration_amount
+      ? new Prisma.Decimal(previewResult.proration_amount)
+      : DECIMAL_ZERO;
+
+    const midCycleInvoice = await this.billing.issueInvoice(sub.id, {
+      prorated: proratedAmount.greaterThan(DECIMAL_ZERO),
+      proratedAmount: proratedAmount.greaterThan(DECIMAL_ZERO)
+        ? proratedAmount
+        : undefined,
+      fromPlanId: (sub as any).paid_plan_id ?? sub.plan_id,
+      toPlanId: dto.planId,
+      changeKind: changeKind as any,
+    });
+
+    if (!midCycleInvoice) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        'Could not issue proration invoice for mid-cycle plan change',
+      );
+    }
+
+    // Stamp pending_* fields and transition to pending_payment within a tx.
+    await this.prisma.$transaction(async (tx) => {
+      await tx.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          pending_plan_id: dto.planId,
+          pending_change_invoice_id: midCycleInvoice.id,
+          pending_change_kind: changeKind as any,
+          pending_change_started_at: new Date(),
+          pending_revert_state: sub.state as any,
+        },
+      });
+      await this.stateService.transitionInTx(tx, storeId, 'pending_payment', {
+        reason: `checkout_commit_${changeKind}_${dto.planId}`,
+        triggeredByUserId: context?.user_id ?? undefined,
+        payload: {
+          from_plan_id: (sub as any).paid_plan_id ?? sub.plan_id,
+          to_plan_id: dto.planId,
+          invoice_id: midCycleInvoice.id,
+          change_kind: changeKind,
+        },
+      });
+    });
+
+    // Persist coupon for application after listener flips to `active`.
+    if (couponCode) {
+      const currentMeta = await this.prisma.store_subscriptions.findUnique({
+        where: { id: sub.id },
+        select: { metadata: true },
+      });
+      const existingMeta =
+        currentMeta?.metadata && typeof currentMeta.metadata === 'object'
+          ? (currentMeta.metadata as Record<string, unknown>)
+          : {};
+      await this.prisma.store_subscriptions.update({
+        where: { id: sub.id },
+        data: {
+          metadata: {
+            ...existingMeta,
+            pending_coupon_code: couponCode,
+          } as Prisma.InputJsonValue,
+        },
+      });
+    }
+
+    // G8 — persistir aceptación de no-reembolso.
+    await this.mergeInvoiceAckMetadata(
+      midCycleInvoice.id,
+      acknowledgmentMetadata,
+    );
+
+    // prepareWidgetCharge MUST be called OUTSIDE the Prisma transaction.
+    const customerEmailMid = await this.resolveCustomerEmail(
+      context?.user_id ?? null,
+    );
+    const { widget: midCycleWidget } = await this.payment.prepareWidgetCharge(
+      midCycleInvoice.id,
+      {
+        customerEmail: customerEmailMid,
+        redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+      },
+    );
+
+    await this.resolver.invalidate(storeId);
+
+    return this.responseService.success(
+      {
+        widget: midCycleWidget,
+        invoiceId: midCycleInvoice.id,
+        mode: changeKind,
+        subscription: await this.prisma.store_subscriptions.findUnique({
+          where: { id: sub.id },
+        }),
+      },
+      'Plan change pending payment',
+    );
   }
 
   /**
@@ -988,6 +1260,62 @@ export class SubscriptionCheckoutController {
   }
 
   /**
+   * Cancel a pending plan change. Voids the pending invoice and reverts the
+   * subscription to the state it was in before the change was initiated
+   * (stored in `pending_revert_state`). Only valid when the sub is in
+   * `pending_payment` with a `pending_plan_id` set.
+   */
+  @Permissions('subscriptions:write')
+  @Delete('pending-change')
+  async cancelPendingChange() {
+    const storeId = RequestContextService.getStoreId();
+    const context = RequestContextService.getContext();
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: {
+        id: true,
+        state: true,
+        pending_plan_id: true,
+        pending_change_invoice_id: true,
+        pending_revert_state: true,
+      },
+    });
+
+    const subAny = sub as any;
+    if (!sub || sub.state !== 'pending_payment' || !subAny.pending_plan_id) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'No pending plan change to cancel',
+      );
+    }
+
+    const revertState: string = subAny.pending_revert_state ?? 'cancelled';
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.voidPendingChange(subAny, tx);
+      await this.stateService.transitionInTx(tx, storeId, revertState as any, {
+        reason: 'user_cancelled_pending_change',
+        triggeredByUserId: context?.user_id ?? undefined,
+        payload: { cancelled_pending_plan_id: subAny.pending_plan_id },
+      });
+    });
+
+    this.resolver.invalidate(storeId).catch((err) =>
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[SubscriptionCheckout] Failed to invalidate resolver cache: ${(err as Error).message}`,
+      ),
+    );
+
+    return this.responseService.success(
+      { success: true, reverted_to_state: revertState },
+      'Pending plan change cancelled',
+    );
+  }
+
+  /**
    * Pull-fallback sync — Webhook safety net. The frontend polling layer
    * calls this on every cycle while a checkout invoice is in `pending_payment`
    * so localhost/NAT-restricted environments still close the loop with Wompi.
@@ -1143,7 +1471,7 @@ export class SubscriptionCheckoutController {
       const created = await tx.store_subscriptions.create({
         data: {
           store_id: storeId,
-          plan_id: plan.id,
+          plan_id: isFreePlan ? plan.id : null,
           partner_override_id: null,
           state: initialState,
           effective_price: pricing.effective_price,

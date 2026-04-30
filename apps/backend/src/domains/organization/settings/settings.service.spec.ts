@@ -72,7 +72,7 @@ describe('SettingsService', () => {
         mockPrismaService.organization_settings.update,
       ).toHaveBeenCalledWith({
         where: { id: existing.id },
-        data: expect.objectContaining({ settings: dto.settings }) as any,
+        data: expect.objectContaining({ settings: dto.settings }),
       });
       expect(result).toEqual(updated);
     });

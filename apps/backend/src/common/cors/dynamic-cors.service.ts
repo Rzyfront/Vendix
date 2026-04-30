@@ -36,9 +36,7 @@ export class DynamicCorsService implements OnModuleInit {
       this.configService.get<string>('BASE_DOMAIN') || 'vendix.online';
     const escaped = baseDomain.replace(/\./g, '\\.');
     // Matches the base domain itself plus any single-label subdomain.
-    this.STATIC_REGEX = new RegExp(
-      `^https?://([a-zA-Z0-9-]+\\.)?${escaped}$`,
-    );
+    this.STATIC_REGEX = new RegExp(`^https?://([a-zA-Z0-9-]+\\.)?${escaped}$`);
   }
 
   async onModuleInit(): Promise<void> {
@@ -77,7 +75,11 @@ export class DynamicCorsService implements OnModuleInit {
         `http://${r.hostname}`,
       ]);
       // cache-manager (>=5) accepts TTL in milliseconds.
-      await this.cache.set(this.CACHE_KEY, origins, this.CACHE_TTL_SECONDS * 1000);
+      await this.cache.set(
+        this.CACHE_KEY,
+        origins,
+        this.CACHE_TTL_SECONDS * 1000,
+      );
       this.logger.log(
         `Loaded ${origins.length} CORS allowed origins from DB (${rows.length} active hostnames)`,
       );

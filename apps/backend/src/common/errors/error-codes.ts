@@ -79,6 +79,33 @@ export const ErrorCodes = {
     devMessage: 'Access denied to payment resource',
   },
 
+  // Payment Sources (Card-On-File / Wompi recurrent)
+  PAYMENT_SOURCE_NOT_FOUND: {
+    code: 'PAYMENT_SOURCE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Payment source not found in gateway',
+  },
+  PAYMENT_SOURCE_REVOKED: {
+    code: 'PAYMENT_SOURCE_REVOKED',
+    httpStatus: 422,
+    devMessage: 'Payment source revoked by issuer',
+  },
+  PAYMENT_SOURCE_NOT_AVAILABLE: {
+    code: 'PAYMENT_SOURCE_NOT_AVAILABLE',
+    httpStatus: 422,
+    devMessage: 'Payment source not available for charges',
+  },
+  PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN: {
+    code: 'PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN',
+    httpStatus: 400,
+    devMessage: 'Acceptance token rejected by gateway',
+  },
+  PAYMENT_METHOD_NOT_MIGRATED: {
+    code: 'PAYMENT_METHOD_NOT_MIGRATED',
+    httpStatus: 412,
+    devMessage: 'Payment method requires re-tokenization',
+  },
+
   // Authentication
   AUTH_FIND_001: {
     code: 'AUTH_FIND_001',
@@ -392,6 +419,12 @@ export const ErrorCodes = {
     code: 'PROD_VALIDATE_003',
     httpStatus: 400,
     devMessage: 'El SKU de la variante no puede estar vacío',
+  },
+  PROD_VALIDATE_004: {
+    code: 'PROD_VALIDATE_004',
+    httpStatus: 400,
+    devMessage:
+      'Los campos específicos de servicio solo pueden asignarse en variantes de productos tipo SERVICIO',
   },
 
   // Product/Service & Variants Validation

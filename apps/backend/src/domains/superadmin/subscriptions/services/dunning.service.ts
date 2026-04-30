@@ -491,8 +491,7 @@ export class DunningService {
           .map((inv) => inv.commission)
           .filter(
             (c): c is NonNullable<typeof c> =>
-              !!c &&
-              (c.state === 'accrued' || c.state === 'pending_payout'),
+              !!c && (c.state === 'accrued' || c.state === 'pending_payout'),
           )
           .map((c) => ({
             id: c.id,
