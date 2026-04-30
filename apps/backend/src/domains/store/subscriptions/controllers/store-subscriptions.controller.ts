@@ -11,6 +11,8 @@ import { SubscriptionPaymentService } from '../services/subscription-payment.ser
 import { SubscriptionProrationService } from '../services/subscription-proration.service';
 import { SubscriptionPaymentMethodsService } from '../services/subscription-payment-methods.service';
 import { SubscriptionInvoicePdfService } from '../services/subscription-invoice-pdf.service';
+import { SubscriptionSupportRequestService } from '../services/subscription-support-request.service';
+import { SubscriptionRedemptionService } from '../services/subscription-redemption.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -40,6 +42,8 @@ export class StoreSubscriptionsController {
     private readonly prisma: GlobalPrismaService,
     private readonly responseService: ResponseService,
     private readonly promoEvaluator: PromotionalRulesEvaluator,
+    private readonly supportService: SubscriptionSupportRequestService,
+    private readonly redemptionService: SubscriptionRedemptionService,
   ) {}
 
   @Get('plans')
@@ -160,6 +164,16 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:read')
+  @Get('plans/redeem/:code')
+  async getPlanByRedemptionCode(@Param('code') code: string) {
+    const plan = await this.redemptionService.getPlanByRedemptionCode(code);
+    if (!plan) {
+      throw new VendixHttpException(ErrorCodes.PROMO_001, 'Invalid redemption code');
+    }
+    return this.responseService.success(plan, 'Plan found');
+  }
+
+  @Permissions('subscriptions:read')
   @Get('current')
   async getCurrent() {
     const storeId = RequestContextService.getStoreId();
@@ -179,13 +193,9 @@ export class StoreSubscriptionsController {
       return this.responseService.success(null, 'No active subscription');
     }
 
-    const data = {
-      ...sub,
-      plan_name: sub.plan?.name ?? null,
-      plan_code: sub.plan?.code ?? null,
-    };
-
-    return this.responseService.success(data, 'Subscription retrieved');
+    // RNC-39: stores in `no_plan` state have plan_id IS NULL (canonical), so
+    // sub.plan naturally resolves to null via the relation. No stripping needed.
+    return this.responseService.success(sub, 'Subscription retrieved');
   }
 
   /**
@@ -213,7 +223,9 @@ export class StoreSubscriptionsController {
   /**
    * G6 — Retry payment of the most recent unpaid invoice for the current
    * store subscription. No body — operates on the latest invoice in
-   * `state IN ('issued','overdue','partially_paid')`.
+   * `state IN ('issued','overdue')` (RNC-10: `partially_paid` is not part of
+   * `subscription_invoice_state_enum`; the canonical "still owes money"
+   * states are `issued` / `overdue`).
    */
   @Permissions('subscriptions:write')
   @Post('retry-payment')
@@ -234,7 +246,7 @@ export class StoreSubscriptionsController {
     const invoice = await this.prisma.subscription_invoices.findFirst({
       where: {
         store_subscription_id: sub.id,
-        state: { in: ['issued', 'overdue', 'partially_paid'] },
+        state: { in: ['issued', 'overdue'] },
       },
       orderBy: { issued_at: 'desc' },
       select: { id: true },
@@ -436,6 +448,69 @@ export class StoreSubscriptionsController {
     });
 
     return this.responseService.success(result, 'Subscription cancelled');
+  }
+
+  @Post('uncancel')
+  @SkipSubscriptionGate()
+  async uncancel() {
+    const storeId = RequestContextService.getStoreId();
+    const context = RequestContextService.getContext();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const result = await this.stateService.unscheduleCancel(storeId, {
+      reason: 'user_initiated_uncancel',
+      triggeredByUserId: context?.user_id,
+    });
+
+    return this.responseService.success(result, 'Scheduled cancellation reverted');
+  }
+
+  /**
+   * RNC-16 / RNC-17 — Cancel a scheduled downgrade (deferred plan change).
+   * Allowed only while the current period has not yet rolled over. After
+   * `current_period_end` the renewal cron has already applied the swap and
+   * the operation returns 4xx (SUBSCRIPTION_010).
+   */
+  @Delete('scheduled-change')
+  @SkipSubscriptionGate()
+  async cancelScheduledPlanChange() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: { id: true },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const result = await this.proration.cancelScheduledChange(sub.id);
+    return this.responseService.success(
+      result,
+      'Cambio de plan programado cancelado',
+    );
+  }
+
+  @Post('support-request')
+  @SkipSubscriptionGate()
+  async supportRequest(@Body() dto: { reason: string; message: string; contact_email?: string }) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const result = await this.supportService.createSupportRequest(storeId, {
+      reason: dto.reason,
+      message: dto.message,
+      contactEmail: dto.contact_email,
+    });
+
+    return this.responseService.success(result, 'Support ticket created');
   }
 
   @Permissions('subscriptions:read')

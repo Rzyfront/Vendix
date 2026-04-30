@@ -166,7 +166,11 @@ export class StoreAdminLayoutComponent {
   });
 
   readonly planDisplayName = computed(() => {
-    const sub = this.subscriptionFacade.current();
+    const sub: any = this.subscriptionFacade.current();
+    // RNC-39 — `no_plan` stores must NOT show the placeholder plan name in
+    // the sidebar footer. Backend strips `plan` from the `current` payload
+    // when state='no_plan' so this fallback is the canonical render.
+    if (!sub || sub.state === 'no_plan') return 'Sin plan activo';
     return sub?.plan?.name ?? 'Sin plan activo';
   });
 

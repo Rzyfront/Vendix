@@ -27,6 +27,8 @@ import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier
 import { PromotionalActivationJob } from './promotional-activation.job';
 import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
 import { CommissionAccrualJob } from './commission-accrual.job';
+import { SubscriptionDraftCleanupJob } from './subscription-draft-cleanup.job';
+import { SaasMetricsSnapshotJob } from './saas-metrics-snapshot.job';
 // PaymentConfirmedEmailJob is intentionally NOT imported here. Its handler
 // logic (job name `payment.confirmed.email`) was consolidated into
 // `EmailNotificationsProcessor` (G10). Registering both as
@@ -89,6 +91,8 @@ import { ResponseModule } from '../common/responses/response.module';
     PromotionalActivationJob,
     PartnerPayoutBatchJob,
     CommissionAccrualJob,
+    SubscriptionDraftCleanupJob,
+    SaasMetricsSnapshotJob,
     EmailNotificationsProcessor,
   ],
 })

@@ -182,6 +182,25 @@ Examples:
 
 **Emitted by**: `return-orders.service.ts` → `process()` method after transaction.
 
+### 10. SaaS Subscriptions (saas_subscription_expense / saas_revenue)
+| Mapping Key | Default PUC | DR/CR | Description |
+|-------------|-------------|-------|-------------|
+| `saas_revenue.vendix_share` | 4135 | CR | Ingreso plataforma Vendix |
+| `saas_revenue.partner_share` | 2335 | CR | CxP Partner (comision) |
+| `saas_revenue.bank` | 1110 | DR | Caja/Banco Wompi |
+| `saas_revenue.accounts_receivable` | 1305 | DR | CxC Clientes SaaS |
+| `saas_subscription_expense.expense` | 5135 | DR | Gasto administrativo SaaS |
+| `saas_subscription_expense.bank` | 1110 | CR | Caja/Banco |
+| `saas_subscription_expense.accounts_payable` | 2335 | CR | CxP Plataforma |
+
+**Doble asiento** (RNC-31):
+- **Vendix-platform** (libros internos): Al emitir factura → DR `1305` CxC / CR `4135` revenue / CR `2335` partner. Al confirmar pago → DR `1110` banco / CR `1305` CxC.
+- **Store-cliente** (libros del cliente): DR `5135` gasto SaaS / CR `1110` caja o `2335` CxP.
+
+**Trigger**: `subscription.payment.succeeded` event (post-payment success only, no IVA).
+
+**Emitted by**: `SubscriptionAccountingListener` in subscriptions module.
+
 ### 8. Compras Recibidas (purchase_order.received)
 | Mapping Key | Default PUC | DR/CR | Description |
 |-------------|-------------|-------|-------------|

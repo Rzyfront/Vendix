@@ -1,9 +1,10 @@
-import { Component, OnInit, inject, computed, signal } from '@angular/core';
+import { Component, OnInit, inject, computed, effect, signal } from '@angular/core';
 import { DatePipe, CurrencyPipe, DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
   CardComponent,
   IconComponent,
+  ButtonComponent,
   EmptyStateComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -11,6 +12,13 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
+import { StoreSubscriptionService } from '../../services/store-subscription.service';
+import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
+import {
+  STATE_PAYWALL_MAP,
+  SubscriptionAccessService,
+} from '../../../../../../core/services/subscription-access.service';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import {
   CancellationFlowModalComponent,
   CancellationConfirmedPayload,
@@ -22,6 +30,7 @@ import {
   imports: [
     CardComponent,
     IconComponent,
+    ButtonComponent,
     EmptyStateComponent,
     StickyHeaderComponent,
     CancellationFlowModalComponent,
@@ -45,6 +54,53 @@ import {
       ></app-sticky-header>
 
       <div class="max-w-6xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+        <!-- Phase 4 — Pending payment banner. Shown when the subscription
+             was committed but the gateway hasn't confirmed payment yet
+             (state = pending_payment). Mobile-first, accessible, with a
+             primary "Completar pago" CTA that re-opens the Wompi widget. -->
+        @if (status() === 'pending_payment') {
+          <div
+            class="rounded-2xl border-l-4 border-amber-500 bg-amber-50 p-4 md:p-5 shadow-sm"
+            role="status"
+            aria-live="polite"
+          >
+            <div class="flex flex-col sm:flex-row sm:items-start gap-4">
+              <div class="flex items-start gap-3 flex-1 min-w-0">
+                <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                  <app-icon name="alert-triangle" [size]="20" class="text-amber-700"></app-icon>
+                </div>
+                <div class="space-y-1 min-w-0">
+                  <h3 class="text-sm md:text-base font-bold text-amber-900">
+                    Tu suscripción tiene un pago pendiente
+                  </h3>
+                  <p class="text-xs md:text-sm text-amber-900/85 leading-relaxed">
+                    Complétalo para activar tu plan. Si ya pagaste, espera
+                    unos segundos mientras confirmamos con la pasarela.
+                  </p>
+                </div>
+              </div>
+              <div class="flex flex-col sm:flex-row gap-2 sm:items-center sm:shrink-0">
+                <app-button
+                  variant="primary"
+                  [loading]="retryingPayment()"
+                  [disabled]="retryingPayment()"
+                  (clicked)="retryPayment()"
+                >
+                  <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                  Completar pago
+                </app-button>
+                <app-button
+                  variant="ghost"
+                  [disabled]="retryingPayment()"
+                  (clicked)="goToPlans()"
+                >
+                  Cancelar y elegir otro plan
+                </app-button>
+              </div>
+            </div>
+          </div>
+        }
+
         <!-- Loading -->
         @if (loading()) {
           <div class="space-y-4 animate-pulse" aria-busy="true">
@@ -59,7 +115,7 @@ import {
         }
 
         <!-- Active subscription -->
-        @if (!loading() && current()) {
+        @if (!loading() && current() && !isNoPlan()) {
           <!-- Hero Card -->
           <div
             class="relative overflow-hidden rounded-2xl shadow-xl text-white p-6 md:p-8"
@@ -333,18 +389,40 @@ import {
               </div>
             </div>
           </app-card>
+
+          <!-- Opt-in link to manage saved payment methods. Discreet by design:
+               the canonical pay-now flow is the pending-invoice retry (Wompi
+               widget) which auto-registers the PM on success. This page only
+               lets the user audit/remove cards already on file. -->
+          @if (showPaymentMethodsLink()) {
+            <div class="flex justify-center pt-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 text-xs text-text-secondary hover:text-primary-600 transition-colors underline-offset-2 hover:underline"
+                (click)="goToPaymentMethods()"
+              >
+                <app-icon name="credit-card" [size]="14"></app-icon>
+                Ver métodos de pago guardados
+              </button>
+            </div>
+          }
         }
 
-        <!-- Empty state -->
-        @if (!loading() && !current()) {
+        <!-- Empty state — shown when there is no subscription row OR when
+             the row is in no_plan state (RNC-39: additional stores of orgs
+             that already consumed their trial). In both cases the user must
+             pick a plan to operate the store. -->
+        @if (!loading() && (!current() || isNoPlan())) {
           <app-empty-state
             icon="sparkles"
             iconColor="primary"
-            title="Activa tu suscripción"
-            description="Desbloquea funciones de IA, automatización y más eligiendo el plan ideal para tu negocio."
+            title="Selecciona tu plan"
+            [description]="isNoPlan()
+              ? 'Tu organización ya consumió su período de prueba. Esta tienda necesita un plan activo para operar.'
+              : 'Desbloquea funciones de IA, automatización y más eligiendo el plan ideal para tu negocio.'"
             actionButtonText="Ver Planes"
             actionButtonIcon="arrow-right"
-            (actionClick)="goToPlans()"
+            (actionClick)="goToPicker()"
           ></app-empty-state>
         }
       </div>
@@ -365,6 +443,58 @@ export class MySubscriptionComponent implements OnInit {
   private router = inject(Router);
   private facade = inject(SubscriptionFacade);
   private toastService = inject(ToastService);
+  private subscriptionService = inject(StoreSubscriptionService);
+  private wompiCheckoutService = inject(WompiCheckoutService);
+  private accessService = inject(SubscriptionAccessService);
+
+  /**
+   * Tracks the last subscription state that already triggered the paywall
+   * modal during this lifecycle of the component. We rely on the access
+   * service's own `isPaywallOpen` signal to dedupe concurrent opens, but we
+   * also want to remember the state we already showed the modal for so we
+   * don't reopen it after the user closes it manually for the same state.
+   * On state change (e.g. payment confirmed → active) we reset, so the next
+   * blocking state will surface a fresh modal.
+   */
+  private readonly lastStatePresented = signal<string | null>(null);
+
+  constructor() {
+    // Auto-open the paywall modal whenever the subscription enters a
+    // blocking or informational state. The modal is informative — the user
+    // can close it and continue browsing the panel in read-only mode — so
+    // we only re-open when the state actually changes (not on every
+    // re-entry to the page). This keeps the modal from spamming the user
+    // who already closed it once.
+    effect(() => {
+      const state = this.status();
+      if (!state) return;
+      if (this.loading()) return;
+      const variantKey = STATE_PAYWALL_MAP[state];
+      if (!variantKey) {
+        // active / trialing / unknown → no modal, reset memo
+        this.lastStatePresented.set(null);
+        return;
+      }
+      if (this.lastStatePresented() === state) return;
+      const sub: any = this.current();
+      this.accessService.openPaywallForState(state, {
+        subscription_state: state,
+        plan_id: sub?.plan_id ?? null,
+        plan_name: sub?.plan_name ?? sub?.plan?.name ?? null,
+        lock_reason: sub?.lock_reason ?? null,
+        grace_period_end:
+          sub?.grace_period_end ??
+          sub?.current_period_end ??
+          sub?.next_billing_at ??
+          null,
+      });
+      this.lastStatePresented.set(state);
+    });
+  }
+
+  /** Phase 4 — local UI state for the retry-payment CTA so the button can
+   * surface a loading state while the backend mints a fresh widget config. */
+  readonly retryingPayment = signal(false);
 
   readonly current = this.facade.current;
   readonly loading = this.facade.loading;
@@ -387,6 +517,15 @@ export class MySubscriptionComponent implements OnInit {
     return s === 'cancelled' || s === 'expired';
   });
 
+  /**
+   * RNC-39 — Subscription row exists but the store has no active plan.
+   * Common case: additional stores of organizations that already consumed
+   * their trial. The hero card / quick stats / feature usage UI must NOT
+   * render plan info (because the persisted `plan_id` is a placeholder
+   * reference, not a plan the user actually has). Empty-state takes over.
+   */
+  readonly isNoPlan = computed(() => this.status() === 'no_plan');
+
   // Surfaces backend's `scheduled_cancel_at` so the user retains a persistent
   // visual reminder that they triggered an end-of-cycle cancel — the toast
   // only flashes once. Only relevant while the plan is still in a non-terminal
@@ -405,6 +544,7 @@ export class MySubscriptionComponent implements OnInit {
   });
 
   readonly planName = computed(() => {
+    if (this.isNoPlan()) return 'Sin Plan';
     const sub: any = this.current();
     return sub?.plan_name ?? sub?.plan?.name ?? 'Sin Plan';
   });
@@ -492,12 +632,14 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly headerSubtitle = computed(() => {
     if (this.loading()) return 'Cargando información...';
-    if (!this.current()) return 'Activa tu plan para desbloquear funciones';
+    if (!this.current() || this.isNoPlan())
+      return 'Selecciona un plan para activar esta tienda';
     if (this.isTrial()) return `${this.daysRemaining()} días de prueba restantes`;
     return 'Plan activo y uso de funciones IA';
   });
 
   readonly headerIcon = computed(() => {
+    if (this.isNoPlan()) return 'sparkles';
     if (this.isTrial()) return 'hourglass';
     if (this.isActive()) return 'crown';
     return 'sparkles';
@@ -537,13 +679,17 @@ export class MySubscriptionComponent implements OnInit {
       s === 'suspended'
     )
       return 'red';
+    if (s === 'no_plan') return 'gray';
     return 'gray';
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    if (!this.current()) {
+    // RNC-39 — `no_plan` is functionally the same as "no subscription" from
+    // the user's perspective: only action is to pick a plan. Routes to the
+    // soft picker instead of the plan catalog.
+    if (!this.current() || this.isNoPlan()) {
       return [
-        { id: 'plans', label: 'Ver Planes', variant: 'primary', icon: 'arrow-right' },
+        { id: 'picker', label: 'Ver Planes', variant: 'primary', icon: 'arrow-right' },
       ];
     }
     const status = this.status();
@@ -599,6 +745,9 @@ export class MySubscriptionComponent implements OnInit {
 
   onHeaderAction(id: string): void {
     switch (id) {
+      case 'picker':
+        this.goToPicker();
+        break;
       case 'plans':
       case 'change':
         this.goToPlans();
@@ -619,8 +768,94 @@ export class MySubscriptionComponent implements OnInit {
     this.router.navigate(['/admin/subscription/plans']);
   }
 
+  /** RNC-39 — Navigate to the soft picker for stores in `no_plan`. */
+  goToPicker(): void {
+    this.router.navigate(['/admin/subscription/picker']);
+  }
+
+  /**
+   * Phase 4 — Retry the pending invoice. Calls the idempotent backend
+   * endpoint to mint a fresh Wompi widget config and re-opens the widget.
+   * Same callback handling as the initial checkout: loadCurrent + polling
+   * on success/pending, error toast on failure.
+   */
+  retryPayment(): void {
+    if (this.retryingPayment()) return;
+    this.retryingPayment.set(true);
+    const returnUrl = `${window.location.origin}/admin/subscription`;
+    this.subscriptionService
+      .retryPayment({ returnUrl })
+      .subscribe({
+        next: (data) => {
+          this.retryingPayment.set(false);
+          // Pull-fallback: Wompi retry-payment response carries the invoice
+          // id whose pending payment we are re-charging, so the polling
+          // loop can call /sync-from-gateway each cycle.
+          const invoiceId =
+            typeof data?.invoice?.id === 'number' ? data.invoice.id : null;
+          this.wompiCheckoutService.openWidget(data.widget, {
+            onApproved: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info('Verificando confirmación de pago…');
+            },
+            onDeclined: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'El pago fue rechazado. Intenta con otro método de pago.',
+              );
+            },
+            onPending: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info(
+                'Pago pendiente de confirmación. Verificando…',
+              );
+            },
+            onClosed: () => {
+              this.facade.loadCurrent();
+              this.toastService.warning(
+                'El pago fue cancelado. Tu suscripción sigue pendiente.',
+              );
+            },
+            onError: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'No se pudo abrir el widget de pago. Intenta de nuevo.',
+              );
+            },
+          });
+        },
+        error: (err) => {
+          this.retryingPayment.set(false);
+          // Backend may have already resolved the invoice asynchronously
+          // (SUBSCRIPTION_010 / DUNNING_001) — refresh state so the banner
+          // disappears if so.
+          this.facade.loadCurrent();
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
   goToHistory(): void {
     this.router.navigate(['/admin/subscription/history']);
+  }
+
+  /**
+   * Opt-in navigation to the read-only payment-methods page. Only relevant
+   * when the user has (or recently had) an active/trial/past_due plan that
+   * actually saves cards on file. In `no_plan`/terminal states there is
+   * nothing meaningful to manage there, so we hide the entry.
+   */
+  readonly showPaymentMethodsLink = computed(() => {
+    if (this.isNoPlan()) return false;
+    if (this.isTerminal()) return false;
+    if (!this.current()) return false;
+    return true;
+  });
+
+  goToPaymentMethods(): void {
+    this.router.navigate(['/admin/subscription/payment']);
   }
 
   goToTimeline(): void {
@@ -660,6 +895,7 @@ export class MySubscriptionComponent implements OnInit {
       grace_soft: 'En Gracia',
       grace_hard: 'Gracia Final',
       draft: 'Borrador',
+      no_plan: 'Sin Plan',
       none: 'Sin Plan',
     };
     return labels[this.status()] || this.status();

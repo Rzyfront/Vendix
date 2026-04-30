@@ -84,6 +84,20 @@ export const scheduleCancelFailure = createAction(
   props<{ error: NormalizedApiPayload | string }>(),
 );
 
+export const unscheduleCancel = createAction(
+  '[Subscription] Unschedule Cancel',
+);
+
+export const unscheduleCancelSuccess = createAction(
+  '[Subscription] Unschedule Cancel Success',
+  props<{ subscription: any }>(),
+);
+
+export const unscheduleCancelFailure = createAction(
+  '[Subscription] Unschedule Cancel Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
 export const changePlan = createAction(
   '[Subscription] Change Plan',
   props<{ planId: string }>(),
@@ -203,6 +217,40 @@ export const loadDunningStateFailure = createAction(
 );
 
 export const retryPayment = createAction('[Subscription] Retry Payment');
+
+/**
+ * Phase 3 — Wompi widget polling. After the widget reports APPROVED (or any
+ * non-error close path) we don't trust the local state immediately: the
+ * backend webhook is the source of truth and may take a moment to flip
+ * `pending_payment → active`. The effect polls `/store/subscriptions/current`
+ * on `intervalMs` until either status becomes `active` (`pollSucceeded`) or
+ * `timeoutMs` elapses (`pollTimeout`). The component can react to either
+ * terminal action via toast/UI feedback.
+ */
+export const pollSubscriptionUntilActive = createAction(
+  '[Subscription] Poll Until Active',
+  props<{
+    timeoutMs?: number;
+    intervalMs?: number;
+    /**
+     * Pull-fallback target invoice. When supplied, the polling effect calls
+     * `POST /store/subscriptions/checkout/invoices/:invoiceId/sync-from-gateway`
+     * on each tick so the backend can reconcile with Wompi without depending
+     * on the (often-unreachable in dev) webhook endpoint. Omit to fall back
+     * to the legacy current-only polling behaviour.
+     */
+    invoiceId?: number | null;
+  }>(),
+);
+
+export const pollSucceeded = createAction('[Subscription] Poll Succeeded');
+
+export const pollTimeout = createAction('[Subscription] Poll Timeout');
+
+export const pollFailed = createAction(
+  '[Subscription] Poll Failed',
+  props<{ reason?: string }>(),
+);
 
 export const retryPaymentSuccess = createAction(
   '[Subscription] Retry Payment Success',

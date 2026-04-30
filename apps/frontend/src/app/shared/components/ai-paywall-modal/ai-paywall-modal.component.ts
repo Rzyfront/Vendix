@@ -100,6 +100,15 @@ const CATEGORIES_WITH_BENEFITS: ReadonlySet<PaywallCategory> = new Set([
       </div>
 
       <div slot="footer" class="paywall-footer">
+        @if (showExtraAction()) {
+          <button
+            type="button"
+            class="paywall-extra-link"
+            (click)="emitExtra()"
+          >
+            {{ extraActionLabel() }}
+          </button>
+        }
         <app-button
           variant="ghost"
           size="md"
@@ -139,6 +148,18 @@ export class AiPaywallModalComponent {
   readonly isOpen = model<boolean>(false);
   readonly action = output<'upgrade' | 'pay' | 'dismiss'>();
   readonly dismissText = input<string>('Cerrar');
+  /**
+   * RNC-24 — Optional tertiary action (e.g. "Contactar soporte"). When the
+   * label is non-empty the button is rendered next to the regular CTAs and
+   * `extraAction` is emitted on click. The host (paywall-outlet) decides
+   * what to do — typically open the support modal.
+   */
+  readonly extraActionLabel = input<string>('');
+  readonly extraAction = output<void>();
+
+  readonly showExtraAction = computed(
+    () => (this.extraActionLabel() ?? '').trim().length > 0,
+  );
 
   readonly resolvedTitle = computed(() => {
     const config = this.variantConfig();
@@ -233,6 +254,10 @@ export class AiPaywallModalComponent {
   dismiss(): void {
     this.action.emit('dismiss');
     this.isOpen.set(false);
+  }
+
+  emitExtra(): void {
+    this.extraAction.emit();
   }
 
   private legacySeverity(): PaywallSeverity {

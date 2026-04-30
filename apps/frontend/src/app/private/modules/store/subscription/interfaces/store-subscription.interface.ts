@@ -9,6 +9,13 @@ export interface SubscriptionPlan {
   features: PlanFeature[];
   is_current: boolean;
   is_popular: boolean;
+  /**
+   * Explicit free-plan flag (server-authoritative). Mirrors
+   * `subscription_plans.is_free` in BD. Frontends should branch on this rather
+   * than `base_price === 0` to support partner-margin overrides on free base
+   * plans.
+   */
+  is_free?: boolean;
   sort_order: number;
 }
 
@@ -132,6 +139,14 @@ export interface ProrationPreview {
     active: boolean;
     scheduled_at: string;
   };
+  /**
+   * Whether the destination plan is configured as free
+   * (`subscription_plans.is_free=true` server-side). Used by the checkout
+   * component as defense-in-depth: when the backend returns `widget=null` but
+   * target is paid AND `proration_amount > 0`, the UI surfaces an error
+   * rather than navigating to a misleading success.
+   */
+  target_plan_is_free?: boolean;
 }
 
 export interface FreePlanInfo {

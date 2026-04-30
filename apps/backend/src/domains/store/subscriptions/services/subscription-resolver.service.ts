@@ -206,6 +206,26 @@ export class SubscriptionResolverService {
       };
     }
 
+    // RNC-39: stores in 'no_plan' state have no plan assigned. Surface empty
+    // features so the gate blocks all feature usage and consumers see a clear
+    // "no plan" signal rather than leaking placeholder plan info.
+    if (!sub.plan_id || !sub.plan) {
+      return {
+        found: true,
+        storeId,
+        state: sub.state,
+        planId: null,
+        planCode: '',
+        partnerOrgId: sub.partner_override?.organization_id ?? null,
+        overlayActive: false,
+        overlayExpiresAt: null,
+        features: {},
+        gracePeriodSoftDays: 0,
+        gracePeriodHardDays: 0,
+        currentPeriodEnd: sub.current_period_end,
+      };
+    }
+
     const baseFeatures = this.coerceFeatures(sub.plan.ai_feature_flags);
     let features: ResolvedFeatures = baseFeatures;
 
@@ -442,18 +462,20 @@ export class SubscriptionResolverService {
     sub: {
       id: number;
       resolved_at: Date;
-      plan: { updated_at: Date };
+      plan?: { updated_at: Date } | null;
       partner_override?: { updated_at: Date } | null;
       promotional_plan?: { updated_at: Date } | null;
     },
     features: ResolvedFeatures,
   ): Promise<void> {
     try {
-      const candidates = [sub.plan.updated_at];
+      const candidates: Date[] = [];
+      if (sub.plan) candidates.push(sub.plan.updated_at);
       if (sub.partner_override)
         candidates.push(sub.partner_override.updated_at);
       if (sub.promotional_plan)
         candidates.push(sub.promotional_plan.updated_at);
+      if (candidates.length === 0) return;
       const maxSource = candidates.reduce(
         (acc, d) => (d.getTime() > acc.getTime() ? d : acc),
         candidates[0],

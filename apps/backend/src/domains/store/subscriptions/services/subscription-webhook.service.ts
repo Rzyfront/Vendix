@@ -3,6 +3,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { SubscriptionPaymentService } from './subscription-payment.service';
+import { SubscriptionFraudService } from './subscription-fraud.service';
+import { SubscriptionStateService } from './subscription-state.service';
 
 /**
  * Wompi transaction.updated payload statuses we care about.
@@ -35,6 +37,8 @@ export class SubscriptionWebhookService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly paymentService: SubscriptionPaymentService,
+    private readonly fraudService: SubscriptionFraudService,
+    private readonly stateService: SubscriptionStateService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
@@ -46,6 +50,21 @@ export class SubscriptionWebhookService {
       this.logger.warn(
         `Webhook missing transaction body for invoice ${invoiceId} (sub ${subscriptionId})`,
       );
+      return;
+    }
+
+    // RNC-29 — Chargeback / dispute detection. Wompi signals chargebacks via
+    // dedicated event types (`nu.dispute.*`, `chargeback.*`) and/or via
+    // `transaction.updated` with a status_message indicating a forced refund.
+    // Both shapes route to the fraud service which:
+    //   - increments `organizations.chargeback_count`,
+    //   - flips the subscription to `suspended` with `lock_reason='chargeback'`,
+    //   - reverses the partner_commission for that invoice (ledger row).
+    // Event is deduped via the same `webhook_event_dedup` table the
+    // transaction.updated path uses, keyed by Wompi event id (or
+    // `cb_<txnId>` when the dispute payload re-uses the original transaction id).
+    if (this.isChargebackEvent(body, txn)) {
+      await this.handleChargebackEvent({ subscriptionId, invoiceId, body, txn });
       return;
     }
 
@@ -255,6 +274,193 @@ export class SubscriptionWebhookService {
         subscriptionId,
         source: 'webhook',
       });
+    }
+  }
+
+  /**
+   * RNC-29 — Detect chargeback / dispute / forced-refund webhook bodies.
+   *
+   * Wompi shapes we accept:
+   *   - body.event starts with `nu.dispute.`, `dispute.`, or `chargeback.`
+   *   - body.event === 'transaction.updated' AND status is REFUNDED/VOIDED
+   *     AND status_message contains 'chargeback' or 'dispute' (case-insensitive)
+   *
+   * The signal must be unambiguous — voluntary refunds DO NOT enter this
+   * branch. Per RNC-11 Vendix never issues voluntary refunds; any refund
+   * arriving here is bank-forced (a real chargeback) and must be treated as
+   * one.
+   */
+  private isChargebackEvent(body: any, txn: any): boolean {
+    const eventName = (body?.event ?? '').toString().toLowerCase();
+    if (
+      eventName.startsWith('nu.dispute.') ||
+      eventName.startsWith('dispute.') ||
+      eventName.startsWith('chargeback.')
+    ) {
+      return true;
+    }
+
+    // Fallback path: `transaction.updated` carrying a chargeback hint.
+    const statusMessage = (txn?.status_message ?? '').toString().toLowerCase();
+    if (
+      eventName === 'transaction.updated' &&
+      (statusMessage.includes('chargeback') ||
+        statusMessage.includes('dispute') ||
+        statusMessage.includes('contracargo'))
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * RNC-29 — Process a chargeback webhook. Idempotent via `webhook_event_dedup`
+   * keyed on the Wompi event id (or a derived id for dispute payloads that
+   * re-reference the original transaction). All writes happen inside a single
+   * ReadCommitted transaction; the post-commit emit is best-effort.
+   */
+  private async handleChargebackEvent(args: {
+    subscriptionId: number;
+    invoiceId: number;
+    body: any;
+    txn: any;
+  }): Promise<void> {
+    const { subscriptionId, invoiceId, body, txn } = args;
+
+    // Stable dedup id. Prefer the dispute envelope id; fall back to the
+    // transaction id with a `cb_` prefix so a regular `transaction.updated`
+    // and its chargeback don't collide on the same dedup key.
+    const eventEnvelopeId =
+      body?.id ??
+      body?.data?.id ??
+      body?.data?.dispute?.id ??
+      (txn?.id ? `cb_${txn.id}` : undefined);
+
+    const dedupKey = eventEnvelopeId ? String(eventEnvelopeId) : undefined;
+
+    // Resolve the subscription -> store -> organization needed by the fraud
+    // service. Read outside the tx because it is a read-only lookup; the
+    // critical writes (dedup insert + fraud-service writes) happen inside.
+    const sub = await this.prisma
+      .withoutScope()
+      .store_subscriptions.findUnique({
+        where: { id: subscriptionId },
+        select: {
+          id: true,
+          store_id: true,
+          state: true,
+          store: { select: { organization_id: true } },
+        },
+      });
+
+    if (!sub || !sub.store) {
+      this.logger.warn(
+        `Chargeback webhook for unknown subscription ${subscriptionId} (invoice ${invoiceId})`,
+      );
+      return;
+    }
+
+    const organizationId = sub.store.organization_id;
+
+    // Idempotent dedup INSERT inside a transaction so concurrent redeliveries
+    // serialize on (processor, event_id).
+    const dedupResult = await this.prisma
+      .withoutScope()
+      .$transaction(
+        async (tx) => {
+          if (dedupKey) {
+            const inserted = await tx.$executeRaw<number>(
+              Prisma.sql`
+                INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
+                VALUES ('wompi_platform', ${dedupKey}, 'chargeback', NOW())
+                ON CONFLICT (processor, event_id) DO NOTHING
+              `,
+            );
+            if (inserted === 0) {
+              return { duplicate: true };
+            }
+          }
+          return { duplicate: false };
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+      );
+
+    if (dedupResult.duplicate) {
+      this.logger.log(
+        `Duplicate chargeback webhook detected for invoice ${invoiceId} (event ${dedupKey}); skipping`,
+      );
+      return;
+    }
+
+    // Suspend the subscription with lock_reason='chargeback'. Done in a short
+    // tx so the fraud-service writes (counter bump + event row) and the state
+    // transition share a consistent committed view.
+    try {
+      if (sub.state !== 'suspended' && sub.state !== 'cancelled') {
+        await this.stateService.transition(sub.store_id, 'suspended', {
+          reason: 'chargeback',
+          triggeredByJob: 'webhook',
+          payload: {
+            invoice_id: invoiceId,
+            subscription_id: subscriptionId,
+            wompi_event: body?.event ?? 'unknown',
+            wompi_txn_id: txn?.id ?? null,
+            source: 'chargeback_webhook',
+          },
+        });
+      }
+    } catch (e: any) {
+      // Do not abort: chargeback bookkeeping must still run. The cron
+      // reconciler will re-attempt the suspension on the next sweep.
+      this.logger.warn(
+        `Failed to transition sub ${subscriptionId} to suspended on chargeback: ${e?.message ?? e}`,
+      );
+    }
+
+    // Bump organization-level chargeback counter + log subscription_event
+    // (org block at threshold per RNC-30 happens inside fraudService).
+    try {
+      const txnAmount =
+        typeof txn?.amount_in_cents === 'number'
+          ? new Prisma.Decimal(txn.amount_in_cents).dividedBy(100)
+          : undefined;
+      const reason =
+        (txn?.status_message as string | undefined) ??
+        (body?.event as string | undefined) ??
+        'wompi_chargeback';
+
+      await this.fraudService.handleChargeback(organizationId, {
+        storeId: sub.store_id,
+        invoiceId,
+        chargebackReason: reason,
+        chargebackAmount: txnAmount,
+      });
+    } catch (e: any) {
+      // Surface in logs; the dedup row already prevents replay so a manual
+      // retry path is safe.
+      this.logger.error(
+        `fraudService.handleChargeback failed for org ${organizationId} ` +
+          `(invoice ${invoiceId}): ${e?.message ?? e}`,
+      );
+    }
+
+    // Post-commit emit — listeners (commission reversal, super-admin notif)
+    // pick up from here. Wrapped because emit() is synchronous but listener
+    // errors must not propagate to the webhook controller.
+    try {
+      this.eventEmitter.emit('subscription.chargeback.received', {
+        organizationId,
+        storeId: sub.store_id,
+        subscriptionId,
+        invoiceId,
+        wompiEvent: body?.event ?? 'unknown',
+        wompiTxnId: txn?.id ?? null,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `subscription.chargeback.received emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+      );
     }
   }
 }

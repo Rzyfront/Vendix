@@ -16,6 +16,7 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
+import { SupportRequestModalComponent } from '../../components/support-request-modal/support-request-modal.component';
 
 /**
  * G6 — Dunning board.
@@ -38,6 +39,7 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
     IconComponent,
     CurrencyPipe,
     DatePipe,
+    SupportRequestModalComponent,
   ],
   templateUrl: './dunning-board.component.html',
   styleUrls: ['./dunning-board.component.scss'],
@@ -187,15 +189,30 @@ export class DunningBoardComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * S2.2 — Send the user to the payment-method page where Wompi tokenization
-   * + the new "Reemplazar" flow live. After tokenizing a fresh card the user
-   * can come back to this board and click "Pagar ahora" — or, if they want
-   * automatic retry, the payment-method page emits replacePaymentMethod()
-   * which already triggers a retry on the backend (subscription-payment
-   * service hook).
+   * Trigger the canonical retry-payment flow. The backend mints a fresh Wompi
+   * widget config and `subscription-payment` auto-registers the new PM on
+   * APPROVED. This avoids redirecting the user to `/payment` (which is opt-in
+   * for managing already-saved methods) and keeps the recovery path inline
+   * with the dunning-board — same as clicking "Pagar ahora".
    */
   onUpdatePaymentMethod(): void {
-    this.router.navigateByUrl('/admin/subscription/payment');
+    this.onRetryPayment();
+  }
+
+  /**
+   * RNC-24 — Open the contact-support modal. Visible on every dunning state
+   * so the customer can reach Vendix even when the gateway flow is broken.
+   */
+  readonly supportModalOpen = signal(false);
+
+  onContactSupport(): void {
+    this.supportModalOpen.set(true);
+  }
+
+  onSupportSubmitted(_payload: { ticketId: number }): void {
+    this.toast.info(
+      'Tu solicitud fue enviada al equipo de soporte. Te contactaremos pronto.',
+    );
   }
 
   featureLabel(key: string): string {

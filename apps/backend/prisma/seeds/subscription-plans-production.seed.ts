@@ -242,6 +242,7 @@ export async function seedSubscriptionPlansProduction(
       ai_feature_flags: plan.ai_feature_flags,
       max_partner_margin_pct: plan.max_partner_margin_pct,
       resellable: true,
+      is_free: false,
       is_promotional: false,
       promo_priority: 0,
       is_popular: plan.is_popular,

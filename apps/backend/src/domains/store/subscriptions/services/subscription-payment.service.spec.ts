@@ -89,6 +89,11 @@ describe('SubscriptionPaymentService', () => {
     wompiProcessorMock = {
       processPayment: jest.fn(),
     };
+    const wompiClientFactoryMock = {
+      getClient: jest.fn().mockReturnValue({
+        getTransactionsByReference: jest.fn().mockResolvedValue({ data: [] }),
+      }),
+    };
     commissionQueueMock = {
       add: jest.fn().mockResolvedValue({ id: 'job-123' }),
     };
@@ -106,6 +111,7 @@ describe('SubscriptionPaymentService', () => {
       eventEmitterMock,
       platformGwMock,
       wompiProcessorMock,
+      wompiClientFactoryMock as any,
       commissionQueueMock,
       emailQueueMock,
     );

@@ -303,7 +303,9 @@ export class SubscriptionBannerComponent implements OnInit {
     ) {
       return '/admin/subscription/dunning';
     }
-    return '/admin/subscription/payment';
+    // Default fallback — send to subscription overview. The /payment page is
+    // opt-in only (managing already-saved methods); never the auto entry.
+    return '/admin/subscription';
   });
 
   onDismiss(): void {

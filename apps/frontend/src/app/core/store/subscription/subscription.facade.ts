@@ -97,7 +97,8 @@ export class SubscriptionFacade {
       s === 'cancelled' ||
       s === 'expired' ||
       s === 'canceled' ||
-      s === 'suspended'
+      s === 'suspended' ||
+      s === 'no_plan'
     );
   });
 
@@ -147,6 +148,10 @@ export class SubscriptionFacade {
     this.store.dispatch(SubscriptionActions.scheduleCancel({ reason }));
   }
 
+  unscheduleCancel(): void {
+    this.store.dispatch(SubscriptionActions.unscheduleCancel());
+  }
+
   changePlan(planId: string): void {
     this.store.dispatch(SubscriptionActions.changePlan({ planId }));
   }
@@ -175,6 +180,33 @@ export class SubscriptionFacade {
 
   retryPayment(): void {
     this.store.dispatch(SubscriptionActions.retryPayment());
+  }
+
+  /**
+   * Phase 3 — Start polling `/store/subscriptions/current` until the
+   * subscription transitions to `active` or `timeoutMs` elapses. Use after
+   * the Wompi widget reports APPROVED so the UI catches the asynchronous
+   * webhook flip `pending_payment → active`.
+   *
+   * Pull-fallback: when `invoiceId` is provided, every poll cycle ALSO
+   * issues `POST checkout/invoices/:invoiceId/sync-from-gateway` so the
+   * backend reconciles directly with Wompi. Required for environments
+   * where the Wompi webhook can't reach localhost (dev) or under transient
+   * outbound failures (prod). Without invoiceId, polling falls back to the
+   * legacy "wait for webhook" behaviour.
+   */
+  pollSubscriptionUntilActive(opts?: {
+    timeoutMs?: number;
+    intervalMs?: number;
+    invoiceId?: number | null;
+  }): void {
+    this.store.dispatch(
+      SubscriptionActions.pollSubscriptionUntilActive({
+        timeoutMs: opts?.timeoutMs,
+        intervalMs: opts?.intervalMs,
+        invoiceId: opts?.invoiceId ?? null,
+      }),
+    );
   }
 
   // S2.1 — Coupon redemption

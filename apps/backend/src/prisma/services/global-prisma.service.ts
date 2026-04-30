@@ -554,4 +554,16 @@ export class GlobalPrismaService extends BasePrismaService {
   get webhook_event_dedup() {
     return this.baseClient.webhook_event_dedup;
   }
+
+  get redemption_consumptions() {
+    return this.baseClient.redemption_consumptions;
+  }
+
+  get organization_trial_consumptions() {
+    return this.baseClient.organization_trial_consumptions;
+  }
+
+  get saas_metrics_snapshot() {
+    return this.baseClient.saas_metrics_snapshot;
+  }
 }

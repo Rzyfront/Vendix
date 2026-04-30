@@ -25,6 +25,15 @@ export interface PricingCardPlan {
   is_popular?: boolean;
 }
 
+/** Emitted on CTA click. `retry=true` indicates the user clicked the
+ * "Completar pago" CTA on a card flagged as the current plan but with a
+ * `pending_payment` subscription status. Consumers should route to the
+ * retry-payment flow instead of the regular checkout. */
+export interface PricingCardSelectEvent {
+  plan: PricingCardPlan;
+  retry: boolean;
+}
+
 @Component({
   selector: 'app-pricing-card',
   standalone: true,
@@ -175,13 +184,13 @@ export interface PricingCardPlan {
         <!-- CTA -->
         <div class="p-6 pt-2">
           <app-button
-            [variant]="isPopular() ? 'secondary' : isCurrent() ? 'outline' : 'primary'"
-            [disabled]="isCurrent()"
+            [variant]="isPopular() ? 'secondary' : isPendingRetry() ? 'primary' : isCurrent() ? 'outline' : 'primary'"
+            [disabled]="isCurrent() && !isPendingRetry()"
             [fullWidth]="true"
             [customClasses]="isPopular() ? 'bg-white text-primary-700 hover:bg-gray-50' : ''"
             (clicked)="onSelect()"
           >
-            {{ isCurrent() ? 'Plan actual' : ctaLabel() }}
+            {{ effectiveCtaLabel() }}
           </app-button>
         </div>
       }
@@ -192,14 +201,37 @@ export class PricingCardComponent {
   readonly plan = input.required<PricingCardPlan>();
   readonly loading = input<boolean>(false);
   readonly ctaLabel = input<string>('Seleccionar');
+  /**
+   * Phase 4 — Status of the currently active subscription, propagated from
+   * the parent (typically `plan-catalog`). Combined with `is_current=true`
+   * to surface a "Completar pago" CTA when the user landed on
+   * `pending_payment` after a Wompi-aborted commit.
+   */
+  readonly subscriptionStatus = input<string | undefined>(undefined);
 
-  readonly select = output<PricingCardPlan>();
+  readonly select = output<PricingCardSelectEvent>();
 
   readonly popularGradient =
     'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
 
   readonly isPopular = computed(() => this.plan().is_popular === true);
   readonly isCurrent = computed(() => this.plan().is_current === true);
+
+  /**
+   * True when this card represents the current plan and the subscription is
+   * stuck in `pending_payment`. Drives the CTA to "Completar pago" instead
+   * of the disabled "Plan actual" label.
+   */
+  readonly isPendingRetry = computed(
+    () => this.isCurrent() && this.subscriptionStatus() === 'pending_payment',
+  );
+
+  /** Effective CTA label; falls back to "Seleccionar" via the input. */
+  readonly effectiveCtaLabel = computed(() => {
+    if (this.isPendingRetry()) return 'Completar pago';
+    if (this.isCurrent()) return 'Plan actual';
+    return this.ctaLabel();
+  });
 
   readonly cycleSuffix = computed(() => {
     const cycle = this.plan().billing_cycle;
@@ -222,7 +254,8 @@ export class PricingCardComponent {
   }
 
   onSelect(): void {
-    if (this.isCurrent() || this.loading()) return;
-    this.select.emit(this.plan());
+    if (this.loading()) return;
+    if (this.isCurrent() && !this.isPendingRetry()) return;
+    this.select.emit({ plan: this.plan(), retry: this.isPendingRetry() });
   }
 }

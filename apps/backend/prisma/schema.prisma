@@ -348,6 +348,10 @@ model organizations {
   partner_since                 DateTime?                      @db.Timestamp(6)
   has_consumed_trial            Boolean                        @default(false)
   trial_consumed_at             DateTime?                      @db.Timestamp(6)
+  fraud_blocked                 Boolean                        @default(false)
+  fraud_blocked_at              DateTime?                      @db.Timestamp(6)
+  fraud_blocked_reason          String?                        @db.Text
+  chargeback_count              Int                            @default(0)
   acm_certificate_arn           String?                        @db.VarChar(2048)
   acm_cert_revision             Int                            @default(0)
   addresses                     addresses[]
@@ -416,6 +420,7 @@ model organizations {
 
   // Trial consumption audit (one-shot per org, replaces has_consumed_trial flag)
   organization_trial_consumption organization_trial_consumptions?
+  redemption_consumptions        redemption_consumptions[]
 
   // Onboarding State
   onboarding_state organization_onboarding_state?
@@ -614,7 +619,7 @@ model stores {
   messaging_channels          messaging_channels[]
 
   // SaaS Subscription (one per store)
-  subscription store_subscriptions?
+  subscription                 store_subscriptions?
   subscription_payment_methods subscription_payment_methods[]
 
   @@unique([organization_id, slug])
@@ -654,17 +659,17 @@ model domain_settings {
   ownership          domain_ownership_enum @default(vendix_subdomain)
 
   // Domain Provisioning v2 (custom domains workflow)
-  validation_cname_name      String?    @db.VarChar(255)
-  validation_cname_value     String?    @db.VarChar(255)
-  validation_dns_missing_at  DateTime?  @db.Timestamptz(6)
-  cert_expires_at            DateTime?  @db.Timestamptz(6)
+  validation_cname_name      String?   @db.VarChar(255)
+  validation_cname_value     String?   @db.VarChar(255)
+  validation_dns_missing_at  DateTime? @db.Timestamptz(6)
+  cert_expires_at            DateTime? @db.Timestamptz(6)
   cloudfront_snapshot_before Json?
-  last_error_code            String?    @db.VarChar(80)
-  retry_count                Int        @default(0)
-  expires_token_at           DateTime?  @db.Timestamptz(6)
+  last_error_code            String?   @db.VarChar(80)
+  retry_count                Int       @default(0)
+  expires_token_at           DateTime? @db.Timestamptz(6)
 
-  organization       organizations?        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store              stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?        @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([hostname])
   @@index([organization_id])
@@ -676,11 +681,11 @@ model domain_settings {
 }
 
 model domain_blocklist {
-  id         Int       @id @default(autoincrement())
-  pattern    String    @unique @db.VarChar(255)
-  match_type String    @db.VarChar(20)
-  reason     String?   @db.Text
-  created_at DateTime  @default(now()) @db.Timestamptz(6)
+  id         Int      @id @default(autoincrement())
+  pattern    String   @unique @db.VarChar(255)
+  match_type String   @db.VarChar(20)
+  reason     String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz(6)
 
   @@map("domain_blocklist")
 }
@@ -5713,16 +5718,17 @@ enum store_subscription_state_enum {
   cancelled
   expired
   pending_payment
+  no_plan
 }
 
 enum subscription_invoice_state_enum {
   draft
   issued
   paid
-  partially_paid
   overdue
   void
   refunded
+  refunded_chargeback
 }
 
 enum subscription_payment_state_enum {
@@ -5750,6 +5756,8 @@ enum subscription_event_type_enum {
   partner_commission_accrued
   partner_commission_paid
   scheduled_cancel
+  chargeback_received
+  manual_payment
 }
 
 enum partner_payout_batch_state_enum {
@@ -5772,6 +5780,7 @@ enum partner_commission_state_enum {
   pending_payout
   paid
   reversed
+  reversed_pending_recovery
 }
 
 enum commission_accrual_state_enum {
@@ -5789,42 +5798,45 @@ enum notification_severity_enum {
 }
 
 model subscription_plans {
-  id                     Int                             @id @default(autoincrement())
-  code                   String                          @unique @db.VarChar(64)
-  name                   String                          @db.VarChar(128)
-  description            String?                         @db.Text
-  plan_type              subscription_plan_type_enum     @default(base)
-  state                  subscription_plan_state_enum    @default(draft)
-  billing_cycle          subscription_billing_cycle_enum @default(monthly)
-  base_price             Decimal                         @db.Decimal(12, 2)
-  currency               String                          @default("COP") @db.VarChar(3)
-  setup_fee              Decimal?                        @db.Decimal(12, 2)
-  trial_days             Int                             @default(0)
-  grace_period_soft_days Int                             @default(5)
-  grace_period_hard_days Int                             @default(10)
-  suspension_day         Int                             @default(14)
-  cancellation_day       Int                             @default(45)
-  feature_matrix         Json
-  ai_feature_flags       Json
-  resellable             Boolean                         @default(false)
-  max_partner_margin_pct Decimal?                        @db.Decimal(5, 2)
-  is_promotional         Boolean                         @default(false)
-  promo_rules            Json?
-  promo_priority         Int                             @default(0)
-  redemption_code        String?                         @unique @db.VarChar(64)
-  is_popular             Boolean                         @default(false)
-  sort_order             Int                             @default(0)
-  is_default             Boolean                         @default(false)
-  parent_plan_id         Int?
-  parent_plan            subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
-  child_plans            subscription_plans[]            @relation("plan_lineage")
-  partner_overrides      partner_plan_overrides[]
-  store_subscriptions    store_subscriptions[]           @relation("store_sub_base_plan")
-  promotional_store_subs store_subscriptions[]           @relation("store_sub_promo_plan")
-  created_at             DateTime                        @default(now()) @db.Timestamp(6)
-  updated_at             DateTime                        @default(now()) @db.Timestamp(6)
-  created_by             Int?
-  archived_at            DateTime?                       @db.Timestamp(6)
+  id                      Int                             @id @default(autoincrement())
+  code                    String                          @unique @db.VarChar(64)
+  name                    String                          @db.VarChar(128)
+  description             String?                         @db.Text
+  plan_type               subscription_plan_type_enum     @default(base)
+  state                   subscription_plan_state_enum    @default(draft)
+  billing_cycle           subscription_billing_cycle_enum @default(monthly)
+  base_price              Decimal                         @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
+  setup_fee               Decimal?                        @db.Decimal(12, 2)
+  trial_days              Int                             @default(0)
+  grace_period_soft_days  Int                             @default(5)
+  grace_period_hard_days  Int                             @default(10)
+  suspension_day          Int                             @default(14)
+  cancellation_day        Int                             @default(45)
+  feature_matrix          Json
+  ai_feature_flags        Json
+  resellable              Boolean                         @default(false)
+  max_partner_margin_pct  Decimal?                        @db.Decimal(5, 2)
+  is_free                 Boolean                         @default(false)
+  is_promotional          Boolean                         @default(false)
+  promo_rules             Json?
+  promo_priority          Int                             @default(0)
+  redemption_code         String?                         @unique @db.VarChar(64)
+  is_popular              Boolean                         @default(false)
+  sort_order              Int                             @default(0)
+  is_default              Boolean                         @default(false)
+  parent_plan_id          Int?
+  parent_plan             subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
+  child_plans             subscription_plans[]            @relation("plan_lineage")
+  partner_overrides       partner_plan_overrides[]
+  store_subscriptions     store_subscriptions[]           @relation("store_sub_base_plan")
+  promotional_store_subs  store_subscriptions[]           @relation("store_sub_promo_plan")
+  scheduled_store_subs    store_subscriptions[]           @relation("store_sub_scheduled_plan")
+  redemption_consumptions redemption_consumptions[]
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
+  created_by              Int?
+  archived_at             DateTime?                       @db.Timestamp(6)
 
   @@index([plan_type, state])
   @@index([is_promotional, promo_priority])
@@ -5852,42 +5864,50 @@ model partner_plan_overrides {
 }
 
 model store_subscriptions {
-  id                     Int                           @id @default(autoincrement())
-  store_id               Int                           @unique
-  plan_id                Int
-  partner_override_id    Int?
-  state                  store_subscription_state_enum @default(draft)
-  started_at             DateTime?                     @db.Timestamp(6)
-  trial_ends_at          DateTime?                     @db.Timestamp(6)
-  current_period_start   DateTime?                     @db.Timestamp(6)
-  current_period_end     DateTime?                     @db.Timestamp(6)
-  next_billing_at        DateTime?                     @db.Timestamp(6)
-  grace_soft_until       DateTime?                     @db.Timestamp(6)
-  grace_hard_until       DateTime?                     @db.Timestamp(6)
-  suspend_at             DateTime?                     @db.Timestamp(6)
-  cancel_at              DateTime?                     @db.Timestamp(6)
-  scheduled_cancel_at    DateTime?                     @db.Timestamp(6)
-  cancelled_at           DateTime?                     @db.Timestamp(6)
-  effective_price        Decimal                       @db.Decimal(12, 2)
-  vendix_base_price      Decimal                       @db.Decimal(12, 2)
-  partner_margin_amount  Decimal                       @default(0) @db.Decimal(12, 2)
-  currency               String                        @default("COP") @db.VarChar(3)
-  auto_renew             Boolean                       @default(true)
-  promotional_plan_id    Int?
-  promotional_applied_at DateTime?                     @db.Timestamp(6)
-  resolved_features      Json
-  resolved_at            DateTime                      @default(now()) @db.Timestamp(6)
-  replaced_by_id         Int?
-  metadata               Json?
-  created_at             DateTime                      @default(now()) @db.Timestamp(6)
-  updated_at             DateTime                      @default(now()) @db.Timestamp(6)
+  id                       Int                           @id @default(autoincrement())
+  store_id                 Int                           @unique
+  // RNC-39: stores in 'no_plan' state have no plan assigned. plan_id is nullable
+  // to allow representing "no plan" without leaking a placeholder plan into reads.
+  plan_id                  Int?
+  partner_override_id      Int?
+  state                    store_subscription_state_enum @default(draft)
+  started_at               DateTime?                     @db.Timestamp(6)
+  trial_ends_at            DateTime?                     @db.Timestamp(6)
+  current_period_start     DateTime?                     @db.Timestamp(6)
+  current_period_end       DateTime?                     @db.Timestamp(6)
+  next_billing_at          DateTime?                     @db.Timestamp(6)
+  grace_soft_until         DateTime?                     @db.Timestamp(6)
+  grace_hard_until         DateTime?                     @db.Timestamp(6)
+  suspend_at               DateTime?                     @db.Timestamp(6)
+  cancel_at                DateTime?                     @db.Timestamp(6)
+  scheduled_cancel_at      DateTime?                     @db.Timestamp(6)
+  // RNC-16/17: deferred plan change (downgrade end-of-period). Renewal cron
+  // applies the swap when scheduled_plan_change_at <= now, then clears both.
+  scheduled_plan_change_at DateTime?                     @db.Timestamptz(6)
+  scheduled_plan_id        Int?
+  cancelled_at             DateTime?                     @db.Timestamp(6)
+  effective_price          Decimal                       @db.Decimal(12, 2)
+  vendix_base_price        Decimal                       @db.Decimal(12, 2)
+  partner_margin_amount    Decimal                       @default(0) @db.Decimal(12, 2)
+  currency                 String                        @default("COP") @db.VarChar(3)
+  auto_renew               Boolean                       @default(true)
+  promotional_plan_id      Int?
+  promotional_applied_at   DateTime?                     @db.Timestamp(6)
+  resolved_features        Json
+  resolved_at              DateTime                      @default(now()) @db.Timestamp(6)
+  lock_reason              String?                       @db.VarChar(64)
+  replaced_by_id           Int?
+  metadata                 Json?
+  created_at               DateTime                      @default(now()) @db.Timestamp(6)
+  updated_at               DateTime                      @default(now()) @db.Timestamp(6)
 
-  store            stores                  @relation(fields: [store_id], references: [id])
-  plan             subscription_plans      @relation("store_sub_base_plan", fields: [plan_id], references: [id])
-  promotional_plan subscription_plans?     @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
-  partner_override partner_plan_overrides? @relation(fields: [partner_override_id], references: [id])
-  replaced_by      store_subscriptions?    @relation("store_sub_lineage", fields: [replaced_by_id], references: [id])
-  replaces         store_subscriptions[]   @relation("store_sub_lineage")
+  store            stores                         @relation(fields: [store_id], references: [id])
+  plan             subscription_plans?            @relation("store_sub_base_plan", fields: [plan_id], references: [id])
+  promotional_plan subscription_plans?            @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
+  scheduled_plan   subscription_plans?            @relation("store_sub_scheduled_plan", fields: [scheduled_plan_id], references: [id], onDelete: SetNull)
+  partner_override partner_plan_overrides?        @relation(fields: [partner_override_id], references: [id])
+  replaced_by      store_subscriptions?           @relation("store_sub_lineage", fields: [replaced_by_id], references: [id])
+  replaces         store_subscriptions[]          @relation("store_sub_lineage")
   invoices         subscription_invoices[]
   events           subscription_events[]
   payment_methods  subscription_payment_methods[]
@@ -5900,6 +5920,7 @@ model store_subscriptions {
   @@index([plan_id])
   @@index([next_billing_at])
   @@index([promotional_plan_id])
+  @@index([scheduled_plan_change_at])
 }
 
 model subscription_invoices {
@@ -5924,7 +5945,7 @@ model subscription_invoices {
   created_at              DateTime                        @default(now()) @db.Timestamp(6)
   updated_at              DateTime                        @default(now()) @db.Timestamp(6)
 
-  store_subscription store_subscriptions     @relation(fields: [store_subscription_id], references: [id])
+  store_subscription store_subscriptions         @relation(fields: [store_subscription_id], references: [id])
   payments           subscription_payments[]
   commission         partner_commissions?
   commission_accrual commission_accrual_pending?
@@ -5973,49 +5994,49 @@ model partner_commissions {
 }
 
 model partner_payout_batches {
-  id                      Int                   @id @default(autoincrement())
+  id                      Int                             @id @default(autoincrement())
   partner_organization_id Int
-  period_start            DateTime              @db.Timestamp(6)
-  period_end              DateTime              @db.Timestamp(6)
-  total_amount            Decimal               @db.Decimal(12, 2)
-  currency                String                @default("COP") @db.VarChar(3)
+  period_start            DateTime                        @db.Timestamp(6)
+  period_end              DateTime                        @db.Timestamp(6)
+  total_amount            Decimal                         @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
   state                   partner_payout_batch_state_enum @default(draft)
-  sent_at                 DateTime?             @db.Timestamp(6)
-  paid_at                 DateTime?             @db.Timestamp(6)
-  payout_method           String                @db.VarChar(64)
-  reference               String?               @db.VarChar(255)
+  sent_at                 DateTime?                       @db.Timestamp(6)
+  paid_at                 DateTime?                       @db.Timestamp(6)
+  payout_method           String                          @db.VarChar(64)
+  reference               String?                         @db.VarChar(255)
   metadata                Json?
   commissions             partner_commissions[]
-  organization            organizations         @relation("partner_payouts", fields: [partner_organization_id], references: [id])
-  created_at              DateTime              @default(now()) @db.Timestamp(6)
-  updated_at              DateTime              @default(now()) @db.Timestamp(6)
+  organization            organizations                   @relation("partner_payouts", fields: [partner_organization_id], references: [id])
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
 
   @@index([partner_organization_id, state])
 }
 
 model subscription_payment_methods {
-  id                     Int                 @id @default(autoincrement())
-  store_id               Int
-  store_subscription_id  Int
-  type                   String              @db.VarChar(32)
-  provider               String              @db.VarChar(32)
-  provider_token         String              @db.Text
-  last4                  String?             @db.VarChar(4)
-  brand                  String?             @db.VarChar(32)
-  expiry_month           String?             @db.VarChar(2)
-  expiry_year            String?             @db.VarChar(4)
-  card_holder            String?             @db.VarChar(128)
-  is_default             Boolean             @default(false)
-  state                  subscription_payment_method_state_enum @default(active)
-  consecutive_failures   Int                 @default(0)
-  replaced_by_id         Int?
-  replaced_at            DateTime?           @db.Timestamp(6)
-  metadata               Json?
-  created_at             DateTime            @default(now()) @db.Timestamp(6)
-  updated_at             DateTime            @default(now()) @db.Timestamp(6)
+  id                    Int                                    @id @default(autoincrement())
+  store_id              Int
+  store_subscription_id Int
+  type                  String                                 @db.VarChar(32)
+  provider              String                                 @db.VarChar(32)
+  provider_token        String                                 @db.Text
+  last4                 String?                                @db.VarChar(4)
+  brand                 String?                                @db.VarChar(32)
+  expiry_month          String?                                @db.VarChar(2)
+  expiry_year           String?                                @db.VarChar(4)
+  card_holder           String?                                @db.VarChar(128)
+  is_default            Boolean                                @default(false)
+  state                 subscription_payment_method_state_enum @default(active)
+  consecutive_failures  Int                                    @default(0)
+  replaced_by_id        Int?
+  replaced_at           DateTime?                              @db.Timestamp(6)
+  metadata              Json?
+  created_at            DateTime                               @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                               @default(now()) @db.Timestamp(6)
 
-  store              stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  store_subscription store_subscriptions @relation(fields: [store_subscription_id], references: [id], onDelete: Cascade)
+  store              stores                         @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store_subscription store_subscriptions            @relation(fields: [store_subscription_id], references: [id], onDelete: Cascade)
   replaced_by        subscription_payment_methods?  @relation("subscription_payment_methods_replaced_by", fields: [replaced_by_id], references: [id], onDelete: SetNull)
   replacements       subscription_payment_methods[] @relation("subscription_payment_methods_replaced_by")
 
@@ -6091,4 +6112,42 @@ model organization_trial_consumptions {
   store_subscription store_subscriptions @relation(fields: [store_subscription_id], references: [id], onDelete: Restrict)
 
   @@index([store_subscription_id])
+}
+
+/// Tracks one-time redemption of promotional plan codes per organization.
+/// UNIQUE(organization_id, plan_id) prevents reusing the same promo twice.
+model redemption_consumptions {
+  id              Int      @id @default(autoincrement())
+  organization_id Int
+  plan_id         Int
+  consumed_at     DateTime @default(now()) @db.Timestamp(6)
+  store_id        Int?
+  metadata        Json?
+
+  organization organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  plan         subscription_plans @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@unique([organization_id, plan_id])
+  @@index([organization_id])
+  @@index([plan_id])
+}
+
+/// Monthly materialized snapshot of SaaS metrics (MRR, ARR, churn, etc.).
+/// Populated by cron on the 1st of each month for historical reporting.
+model saas_metrics_snapshot {
+  id                    Int      @id @default(autoincrement())
+  year_month            String   @unique @db.VarChar(7)
+  snapshot_at           DateTime @default(now()) @db.Timestamp(6)
+  mrr                   Decimal  @default(0) @db.Decimal(14, 2)
+  arr                   Decimal  @default(0) @db.Decimal(14, 2)
+  active_subscriptions  Int      @default(0)
+  churn_voluntary       Int      @default(0)
+  churn_involuntary     Int      @default(0)
+  new_subscriptions     Int      @default(0)
+  trial_conversions     Int      @default(0)
+  total_revenue         Decimal  @default(0) @db.Decimal(14, 2)
+  partner_payouts_total Decimal  @default(0) @db.Decimal(14, 2)
+  metadata              Json?
+
+  @@index([year_month])
 }

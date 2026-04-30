@@ -7,7 +7,10 @@ import { PlansController } from './controllers/plans.controller';
 import { PlansService } from './services/plans.service';
 import { PartnersController } from './controllers/partners.controller';
 import { PartnersService } from './services/partners.service';
-import { PromotionalController } from './controllers/promotional.controller';
+import {
+  PromotionalController,
+  OrgPromoAssignController,
+} from './controllers/promotional.controller';
 import { PromotionalService } from './services/promotional.service';
 import { ActiveSubscriptionsController } from './controllers/active-subscriptions.controller';
 import { ActiveSubscriptionsService } from './services/active-subscriptions.service';
@@ -21,6 +24,7 @@ import { SubscriptionsStatsController } from './controllers/stats.controller';
 import { SubscriptionsStatsService } from './services/stats.service';
 import { SubscriptionMetricsController } from './controllers/metrics.controller';
 import { SubscriptionMetricsService } from './services/subscription-metrics.service';
+import { ManualPaymentController } from './controllers/manual-payment.controller';
 import { PlatformGatewayModule } from './gateway/gateway.module';
 
 @Module({
@@ -35,12 +39,14 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     PlansController,
     PartnersController,
     PromotionalController,
+    OrgPromoAssignController,
     ActiveSubscriptionsController,
     DunningController,
     PayoutsController,
     EventsController,
     SubscriptionsStatsController,
     SubscriptionMetricsController,
+    ManualPaymentController,
   ],
   providers: [
     PlansService,

@@ -4,7 +4,10 @@ import { Router } from '@angular/router';
 import { CommonModule } from '@angular/common';
 import { PublicPlansService, PublicPlan } from './services/public-plans.service';
 import { PricingCardComponent } from '../../shared/components';
-import { PricingCardPlan } from '../../shared/components/pricing-card/pricing-card.component';
+import {
+  PricingCardPlan,
+  PricingCardSelectEvent,
+} from '../../shared/components/pricing-card/pricing-card.component';
 import { PlanComparisonTableComponent } from './components/plan-comparison-table/plan-comparison-table.component';
 
 type PricingViewMode = 'cards' | 'compare';
@@ -56,7 +59,14 @@ export class PricingComponent {
     this.viewMode.set(mode);
   }
 
-  onSelectPlan(plan: PricingCardPlan | PublicPlan): void {
+  onSelectPlan(
+    event: PricingCardSelectEvent | PricingCardPlan | PublicPlan,
+  ): void {
+    // Pricing-card now emits `{ plan, retry }`; the comparison table still
+    // emits a bare plan. Accept both shapes so we don't force a refactor of
+    // the table for this change.
+    const plan: { id: number | string } =
+      'plan' in event ? (event as PricingCardSelectEvent).plan : event;
     this.router.navigate(['/auth/register'], { queryParams: { plan: plan.id } });
   }
 

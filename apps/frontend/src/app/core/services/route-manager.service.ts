@@ -36,7 +36,12 @@ export class RouteManagerService {
     if (typeof window === 'undefined') return;
 
     this.bootTimeout = setTimeout(() => {
-      if (!this.routesConfigured) {
+      // Bug fix: previously this checked `!this.routesConfigured`, but
+      // `routesConfigured` is a ReplaySubject (always truthy), so the
+      // fallback never fired. Use the explicit `initialized_complete`
+      // flag which flips to true the moment configureDynamicRoutes runs.
+      this.bootTimeout = null;
+      if (!this.initialized_complete) {
         console.warn(
           '[RouteManagerService] Boot timeout - routes not configured after 5s, forcing fallback',
         );

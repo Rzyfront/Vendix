@@ -13,7 +13,10 @@ import {
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { CheckoutPreviewResponse } from '../../interfaces/store-subscription.interface';
-import { WompiService } from '../../../../../../shared/services/wompi.service';
+import {
+  WompiCheckoutService,
+  WompiWidgetConfig,
+} from '../../../../../../core/services/wompi-checkout.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 // S2.1 — Map backend coupon validation `reason` codes to user-facing
@@ -27,16 +30,6 @@ const COUPON_REASON_COPY: Record<string, string> = {
   invalid_state: 'El cupón está deshabilitado',
   network_error: 'Error de red al validar el cupón',
 };
-
-interface SaasWompiWidgetConfig {
-  public_key: string;
-  currency: string;
-  amount_in_cents: number;
-  reference: string;
-  signature_integrity: string;
-  redirect_url: string;
-  customer_email: string;
-}
 
 @Component({
   selector: 'app-checkout',
@@ -153,7 +146,7 @@ interface SaasWompiWidgetConfig {
                   <strong>Próximo cargo:</strong>
                   {{ ts.trial_ends_at | date:'mediumDate':'-0500':'es-CO' }}
                   por
-                  {{ asNumber(proration()?.new_effective_price) | currency:'COP':'symbol-narrow':'1.0-0' }}/mes
+                  {{ asNumber(ts.new_effective_price) | currency:'COP':'symbol-narrow':'1.0-0' }}/mes
                 </p>
                 <p class="text-xs text-blue-900/80">
                   Puedes cancelar la renovación automática en cualquier momento desde tu panel.
@@ -485,7 +478,7 @@ export class CheckoutComponent implements OnInit {
   private facade = inject(SubscriptionFacade);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
-  private wompiService = inject(WompiService);
+  private wompiCheckoutService = inject(WompiCheckoutService);
 
   readonly preview = signal<CheckoutPreviewResponse | null>(null);
   readonly loadingPreview = signal(false);
@@ -533,11 +526,19 @@ export class CheckoutComponent implements OnInit {
   // with `kind === 'trial_plan_swap'` and embeds plan metadata in
   // `trial_swap`. The view branches on this signal to render the
   // deferred-change card instead of the regular breakdown.
+  //
+  // Bundle both `trial_swap` and `new_effective_price` in a single
+  // computed snapshot so the template reads them atomically. Reading
+  // `proration()?.new_effective_price` separately inside the @if block
+  // caused NG0100 (ExpressionChangedAfterItHasBeenChecked) when the
+  // preview signal flipped during the verify-changes pass.
   readonly trialSwapInfo = computed(() => {
     const p = this.proration();
-    return p && p.kind === 'trial_plan_swap' && p.trial_swap
-      ? p.trial_swap
-      : null;
+    if (!p || p.kind !== 'trial_plan_swap' || !p.trial_swap) return null;
+    return {
+      ...p.trial_swap,
+      new_effective_price: p.new_effective_price,
+    };
   });
 
   readonly chargeNow = computed(() => {
@@ -545,9 +546,18 @@ export class CheckoutComponent implements OnInit {
     return inv ? this.asNumber(inv.total) : 0;
   });
 
+  // RNC-15 — Trial → paid plan path. The backend returns kind='re_subscribe'
+  // for trial → paid (anti-arrastre). We detect it on the frontend by reading
+  // the current subscription status from the facade so we can show accurate
+  // copy ("Suscríbete al plan…" instead of "Reactivar suscripción").
+  readonly isTrialUpgrade = computed(
+    () => this.isResubscribe() && this.facade.status() === 'trialing',
+  );
+
   readonly headerTitle = computed(() => {
     if (this.trialSwapInfo()) return 'Cambiar plan durante prueba';
     if (this.freePlan()) return 'Activar Plan';
+    if (this.isTrialUpgrade()) return 'Suscríbete al plan';
     if (this.isResubscribe()) return 'Reactivar suscripción';
     if (this.voidsScheduledCancelOnly()) return 'Reanudar suscripción';
     return 'Confirmar Cambio de Plan';
@@ -576,6 +586,8 @@ export class CheckoutComponent implements OnInit {
     if (this.trialSwapInfo())
       return 'Mantienes tu prueba activa, sin cobros inmediatos';
     if (this.freePlan()) return 'Activa tu plan sin costo en un solo paso';
+    if (this.isTrialUpgrade())
+      return 'Tu prueba termina al confirmar el pago. Comienzas un ciclo completo desde hoy.';
     if (this.isResubscribe())
       return 'Inicia un ciclo nuevo eligiendo el plan que prefieras';
     return 'Revisa los detalles antes de confirmar';
@@ -680,9 +692,36 @@ export class CheckoutComponent implements OnInit {
           this.facade.loadCurrent();
           // Paid fresh purchase → backend returns Wompi widget config.
           // Free plan / inline-charged upgrade / trial swap → widget is null.
-          const widget = res?.data?.widget as SaasWompiWidgetConfig | null;
+          const widget = res?.data?.widget as WompiWidgetConfig | null;
+          // Pull-fallback: backend now returns `invoiceId` on the commit
+          // response so the polling loop can reconcile against Wompi
+          // directly when the webhook can't reach localhost.
+          const invoiceId =
+            typeof res?.data?.invoiceId === 'number'
+              ? (res.data.invoiceId as number)
+              : null;
           if (widget) {
-            this.openWompiWidget(widget);
+            this.openWompiWidget(widget, invoiceId);
+            return;
+          }
+          // Defense in depth: if there is a charge to collect AND the target
+          // plan is NOT free, the backend MUST return a Wompi widget config.
+          // Receiving widget=null here means a server-side regression has
+          // routed the commit through a free-plan branch without charging.
+          // Surface an error rather than navigating to a misleading
+          // "success" state. Prefer the explicit `target_plan_is_free` flag
+          // (server-authoritative); fall back to chargeNow heuristic only
+          // when older backends omit the field.
+          const proration = this.proration();
+          const targetIsFree =
+            proration && typeof proration.target_plan_is_free === 'boolean'
+              ? proration.target_plan_is_free
+              : !!this.freePlan();
+          if (!swap && !targetIsFree && this.chargeNow() > 0) {
+            this.committing.set(false);
+            this.toastService.error(
+              'Error procesando el cobro. Por favor refresca la página y reintenta.',
+            );
             return;
           }
           if (swap) {
@@ -711,55 +750,62 @@ export class CheckoutComponent implements OnInit {
       });
   }
 
-  private async openWompiWidget(config: SaasWompiWidgetConfig): Promise<void> {
-    try {
-      await this.wompiService.loadWidgetScript();
-
-      const checkout = new (window as any).WidgetCheckout({
-        currency: config.currency,
-        amountInCents: config.amount_in_cents,
-        reference: config.reference,
-        publicKey: config.public_key,
-        signature: { integrity: config.signature_integrity },
-        redirectUrl: config.redirect_url,
-        customerData: { email: config.customer_email },
-      });
-
-      checkout.open((result: any) => {
-        const transaction = result?.transaction;
+  /**
+   * Phase 3 — Delegates to the shared `WompiCheckoutService.openWidget`. Every
+   * callback path (approved/declined/pending/closed/error) refreshes the
+   * subscription state via `loadCurrent()` so the UI never lags behind the
+   * webhook. The APPROVED path also kicks off polling so the banner flips
+   * `pending_payment → active` as soon as the backend persists the change.
+   */
+  private async openWompiWidget(
+    config: WompiWidgetConfig,
+    invoiceId: number | null = null,
+  ): Promise<void> {
+    await this.wompiCheckoutService.openWidget(config, {
+      onApproved: () => {
         this.committing.set(false);
-
-        if (!transaction) {
-          // User closed widget without paying.
-          this.toastService.warning(
-            'El pago fue cancelado. Tu suscripción quedó pendiente de pago.',
-          );
-          return;
-        }
-
-        if (transaction.status === 'APPROVED') {
-          this.facade.loadCurrent();
-          this.toastService.success('Pago aprobado. Suscripción activada.');
-          this.router.navigate(['/admin/subscription']);
-          return;
-        }
-
-        if (transaction.status === 'DECLINED' || transaction.status === 'ERROR') {
-          this.toastService.error(
-            'El pago fue rechazado. Intenta con otro método de pago.',
-          );
-          return;
-        }
-
-        // PENDING — webhook llegará luego. Llevamos al usuario a la página
-        // de suscripción para que vea el estado.
-        this.toastService.info('Pago pendiente de confirmación.');
+        // Always refresh first; the response might already be `active` if
+        // the synchronous webhook fast-path won, otherwise polling catches
+        // the async transition.
+        this.facade.loadCurrent();
+        // Pull-fallback: when invoiceId is known, the polling loop will
+        // hit /sync-from-gateway each cycle so localhost dev stops getting
+        // stuck in pending_payment.
+        this.facade.pollSubscriptionUntilActive({ invoiceId });
+        this.toastService.info('Verificando confirmación de pago…');
         this.router.navigate(['/admin/subscription']);
-      });
-    } catch (err) {
-      this.committing.set(false);
-      this.toastService.error('No se pudo abrir el widget de pago. Intenta de nuevo.');
-    }
+      },
+      onDeclined: () => {
+        this.committing.set(false);
+        this.facade.loadCurrent();
+        this.toastService.error(
+          'El pago fue rechazado. Intenta con otro método de pago.',
+        );
+      },
+      onPending: () => {
+        this.committing.set(false);
+        this.facade.loadCurrent();
+        this.facade.pollSubscriptionUntilActive({ invoiceId });
+        this.toastService.info(
+          'Pago pendiente de confirmación. Verificando…',
+        );
+        this.router.navigate(['/admin/subscription']);
+      },
+      onClosed: () => {
+        this.committing.set(false);
+        this.facade.loadCurrent();
+        this.toastService.warning(
+          'El pago fue cancelado. Tu suscripción quedó pendiente de pago.',
+        );
+      },
+      onError: () => {
+        this.committing.set(false);
+        this.facade.loadCurrent();
+        this.toastService.error(
+          'No se pudo abrir el widget de pago. Intenta de nuevo.',
+        );
+      },
+    });
   }
 
   goBack(): void {

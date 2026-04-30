@@ -5,6 +5,8 @@ import {
   signal,
   inject,
   DestroyRef,
+  effect,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -49,26 +51,32 @@ export interface WompiWidgetConfig {
       size="md"
     >
       <div class="p-4 space-y-4">
-        @if (loading()) {
-          <div class="flex items-center justify-center py-8">
-            <div
-              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-          </div>
-        } @else {
-          <div class="space-y-3">
+        @if (loadError()) {
+          <div class="space-y-3 text-center py-4">
             <p class="text-sm text-text-secondary">
-              Al hacer clic en "Abrir Widget Wompi" serás redirigido al formulario
-              seguro de Wompi para ingresar los datos de tu tarjeta.
+              No pudimos preparar el formulario seguro. Inténtalo de nuevo.
             </p>
             <app-button
               variant="primary"
-              [loading]="widgetLoading()"
-              (clicked)="openWompiWidget()"
+              [loading]="loading() || widgetLoading()"
+              (clicked)="retry()"
               class="w-full"
             >
-              Abrir Widget Wompi
+              Reintentar
             </app-button>
+          </div>
+        } @else {
+          <div class="flex flex-col items-center justify-center py-8 space-y-3">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="text-sm text-text-secondary text-center">
+              @if (loading()) {
+                Preparando formulario seguro de Wompi...
+              } @else {
+                Abriendo formulario...
+              }
+            </p>
           </div>
         }
       </div>
@@ -93,19 +101,55 @@ export class WompiCardWidgetComponent {
 
   readonly loading = signal(false);
   readonly widgetLoading = signal(false);
+  readonly loadError = signal(false);
 
+  /**
+   * Guards against re-triggering the auto-open flow while the modal is
+   * already open. Reset on close so the next open re-runs the effect.
+   */
+  private hasOpened = false;
   private widgetConfig: WompiWidgetConfig | null = null;
 
   constructor() {
-    // Load config when modal opens
-    // Use effect to react to model changes
-    // But simple approach: parent calls load when opening
+    // Auto-trigger the load + open flow whenever the modal transitions
+    // from closed -> open. Defer with queueMicrotask to avoid NG0100
+    // (the parent just set isOpen=true in the same change-detection
+    // cycle). Use untracked() inside the deferred work so we don't
+    // accidentally re-track signals read during start().
+    effect(() => {
+      const open = this.isOpen();
+      if (!open) {
+        // Reset on close so the next open runs the flow again.
+        this.hasOpened = false;
+        this.loadError.set(false);
+        return;
+      }
+      if (this.hasOpened) return;
+      this.hasOpened = true;
+      queueMicrotask(() => untracked(() => this.start()));
+    });
   }
 
+  /**
+   * Backwards-compatible no-op kept for any caller that still invokes it.
+   * The effect() above handles the load + open lifecycle automatically.
+   */
   loadWidgetConfigIfNeeded(): void {
-    if (!this.widgetConfig) {
-      this.loadWidgetConfig();
+    /* handled by effect() */
+  }
+
+  /**
+   * Entry point of the open flow: load config (if not cached) and then
+   * auto-open the Wompi widget. On any failure flips loadError() so the
+   * template renders the Reintentar branch.
+   */
+  private start(): void {
+    this.loadError.set(false);
+    if (this.widgetConfig) {
+      void this.openWompiWidget();
+      return;
     }
+    this.loadWidgetConfig();
   }
 
   private loadWidgetConfig(): void {
@@ -115,22 +159,32 @@ export class WompiCardWidgetComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
+          this.loading.set(false);
           if (res.success && res.data) {
             this.widgetConfig = res.data as WompiWidgetConfig;
+            void this.openWompiWidget();
+          } else {
+            this.loadError.set(true);
           }
-          this.loading.set(false);
         },
         error: () => {
           this.loading.set(false);
-          this.toastService.error('Error al cargar configuración del widget');
-          this.onClose();
+          this.loadError.set(true);
         },
       });
   }
 
+  /**
+   * Retry handler — re-runs the full load + open flow. Used after a
+   * config-load failure or a widget-open failure.
+   */
+  retry(): void {
+    this.start();
+  }
+
   async openWompiWidget(): Promise<void> {
     if (!this.widgetConfig) {
-      this.toastService.error('Configuración del widget no disponible');
+      this.loadError.set(true);
       return;
     }
 
@@ -155,6 +209,7 @@ export class WompiCardWidgetComponent {
 
         if (!transaction) {
           this.toastService.warning('Tokenización cancelada');
+          this.onClose();
           return;
         }
 
@@ -184,14 +239,16 @@ export class WompiCardWidgetComponent {
           this.toastService.error(
             'La tarjeta fue rechazada. Intenta con otra.',
           );
+          this.onClose();
           return;
         }
 
         this.toastService.info('Pago pendiente de confirmación.');
+        this.onClose();
       });
     } catch (err) {
       this.widgetLoading.set(false);
-      this.toastService.error('No se pudo abrir el widget de Wompi');
+      this.loadError.set(true);
     }
   }
 

@@ -215,4 +215,54 @@ export class PlansService {
 
     await this.prisma.subscription_plans.delete({ where: { id } });
   }
+
+  /**
+   * RNC-04 — Atomically set a plan as the unique default. Runs inside a
+   * Serializable transaction:
+   *  1. UPDATE subscription_plans SET is_default = false WHERE is_default = true
+   *  2. UPDATE subscription_plans SET is_default = true WHERE id = :id
+   *
+   * Validations:
+   *  - Plan must exist
+   *  - Plan must be in `state='active'` (cannot promote draft/archived)
+   *
+   * The DB also enforces uniqueness through the partial unique index created
+   * in migration 20260429000000 (`uniq_subscription_plans_only_one_default`),
+   * so a race that sneaks past the read-then-write window will surface as a
+   * unique-violation rather than corrupt data.
+   */
+  async setDefault(id: number) {
+    const plan = await this.prisma.subscription_plans.findUnique({
+      where: { id },
+    });
+
+    if (!plan) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    if (plan.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'Only plans in state=active can be set as default',
+      );
+    }
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        // 1. Clear any existing default first to avoid violating the partial
+        //    unique index (idx allows a single row with is_default=true).
+        await tx.subscription_plans.updateMany({
+          where: { is_default: true },
+          data: { is_default: false, updated_at: new Date() },
+        });
+
+        // 2. Promote the requested plan.
+        return tx.subscription_plans.update({
+          where: { id },
+          data: { is_default: true, updated_at: new Date() },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+  }
 }

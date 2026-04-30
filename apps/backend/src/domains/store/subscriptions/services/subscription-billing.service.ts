@@ -95,6 +95,21 @@ export class SubscriptionBillingService {
           },
         });
 
+        // RNC-39: subscriptions in 'no_plan' have no plan_id. They MUST NOT
+        // emit invoices — there is nothing to bill. Log and bail.
+        if (!sub.plan_id || !sub.plan) {
+          this.logger.warn(
+            JSON.stringify({
+              event: 'INVOICE_SKIPPED_NO_PLAN',
+              subscription_id: sub.id,
+              store_id: sub.store_id,
+              state: sub.state,
+              prorated: !!opts.prorated,
+            }),
+          );
+          return null;
+        }
+
         // Idempotent reuse / void of an existing pending invoice for this
         // subscription. Prevents duplicate billing rows when the user retries
         // checkout (closed widget, re-open) or changes plan while pending:
@@ -186,6 +201,17 @@ export class SubscriptionBillingService {
                 },
               });
             }
+
+            // Reverse the partner commission row for the voided invoice so
+            // the monthly payout batch ignores it. We use `reversed` (the
+            // canonical terminal-failure state in partner_commission_state_enum).
+            await tx.partner_commissions.updateMany({
+              where: {
+                invoice_id: existingPending.id,
+                state: 'accrued',
+              },
+              data: { state: 'reversed' },
+            });
 
             this.logger.warn(
               JSON.stringify({
@@ -380,9 +406,12 @@ export class SubscriptionBillingService {
         }
 
         // Accrue partner commission (state=accrued) when applicable.
+        // RNC-41: promotional plans NEVER accrue commission.
+        const isPromotionalPlan = sub.plan.plan_type === 'promotional' || sub.plan.is_promotional;
         if (
           pricing.partner_org_id !== null &&
-          pricing.margin_amount.greaterThan(DECIMAL_ZERO)
+          pricing.margin_amount.greaterThan(DECIMAL_ZERO) &&
+          !isPromotionalPlan
         ) {
           await tx.partner_commissions.create({
             data: {
@@ -417,6 +446,11 @@ export class SubscriptionBillingService {
     });
     if (!sub) {
       throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    // RNC-39: no_plan stores cannot have an invoice preview (nothing to bill).
+    if (!sub.plan_id || !sub.plan) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_002);
     }
 
     const pricing = this.computePricing(sub);
@@ -476,12 +510,22 @@ export class SubscriptionBillingService {
    * pending_payment → widget flow and activate the subscription synchronously.
    */
   isFreePlan(plan: {
+    id?: number;
     base_price: Prisma.Decimal;
     max_partner_margin_pct: Prisma.Decimal | null;
+    is_free?: boolean;
   }): boolean {
-    const pricing = this.computePricing({ plan });
+    const pricing = this.computePricing({
+      plan: { id: plan.id ?? 0, ...plan },
+    });
+    // Authoritative signal is the explicit `is_free` flag on the plan row
+    // (added by 20260429235000_add_is_free_to_subscription_plans). The legacy
+    // heuristic `effective_price <= 0` failed silently when sub.plan was null
+    // and routed paid checkouts through free-plan branches without charging.
+    // Margin must also be zero — when a partner override produces a non-zero
+    // margin amount on a base-free plan there IS still a charge to collect.
     return (
-      pricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO) &&
+      plan.is_free === true &&
       pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO)
     );
   }
@@ -491,7 +535,7 @@ export class SubscriptionBillingService {
       id: number;
       base_price: Prisma.Decimal;
       max_partner_margin_pct: Prisma.Decimal | null;
-    };
+    } | null;
     partner_override?: {
       organization_id: number;
       margin_pct: Prisma.Decimal;
@@ -500,6 +544,19 @@ export class SubscriptionBillingService {
       base_plan: { max_partner_margin_pct: Prisma.Decimal | null };
     } | null;
   }): ComputedPricing {
+    // RNC-39: no plan -> zero pricing across the board. Caller is expected to
+    // short-circuit (e.g. skip invoice emission) before reaching this method;
+    // we fail safe to avoid crashes on the no_plan path.
+    if (!sub.plan) {
+      return {
+        base_price: DECIMAL_ZERO,
+        margin_pct: DECIMAL_ZERO,
+        margin_amount: DECIMAL_ZERO,
+        fixed_surcharge: DECIMAL_ZERO,
+        effective_price: DECIMAL_ZERO,
+        partner_org_id: null,
+      };
+    }
     const basePrice = new Prisma.Decimal(sub.plan.base_price);
 
     if (!sub.partner_override || !sub.partner_override.is_active) {

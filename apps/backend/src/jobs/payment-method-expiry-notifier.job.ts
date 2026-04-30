@@ -6,7 +6,7 @@ import { Prisma, subscription_payment_method_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 
 /**
- * G11 — Daily cron (10:00 UTC) that runs TWO complementary passes:
+ * G11 — Daily cron (05:00 UTC, RNC-26) that runs TWO complementary passes:
  *
  *  1. **Pre-expiry notice** (existing): warn stores whose tokenized card on an
  *     active/trial subscription will expire within the next 14 days. Throttled
@@ -46,7 +46,7 @@ export class PaymentMethodExpiryNotifierJob {
     private readonly emailQueue: Queue,
   ) {}
 
-  @Cron('0 10 * * *')
+  @Cron('0 5 * * *')
   async handleExpiryNotifications(): Promise<void> {
     if (this.isRunning) {
       this.logger.warn(

@@ -59,14 +59,27 @@ export class AppComponent {
   });
 
   constructor() {
+    // Track whether the boot-timeout warning is still relevant. Once routes
+    // are configured (the happy path) we cancel the timeout so the spurious
+    // "Boot timeout - routes did not configure" error never logs after a
+    // successful boot.
+    let bootTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
     effect(() => {
       if (this.routesConfigured()) {
         this.is_loading.set(false);
         this.removePrerenderGate();
+        if (bootTimeoutId !== null) {
+          clearTimeout(bootTimeoutId);
+          bootTimeoutId = null;
+        }
       }
     });
 
-    setTimeout(() => {
+    bootTimeoutId = setTimeout(() => {
+      bootTimeoutId = null;
+      // Only fire the failure path if routes actually never configured.
+      if (this.routesConfigured()) return;
       this.is_loading.set(false);
       console.error('[AppComponent] Boot timeout - routes did not configure');
     }, 10000);

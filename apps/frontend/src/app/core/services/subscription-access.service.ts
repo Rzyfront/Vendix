@@ -12,13 +12,43 @@ import { SubscriptionFacade } from '../store/subscription';
 export type PaywallCode =
   | 'SUBSCRIPTION_002_PENDING'
   | 'SUBSCRIPTION_002_NO_RECORD'
+  | 'SUBSCRIPTION_003'
   | 'SUBSCRIPTION_004'
   | 'SUBSCRIPTION_005'
   | 'SUBSCRIPTION_006'
+  | 'SUBSCRIPTION_007'
   | 'SUBSCRIPTION_008'
   | 'SUBSCRIPTION_009'
   | 'PLAN_001'
-  | 'TRIAL_001';
+  | 'TRIAL_001'
+  // Synthetic variants driven by the local subscription state (not by an
+  // HTTP error). Used by `openPaywallForState()` so the panel can display
+  // the same modal at-rest, before the user has triggered a blocked write.
+  | 'STATE_NO_PLAN'
+  | 'STATE_PENDING_PAYMENT'
+  | 'STATE_GRACE_SOFT'
+  | 'STATE_GRACE_HARD'
+  | 'STATE_SUSPENDED'
+  | 'STATE_BLOCKED'
+  | 'STATE_CANCELLED'
+  | 'STATE_EXPIRED';
+
+/**
+ * Subscription states that, when surfaced inside the panel (e.g. on entering
+ * `/admin/subscription`), should automatically open an informational paywall
+ * modal. Maps 1:1 to a STATE_* variant in the catalog.
+ */
+export const STATE_PAYWALL_MAP: Record<string, PaywallCode> = {
+  no_plan: 'STATE_NO_PLAN',
+  pending_payment: 'STATE_PENDING_PAYMENT',
+  grace_soft: 'STATE_GRACE_SOFT',
+  grace_hard: 'STATE_GRACE_HARD',
+  suspended: 'STATE_SUSPENDED',
+  blocked: 'STATE_BLOCKED',
+  cancelled: 'STATE_CANCELLED',
+  canceled: 'STATE_CANCELLED',
+  expired: 'STATE_EXPIRED',
+};
 
 /**
  * Optional payload that the backend appends to subscription gate exceptions
@@ -30,6 +60,12 @@ export interface PaywallDetails {
   subscription_state?: string;
   plan_id?: number | null;
   has_record?: boolean;
+  /** Optional administrative reason supplied by super-admin lock workflows. */
+  lock_reason?: string | null;
+  /** Optional ISO date when the grace period ends. */
+  grace_period_end?: string | null;
+  /** Optional human-readable plan name for inline interpolation. */
+  plan_name?: string | null;
 }
 
 /**
@@ -172,7 +208,10 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     title: 'Suscripción suspendida',
     description: 'Tu suscripción está suspendida por un pago pendiente. Regulariza ahora para retomar tu actividad sin perder datos.',
     ctaLabel: 'Pagar ahora',
-    ctaRoute: '/admin/subscription/payment',
+    // Canonical recovery path: dunning-board exposes "Pagar ahora" which mints
+    // a fresh Wompi widget via retry-payment and auto-registers the PM on
+    // approval. The /payment page is only for managing already-saved methods.
+    ctaRoute: '/admin/subscription/dunning',
     severity: 'critical',
     category: 'payment-due',
     iconName: 'alert-octagon',
@@ -183,7 +222,8 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     title: 'Suscripción bloqueada',
     description: 'Tu suscripción ha sido bloqueada por falta de pago. Realiza el pago pendiente para reactivarla de inmediato.',
     ctaLabel: 'Pagar ahora',
-    ctaRoute: '/admin/subscription/payment',
+    // Same as SUBSCRIPTION_008 — recover via dunning-board widget flow.
+    ctaRoute: '/admin/subscription/dunning',
     severity: 'critical',
     category: 'payment-due',
     iconName: 'pause-circle',
@@ -214,6 +254,134 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
     category: 'upgrade',
     iconName: 'crown',
     badgeLabel: 'Mejora tu plan',
+  },
+  // ── SUBSCRIPTION_003 — cancelled / expired (read-only retention) ──────────
+  SUBSCRIPTION_003: {
+    title: 'Tu suscripción finalizó',
+    description:
+      'Tu plan ya no está activo. Puedes consultar y exportar tus datos en modo lectura. Para volver a operar, reactiva con un plan nuevo.',
+    ctaLabel: 'Reactivar suscripción',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'critical',
+    category: 'trial-ended',
+    iconName: 'alert-octagon',
+    badgeLabel: 'Acceso limitado',
+    secondaryCtaLabel: 'Continuar en lectura',
+  },
+  // ── SUBSCRIPTION_007 — past_due / grace banner (informational) ───────────
+  SUBSCRIPTION_007: {
+    title: 'Pago pendiente',
+    description:
+      'Tu última factura quedó sin pagar. Regulariza pronto para evitar restricciones de acceso.',
+    ctaLabel: 'Pagar ahora',
+    ctaRoute: '/admin/subscription/dunning',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'credit-card',
+    badgeLabel: 'Pago pendiente',
+    secondaryCtaLabel: 'Recordarme luego',
+  },
+  // ── State-driven variants — opened from `openPaywallForState(state)` ────
+  STATE_NO_PLAN: {
+    title: 'Selecciona un plan',
+    description:
+      'Tu organización ya consumió el período de prueba. Para activar esta tienda, elige uno de nuestros planes.',
+    ctaLabel: 'Ver planes',
+    ctaRoute: '/admin/subscription/picker',
+    severity: 'upsell',
+    category: 'upgrade',
+    iconName: 'sparkles',
+    badgeLabel: 'Activa tu tienda',
+    benefits: [
+      'Inventario, ventas y POS sin límites',
+      'IA integrada para automatizar tareas',
+      'Cancela cuando quieras',
+    ],
+    secondaryCtaLabel: 'Cerrar',
+  },
+  STATE_PENDING_PAYMENT: {
+    title: 'Confirmando tu pago',
+    description:
+      'Estamos esperando la confirmación de tu pago. Si ya pagaste, puede tardar unos segundos. Si no, retoma el cobro.',
+    ctaLabel: 'Reintentar pago',
+    ctaRoute: '/admin/subscription',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'credit-card',
+    badgeLabel: 'Pago en proceso',
+    secondaryCtaLabel: 'Cerrar',
+  },
+  STATE_GRACE_SOFT: {
+    title: 'Pago pendiente',
+    description:
+      'Tu última factura quedó sin pagar. Tienes algunos días para regularizar antes de que se restrinja el acceso a tu tienda.',
+    ctaLabel: 'Pagar ahora',
+    ctaRoute: '/admin/subscription/dunning',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'alert-triangle',
+    badgeLabel: 'Pago pendiente',
+    secondaryCtaLabel: 'Recordarme luego',
+  },
+  STATE_GRACE_HARD: {
+    title: 'Acceso restringido',
+    description:
+      'Tu factura sigue sin pagar y algunas funciones están limitadas. Regulariza pronto para evitar la suspensión completa.',
+    ctaLabel: 'Pagar ahora',
+    ctaRoute: '/admin/subscription/dunning',
+    severity: 'critical',
+    category: 'payment-due',
+    iconName: 'alert-octagon',
+    badgeLabel: 'Acceso limitado',
+    secondaryCtaLabel: 'Recordarme luego',
+  },
+  STATE_SUSPENDED: {
+    title: 'Tienda suspendida',
+    description:
+      'Tu tienda fue suspendida por falta de pago. Para restaurar el acceso, paga la factura pendiente o contacta a soporte.',
+    ctaLabel: 'Pagar ahora',
+    ctaRoute: '/admin/subscription/dunning',
+    severity: 'critical',
+    category: 'payment-due',
+    iconName: 'pause-circle',
+    badgeLabel: 'Suspendida',
+    secondaryCtaLabel: 'Recordarme luego',
+  },
+  STATE_BLOCKED: {
+    title: 'Acceso bloqueado',
+    description:
+      'Tu tienda fue bloqueada manualmente por nuestro equipo. Contacta a soporte para más información y restablecer el acceso.',
+    ctaLabel: 'Contactar soporte',
+    ctaRoute: '/admin/subscription/dunning',
+    severity: 'critical',
+    category: 'payment-due',
+    iconName: 'shield-alert',
+    badgeLabel: 'Bloqueada',
+    secondaryCtaLabel: 'Cerrar',
+  },
+  STATE_CANCELLED: {
+    title: 'Suscripción cancelada',
+    description:
+      'Tu suscripción fue cancelada. Puedes seguir consultando y exportando tus datos en modo lectura. Para volver a operar, reactiva con un plan.',
+    ctaLabel: 'Reactivar suscripción',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'critical',
+    category: 'trial-ended',
+    iconName: 'x-circle',
+    badgeLabel: 'Cancelada',
+    secondaryCtaLabel: 'Continuar en lectura',
+  },
+  STATE_EXPIRED: {
+    title: 'Tu plan expiró',
+    description:
+      'El período de tu plan terminó sin renovación. Reactiva tu tienda eligiendo un plan para continuar operando.',
+    ctaLabel: 'Ver planes',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'critical',
+    category: 'trial-ended',
+    iconName: 'clock',
+    badgeLabel: 'Plan expirado',
+    secondaryCtaLabel: 'Cerrar',
   },
 };
 
@@ -291,13 +459,62 @@ export class SubscriptionAccessService {
     const knownCode = (PAYWALL_VARIANTS as Record<string, PaywallVariant>)[variantKey]
       ? (variantKey as PaywallCode)
       : 'PLAN_001';
+    const baseVariant = PAYWALL_VARIANTS[knownCode];
     this.state.set({
       code: knownCode,
-      variant: PAYWALL_VARIANTS[knownCode],
+      variant: this.interpolateVariant(baseVariant, details),
       message,
       details,
     });
     this.isOpen.set(true);
+  }
+
+  /**
+   * Open the paywall modal informationally, driven by the local subscription
+   * state (e.g. on entering `/admin/subscription` while in `no_plan` /
+   * `suspended` / `cancelled`). Bypasses HTTP error codes and uses the
+   * `STATE_*` variant catalog.
+   *
+   * Returns silently when the state has no associated variant (active /
+   * trial) — the panel renders normally with no modal on top.
+   *
+   * Deduped via `isOpen` so multiple effect runs do not stack modals.
+   */
+  openPaywallForState(state: string | null | undefined, details?: PaywallDetails): void {
+    if (!state) return;
+    const variantKey = STATE_PAYWALL_MAP[state];
+    if (!variantKey) return;
+    if (this.isOpen()) return;
+
+    const baseVariant = PAYWALL_VARIANTS[variantKey];
+    const enrichedDetails: PaywallDetails = {
+      subscription_state: state,
+      ...(details ?? {}),
+    };
+    this.state.set({
+      code: variantKey,
+      variant: this.interpolateVariant(baseVariant, enrichedDetails),
+      details: enrichedDetails,
+    });
+    this.isOpen.set(true);
+  }
+
+  /**
+   * Inject runtime details (lock_reason, grace_period_end, plan_name) into
+   * the variant copy so messages are concrete instead of generic. Returns a
+   * new object — never mutates the catalog entry.
+   */
+  private interpolateVariant(
+    base: PaywallVariant,
+    details?: PaywallDetails,
+  ): PaywallVariant {
+    if (!details) return base;
+    const lock = (details.lock_reason ?? '').toString().trim();
+    if (!lock) return base;
+    return {
+      ...base,
+      description: `${base.description} Motivo: ${lock}.`,
+    };
   }
 
   /** Close the paywall without performing the CTA navigation. */

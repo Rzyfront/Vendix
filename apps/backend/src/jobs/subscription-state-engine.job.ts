@@ -43,7 +43,8 @@ export class SubscriptionStateEngineJob {
     try {
       const subscriptions = await this.prisma.store_subscriptions.findMany({
         where: {
-          state: { notIn: ['cancelled', 'expired', 'draft'] },
+          // RNC-39: also exclude no_plan rows (no period/plan to evaluate).
+          state: { notIn: ['cancelled', 'expired', 'draft', 'no_plan'] },
         },
         select: { id: true },
         take: 50,

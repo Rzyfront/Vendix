@@ -117,6 +117,70 @@ export class SubscriptionProrationService {
       );
     }
 
+    // RNC-39 — no_plan path: the store has no current plan. Treat as a fresh
+    // subscription (no proration math, no credit). Done BEFORE computePricing
+    // because computePricing requires sub.plan to be present.
+    //
+    // BUGFIX: previously returned `invoice_to_issue=null` and
+    // `proration_amount=0` for both free and paid targets, which made the
+    // checkout controller assume "no widget needed" and the frontend navigate
+    // to "success" without a Wompi charge — leaving the store on a paid plan
+    // it never paid for. Now we check `newPlan.is_free` (explicit flag, not
+    // `base_price <= 0` heuristic) and synthesize an invoice + non-zero
+    // proration_amount for paid targets, surfacing `target_plan_is_free`
+    // so the controller and frontend can branch on the same authoritative
+    // signal.
+    if (sub.state === 'no_plan' || !sub.plan_id || !sub.plan) {
+      const now = new Date();
+      const cycleDays = this.billingCycleDays(newPlan.billing_cycle ?? 'monthly');
+      const targetIsFree = newPlan.is_free === true;
+      const invoiceToIssue: InvoicePreview | null = targetIsFree
+        ? null
+        : {
+            total: newPlan.base_price.toFixed(2),
+            period_start: now.toISOString(),
+            period_end: new Date(
+              now.getTime() + cycleDays * DAY_MS,
+            ).toISOString(),
+            line_items: [
+              {
+                description: `Plan ${newPlan.code} (${newPlan.billing_cycle})`,
+                quantity: 1,
+                unit_price: newPlan.base_price.toFixed(2),
+                total: newPlan.base_price.toFixed(2),
+                meta: {
+                  plan_id: newPlan.id,
+                  plan_code: newPlan.code,
+                  billing_cycle: newPlan.billing_cycle,
+                  fresh_purchase: true,
+                },
+              },
+            ],
+            split_breakdown: {
+              vendix_share: newPlan.base_price.toFixed(2),
+              partner_share: '0.00',
+              margin_pct_used: '0.00',
+              partner_org_id: null,
+            },
+          };
+      return {
+        kind: 're_subscribe',
+        mode: 're_subscribe',
+        days_remaining: 0,
+        cycle_days: cycleDays,
+        old_effective_price: '0.00',
+        new_effective_price: newPlan.base_price.toFixed(2),
+        proration_amount: targetIsFree
+          ? DECIMAL_ZERO.toFixed(2)
+          : newPlan.base_price.toFixed(2),
+        applies_immediately: true,
+        invoice_to_issue: invoiceToIssue,
+        credit_to_apply_next_cycle: DECIMAL_ZERO.toFixed(2),
+        effective_at: now.toISOString(),
+        target_plan_is_free: targetIsFree,
+      };
+    }
+
     const currentPricing = this.billing.computePricing(sub);
 
     // Re-subscribe path: cancelled/expired subscriptions admit a single legal
@@ -133,6 +197,7 @@ export class SubscriptionProrationService {
       const cycleDays = this.billingCycleDays(
         newPlanForResub?.billing_cycle ?? 'monthly',
       );
+      const targetIsFree = newPlan.is_free === true;
       return {
         kind: 're_subscribe',
         mode: 're_subscribe',
@@ -140,11 +205,14 @@ export class SubscriptionProrationService {
         cycle_days: cycleDays,
         old_effective_price: '0.00',
         new_effective_price: newPlan.base_price.toFixed(2),
-        proration_amount: DECIMAL_ZERO.toFixed(2),
+        proration_amount: targetIsFree
+          ? DECIMAL_ZERO.toFixed(2)
+          : newPlan.base_price.toFixed(2),
         applies_immediately: true,
         invoice_to_issue: null,
         credit_to_apply_next_cycle: DECIMAL_ZERO.toFixed(2),
         effective_at: now.toISOString(),
+        target_plan_is_free: targetIsFree,
       };
     }
 
@@ -166,17 +234,24 @@ export class SubscriptionProrationService {
     };
     const newPricing = this.billing.computePricing(newSub);
 
-    // S3.4 — Trial plan-swap edge case. When the subscription is in `trial`
-    // state and trial_ends_at is still in the future, switching plans does
-    // not trigger any charge: the user keeps the remaining trial and the
-    // new plan starts being billed at `trial_ends_at`. No invoice, no state
-    // change, no proration math — return early with a dedicated kind so the
-    // frontend renders the swap-variant card.
+    // S3.4 / RNC-15 — Trial plan-swap path. Only kept for trial → free / promo
+    // changes (target plan also has effective_price = 0). For trial → paid
+    // plans the anti-arrastre rule (RNC-15) requires an immediate full-price
+    // charge: there is no scheduled change, no carry-over of remaining trial
+    // days, the user pays the full destination plan price NOW. That branch
+    // falls through to the re_subscribe-style return below.
     const now = new Date();
+    // Target is free per explicit flag (not heuristic). When the partner
+    // override produces a non-zero margin on a base-free plan we still treat
+    // it as paid because there IS a charge to collect.
+    const targetIsFree =
+      newPlan.is_free === true &&
+      newPricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO);
     if (
       sub.state === 'trial' &&
       sub.trial_ends_at &&
-      sub.trial_ends_at.getTime() > now.getTime()
+      sub.trial_ends_at.getTime() > now.getTime() &&
+      targetIsFree
     ) {
       const trialSwap: TrialPlanSwapInfo = {
         old_plan: {
@@ -224,8 +299,46 @@ export class SubscriptionProrationService {
         credit_to_apply_next_cycle: DECIMAL_ZERO.toFixed(2),
         trial_swap: trialSwap,
         effective_at: sub.trial_ends_at.toISOString(),
+        target_plan_is_free: true,
       };
     }
+
+    // RNC-15 — Trial → paid plan. Anti-arrastre: no credit for remaining
+    // trial days, no proration delta. The user pays the FULL destination
+    // plan price RIGHT NOW. Return a `re_subscribe`-shaped preview so the
+    // frontend renders the fresh-cycle card and the checkout commit emits a
+    // regular invoice + Wompi widget. Trial state stays until the charge
+    // confirms; the controller transitions trial → pending_payment.
+    if (
+      sub.state === 'trial' &&
+      sub.trial_ends_at &&
+      sub.trial_ends_at.getTime() > now.getTime() &&
+      !targetIsFree
+    ) {
+      const cycleDays = this.billingCycleDays(newPlan.billing_cycle ?? 'monthly');
+      return {
+        kind: 're_subscribe',
+        mode: 're_subscribe',
+        days_remaining: 0,
+        cycle_days: cycleDays,
+        old_effective_price: '0.00',
+        new_effective_price: newPricing.effective_price.toFixed(2),
+        proration_amount: newPricing.effective_price.toFixed(2),
+        applies_immediately: true,
+        invoice_to_issue: null,
+        credit_to_apply_next_cycle: DECIMAL_ZERO.toFixed(2),
+        effective_at: now.toISOString(),
+        target_plan_is_free: false,
+      };
+    }
+
+    // RNC-15 — Anti-arrastre: if source plan is free/promotional (is_free=true),
+    // NO credit or proration is calculated. Upgrade charges full remaining delta.
+    // Uses the explicit `is_free` flag (replaces heuristic `base_price <= 0`).
+    const isFreeOrigin =
+      sub.plan.is_free === true ||
+      sub.plan.plan_type === 'promotional' ||
+      sub.plan.is_promotional;
 
     const kind = this.determineKind(
       currentPricing.effective_price,
@@ -233,26 +346,30 @@ export class SubscriptionProrationService {
     );
 
     const periodEnd = sub.current_period_end ?? new Date();
-    const daysRemaining = Math.max(
-      0,
-      Math.ceil((periodEnd.getTime() - now.getTime()) / DAY_MS),
-    );
-    const cycleDays = Math.max(
-      1,
-      Math.ceil(
-        ((sub.current_period_end ?? now).getTime() -
-          (sub.current_period_start ?? now).getTime()) /
-          DAY_MS,
-      ),
-    );
+    const daysRemaining = isFreeOrigin
+      ? 0
+      : Math.max(0, Math.ceil((periodEnd.getTime() - now.getTime()) / DAY_MS));
+    const cycleDays = isFreeOrigin
+      ? 1
+      : Math.max(
+          1,
+          Math.ceil(
+            ((sub.current_period_end ?? now).getTime() -
+              (sub.current_period_start ?? now).getTime()) /
+              DAY_MS,
+          ),
+        );
 
     const priceDiff = newPricing.effective_price.minus(
       currentPricing.effective_price,
     );
+    // When free origin, proration = full price (no credit for remaining days)
     const prorationAmount = this.round2(
-      priceDiff
-        .times(new Prisma.Decimal(daysRemaining))
-        .dividedBy(new Prisma.Decimal(cycleDays)),
+      isFreeOrigin
+        ? newPricing.effective_price
+        : priceDiff
+            .times(new Prisma.Decimal(daysRemaining))
+            .dividedBy(new Prisma.Decimal(cycleDays)),
     );
 
     let creditToApply = DECIMAL_ZERO;
@@ -313,6 +430,9 @@ export class SubscriptionProrationService {
       credit_to_apply_next_cycle: creditToApply.toFixed(2),
       effective_at: now.toISOString(),
       voids_scheduled_cancel: voidsScheduledCancel,
+      target_plan_is_free:
+        newPlan.is_free === true &&
+        newPricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO),
     };
   }
 
@@ -436,6 +556,105 @@ export class SubscriptionProrationService {
       return result;
     }
 
+    // RNC-16 / RNC-17 — Downgrade end-of-period (deferred plan change).
+    //
+    // For `kind='downgrade'` we DO NOT swap plan_id immediately. The customer
+    // keeps the higher-tier features + quotas until `current_period_end` and
+    // is billed the cheaper plan only on next renewal. We persist the intent
+    // on the row via two columns added in 20260429120000_add_scheduled_plan_change:
+    //
+    //   scheduled_plan_change_at = current_period_end (when the swap happens)
+    //   scheduled_plan_id        = newPlanId          (target plan)
+    //
+    // Multiple downgrades in the same period overwrite the previous
+    // scheduled change (RNC-17). The renewal cron picks up the row when
+    // `scheduled_plan_change_at <= now`, applies the swap atomically, and
+    // emits the new-plan invoice.
+    //
+    // Cancel path: DELETE /api/store/subscriptions/scheduled-change clears
+    // both columns while `period_end` is still in the future (handled at the
+    // controller layer; out of scope for this method).
+    if (preview.kind === 'downgrade' && sub.current_period_end) {
+      const now = new Date();
+      const scheduledAt = sub.current_period_end;
+
+      // Defensive guard: if period already passed, fall through to the
+      // immediate-apply path below — nothing to schedule against.
+      if (scheduledAt.getTime() > now.getTime()) {
+        const result = await this.prisma.$transaction(
+          async (tx: any) => {
+            const locked = (await tx.$queryRaw(
+              Prisma.sql`SELECT id FROM store_subscriptions WHERE id = ${subscriptionId} FOR UPDATE`,
+            )) as Array<{ id: number }>;
+            if (!locked.length) {
+              throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+            }
+
+            const updated = await tx.store_subscriptions.update({
+              where: { id: subscriptionId },
+              data: {
+                // NOTE: plan_id, effective_price, vendix_base_price,
+                // partner_margin_amount intentionally untouched — customer
+                // keeps current plan + features until period_end.
+                scheduled_plan_change_at: scheduledAt,
+                scheduled_plan_id: newPlanId,
+                updated_at: now,
+              },
+            });
+
+            await tx.subscription_events.create({
+              data: {
+                store_subscription_id: subscriptionId,
+                type: 'plan_changed',
+                payload: {
+                  from_plan_id: oldPlanId,
+                  to_plan_id: newPlanId,
+                  mode: 'downgrade_scheduled',
+                  kind: 'downgrade',
+                  scheduled_plan_change_at: scheduledAt.toISOString(),
+                  current_period_end: scheduledAt.toISOString(),
+                  proration_amount: '0.00',
+                  applies_immediately: false,
+                  effective_at: scheduledAt.toISOString(),
+                } as Prisma.InputJsonValue,
+              },
+            });
+
+            return updated;
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
+
+        this.invalidateRedisCache(sub.store_id);
+
+        this.eventEmitter.emit('subscription.plan_change_scheduled', {
+          subscriptionId,
+          storeId: sub.store_id,
+          fromPlanId: oldPlanId,
+          toPlanId: newPlanId,
+          scheduledAt: scheduledAt.toISOString(),
+        });
+
+        // Also emit the standard plan-changed event so existing listeners
+        // (state, audit, panel cache busts) observe the intent without
+        // having to subscribe to a new topic. Listeners decide whether to
+        // act on `applies_immediately=false`.
+        this.eventEmitter.emit('subscription.plan.changed', {
+          subscriptionId,
+          storeId: sub.store_id,
+          fromPlanId: oldPlanId,
+          toPlanId: newPlanId,
+          prorationAmount: '0.00',
+          kind: 'downgrade',
+          mode: 'downgrade_scheduled',
+          scheduledAt: scheduledAt.toISOString(),
+          appliesImmediately: false,
+        });
+
+        return result;
+      }
+    }
+
     const result = await this.prisma.$transaction(
       async (tx: any) => {
         const locked = (await tx.$queryRaw(
@@ -451,15 +670,25 @@ export class SubscriptionProrationService {
             : {}),
         } as Record<string, unknown>;
 
+        // RNC-15: Anti-arrastre — no credit carry-over from free/promo plans
+        // RNC-39: no_plan also has no credit carry-over (no origin pricing).
         if (creditAmount.greaterThan(DECIMAL_ZERO)) {
-          const existingCredit =
-            typeof metadata['pending_credit'] === 'string'
-              ? new Prisma.Decimal(metadata['pending_credit'])
-              : DECIMAL_ZERO;
-          metadata['pending_credit'] = Prisma.Decimal.min(
-            existingCredit.plus(creditAmount),
-            newPricing.effective_price,
-          ).toFixed(2);
+          const isFreeOrigin =
+            !sub.plan ||
+            sub.plan.is_free === true ||
+            sub.plan.plan_type === 'promotional' ||
+            sub.plan.is_promotional;
+          // Skip credit accumulation when origin is free/promo
+          if (!isFreeOrigin) {
+            const existingCredit =
+              typeof metadata['pending_credit'] === 'string'
+                ? new Prisma.Decimal(metadata['pending_credit'])
+                : DECIMAL_ZERO;
+            metadata['pending_credit'] = Prisma.Decimal.min(
+              existingCredit.plus(creditAmount),
+              newPricing.effective_price,
+            ).toFixed(2);
+          }
         }
 
         // S3.5 — When the sub had a scheduled cancellation, this checkout
@@ -473,6 +702,9 @@ export class SubscriptionProrationService {
           ? sub.scheduled_cancel_at!.toISOString()
           : null;
 
+        // Upgrade / same-tier path: apply immediately AND clear any prior
+        // scheduled downgrade so the user does not get an unintended swap
+        // at period_end after upgrading.
         const updated = await tx.store_subscriptions.update({
           where: { id: subscriptionId },
           data: {
@@ -481,6 +713,8 @@ export class SubscriptionProrationService {
             vendix_base_price: newPricing.base_price,
             partner_margin_amount: newPricing.margin_amount,
             metadata: metadata as Prisma.InputJsonValue,
+            scheduled_plan_change_at: null,
+            scheduled_plan_id: null,
             ...(hadScheduledCancel
               ? { scheduled_cancel_at: null, auto_renew: true }
               : {}),
@@ -538,6 +772,94 @@ export class SubscriptionProrationService {
     });
 
     return result;
+  }
+
+  /**
+   * RNC-16 / RNC-17 — Cancel a scheduled downgrade.
+   *
+   * Allowed while `current_period_end` is still in the future. After it
+   * passes the renewal cron has already (or will imminently) apply the swap,
+   * and the operation is no longer reversible from the customer side.
+   *
+   * Returns the updated subscription with both scheduled_* columns cleared.
+   * Throws SUBSCRIPTION_001 when the subscription is unknown and a 4xx
+   * error code (SUBSCRIPTION_010) when the period has already passed.
+   */
+  async cancelScheduledChange(
+    subscriptionId: number,
+  ): Promise<store_subscriptions> {
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { id: subscriptionId },
+      select: {
+        id: true,
+        store_id: true,
+        plan_id: true,
+        scheduled_plan_change_at: true,
+        scheduled_plan_id: true,
+        current_period_end: true,
+      },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    if (!sub.scheduled_plan_change_at || !sub.scheduled_plan_id) {
+      // Idempotent: nothing scheduled. Return the row as-is.
+      return (await this.prisma.store_subscriptions.findUniqueOrThrow({
+        where: { id: subscriptionId },
+      })) as store_subscriptions;
+    }
+
+    const now = new Date();
+    if (sub.scheduled_plan_change_at.getTime() <= now.getTime()) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'El cambio de plan ya entró en vigor; no se puede cancelar.',
+      );
+    }
+
+    const previouslyScheduledPlanId = sub.scheduled_plan_id;
+
+    const updated = await this.prisma.$transaction(
+      async (tx: any) => {
+        const result = await tx.store_subscriptions.update({
+          where: { id: subscriptionId },
+          data: {
+            scheduled_plan_change_at: null,
+            scheduled_plan_id: null,
+            updated_at: now,
+          },
+        });
+
+        await tx.subscription_events.create({
+          data: {
+            store_subscription_id: subscriptionId,
+            type: 'plan_changed',
+            payload: {
+              mode: 'downgrade_scheduled_cancelled',
+              kind: 'downgrade',
+              cancelled_scheduled_plan_id: previouslyScheduledPlanId,
+              cancelled_scheduled_at:
+                sub.scheduled_plan_change_at?.toISOString() ?? null,
+              effective_at: now.toISOString(),
+            } as Prisma.InputJsonValue,
+          },
+        });
+
+        return result;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    this.invalidateRedisCache(sub.store_id);
+
+    this.eventEmitter.emit('subscription.plan_change_scheduled.cancelled', {
+      subscriptionId,
+      storeId: sub.store_id,
+      cancelledScheduledPlanId: previouslyScheduledPlanId,
+    });
+
+    return updated;
   }
 
   /**

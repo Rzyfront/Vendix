@@ -165,16 +165,38 @@
   width: 100%;
 }
 
+/* RNC-24 — Extra tertiary action ("Contactar soporte" link). */
+.paywall-extra-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary, #64748b);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  padding: 0.25rem 0.5rem;
+  transition: color 150ms ease-out;
+  align-self: center;
+}
+
+.paywall-extra-link:hover {
+  color: var(--color-text-primary, #0f172a);
+}
+
 @media (min-width: 640px) {
   .paywall-footer {
     flex-direction: row;
     justify-content: flex-end;
     gap: 0.75rem;
+    align-items: center;
   }
   .paywall-footer .paywall-secondary-btn,
   .paywall-footer .paywall-primary-btn {
     width: auto;
     min-width: 8.5rem;
+  }
+  .paywall-extra-link {
+    margin-right: auto;
   }
 }
 

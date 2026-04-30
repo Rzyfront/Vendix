@@ -133,6 +133,13 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'cash_register.closed.shortage': '5295',
   'cash_register.movement.cash': '1105',
   'cash_register.movement.other': '2805',
+  // SaaS Subscription (RNC-31) — Store side: gasto admin del cliente
+  'saas_subscription_expense.expense': '5135',
+  'saas_subscription_expense.cash_bank': '1110',
+  // SaaS Subscription (RNC-31) — Platform side: ingreso Vendix + partner payable
+  'saas_revenue.cash_bank': '1110',
+  'saas_revenue.revenue': '4135',
+  'saas_revenue.partner_payable': '2335',
 };
 
 /**

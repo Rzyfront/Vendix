@@ -411,7 +411,7 @@ export class SubscriptionAccessService {
     const invoicesRaw = await this.prisma.subscription_invoices.findMany({
       where: {
         store_subscription_id: sub.id,
-        state: { in: ['issued', 'overdue', 'partially_paid'] },
+        state: { in: ['issued', 'overdue'] },
       },
       orderBy: { issued_at: 'asc' },
       select: {
@@ -646,6 +646,12 @@ export class SubscriptionAccessService {
           mode: 'block',
           severity: 'blocker',
           reason: 'SUBSCRIPTION_003',
+        };
+      case 'no_plan':
+        return {
+          mode: 'block',
+          severity: 'blocker',
+          reason: 'SUBSCRIPTION_004',
         };
       case 'draft':
       default:

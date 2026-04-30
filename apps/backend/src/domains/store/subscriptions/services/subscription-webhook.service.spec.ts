@@ -17,6 +17,8 @@ describe('SubscriptionWebhookService', () => {
   let service: SubscriptionWebhookService;
   let prismaMock: any;
   let paymentServiceMock: any;
+  let fraudServiceMock: any;
+  let stateServiceMock: any;
   let eventEmitterMock: any;
 
   beforeEach(() => {
@@ -28,12 +30,21 @@ describe('SubscriptionWebhookService', () => {
     paymentServiceMock = {
       markPaymentSucceededFromWebhook: jest.fn(),
       markPaymentFailedFromWebhook: jest.fn(),
+      enqueueCommissionAccrualPostCommit: jest.fn(),
+    };
+    fraudServiceMock = {
+      handleChargeback: jest.fn(),
+    };
+    stateServiceMock = {
+      transition: jest.fn(),
     };
     eventEmitterMock = { emit: jest.fn() };
 
     service = new SubscriptionWebhookService(
       prismaMock,
       paymentServiceMock,
+      fraudServiceMock,
+      stateServiceMock,
       eventEmitterMock,
     );
   });

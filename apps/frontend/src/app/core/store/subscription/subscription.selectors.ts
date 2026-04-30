@@ -103,6 +103,11 @@ export const selectBannerLevel = createSelector(
     // not a "regularize payment" CTA. The banner branches accordingly.
     if (status === 'cancelled' || status === 'expired') return 'terminal';
     if (status === 'grace_hard' || status === 'grace_soft' || status === 'suspended') return 'danger';
+    // Phase 4 — `pending_payment` means the user committed a checkout but the
+    // payment hasn't cleared yet. Surface as `warning` (yellow) so the
+    // banner + retry CTA can guide them back into the widget without the
+    // alarm of grace/suspended.
+    if (status === 'pending_payment') return 'warning';
     // Scheduled cancellation: plan is still alive (active/trial) but the user
     // turned off auto-renew with an end-of-cycle cancel. Surface as `warning`
     // (orange) — informative, not alarming, distinguishable from terminal red.

@@ -634,8 +634,6 @@ export class SubscriptionInvoicePdfService {
       case 'overdue':
       case 'uncollectible':
         return { bg: '#FEF2F2', border: '#FECACA', fg: '#B91C1C' };
-      case 'partially_paid':
-        return { bg: '#FFFBEB', border: '#FDE68A', fg: '#B45309' };
       case 'void':
       case 'refunded':
         return { bg: '#F3F4F6', border: '#D1D5DB', fg: '#374151' };

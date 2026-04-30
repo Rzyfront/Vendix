@@ -129,11 +129,28 @@ export class SubscriptionTrialService {
 
     const orgRow = lockedRows[0];
 
-    // 2. One-shot per org: skip silently if trial already consumed.
+    // 2. One-shot per org: create no_plan subscription if trial already consumed.
+    //    (RNC-03, RNC-39: stores adicionales sin trial van a no_plan)
     if (orgRow.has_consumed_trial === true) {
       this.logger.log(
-        `trial already consumed for org ${organizationId}, skipping`,
+        `trial already consumed for org ${organizationId}, creating no_plan sub for store ${storeId}`,
       );
+      // RNC-39: no_plan rows have NO plan assigned. plan_id is now nullable
+      // and we MUST persist NULL — no placeholder reference.
+      await tx.store_subscriptions.create({
+        data: {
+          store_id: storeId,
+          plan_id: null,
+          state: 'no_plan',
+          effective_price: new Prisma.Decimal(0),
+          vendix_base_price: new Prisma.Decimal(0),
+          currency: 'COP',
+          auto_renew: false,
+          resolved_features: Prisma.JsonNull,
+          resolved_at: new Date(),
+          metadata: { reason: 'secondary_store_no_trial' } as Prisma.InputJsonValue,
+        },
+      });
       return null;
     }
 
@@ -190,6 +207,7 @@ export class SubscriptionTrialService {
         resolved_features:
           (plan.ai_feature_flags as Prisma.InputJsonValue) ?? Prisma.JsonNull,
         resolved_at: now,
+        metadata: { auto_convert_at_end: true } as Prisma.InputJsonValue,
       },
     });
 

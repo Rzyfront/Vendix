@@ -193,7 +193,12 @@ export class SubscriptionMetricsService {
       by_state[String(row.state)] = row._count._all;
     }
 
-    const planIds = byPlanRows.map((r) => r.plan_id);
+    // RNC-39: plan_id may be null (no_plan rows). Filter those out — they
+    // are surfaced separately via the by_state breakdown and have no plan
+    // metadata to display.
+    const planIds = byPlanRows
+      .map((r) => r.plan_id)
+      .filter((id): id is number => id !== null);
     const plans = planIds.length
       ? await this.prisma.subscription_plans.findMany({
           where: { id: { in: planIds } },
@@ -203,6 +208,7 @@ export class SubscriptionMetricsService {
     const planNameById = new Map(plans.map((p) => [p.id, p.name] as const));
 
     const by_plan = byPlanRows
+      .filter((row): row is typeof row & { plan_id: number } => row.plan_id !== null)
       .map((row) => ({
         plan_id: row.plan_id,
         plan_name: planNameById.get(row.plan_id) ?? `Plan #${row.plan_id}`,

@@ -248,7 +248,8 @@ export class PromotionalApplyService {
       promoPlan,
     );
 
-    const baseFeatures = this.coerceFeatures(sub.plan.ai_feature_flags);
+    // RNC-39: no_plan rows have no base plan to derive features from.
+    const baseFeatures = this.coerceFeatures(sub.plan?.ai_feature_flags ?? null);
     let resolvedFeatures: ResolvedFeatures = baseFeatures;
 
     if (sub.partner_override?.feature_overrides) {
@@ -308,7 +309,8 @@ export class PromotionalApplyService {
       return;
     }
 
-    const baseFeatures = this.coerceFeatures(sub.plan.ai_feature_flags);
+    // RNC-39: no_plan rows have no base plan to derive features from.
+    const baseFeatures = this.coerceFeatures(sub.plan?.ai_feature_flags ?? null);
     let resolvedFeatures: ResolvedFeatures = baseFeatures;
 
     if (sub.partner_override?.feature_overrides) {

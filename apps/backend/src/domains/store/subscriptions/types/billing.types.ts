@@ -97,6 +97,14 @@ export interface ProrationPreview {
     active: boolean;
     scheduled_at: string; // ISO
   };
+  /**
+   * Whether the destination plan is configured as free (`subscription_plans.is_free=true`).
+   * Used by frontend defense-in-depth: if the target is paid AND
+   * `proration_amount > 0` AND backend returned `widget=null`, the UI must
+   * surface an error rather than navigating to "success". Replaces the legacy
+   * `base_price <= 0` heuristic that fails silently when sub.plan is null.
+   */
+  target_plan_is_free?: boolean;
 }
 
 export interface FreePlanInfo {

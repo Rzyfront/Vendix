@@ -168,12 +168,12 @@ export class DunningService {
       sub.store_id,
       type,
       'Recordatorio de pago pendiente',
-      `Tu suscripción al plan ${sub.plan.name} requiere atención.`,
+      `Tu suscripción al plan ${sub.plan?.name ?? 'sin plan'} requiere atención.`,
       {
         severity,
         subscription_id: sub.id,
         state: sub.state,
-        plan_code: sub.plan.code,
+        plan_code: sub.plan?.code ?? null,
         triggered_by_user_id: triggeredByUserId,
       },
     );
@@ -225,7 +225,7 @@ export class DunningService {
       where: { id: subscriptionId },
       include: {
         invoices: {
-          where: { state: { in: ['issued', 'overdue', 'partially_paid'] } },
+          where: { state: { in: ['issued', 'overdue'] } },
           orderBy: { due_at: 'asc' },
           take: 1,
         },
@@ -338,7 +338,7 @@ export class DunningService {
         },
         invoices: {
           where: {
-            state: { in: ['issued', 'overdue', 'partially_paid', 'draft'] },
+            state: { in: ['issued', 'overdue', 'draft'] },
           },
           select: {
             id: true,

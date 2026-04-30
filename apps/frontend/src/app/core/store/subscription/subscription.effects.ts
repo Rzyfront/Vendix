@@ -1,7 +1,18 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType, ROOT_EFFECTS_INIT } from '@ngrx/effects';
-import { of, Observable, EMPTY } from 'rxjs';
-import { map, mergeMap, catchError, switchMap, filter } from 'rxjs/operators';
+import { of, Observable, EMPTY, interval, timer, race, defer, from } from 'rxjs';
+import {
+  map,
+  mergeMap,
+  catchError,
+  switchMap,
+  filter,
+  takeUntil,
+  concatMap,
+  delay,
+  expand,
+  takeWhile,
+} from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
 import { Action } from '@ngrx/store';
 import { environment } from '../../../../environments/environment';
@@ -368,6 +379,184 @@ export class SubscriptionEffects {
             ),
           ),
       ),
+    ),
+  );
+
+  /**
+   * Phase 3 + Pull-fallback — Poll until the subscription transitions to
+   * `active` after a Wompi widget close.
+   *
+   * Two flavors driven by the action payload:
+   *   1. With `invoiceId` → on each tick: (a) call backend
+   *      `POST checkout/invoices/:invoiceId/sync-from-gateway` so the
+   *      backend reconciles directly with Wompi (works on localhost where
+   *      the webhook can't land); then (b) refresh `/current`. If the sync
+   *      response says `paid` we short-circuit immediately. This is the
+   *      canonical path post-checkout.
+   *   2. Without `invoiceId` → legacy polling against `/current` only,
+   *      relying on a real Wompi webhook to flip the state. Kept for
+   *      callers that don't yet pass the invoice id.
+   *
+   * Backoff schedule (no fixed `intervalMs` from caller): 2s, 3s, 5s, 8s,
+   * 12s, then 12s thereafter. Cap of 10 attempts (~60s) before emitting
+   * `pollFailed` so the UI can surface a "Reintentar verificación" CTA.
+   * If `intervalMs` is supplied we honor it (legacy path).
+   *
+   * `switchMap` cancels any in-flight poll on a fresh dispatch.
+   */
+  pollSubscriptionUntilActive$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(SubscriptionActions.pollSubscriptionUntilActive),
+      switchMap(({ timeoutMs, intervalMs, invoiceId }) => {
+        // Hard timeout still wins in any case. Default keeps backwards
+        // compat with the legacy 30s default; raise to 60s when we are in
+        // pull-fallback mode so the backoff schedule has room to finish.
+        const deadline = timeoutMs ?? (invoiceId ? 60000 : 30000);
+        const timeout$ = timer(deadline).pipe(
+          map(() => SubscriptionActions.pollTimeout()),
+        );
+
+        // Cancellation streams — stop on success or on the (post-cap) failed
+        // signal so the inner observable doesn't outlive the user-visible
+        // outcome.
+        const cancel$ = this.actions$.pipe(
+          ofType(
+            SubscriptionActions.pollSucceeded,
+            SubscriptionActions.pollFailed,
+            SubscriptionActions.pollTimeout,
+          ),
+        );
+
+        // Backoff schedule for pull-fallback mode. Numbers chosen to balance
+        // perceived snappiness (first check at 2s) against backend load:
+        // 2 + 3 + 5 + 8 + 12 = 30s for the first 5 ticks; subsequent ticks
+        // hold at 12s. Capped at 10 ticks (~78s aggregated) before we give
+        // up and surface the manual CTA.
+        const BACKOFF_MS = [2000, 3000, 5000, 8000, 12000, 12000, 12000, 12000, 12000, 12000];
+        const MAX_ATTEMPTS = BACKOFF_MS.length;
+
+        const tickFor = (attemptIdx: number): number => {
+          if (intervalMs && intervalMs > 0) return intervalMs;
+          return BACKOFF_MS[Math.min(attemptIdx, BACKOFF_MS.length - 1)];
+        };
+
+        // Per-tick action: returns the list of NgRx actions to dispatch
+        // for the given attempt index. Network errors are swallowed so the
+        // loop never aborts mid-flight — the timeout/cap branches own the
+        // terminal decisions.
+        const tick$ = (): Observable<Action[]> => {
+          const sync$ = invoiceId
+            ? this.http
+                .post<{ success: boolean; data: any }>(
+                  `${this.apiUrl}/store/subscriptions/checkout/invoices/${invoiceId}/sync-from-gateway`,
+                  {},
+                )
+                .pipe(catchError(() => of(null)))
+            : of(null);
+
+          return sync$.pipe(
+            mergeMap((syncRes) => {
+              const syncStatus = syncRes?.data?.status as
+                | 'paid'
+                | 'failed'
+                | 'pending'
+                | 'no_transaction'
+                | undefined;
+
+              if (syncStatus === 'paid') {
+                return this.http
+                  .get<{ success: boolean; data: any }>(
+                    `${this.apiUrl}/store/subscriptions/current`,
+                  )
+                  .pipe(
+                    map((response): Action[] => [
+                      SubscriptionActions.loadCurrentSuccess({
+                        subscription: response?.data ?? null,
+                      }),
+                      SubscriptionActions.pollSucceeded(),
+                    ]),
+                    catchError((): Observable<Action[]> =>
+                      of([SubscriptionActions.pollSucceeded()]),
+                    ),
+                  );
+              }
+
+              if (syncStatus === 'failed') {
+                return of<Action[]>([
+                  SubscriptionActions.pollFailed({
+                    reason: 'gateway_declined',
+                  }),
+                ]);
+              }
+
+              // Pending / no_transaction / no invoiceId — refresh /current
+              // so the banner reacts to listener-led promotions too.
+              return this.http
+                .get<{ success: boolean; data: any }>(
+                  `${this.apiUrl}/store/subscriptions/current`,
+                )
+                .pipe(
+                  map((response): Action[] => {
+                    const sub = response?.data ?? null;
+                    const status = sub?.status ?? sub?.state ?? null;
+                    const updateAction =
+                      SubscriptionActions.loadCurrentSuccess({
+                        subscription: sub,
+                      });
+                    if (
+                      status === 'active' ||
+                      status === 'trialing' ||
+                      status === 'trial'
+                    ) {
+                      return [
+                        updateAction,
+                        SubscriptionActions.pollSucceeded(),
+                      ];
+                    }
+                    return [updateAction];
+                  }),
+                  catchError((): Observable<Action[]> => of([])),
+                );
+            }),
+          );
+        };
+
+        // Sequential scheduler with backoff. Each attempt is wrapped as
+        // a discrete observable that waits `tickFor(idx)` and then issues
+        // its tick. We expand into the next attempt unless the previous
+        // one terminated with succeeded/failed.
+        type AttemptResult = { idx: number; actions: Action[] };
+        const runAttempt = (idx: number): Observable<AttemptResult> =>
+          timer(tickFor(idx)).pipe(
+            switchMap(() => tick$()),
+            map((actions) => ({ idx, actions })),
+          );
+
+        const polling$ = runAttempt(0).pipe(
+          expand((prev) => {
+            const terminal = prev.actions.some(
+              (a) =>
+                a.type === SubscriptionActions.pollSucceeded.type ||
+                a.type === SubscriptionActions.pollFailed.type,
+            );
+            if (terminal) return EMPTY;
+            const nextIdx = prev.idx + 1;
+            if (nextIdx >= MAX_ATTEMPTS) {
+              return of<AttemptResult>({
+                idx: nextIdx,
+                actions: [
+                  SubscriptionActions.pollFailed({ reason: 'max_attempts' }),
+                ],
+              });
+            }
+            return runAttempt(nextIdx);
+          }),
+          concatMap((attempt) => from(attempt.actions)),
+          takeUntil(cancel$),
+        );
+
+        return race(polling$, timeout$);
+      }),
     ),
   );
 

@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpResponse } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   SubscriptionPlan,
@@ -12,6 +12,18 @@ import {
   CouponValidationResponse,
   SubscriptionTimelineEvent,
 } from '../interfaces/store-subscription.interface';
+import { WompiWidgetConfig } from '../../../../../core/services/wompi-checkout.service';
+
+/**
+ * Phase 4 — Response shape for `POST /store/subscriptions/checkout/retry-payment`.
+ * Backend returns the Wompi widget config plus the invoice metadata the user
+ * is paying. Idempotent: re-calling does not duplicate the invoice; it
+ * appends a new `payment` row with `attempt` incremented.
+ */
+export interface RetryPaymentResponse {
+  widget: WompiWidgetConfig;
+  invoice: { id: number; total: string; currency: string };
+}
 
 @Injectable({ providedIn: 'root' })
 export class StoreSubscriptionService {
@@ -121,6 +133,63 @@ export class StoreSubscriptionService {
   }
 
   /**
+   * Phase 4 — Retry the payment for the current `pending_payment` invoice.
+   * Backend returns a fresh Wompi widget config keyed to the same invoice;
+   * idempotent across calls. Errors:
+   *  - SUBSCRIPTION_001 (404) — no current subscription
+   *  - SUBSCRIPTION_010 (409) — subscription not in pending_payment
+   *  - DUNNING_001 (400) — no invoice to retry
+   *  - SUBSCRIPTION_GATEWAY_003 (404) — no payment gateway configured
+   */
+  retryPayment(params?: {
+    returnUrl?: string;
+  }): Observable<RetryPaymentResponse> {
+    const body: Record<string, string> = {};
+    if (params?.returnUrl) body['returnUrl'] = params.returnUrl;
+    return this.http
+      .post<ApiResponse<RetryPaymentResponse>>(
+        this.getApiUrl('checkout/retry-payment'),
+        body,
+      )
+      .pipe(map((res) => res.data as RetryPaymentResponse));
+  }
+
+  /**
+   * Pull-fallback sync — Calls the backend's webhook safety net so the
+   * subscription state machine closes the loop with Wompi even when the
+   * Wompi webhook cannot reach the backend (localhost / NAT / outage).
+   *
+   * The polling loop calls this on every tick while the subscription is
+   * still in `pending_payment`. Backend reuses its webhook handlers, so a
+   * `paid` response is indistinguishable from a webhook-delivered success.
+   *
+   * Returns:
+   *   - `paid`         → polling can stop, subscription will be active
+   *   - `failed`       → polling can stop, surface error toast
+   *   - `pending`      → keep polling (Wompi still authorizing)
+   *   - `no_transaction` → no payment row found yet, keep polling
+   */
+  syncInvoiceFromGateway(
+    invoiceId: number,
+  ): Observable<
+    ApiResponse<{
+      status: 'paid' | 'failed' | 'pending' | 'no_transaction';
+      already_paid?: boolean;
+      transaction_id?: string;
+      payment_status?: string;
+    }>
+  > {
+    return this.http.post<
+      ApiResponse<{
+        status: 'paid' | 'failed' | 'pending' | 'no_transaction';
+        already_paid?: boolean;
+        transaction_id?: string;
+        payment_status?: string;
+      }>
+    >(this.getApiUrl(`checkout/invoices/${invoiceId}/sync-from-gateway`), {});
+  }
+
+  /**
    * S2.1 — Validate a redemption code against the current store. Returns
    * `{ valid, reason?, plan?, overlay_features?, duration_days?, expires_at? }`.
    */
@@ -172,6 +241,25 @@ export class StoreSubscriptionService {
     return this.http.get<ApiResponse<PaymentMethodCharge[]>>(
       this.getApiUrl(`payment-methods/${id}/charges`),
       { params: { limit: String(limit) } },
+    );
+  }
+
+  /**
+   * RNC-24 — Send a support ticket from the dunning UI / paywall.
+   * Backend endpoint: POST /store/subscriptions/support-request
+   *
+   * Backend validates that the subscription is in a dunning state
+   * (grace_soft, grace_hard, suspended, blocked) and returns a `ticketId`.
+   * Skipping the subscription gate is server-side (`@SkipSubscriptionGate`).
+   */
+  requestSupport(payload: {
+    reason: string;
+    message: string;
+    contact_email?: string;
+  }): Observable<ApiResponse<{ ticketId: number }>> {
+    return this.http.post<ApiResponse<{ ticketId: number }>>(
+      this.getApiUrl('support-request'),
+      payload,
     );
   }
 

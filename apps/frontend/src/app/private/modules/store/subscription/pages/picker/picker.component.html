@@ -1,0 +1,91 @@
+<div class="w-full max-w-7xl mx-auto px-4 py-6 lg:py-10 space-y-8">
+  <!-- Welcoming hero — soft tone, no paywall agresivo -->
+  <header class="text-center space-y-4 max-w-3xl mx-auto">
+    <div
+      class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary-100 to-primary-200 mx-auto"
+    >
+      <app-icon
+        name="sparkles"
+        [size]="32"
+        class="text-primary-700"
+      ></app-icon>
+    </div>
+    <span
+      class="inline-block bg-primary-100 text-primary-700 text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full"
+    >
+      Bienvenido a tu nueva tienda
+    </span>
+    <h1
+      class="text-3xl md:text-4xl font-extrabold text-text-primary leading-tight"
+    >
+      Elige tu plan para empezar a vender
+    </h1>
+    <p class="text-base md:text-lg text-text-secondary">
+      Tu tienda está casi lista. Selecciona el plan que mejor se ajuste a tu
+      negocio para activar todas las funciones de Vendix.
+    </p>
+    <p class="text-xs text-text-secondary/80 italic">
+      Esta tienda es adicional a tu organización, así que el trial gratuito
+      no está disponible. Puedes elegir cualquier plan y cambiarlo cuando
+      quieras.
+    </p>
+  </header>
+
+  <!-- Loading skeletons -->
+  @if (loading()) {
+    <div
+      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6"
+    >
+      @for (i of [0, 1, 2]; track i) {
+        <app-pricing-card
+          [plan]="skeletonPlan"
+          [loading]="true"
+        ></app-pricing-card>
+      }
+    </div>
+  }
+
+  <!-- Empty state -->
+  @if (!loading() && visiblePlans().length === 0) {
+    <app-empty-state
+      icon="package"
+      iconColor="primary"
+      title="No hay planes disponibles"
+      description="Por el momento no hay planes activos para tu organización. Contacta al equipo de Vendix o a tu partner para activar planes."
+      [showActionButton]="false"
+    ></app-empty-state>
+  }
+
+  <!-- Plans grid -->
+  @if (!loading() && visiblePlans().length > 0) {
+    <div
+      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6"
+    >
+      @for (plan of visiblePlans(); track plan.id) {
+        <app-pricing-card
+          [plan]="plan"
+          [subscriptionStatus]="subscriptionStatus()"
+          ctaLabel="Empezar con este plan"
+          (select)="selectPlan($event)"
+        ></app-pricing-card>
+      }
+    </div>
+  }
+
+  <!-- Footer helpers -->
+  @if (!loading() && visiblePlans().length > 0) {
+    <div
+      class="text-center pt-4 border-t border-border space-y-3 text-text-secondary"
+    >
+      <p class="text-xs">
+        ¿Necesitas comparar todas las opciones detalladas?
+      </p>
+      <app-button variant="ghost" size="sm" (clicked)="goToPlansCatalog()">
+        <span class="flex items-center gap-2">
+          <app-icon name="layout-grid" [size]="14"></app-icon>
+          Ver catálogo completo
+        </span>
+      </app-button>
+    </div>
+  }
+</div>

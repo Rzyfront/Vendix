@@ -195,4 +195,174 @@ export class PromotionalService {
 
     await this.prisma.subscription_plans.delete({ where: { id } });
   }
+
+  /**
+   * RNC-05 — Super-admin grants a promotional plan to one or all stores of an
+   * organization. Replaces the legacy `extend-trial` flow: there are no trial
+   * extensions, only promotional plan assignments.
+   *
+   * Behavior:
+   *  - If `storeId` is given, target that single store.
+   *  - Otherwise, target every store of the org that does NOT already have an
+   *    active promotional_plan_id (idempotent: never overwrites a different
+   *    promo without explicit override).
+   *  - For each target store_subscriptions row:
+   *      * Sets `promotional_plan_id` and `promotional_applied_at`.
+   *      * If currently in `draft`/`cancelled`/`expired`/`no_plan`, transitions
+   *        to `active`.
+   *      * Writes a `subscription_events` audit row of type
+   *        `promotional_applied` with `payload.assigned_by_admin = true` plus
+   *        the operator-provided `reason` (used by audit dashboards instead of
+   *        the deprecated `promo_assigned_by_admin` event-type alias).
+   *
+   * Validations:
+   *  - Plan must exist and be `plan_type='promotional'` and `state='active'`.
+   *  - Org must exist; at least one eligible store required.
+   */
+  async assignPromoPlan(
+    orgId: number,
+    dto: { plan_id: number; store_id?: number; reason: string },
+    actorUserId: number | null,
+  ): Promise<{
+    org_id: number;
+    plan_id: number;
+    assigned: Array<{ store_id: number; subscription_id: number }>;
+  }> {
+    if (!Number.isInteger(orgId) || orgId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SYS_VALIDATION_001);
+    }
+    if (!dto?.reason || dto.reason.trim().length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'reason is required',
+      );
+    }
+
+    const promoPlan = await this.prisma.subscription_plans.findUnique({
+      where: { id: dto.plan_id },
+    });
+
+    if (!promoPlan) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Promotional plan not found',
+      );
+    }
+    if (promoPlan.plan_type !== 'promotional') {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'Plan is not of type promotional',
+      );
+    }
+    if (promoPlan.state !== 'active') {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'Promotional plan must be in state=active',
+      );
+    }
+
+    const org = await this.prisma.organizations.findUnique({
+      where: { id: orgId },
+      select: { id: true },
+    });
+    if (!org) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Organization not found',
+      );
+    }
+
+    // Resolve target stores.
+    const storeWhere: Prisma.storesWhereInput = { organization_id: orgId };
+    if (dto.store_id) {
+      storeWhere.id = dto.store_id;
+    }
+    const stores = await this.prisma.stores.findMany({
+      where: storeWhere,
+      select: { id: true },
+    });
+    if (stores.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'No matching stores for organization',
+      );
+    }
+
+    const now = new Date();
+    const assigned: Array<{ store_id: number; subscription_id: number }> = [];
+    const eligibleStateTransitions = new Set<string>([
+      'draft',
+      'cancelled',
+      'expired',
+      'no_plan',
+    ]);
+
+    for (const store of stores) {
+      const sub = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: store.id },
+      });
+
+      // When no explicit store_id, skip stores that already have a promo
+      // assigned (idempotent broadcast).
+      if (!dto.store_id && sub?.promotional_plan_id) {
+        continue;
+      }
+
+      const result = await this.prisma.$transaction(async (tx) => {
+        let targetSub = sub;
+
+        if (!targetSub) {
+          // No subscription yet — create one with the promo plan and active state.
+          targetSub = await tx.store_subscriptions.create({
+            data: {
+              store_id: store.id,
+              plan_id: promoPlan.id,
+              promotional_plan_id: promoPlan.id,
+              promotional_applied_at: now,
+              state: 'active',
+              auto_renew: true,
+              updated_at: now,
+            },
+          });
+        } else {
+          const updateData: Prisma.store_subscriptionsUpdateInput = {
+            promotional_plan: { connect: { id: promoPlan.id } },
+            promotional_applied_at: now,
+            updated_at: now,
+          };
+          if (eligibleStateTransitions.has(targetSub.state)) {
+            updateData.state = 'active';
+          }
+          targetSub = await tx.store_subscriptions.update({
+            where: { id: targetSub.id },
+            data: updateData,
+          });
+        }
+
+        // After both branches, targetSub is guaranteed non-null.
+        const subRow = targetSub!;
+
+        await tx.subscription_events.create({
+          data: {
+            store_subscription_id: subRow.id,
+            type: 'promotional_applied',
+            payload: {
+              assigned_by_admin: true,
+              promotional_plan_id: promoPlan.id,
+              promotional_plan_code: promoPlan.code,
+              reason: dto.reason,
+              kind: 'promo_assigned_by_admin',
+            } as Prisma.InputJsonValue,
+            triggered_by_user_id: actorUserId ?? null,
+          },
+        });
+
+        return subRow;
+      });
+
+      assigned.push({ store_id: store.id, subscription_id: result.id });
+    }
+
+    return { org_id: orgId, plan_id: promoPlan.id, assigned };
+  }
 }

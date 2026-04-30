@@ -244,6 +244,40 @@
     </app-card>
   </div>
 
+  <!-- RNC-24 — Contact support CTA, available across every dunning state.
+       Surfaces a non-blocking modal that creates a ticket via
+       POST /store/subscriptions/support-request. -->
+  <app-card>
+    <div
+      class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4"
+    >
+      <div class="flex items-start gap-3">
+        <div class="p-3 bg-blue-100 rounded-xl shrink-0">
+          <app-icon
+            name="life-buoy"
+            [size]="24"
+            class="text-blue-700"
+          ></app-icon>
+        </div>
+        <div>
+          <p class="text-sm font-semibold text-text-primary">
+            ¿Necesitas ayuda con tu pago?
+          </p>
+          <p class="text-xs text-text-secondary mt-1">
+            Nuestro equipo de soporte puede ayudarte a resolver problemas con
+            tu pago, plan o tarjeta.
+          </p>
+        </div>
+      </div>
+      <app-button variant="outline" size="md" (clicked)="onContactSupport()">
+        <span class="flex items-center gap-2">
+          <app-icon name="message-square" [size]="16"></app-icon>
+          Contactar soporte
+        </span>
+      </app-button>
+    </div>
+  </app-card>
+
   <!-- Footer disclaimer -->
   <p class="text-xs text-text-secondary text-center pt-4 border-t border-gray-200">
     Si tu suscripción se cancela por falta de pago, perderás acceso al servicio.
@@ -251,3 +285,8 @@
     retroactivos.
   </p>
 </div>
+
+<app-support-request-modal
+  [(isOpen)]="supportModalOpen"
+  (submitted)="onSupportSubmitted($event)"
+></app-support-request-modal>

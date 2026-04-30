@@ -120,14 +120,14 @@ export class DashboardService {
 
       this.prisma.subscription_invoices.aggregate({
         where: {
-          state: { in: ['paid', 'partially_paid'] },
+          state: { in: ['paid'] },
           created_at: { gte: currentMonthStart },
         },
         _sum: { total: true },
       }),
       this.prisma.subscription_invoices.aggregate({
         where: {
-          state: { in: ['paid', 'partially_paid'] },
+          state: { in: ['paid'] },
           created_at: { gte: lastMonthStart, lte: lastMonthEnd },
         },
         _sum: { total: true },
@@ -349,7 +349,7 @@ export class DashboardService {
             await this.prisma.subscription_invoices.aggregate({
               where: {
                 store_id: { in: storeIds },
-                state: { in: ['paid', 'partially_paid'] },
+                state: { in: ['paid'] },
                 created_at: { gte: currentMonthStart },
               },
               _sum: { total: true },
@@ -457,7 +457,7 @@ export class DashboardService {
       const [revenueAgg, orgs, users, stores, subs] = await Promise.all([
         this.prisma.subscription_invoices.aggregate({
           where: {
-            state: { in: ['paid', 'partially_paid'] },
+            state: { in: ['paid'] },
             created_at: { gte: monthStart, lte: monthEnd },
           },
           _sum: { total: true },

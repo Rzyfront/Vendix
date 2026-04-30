@@ -3,7 +3,11 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { Prisma, subscription_payments } from '@prisma/client';
+import {
+  Prisma,
+  subscription_payments,
+  subscription_payment_method_state_enum,
+} from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PaymentGatewayService } from '../../payments/services/payment-gateway.service';
 import {
@@ -11,7 +15,11 @@ import {
   PaymentStatus,
 } from '../../payments/interfaces/payment-processor.interface';
 import { WompiProcessor } from '../../payments/processors/wompi/wompi.processor';
-import { WompiEnvironment } from '../../payments/processors/wompi/wompi.types';
+import {
+  WompiEnvironment,
+  WompiTransactionData,
+} from '../../payments/processors/wompi/wompi.types';
+import { WompiClientFactory } from '../../payments/processors/wompi/wompi.factory';
 import {
   PlatformGatewayService,
   DecryptedCreds,
@@ -45,6 +53,7 @@ const PROMOTABLE_ON_PAYMENT_SUCCESS = [
 ] as const;
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * S3.5 — Threshold of consecutive failed automatic charges against a saved
@@ -80,6 +89,7 @@ export class SubscriptionPaymentService {
     private readonly eventEmitter: EventEmitter2,
     private readonly platformGw: PlatformGatewayService,
     private readonly wompiProcessor: WompiProcessor,
+    private readonly wompiClientFactory: WompiClientFactory,
     @InjectQueue('commission-accrual')
     private readonly commissionQueue: Queue,
     @InjectQueue('email-notifications')
@@ -250,6 +260,210 @@ export class SubscriptionPaymentService {
       .createHash('sha256')
       .update(concatenated)
       .digest('hex');
+  }
+
+  /**
+   * Pull-fallback sync — Webhook safety net for environments where the
+   * Wompi webhook cannot reach the backend (localhost, NAT, transient
+   * outbound failures, prod misconfig). The frontend polling layer calls
+   * this on every cycle while the subscription remains in `pending_payment`.
+   *
+   * Flow:
+   *   1. Load invoice + payments. If invoice already paid → return.
+   *   2. Pick the most recent pending payment row's `metadata.reference`
+   *      (the one we generated when calling prepareWidgetCharge / charge).
+   *   3. Query Wompi `GET /v1/transactions?reference=...` using PLATFORM
+   *      credentials (same source the widget was issued with).
+   *   4. If APPROVED → reuse webhook handler `markPaymentSucceededFromWebhook`
+   *      so all atomic invariants (invoice paid, subscription promoted,
+   *      auto-PM, partner commission outbox, listener emit) run identically.
+   *      Idempotency via `webhook_event_dedup` keyed on the Wompi event id
+   *      with processor='wompi_sync'.
+   *   5. If DECLINED/ERROR → mark payment failed (same handler).
+   *   6. If PENDING/empty → return pending status; caller keeps polling.
+   *
+   * Reusing the webhook handlers (instead of duplicating success logic)
+   * guarantees parity: a charge confirmed via this path is indistinguishable
+   * from one confirmed via the actual Wompi webhook.
+   */
+  async syncInvoiceFromGateway(
+    invoiceId: number,
+  ): Promise<{
+    status: 'paid' | 'failed' | 'pending' | 'no_transaction';
+    already_paid?: boolean;
+    transaction_id?: string;
+    payment_status?: string;
+  }> {
+    const invoice = await this.prisma.subscription_invoices.findUnique({
+      where: { id: invoiceId },
+    });
+    if (!invoice) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    if (invoice.state === 'paid') {
+      return { status: 'paid', already_paid: true };
+    }
+    if (invoice.state === 'void' || invoice.state === 'refunded') {
+      return { status: 'failed', already_paid: false };
+    }
+
+    // Locate the most recent pending payment for this invoice. The
+    // `metadata.reference` is the one passed to the Wompi widget — that is
+    // the only stable join key against `GET /transactions?reference=`.
+    const payment = await this.prisma.subscription_payments.findFirst({
+      where: { invoice_id: invoiceId },
+      orderBy: { id: 'desc' },
+    });
+
+    if (!payment) {
+      return { status: 'no_transaction' };
+    }
+
+    if (this.isTerminalState(payment.state)) {
+      // Payment row already terminal — invoice should reflect it.
+      return {
+        status: payment.state === 'succeeded' ? 'paid' : 'failed',
+        payment_status: payment.state,
+      };
+    }
+
+    const meta =
+      payment.metadata && typeof payment.metadata === 'object'
+        ? (payment.metadata as Record<string, unknown>)
+        : {};
+    const reference =
+      typeof meta.reference === 'string' && meta.reference.length > 0
+        ? meta.reference
+        : null;
+
+    if (!reference) {
+      this.logger.warn(
+        `syncInvoiceFromGateway: payment ${payment.id} has no metadata.reference`,
+      );
+      return { status: 'pending', payment_status: payment.state };
+    }
+
+    const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
+    if (!wompiCreds) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_003,
+        'Credenciales de pasarela de plataforma no configuradas',
+      );
+    }
+
+    let txns: WompiTransactionData[] = [];
+    try {
+      const client = this.wompiClientFactory.getClient(
+        'platform-sync',
+        this.toProcessorWompiConfig(wompiCreds),
+      );
+      const result = await client.getTransactionsByReference(reference);
+      txns = Array.isArray(result?.data) ? result.data : [];
+    } catch (err: any) {
+      this.logger.warn(
+        `syncInvoiceFromGateway: Wompi lookup failed for invoice ${invoiceId} ref=${reference}: ${err?.message ?? err}`,
+      );
+      return { status: 'pending', payment_status: payment.state };
+    }
+
+    if (txns.length === 0) {
+      return { status: 'pending', payment_status: payment.state };
+    }
+
+    // Prefer an APPROVED txn if any; otherwise fall back to the most
+    // recent terminal one (DECLINED/ERROR/VOIDED). PENDING ones leave
+    // the caller polling.
+    const approved = txns.find(
+      (t) => String(t.status).toUpperCase() === 'APPROVED',
+    );
+    const terminalFailed = txns.find((t) => {
+      const s = String(t.status).toUpperCase();
+      return s === 'DECLINED' || s === 'ERROR' || s === 'VOIDED';
+    });
+    const txn = approved ?? terminalFailed ?? txns[0];
+    const status = String(txn.status).toUpperCase();
+
+    if (status === 'APPROVED') {
+      // Idempotent dedup INSERT inside an atomic tx + reuse the webhook
+      // success path so subscription promotion + auto-PM + outbox all run
+      // identically to a real webhook. processor='wompi_sync' so a
+      // subsequent real webhook (processor='wompi_platform') is NOT blocked
+      // by this dedup row.
+      await this.prisma.withoutScope().$transaction(
+        async (tx) => {
+          const dedupKey = String(txn.id);
+          const inserted = await tx.$executeRaw<number>(
+            Prisma.sql`
+              INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
+              VALUES ('wompi_sync', ${dedupKey}, 'pull_sync', NOW())
+              ON CONFLICT (processor, event_id) DO NOTHING
+            `,
+          );
+          if (inserted === 0) {
+            this.logger.log(
+              `syncInvoiceFromGateway: dedup hit for txn ${dedupKey}, invoice ${invoiceId}; skipping`,
+            );
+            return;
+          }
+
+          await this.markPaymentSucceededFromWebhook(
+            {
+              paymentId: payment.id,
+              invoiceId,
+              transactionId: txn.id,
+              gatewayResponse: txn,
+            },
+            tx,
+          );
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+      );
+
+      // Post-commit side effects — mirror SubscriptionWebhookService.
+      try {
+        await this.enqueueCommissionAccrualPostCommit(invoiceId);
+      } catch (e: any) {
+        this.logger.warn(
+          `syncInvoiceFromGateway: enqueueCommissionAccrual failed invoice=${invoiceId}: ${e?.message ?? e}`,
+        );
+      }
+
+      try {
+        this.eventEmitter.emit('subscription.payment.succeeded', {
+          invoiceId,
+          paymentId: payment.id,
+          subscriptionId: invoice.store_subscription_id,
+          storeId: invoice.store_id,
+          source: 'pull_sync',
+        });
+      } catch (e: any) {
+        this.logger.warn(
+          `syncInvoiceFromGateway: emit failed invoice=${invoiceId}: ${e?.message ?? e}`,
+        );
+      }
+
+      this.logger.log(
+        `syncInvoiceFromGateway: APPROVED applied for invoice ${invoiceId} via pull (txn=${txn.id})`,
+      );
+      return { status: 'paid', transaction_id: txn.id, payment_status: 'succeeded' };
+    }
+
+    if (status === 'DECLINED' || status === 'ERROR' || status === 'VOIDED') {
+      await this.markPaymentFailedFromWebhook({
+        paymentId: payment.id,
+        invoiceId,
+        reason: txn.status_message ?? status,
+      });
+      return {
+        status: 'failed',
+        transaction_id: txn.id,
+        payment_status: 'failed',
+      };
+    }
+
+    // PENDING / unknown — caller continues polling.
+    return { status: 'pending', payment_status: payment.state };
   }
 
   /**
@@ -898,11 +1112,14 @@ export class SubscriptionPaymentService {
         },
       });
 
-      if (refundResult.success) {
+      if (refundResult.success && isFullRefund) {
+        // RNC-10/RNC-11: only full refunds change invoice state to 'refunded'.
+        // Partial refunds leave the invoice in 'paid'; the partial chargeback
+        // is recorded only on the subscription_payments row (state='partial_refund').
         await tx.subscription_invoices.update({
           where: { id: invoiceId },
           data: {
-            state: isFullRefund ? 'refunded' : 'partially_paid',
+            state: 'refunded',
             updated_at: new Date(),
           },
         });
@@ -952,6 +1169,30 @@ export class SubscriptionPaymentService {
         },
       });
 
+      // ── Auto-register the card used for this charge as a saved
+      // subscription_payment_method (implicit > explicit). This is the
+      // canonical path: the user pays the real invoice via Wompi widget,
+      // and the card used is persisted as the recurring PM with
+      // is_default=true. No standalone "add card" flow is needed.
+      //
+      // Errors are swallowed (logged) — the payment is already approved by
+      // the gateway and the invoice is paid; failing to persist the PM
+      // must NOT roll back the success transaction. The user can re-pay
+      // manually next renewal if the PM record is missing.
+      try {
+        await this.autoRegisterPaymentMethodFromGateway(
+          tx,
+          invoice.store_id,
+          invoice.store_subscription_id,
+          gatewayResponse,
+          paymentId,
+        );
+      } catch (e: any) {
+        this.logger.warn(
+          `autoRegisterPaymentMethodFromGateway failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+        );
+      }
+
       // Synchronous subscription-state promotion (root-cause fix for
       // pending_payment drift). The listener at
       // `SubscriptionStateListener.onPaymentSucceeded` is best-effort and
@@ -968,7 +1209,11 @@ export class SubscriptionPaymentService {
         try {
           const subRow = await tx.store_subscriptions.findUnique({
             where: { id: invoice.store_subscription_id },
-            select: { state: true },
+            select: {
+              state: true,
+              current_period_end: true,
+              plan: { select: { billing_cycle: true } },
+            },
           });
           const currentState = subRow?.state as string | undefined;
           if (
@@ -977,6 +1222,82 @@ export class SubscriptionPaymentService {
               currentState as (typeof PROMOTABLE_ON_PAYMENT_SUCCESS)[number],
             )
           ) {
+            // RNC-22 — Reactivation from grace/suspended discounts the days
+            // already consumed in grace. Only applies when the previous
+            // billing period actually ended before the payment landed
+            // (current_period_end < paid_at). Pure new-cycle states
+            // (pending_payment, draft, expired, no_plan, cancelled) get a
+            // clean cycle per RNC-21 and never enter this branch.
+            const isGraceReactivation =
+              currentState === 'grace_soft' ||
+              currentState === 'grace_hard' ||
+              currentState === 'suspended';
+
+            if (
+              isGraceReactivation &&
+              subRow?.current_period_end &&
+              subRow.plan?.billing_cycle
+            ) {
+              const previousPeriodEnd = new Date(subRow.current_period_end);
+              if (previousPeriodEnd.getTime() < now.getTime()) {
+                const cycleMs = this.billingCycleMs(subRow.plan.billing_cycle);
+                const cycleDays = Math.max(1, Math.round(cycleMs / DAY_MS));
+                // Days fully consumed in grace, clamped to [0, cycleDays].
+                const daysInGraceRaw = Math.floor(
+                  (now.getTime() - previousPeriodEnd.getTime()) / DAY_MS,
+                );
+                const daysInGrace = Math.max(
+                  0,
+                  Math.min(cycleDays, daysInGraceRaw),
+                );
+
+                // New period: paid_at + (cycle - days_in_grace).
+                const effectiveDaysGranted = cycleDays - daysInGrace;
+                const newPeriodEnd = new Date(
+                  now.getTime() + effectiveDaysGranted * DAY_MS,
+                );
+
+                await tx.store_subscriptions.update({
+                  where: { id: invoice.store_subscription_id },
+                  data: {
+                    current_period_start: now,
+                    current_period_end: newPeriodEnd,
+                    next_billing_at: newPeriodEnd,
+                    grace_soft_until: null,
+                    grace_hard_until: null,
+                    suspend_at: null,
+                    updated_at: now,
+                  },
+                });
+
+                await tx.subscription_events.create({
+                  data: {
+                    store_subscription_id: invoice.store_subscription_id,
+                    type: 'state_transition',
+                    payload: {
+                      reason: 'reactivation_with_grace_discount',
+                      previous_state: currentState,
+                      payment_id: paymentId,
+                      invoice_id: invoiceId,
+                      days_in_grace: daysInGrace,
+                      cycle_days: cycleDays,
+                      original_period_end: previousPeriodEnd.toISOString(),
+                      new_period_end: newPeriodEnd.toISOString(),
+                      paid_at: now.toISOString(),
+                    } as Prisma.InputJsonValue,
+                    triggered_by_job: 'subscription-payment-service',
+                  },
+                });
+
+                this.logger.log(
+                  `RNC-22 grace-discount applied sub=${invoice.store_subscription_id} ` +
+                    `previous_state=${currentState} days_in_grace=${daysInGrace} ` +
+                    `original_period_end=${previousPeriodEnd.toISOString()} ` +
+                    `new_period_end=${newPeriodEnd.toISOString()}`,
+                );
+              }
+            }
+
             await this.stateService.transitionInTx(
               tx,
               invoice.store_id,
@@ -1117,6 +1438,182 @@ export class SubscriptionPaymentService {
     return result;
   }
 
+  /**
+   * Auto-register the card used in a successful Wompi charge as a
+   * subscription_payment_methods row. This is the canonical "implicit PM
+   * registration" path: when the user pays a real invoice via the Wompi
+   * widget, the card used becomes the saved recurring PM (is_default=true).
+   *
+   * Idempotent — webhook redelivery or duplicate charge is safe:
+   *   - A row with the same provider_token for this store is reused
+   *     (only `last_used_at` / metadata gets refreshed; no new row).
+   *   - If the card data is incomplete (e.g. payment_method_type !== 'CARD',
+   *     no provider_token, no last_four), the call is a NO-OP. The user can
+   *     still pay; we just won't persist a recurring PM. Next successful
+   *     charge with full data will register it.
+   *
+   * Wompi `transaction.payment_method` shape for CARD:
+   *   {
+   *     type: 'CARD',
+   *     installments: 1,
+   *     extra: { last_four, name, brand, exp_year, exp_month, ... }
+   *   }
+   * The recurring token comes via `transaction.payment_method_token` (or
+   * `payment_method.token` depending on widget version) — without it we
+   * cannot reuse the card for renewals, so we skip persistence.
+   */
+  private async autoRegisterPaymentMethodFromGateway(
+    tx: Prisma.TransactionClient,
+    storeId: number | null | undefined,
+    subscriptionId: number,
+    gatewayResponse: any,
+    paymentId: number,
+  ): Promise<void> {
+    if (!storeId) return;
+    if (!gatewayResponse || typeof gatewayResponse !== 'object') return;
+
+    const paymentMethodType = String(
+      gatewayResponse.payment_method_type ?? '',
+    ).toUpperCase();
+    if (paymentMethodType !== 'CARD') {
+      // We only persist recurring CARD tokens. Wallets like NEQUI / PSE
+      // are one-shot per Wompi's contract — re-prompt the user each time.
+      return;
+    }
+
+    const paymentMethod = gatewayResponse.payment_method ?? {};
+    const extra = paymentMethod.extra ?? {};
+
+    // Recurring token: Wompi exposes it on the transaction body when the
+    // merchant has tokenization enabled. Different widget versions surface
+    // it on different fields — accept the most common shapes.
+    const providerToken: string | null =
+      gatewayResponse.payment_method_token ??
+      paymentMethod.token ??
+      paymentMethod.payment_method_token ??
+      null;
+
+    if (!providerToken) {
+      // No recurring token — nothing reusable to save. The user must
+      // re-enter the card next time. This is fine: the invoice is still
+      // paid, and we just don't get a saved PM. Logged so ops can see it.
+      this.logger.debug(
+        `auto-register PM skipped sub=${subscriptionId} invoice paid but no provider_token in Wompi payload`,
+      );
+      return;
+    }
+
+    const last4: string | null =
+      typeof extra.last_four === 'string'
+        ? extra.last_four
+        : typeof paymentMethod.last_four === 'string'
+          ? paymentMethod.last_four
+          : null;
+
+    if (!last4) {
+      this.logger.debug(
+        `auto-register PM skipped sub=${subscriptionId} no last_four in Wompi payload`,
+      );
+      return;
+    }
+
+    const brand: string | null = (extra.brand ?? paymentMethod.brand ?? null) as
+      | string
+      | null;
+    const expMonthRaw =
+      extra.exp_month ?? paymentMethod.exp_month ?? null;
+    const expYearRaw = extra.exp_year ?? paymentMethod.exp_year ?? null;
+    const expiry_month =
+      expMonthRaw !== null && expMonthRaw !== undefined
+        ? String(expMonthRaw).padStart(2, '0').slice(0, 2)
+        : null;
+    const expiry_year =
+      expYearRaw !== null && expYearRaw !== undefined
+        ? String(expYearRaw).slice(0, 4)
+        : null;
+    const cardHolder: string | null =
+      (extra.name ?? extra.card_holder ?? paymentMethod.name ?? null) as
+        | string
+        | null;
+
+    // Idempotency — if the same recurring token is already saved for this
+    // store, treat the second webhook as a no-op (refresh updated_at only).
+    const existing = await tx.subscription_payment_methods.findFirst({
+      where: {
+        store_id: storeId,
+        provider_token: providerToken,
+        state: subscription_payment_method_state_enum.active,
+      },
+    });
+
+    const nowDate = new Date();
+
+    if (existing) {
+      await tx.subscription_payment_methods.update({
+        where: { id: existing.id },
+        data: { updated_at: nowDate },
+      });
+      this.logger.log(
+        `auto-register PM dedup sub=${subscriptionId} reused pm=${existing.id} last4=${last4}`,
+      );
+      return;
+    }
+
+    // First-PM-for-store ⇒ default. Otherwise demote any previous default
+    // and promote the freshly-paid card as default — RNC-25 failover relies
+    // on `is_default=true` pointing at the most-recently-charged card.
+    await tx.subscription_payment_methods.updateMany({
+      where: {
+        store_id: storeId,
+        is_default: true,
+        state: subscription_payment_method_state_enum.active,
+      },
+      data: { is_default: false, updated_at: nowDate },
+    });
+
+    const created = await tx.subscription_payment_methods.create({
+      data: {
+        store_id: storeId,
+        store_subscription_id: subscriptionId,
+        type: 'card',
+        provider: 'wompi',
+        provider_token: providerToken,
+        last4,
+        brand,
+        expiry_month,
+        expiry_year,
+        card_holder: cardHolder,
+        is_default: true,
+        state: subscription_payment_method_state_enum.active,
+        metadata: {
+          source: 'auto_register_from_payment',
+          payment_id: paymentId,
+          registered_at: nowDate.toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+
+    // Audit row so the timeline reflects "card auto-saved".
+    await tx.subscription_events.create({
+      data: {
+        store_subscription_id: subscriptionId,
+        type: 'state_transition',
+        payload: {
+          reason: 'payment_method_auto_registered',
+          payment_method_id: created.id,
+          payment_id: paymentId,
+          last_four: last4,
+          brand,
+        } as Prisma.InputJsonValue,
+        triggered_by_job: 'subscription-payment-service',
+      },
+    });
+
+    this.logger.log(
+      `PAYMENT_METHOD_AUTO_REGISTERED sub=${subscriptionId} pm=${created.id} last4=${last4} brand=${brand ?? 'unknown'}`,
+    );
+  }
+
   private async handleChargeFailure(
     paymentId: number,
     invoiceId: number,
@@ -1145,6 +1642,29 @@ export class SubscriptionPaymentService {
     });
 
     return updatedPayment;
+  }
+
+  /**
+   * RNC-22 helper — billing cycle duration in milliseconds.
+   * Mirrors the table in SubscriptionBillingService.billingCycleMs() so the
+   * grace-discount path computes the same period length the renewal cron
+   * would have used.
+   */
+  private billingCycleMs(cycle: string): number {
+    switch (cycle) {
+      case 'monthly':
+        return 30 * DAY_MS;
+      case 'quarterly':
+        return 90 * DAY_MS;
+      case 'semiannual':
+        return 180 * DAY_MS;
+      case 'annual':
+        return 365 * DAY_MS;
+      case 'lifetime':
+        return 100 * 365 * DAY_MS;
+      default:
+        return 30 * DAY_MS;
+    }
   }
 
   private async handleZeroInvoice(

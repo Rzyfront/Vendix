@@ -85,4 +85,17 @@ export class PlansController {
     await this.plansService.remove(id);
     return this.responseService.deleted('Plan deleted');
   }
+
+  /**
+   * RNC-04 — Atomically promote a plan to be the unique default.
+   * Clears the previous default within the same Serializable transaction,
+   * preserving the partial unique index invariant.
+   */
+  @Permissions('superadmin:subscriptions:plans:update')
+  @Post(':id/set-default')
+  @ApiOperation({ summary: 'Set a subscription plan as the unique default' })
+  async setDefault(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.plansService.setDefault(id);
+    return this.responseService.updated(result, 'Default plan updated');
+  }
 }

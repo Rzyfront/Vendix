@@ -55,6 +55,8 @@ export class SubscriptionRenewalBillingJob {
         where: {
           next_billing_at: { lte: tomorrow },
           state: { in: ['active', 'grace_soft', 'grace_hard'] },
+          // RNC-39: defensive — never bill subscriptions without a plan.
+          plan_id: { not: null },
         },
         select: { id: true, store_id: true, scheduled_cancel_at: true },
         take: 20,

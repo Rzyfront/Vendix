@@ -47,16 +47,20 @@ interface PaymentFailedEventPayload {
  * back through the existing pending → active flow.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
-  draft: ['pending_payment', 'trial', 'active'],
+  draft: ['pending_payment', 'trial', 'active', 'no_plan'],
   pending_payment: ['active', 'blocked', 'cancelled', 'expired'],
-  trial: ['active', 'blocked', 'cancelled', 'expired'],
-  active: ['grace_soft', 'cancelled', 'expired'],
-  grace_soft: ['active', 'grace_hard', 'cancelled'],
-  grace_hard: ['active', 'suspended', 'cancelled'],
+  // RNC-15 anti-arrastre: trial → pending_payment is allowed when the user
+  // upgrades from a trial (free) to a paid plan via checkout. The charge runs
+  // and on Wompi APPROVED the listener flips pending_payment → active.
+  trial: ['active', 'pending_payment', 'blocked', 'cancelled', 'expired'],
+  active: ['grace_soft', 'cancelled', 'expired', 'no_plan'],
+  grace_soft: ['active', 'grace_hard', 'cancelled', 'no_plan'],
+  grace_hard: ['active', 'suspended', 'cancelled', 'expired'],
   suspended: ['active', 'blocked', 'cancelled'],
   blocked: ['active', 'cancelled'],
-  cancelled: ['pending_payment'],
-  expired: ['pending_payment'],
+  cancelled: ['pending_payment', 'no_plan'],
+  expired: ['pending_payment', 'no_plan'],
+  no_plan: ['pending_payment', 'active', 'cancelled'],
 };
 
 export interface TransitionOptions {
@@ -64,6 +68,7 @@ export interface TransitionOptions {
   triggeredByUserId?: number;
   triggeredByJob?: string;
   payload?: Record<string, unknown>;
+  lockReason?: string;
 }
 
 /**
@@ -225,10 +230,17 @@ export class SubscriptionStateService {
       );
     }
 
+    // Auto-set lock_reason for suspended/blocked transitions
+    const lockReason =
+      toState === 'suspended' || toState === 'blocked'
+        ? (opts.lockReason ?? 'admin_manual')
+        : undefined;
+
     const updatedRow = await tx.store_subscriptions.update({
       where: { id: current.id },
       data: {
         state: toState,
+        lock_reason: lockReason ?? undefined,
         updated_at: new Date(),
       },
     });
@@ -281,10 +293,7 @@ export class SubscriptionStateService {
     await this.prisma.subscription_events.create({
       data: {
         store_subscription_id: updated.id,
-        // TODO: 'scheduled_cancel' is not yet in subscription_event_type_enum.
-        // Until a migration adds it (out of scope this sprint), cast to keep
-        // the audit row distinguishable via payload.kind for now.
-        type: 'scheduled_cancel' as any,
+        type: 'scheduled_cancel',
         from_state: updated.state,
         to_state: 'cancelled',
         payload: {
@@ -309,6 +318,77 @@ export class SubscriptionStateService {
       storeId,
       fromState: updated.state,
       toState: 'cancelled',
+      reason: opts.reason,
+      triggeredByUserId: opts.triggeredByUserId,
+      triggeredByJob: opts.triggeredByJob,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Revert a scheduled cancellation before period_end.
+   * Clears scheduled_cancel_at, restores auto_renew=true.
+   * Returns the updated subscription (state stays unchanged).
+   */
+  async unscheduleCancel(
+    storeId: number,
+    opts: TransitionOptions,
+  ): Promise<store_subscriptions> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+    if (!sub.scheduled_cancel_at) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        'No scheduled cancellation to revert',
+      );
+    }
+
+    const updated = await this.prisma.store_subscriptions.update({
+      where: { store_id: storeId },
+      data: {
+        scheduled_cancel_at: null,
+        auto_renew: true,
+        updated_at: new Date(),
+      },
+    });
+
+    await this.prisma.subscription_events.create({
+      data: {
+        store_subscription_id: updated.id,
+        type: 'activated',
+        from_state: updated.state,
+        to_state: updated.state,
+        payload: {
+          reason: opts.reason,
+          kind: 'scheduled_cancel_voided',
+          previous_scheduled_cancel_at: sub.scheduled_cancel_at.toISOString(),
+        } as Prisma.InputJsonValue,
+        triggered_by_user_id: opts.triggeredByUserId ?? null,
+        triggered_by_job: opts.triggeredByJob ?? null,
+      },
+    });
+
+    try {
+      await this.accessService.invalidateCache(storeId);
+    } catch (err) {
+      this.logger.warn(
+        `Post-unschedule-cancel cache invalidation failed for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
+
+    this.eventEmitter.emit('subscription.state.changed', {
+      storeId,
+      fromState: updated.state,
+      toState: updated.state,
       reason: opts.reason,
       triggeredByUserId: opts.triggeredByUserId,
       triggeredByJob: opts.triggeredByJob,
@@ -377,8 +457,12 @@ export class SubscriptionStateService {
     if (
       sub.state === 'cancelled' ||
       sub.state === 'expired' ||
-      sub.state === 'draft'
+      sub.state === 'draft' ||
+      sub.state === 'no_plan'
     ) {
+      // RNC-39: no_plan rows have no plan_id and no billing window. They are
+      // not subject to dunning/promo/trial transitions until the user picks a
+      // plan via the subscribe flow.
       this.logger.debug(
         `evaluateAndTransitionForSubscription: sub ${subscriptionId} in terminal/draft state ${sub.state}, skipping`,
       );
@@ -412,22 +496,33 @@ export class SubscriptionStateService {
       }
     }
 
-    // 2. Trial expiry
+    // 2. Trial expiry (RNC-06: auto_convert_at_end)
     if (
       sub.trial_ends_at &&
       new Date(sub.trial_ends_at) < now &&
       currentState === 'trial'
     ) {
-      const hasPayment = await this.prisma.subscription_payments.findFirst({
-        where: {
-          invoice: { store_subscription_id: sub.id },
-          state: 'succeeded',
-        },
-      });
+      const metadata = sub.metadata as Record<string, unknown> | null;
+      const autoConvert = metadata?.auto_convert_at_end !== false;
 
-      const targetState: State = hasPayment ? 'grace_soft' : 'blocked';
-      await this.transition(sub.store_id, targetState, {
-        reason: 'Trial period ended',
+      if (autoConvert) {
+        const hasActivePM = await this.prisma.subscription_payment_methods.findFirst({
+          where: { store_subscription_id: sub.id, state: 'active' },
+        });
+        if (hasActivePM) {
+          await this.transition(sub.store_id, 'active', {
+            reason: 'Trial ended — auto-convert with valid PM',
+            triggeredByJob: 'subscription-state-engine',
+            payload: { trial_ends_at: sub.trial_ends_at, auto_converted: true },
+          });
+          // Re-issue invoice for the trial plan's base_price (if > 0)
+          // The renewal billing cron handles this; just promote state.
+          return;
+        }
+      }
+
+      await this.transition(sub.store_id, 'expired', {
+        reason: 'Trial period ended without payment method or auto_convert=false',
         triggeredByJob: 'subscription-state-engine',
         payload: { trial_ends_at: sub.trial_ends_at },
       });
@@ -437,10 +532,13 @@ export class SubscriptionStateService {
     // 3. Period expiry — dunning windows
     if (sub.current_period_end && new Date(sub.current_period_end) < now) {
       const periodEnd = new Date(sub.current_period_end);
-      const softDays = plan.grace_period_soft_days;
-      const hardDays = plan.grace_period_hard_days;
-      const suspensionDay = plan.suspension_day;
-      const cancellationDay = plan.cancellation_day;
+      // RNC-23: read dunning cadence from the plan. Defaults (5/10/14/45) are
+      // applied here as a safety net for legacy rows where the plan FK is
+      // somehow null/missing or where a plan predates the cadence columns.
+      const softDays = plan?.grace_period_soft_days ?? 5;
+      const hardDays = plan?.grace_period_hard_days ?? 10;
+      const suspensionDay = plan?.suspension_day ?? 14;
+      const cancellationDay = plan?.cancellation_day ?? 45;
 
       const softDeadline = new Date(
         periodEnd.getTime() + softDays * 24 * 60 * 60 * 1000,
@@ -484,6 +582,24 @@ export class SubscriptionStateService {
             cancel_deadline: cancelDeadline.toISOString(),
           },
         });
+      }
+    }
+
+    // 4. expired → cancelled after prolonged inactivity (RNC-38)
+    if (currentState === 'expired' && sub.cancelled_at === null) {
+      const cancellationDay = plan?.cancellation_day ?? 45;
+      const expiredSince = sub.current_period_end ?? sub.updated_at;
+      if (expiredSince) {
+        const cancelThreshold = new Date(
+          new Date(expiredSince).getTime() + cancellationDay * 24 * 60 * 60 * 1000,
+        );
+        if (now >= cancelThreshold) {
+          await this.transition(sub.store_id, 'cancelled', {
+            reason: 'Expired — prolonged inactivity',
+            triggeredByJob: 'subscription-state-engine',
+            payload: { expired_since: expiredSince.toISOString() },
+          });
+        }
       }
     }
   }

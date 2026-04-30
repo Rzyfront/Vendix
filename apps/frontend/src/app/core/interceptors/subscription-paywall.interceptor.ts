@@ -22,27 +22,19 @@ import {
  */
 const BLOCKING_CODES = new Set<string>([
   'SUBSCRIPTION_002',
+  'SUBSCRIPTION_003',
   'SUBSCRIPTION_004',
   'SUBSCRIPTION_005',
   'SUBSCRIPTION_006',
+  'SUBSCRIPTION_007',
   'SUBSCRIPTION_008',
   'SUBSCRIPTION_009',
   'PLAN_001',
   'TRIAL_001',
 ]);
 
-/**
- * Subset of error codes that indicate the store is hard-blocked from
- * operating (suspended/blocked). For these codes the interceptor also
- * navigates the user to the dunning board, where they can pay and recover
- * access without leaving the panel.
- */
-const DUNNING_REDIRECT_CODES = new Set<string>([
-  'SUBSCRIPTION_008',
-  'SUBSCRIPTION_009',
-]);
-
 const DUNNING_ROUTE = '/admin/subscription/dunning';
+const PICKER_ROUTE = '/admin/subscription/picker';
 
 /**
  * Functional HTTP interceptor that listens for subscription / plan enforcement
@@ -70,26 +62,29 @@ export const subscriptionPaywallInterceptor: HttpInterceptorFn = (req, next) => 
         const code = body?.error_code ?? '';
         const blocking = BLOCKING_CODES.has(code);
         if (blocking) {
-          // For suspended/blocked we redirect the user into the dunning
-          // board (where they can pay) rather than only opening the paywall
-          // modal. The modal remains the right surface for the
-          // softer/feature-gating codes (002/005/006) and for triggers
-          // happening anywhere outside the /admin/subscription/* tree.
-          const shouldRedirect =
-            DUNNING_REDIRECT_CODES.has(code) &&
-            router.url !== DUNNING_ROUTE;
-          if (shouldRedirect) {
-            try {
-              router.navigateByUrl(DUNNING_ROUTE);
-            } catch {
-              // Routing failures fall back to the modal below.
-            }
-          }
-          // Skip the modal when the user is already on the dunning board
-          // (or about to be redirected there); otherwise show the paywall.
-          const onDunningPath =
-            router.url === DUNNING_ROUTE || shouldRedirect;
-          if (!onDunningPath) {
+          // Always open the paywall modal first — informative UX comes
+          // before any redirect. The modal contains the CTA that takes the
+          // user to the picker / dunning / plans page, so we let the modal
+          // drive navigation instead of redirecting silently. Skip the
+          // modal only when the user is already on the destination page
+          // (avoids stacking duplicate modals on top of the dunning board
+          // or the picker, which already display their own state UI).
+          const onPickerPath = router.url.startsWith(PICKER_ROUTE);
+          const onDunningPath = router.url === DUNNING_ROUTE;
+          const onSubscriptionTree = router.url.startsWith('/admin/subscription');
+          // We still suppress the modal if the user is already deep in the
+          // subscription tree on the matching destination page — the page
+          // itself will surface the modal via its own effect.
+          const suppressModal =
+            (code === 'SUBSCRIPTION_004' &&
+              body?.details?.subscription_state === 'no_plan' &&
+              onPickerPath) ||
+            ((code === 'SUBSCRIPTION_008' || code === 'SUBSCRIPTION_009') &&
+              onDunningPath) ||
+            // The /admin/subscription page (my-subscription) opens its own
+            // paywall modal via effect — let that flow win.
+            (router.url === '/admin/subscription' && onSubscriptionTree);
+          if (!suppressModal) {
             try {
               access.openPaywall(code, body?.message, body?.details);
             } catch {

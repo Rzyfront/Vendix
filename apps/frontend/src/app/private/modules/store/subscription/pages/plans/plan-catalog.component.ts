@@ -13,6 +13,8 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { SubscriptionPlan } from '../../interfaces/store-subscription.interface';
+import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
+import { PricingCardSelectEvent } from '../../../../../../shared/components/pricing-card/pricing-card.component';
 
 // S2.1 — Same reason → copy mapping as in checkout component.
 const COUPON_REASON_COPY: Record<string, string> = {
@@ -130,6 +132,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
           @for (plan of plans(); track plan.id) {
             <app-pricing-card
               [plan]="plan"
+              [subscriptionStatus]="subscriptionStatus()"
               ctaLabel="Seleccionar plan"
               (select)="selectPlan($event)"
             ></app-pricing-card>
@@ -145,9 +148,15 @@ export class PlanCatalogComponent implements OnInit {
   private facade = inject(SubscriptionFacade);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
+  private wompiCheckoutService = inject(WompiCheckoutService);
 
   readonly plans = signal<SubscriptionPlan[]>([]);
   readonly loading = signal(false);
+  /** Phase 4 — Forwarded into each pricing-card so the current plan in
+   * `pending_payment` switches its CTA to "Completar pago" instead of being
+   * disabled with "Plan actual". */
+  readonly subscriptionStatus = this.facade.status;
+  readonly retryingPayment = signal(false);
 
   // S2.1 — Coupon UI state. Local to this component (no NgRx) since the
   // catalog dispatch only routes to checkout; the checkout page reads the
@@ -214,8 +223,73 @@ export class PlanCatalogComponent implements OnInit {
       });
   }
 
-  selectPlan(plan: { id: number | string }): void {
-    this.router.navigate(['/admin/subscription/checkout', plan.id]);
+  selectPlan(event: PricingCardSelectEvent): void {
+    if (event.retry) {
+      this.retryPayment();
+      return;
+    }
+    this.router.navigate(['/admin/subscription/checkout', event.plan.id]);
+  }
+
+  /**
+   * Phase 4 — Same retry-payment flow as `my-subscription`. Mints a fresh
+   * Wompi widget for the existing pending invoice and reopens it. Surfacing
+   * this in the catalog is convenient when the user navigated here straight
+   * after a closed widget.
+   */
+  retryPayment(): void {
+    if (this.retryingPayment()) return;
+    this.retryingPayment.set(true);
+    const returnUrl = `${window.location.origin}/admin/subscription`;
+    this.subscriptionService
+      .retryPayment({ returnUrl })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.retryingPayment.set(false);
+          const invoiceId =
+            typeof data?.invoice?.id === 'number' ? data.invoice.id : null;
+          this.wompiCheckoutService.openWidget(data.widget, {
+            onApproved: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info('Verificando confirmación de pago…');
+              this.router.navigate(['/admin/subscription']);
+            },
+            onDeclined: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'El pago fue rechazado. Intenta con otro método de pago.',
+              );
+            },
+            onPending: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info(
+                'Pago pendiente de confirmación. Verificando…',
+              );
+              this.router.navigate(['/admin/subscription']);
+            },
+            onClosed: () => {
+              this.facade.loadCurrent();
+              this.toastService.warning(
+                'El pago fue cancelado. Tu suscripción sigue pendiente.',
+              );
+            },
+            onError: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'No se pudo abrir el widget de pago. Intenta de nuevo.',
+              );
+            },
+          });
+        },
+        error: (err) => {
+          this.retryingPayment.set(false);
+          this.facade.loadCurrent();
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
   }
 
   /**

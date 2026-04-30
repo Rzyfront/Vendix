@@ -1,4 +1,4 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Param, ParseIntPipe, Post } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -15,6 +15,7 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { UseGuards } from '@nestjs/common';
 import { CheckoutPreviewDto } from '../dto/checkout-preview.dto';
 import { CheckoutCommitDto } from '../dto/checkout-commit.dto';
+import { RetryPaymentDto } from '../dto/retry-payment.dto';
 import { ValidateCouponDto } from '../dto/validate-coupon.dto';
 import { Prisma } from '@prisma/client';
 import {
@@ -107,8 +108,11 @@ export class SubscriptionCheckoutController {
       dto.coupon_code,
     );
 
+    // Use the explicit `is_free` flag (added by
+    // 20260429235000_add_is_free_to_subscription_plans). Legacy heuristic was
+    // `effective_price <= 0` which masked partner-override edge cases.
     if (
-      targetPricing.effective_price.lte(DECIMAL_ZERO) &&
+      targetPlan.is_free === true &&
       targetPricing.margin_amount.lte(DECIMAL_ZERO)
     ) {
       const result: CheckoutPreviewResult = {
@@ -316,30 +320,34 @@ export class SubscriptionCheckoutController {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const sub = await this.prisma.store_subscriptions.findUnique({
+    // `sub` is `let` (not `const`) because Bug 1 (free-plan swap while
+    // pending_payment) cancels the existing row and we re-read after.
+    let sub = await this.prisma.store_subscriptions.findUnique({
       where: { store_id: storeId },
     });
 
-    // S3.4 — A trial-state plan swap is a free deferred change: no charge
-    // happens at commit and the user keeps the rest of the trial. The
-    // no-refund acknowledgement only gates flows that emit a charge, so we
-    // skip the hard block here.
+    // Free-plan detection: when the plan is explicitly marked `is_free=true`
+    // the commit emits no charge, so the no-refund acknowledgement is
+    // semantically vacuous. Mirrors the frontend which hides the policy block
+    // for free plans. Replaces the legacy `base_price <= 0` heuristic that
+    // failed silently when the row pricing snapshot was stale.
+    const targetPlan = await this.prisma.subscription_plans.findUnique({
+      where: { id: dto.planId },
+      select: { base_price: true, is_free: true },
+    });
+    const isFreePlan = !!targetPlan && targetPlan.is_free === true;
+
+    // S3.4 — A trial-state plan swap is a free deferred change ONLY when the
+    // target is also free. Trial → paid is now handled as an immediate
+    // re-subscribe (RNC-15 anti-arrastre) and DOES emit a charge, so it must
+    // require the no-refund acknowledgement like any other paid commit.
     const isTrialSwap = !!(
       sub &&
       sub.state === 'trial' &&
       sub.trial_ends_at &&
-      sub.trial_ends_at.getTime() > Date.now()
+      sub.trial_ends_at.getTime() > Date.now() &&
+      isFreePlan
     );
-
-    // Free-plan detection: when base_price is 0 the commit emits no charge,
-    // so the no-refund acknowledgement is semantically vacuous. Mirrors the
-    // frontend which hides the policy block for free plans.
-    const targetPlan = await this.prisma.subscription_plans.findUnique({
-      where: { id: dto.planId },
-      select: { base_price: true },
-    });
-    const isFreePlan =
-      !!targetPlan && new Prisma.Decimal(targetPlan.base_price).lessThanOrEqualTo(DECIMAL_ZERO);
 
     // G8 — política de no-reembolso. Bloqueo duro: el cliente debe aceptar
     // explícitamente. Sin esto no se procesa ningún cargo. Se exenta para
@@ -379,13 +387,13 @@ export class SubscriptionCheckoutController {
     // S3.8b — Bug 1 fix: Free-plan switch while a previous subscription is
     // stuck in `pending_payment`. The legacy path-E branch below assumed the
     // target was paid and emitted a new invoice, leaving the user trapped in
-    // pending_payment. For a free plan there's no charge to wait for, so we
-    // short-circuit here:
+    // pending_payment. For a free plan there's no charge to wait for, so we:
     //   1. Void the stranded pending invoice + cancel its pending payments.
     //   2. Cancel the dead subscription (legal transition pending_payment →
     //      cancelled per TRANSITIONS map).
-    //   3. Fall through to the !sub fresh-purchase path which creates a clean
-    //      `active` row for the free plan.
+    //   3. Fall through to the existing cancelled/expired re-subscribe path
+    //      below, which already handles the free-plan zero-invoice case
+    //      (issueInvoice() returns null → straight transition to `active`).
     if (sub && sub.state === 'pending_payment' && isFreePlan) {
       await this.cancelStrandedPendingSubscription(
         sub.id,
@@ -393,45 +401,11 @@ export class SubscriptionCheckoutController {
         context?.user_id ?? null,
         'free_plan_replacement',
       );
-      // Re-fetch: the row should now be cancelled. We treat downstream like a
-      // fresh purchase by setting `sub` to null via a local rebind.
-      const refreshed = await this.prisma.store_subscriptions.findUnique({
+      // Re-fetch so downstream branches (cancelled re-subscribe) pick up the
+      // new state. The cancelled row will flow through path D below.
+      sub = await this.prisma.store_subscriptions.findUnique({
         where: { store_id: storeId },
       });
-      if (refreshed && refreshed.state === 'cancelled') {
-        // Re-subscribe path expects sub to exist + state cancelled, which is
-        // exactly what we want for a free-plan cancelled → active jump.
-        const reactivated = await this.proration.applyResubscribe(
-          refreshed.id,
-          dto.planId,
-        );
-        await this.stateService.transition(storeId, 'pending_payment', {
-          reason: 'free_plan_replacement_intermediate',
-          triggeredByUserId: context?.user_id ?? undefined,
-        });
-        await this.stateService.transition(storeId, 'active', {
-          reason: 'free_plan_replacement_active',
-          triggeredByUserId: context?.user_id ?? undefined,
-        });
-        await this.resolver.invalidate(storeId);
-        if (couponCode) {
-          await this.safeApplyCoupon(
-            storeId,
-            couponCode,
-            context?.user_id ?? null,
-          );
-        }
-        return this.responseService.success(
-          {
-            subscription: await this.prisma.store_subscriptions.findUnique({
-              where: { id: reactivated.id },
-            }),
-            widget: null,
-            mode: 'free_plan_replacement',
-          },
-          'Free plan activated (replaced pending subscription)',
-        );
-      }
     }
 
     // Fresh purchase: store has no subscription yet → create one, issue
@@ -490,14 +464,27 @@ export class SubscriptionCheckoutController {
       );
     }
 
-    // Path D — Re-subscribe from a terminal state (`cancelled` or `expired`).
-    // Treats the commit like a fresh purchase: transition cancelled/expired →
-    // pending_payment, reset the subscription's billing window via
-    // applyResubscribe(), issue a fresh invoice for the new plan's full price,
-    // and prepare the Wompi widget so the frontend can open the payment modal.
-    // The pending_payment → active promotion happens via the existing
-    // SubscriptionStateListener once the Wompi webhook reports APPROVED.
-    if (sub.state === 'cancelled' || sub.state === 'expired') {
+    // Path D — Re-subscribe from a terminal state (`cancelled` / `expired`)
+    // OR adopt a plan from `no_plan` (sibling store under the same org has
+    // already consumed the org-level trial). All three states share the same
+    // pipeline: transition → pending_payment, reset the billing window via
+    // applyResubscribe(), issue a fresh invoice for the new plan's full
+    // price, and prepare the Wompi widget so the frontend can open the
+    // payment modal. The pending_payment → active promotion happens via the
+    // existing SubscriptionStateListener once Wompi reports APPROVED.
+    //
+    // BUGFIX (no_plan → paid): previously this branch only matched
+    // cancelled/expired, so `no_plan` sub rows fell through to the final
+    // proration.apply() call which assumes an existing plan_id and a stored
+    // payment method — leaving the widget unopened and the plan assigned in
+    // BD without a charge. We now route no_plan through the same fresh-charge
+    // pipeline. For free targets we short-circuit to `active` straight away
+    // (no invoice, no widget) just like the cancelled-free path.
+    if (
+      sub.state === 'cancelled' ||
+      sub.state === 'expired' ||
+      sub.state === 'no_plan'
+    ) {
       // 1. Transition cancelled/expired → pending_payment (legal edge added
       //    in TRANSITIONS map). Audit row + cache invalidation handled by
       //    SubscriptionStateService.transition().
@@ -636,6 +623,97 @@ export class SubscriptionCheckoutController {
       );
     }
 
+    // RNC-15 — Trial → paid plan. Anti-arrastre: charge the FULL destination
+    // plan price immediately. Mirrors the cancelled/expired re-subscribe path:
+    // transition trial → pending_payment, reset the billing window via
+    // applyResubscribe(), issue a fresh invoice for the new plan's full price,
+    // and prepare the Wompi widget. The promotion to `active` happens via the
+    // SubscriptionStateListener once Wompi reports APPROVED — never before.
+    const isTrialToPaid =
+      !!(
+        sub &&
+        sub.state === 'trial' &&
+        sub.trial_ends_at &&
+        sub.trial_ends_at.getTime() > Date.now() &&
+        !isFreePlan
+      );
+    if (isTrialToPaid) {
+      // Validate platform Wompi credentials BEFORE mutating state, so a
+      // misconfigured environment surfaces a clean error and the trial is
+      // left untouched.
+      const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
+      if (!wompiCreds) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_GATEWAY_003,
+          'Credenciales de pasarela de plataforma no configuradas',
+        );
+      }
+
+      // 1. trial → pending_payment (legal transition added in TRANSITIONS).
+      await this.stateService.transition(storeId, 'pending_payment', {
+        reason: 'trial_to_paid_checkout',
+        triggeredByUserId: context?.user_id ?? undefined,
+        payload: {
+          from_plan_id: sub.plan_id,
+          to_plan_id: dto.planId,
+          previous_state: sub.state,
+          trial_ends_at: sub.trial_ends_at?.toISOString() ?? null,
+        },
+      });
+
+      // 2. Reset plan + period (anti-arrastre: no carry-over of trial days).
+      const reactivated = await this.proration.applyResubscribe(
+        sub.id,
+        dto.planId,
+      );
+
+      // 3. Persist coupon for application after listener flips to `active`.
+      if (couponCode) {
+        const reactMeta = {
+          ...(reactivated.metadata && typeof reactivated.metadata === 'object'
+            ? (reactivated.metadata as Record<string, unknown>)
+            : {}),
+          pending_coupon_code: couponCode,
+        };
+        await this.prisma.store_subscriptions.update({
+          where: { id: reactivated.id },
+          data: { metadata: reactMeta as Prisma.InputJsonValue },
+        });
+      }
+
+      // 4. Issue invoice for the new plan's full price.
+      const invoice = await this.billing.issueInvoice(reactivated.id);
+      if (!invoice) {
+        // Defensive: a paid plan must always produce an invoice.
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+          'Could not issue invoice for trial-to-paid checkout',
+        );
+      }
+
+      // 5. Persist no-refund acknowledgement and prepare Wompi widget.
+      await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
+      const customerEmail = await this.resolveCustomerEmail(
+        context?.user_id ?? null,
+      );
+      const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
+        customerEmail,
+        redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+      });
+
+      await this.resolver.invalidate(storeId);
+
+      return this.responseService.success(
+        {
+          subscription: reactivated,
+          widget,
+          invoiceId: invoice.id,
+          mode: 'trial_to_paid',
+        },
+        'Trial upgraded to paid plan (awaiting payment)',
+      );
+    }
+
     // S3.4 — Re-evaluate proration server-side BEFORE applying so we can
     // branch on `trial_plan_swap` and skip the no-refund-bound invoice/charge
     // pipeline. The trial swap path is free; no invoice is emitted, no
@@ -715,7 +793,11 @@ export class SubscriptionCheckoutController {
             // Revert plan change. We do NOT swallow `chargeErr` — re-throw
             // after the revert so the user sees the original failure.
             try {
-              if (oldPlanId !== dto.planId) {
+              // RNC-39: oldPlanId may be null when the previous state was
+              // no_plan. In that case there is nothing to revert to — leave
+              // the plan change in place and rely on the void invoice + thrown
+              // error to surface the failure to the user.
+              if (oldPlanId !== null && oldPlanId !== dto.planId) {
                 await this.proration.apply(sub.id, oldPlanId);
               }
               await this.prisma.subscription_invoices.update({
@@ -744,6 +826,211 @@ export class SubscriptionCheckoutController {
     }
 
     return this.responseService.success(updated, 'Checkout committed');
+  }
+
+  /**
+   * Bug 1 / 2 helper — Cancel a subscription stuck in `pending_payment` and
+   * void its in-flight invoice + payments so the store can switch onto a
+   * different (free or paid) plan without leaving stale billing artifacts
+   * behind. Idempotent: safe to call when the row is already cancelled or
+   * when there's nothing pending to void.
+   */
+  private async cancelStrandedPendingSubscription(
+    subscriptionId: number,
+    storeId: number,
+    userId: number | null,
+    reason: 'free_plan_replacement' | 'plan_change_replacement',
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx: any) => {
+      // Void any pending invoices for this subscription.
+      const pendingInvoices = await tx.subscription_invoices.findMany({
+        where: { store_subscription_id: subscriptionId, state: 'issued' },
+        select: { id: true, metadata: true },
+      });
+      for (const inv of pendingInvoices) {
+        const meta =
+          inv.metadata && typeof inv.metadata === 'object'
+            ? (inv.metadata as Record<string, unknown>)
+            : {};
+        await tx.subscription_invoices.update({
+          where: { id: inv.id },
+          data: {
+            state: 'void',
+            metadata: {
+              ...meta,
+              void_reason: reason,
+              voided_at: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
+            updated_at: new Date(),
+          },
+        });
+
+        // Cancel pending payments tied to the voided invoice. The enum has no
+        // explicit `cancelled`, so we mark them `failed` with reason metadata.
+        const pendingPayments = await tx.subscription_payments.findMany({
+          where: { invoice_id: inv.id, state: 'pending' },
+          select: { id: true, metadata: true },
+        });
+        for (const pp of pendingPayments) {
+          const ppMeta =
+            pp.metadata && typeof pp.metadata === 'object'
+              ? (pp.metadata as Record<string, unknown>)
+              : {};
+          await tx.subscription_payments.update({
+            where: { id: pp.id },
+            data: {
+              state: 'failed',
+              metadata: {
+                ...ppMeta,
+                cancellation_reason: reason,
+                cancelled_at: new Date().toISOString(),
+              } as Prisma.InputJsonValue,
+              updated_at: new Date(),
+            },
+          });
+        }
+
+        // Reverse the partner commission row for this voided invoice so the
+        // monthly payout batch ignores it (terminal state in enum).
+        await tx.partner_commissions.updateMany({
+          where: { invoice_id: inv.id, state: 'accrued' },
+          data: { state: 'reversed' },
+        });
+      }
+
+      // Transition pending_payment → cancelled within the same tx so the
+      // void of invoices and the row state-change commit together.
+      await this.stateService.transitionInTx(tx, storeId, 'cancelled', {
+        reason,
+        triggeredByUserId: userId ?? undefined,
+        payload: {
+          subscription_id: subscriptionId,
+          voided_invoice_count: pendingInvoices.length,
+        },
+      });
+    });
+
+    // Post-commit side effects (cache invalidation only — events emitted by
+    // the next state transition into `pending_payment` / `active`).
+    await this.resolver.invalidate(storeId);
+  }
+
+  /**
+   * Bug 3 — Retry payment endpoint. Allows a user stuck in `pending_payment`
+   * to re-open the Wompi widget for the existing pending invoice WITHOUT
+   * going through the full checkout/commit flow (which would create a new
+   * invoice, void the old one, etc.). Idempotent: calling it twice returns
+   * the same widget config bound to the same invoice.
+   *
+   * - Authentication: handled by JwtAuthGuard at the global guard layer.
+   * - Subscription gating: bypassed via class-level @SkipSubscriptionGate so
+   *   a blocked/pending-payment store can still pay its bill.
+   * - Permission: subscriptions:write — same as commit.
+   */
+  @Permissions('subscriptions:write')
+  @Post('retry-payment')
+  async retryPayment(@Body() dto: RetryPaymentDto) {
+    const storeId = RequestContextService.getStoreId();
+    const context = RequestContextService.getContext();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+    });
+    if (!sub) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'No subscription to retry',
+      );
+    }
+    if (sub.state !== 'pending_payment') {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        `Cannot retry payment in state ${sub.state}`,
+      );
+    }
+
+    // Find the most recent pending invoice for this subscription. We do NOT
+    // create a new one here — the caller wants to complete the existing
+    // payment, not start a new billing cycle.
+    const invoice = await this.prisma.subscription_invoices.findFirst({
+      where: { store_subscription_id: sub.id, state: 'issued' },
+      orderBy: { created_at: 'desc' },
+    });
+    if (!invoice) {
+      throw new VendixHttpException(
+        ErrorCodes.DUNNING_001,
+        'No payable invoice available for retry',
+      );
+    }
+
+    const customerEmail = await this.resolveCustomerEmail(
+      context?.user_id ?? null,
+    );
+    const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
+      customerEmail,
+      redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+    });
+
+    return this.responseService.success(
+      {
+        widget,
+        invoice: {
+          id: invoice.id,
+          total: invoice.total.toString(),
+          currency: invoice.currency,
+        },
+      },
+      'Retry payment widget prepared',
+    );
+  }
+
+  /**
+   * Pull-fallback sync — Webhook safety net. The frontend polling layer
+   * calls this on every cycle while a checkout invoice is in `pending_payment`
+   * so localhost/NAT-restricted environments still close the loop with Wompi.
+   *
+   * Backend hits Wompi `GET /v1/transactions?reference=...` with platform
+   * credentials and reuses the webhook success/failure handlers.
+   * Idempotency is guaranteed via `webhook_event_dedup` (processor='wompi_sync').
+   *
+   * Returns a discriminated result so the frontend can decide whether to
+   * stop polling (paid/failed) or continue (pending).
+   */
+  @Permissions('subscriptions:write')
+  @Post('invoices/:invoiceId/sync-from-gateway')
+  async syncInvoiceFromGateway(
+    @Param('invoiceId', ParseIntPipe) invoiceId: number,
+  ) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // Defensive scoping — the invoice must belong to the caller's store so
+    // a tenant cannot poke another tenant's invoice id.
+    const invoice = await this.prisma.subscription_invoices.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, store_id: true },
+    });
+    if (!invoice || invoice.store_id !== storeId) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const result = await this.payment.syncInvoiceFromGateway(invoiceId);
+
+    if (result.status === 'pending') {
+      return this.responseService.success(result, 'Pago aún pendiente');
+    }
+    if (result.status === 'no_transaction') {
+      return this.responseService.success(result, 'Sin transacción asociada');
+    }
+    if (result.status === 'failed') {
+      return this.responseService.success(result, 'Pago rechazado');
+    }
+    return this.responseService.success(result, 'Pago confirmado');
   }
 
   /**
@@ -827,8 +1114,11 @@ export class SubscriptionCheckoutController {
     // Listener (subscription.payment.succeeded) is allowed to promote them
     // to `active`. Free plans (effective_price <= 0 and no partner margin)
     // skip the invoice/charge cycle and go straight to `active`.
+    // Use explicit is_free flag rather than effective_price heuristic so that
+    // partner-margin edge cases on base-free plans are still routed through
+    // the paid pipeline (issueInvoice + Wompi widget).
     const isFreePlan =
-      pricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO) &&
+      plan.is_free === true &&
       pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO);
     const initialState = isFreePlan ? 'active' : 'pending_payment';
 

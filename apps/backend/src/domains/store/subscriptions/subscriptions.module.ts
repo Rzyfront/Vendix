@@ -20,7 +20,12 @@ import { PartnerCommissionsService } from './services/partner-commissions.servic
 import { SubscriptionTrialService } from './services/subscription-trial.service';
 import { SubscriptionPaymentMethodsService } from './services/subscription-payment-methods.service';
 import { SubscriptionInvoicePdfService } from './services/subscription-invoice-pdf.service';
+import { SubscriptionSupportRequestService } from './services/subscription-support-request.service';
+import { SubscriptionFraudService } from './services/subscription-fraud.service';
+import { SubscriptionManualPaymentService } from './services/subscription-manual-payment.service';
+import { SubscriptionRedemptionService } from './services/subscription-redemption.service';
 import { SubscriptionStateListener } from './listeners/subscription-state.listener';
+import { SubscriptionAccountingListener } from './listeners/subscription-accounting.listener';
 import { ReconcileStuckPendingJob } from './jobs/reconcile-stuck-pending.job';
 import { SubscriptionGateConfig } from './config/subscription-gate.config';
 import { PaymentsModule } from '../payments/payments.module';
@@ -65,11 +70,19 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     SubscriptionTrialService,
     SubscriptionPaymentMethodsService,
     SubscriptionInvoicePdfService,
+    SubscriptionSupportRequestService,
+    SubscriptionFraudService,
+    SubscriptionManualPaymentService,
+    SubscriptionRedemptionService,
     // Listener: auto-promotes pending_payment / grace_* / blocked subs to
     // `active` on `subscription.payment.succeeded`. Registered as a provider
     // so NestJS instantiates it; the @OnEvent decorator wires the
     // EventEmitterModule subscription.
     SubscriptionStateListener,
+    // Listener: writes platform-side accounting entries (asientos automaticos
+    // SaaS) on subscription invoice/payment/refund events. NestJS needs it as
+    // a provider so the @OnEvent wiring is active.
+    SubscriptionAccountingListener,
     // Cron safety-net: catches subscriptions stuck in pending_payment whose
     // last payment is already succeeded (synchronous webhook promotion +
     // listener both missed). Runs every 5 minutes, idempotent.
@@ -93,6 +106,10 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     SubscriptionTrialService,
     SubscriptionPaymentMethodsService,
     SubscriptionInvoicePdfService,
+    SubscriptionSupportRequestService,
+    SubscriptionFraudService,
+    SubscriptionManualPaymentService,
+    SubscriptionRedemptionService,
   ],
 })
 export class SubscriptionsModule {}

@@ -17,6 +17,17 @@ const subscriptionRoutes: Routes = [
       ),
   },
   {
+    // RNC-39 — Soft picker for stores in `no_plan`. The
+    // subscriptionPaywallInterceptor redirects here instead of opening the
+    // aggressive paywall when the backend reports a no_plan subscription
+    // state.
+    path: 'picker',
+    loadComponent: () =>
+      import('./pages/picker/picker.component').then(
+        (c) => c.PickerComponent,
+      ),
+  },
+  {
     path: 'payment',
     loadComponent: () =>
       import('./pages/payment/payment-method.component').then(
