@@ -1,159 +1,113 @@
 ---
 name: skill-creator
 description: >
-  Creates new AI agent skills following the Agent Skills spec.
-  Trigger: When user asks to create a new skill, add agent instructions, or document patterns for AI.
+  Creates or updates Vendix AI agent skills using the repository skill standard.
+  Trigger: When creating a new skill, updating skill guidance, documenting repeatable AI patterns, or resolving a knowledge gap.
 license: MIT
 metadata:
   author: rzyfront
   version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Creating a new skill"
+    - "Updating skill guidance or documenting repeatable AI patterns"
+    - "Resolving a knowledge gap by creating or updating a skill"
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash, WebFetch, WebSearch, Task
 ---
 
-## When to Create a Skill
+# Skill Creator
 
-Create a skill when:
-- A pattern is used repeatedly and AI needs guidance
-- Project-specific conventions differ from generic best practices
-- Complex workflows need step-by-step instructions
-- Decision trees help AI choose the right approach
+## Purpose
 
-**Don't create a skill when:**
-- Documentation already exists (create a reference instead)
-- Pattern is trivial or self-explanatory
-- It's a one-off task
+Use this skill to create or update reusable AI guidance for Vendix. Skills should be compact, accurate, scoped to one responsibility, and synchronized through `skill-sync`.
 
+## When To Create Or Update A Skill
+
+Create or update a skill when:
+
+- A pattern is repeated across tasks and agents need consistent guidance.
+- Vendix behavior differs from generic framework defaults.
+- A workflow needs explicit decision rules, commands, or safety constraints.
+- A plan step exposes a knowledge gap that should become reusable guidance.
+
+Do not create a skill for one-off instructions, obvious conventions, or content already covered by an accurate existing skill.
+
+## Skill Standard
+
+Each skill should have:
+
+- One clear owner scope and purpose.
+- Frontmatter with `name`, `description`, `license`, `metadata.author`, `metadata.version`, and usually `metadata.scope` plus `metadata.auto_invoke`.
+- Critical rules first.
+- Minimal examples only when they prevent mistakes.
+- References to related skills instead of duplicating their rules.
+- No stale project names, provider-specific assumptions, or absolute user paths.
+
+## Frontmatter Template
+
+```yaml
 ---
-
-## Skill Structure
-
-```
-skills/{skill-name}/
-├── SKILL.md              # Required - main skill file
-├── assets/               # Optional - templates, schemas, examples
-│   ├── template.py
-│   └── schema.json
-└── references/           # Optional - links to local docs
-    └── docs.md           # Points to docs/developer-guide/*.mdx
-```
-
----
-
-## SKILL.md Template
-
-```markdown
----
-name: {skill-name}
+name: vendix-example-skill
 description: >
-  {One-line description of what this skill does}.
-  Trigger: {When the AI should load this skill}.
+  Short description of what this skill governs.
+  Trigger: Specific action, file type, domain, or workflow that should load it.
 license: MIT
 metadata:
   author: rzyfront
   version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Specific action that should load this skill"
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
-
-## When to Use
-
-{Bullet points of when to use this skill}
-
-## Critical Patterns
-
-{The most important rules - what AI MUST know}
-
-## Code Examples
-
-{Minimal, focused examples}
-
-## Commands
-
-```bash
-{Common commands}
 ```
 
-## Resources
+`allowed-tools` is optional and belongs at the top level. Keep `metadata.auto_invoke` specific enough to avoid loading unrelated skills.
 
-- **Templates**: See [assets/](assets/) for {description}
-- **Documentation**: See [references/](references/) for local docs
-```
-
----
-
-## Naming Conventions
-
-| Type | Pattern | Examples |
-|------|---------|----------|
-| Generic skill | `{technology}` | `pytest`, `playwright`, `typescript` |
-| Prowler-specific | `prowler-{component}` | `prowler-api`, `prowler-ui`, `prowler-sdk-check` |
-| Testing skill | `prowler-test-{component}` | `prowler-test-sdk`, `prowler-test-api` |
-| Workflow skill | `{action}-{target}` | `skill-creator`, `jira-task` |
-
----
-
-## Decision: assets/ vs references/
-
-```
-Need code templates?        → assets/
-Need JSON schemas?          → assets/
-Need example configs?       → assets/
-Link to existing docs?      → references/
-Link to external guides?    → references/ (with local path)
-```
-
-**Key Rule**: `references/` should point to LOCAL files (`docs/developer-guide/*.mdx`), not web URLs.
-
----
-
-## Frontmatter Fields
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `name` | Yes | Skill identifier (lowercase, hyphens) |
-| `description` | Yes | What + Trigger in one block |
-| `license` | Yes | `MIT` |
-| `metadata.author` | Yes | `rzyfront` |
-| `metadata.version` | Yes | Semantic version as string |
-
----
-
-## Content Guidelines
-
-### DO
-- Start with the most critical patterns
-- Use tables for decision trees
-- Keep code examples minimal and focused
-- Include Commands section with copy-paste commands
-
-### DON'T
-- Add Keywords section (agent searches frontmatter, not body)
-- Duplicate content from existing docs (reference instead)
-- Include lengthy explanations (link to docs)
-- Add troubleshooting sections (keep focused)
-- Use web URLs in references (use local paths)
-
----
-
-## Registering the Skill
-
-After creating the skill, add it to `AGENTS.md`:
+## Content Template
 
 ```markdown
-| `{skill-name}` | {Description} | [SKILL.md](skills/{skill-name}/SKILL.md) |
+# Skill Title
+
+## Purpose
+[What this skill governs and what it does not govern]
+
+## Core Rules
+- [Most important rules]
+
+## Workflow
+1. [Only if this skill requires sequence]
+
+## Decision Rules
+| Situation | Use |
+| --- | --- |
+| [Condition] | [Action] |
+
+## Related Skills
+- `other-skill` - [why it is related]
 ```
 
----
+## Update Workflow
 
-## Checklist Before Creating
+1. Check whether an existing skill should be updated instead of creating a new one.
+2. Read related skills to avoid duplication.
+3. Edit only the source skill under `skills/`.
+4. Keep guidance compact and current with the real codebase.
+5. Run `./skills/skill-sync/assets/sync.sh`.
+6. Run `./skills/setup.sh --sync`.
+7. Verify generated provider copies and `AGENTS.md` auto-invoke entries.
 
-- [ ] Skill doesn't already exist (check `skills/`)
-- [ ] Pattern is reusable (not one-off)
-- [ ] Name follows conventions
-- [ ] Frontmatter is complete (description includes trigger keywords)
-- [ ] Critical patterns are clear
-- [ ] Code examples are minimal
-- [ ] Commands section exists
-- [ ] Added to AGENTS.md
+## Naming Rules
 
-## Resources
+| Skill Type | Pattern | Examples |
+| --- | --- | --- |
+| Workflow | `{action}-{target}` | `skill-creator`, `buildcheck-dev` |
+| Vendix domain | `vendix-{domain}` | `vendix-subscription-gate` |
+| Vendix app/layer | `vendix-{layer}-{topic}` | `vendix-frontend-routing` |
+| AI platform | `vendix-ai-{topic}` | `vendix-ai-streaming` |
 
-- **Templates**: See [assets/](assets/) for SKILL.md template
+## Related Skills
+
+- `skill-sync` - Required after creating or modifying skills
+- `how-to-plan` - Marks knowledge gaps that may become skills
+- `how-to-dev` - Requires loading relevant skills before development

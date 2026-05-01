@@ -1,81 +1,87 @@
 ---
 name: vendix-frontend-icons
-description: Protocol for using and registering system icons (Lucide) in the Frontend. Trigger: When adding icons to components, buttons, menus, or using <app-icon>.
+description: >
+  Protocol for using and registering Lucide icons in the Vendix frontend. Trigger: When
+  adding icons to components, buttons, menus, stats, tables, cards, or using app-icon.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
-  scope: [frontend]
+  version: "1.1"
+  scope: [root]
   auto_invoke: "When adding icons to components, buttons, menus, or using <app-icon>"
 ---
 
-> **Tip**: Antes de usar app-icon, consulta su README en `apps/frontend/src/app/shared/components/icon/README.md` para conocer como registrar iconos y los iconos disponibles.
+## When to Use
 
-## 🎨 Icon System Protocol
+- Adding `app-icon` to a template.
+- Adding `iconName`, action `icon`, `avatarFallbackIcon`, detail `icon`, or menu/sidebar icons.
+- Registering a missing Lucide icon.
 
-Vendix uses **Lucide Angular** icons, but they are **NOT** globally available. They must be explicitly registered in a central registry to optimize bundle size.
+## Source of Truth
 
-### 🚨 CRITICAL RULES
+- Component: `apps/frontend/src/app/shared/components/icon/icon.component.ts`
+- Registry: `apps/frontend/src/app/shared/components/icon/icons.registry.ts`
+- README: `apps/frontend/src/app/shared/components/icon/README.md`
 
-1.  **NEVER** assume an icon exists.
-2.  **ALWAYS** check `apps/frontend/src/app/shared/components/icon/icons.registry.ts` first.
-3.  **IF MISSING**: You MUST register it before using it.
-4.  **IF EXISTS**: Use the exact key defined in the registry.
+## Critical Rules
 
----
+- Never assume a Lucide icon is available globally.
+- Check `icons.registry.ts` before using an icon key.
+- If missing, import the Lucide symbol and add it to `ICON_REGISTRY`.
+- Use the exact registered key. Aliases exist, but only the registry is authoritative.
+- For Tailwind color classes, pass classes through `class`, not `color`. The `color` input is forwarded to Lucide as a color value.
 
-### 📖 How to Register a New Icon
+## app-icon API
 
-**File:** `apps/frontend/src/app/shared/components/icon/icons.registry.ts`
+`IconComponent` inputs:
 
-1.  **Import** the icon from `lucide-angular`.
-2.  **Add** it to the `ICON_REGISTRY` constant.
-3.  **Use** the key (camelCase or kebab-case as defined in the registry).
+- `name: IconName` required.
+- `size: number | string = 16`.
+- `color?: string`.
+- `class` alias stored as `cls`.
+- `spin: boolean = false`.
 
-#### Example
+If a name is not found, the component falls back to the registry `default` icon, currently `HelpCircle`. A fallback prevents crashes but still means the icon key is wrong.
+
+```html
+<app-icon name="package" [size]="20" class="text-blue-500" />
+<app-icon name="loader-2" [size]="18" class="text-primary" [spin]="true" />
+```
+
+## Registering an Icon
 
 ```typescript
-// 1. Import
 import {
-  // ... existing imports
-  Fingerprint, // <--- New Import
-} from "lucide-angular";
+  Fingerprint,
+  // existing imports
+} from 'lucide-angular';
 
-export const ICON_REGISTRY: Record<string, LucideIconData> = {
-  // ... existing icons
-
-  // 2. Register
-  fingerprint: Fingerprint, // <--- Add to registry
+export const ICON_REGISTRY = {
+  // existing icons
+  fingerprint: Fingerprint,
 } as const;
 ```
 
----
+Use a stable key that matches existing naming style. Kebab aliases such as `trash-2` and simple aliases such as `trash` may both exist; do not add duplicates unless there is a clear compatibility/use reason.
 
-### 💻 How to Use
+## Common Consumers
 
-Once registered, use the **key** string in your components.
+- `app-stats`: `iconName="shopping-cart"`.
+- `TableAction`: `{ icon: 'trash-2', ... }`.
+- `ItemListCardConfig`: `avatarFallbackIcon`, detail field `icon`, and info icons.
+- `app-sticky-header`: `icon="settings"` and action `icon` values.
+- Sidebar/menu config: `icon` keys.
 
-#### In Templates (HTML)
+## Checklist
 
-```html
-<!-- Basic Usage -->
-<app-icon name="fingerprint" size="24" class="text-primary"></app-icon>
+- Check `icons.registry.ts` for the key.
+- Register missing icons in the registry source file.
+- Use `class="text-*"` for Tailwind color.
+- Use `[spin]="true"` only for loading/spinner icons.
+- Keep icon additions minimal to preserve bundle optimization.
 
-<!-- In Buttons -->
-<app-button iconName="fingerprint">Authenticate</app-button>
-```
+## Related Skills
 
-#### In Typescript (Menu Items / Config)
-
-```typescript
-const menuItem = {
-  label: "Biometrics",
-  icon: "fingerprint", // Must match registry key
-  route: "/settings/bio",
-};
-```
-
-### 🔍 Troubleshooting
-
-**Error:** `Icon "xyz" not found` or blank icon.
-**Fix:** The icon is likely missing from `icons.registry.ts`. Add it immediately.
+- `vendix-frontend-standard-module` - Icons in admin list modules
+- `vendix-frontend-data-display` - Action/card icons
+- `vendix-panel-ui` - Sidebar/menu icons

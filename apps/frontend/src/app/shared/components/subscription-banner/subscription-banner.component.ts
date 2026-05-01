@@ -25,6 +25,34 @@ interface BannerCopy {
   iconName: string;
 }
 
+function pluralize(n: number, singular: string, plural: string): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}
+
+/**
+ * Builds the grace-state detail line so it surfaces BOTH the overdue side
+ * (days since `current_period_end`) and the deadline side (days left until
+ * the next state transition). Single-side phrasing was ambiguous: "Te quedan
+ * 2 días para regularizar" reads as "I've been here 2 days" to a fraction of
+ * users because nothing anchors the count to the future deadline.
+ */
+function graceDetail(
+  daysOverdue: number,
+  daysRemaining: number,
+  nextStepNoun: string,
+): string {
+  if (daysRemaining <= 0) {
+    return `Regulariza el pago para evitar ${nextStepNoun}.`;
+  }
+  const overdueClause =
+    daysOverdue > 0
+      ? `Tu pago está vencido hace ${pluralize(daysOverdue, 'día', 'días')}. `
+      : '';
+  return `${overdueClause}${pluralize(daysRemaining, 'día', 'días')} restante${
+    daysRemaining === 1 ? '' : 's'
+  } antes de ${nextStepNoun}.`;
+}
+
 @Component({
   selector: 'app-subscription-banner',
   standalone: true,
@@ -237,10 +265,7 @@ export class SubscriptionBannerComponent implements OnInit {
     if (ui.kind === 'grace_soft') {
       return {
         title: 'Tu suscripción está en período de gracia',
-        detail:
-          ui.daysRemaining > 0
-            ? `Te quedan ${ui.daysRemaining} días para regularizar el pago.`
-            : 'Regulariza el pago para evitar la suspensión.',
+        detail: graceDetail(ui.daysOverdue, ui.daysRemaining, 'la suspensión'),
         ctaText: 'Pagar ahora',
         iconName: 'alert-triangle',
       };
@@ -249,10 +274,7 @@ export class SubscriptionBannerComponent implements OnInit {
     if (ui.kind === 'grace_hard') {
       return {
         title: 'Tu suscripción entró en gracia crítica',
-        detail:
-          ui.daysRemaining > 0
-            ? `Te quedan ${ui.daysRemaining} días antes de la suspensión total.`
-            : 'Regulariza el pago de inmediato para recuperar el acceso.',
+        detail: graceDetail(ui.daysOverdue, ui.daysRemaining, 'la suspensión total'),
         ctaText: 'Regularizar',
         iconName: 'alert-octagon',
       };

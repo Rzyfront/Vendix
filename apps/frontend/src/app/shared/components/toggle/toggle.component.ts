@@ -34,7 +34,7 @@ import { FormStyleVariant } from '../../types/form.types';
       type="button"
       [attr.aria-pressed]="isOn()"
       [attr.aria-label]="ariaLabel() || label() || 'Toggle'"
-      [disabled]="disabled()"
+      [disabled]="isDisabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
       [class.bg-[var(--color-primary)]]="isOn()"
@@ -54,7 +54,8 @@ import { FormStyleVariant } from '../../types/form.types';
 export class ToggleComponent implements ControlValueAccessor {
   readonly checked = input(false);
   readonly disabled = input(false);
-  private isDisabledFromForm = false;
+  private readonly isDisabledFromForm = signal(false);
+  private readonly isBoundToForm = signal(false);
   readonly label = input<string | undefined>(undefined);
   readonly ariaLabel = input<string>();
   readonly styleVariant = input<FormStyleVariant>('modern');
@@ -68,11 +69,13 @@ export class ToggleComponent implements ControlValueAccessor {
 
   constructor() {
     effect(() => {
+      if (this.isBoundToForm()) return;
       this.isOn.set(this.checked());
     });
   }
 
   writeValue(value: boolean): void {
+    this.isBoundToForm.set(true);
     this.isOn.set(!!value);
   }
 
@@ -85,11 +88,11 @@ export class ToggleComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.isDisabledFromForm = isDisabled;
+    this.isDisabledFromForm.set(isDisabled);
   }
 
   onToggle(): void {
-    if (this.disabled() || this.isDisabledFromForm) return;
+    if (this.isDisabled()) return;
     this.isOn.update((v) => !v);
     this.onChange(this.isOn());
     this.toggled.emit(this.isOn());
@@ -129,6 +132,10 @@ export class ToggleComponent implements ControlValueAccessor {
       'focus:ring-[var(--color-ring)]',
       'focus:ring-offset-2',
     ].join(' ');
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.isDisabledFromForm();
   }
 
   get labelClasses(): string {

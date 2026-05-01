@@ -1,203 +1,77 @@
 ---
 name: vendix-multi-tenant-context
 description: >
-  Explains the 'Context Bridge' pattern where Middleware resolves the tenant (domain/store), stores it in the Request object, and an Interceptor unifies it with user authentication into AsyncLocalStorage.
+  Backend tenant context bridge from ecommerce domain resolution and JWT user context into AsyncLocalStorage.
+  Trigger: Handling store context, implementing multi-tenant logic, or fixing Forbidden/403 errors in scoped services.
 license: Apache-2.0
 metadata:
   author: rzyfront
   version: "1.0"
-  scope: [root, backend]
+  scope: [root]
   auto_invoke:
-    - "Implementing multi-tenant logic"
     - "Handling store context"
+    - "Implementing multi-tenant logic"
     - "Fixing Forbidden/403 errors in scoped services"
-allowed-tools: [Read, Edit, Write, Glob, Grep, Bash]
 ---
 
-## Multi-Tenant Context Bridge
+# Vendix Multi-Tenant Context
 
-Vendix uses a **Context Bridge** pattern to manage multi-tenancy. This pattern ensures that every request has a verified `store_id` and `organization_id` available throughout the execution flow, without relying on passing parameters through every function call.
+## Purpose
 
-### 1. Middleware Resolution
+Use this skill for backend request context: how store/organization/user data reaches `RequestContextService` and scoped Prisma services.
 
-The `DomainResolverMiddleware` is the first line of defense. It identifies the tenant based on the hostname or a specific header.
+## Real Context Flow
 
-```typescript
-// apps/backend/src/common/middleware/domain-resolver.middleware.ts
-async use(req: Request, res: Response, next: NextFunction) {
-  const hostname = this.extractHostname(req);
-  const x_store_id = req.headers['x-store-id'];
+1. `DomainResolverMiddleware` is registered globally, but it only resolves domain context for URLs containing `/ecommerce/`.
+2. For ecommerce routes, it first accepts `x-store-id` header or `store_id` query param.
+3. If no explicit store is provided, it resolves hostname through cache and `PublicDomainsService.resolveDomain()`.
+4. It writes `{ store_id, organization_id? }` to `req['domain_context']` and continues even if resolution fails.
+5. `RequestContextInterceptor` merges JWT `req.user` and `domain_context` into AsyncLocalStorage.
 
-  // Priority 1: x-store-id header (development/manual override)
-  if (x_store_id) {
-    req['domain_context'] = { store_id: Number(x_store_id) };
-    return next();
-  }
+Key files:
 
-  // Priority 2: Hostname resolution (production)
-  const domain = await this.publicDomains.resolveDomain(hostname);
-  req['domain_context'] = {
-    store_id: domain.store_id,
-    organization_id: domain.organization_id,
-  };
-  next();
-}
-```
+- `apps/backend/src/common/middleware/domain-resolver.middleware.ts`
+- `apps/backend/src/common/interceptors/request-context.interceptor.ts`
+- `apps/backend/src/common/context/request-context.service.ts`
 
-### 2. Request Bridging
+## Precedence Rules
 
-Middleware cannot use `AsyncLocalStorage` directly if it needs to coexist with NestJS Interceptors that also manage context. Instead, it "bridges" the information by attaching it to the `Request` object.
+- JWT user context fills `user_id`, `organization_id`, `store_id`, roles, permissions, and flags first.
+- Ecommerce `domain_context.store_id` overwrites `context.store_id`.
+- Ecommerce `domain_context.organization_id` fills `organization_id` only when JWT did not provide one.
+- Non-ecommerce routes usually rely on JWT/user context, not hostname resolution.
 
-```typescript
-req["domain_context"] = { store_id, organization_id };
-```
+## Scoped Prisma Services
 
-### 3. Interceptor Unification
+| Service | Scope |
+| --- | --- |
+| `GlobalPrismaService` | No tenant scope; use for superadmin/system operations only |
+| `OrganizationPrismaService` | Organization-scoped models |
+| `StorePrismaService` | Store/organization-scoped models |
+| `EcommercePrismaService` | Ecommerce store/customer scoped access |
 
-The `RequestContextInterceptor` merges user authentication (from `req.user`) with the domain context (from `req['domain_context']`) and initializes the `AsyncLocalStorage`.
+Model lists change over time. Treat the arrays inside the Prisma scoped service files as canonical instead of copying exhaustive lists into skills.
 
-```typescript
-// apps/backend/src/common/interceptors/request-context.interceptor.ts
-intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-  const req = context.switchToHttp().getRequest();
-  const user = req.user;
-  const domain_context = req['domain_context'];
+## Guardrails
 
-  const contextObj: RequestContext = {
-    user_id: user?.id,
-    organization_id: user?.organization_id || domain_context?.organization_id,
-    store_id: user?.store_id || domain_context?.store_id,
-    is_super_admin: roles.includes('super_admin'),
-    // ...
-  };
+- Do not use `GlobalPrismaService` for tenant data unless the use case is explicitly system-level or the code manually scopes the query.
+- Do not rely on frontend-selected store IDs for authorization.
+- Raw SQL and Prisma `$queryRaw` bypass scoped-service extensions; add explicit tenant filters.
+- The current `RequestContextService` has a static `currentContext` fallback; treat it as existing behavior, not a pattern to expand.
 
-  return RequestContextService.asyncLocalStorage.run(contextObj, () => {
-    return next.handle();
-  });
-}
-```
+## Debugging 403 / Missing Context
 
-### 4. Safe Context Service
+Check:
 
-The `RequestContextService` provides a static API to access the context. It must **never** provide static fallbacks or "mock" data if the context is missing, as this could lead to data leakage between tenants.
+1. Is the route ecommerce? If not, domain middleware will not resolve hostname context.
+2. Does JWT include the expected `organization_id` and `store_id`?
+3. For ecommerce, is `x-store-id`, `store_id` query, or host domain resolving correctly?
+4. Is the model registered in the correct scoped Prisma service?
+5. Is raw SQL missing explicit tenant filters?
 
-```typescript
-// apps/backend/src/common/context/request-context.service.ts
-export class RequestContextService {
-  public static asyncLocalStorage = new AsyncLocalStorage<RequestContext>();
+## Related Skills
 
-  static getContext(): RequestContext | undefined {
-    return this.asyncLocalStorage.getStore();
-  }
-
-  static getStoreId(): number | undefined {
-    return this.getContext()?.store_id;
-  }
-}
-```
-
-### 5. Scoped Prisma Usage
-
-The context flows into **4 domain-scoped Prisma services** that use Prisma Client Extensions to automatically intercept ALL queries and inject tenant filters:
-
-| Service                     | Scope Applied                  | Domain      |
-| --------------------------- | ------------------------------ | ----------- |
-| `GlobalPrismaService`       | None                           | Superadmin  |
-| `OrganizationPrismaService` | `organization_id`              | Org admin   |
-| `StorePrismaService`        | `store_id` + `organization_id` | Store admin |
-| `EcommercePrismaService`    | `store_id` + `user_id`         | E-commerce  |
-
-```typescript
-// Scoping is transparent - no manual filtering needed
-constructor(private readonly prisma: StorePrismaService) {}
-
-async findProducts() {
-  // Extensions auto-inject WHERE store_id = ctx.store_id
-  return this.prisma.products.findMany();
-}
-```
-
-> **Scoped services are mandatory.** `withoutScope()` requires explicit user approval. See `vendix-prisma-scopes` skill for model registration rules and complete documentation.
-
-## Troubleshooting 403 Forbidden
-
-If you encounter a `403 Forbidden` error in a scoped service:
-
-1. **Check Middleware:** Ensure `DomainResolverMiddleware` is applied to the route.
-2. **Check Interceptor:** Ensure `RequestContextInterceptor` is active (usually global).
-3. **Verify Header:** If testing via API, ensure `x-store-id` is sent or the `Host` header matches a registered domain.
-4. **Context Presence:** Use `RequestContextService.getContext()` to debug if the store is being resolved correctly.
-5. **Model Registration:** Ensure the model is registered in the scoped service's model arrays (see `vendix-prisma-scopes`).
-
-## AI Platform Scoping
-
-The AI Platform Layer introduces three new multi-tenant models:
-
-### ai_conversations (Store-Scoped + User-Scoped)
-
-```typescript
-// Registered in store_scoped_models → auto-filters by store_id + organization_id
-// ALSO manually filtered by user_id for privacy:
-const conversation = await this.prisma.ai_conversations.findFirst({
-  where: {
-    id,
-    user_id: context?.user_id,  // Manual check — users only see their own conversations
-  },
-});
-```
-
-**Key:** `StorePrismaService` auto-injects `store_id` and `organization_id`, but `user_id` must be checked manually because multiple users share a store.
-
-### ai_messages (Relationally Scoped)
-
-```typescript
-// Scoped via conversation relation:
-// { conversation: { store_id: context.store_id, organization_id: context.organization_id } }
-// This ensures messages are only accessible if the parent conversation belongs to the tenant.
-```
-
-**Key:** Messages don't have their own `store_id` — they inherit scoping from their parent `ai_conversations`.
-
-### ai_embeddings (Store-Scoped + Raw SQL)
-
-```typescript
-// Registered in store_scoped_models for Prisma queries
-// BUT vector searches use raw SQL with explicit WHERE:
-const results = await this.prisma.$queryRawUnsafe(`
-  SELECT ... FROM ai_embeddings
-  WHERE store_id = $1          -- Explicit tenant filter
-    AND entity_type = ...
-  ORDER BY embedding <=> $2::vector
-`, storeId, embeddingStr);
-```
-
-**Key:** pgvector operations bypass Prisma ORM (raw SQL), so tenant isolation must be enforced manually with `WHERE store_id = $1`.
-
-### MCP Context Injection
-
-MCP endpoints bypass the normal JWT auth flow (`@Public()` decorator) but use `McpAuthGuard` instead:
-
-```typescript
-// McpAuthGuard validates JWT and sets request.user:
-request.user = {
-  user_id: payload.user_id,
-  organization_id: payload.organization_id,
-  store_id: payload.store_id,
-  roles: payload.roles,
-};
-// RequestContextInterceptor then propagates this to AsyncLocalStorage
-// → All downstream scoped services work normally
-```
-
-**Key:** MCP uses the same `request.user` property as JWT auth, so the existing `RequestContextInterceptor` handles context propagation without changes.
-
-### Scoping Summary
-
-| Model | Scope Type | Auto-filtered | Manual Checks |
-|-------|-----------|--------------|---------------|
-| `ai_engine_configs` | Global | None (superadmin only) | — |
-| `ai_engine_applications` | Global | None (superadmin only) | — |
-| `ai_engine_logs` | Global | None (superadmin reads) | org_id, store_id in queries |
-| `ai_conversations` | Store + User | store_id, org_id | user_id |
-| `ai_messages` | Relational | via conversation | — |
-| `ai_embeddings` | Store | store_id, org_id | Raw SQL: `WHERE store_id = $1` |
+- `vendix-prisma-scopes` - Scoped Prisma model registration
+- `vendix-backend-auth` - JWT, public routes, guards
+- `vendix-app-architecture` - App/domain concepts
+- `vendix-mcp-server` - MCP auth/context injection

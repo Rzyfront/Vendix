@@ -71,7 +71,7 @@ export class SubscriptionAdminService {
     // Type / state / billing
     if (d.plan_type !== undefined) payload['plan_type'] = d.plan_type;
     if (d.state !== undefined) payload['state'] = d.state;
-    if (d.billing_cycle !== undefined) payload['billing_cycle'] = d.billing_cycle;
+    if (d.billing_cycle !== undefined) payload['billing_cycle'] = this.normalizeBillingCycle(d.billing_cycle);
 
     // Money (Prisma Decimal accepts number on input)
     if (d.base_price !== undefined && d.base_price !== null) {
@@ -81,6 +81,7 @@ export class SubscriptionAdminService {
     if (d.setup_fee !== undefined) {
       payload['setup_fee'] = d.setup_fee === null ? null : Number(d.setup_fee);
     }
+    if (d.is_free !== undefined) payload['is_free'] = Boolean(d.is_free);
 
     // Trial + dunning
     if (d.trial_days !== undefined) payload['trial_days'] = Number(d.trial_days);
@@ -98,6 +99,10 @@ export class SubscriptionAdminService {
 
     // Promotional
     if (d.is_promotional !== undefined) payload['is_promotional'] = Boolean(d.is_promotional);
+    if (d.redemption_code !== undefined) {
+      const code = typeof d.redemption_code === 'string' ? d.redemption_code.trim() : '';
+      payload['redemption_code'] = code || null;
+    }
     if (d.promo_priority !== undefined) payload['promo_priority'] = Number(d.promo_priority);
 
     // Display
@@ -120,7 +125,7 @@ export class SubscriptionAdminService {
     if (Array.isArray(d.pricing) && d.pricing.length) {
       const pricingFirst = d.pricing.find((p: any) => p.is_default) ?? d.pricing[0];
       if (payload['billing_cycle'] === undefined && pricingFirst.billing_cycle) {
-        payload['billing_cycle'] = pricingFirst.billing_cycle;
+        payload['billing_cycle'] = this.normalizeBillingCycle(pricingFirst.billing_cycle);
       }
       if (payload['base_price'] === undefined && pricingFirst.price !== undefined) {
         payload['base_price'] = Number(pricingFirst.price);
@@ -137,7 +142,7 @@ export class SubscriptionAdminService {
     const base_price = this.toNumberOrZero(raw.base_price);
     const setup_fee = this.toNumber(raw.setup_fee);
     const max_partner_margin_pct = this.toNumber(raw.max_partner_margin_pct);
-    const billing_cycle = (raw.billing_cycle ?? 'monthly') as SubscriptionPlan['billing_cycle'];
+    const billing_cycle = this.normalizeBillingCycle(raw.billing_cycle ?? 'monthly') as SubscriptionPlan['billing_cycle'];
     const currency = raw.currency ?? 'COP';
     const grace_period_soft_days = Number(raw.grace_period_soft_days ?? 0);
 
@@ -154,6 +159,7 @@ export class SubscriptionAdminService {
       base_price,
       currency,
       setup_fee,
+      is_free: Boolean(raw.is_free),
 
       trial_days: Number(raw.trial_days ?? 0),
       grace_period_soft_days,
@@ -168,6 +174,7 @@ export class SubscriptionAdminService {
       max_partner_margin_pct,
 
       is_promotional: Boolean(raw.is_promotional),
+      redemption_code: raw.redemption_code ?? null,
       promo_rules: raw.promo_rules ?? null,
       promo_priority: Number(raw.promo_priority ?? 0),
 
@@ -195,6 +202,10 @@ export class SubscriptionAdminService {
       ],
       grace_threshold_days: grace_period_soft_days,
     };
+  }
+
+  private normalizeBillingCycle(value: unknown): string {
+    return value === 'biannual' ? 'semiannual' : String(value || 'monthly');
   }
 
   // ─── Subscription transformers (Phase B) ───

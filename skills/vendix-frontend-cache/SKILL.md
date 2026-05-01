@@ -1,206 +1,50 @@
-# vendix-frontend-cache
+---
+name: vendix-frontend-cache
+description: >
+  Frontend caching patterns for Vendix Angular services: shareReplay TTL caches, instance
+  fields, module-level Map caches, parameterized cache keys, and invalidation after writes.
+  Trigger: When caching frontend HTTP data or reducing repeated dashboard/report requests.
+license: MIT
+metadata:
+  author: rzyfront
+  version: "2.0"
+  scope: [root]
+  auto_invoke: "Caching frontend HTTP/dashboard/report data"
+---
 
-Frontend caching pattern for stats/dashboard endpoints using RxJS `shareReplay` with TTL.
+# Vendix Frontend Cache
 
-## Trigger
+## Source of Truth
 
-When implementing or modifying stats/dashboard endpoints in Angular services to reduce HTTP requests during navigation.
+Representative patterns live in:
 
-## Context
+- `.../super-admin/dashboard/services/super-admin-dashboard.service.ts`
+- `.../organization/dashboard/services/organization-dashboard.service.ts`
+- `.../store/reports/services/reports-data.service.ts`
 
-Stats and dashboard endpoints are frequently called when users navigate between modules. Without caching, every navigation triggers new HTTP requests even when data hasn't changed.
+## Current Reality
 
-**Key insight:** In Angular with lazy loading and standalone components, service instances are recreated on navigation. Instance variables don't persist - use **static global cache**.
+Vendix does not use one single cache shape.
 
-## Pattern
+Current patterns include:
 
-### Static Global Cache (for simple endpoints)
+- service instance fields with TTL timestamps
+- module-level `Map` caches keyed by params/entity ids
+- helper methods like `withCache(key, factory)`
+- `shareReplay({ bufferSize: 1, refCount: true })` and also `refCount: false`
 
-```typescript
-import { tap, shareReplay } from 'rxjs/operators';
+Do not document a false rule that Angular service instances are always recreated on navigation or that all caches must be static globals.
 
-// Static cache outside class (persists across instances)
-interface CacheEntry<T> {
-  observable: T;
-  lastFetch: number;
-}
+## Rules
 
-let statsCache: CacheEntry<Observable<ApiResponse<Stats>>> | null = null;
+- Pick cache shape based on the endpoint usage pattern, not ideology.
+- Use stable cache keys when params/date ranges/entity ids change the result.
+- Invalidate cache after writes that make the cached view stale.
+- Avoid caching obviously real-time or rapidly changing streams unless the feature explicitly accepts staleness.
+- Use short TTLs for dashboards/stats unless there is a stronger product reason.
 
-@Injectable({ providedIn: 'root' })
-export class MyService {
-  private readonly CACHE_TTL = 30000; // 30 seconds
+## Related Skills
 
-  getStats(): Observable<ApiResponse<Stats>> {
-    const now = Date.now();
-
-    // Return cached if valid
-    if (statsCache && (now - statsCache.lastFetch) < this.CACHE_TTL) {
-      return statsCache.observable;
-    }
-
-    // Create new observable with cache
-    const observable$ = this.http.get<ApiResponse<Stats>>(`${this.apiUrl}/stats`)
-      .pipe(
-        shareReplay({ bufferSize: 1, refCount: false }),
-        tap(() => {
-          if (statsCache) {
-            statsCache.lastFetch = Date.now();
-          }
-        }),
-      );
-
-    statsCache = {
-      observable: observable$,
-      lastFetch: now,
-    };
-
-    return observable$;
-  }
-
-  invalidateCache(): void {
-    statsCache = null;
-  }
-}
-```
-
-### Map-Based Cache (for endpoints with entity IDs)
-
-```typescript
-// Map-based cache for multiple entities
-const storeStatsCache = new Map<number, CacheEntry<Observable<StoreStats>>>();
-
-getStats(storeId: number): Observable<StoreStats> {
-  const now = Date.now();
-  const cached = storeStatsCache.get(storeId);
-
-  if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
-    return cached.observable;
-  }
-
-  const observable$ = this.http.get<StoreStats>(`${this.apiUrl}/store/${storeId}/stats`)
-    .pipe(
-      shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        const entry = storeStatsCache.get(storeId);
-        if (entry) {
-          entry.lastFetch = Date.now();
-        }
-      }),
-    );
-
-  storeStatsCache.set(storeId, {
-    observable: observable$,
-    lastFetch: now,
-  });
-
-  return observable$;
-}
-
-invalidateCache(storeId?: number): void {
-  if (storeId) {
-    storeStatsCache.delete(storeId);
-  } else {
-    storeStatsCache.clear();
-  }
-}
-```
-
-### Conditional Caching (with parameters)
-
-```typescript
-getStats(fromDate?: string, toDate?: string): Observable<Stats> {
-  // Bypass cache with date parameters
-  if (fromDate || toDate) {
-    const params: any = {};
-    if (fromDate) params.from = fromDate;
-    if (toDate) params.to = toDate;
-
-    return this.http.get<Stats>(`${this.apiUrl}/stats`, { params });
-  }
-
-  // Use cache without parameters
-  const now = Date.now();
-  if (statsCache && (now - statsCache.lastFetch) < this.CACHE_TTL) {
-    return statsCache.observable;
-  }
-
-  const observable$ = this.http.get<Stats>(`${this.apiUrl}/stats`)
-    .pipe(
-      shareReplay({ bufferSize: 1, refCount: false }),
-      tap(() => {
-        if (statsCache) {
-          statsCache.lastFetch = Date.now();
-        }
-      }),
-    );
-
-  statsCache = { observable: observable$, lastFetch: now };
-  return observable$;
-}
-```
-
-## Key Points
-
-### When to use cache:
-- Dashboard general stats
-- List of entities without filters
-- Reference data (roles, currencies, etc.)
-
-### When NOT to use cache:
-- Entity-specific endpoints by ID (use Map instead)
-- With date/filters parameters (bypass cache)
-- Real-time data (logs, health metrics)
-- Paginated lists
-
-### Critical Settings:
-- `refCount: false` - Keeps observable alive even without subscribers
-- `bufferSize: 1` - Replay last value to new subscribers
-- `CACHE_TTL = 30000` - 30 second expiration
-- Static variables outside class - Persists across service instances
-
-## Implemented Services
-
-### Super-Admin (17 endpoints)
-- Dashboard Service (6): getDashboardStats, getOrganizationsStats, getUsersStats, getStoresStats, getDomainsStats, getRolesStats
-- Domains Service: getDomainStatsList
-- Organizations Service: getOrganizationStatsList
-- Stores Service: getStoreStatsList
-- Users Service: getUsersStats (conditional)
-- Roles Service: getRolesStats
-- Audit Service: getAuditStats (conditional)
-- Currencies Service: getCurrencyStats
-- Shipping Service: getMethodStats, getZoneStats
-- Payment Methods Service: getPaymentMethodsStats
-- Templates Service: getTemplateStats
-- Legal Documents Service: getAcceptanceStats (Map-based)
-
-### Organization Module (4 endpoints)
-- Dashboard Service: getDashboardStats (Map-based by orgId-period)
-- Users Service: getUsersStats
-- Audit Service: getAuditStats
-- Stores Service: getOrganizationStoreStats
-
-### Store Module (8 endpoints)
-- Dashboard Service: getDashboardStats, getProductsStats (both Map-based)
-- Orders Service: getOrderStats
-- Products Service: getProductStats (Map-based)
-- Inventory Service: getInventoryStats
-- Customers Service: getStats (Map-based)
-- Expenses Service: getExpensesSummary (conditional)
-
-## Cache Invalidation
-
-Call `invalidateCache()` after:
-- Creating a new entity
-- Editing an entity
-- Deleting an entity
-
-Example:
-```typescript
-createItem(data: CreateDto): Observable<Item> {
-  return this.http.post<Item>(this.apiUrl, data).pipe(
-    tap(() => this.invalidateCache())
-  );
-}
-```
+- `vendix-frontend-state`
+- `vendix-zoneless-signals`
+- `vendix-frontend-data-display`

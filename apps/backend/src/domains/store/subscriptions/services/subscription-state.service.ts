@@ -45,10 +45,33 @@ interface PaymentFailedEventPayload {
  * `cancelled` and `expired` admit a single legal exit to `pending_payment`
  * via the re-subscribe checkout path. The first paid invoice promotes them
  * back through the existing pending → active flow.
+ *
+ * Recovery from grace/suspended via the regular checkout flow (NOT the
+ * direct-charge retryPayment path) ALSO needs `pending_payment` as a legal
+ * intermediate. The checkout commit endpoint creates an open invoice, hands
+ * the user the Wompi widget, and the listener promotes pending_payment →
+ * active on APPROVED. Without these transitions a customer in grace or
+ * suspended cannot self-recover via the same checkout UX they would use to
+ * change plans — they got a 409 "Illegal transition X -> pending_payment"
+ * 409 from the controller and were stuck.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
   draft: ['pending_payment', 'trial', 'active', 'no_plan'],
-  pending_payment: ['active', 'blocked', 'cancelled', 'expired', 'no_plan'],
+  // Recovery checkouts initiated from grace/suspended store the prior state
+  // in `pending_revert_state`. cancelPendingChange uses that field to roll
+  // back, so pending_payment must be able to transition back to those
+  // states. Without these entries the cancel call throws "Illegal transition
+  // pending_payment -> suspended" and leaves the subscription stuck.
+  pending_payment: [
+    'active',
+    'blocked',
+    'cancelled',
+    'expired',
+    'no_plan',
+    'grace_soft',
+    'grace_hard',
+    'suspended',
+  ],
   // RNC-15 anti-arrastre: trial → pending_payment is allowed when the user
   // upgrades from a trial (free) to a paid plan via checkout. The charge runs
   // and on Wompi APPROVED the listener flips pending_payment → active.
@@ -56,9 +79,9 @@ const TRANSITIONS: Record<State, readonly State[]> = {
   // ADR-7: active → pending_payment allowed for mid-cycle paid plan changes.
   // plan_id only mutates in confirmPendingChange() after gateway confirmation.
   active: ['grace_soft', 'cancelled', 'expired', 'no_plan', 'pending_payment'],
-  grace_soft: ['active', 'grace_hard', 'cancelled', 'no_plan'],
-  grace_hard: ['active', 'suspended', 'cancelled', 'expired'],
-  suspended: ['active', 'blocked', 'cancelled'],
+  grace_soft: ['active', 'grace_hard', 'cancelled', 'no_plan', 'pending_payment'],
+  grace_hard: ['active', 'suspended', 'cancelled', 'expired', 'pending_payment'],
+  suspended: ['active', 'blocked', 'cancelled', 'pending_payment'],
   blocked: ['active', 'cancelled'],
   cancelled: ['pending_payment', 'no_plan'],
   expired: ['pending_payment', 'no_plan'],

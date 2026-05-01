@@ -1,4 +1,18 @@
-<div class="w-full max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+<div class="w-full max-w-5xl mx-auto px-4 py-6 lg:py-8 flex flex-col gap-6">
+  @if (!ready()) {
+    <!-- Skeleton while dunning snapshot loads. Avoids the empty-default flash
+         where the banner falls to the catch-all "Tu suscripción requiere
+         atención" copy and renders empty cards before the real payload
+         arrives. -->
+    <div class="animate-pulse flex flex-col gap-6" aria-busy="true" aria-live="polite">
+      <div class="h-24 rounded-2xl bg-gray-200/70"></div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="h-28 rounded-2xl bg-gray-200/70"></div>
+        <div class="h-28 rounded-2xl bg-gray-200/70"></div>
+      </div>
+      <div class="h-20 rounded-2xl bg-gray-200/70"></div>
+    </div>
+  } @else {
   <!-- Critical banner -->
   <app-card customClasses="border-l-4 border-l-red-500 bg-red-50/40">
     <div class="p-5 flex items-start gap-4">
@@ -100,36 +114,42 @@
     </app-card>
   }
 
-  <!-- Pay now CTA -->
-  @if (hasInvoices()) {
-    <app-card>
-      <div class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
-        <div>
-          <p class="text-sm font-semibold text-text-primary">
-            Regulariza tu pago para recuperar el acceso completo
-          </p>
-          <p class="text-xs text-text-secondary mt-1">
+  <!-- Pay now CTA — always visible while in any dunning state, even when
+       no overdue invoice exists yet. When hasInvoices()=false (e.g. grace
+       triggered without a generated invoice), the click routes to the
+       checkout flow for the current plan so the user can re-up the
+       subscription manually. -->
+  <app-card>
+    <div class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-semibold text-text-primary">
+          Regulariza tu pago para recuperar el acceso completo
+        </p>
+        <p class="text-xs text-text-secondary mt-1">
+          @if (hasInvoices()) {
             Procesaremos el cobro de la factura pendiente más reciente.
-          </p>
-        </div>
-        <app-button
-          variant="primary"
-          size="lg"
-          [disabled]="retrying()"
-          (clicked)="onRetryPayment()"
-        >
-          @if (retrying()) {
-            Procesando…
           } @else {
-            <span class="flex items-center gap-2">
-              <app-icon name="credit-card" [size]="18"></app-icon>
-              Pagar ahora
-            </span>
+            Te llevaremos al checkout para renovar tu plan actual.
           }
-        </app-button>
+        </p>
       </div>
-    </app-card>
-  }
+      <app-button
+        variant="primary"
+        size="lg"
+        [disabled]="retrying()"
+        (clicked)="onPayNow()"
+      >
+        @if (retrying()) {
+          Procesando…
+        } @else {
+          <span class="flex items-center gap-2">
+            <app-icon name="credit-card" [size]="18"></app-icon>
+            Pagar ahora
+          </span>
+        }
+      </app-button>
+    </div>
+  </app-card>
 
   <!-- Overdue invoices table -->
   @if (hasInvoices()) {
@@ -191,59 +211,6 @@
     </app-card>
   }
 
-  <!-- Features kept vs lost -->
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-    <app-card>
-      <div class="p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
-          Mantienes acceso a:
-        </h2>
-        @if (featuresKept().length === 0) {
-          <p class="text-xs text-text-secondary">
-            No hay funciones disponibles en este momento.
-          </p>
-        }
-        <ul class="space-y-2">
-          @for (key of featuresKept(); track key) {
-            <li class="flex items-center gap-2 text-sm text-text-primary">
-              <app-icon
-                name="check-circle"
-                [size]="16"
-                class="text-green-600"
-              ></app-icon>
-              <span>{{ featureLabel(key) }}</span>
-            </li>
-          }
-        </ul>
-      </div>
-    </app-card>
-
-    <app-card>
-      <div class="p-5 space-y-3">
-        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
-          Has perdido acceso a:
-        </h2>
-        @if (featuresLost().length === 0) {
-          <p class="text-xs text-text-secondary">
-            Aún tienes todas tus funciones disponibles.
-          </p>
-        }
-        <ul class="space-y-2">
-          @for (key of featuresLost(); track key) {
-            <li class="flex items-center gap-2 text-sm text-text-secondary">
-              <app-icon
-                name="x-circle"
-                [size]="16"
-                class="text-red-500"
-              ></app-icon>
-              <span>{{ featureLabel(key) }}</span>
-            </li>
-          }
-        </ul>
-      </div>
-    </app-card>
-  </div>
-
   <!-- RNC-24 — Contact support CTA, available across every dunning state.
        Surfaces a non-blocking modal that creates a ticket via
        POST /store/subscriptions/support-request. -->
@@ -284,6 +251,7 @@
     Las suscripciones canceladas no son reembolsables ni admiten créditos
     retroactivos.
   </p>
+  }
 </div>
 
 <app-support-request-modal

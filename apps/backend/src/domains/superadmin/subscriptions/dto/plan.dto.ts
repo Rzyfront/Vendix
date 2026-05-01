@@ -52,6 +52,10 @@ export class CreatePlanDto {
   setup_fee?: number;
 
   @IsOptional()
+  @IsBoolean()
+  is_free?: boolean;
+
+  @IsOptional()
   @IsNumber()
   @Min(0)
   trial_days?: number;
@@ -96,6 +100,11 @@ export class CreatePlanDto {
   @IsOptional()
   @IsBoolean()
   is_promotional?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  redemption_code?: string | null;
 
   @IsOptional()
   @IsObject()

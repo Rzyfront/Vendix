@@ -132,7 +132,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
            validates the code against the backend, then routes to the
            checkout for the matching promotional plan with the code in the
            query string. -->
-      <div class="text-center">
+      <div class="text-center mt-8">
         @if (!couponOpen()) {
           <button
             type="button"

@@ -1,188 +1,162 @@
 ---
 name: vendix-customer-auth
 description: >
-  Customer authentication patterns for STORE_ECOMMERCE app using modal-based login/register.
-  Trigger: When implementing customer login, registration, or auth modal in e-commerce frontend.
+  Customer authentication patterns for STORE_ECOMMERCE using modal login/register,
+  store-scoped auth endpoints, tenant context, and legal document acceptance. Trigger:
+  When implementing customer login, registration, auth modal, or ecommerce auth flows.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
-  scope: frontend
+  version: "1.1"
+  scope: [root]
   auto_invoke:
-    - action: "Implementing customer auth in e-commerce"
-    - action: "Creating auth modal components"
-    - action: "Customer registration flow"
+    - "Implementing customer auth in e-commerce"
+    - "Creating auth modal components"
+    - "Customer registration flow"
 ---
 
 ## When to Use
 
-- Implementing customer login/registration in STORE_ECOMMERCE
-- Creating auth modals that don't redirect
-- Working with customer-specific auth flows
-- Integrating TenantFacade with auth
+- Implementing customer login or registration in `STORE_ECOMMERCE`.
+- Editing the ecommerce auth modal or store ecommerce layout.
+- Working with `loginCustomer`, `registerCustomer`, customer tokens, or legal document acceptance.
 
-## Critical Patterns
+## Backend Endpoints
 
-### 1. Modal-Based Auth (No Redirect)
+- `POST /auth/register-customer` is `@Public()`.
+- `POST /auth/login-customer` is `@Public()`.
+- Both collect `ip_address` and `user_agent` from the request.
 
-Customers authenticate via modal using dedicated customer-only methods:
+Files:
+
+- `apps/backend/src/domains/auth/auth.controller.ts`
+- `apps/backend/src/domains/auth/auth.service.ts`
+- `apps/backend/src/domains/auth/dto/register-customer.dto.ts`
+- `apps/backend/src/domains/auth/dto/login-customer.dto.ts`
+
+## DTO Rules
+
+`RegisterCustomerDto` requires `email`, `first_name`, `last_name`, and `store_id`.
+
+`password` is optional in the backend DTO. If provided, it must be at least 8 chars and contain at least one non-alphanumeric character. The current frontend modal requires a password during registration.
+
+Optional registration fields include `phone`, `document_type`, and `document_number`. Phone allows digits plus `+ # * ( ) -` and spaces.
+
+`LoginCustomerDto` requires `email`, `password`, and `store_id`.
+
+## Backend Service Behavior
+
+`registerCustomer()`:
+
+- Finds the store by `store_id`.
+- Rejects duplicate email within the store organization.
+- Uses role name `customer` in lowercase.
+- Generates a temporary password if backend password is omitted.
+- Creates `users` with the store organization id.
+- Creates `user_settings` with `app_type: 'STORE_ECOMMERCE'`.
+- Creates `user_roles` and `store_users` association.
+- Generates tokens with organization context.
+- Emits `customer.created` and sends a store-branded welcome email.
+
+`loginCustomer()`:
+
+- Finds store and user by `email + organization_id`.
+- Validates bcrypt password.
+- Rejects suspended/archived users.
+- Requires role `customer` and association in `store_users`.
+- Generates tokens with `store_id: store.id`.
+- Returns `updatedEnvironment: 'STORE_ECOMMERCE'`.
+
+## Frontend Modal Pattern
+
+Use modal auth, not redirects, for customer login/register.
+
+Files:
+
+- `apps/frontend/src/app/private/layouts/store-ecommerce/store-ecommerce-layout.component.ts`
+- `apps/frontend/src/app/private/layouts/store-ecommerce/components/auth-modal/auth-modal.component.ts`
+- `apps/frontend/src/app/core/store/auth/auth.actions.ts`
+- `apps/frontend/src/app/core/store/auth/auth.facade.ts`
+- `apps/frontend/src/app/core/store/auth/auth.effects.ts`
+- `apps/frontend/src/app/core/store/auth/auth.reducer.ts`
+
+The layout uses signals:
 
 ```typescript
-// store-ecommerce-layout.component.ts
-@Component({...})
-export class StoreEcommerceLayoutComponent {
-  is_auth_modal_open = false;
-  auth_modal_mode: 'login' | 'register' = 'login';
+readonly is_auth_modal_open = signal(false);
+readonly auth_modal_mode = signal<'login' | 'register'>('login');
 
-  login(): void {
-    this.auth_modal_mode = 'login';
-    this.is_auth_modal_open = true;
-    this.show_user_menu = false;
-  }
-
-  register(): void {
-    this.auth_modal_mode = 'register';
-    this.is_auth_modal_open = true;
-    this.show_user_menu = false;
-  }
+login(): void {
+  this.auth_modal_mode.set('login');
+  this.is_auth_modal_open.set(true);
 }
 ```
 
-### 2. Dedicated Customer Auth Methods
+Template binding:
 
-Always use `loginCustomer` and `registerCustomer` for e-commerce, which require `store_id`:
+```html
+<app-auth-modal
+  [isOpen]="is_auth_modal_open()"
+  [initialMode]="auth_modal_mode()"
+  [storeLogo]="store_logo()"
+  [storeName]="store_name()"
+  (closed)="closeAuthModal()"
+/>
+```
+
+## Auth Modal Behavior
+
+`AuthModalComponent` uses signal `input()`/`output()` APIs and signal state. It auto-closes with an `effect()` when `authFacade.isAuthenticated()` becomes true while the modal is open.
+
+Login calls:
 
 ```typescript
-onSubmit(): void {
-  const storeId = this.tenantFacade.getCurrentStoreId();
-
-  if (this.isLogin) {
-    // Dedicated customer login
-    this.authFacade.loginCustomer(email, password, storeId);
-  } else {
-    // Dedicated customer registration
-    this.authFacade.registerCustomer({
-      ...this.authForm.value,
-      store_id: storeId,
-    });
-  }
-}
+const storeId = this.tenantFacade.getCurrentStoreId();
+this.authFacade.loginCustomer(email, password, storeId);
 ```
 
-### 3. Backend Symmetry
-
-Customer auth has its own dedicated endpoints to avoid admin-logic conflicts:
-
-- `POST /api/auth/register-customer`
-- `POST /api/auth/login-customer` (Requires store_id)
-
-### 4. Password Requirements (Backend Strictness)
-
-The backend `RegisterCustomerDto` requires:
-
-- **Min 8 characters**
-- **At least one special character** (e.g., `@`, `#`, `!`)
-
-Ensure your frontend validators match:
+Registration calls:
 
 ```typescript
-password: [
-  "",
-  [
-    Validators.required,
-    Validators.minLength(8),
-    Validators.pattern(/.*[^A-Za-z0-9].*/),
-  ],
-];
+this.authFacade.registerCustomer({
+  email,
+  password,
+  first_name,
+  last_name,
+  store_id: storeId,
+});
 ```
 
-### 4. loginSuccess$ Effect - No Redirect for E-commerce
+The modal requires pending legal documents to be accepted before registration when any are returned by the legal service.
 
-The effect already handles this:
+## NgRx Auth Pattern
 
-```typescript
-// auth.effects.ts
-loginSuccess$ = createEffect(() =>
-  this.actions$.pipe(
-    ofType(AuthActions.loginSuccess),
-    tap(({ message, updated_environment }) => {
-      if (message) this.toast.success(message);
+Dedicated customer actions exist: `loginCustomer`, `loginCustomerSuccess`, `loginCustomerFailure`, `registerCustomer`, `registerCustomerSuccess`, and `registerCustomerFailure`.
 
-      // For customers, updated_environment is null
-      // So we just return without redirecting
-      if (!currentConfig || !updated_environment) {
-        return; // Modal closes via isAuthenticated$ subscription
-      }
-      // ... admin redirect logic
-    }),
-  ),
-);
-```
+`AuthFacade.loginCustomer()` and `AuthFacade.registerCustomer()` dispatch those actions. Facade signals use `toSignal(..., { initialValue })`.
 
-### 5. Dropdown Close Pattern (No Overlay)
+`loginSuccess$` handles customer login success too. Customer login returns `updatedEnvironment: 'STORE_ECOMMERCE'`; do not rely on it being null.
 
-Use `@HostListener` instead of overlay divs:
+`registerCustomerSuccess` persists auth state in the reducer and shows a success toast through its effect.
 
-```typescript
-@HostListener('document:click', ['$event'])
-onClickOutside(event: MouseEvent): void {
-  const target = event.target as HTMLElement;
-  const container = document.querySelector('.user-menu-container');
-  if (this.show_user_menu && container && !container.contains(target)) {
-    this.show_user_menu = false;
-  }
-}
+## Tenant Context
 
-@HostListener('document:keydown.escape')
-onEscapeKey(): void {
-  if (this.show_user_menu) {
-    this.show_user_menu = false;
-  }
-}
-```
+The auth modal obtains `store_id` through `TenantFacade.getCurrentStoreId()`, which reads `currentStore().id` first and falls back to `domainConfig().store_id`.
 
-## Data Flow
+Legal document APIs use `x-store-id` and live in `apps/frontend/src/app/public/ecommerce/services/legal.service.ts`.
 
-```
-User clicks Login
-  -> Opens AuthModal (is_auth_modal_open = true)
-  -> User submits form
-  -> AuthFacade.login() dispatches action
-  -> auth.effects.ts: login$ calls API
-  -> API returns tokens + user
-  -> auth.reducer.ts: loginSuccess sets is_authenticated = true
-  -> auth.effects.ts: loginSuccess$ shows toast, returns (no redirect)
-  -> AuthModal observes isAuthenticated$ = true
-  -> AuthModal.onClose() fires
-  -> User stays on current page, authenticated
-```
+## Rules
 
-## Backend Requirements
+- Use `loginCustomer`/`registerCustomer`, not admin login/register, for ecommerce customers.
+- Use signals for modal state; do not copy old plain boolean examples.
+- Use lowercase `customer` when reasoning about backend role names.
+- Keep frontend password validators aligned with backend password requirements when a password is collected.
+- Do not redirect customers to admin routes after login.
+- Keep document acceptance in the registration flow when pending legal documents exist.
 
-Customer registration endpoint should:
+## Related Skills
 
-1. Create user with role `CUSTOMER`
-2. Create `UserSettings` with `config.app: 'STORE_ECOMMERCE'`
-3. Associate user with store via `store_users` table
-4. Return tokens for immediate login
-
-## Files Reference
-
-| File                                  | Purpose                    |
-| ------------------------------------- | -------------------------- |
-| `store-ecommerce-layout.component.ts` | Layout with modal triggers |
-| `auth-modal/auth-modal.component.ts`  | Modal component            |
-| `auth.effects.ts`                     | loginSuccess$ effect       |
-| `auth.reducer.ts`                     | State management           |
-| `auth.facade.ts`                      | Public API for auth        |
-| `tenant.facade.ts`                    | Store/domain context       |
-
-## Commands
-
-```bash
-# Generate auth modal component
-ng g c private/layouts/store-ecommerce/components/auth-modal --standalone
-
-# Check auth state
-localStorage.getItem('vendix_auth_state')
-```
+- `vendix-ecommerce-checkout` - Guest vs authenticated checkout boundary
+- `vendix-backend-auth` - Backend auth guards and public routes
+- `vendix-zoneless-signals` - Modal signal patterns
+- `vendix-multi-tenant-context` - Store id resolution

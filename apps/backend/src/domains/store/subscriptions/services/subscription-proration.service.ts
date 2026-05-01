@@ -13,7 +13,6 @@ import {
   ProrationKind,
   ComputedPricing,
   InvoicePreview,
-  TrialPlanSwapInfo,
 } from '../types/billing.types';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
@@ -109,12 +108,10 @@ export class SubscriptionProrationService {
     partnerOverride?: {
       organization_id: number;
       margin_pct: Prisma.Decimal;
-      fixed_surcharge: Prisma.Decimal;
+      fixed_surcharge: Prisma.Decimal | null;
       is_active: boolean;
       base_plan: {
-        id: number;
-        base_price: Prisma.Decimal;
-        max_partner_margin_pct: Prisma.Decimal;
+        max_partner_margin_pct: Prisma.Decimal | null;
       } | null;
     } | null,
   ): Promise<{
@@ -142,7 +139,10 @@ export class SubscriptionProrationService {
             margin_pct: partnerOverride.margin_pct,
             fixed_surcharge: partnerOverride.fixed_surcharge,
             is_active: partnerOverride.is_active,
-            base_plan: partnerOverride.base_plan,
+            base_plan: {
+              max_partner_margin_pct:
+                partnerOverride.base_plan?.max_partner_margin_pct ?? null,
+            },
           }
         : null,
     };
@@ -308,12 +308,11 @@ export class SubscriptionProrationService {
     };
     const newPricing = this.billing.computePricing(newSub);
 
-    // S3.4 / RNC-15 — Trial plan-swap path. Only kept for trial → free / promo
-    // changes (target plan also has effective_price = 0). For trial → paid
-    // plans the anti-arrastre rule (RNC-15) requires an immediate full-price
-    // charge: there is no scheduled change, no carry-over of remaining trial
-    // days, the user pays the full destination plan price NOW. That branch
-    // falls through to the re_subscribe-style return below.
+    // S3.4 / RNC-15 — Trial → free must be immediate. Earlier versions kept
+    // the subscription in `trial` until trial_ends_at, which made the new free
+    // plan look active while the old trial cycle still controlled access and
+    // billing dates. Anti-arrastre applies here too: no remaining trial days
+    // are carried into the free plan.
     const now = new Date();
     // Target is free per explicit flag (not heuristic). When the partner
     // override produces a non-zero margin on a base-free plan we still treat
@@ -327,51 +326,23 @@ export class SubscriptionProrationService {
       sub.trial_ends_at.getTime() > now.getTime() &&
       targetIsFree
     ) {
-      const trialSwap: TrialPlanSwapInfo = {
-        old_plan: {
-          id: sub.plan.id,
-          code: sub.plan.code,
-          name: sub.plan.name,
-          base_price: sub.plan.base_price.toFixed(2),
-        },
-        new_plan: {
-          id: newPlan.id,
-          code: newPlan.code,
-          name: newPlan.name,
-          base_price: newPlan.base_price.toFixed(2),
-        },
-        trial_ends_at: sub.trial_ends_at.toISOString(),
-        message: 'Cambio de plan durante trial. Sin cobro hasta fin del trial.',
-      };
-
-      const trialCycleDays = Math.max(
-        1,
-        Math.ceil(
-          ((sub.current_period_end ?? sub.trial_ends_at).getTime() -
-            (sub.current_period_start ?? now).getTime()) /
-            DAY_MS,
-        ),
+      const cycleDays = this.billingCycleDays(
+        newPlan.billing_cycle ?? 'monthly',
       );
-      const trialDaysRemaining = Math.max(
-        0,
-        Math.ceil((sub.trial_ends_at.getTime() - now.getTime()) / DAY_MS),
-      );
-
       return {
         kind: 'trial_plan_swap',
         mode: 'trial_plan_swap',
-        days_remaining: trialDaysRemaining,
-        cycle_days: trialCycleDays,
+        days_remaining: 0,
+        cycle_days: cycleDays,
         old_effective_price: (
           paidBaseline?.effectivePrice ?? DECIMAL_ZERO
         ).toFixed(2),
         new_effective_price: newPricing.effective_price.toFixed(2),
         proration_amount: DECIMAL_ZERO.toFixed(2),
-        applies_immediately: false,
+        applies_immediately: true,
         invoice_to_issue: null,
         credit_to_apply_next_cycle: DECIMAL_ZERO.toFixed(2),
-        trial_swap: trialSwap,
-        effective_at: sub.trial_ends_at.toISOString(),
+        effective_at: now.toISOString(),
         target_plan_is_free: true,
       };
     }
@@ -460,7 +431,7 @@ export class SubscriptionProrationService {
     const isDowngrade = kind === 'downgrade';
     const isPlanChange = isUpgrade || isDowngrade;
     const currentCycleIsYearly =
-      (sub.plan?.billing_cycle ?? 'monthly') === 'yearly';
+      (sub.plan?.billing_cycle ?? 'monthly') === 'annual';
 
     // Unused value of the current cycle: baselinePrice × (daysRemaining /
     // cycleDays). Only meaningful when there IS a paid baseline (not free
@@ -631,17 +602,15 @@ export class SubscriptionProrationService {
     const prorationAmount = new Prisma.Decimal(preview.proration_amount);
     const creditAmount = new Prisma.Decimal(preview.credit_to_apply_next_cycle);
 
-    // S3.4 — Trial plan-swap path. Re-validate from preview (server-side
-    // authoritative). Inside a Serializable + FOR UPDATE transaction:
-    //   - Update plan_id + pricing fields (effective_price, vendix_base_price,
-    //     partner_margin_amount).
-    //   - Do NOT transition state — subscription stays in `trial`.
-    //   - Do NOT emit any invoice; the next charge happens at trial_ends_at
-    //     via the regular trial-end pipeline.
-    //   - Emit `plan_changed` with mode='trial_plan_swap' and the trial
-    //     remaining days for audit / observability.
+    // S3.4 — Trial → free path. Re-validate from preview (server-side
+    // authoritative). It is free, so no invoice is emitted; it is also an
+    // immediate fresh free cycle, so the old trial dates are cleared and the
+    // subscription becomes active now.
     if (preview.kind === 'trial_plan_swap') {
-      const trialRemainingDays = preview.days_remaining;
+      const now = new Date();
+      const cycleMs = this.billingCycleMs(newPlan.billing_cycle);
+      const periodEnd = new Date(now.getTime() + cycleMs);
+      const previousTrialEndsAt = sub.trial_ends_at?.toISOString() ?? null;
       const result = await this.prisma.$transaction(
         async (tx: any) => {
           const locked = (await tx.$queryRaw(
@@ -654,12 +623,46 @@ export class SubscriptionProrationService {
           const updated = await tx.store_subscriptions.update({
             where: { id: subscriptionId },
             data: {
+              state: 'active',
               plan_id: newPlanId,
+              paid_plan_id: newPlanId,
               effective_price: newPricing.effective_price,
               vendix_base_price: newPricing.base_price,
               partner_margin_amount: newPricing.margin_amount,
-              resolved_at: new Date(),
-              updated_at: new Date(),
+              current_period_start: now,
+              current_period_end: periodEnd,
+              next_billing_at: periodEnd,
+              trial_ends_at: null,
+              grace_soft_until: null,
+              grace_hard_until: null,
+              suspend_at: null,
+              scheduled_plan_change_at: null,
+              scheduled_plan_id: null,
+              pending_plan_id: null,
+              pending_change_invoice_id: null,
+              pending_change_kind: null,
+              pending_change_started_at: null,
+              pending_revert_state: null,
+              auto_renew: true,
+              resolved_at: now,
+              updated_at: now,
+            },
+          });
+
+          await tx.subscription_events.create({
+            data: {
+              store_subscription_id: subscriptionId,
+              type: 'state_transition',
+              from_state: 'trial',
+              to_state: 'active',
+              payload: {
+                reason: 'trial_to_free_checkout',
+                from_plan_id: oldPlanId,
+                to_plan_id: newPlanId,
+                previous_trial_ends_at: previousTrialEndsAt,
+                current_period_start: now.toISOString(),
+                current_period_end: periodEnd.toISOString(),
+              } as Prisma.InputJsonValue,
             },
           });
 
@@ -671,12 +674,13 @@ export class SubscriptionProrationService {
                 from_plan_id: oldPlanId,
                 to_plan_id: newPlanId,
                 mode: 'trial_plan_swap',
-                trial_remaining_days: trialRemainingDays,
-                trial_ends_at: sub.trial_ends_at?.toISOString() ?? null,
-                effective_at:
-                  sub.trial_ends_at?.toISOString() ?? new Date().toISOString(),
+                previous_trial_ends_at: previousTrialEndsAt,
+                effective_at: now.toISOString(),
+                current_period_start: now.toISOString(),
+                current_period_end: periodEnd.toISOString(),
                 proration_amount: '0.00',
                 kind: 'trial_plan_swap',
+                applies_immediately: true,
               } as Prisma.InputJsonValue,
             },
           });
@@ -696,7 +700,18 @@ export class SubscriptionProrationService {
         prorationAmount: '0.00',
         kind: 'trial_plan_swap',
         mode: 'trial_plan_swap',
-        trialRemainingDays,
+        appliesImmediately: true,
+        previousTrialEndsAt,
+        currentPeriodStart: now.toISOString(),
+        currentPeriodEnd: periodEnd.toISOString(),
+      });
+
+      this.eventEmitter.emit('subscription.state.changed', {
+        storeId: sub.store_id,
+        subscriptionId,
+        fromState: 'trial',
+        toState: 'active',
+        reason: 'trial_to_free_checkout',
       });
 
       return result;

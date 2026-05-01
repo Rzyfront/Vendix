@@ -1,189 +1,107 @@
 ---
 name: vendix-mcp-server
 description: >
-  MCP (Model Context Protocol) Gateway: resources, tools, prompts, authentication, rate limiting, audit logging, and protocol compliance.
-  Trigger: When working with the MCP server, adding MCP resources/tools/prompts, or configuring MCP authentication.
+  MCP Gateway for external AI clients: resources, tools, prompts, JWT auth, rate limiting,
+  audit logging, and protocol responses. Trigger: When working with MCP server endpoints,
+  adding MCP resources/tools/prompts, configuring MCP auth, or exposing Vendix data to AI clients.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Working with MCP server"
     - "Adding MCP resources or tools"
     - "Configuring MCP authentication"
-    - "Working with McpController"
     - "Exposing Vendix data to AI clients"
+    - "Working with McpController"
 ---
 
-## When to Use
+## Source of Truth
 
-- Working with the MCP Gateway (`/mcp/*` endpoints)
-- Adding new resources, tools, or prompts to MCP
-- Configuring MCP authentication or rate limiting
-- Integrating external AI clients (Claude Desktop, ChatGPT, etc.)
-- Understanding MCP protocol compliance
-
----
-
-## What is MCP?
-
-MCP (Model Context Protocol) is an open protocol that standardizes how AI applications connect to data sources and tools. Vendix exposes its business data and operations as an MCP server, allowing any MCP-compatible AI client to:
-
-- **Read** business data (products, inventory, reports)
-- **Execute** operations (search, query tools)
-- **Use** prompt templates (pre-configured AI applications)
-
----
-
-## Architecture
-
-```
-┌─────────────────────────────────────────┐
-│         MCP Clients (External)          │
-│  Claude Desktop │ ChatGPT │ Custom      │
-└──────────────────┬──────────────────────┘
-                   │ POST /mcp/*
-                   ▼
-┌─────────────────────────────────────────┐
-│            McpAuthGuard                  │
-│  JWT validation → Rate limit → Context   │
-└──────────────────┬──────────────────────┘
-                   │
-┌──────────────────▼──────────────────────┐
-│           McpController                  │
-│  initialize │ resources │ tools │ prompts│
-└──────┬──────────┬──────────┬────────────┘
-       ▼          ▼          ▼
-  Resources    Tools      Prompts
-  Provider    Provider    Provider
-  (Prisma)   (Registry)  (DB Apps)
-```
-
----
+- Controller: `apps/backend/src/domains/store/mcp/mcp.controller.ts`
+- Auth: `apps/backend/src/domains/store/mcp/mcp-auth.service.ts`
+- Guard: `apps/backend/src/domains/store/mcp/guards/mcp-auth.guard.ts`
+- Audit: `apps/backend/src/domains/store/mcp/mcp-audit.service.ts`
+- Providers: `apps/backend/src/domains/store/mcp/providers/`
 
 ## Endpoints
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/mcp/initialize` | MCP handshake (version, capabilities) |
-| POST | `/mcp/resources/list` | List available resources |
-| POST | `/mcp/resources/read` | Read a specific resource |
-| POST | `/mcp/tools/list` | List available tools |
-| POST | `/mcp/tools/call` | Execute a tool |
-| POST | `/mcp/prompts/list` | List prompt templates |
-| POST | `/mcp/prompts/get` | Get a prompt with variables |
+Base route: `/mcp`.
 
-All endpoints (except initialize) are **audit-logged** to `ai_engine_logs`.
+- `POST /initialize`
+- `POST /resources/list`
+- `POST /resources/read`
+- `POST /tools/list`
+- `POST /tools/call`
+- `POST /prompts/list`
+- `POST /prompts/get`
 
----
+Controller uses `@Public()` plus `@UseGuards(McpAuthGuard)`. `initialize` returns protocol version `2024-11-05`, capabilities for resources/tools/prompts, and server `vendix-mcp-server` v`1.0.0`.
 
-## Authentication
+Audit logging runs for all endpoints except `initialize`.
 
-```
+## Auth And Rate Limit
+
 Token sources:
-  1. Authorization: Bearer <JWT>
-  2. Query param: ?token=<JWT>
 
-Token is the same JWT used by the regular Vendix API.
-Guard sets request.user → RequestContextInterceptor propagates context.
-```
+- `Authorization: Bearer <JWT>`.
+- Query param `?token=...`.
 
-**Rate limit:** 100 requests per minute per store (Redis-backed).
+`McpAuthGuard` sets `request.mcpAuth` and `request.user` for `RequestContextInterceptor` propagation.
 
----
+Rate limit:
 
-## Adding a New Resource
+- Redis key `mcp:ratelimit:{storeId}`.
+- 100 requests per 60 seconds.
+- Uses `INCR` and sets `EXPIRE` only when current count is 1.
 
-In `apps/backend/src/domains/store/mcp/providers/mcp-resource.provider.ts`:
+## Resources
 
-```typescript
-// 1. Add to listResources()
-{
-  uri: `vendix://customers/${storeId}`,
-  name: 'Customer List',
-  description: 'Active customers with contact info',
-  mimeType: 'application/json',
-}
+Current resource list has 7 URI patterns:
 
-// 2. Add handler in readResource()
-if (uri.startsWith('vendix://customers/')) {
-  const customers = await this.prisma.customers.findMany({
-    where: { is_active: true },
-    select: { id: true, first_name: true, last_name: true, email: true },
-    take: 100,
-  });
-  return {
-    uri,
-    mimeType: 'application/json',
-    text: JSON.stringify({ store_id: context?.store_id, customers }),
-  };
-}
-```
+- `vendix://products/{storeId}`
+- `vendix://inventory/{storeId}`
+- `vendix://reports/sales/{storeId}`
+- `vendix://catalog/categories/{storeId}`
+- `vendix://catalog/category/{storeId}/{categoryId}`
+- `vendix://catalog/product/{storeId}/{productId}`
+- `vendix://catalog/featured/{storeId}`
 
-## Adding Tools to MCP
+`McpResourceProvider` uses `StorePrismaService`; actual filtering depends on request context/scoped Prisma, not blindly on the store id embedded in URI.
 
-Tools registered in `AIToolRegistry` are **automatically available** via MCP. Just create a new tool (see `vendix-ai-agent-tools` skill) and it appears in MCP tool listing.
+Security caveat: product detail currently exposes business-sensitive fields such as `cost_price` and `profit_margin`. Review before expanding MCP resources or exposing to external clients.
 
-## Available Resources
+## Tools
 
-| URI Pattern | Data |
-|------------|------|
-| `vendix://products/{storeId}` | Active products (100 max) |
-| `vendix://inventory/{storeId}` | Stock levels |
-| `vendix://reports/sales/{storeId}` | Recent orders + revenue |
+MCP tools come from `AIToolRegistry`.
 
----
+- Listing uses `context.permissions || context.roles` for availability.
+- Calls use `toolRegistry.executeTool()`.
+- Errors are converted to MCP style `{ isError: true, content: [...] }`.
 
-## Error Codes
+Tool quality caveat: many AI tools are placeholders; only inventory tools are currently service-backed.
 
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `AI_MCP_001` | 401 | Authentication failed |
-| `AI_MCP_002` | 403 | Tool not permitted |
-| `AI_MCP_003` | 429 | Rate limit exceeded |
-| `AI_MCP_004` | 400 | Invalid request format |
+## Prompts
 
----
+`McpPromptProvider` lists active `ai_engine_applications`, extracts `{{variables}}`, and returns prompts. `getPrompt` uses `ai_engine_applications.findUnique({ key })`.
 
-## File Reference
+Current prompt response uses user messages and prepends system prompt as `Context: ...`.
 
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/domains/store/mcp/mcp.controller.ts` | 7 MCP endpoints |
-| `apps/backend/src/domains/store/mcp/mcp.module.ts` | Module registration |
-| `apps/backend/src/domains/store/mcp/mcp-auth.service.ts` | JWT validation + rate limit |
-| `apps/backend/src/domains/store/mcp/mcp-audit.service.ts` | Audit logging |
-| `apps/backend/src/domains/store/mcp/guards/mcp-auth.guard.ts` | Auth guard |
-| `apps/backend/src/domains/store/mcp/providers/mcp-resource.provider.ts` | Resources |
-| `apps/backend/src/domains/store/mcp/providers/mcp-tool.provider.ts` | Tools (wraps Registry) |
-| `apps/backend/src/domains/store/mcp/providers/mcp-prompt.provider.ts` | Prompts |
+## Audit
 
----
+`McpAuditService` logs through `AILoggingService.logRequest()` with app key `mcp:${method}`, model set to resource/tool/prompt name or `mcp`, and zero tokens/cost.
 
-## Protocol Compliance
+## Rules
 
-- **Version:** `2024-11-05`
-- **Transport:** HTTP (POST endpoints)
-- **Capabilities:** resources, tools, prompts (listChanged: false)
-- **Server info:** `vendix-mcp-server v1.0.0`
-
----
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Exposing sensitive data | Never include API keys, passwords in resources |
-| No rate limiting | Already enforced: 100 req/min per store |
-| Missing audit | All endpoints auto-log via `McpAuditService` |
-| Resource too large | Limit query results (take: 100) |
-| Using @Public without guard | MCP uses `@Public() + @UseGuards(McpAuthGuard)` |
-
----
+- Never expose API keys, passwords, or tenant data outside request context.
+- Keep resource result limits small.
+- Add new operational capabilities as AI tools first, then expose through MCP automatically.
+- Verify tool permissions and actual service-backed behavior before documenting them as production-ready.
 
 ## Related Skills
 
-- `vendix-ai-platform-core` — Core AI Engine
-- `vendix-ai-agent-tools` — Tool Registry (shared with MCP)
-- `vendix-backend-auth` — JWT authentication patterns
+- `vendix-ai-agent-tools`
+- `vendix-ai-platform-core`
+- `vendix-backend-auth`
+- `vendix-prisma-scopes`

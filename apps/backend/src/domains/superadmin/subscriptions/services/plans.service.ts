@@ -8,6 +8,23 @@ import { CreatePlanDto, UpdatePlanDto, PlanQueryDto } from '../dto';
 export class PlansService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
+  private normalizeRedemptionCode(value: string | null | undefined) {
+    if (value === undefined) return undefined;
+    const code = String(value ?? '').trim();
+    return code.length > 0 ? code : null;
+  }
+
+  private resolvePlanType(
+    planType: string | undefined,
+    isPromotional: boolean | undefined,
+    fallback: string = 'base',
+  ) {
+    if (isPromotional === true) return 'promotional';
+    const nextPlanType = planType ?? fallback;
+    if (isPromotional === false && nextPlanType === 'promotional') return 'base';
+    return nextPlanType;
+  }
+
   async create(dto: CreatePlanDto) {
     const existing = await this.prisma.subscription_plans.findUnique({
       where: { code: dto.code },
@@ -17,17 +34,21 @@ export class PlansService {
       throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
     }
 
+    const planType = this.resolvePlanType(dto.plan_type, dto.is_promotional);
+    const isPromotional = planType === 'promotional';
+
     return this.prisma.subscription_plans.create({
       data: {
         code: dto.code,
         name: dto.name,
         description: dto.description || null,
-        plan_type: (dto.plan_type as any) || 'base',
+        plan_type: planType as any,
         state: (dto.state as any) || 'draft',
         billing_cycle: (dto.billing_cycle as any) || 'monthly',
-        base_price: dto.base_price,
+        base_price: dto.is_free ? 0 : dto.base_price,
         currency: dto.currency || 'COP',
-        setup_fee: dto.setup_fee || null,
+        setup_fee: dto.is_free ? null : dto.setup_fee || null,
+        is_free: dto.is_free ?? false,
         trial_days: dto.trial_days ?? 0,
         grace_period_soft_days: dto.grace_period_soft_days ?? 5,
         grace_period_hard_days: dto.grace_period_hard_days ?? 10,
@@ -35,9 +56,10 @@ export class PlansService {
         cancellation_day: dto.cancellation_day ?? 45,
         feature_matrix: (dto.feature_matrix ?? {}) as any,
         ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
-        resellable: dto.resellable ?? false,
+        resellable: dto.resellable ?? !isPromotional,
         max_partner_margin_pct: dto.max_partner_margin_pct || null,
-        is_promotional: dto.is_promotional ?? false,
+        is_promotional: isPromotional,
+        redemption_code: this.normalizeRedemptionCode(dto.redemption_code),
         promo_rules: (dto.promo_rules as any) || null,
         promo_priority: dto.promo_priority ?? 0,
         is_popular: dto.is_popular ?? false,
@@ -130,18 +152,39 @@ export class PlansService {
       }
     }
 
+    const nextIsFree = dto.is_free ?? existing.is_free;
+    const nextPlanType = this.resolvePlanType(
+      dto.plan_type,
+      dto.is_promotional,
+      existing.plan_type,
+    );
+    const nextIsPromotional = nextPlanType === 'promotional';
+    const isLeavingPromotional =
+      (existing.is_promotional || existing.plan_type === 'promotional') &&
+      !nextIsPromotional;
+    const redemptionCode = this.normalizeRedemptionCode(dto.redemption_code);
+
     return this.prisma.subscription_plans.update({
       where: { id },
       data: {
         ...(dto.code && { code: dto.code }),
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.plan_type && { plan_type: dto.plan_type as any }),
+        plan_type: nextPlanType as any,
         ...(dto.state && { state: dto.state as any }),
         ...(dto.billing_cycle && { billing_cycle: dto.billing_cycle as any }),
-        ...(dto.base_price !== undefined && { base_price: dto.base_price }),
+        ...(nextIsFree
+          ? { base_price: 0 }
+          : dto.base_price !== undefined
+            ? { base_price: dto.base_price }
+            : {}),
         ...(dto.currency && { currency: dto.currency }),
-        ...(dto.setup_fee !== undefined && { setup_fee: dto.setup_fee }),
+        ...(nextIsFree
+          ? { setup_fee: null }
+          : dto.setup_fee !== undefined
+            ? { setup_fee: dto.setup_fee }
+            : {}),
+        ...(dto.is_free !== undefined && { is_free: dto.is_free }),
         ...(dto.trial_days !== undefined && { trial_days: dto.trial_days }),
         ...(dto.grace_period_soft_days !== undefined && {
           grace_period_soft_days: dto.grace_period_soft_days,
@@ -161,12 +204,17 @@ export class PlansService {
         ...(dto.ai_feature_flags !== undefined && {
           ai_feature_flags: dto.ai_feature_flags as any,
         }),
-        ...(dto.resellable !== undefined && { resellable: dto.resellable }),
+        ...(isLeavingPromotional
+          ? { resellable: true }
+          : dto.resellable !== undefined
+            ? { resellable: dto.resellable }
+            : {}),
         ...(dto.max_partner_margin_pct !== undefined && {
           max_partner_margin_pct: dto.max_partner_margin_pct,
         }),
-        ...(dto.is_promotional !== undefined && {
-          is_promotional: dto.is_promotional,
+        is_promotional: nextIsPromotional,
+        ...(redemptionCode !== undefined && {
+          redemption_code: redemptionCode,
         }),
         ...(dto.promo_rules !== undefined && {
           promo_rules: dto.promo_rules as any,

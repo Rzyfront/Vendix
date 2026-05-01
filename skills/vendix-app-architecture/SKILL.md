@@ -1,269 +1,82 @@
 ---
 name: vendix-app-architecture
 description: >
-  Explains the Vendix Public and Private App architecture, Domain Types, and App Environments.
-  Trigger: When asking about different apps, environments (ORG_ADMIN, STORE_ADMIN), or domain logic.
+  Vendix app environments, public/private web apps, mobile app boundary, and domain/app type resolution.
+  Trigger: When asking about different apps, environments (VENDIX_ADMIN, ORG_ADMIN, STORE_ADMIN, STORE_ECOMMERCE), mobile boundaries, or domain logic.
 license: Apache-2.0
 metadata:
   author: rzyfront
   version: "1.0"
   scope: [root]
-  auto_invoke: "Understanding Public/Private Apps and Domains"
+  auto_invoke:
+    - "Understanding Public/Private Apps and Domains"
+    - "Understanding Vendix app environments or mobile boundary"
 ---
 
-## When to Use
+# Vendix App Architecture
 
-Use this skill when:
+## Purpose
 
-- Understanding the difference between Public and Private apps.
-- Configuring domains or environments.
-- Debugging routing issues related to domain resolution.
-- Setting up new user roles and their corresponding environments.
+Use this skill to understand Vendix app environments and app boundaries. Detailed settings, panel UI, tenant context, and frontend implementation rules live in their specialized skills.
 
-## 🏗️ Core Architecture: One Codebase, Multiple Apps
+## App Map
 
-Vendix is a **multi-tenant monorepo** where a single frontend application (`apps/frontend`) dynamically behaves as different "Apps" based on the **Domain** and **User Context**.
+| App Area | Path | Technology | Scope |
+| --- | --- | --- | --- |
+| Frontend web | `apps/frontend` | Angular 20 | Public landing/ecommerce and private admin panels |
+| Mobile app | `apps/mobile` | Expo/React Native | Native/mobile app boundary; detailed mobile skills are a knowledge gap |
+| Backend API | `apps/backend` | NestJS + Prisma | Domain resolution, auth, tenancy, APIs |
 
-### 🌍 App Environments
+## Web App Environments
 
-The system defines specific "Environments" that determine the UI and features available.
+`AppType` is the canonical app environment concept for the Angular web app. It is synchronized with backend `app_type_enum` and used by `domain_settings.app_type`, `user_settings.app_type`, and frontend app config.
 
-| Environment           | Type    | Target User           | Description                                             |
-| :-------------------- | :------ | :-------------------- | :------------------------------------------------------ |
-| **`VENDIX_ADMIN`**    | Private | Super Admin           | Platform administration (SaaS owners).                  |
-| **`ORG_ADMIN`**       | Private | Org Owner / Admin     | Manages the Organization, Billing, and global settings. |
-| **`STORE_ADMIN`**     | Private | Store Manager / Staff | Manages a specific Store (POS, Inventory, Orders).      |
-| **`STORE_ECOMMERCE`** | Public  | Customers             | Public online store for shopping.                       |
-| **`VENDIX_LANDING`**  | Public  | Visitors              | Public landing page for the Vendix SaaS platform.       |
-| **`ORG_LANDING`**     | Public  | Visitors              | Public landing page for an Organization (optional).     |
+| AppType | Access | User | Typical Route |
+| --- | --- | --- | --- |
+| `VENDIX_LANDING` | Public | SaaS visitors | `/` |
+| `VENDIX_ADMIN` | Private | Vendix super admin | `/super-admin/*` |
+| `ORG_LANDING` | Public | Organization visitors | `/` on org domain |
+| `ORG_ADMIN` | Private | Organization owner/admin | `/admin/*` |
+| `STORE_LANDING` | Public | Store visitors | `/` on store domain |
+| `STORE_ADMIN` | Private | Store staff/admin | `/admin/*` |
+| `STORE_ECOMMERCE` | Public/customer | Store customers | `/`, catalog, cart, checkout |
 
----
+`AppEnvironment` exists as a compatibility alias for `AppType`; prefer `AppType` in new code.
 
-## 🔍 Domain Resolution Logic
+## Domain Resolution
 
-The frontend determines which "App" to load based on the **Host Resolution** provided by the backend. This is handled by `AppConfigService`.
+- Frontend web resolves host/app context through `AppConfigService` and backend domain resolution.
+- `app_type` determines which app environment loads.
+- `domain_type` is legacy/categorization and must not be treated as the primary app selector.
+- Authenticated users may have `user_settings.app_type` to select or restore their preferred admin environment.
 
-**CRITICAL:** The decision of which app to load is **NOT** inferred solely from the URL pattern. It is explicitly returned by the backend in the `app` property (from `domain_settings.app_type`).
+## Ownership Boundaries
 
-### Resolution Response Structure
+| Concern | Owning Skill |
+| --- | --- |
+| `store_settings` / `organization_settings` structure | `vendix-settings-system` |
+| Branding and settings source of truth | `vendix-settings-system` / `vendix-frontend-theme` |
+| Sidebar/module visibility through `panel_ui` | `vendix-panel-ui` |
+| Backend request tenant context | `vendix-multi-tenant-context` |
+| Scoped Prisma access | `vendix-prisma-scopes` |
+| Angular web Signals/Zoneless patterns | `vendix-zoneless-signals` |
+| Expo/React Native implementation | Knowledge gap until mobile-specific skills are created |
 
-When the frontend calls `/api/domains/resolve`, the backend returns a configuration object. The `app` key is the **Source of Truth** (synchronized with `app_type_enum`).
+## Public vs Private Rules
 
-```json
-{
-  "success": true,
-  "data": {
-    "hostname": "vendix.com",
-    "app": "VENDIX_LANDING",  // <--- THIS DETERMINES THE APP (from domain_settings.app_type)
-    "branding": { ... },      // Branding from store_settings
-    "fonts": { ... },         // Fonts from store_settings
-    "ecommerce": { ... },     // Ecommerce config from store_settings
-    "publication": { ... },   // Publication config from store_settings
-    "domain_type": "vendix_core",
-    "config": {               // Legacy - kept for backward compatibility
-      "app": "VENDIX_LANDING"
-    }
-  }
-}
-```
+- Public web apps do not require staff/admin JWT for page access, though customer auth may apply to account/checkout features.
+- Private admin apps require authentication and role/permission enforcement.
+- `panel_ui` controls visible menu modules only; it is not backend authorization.
+- Backend permissions and guards remain the source of enforcement for protected operations.
 
-### App Type Enum (Backend + Frontend)
+## Mobile Boundary
 
-Both backend and frontend use the **same enum values** for `app_type`:
+`apps/mobile` is a real Expo/React Native workspace. Existing frontend web skills describe responsive web behavior, not native mobile behavior. When planning mobile work, mark missing guidance as a knowledge gap and propose a focused mobile skill before standardizing patterns.
 
-```typescript
-// Frontend: apps/frontend/src/app/core/models/environment.enum.ts
-// Backend: Prisma schema - app_type_enum
-export enum AppType {
-  VENDIX_LANDING = "VENDIX_LANDING", // Public: Vendix SaaS landing
-  VENDIX_ADMIN = "VENDIX_ADMIN", // Private: Super admin panel
-  ORG_LANDING = "ORG_LANDING", // Public: Organization landing
-  ORG_ADMIN = "ORG_ADMIN", // Private: Organization admin
-  STORE_LANDING = "STORE_LANDING", // Public: Store landing
-  STORE_ADMIN = "STORE_ADMIN", // Private: Store admin panel
-  STORE_ECOMMERCE = "STORE_ECOMMERCE", // Public: Store e-commerce
-}
-```
+## Related Skills
 
-### Database Schema
-
-```prisma
-// Prisma schema
-enum app_type_enum {
-  VENDIX_LANDING
-  VENDIX_ADMIN
-  ORG_LANDING
-  ORG_ADMIN
-  STORE_LANDING
-  STORE_ADMIN
-  STORE_ECOMMERCE
-}
-
-model domain_settings {
-  app_type  app_type_enum  @default(VENDIX_LANDING) // <--- Source of Truth
-  config    Json?                                      // Now nullable (legacy)
-  // ...
-}
-
-model user_settings {
-  app_type  app_type_enum  @default(STORE_ADMIN) // Override post-login
-  // ...
-}
-```
-
-### Domain Types vs App Types
-
-**IMPORTANT:** There are TWO related but distinct concepts:
-
-1. **`app_type`** (`AppType` enum) - **Primary Source of Truth**
-   - Determines which App/Environment loads
-   - Stored in `domain_settings.app_type`
-   - Can be overridden by `user_settings.app_type` after login
-   - Directly controls UI/UX and available features
-
-2. **`domain_type`** (`DomainType` enum) - **Legacy/Categorization**
-   - Categorizes the domain based on the resolved entity
-   - Used for database relationships and organization
-   - **NOT** the primary driver for app selection
-   - Will eventually be deprecated in favor of `app_type`
-
-#### App Type → Domain Type Mapping
-
-| `app_type`        | `domain_type`  | Example Domain                |
-| :---------------- | :------------- | :---------------------------- |
-| `VENDIX_LANDING`  | `vendix_core`  | `vendix.com`                  |
-| `VENDIX_ADMIN`    | `vendix_core`  | `app.vendix.com/admin`        |
-| `ORG_LANDING`     | `organization` | `my-company.vendix.com`       |
-| `ORG_ADMIN`       | `organization` | `my-company.vendix.com/admin` |
-| `STORE_LANDING`   | `store`        | `store.example.com`           |
-| `STORE_ADMIN`     | `store`        | `store.example.com/admin`     |
-| `STORE_ECOMMERCE` | `ecommerce`    | `shop.example.com`            |
-
-**NOTE:** A single domain can resolve to different `app_type` values based on:
-
-- User authentication status
-- URL path (`/admin/*` vs `/`)
-- User permissions and `user_settings.app_type` override
-
----
-
-## 🔐 Private vs Public Access
-
-### Private Apps (Admin Panels)
-
-- **Requires Auth:** Yes (JWT).
-- **Guards:** `AuthGuard`, `RolesGuard`.
-- **Routing Path:** `/admin/*`, `/superadmin/*`.
-- **Features:** Defined by `DefaultPanelUIService` in backend.
-  - _Example:_ An `ORG_ADMIN` user sees "Stores", "Billing", "Users".
-  - _Example:_ A `STORE_ADMIN` user sees "POS", "Orders", "Inventory".
-
-### Public Apps (Storefronts / Landing)
-
-- **Requires Auth:** No (Optional for Customer Accounts).
-- **Guards:** None (or `PublicGuard`).
-- **Routing Path:** `/` (Root), `/catalog`, `/cart`.
-- **Features:** Product catalog, Cart, Checkout.
-
----
-
-## 🛠️ Configuration & Context
-
-### Backend: Store Settings & Branding
-
-Branding and app configuration now comes from `store_settings` rather than `domain_settings.config`:
-
-```typescript
-// Backend: StoreSettings interface
-interface StoreSettings {
-  branding: {
-    name: string;
-    primary_color: string;
-    secondary_color: string;
-    logo_url?: string;
-    favicon_url?: string;
-    custom_css?: string;
-  };
-  fonts: {
-    primary: string;
-    secondary: string;
-    headings: string;
-  };
-  publication: {
-    store_published: boolean;
-    ecommerce_enabled: boolean;
-    landing_enabled: boolean;
-    maintenance_mode: boolean;
-  };
-  ecommerce: {
-    enabled: boolean;
-    slider?: { ... };
-    catalog?: { ... };
-    cart?: { ... };
-    checkout?: { ... };
-  };
-}
-```
-
-### User Settings: App Type Override
-
-Users can have a default `app_type` override in their settings:
-
-```json
-// user_settings
-{
-  "app_type": "STORE_ADMIN", // Default app for this user
-  "config": {
-    "panel_ui": {
-      "ORG_ADMIN": { "dashboard": true, "stores": true },
-      "STORE_ADMIN": { "pos": true, "orders": true }
-    }
-  }
-}
-```
-
-### Frontend: Environment Switching
-
-Users can switch between environments (e.g., from `ORG_ADMIN` to `STORE_ADMIN`) if they have permissions.
-
-- **Service:** `AppConfigService` (formerly `DomainConfigService`)
-- **Action:** Updates `user_settings.app_type` and redirects to the appropriate route.
-
-```typescript
-// Frontend: App type switching
-switchAppType(newAppType: AppType) {
-  // Update user preference on backend
-  this.userService.updateSettings({ app_type: newAppType });
-  // Redirect to appropriate route
-  this.router.navigate(this.getRouteForAppType(newAppType));
-}
-```
-
----
-
-## 📝 Decision Tree: Which App is this?
-
-```
-Incoming Request Hostname
-├── Is it the main SaaS domain? (vendix.com)
-│   ├── Is user logged in & SuperAdmin? → VENDIX_ADMIN
-│   └── Else → VENDIX_LANDING
-│
-├── Is it an Organization domain? (org.vendix.com)
-│   ├── Is user logged in & OrgUser? → ORG_ADMIN
-│   └── Else → ORG_LANDING (or redirect to Login)
-│
-└── Is it a Store domain? (store.org.vendix.com)
-    ├── Is URL path /admin/* ?
-    │   └── Is user logged in & StoreUser? → STORE_ADMIN
-    └── Else → STORE_ECOMMERCE
-```
-
-## Resources
-
-- **App Type Enum (Frontend)**: `apps/frontend/src/app/core/models/environment.enum.ts`
-- **Domain Config Interface**: `apps/frontend/src/app/core/models/domain-config.interface.ts`
-- **App Config Service**: `apps/frontend/src/app/core/services/app-config.service.ts`
-- **Routing Skill**: [vendix-frontend-routing](../vendix-frontend-routing/SKILL.md)
-- **Backend Defaults**: `apps/backend/src/domains/store/settings/defaults/default-store-settings.ts`
-- **Public Domains Service**: `apps/backend/src/domains/public/domains/public-domains.service.ts`
+- `vendix-core` - Repository-wide architecture map
+- `vendix-settings-system` - Settings and branding persistence
+- `vendix-panel-ui` - Admin module visibility
+- `vendix-multi-tenant-context` - Backend tenant context
+- `vendix-zoneless-signals` - Angular web implementation rules

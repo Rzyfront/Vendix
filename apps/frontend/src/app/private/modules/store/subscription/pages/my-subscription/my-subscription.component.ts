@@ -183,7 +183,7 @@ import {
                 <!-- Plan avatar -->
                 <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center shrink-0">
                   <app-icon
-                    [name]="isTerminal() ? 'alert-octagon' : (isGrace() ? 'alert-triangle' : (isTrial() ? 'hourglass' : 'sparkles'))"
+                    [name]="isTerminal() || isSuspendedOrBlocked() ? 'alert-octagon' : (isGrace() ? 'alert-triangle' : (isTrial() ? 'hourglass' : 'sparkles'))"
                     [size]="28"
                     class="text-white"
                   ></app-icon>
@@ -227,8 +227,8 @@ import {
               }
 
               <!-- Grace period notice — shown when payment is overdue and the
-                   subscription entered grace_soft or grace_hard. Orange banner
-                   inside the hero card to make the urgency impossible to miss. -->
+                    subscription entered grace_soft or grace_hard. Orange banner
+                    inside the hero card to make the urgency impossible to miss. -->
               @if (isGrace()) {
                 <div class="flex items-start gap-2 bg-orange-400/25 backdrop-blur border border-orange-200/40 rounded-lg px-3 py-2">
                   <app-icon name="alert-triangle" [size]="16" class="text-orange-100 mt-0.5 shrink-0"></app-icon>
@@ -239,6 +239,93 @@ import {
                     {{ graceDaysOverdue() > 0 ? 'Tienes ' + graceDaysOverdue() + ' día(s) de pago vencido.' : 'Se pasó la fecha de pago.' }}
                     Regulariza tu pago para evitar la suspensión.
                   </span>
+                </div>
+              }
+
+              <!-- Suspended state notice -->
+              @if (status() === 'suspended') {
+                <div class="flex flex-col sm:flex-row sm:items-start gap-3 bg-red-400/25 backdrop-blur border border-red-200/40 rounded-lg px-3 py-2">
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon name="pause-circle" [size]="16" class="text-red-100 mt-0.5 shrink-0"></app-icon>
+                    <span class="text-xs text-red-50 leading-relaxed">
+                      <span class="font-bold">Tu tienda está suspendida por falta de pago.</span>
+                      Tus datos están seguros pero el acceso está restringido.
+                      Regulariza tu pago para reactivar todos los servicios.
+                    </span>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="goToDunning()"
+                  >
+                    <app-icon name="credit-card" [size]="14" slot="icon"></app-icon>
+                    Pagar ahora
+                  </app-button>
+                </div>
+              }
+
+              <!-- Blocked state notice -->
+              @if (status() === 'blocked') {
+                <div class="flex flex-col sm:flex-row sm:items-start gap-3 bg-red-400/25 backdrop-blur border border-red-200/40 rounded-lg px-3 py-2">
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon name="shield-alert" [size]="16" class="text-red-100 mt-0.5 shrink-0"></app-icon>
+                    <span class="text-xs text-red-50 leading-relaxed">
+                      <span class="font-bold">Tu tienda fue bloqueada.</span>
+                      El acceso a tu tienda está restringido. Contacta a soporte para más información y restablecer el acceso.
+                    </span>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="goToDunning()"
+                  >
+                    <app-icon name="headphones" [size]="14" slot="icon"></app-icon>
+                    Contactar soporte
+                  </app-button>
+                </div>
+              }
+
+              <!-- Cancelled state notice -->
+              @if (status() === 'cancelled') {
+                <div class="flex flex-col sm:flex-row sm:items-start gap-3 bg-red-400/25 backdrop-blur border border-red-200/40 rounded-lg px-3 py-2">
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon name="x-circle" [size]="16" class="text-red-100 mt-0.5 shrink-0"></app-icon>
+                    <span class="text-xs text-red-50 leading-relaxed">
+                      <span class="font-bold">Tu suscripción fue cancelada.</span>
+                      Puedes seguir consultando y exportando tus datos en modo lectura.
+                      Para volver a operar, reactiva con un plan.
+                    </span>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="goToPlans()"
+                  >
+                    <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                    Reactivar suscripción
+                  </app-button>
+                </div>
+              }
+
+              <!-- Expired state notice -->
+              @if (status() === 'expired') {
+                <div class="flex flex-col sm:flex-row sm:items-start gap-3 bg-red-400/25 backdrop-blur border border-red-200/40 rounded-lg px-3 py-2">
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon name="clock" [size]="16" class="text-red-100 mt-0.5 shrink-0"></app-icon>
+                    <span class="text-xs text-red-50 leading-relaxed">
+                      <span class="font-bold">Tu plan expiró.</span>
+                      El período de tu plan terminó sin renovación.
+                      Elige un plan para continuar operando tu tienda.
+                    </span>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="goToPlans()"
+                  >
+                    <app-icon name="crown" [size]="14" slot="icon"></app-icon>
+                    Ver planes
+                  </app-button>
                 </div>
               }
 
@@ -733,6 +820,11 @@ export class MySubscriptionComponent implements OnInit {
     return s === 'cancelled' || s === 'expired';
   });
 
+  readonly isSuspendedOrBlocked = computed(() => {
+    const s = this.status();
+    return s === 'suspended' || s === 'blocked';
+  });
+
   /**
    * RNC-39 — Subscription row exists but the store has no active plan.
    * Common case: additional stores of organizations that already consumed
@@ -755,6 +847,7 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly heroGradient = computed(() => {
     if (this.isTerminal()) return this.cancelledGradient;
+    if (this.isSuspendedOrBlocked()) return this.cancelledGradient;
     if (this.isGrace()) return this.graceGradient;
     if (this.isTrial()) return this.trialGradient;
     return this.activeGradient;
@@ -944,7 +1037,11 @@ export class MySubscriptionComponent implements OnInit {
       s === 'past_due' ||
       s === 'pending_payment' ||
       s === 'grace_soft' ||
-      s === 'grace_hard'
+      s === 'grace_hard' ||
+      s === 'suspended' ||
+      s === 'blocked' ||
+      s === 'cancelled' ||
+      s === 'expired'
     );
   });
 
@@ -1256,6 +1353,10 @@ export class MySubscriptionComponent implements OnInit {
 
   goToTimeline(): void {
     this.router.navigate(['/admin/subscription/timeline']);
+  }
+
+  goToDunning(): void {
+    this.router.navigate(['/admin/subscription/dunning']);
   }
 
   cancelSubscription(): void {

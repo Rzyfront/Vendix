@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Options:"
             echo "  --dry-run    Show what would change without modifying files"
-            echo "  --scope      Only sync specific scope (root, ui, api, sdk)"
+            echo "  --scope      Only sync specific scope (root, backend, frontend, ecommerce)"
             exit 0
             ;;
         *)
@@ -46,13 +46,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Map scope to AGENTS.md path
-# EDIT THIS FUNCTION TO MATCH YOUR REPO STRUCTURE
 get_agents_path() {
     local scope="$1"
     case "$scope" in
         root)       echo "$REPO_ROOT/AGENTS.md" ;;
-        frontend)   echo "$REPO_ROOT/frontend/AGENTS.md" ;; # Adjust paths as needed
-        backend)    echo "$REPO_ROOT/backend/AGENTS.md" ;;  # Adjust paths as needed
+        frontend)   echo "$REPO_ROOT/apps/frontend/AGENTS.md" ;;
+        backend)    echo "$REPO_ROOT/apps/backend/AGENTS.md" ;;
+        ecommerce)  echo "$REPO_ROOT/apps/ecommerce/AGENTS.md" ;;
         *)          
             # Try to find AGENTS.md in a directory named after the scope
             if [ -f "$REPO_ROOT/$scope/AGENTS.md" ]; then

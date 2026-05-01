@@ -1,53 +1,79 @@
 ---
 name: how-to-dev
 description: >
-  Establishes the mandatory software development flow using the skills system.
-  Trigger: ALWAYS when the user requests changes, new features, or general development.
+  Establishes development best practices using the Vendix skills system.
+  Trigger: ALWAYS when the user requests code changes, feature work, fixes, refactors, or development execution.
 license: MIT
 metadata:
   author: rzyfront
   version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Code changes, feature work, fixes, refactors, or development execution"
+    - "General Development"
 ---
 
-## When to Use
+# How To Dev
 
-This skill must govern **EVERY** development interaction in the Vendix repository. It is the master guide for how the AI agent should approach user requests.
+## Purpose
 
-## Development Flow (Standard Changes)
+Use this skill to execute development work safely and consistently after the required skills and plan are known. This skill defines how to develop; planning rules live in `how-to-plan`.
 
-When the user requests specific changes or improvements:
+## Core Rules
 
-1.  **Analyze the Request**: Deeply understand what the user wants.
-2.  **Search the Skills Routing**: Check `AGENTS.md` or the provider configuration file (`GEMINI.md`, `CLAUDE.md`) to find skills related to the change.
-3.  **Acquire Context**: Read the identified skills BEFORE performing any action to ensure the project's patterns are followed.
-4.  **Execute with Context**: Make the change applying the knowledge from the skills.
-5.  **Handle Knowledge Gaps**: If the change follows a new undocumented pattern, ask the user whether a new skill should be created.
+- Load every relevant skill before editing code.
+- Follow the approved plan when one exists; do not replan unless the human asks.
+- If no approved plan exists for non-trivial work, use `how-to-plan` before development.
+- Keep changes minimal, scoped, and aligned with the mapped skills.
+- Do not introduce new architecture, business behavior, or compatibility layers unless the plan or the human explicitly requires it.
+- Preserve unrelated user changes in the working tree.
+- Verify the result with `buildcheck-dev` before claiming completion.
 
-## Development Flow (Structural Changes / Plans)
+## Skill-First Development
 
-When the request involves structural changes, complete flows, broad scope, or a development plan:
+Before changing files:
 
-1.  **Pre-analysis**: Read and perform a pre-analysis of the user's request.
-2.  **Code Analysis**: Create a small code analysis plan based on the request and then plan it out.
-3.  **Stage-based Planning**: Break down the plan into various stages and development points.
-4.  **Skills Search and Mapping**: Go to the skills listing (`AGENTS.md` or skills routing) to find the correct information based on skills per stage or development point. You must finish ALL skills without exception that may be useful at each stage of the plan, leaving them specifically highlighted in the plan or development below.
-5.  **Strict Execution**: During execution or development phases, you must ALWAYS use this same pre-designed strategy based on the plan's points and skills.
-6.  **Gap Closure**: At the end, if any stage of the plan did not have a skill to follow this pattern, then design that pattern and propose to the user the possibility of creating a new skill to address the knowledge gap.
+1. Identify the affected domain, layer, and file types.
+2. Load the matching skills from `AGENTS.md` or provider-specific skill routing.
+3. Apply the rules from those skills during implementation.
+4. If no skill covers a required pattern, mark it as a knowledge gap and ask whether to create or update a skill.
 
-## ULTRA-MANDATORY RULES
+## Execution Discipline
 
-- **NEVER** create or start a plan without referencing in detail the required skills by stages and points.
-- **NEVER, ABSOLUTELY NEVER** start the development of a plan that does not yet have references to skills in its stages or points. Always, _before_ starting to plan or develop, you must verify which skills cover each stage or point and reference them correctly in each one.
-- **Always use this pre-designed standard** for all development.
-- **Check before Acting**: Never assume a pattern or proceed without mapping the relevant skill to the change points.
+During implementation:
 
-## Verification Commands
+- Make the smallest correct change that satisfies the approved scope.
+- Prefer existing project patterns over new abstractions.
+- Keep business decisions explicit in code names, validations, tests, or comments when needed.
+- Do not silently change behavior outside the planned scope.
+- Do not edit migrations, schema, auth, billing, accounting, subscriptions, inventory, AI, or tenant-scoped logic without loading the matching specialized skills.
 
-```bash
-# Sync skills after creating/modifying one
-./skills/setup.sh --sync
+## Quality Principles
 
-# Check container logs to ensure the development did not break the build
-docker logs --tail 40 vendix_backend
-docker logs --tail 40 vendix_frontend
-```
+- Read existing code before changing it.
+- Match established naming, folder structure, and domain boundaries.
+- Keep TypeScript strongly typed; avoid `any` unless an existing integration forces it and the reason is clear.
+- Consider tenant isolation and authorization on backend changes.
+- Prefer clear existing service/facade/component patterns over speculative abstractions.
+- Add comments only when the code path is not self-explanatory.
+
+## Relationship With Planning
+
+Use `how-to-plan` when the work needs a plan, including structural changes, multi-file changes, multi-domain work, broad refactors, new features, or any request where the why and sequence are not already explicit.
+
+Development may proceed directly only for trivial, low-risk edits where the relevant skills are clear and no planning decision is needed.
+
+## Verification
+
+After code or skill changes:
+
+- Use `buildcheck-dev` for development verification.
+- Use `skill-sync` after creating or modifying skills.
+- Run production build commands only when the human explicitly requests production verification.
+
+## Related Skills
+
+- `how-to-plan` - Planning protocol before development
+- `agent-teams` - Multi-agent orchestration for non-trivial work
+- `buildcheck-dev` - Development verification through Docker watch-mode logs
+- `skill-sync` - Synchronize skill metadata and generated agent files

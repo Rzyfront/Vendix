@@ -1,7 +1,12 @@
 ---
 name: vendix-monorepo-workspaces
-description: Monorepo architecture and npm workspaces patterns.
+description: >
+  Monorepo workspaces, dependency placement, Docker, and CI/CD patterns for Vendix.
+  Trigger: When installing dependencies, modifying package.json, adding/removing workspaces, creating Dockerfiles, or configuring CI/CD.
+license: MIT
 metadata:
+  author: rzyfront
+  version: "1.0"
   scope: [root]
   auto_invoke:
     - "Installing dependencies"
@@ -10,276 +15,115 @@ metadata:
     - "Configuring CI/CD"
     - "Adding/removing workspaces"
 ---
+
 # Vendix Monorepo Workspaces
 
-> **Trigger**: Whenever you work with dependencies, package installation, or monorepo configuration.
+## Purpose
 
-## Summary
+Use this skill for npm workspaces, dependency placement, app package boundaries, Docker build contexts, and CI/CD commands. Architecture ownership belongs to `vendix-core`.
 
-Vendix is a **monorepo using npm workspaces** with multiple apps (`apps/*`) and shared libs (`libs/*`). Each workspace is self-contained for production, but they share development tools.
+## Current Workspace Map
 
-```
-Vendix/
-├── package.json              # Root: scripts only, NO production dependencies
-├── apps/
-│   ├── backend/              # NestJS API
-│   │   └── package.json      # Backend dependencies
-│   └── frontend/             # Angular SPA
-│           └── package.json  # Frontend dependencies
-└── libs/                     # Shared libraries (future)
-```
+| Workspace | Path | Notes |
+| --- | --- | --- |
+| Backend | `apps/backend` | NestJS API with its own dependencies and Dockerfiles |
+| Frontend web | `apps/frontend` | Angular app with its own dependencies and Dockerfiles |
+| Mobile | `apps/mobile` | Expo/React Native app with its own dependencies |
+| Shared types | `libs/shared-types` | Local package consumed by apps, e.g. `@vendix/shared-types` |
 
-## CRITICAL Rule: Dependency Location
+Root `package.json` orchestrates scripts and workspaces. Production/runtime dependencies should normally live in the workspace that imports them. Root dependencies should be treated as exceptions and reviewed before adding more; the current repo already has at least one root runtime exception, so do not assume `dependencies` is empty.
 
-### CORRECT
+## Dependency Rules
 
-```yaml
-# package.json (root)
-dependencies: {}  # EMPTY - scripts only
+- If code in one workspace imports a package, that workspace must declare the dependency.
+- If frontend and backend both import the same package, install it in both workspaces.
+- If mobile imports a package, install it in `apps/mobile`.
+- Shared libraries should declare their own package metadata and avoid hidden app dependencies.
+- Root should mainly contain orchestration scripts and shared dev tooling, unless an explicit repo-level exception is required and documented.
+- Do not rely on hoisting as the reason a workspace can build.
 
-# apps/frontend/package.json
-dependencies:
-  - marked           # Only frontend uses it
-  - xlsx             # Frontend uses it
-  - @types/xlsx
-
-# apps/backend/package.json
-dependencies:
-  - xlsx             # Backend uses it
-  - @types/xlsx
-  - @nestjs/common   # Only backend uses it
-```
-
-### INCORRECT
-
-```yaml
-# package.json (root)
-dependencies:
-  - marked           # WRONG: Only frontend uses it
-  - xlsx             # WRONG: Causes duplication
-
-# apps/frontend/package.json
-dependencies: {}     # WRONG: Uses marked but doesn't declare it
-```
-
-## Principles
-
-### 1. Self-containment
-**Each workspace must declare ALL dependencies it uses.**
-
-If `apps/frontend/src` does `import { marked } from 'marked'`:
-- `marked` MUST be in `apps/frontend/package.json`
-- It must NOT depend on the root to obtain it
-
-### 2. Single Source of Truth
-**A dependency should live in ONE place only.**
-
-- **Shared by frontend + backend**: Declare in BOTH `package.json`
-- **Used by only one app**: Declare only in that app
-- **Never in root**: Unless it's a shared development tool
-
-### 3. Transparency
-**When reading `apps/frontend/package.json`, I should see EVERYTHING it needs.**
-
-There should be no "hidden" dependencies in the root that are required for production.
-
-## Installing Dependencies
-
-### Local Development
+## Commands
 
 ```bash
-# From the root - installs ALL workspaces
+# Install all workspaces from root
 npm install
 
-# Install a dependency for a specific workspace
-npm install <package> -w apps/frontend
-
-# Install a shared dependency (both workspaces)
+# Install in a specific workspace
 npm install <package> -w apps/frontend
 npm install <package> -w apps/backend
+npm install <package> -w apps/mobile
+
+# Run workspace scripts
+npm run start -w apps/frontend
+npm run start:dev -w apps/backend
+npm run start -w apps/mobile
+
+# Root orchestration scripts
+npm run dev
+npm run mobile:start
+npm run mobile:ios
+npm run mobile:android
 ```
 
-### Practical Examples
+Do not run production build commands unless the human explicitly requests production verification; use `buildcheck-dev` for normal development verification.
+
+## Docker Rules
+
+- Docker build contexts for app containers should point at the workspace, not the repo root.
+- Current dev containers use `apps/backend/Dockerfile.dev` and `apps/frontend/Dockerfile.dev`.
+- Backend and frontend containers mount their workspace and isolate `/app/node_modules`.
+- Mobile currently does not have a Dockerfile in this repo; treat mobile Dockerization as a knowledge gap unless added intentionally.
+
+Current compose services include `db`, `redis`, `backend`, `frontend`, `nginx`, and `docker-cleanup`.
+
+## Docker Commands
 
 ```bash
-# Case 1: Frontend needs a new package
-npm install lucide-react -w apps/frontend
+# Start development services
+docker compose up -d
 
-# Case 2: Both need the same package
-npm install date-fns -w apps/frontend
-npm install date-fns -w apps/backend
+# Rebuild services after Dockerfile/package changes
+docker compose up --build -d
 
-# Case 3: Shared development tool (eslint, prettier)
-npm install -D -w apps/frontend eslint
-npm install -D -w apps/backend eslint
+# Stop services
+docker compose down
 ```
 
-## Docker and Containerization
+Prefer the root docker scripts already present in `package.json` when useful: `docker:up`, `docker:rebuild`, `docker:down`, `docker:down-v`.
 
-### Correct Dockerfile.dev Pattern
+Use `buildcheck-dev` for log-based verification after development changes.
 
-```dockerfile
-# CORRECT - Each workspace installs itself
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm install
-COPY . .
-EXPOSE 4200
-CMD ["npx", "ng", "serve", "--host", "0.0.0.0"]
-```
+## CI/CD Rules
 
-```dockerfile
-# INCORRECT - Depends on root
-FROM node:20-alpine
-WORKDIR /app
-COPY ../../package.json ./package.json  # Don't do this
-RUN npm install
-```
+- Install dependencies from root with workspace-aware npm commands.
+- Build or lint the specific workspace being validated.
+- Keep Docker image builds scoped to the app workspace unless the Dockerfile explicitly requires repo context.
+- Do not add root-level production dependencies to make CI pass; fix the workspace package instead.
 
-### docker-compose.yml
+## Adding Or Removing Workspaces
 
-```yaml
-services:
-  frontend:
-    build:
-      context: ./apps/frontend
-      dockerfile: Dockerfile.dev
-    volumes:
-      - ./apps/frontend:/app
-      - /app/node_modules
-```
+When adding a workspace:
 
-**Important**: The context must be the workspace, not the root.
+1. Place it under `apps/` or `libs/` so root workspaces detect it.
+2. Give it its own `package.json` with accurate dependencies.
+3. Add root scripts only when cross-team orchestration is useful.
+4. Add or update app-specific skills if the workspace introduces new patterns.
 
-## CI/CD Considerations
+When removing a workspace:
 
-### GitHub Actions - Frontend
-
-```yaml
-- name: Install dependencies
-  run: npm ci              # Installs from root (workspaces)
-
-- name: Build frontend
-  working-directory: apps/frontend
-  run: npm run build:prod  # Builds only frontend
-```
-
-**Why it works**: `npm ci` installs all workspaces, but each build is independent.
-
-### GitHub Actions - Backend
-
-```yaml
-- name: Build and push Docker image
-  run: |
-    cd apps/backend
-    docker build -t app .
-```
-
-**Why it works**: The backend Dockerfile includes its own dependencies.
-
-## Common Errors
-
-### Error 1: "Cannot find module"
-
-```
-TS2307: Cannot find module 'marked' or its corresponding type declarations
-```
-
-**Cause**: `marked` is in the root but not in `apps/frontend/package.json`
-
-**Solution**:
-```bash
-# Move the dependency to where it's used
-npm install marked -w apps/frontend
-# And remove it from root package.json
-```
-
-### Error 2: Duplicate Dependencies
-
-```
-node_modules/marked (v17.0.1)
-node_modules/apps/frontend/node_modules/marked (v16.0.0)
-```
-
-**Cause**: The same dependency in root + workspace with different versions
-
-**Solution**: Keep only in the workspace, remove from root
-
-### Error 3: Docker Build Fails
-
-```
-Error: Cannot find module '@nestjs/common'
-```
-
-**Cause**: Dockerfile tries to install from root instead of the workspace
-
-**Solution**: Use `COPY package*.json ./` from the workspace, not from the root
+1. Remove root scripts that reference it.
+2. Remove dependent workspace references and local file dependencies.
+3. Run `npm install` from root to update the lockfile.
 
 ## Verification
 
-### Diagnostic Commands
+- Check the importing workspace declares each package it uses.
+- Check root `package.json` did not gain unnecessary production dependencies.
+- Check Docker contexts still match `docker-compose.yml`.
+- Run `./skills/skill-sync/assets/sync.sh` and `./skills/setup.sh --sync` after skill metadata changes.
 
-```bash
-# See which apps use a package
-grep -r "from ['\"]<package>['\"]" apps/*/src
+## Related Skills
 
-# See if a package is duplicated
-grep -r '"<package>"' package.json apps/*/package.json
-
-# See workspace structure
-npm workspaces list
-```
-
-### Pre-Commit Checklist
-
-- [ ] Each dependency is in the package.json where it's used
-- [ ] No production dependencies in the root
-- [ ] Dockerfiles install from their own workspace
-- [ ] `npm install` runs without errors
-- [ ] Each app's build works individually
-
-## Quick Reference
-
-| Command | Description |
-|---------|-------------|
-| `npm install` | Installs all workspaces from root |
-| `npm install <pkg> -w <workspace>` | Installs in a specific workspace |
-| `npm run build -w apps/frontend` | Runs script in a specific workspace |
-| `npm workspaces list` | Lists all workspaces |
-
-## Lessons Learned
-
-1. **marked** was moved from root to frontend (only frontend uses it)
-2. **xlsx** is in frontend and backend (both use it independently)
-3. **@types/xlsx** is needed by both (TypeScript types per app)
-4. The root should stay clean: orchestration scripts only
-
-## Maintenance
-
-### Adding a New App to the Monorepo
-
-```bash
-# 1. Create directory
-mkdir apps/new-app
-
-# 2. Initialize
-cd apps/new-app
-npm init -y
-
-# 3. The root will detect it automatically (workspaces: ["apps/*"])
-```
-
-### Removing an App
-
-```bash
-# 1. Delete directory
-rm -rf apps/old-app
-
-# 2. Clean node_modules
-npm install
-```
-
----
-
-**Remember**: The key is that each workspace should be **self-contained**. If a file does `import X from 'Y'`, then `Y` must be in the `package.json` of that workspace.
+- `vendix-core` - Architecture map and app boundaries
+- `buildcheck-dev` - Development verification
+- `vendix-zoneless-signals` - Frontend web build-sensitive patterns

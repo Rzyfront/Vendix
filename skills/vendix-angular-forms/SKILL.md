@@ -1,345 +1,149 @@
 ---
 name: vendix-angular-forms
 description: >
-  Angular Reactive Forms patterns with strict typing for FormControl bindings in templates.
-  Trigger: When creating Angular forms, fixing FormControl type errors, or binding form controls in templates.
+  Angular Reactive Forms patterns with strict typing, shared CVA components, and Zoneless-safe
+  form state. Trigger: When creating Angular forms, fixing FormControl type errors, binding
+  form controls in templates, or implementing ControlValueAccessor components.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
-  scope: [frontend]
-  auto_invoke: "Creating Angular Forms"
+  version: "1.1"
+  scope: [root]
+  auto_invoke:
+    - "Creating Angular Forms"
+    - "Binding form controls in Angular templates"
+    - "Implementing ControlValueAccessor in frontend components"
 ---
-
-> **Tip**: Antes de usar InputComponent o ToggleComponent, consulta sus READMEs en `apps/frontend/src/app/shared/components/{input,toggle}/README.md` para conocer sus inputs, outputs y variantes disponibles.
 
 ## When to Use
 
-Use this skill when:
+- Creating or refactoring Angular reactive forms.
+- Fixing `AbstractControl | null` template binding errors.
+- Choosing between `[formControl]` and `formControlName`.
+- Working with shared CVA controls such as `app-input` and `app-toggle`.
 
-- Creating new Angular Reactive Forms
-- Fixing `Type 'AbstractControl | null' is not assignable to type 'FormControl'` errors
-- Binding form controls to `[formControl]` directive in templates
-- Working with typed FormControls in Angular 20+
+Before using shared controls, check their READMEs under `apps/frontend/src/app/shared/components/{input,toggle}/` and verify current inputs in the component source.
 
-## Critical Patterns
+## Current References
 
-### Pattern 1: Typed FormControl Getters
+- Clean typed getter form: `apps/frontend/src/app/private/modules/store/settings/general/components/general-settings-form/`
+- Typed `FormGroup` examples: `apps/frontend/src/app/private/modules/super-admin/subscriptions/pages/gateway/` and `plans/plan-form.component.ts`
+- Large `formControlName` example: `apps/frontend/src/app/private/modules/store/products/pages/product-create-page/`
+- Shared CVAs: `apps/frontend/src/app/shared/components/input/input.component.ts` and `toggle/toggle.component.ts`
 
-**PROBLEM**: `form.get('fieldName')` returns `AbstractControl | null`, but `[formControl]` expects `FormControl`.
+## Binding Choice
 
-**SOLUTION**: Always create typed getters for each form control.
+| Template Pattern | Use When | Rule |
+| --- | --- | --- |
+| `formControlName="name"` inside `[formGroup]` | Standard form layout with static control names | Preferred for straightforward forms |
+| `[formControl]="nameControl"` | Passing a specific control to a component or dynamic binding | Use a typed getter or typed property |
+| `[control]="..."` | Component-specific extra input, not Angular Forms binding | Avoid `form.get()` directly unless the component explicitly needs `AbstractControl` |
 
-```typescript
-import { FormGroup, FormControl } from "@angular/forms";
+Do not use `$any(form.get(...))` in new code. It exists in legacy pages only.
 
-export class MyFormComponent {
-  form: FormGroup = new FormGroup({
-    email: new FormControl(""),
-    enabled: new FormControl(false),
-    maxValue: new FormControl(100),
-  });
+## Typed Getter Pattern
 
-  // ✅ CORRECT: Typed getters
-  get emailControl(): FormControl<string> {
-    return this.form.get("email") as FormControl<string>;
-  }
-
-  get enabledControl(): FormControl<boolean> {
-    return this.form.get("enabled") as FormControl<boolean>;
-  }
-
-  get maxValueControl(): FormControl<number> {
-    return this.form.get("maxValue") as FormControl<number>;
-  }
-}
-```
-
-### Pattern 2: Template Binding
-
-**ALWAYS** use getters in templates, **NEVER** use `form.get()` directly.
-
-```html
-<!-- ❌ WRONG: Direct form.get() - causes type errors -->
-<app-input
-  [formControl]="form.get('email')"
-  type="email"
-  label="Email"
-></app-input>
-
-<!-- ✅ CORRECT: Use typed getter -->
-<app-input [formControl]="emailControl" type="email" label="Email"></app-input>
-
-<!-- ❌ WRONG: With null assertion - still causes errors -->
-<app-toggle
-  [formControl]="form.get('enabled')!"
-  (changed)="onFieldChange()"
-></app-toggle>
-
-<!-- ✅ CORRECT: Use typed getter -->
-<app-toggle
-  [formControl]="enabledControl"
-  (changed)="onFieldChange()"
-></app-toggle>
-```
-
-### Pattern 3: Nullable Form Controls
-
-For optional/nullable fields, explicitly type as `T | null`:
+Use typed getters when binding to `[formControl]`.
 
 ```typescript
-form: FormGroup = new FormGroup({
-  logo_url: new FormControl(null),
-  default_method: new FormControl(null),
+readonly form = new FormGroup({
+  name: new FormControl('', { nonNullable: true }),
+  enabled: new FormControl(false, { nonNullable: true }),
+  logoUrl: new FormControl<string | null>(null),
 });
 
-// Typed getters for nullable controls
-get logoUrlControl(): FormControl<string | null> {
-  return this.form.get('logo_url') as FormControl<string | null>;
+get nameControl(): FormControl<string> {
+  return this.form.get('name') as FormControl<string>;
 }
-
-get defaultMethodControl(): FormControl<string | null> {
-  return this.form.get('default_method') as FormControl<string | null>;
-}
-```
-
-### Pattern 4: Select Elements
-
-Native `<select>` elements also require typed getters:
-
-```html
-<!-- ❌ WRONG -->
-<select [formControl]="form.get('currency')">
-  <option value="USD">USD</option>
-</select>
-
-<!-- ✅ CORRECT -->
-<select [formControl]="currencyControl">
-  <option value="USD">USD</option>
-</select>
-```
-
-```typescript
-get currencyControl(): FormControl<string> {
-  return this.form.get('currency') as FormControl<string>;
-}
-```
-
-## Decision Tree
-
-```
-Need to bind a FormControl in template?
-├─→ Is it a new form?
-│   ├─→ YES: Create FormGroup with all controls
-│   │        Create typed getters for each control
-│   │        Use getters in template
-│   └─→ NO: Continue
-│
-├─→ Getting type error "AbstractControl | null is not assignable"?
-│   └─→ YES: Create typed getter for that control
-│            Replace form.get() with getter in template
-│
-└─→ Is the field nullable/optional?
-    └─→ YES: Type getter as FormControl<T | null>
-```
-
-## Common Type Mappings
-
-| Field Type      | FormControl Type              | Example                               |
-| --------------- | ----------------------------- | ------------------------------------- |
-| Text input      | `FormControl<string>`         | `name`, `email`, `description`        |
-| Number input    | `FormControl<number>`         | `price`, `quantity`, `threshold`      |
-| Boolean/Toggle  | `FormControl<boolean>`        | `enabled`, `active`, `tax_included`   |
-| Nullable string | `FormControl<string \| null>` | `logo_url`, `notes`, `optional_field` |
-| Select/enum     | `FormControl<string>`         | `currency`, `language`, `status`      |
-
-## Code Examples
-
-### Example 1: Complete Form Component
-
-```typescript
-import { Component, OnInit } from "@angular/core";
-import { CommonModule } from "@angular/common";
-import { ReactiveFormsModule, FormGroup, FormControl } from "@angular/forms";
-import { InputComponent } from "@shared/components/input/input.component";
-import { ToggleComponent } from "@shared/components/toggle/toggle.component";
-
-@Component({
-  selector: "app-settings-form",
-  standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, ToggleComponent],
-  templateUrl: "./settings-form.component.html",
-})
-export class SettingsFormComponent implements OnInit {
-  form: FormGroup = new FormGroup({
-    store_name: new FormControl(""),
-    enabled: new FormControl(true),
-    max_items: new FormControl(100),
-    logo_url: new FormControl(null),
-  });
-
-  // Typed getters for all controls
-  get storeNameControl(): FormControl<string> {
-    return this.form.get("store_name") as FormControl<string>;
-  }
-
-  get enabledControl(): FormControl<boolean> {
-    return this.form.get("enabled") as FormControl<boolean>;
-  }
-
-  get maxItemsControl(): FormControl<number> {
-    return this.form.get("max_items") as FormControl<number>;
-  }
-
-  get logoUrlControl(): FormControl<string | null> {
-    return this.form.get("logo_url") as FormControl<string | null>;
-  }
-
-  ngOnInit() {
-    // Form initialization logic
-  }
-
-  onSubmit() {
-    if (this.form.valid) {
-      console.log(this.form.value);
-    }
-  }
-}
-```
-
-### Example 2: Template with Typed Controls
-
-```html
-<form [formGroup]="form" (ngSubmit)="onSubmit()">
-  <!-- Text input -->
-  <app-input
-    [formControl]="storeNameControl"
-    type="text"
-    label="Store Name"
-    placeholder="My Store"
-  ></app-input>
-
-  <!-- Toggle -->
-  <app-toggle
-    [formControl]="enabledControl"
-    ariaLabel="Enable store"
-  ></app-toggle>
-
-  <!-- Number input -->
-  <app-input
-    [formControl]="maxItemsControl"
-    type="number"
-    label="Max Items"
-    min="0"
-  ></app-input>
-
-  <!-- Nullable input -->
-  <app-input
-    [formControl]="logoUrlControl"
-    type="url"
-    label="Logo URL"
-    placeholder="https://example.com/logo.png"
-  ></app-input>
-
-  <!-- Native select -->
-  <select [formControl]="currencyControl">
-    <option value="USD">USD</option>
-    <option value="EUR">EUR</option>
-  </select>
-</form>
-```
-
-### Example 3: Fixing Existing Type Errors
-
-**BEFORE (with errors):**
-
-```typescript
-// Component
-form: FormGroup = new FormGroup({
-  enabled: new FormControl(true),
-});
-
-// Template
-<app-toggle [formControl]="form.get('enabled')"></app-toggle>
-// ❌ ERROR: Type 'AbstractControl | null' is not assignable
-```
-
-**AFTER (fixed):**
-
-```typescript
-// Component - Add getter
-form: FormGroup = new FormGroup({
-  enabled: new FormControl(true),
-});
 
 get enabledControl(): FormControl<boolean> {
   return this.form.get('enabled') as FormControl<boolean>;
 }
 
-// Template - Use getter
-<app-toggle [formControl]="enabledControl"></app-toggle>
-// ✅ No errors
+get logoUrlControl(): FormControl<string | null> {
+  return this.form.get('logoUrl') as FormControl<string | null>;
+}
 ```
 
-## Commands
-
-```bash
-# Generate new form component
-ng generate component modules/settings/settings-form --standalone
-
-# Run type check
-npm run type-check -w apps/frontend
-
-# Check build errors
-docker logs --tail 60 vendix_frontend
+```html
+<app-input [formControl]="nameControl" label="Name" />
+<app-toggle [formControl]="enabledControl" label="Enabled" />
 ```
 
-## Best Practices
+## formControlName Pattern
 
-1. **Always create getters**: Don't use `form.get()` directly in templates
-2. **Type correctly**: Use appropriate types (`string`, `number`, `boolean`, `T | null`)
-3. **Consistent naming**: Use `{fieldName}Control` pattern for getters
-4. **Group getters**: Place all getters together after form definition
-5. **Document nullable**: Comment why a field is nullable if not obvious
+Use `formControlName` when the control is inside the current `[formGroup]` and no explicit control reference is needed.
+
+```html
+<form [formGroup]="form" (ngSubmit)="onSubmit()">
+  <app-input formControlName="name" label="Name" />
+  <app-toggle formControlName="is_active" label="Active" />
+</form>
+```
+
+This avoids repetitive getters for large static forms.
+
+## Typed FormGroup Pattern
+
+Prefer typed forms for new complex forms.
+
+```typescript
+interface GatewayFormControls {
+  public_key: FormControl<string>;
+  private_key: FormControl<string>;
+  enabled: FormControl<boolean>;
+}
+
+readonly form = new FormGroup<GatewayFormControls>({
+  public_key: new FormControl('', { nonNullable: true }),
+  private_key: new FormControl('', { nonNullable: true }),
+  enabled: new FormControl(false, { nonNullable: true }),
+});
+```
+
+## Shared CVA Facts
+
+`InputComponent` is a CVA and supports text-like types including `text`, `email`, `password`, `number`, `tel`, `url`, `search`, `date`, `time`, `datetime-local`, and `color`.
+
+Important `InputComponent` features:
+
+- `currency`, `currencyDecimals`, and `allowNegative` for money inputs.
+- `prefixIcon`, `suffixIcon`, `suffixClickable`, and `suffixClick`.
+- `tooltipText`, `tooltipPosition`, and `tooltipVisible`.
+- CVA value and disabled state are stored in signals.
+
+`ToggleComponent` is a CVA with `checked`, `disabled`, `label`, `ariaLabel`, and `styleVariant`. It emits both `toggled` and `changed`, and stores form-written state in signals.
+
+## Zoneless CVA Rule
+
+In any custom CVA, every field written by `writeValue` or `setDisabledState` and read by the template must be a `signal()`.
+
+```typescript
+readonly value = signal(false);
+readonly disabledFromForm = signal(false);
+
+writeValue(value: boolean): void {
+  this.value.set(Boolean(value));
+}
+
+setDisabledState(disabled: boolean): void {
+  this.disabledFromForm.set(disabled);
+}
+```
+
+Plain mutable fields in CVA callbacks can leave the template stale in Zoneless mode.
 
 ## Anti-Patterns
 
-❌ **DON'T** use `form.get()` in templates:
+- Do not bind `[formControl]="form.get('name')"` in templates.
+- Do not use `[formControl]="form.get('name')!"`; use a typed getter.
+- Do not use `$any(...)` in new form templates.
+- Do not cast getters to `any`.
+- Do not use plain template-read fields for CVA `value`, `disabled`, `checked`, or `selected` state.
 
-```html
-<app-input [formControl]="form.get('email')"></app-input>
-```
+## Related Skills
 
-❌ **DON'T** use null assertions without getters:
-
-```html
-<app-toggle [formControl]="form.get('enabled')!"></app-toggle>
-```
-
-❌ **DON'T** cast to `any`:
-
-```typescript
-get emailControl(): any {
-  return this.form.get('email');
-}
-```
-
-❌ **DON'T** forget type parameters:
-
-```typescript
-// Wrong - no type specified
-get emailControl(): FormControl {
-  return this.form.get('email') as FormControl;
-}
-
-// Correct - with type
-get emailControl(): FormControl<string> {
-  return this.form.get('email') as FormControl<string>;
-}
-```
-
-## Resources
-
-- **Angular Forms Documentation**: https://angular.dev/guide/forms
-- **TypeScript Strict Mode**: https://www.typescriptlang.org/tsconfig#strict
-- **Related Skills**: `vendix-frontend-component`, `vendix-frontend`
+- `vendix-zoneless-signals` - Signals, CVA, and change detection rules
+- `vendix-currency-formatting` - Money input/display patterns
+- `vendix-date-timezone` - Date input and date-only handling
+- `vendix-frontend-sticky-header` - Form page headers and save/cancel actions

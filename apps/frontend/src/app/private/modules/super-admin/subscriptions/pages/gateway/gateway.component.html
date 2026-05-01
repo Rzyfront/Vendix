@@ -240,7 +240,7 @@
           </div>
         </div>
 
-        @if (form.controls.environment.value === 'production') {
+        @if (selectedEnvironment() === 'production') {
           <div
             class="border border-amber-300 bg-amber-50 rounded-md px-4 py-3 space-y-2"
           >

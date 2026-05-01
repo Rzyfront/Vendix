@@ -1,254 +1,65 @@
 ---
 name: vendix-core
 description: >
-  Vendix monorepo patterns, workspace structure, and shared libraries.
-  Trigger: When working with monorepo structure, shared libs, or cross-app code.
+  Vendix repository architecture, app boundaries, and cross-app guidance.
+  Trigger: When understanding Vendix architecture, working across apps/libs, or deciding which specialized skill owns a pattern.
 license: MIT
 metadata:
   author: rzyfront
   version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Understanding Vendix architecture"
+    - "Working across apps or shared libraries"
+    - "Deciding which Vendix skill owns a pattern"
 ---
 
-## When to Use
+# Vendix Core
 
-Use this skill when:
+## Purpose
 
-- Creating or modifying shared libraries
-- Working with monorepo workspace configuration
-- Understanding the Vendix architecture
-- Adding dependencies across apps
+Use this skill as the architecture map for Vendix. It explains the major apps and ownership boundaries; detailed implementation rules live in specialized skills.
 
-> **⚠️ Frontend work**: Cualquier edición bajo `apps/frontend/` requiere invocar **`vendix-zoneless-signals`** (CRITICAL). Vendix es Angular 20 Zoneless + Signals — violar esos patrones produce bugs silenciosos de CD.
+## Repository Map
 
-## Critical Patterns
+| Area | Path | Role | Primary Skills |
+| --- | --- | --- | --- |
+| Backend API | `apps/backend` | NestJS API, Prisma, domains, jobs, auth, tenant context | `vendix-backend`, `vendix-prisma`, `vendix-multi-tenant-context` |
+| Frontend web | `apps/frontend` | Angular 20 admin/ecommerce web app | `vendix-frontend-*`, `vendix-zoneless-signals`, `vendix-ui-ux` |
+| Mobile app | `apps/mobile` | Expo/React Native mobile app | Knowledge gap until mobile-specific skills are created |
+| Shared types | `libs/shared-types` | Cross-app TypeScript type package | `vendix-monorepo-workspaces` |
+| Skills | `skills` | Source of AI agent guidance | `skill-creator`, `skill-sync` |
 
-### Pattern 1: Monorepo Structure
+## Core Rules
 
-Vendix uses npm workspaces:
+- Use the app-specific skill before editing inside an app.
+- Frontend web work under `apps/frontend` must also use `vendix-zoneless-signals`.
+- Backend work under `apps/backend` must use backend/domain/Prisma skills that match the change.
+- Mobile work under `apps/mobile` is a current knowledge gap unless a mobile-specific skill exists for the task.
+- Cross-app dependencies, package placement, Docker, and CI/CD belong to `vendix-monorepo-workspaces`.
+- Shared types should stay framework-neutral and avoid importing app-specific code.
+- Do not duplicate detailed rules here; link to the owning skill.
 
-```
-Vendix/
-├── apps/
-│   ├── frontend/          # Angular 20 app
-│   └── backend/           # NestJS app
-├── libs/
-│   ├── shared/            # Shared utilities
-│   ├── ui/                # UI components
-│   └── types/             # TypeScript types
-├── package.json           # Root package with workspaces
-├── package-lock.json      # Root lockfile
-└── docker-compose.yml     # Dev environment
-```
+## App Boundary Rules
 
-### Pattern 2: Workspace Configuration
+| Question | Owner |
+| --- | --- |
+| Where should a dependency be installed? | `vendix-monorepo-workspaces` |
+| How does Angular web UI use Signals/Zoneless? | `vendix-zoneless-signals` |
+| How are admin modules structured? | `vendix-frontend-standard-module` / `vendix-frontend-module` |
+| How are backend domains/API endpoints built? | `vendix-backend-domain` / `vendix-backend-api` |
+| How is tenant/store context resolved? | `vendix-multi-tenant-context` / `vendix-prisma-scopes` |
+| How are Prisma schema/migrations handled? | `vendix-prisma-schema` / `vendix-prisma-migrations` |
+| How are mobile-native patterns handled? | Knowledge gap until mobile skill exists |
 
-Root package.json defines workspaces:
+## Mobile Knowledge Gap
 
-```json
-{
-  "private": true,
-  "workspaces": ["apps/*", "libs/*"],
-  "scripts": {
-    "dev": "npm run start:dev -w apps/backend & npm run start -w apps/frontend",
-    "build": "npm run build -w apps/backend && npm run build:prod -w apps/frontend",
-    "install:all": "npm install -ws"
-  }
-}
-```
+Vendix has `apps/mobile` using Expo/React Native, but the current skill set is mostly backend and web frontend. When planning or editing mobile work, mark missing native-mobile guidance as a knowledge gap and propose a focused skill such as `vendix-mobile` or `vendix-mobile-navigation`.
 
-### Pattern 3: Creating Shared Libraries
+## Related Skills
 
-```bash
-# Generate Angular library
-cd apps/frontend
-ng generate library libs/my-lib --prefix=vendix
-
-# Or create manually in libs/
-mkdir -p libs/my-lib/src/lib
-```
-
-### Pattern 4: Importing from Shared Libraries
-
-```typescript
-// In apps/frontend
-import { MyService } from "@vendix/my-lib";
-
-// In apps/backend
-import { MyUtil } from "@vendix/shared";
-```
-
-### Pattern 5: Library Path Mapping
-
-**apps/frontend/tsconfig.json**:
-
-```json
-{
-  "compilerOptions": {
-    "paths": {
-      "@vendix/shared": ["../../libs/shared/src"],
-      "@vendix/ui": ["../../libs/ui/src"],
-      "@vendix/types": ["../../libs/types/src"]
-    }
-  }
-}
-```
-
-**apps/backend/tsconfig.json**:
-
-```json
-{
-  "compilerOptions": {
-    "paths": {
-      "@vendix/shared": ["../../libs/shared/src"],
-      "@vendix/types": ["../../libs/types/src"]
-    }
-  }
-}
-```
-
-## Decision Tree
-
-```
-Creating shared code?
-├── Is it UI-related?          → libs/ui/
-├── Is it business logic?      → libs/shared/
-├── Is it types/interfaces?    → libs/types/
-└── Is it app-specific?        → Keep in apps/
-
-Adding dependency?
-├── Is it used by both apps?   → Install in root
-├── Is it frontend-only?       → Install in apps/frontend
-├── Is it backend-only?        → Install in apps/backend
-└── Run npm install -ws        → Install in all workspaces
-
-Running development?
-├── Need both apps?            → npm run dev
-├── Need frontend only?        → npm run start -w apps/frontend
-├── Need backend only?         → npm run start:dev -w apps/backend
-└── Need Docker?               → docker compose up -d
-```
-
-## Code Examples
-
-### Example 1: Shared Utility Library
-
-```typescript
-// libs/shared/src/lib/utils.ts
-export function formatPrice(price: number): string {
-  return new Intl.NumberFormat("es-AR", {
-    style: "currency",
-    currency: "ARS",
-  }).format(price);
-}
-
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 15);
-}
-
-// Export in public-api.ts
-export * from "./lib/utils";
-```
-
-### Example 2: Shared Types
-
-```typescript
-// libs/types/src/lib/user.types.ts
-export interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: "admin" | "user";
-}
-
-export interface CreateUserData {
-  email: string;
-  name: string;
-  password: string;
-}
-
-// Export in public-api.ts
-export * from "./lib/user.types";
-```
-
-### Example 3: Using Shared Library in Frontend
-
-```typescript
-// apps/frontend/src/app/services/user.service.ts
-import { User, CreateUserData } from "@vendix/types";
-import { formatPrice } from "@vendix/shared";
-
-@Injectable({ providedIn: "root" })
-export class UserService {
-  createUser(data: CreateUserData): Observable<User> {
-    // implementation
-  }
-}
-```
-
-### Example 4: Using Shared Library in Backend
-
-```typescript
-// apps/backend/src/users/users.service.ts
-import { User, CreateUserData } from "@vendix/types";
-
-@Injectable()
-export class UsersService {
-  async create(data: CreateUserData): Promise<User> {
-    return this.prisma.user.create({ data });
-  }
-}
-```
-
-## Commands
-
-```bash
-# Install all dependencies
-npm run install:all
-
-# Start development (both apps)
-npm run dev
-
-# Start specific app
-npm run start -w apps/frontend
-npm run start:dev -w apps/backend
-
-# Build all apps
-npm run build
-
-# Install dependency in specific workspace
-npm install <package> -w apps/frontend
-npm install <package> -w apps/backend
-
-# Install dependency in all workspaces
-npm install <package> -ws
-
-# Add dependency to root
-npm install <package> --save-exact
-```
-
-## Docker Development
-
-```bash
-# Start all services (Postgres, backend, frontend)
-docker compose up -d
-
-# Rebuild and start
-docker compose up --build -d
-
-# View logs
-docker compose logs -f backend
-docker compose logs -f frontend
-
-# Stop services
-docker compose down
-
-# Stop with volumes
-docker compose down --volumes
-```
-
-## Resources
-
-- **Frontend**: [apps/frontend/](../../../apps/frontend/)
-- **Backend**: [apps/backend/](../../../apps/backend/)
-- **Shared Libs**: [libs/](../../../libs/)
-- **Docker**: [docker-compose.yml](../../../docker-compose.yml)
+- `vendix-monorepo-workspaces` - Workspaces, dependencies, Docker, CI/CD
+- `vendix-app-architecture` - Product app environments and domain behavior
+- `vendix-backend` - Backend API implementation patterns
+- `vendix-frontend` - Frontend web overview or index
+- `vendix-zoneless-signals` - Critical Angular 20 Signals/Zoneless rules

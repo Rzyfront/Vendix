@@ -1,93 +1,69 @@
 ---
 name: vendix-product-pricing
 description: >
-  Patterns for advanced product pricing logic, rentability calculations, and reactive price management in Vendix.
-  Trigger: When editing product schemas, pricing logic, or advanced product forms.
-license: Apache-2.0
+  Product and variant pricing patterns: cost, margin, base price, variant price_override,
+  sale price, tax-derived final_price, and frontend reactive calculations. Trigger: When
+  editing product schemas, pricing logic, or advanced product forms.
+license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.0"
+  scope: [root]
+  auto_invoke: "When editing product schemas, pricing logic, or advanced product forms"
 ---
 
-## When to Use
+# Vendix Product Pricing
 
-- Implementing new pricing fields in Product or ProductVariant models.
-- Building UI components that require bidirectional price/margin calculations.
-- Handling tax-inclusive pricing displays in frontend.
-- Managing "On Sale" (Offer) price logic.
+## Source of Truth
 
-## Critical Patterns
+- Schema: `apps/backend/prisma/schema.prisma`.
+- Backend product service: `apps/backend/src/domains/store/products/products.service.ts`.
+- Frontend product forms/pages under `apps/frontend/src/app/private/modules/store/products/`.
 
-### 1. Database Fields
+## Stored Fields
 
-Always include the four pillars of pricing in both `products` and `product_variants` tables:
+Products:
 
-- `cost_price`: The acquisition cost.
-- `profit_margin`: The target profitability percentage.
-- `base_price`: The listing price (PVP) before taxes.
-- `sale_price`: The promotional price (Offer).
-- `is_on_sale`: Boolean flag to activate the offer.
+- `base_price`: listing price before taxes.
+- `cost_price`: acquisition/manufacturing cost.
+- `profit_margin`: target margin percentage.
+- `is_on_sale`: sale flag.
+- `sale_price`: promotional price.
 
-### 2. Bidirectional Calculation Logic (Angular)
+Product variants:
 
-When one price field changes, others should update reactively:
+- `price_override`: variant-specific listing price override.
+- `cost_price`: variant cost.
+- `profit_margin`: variant margin.
+- `is_on_sale`: variant sale flag.
+- `sale_price`: variant promotional price.
 
-- **Margin -> Base Price**: `base_price = cost_price * (1 + margin / 100)`
-- **Base Price -> Margin**: `margin = ((base_price - cost_price) / cost_price) * 100` (Only if cost > 0)
+Do not document or add `product_variants.base_price`; variants use `price_override`.
 
-### 3. Tax Integration
+## Calculations
 
-The final price should always be calculated dynamically based on selected `tax_categories`:
+- Base from margin: `base_price = cost_price * (1 + profit_margin / 100)`.
+- Margin from base: `profit_margin = ((base_price - cost_price) / cost_price) * 100` when cost is positive.
+- Sale price is valid only when `is_on_sale` and must be less than the regular/base price.
+- Tax assignments are many-to-many through `product_tax_assignments` / tax categories.
+- Backend read responses calculate `final_price`; this is not persisted for products.
 
-- `final_price = base_price * (1 + sum(tax_rates))`
+## Frontend Rules
 
-## Code Examples
+- Keep cost/margin/base calculations reactive without infinite loops (`emitEvent: false` where needed).
+- Show tax-inclusive/final price as read-only calculated information.
+- Use existing product validators for cross-field pricing constraints before adding new validators.
+- Format money with `vendix-currency-formatting` patterns.
 
-### Reactive Form Setup (Angular)
+## Backend Rules
 
-```typescript
-private setupPriceCalculations(form: FormGroup): void {
-  const costCtrl = form.get('cost_price');
-  const marginCtrl = form.get('profit_margin');
-  const basePriceCtrl = form.get('base_price');
+- Create/update DTOs accept persisted fields only; do not accept client-supplied `final_price`.
+- Calculate `final_price` in read responses from sale/base price plus assigned tax rates.
+- Preserve historical order/invoice totals separately; those are snapshots, unlike product display prices.
 
-  // Cost or Margin changed -> Update Base Price
-  merge(costCtrl.valueChanges, marginCtrl.valueChanges).subscribe(() => {
-    const cost = Number(costCtrl.value || 0);
-    const margin = Number(marginCtrl.value || 0);
-    const basePrice = cost * (1 + margin / 100);
-    basePriceCtrl.setValue(basePrice, { emitEvent: false });
-  });
+## Related Skills
 
-  // Base Price changed -> Update Margin
-  basePriceCtrl.valueChanges.subscribe((val) => {
-    const cost = Number(costCtrl.value || 0);
-    if (cost > 0) {
-      const margin = ((val - cost) / cost) * 100;
-      marginCtrl.setValue(margin, { emitEvent: false });
-    }
-  });
-}
-```
-
-### Prisma Schema Fields
-
-```prisma
-model products {
-  base_price               Decimal                    @db.Decimal(12, 2)
-  cost_price               Decimal?                   @db.Decimal(12, 2)
-  profit_margin            Decimal?                   @db.Decimal(5, 2)
-  is_on_sale               Boolean                    @default(false)
-  sale_price               Decimal?                   @db.Decimal(12, 2)
-}
-```
-
-## Commands
-
-```bash
-# Regenerate Prisma client after adding pricing fields
-npx prisma generate
-
-# Apply pricing schema changes
-npx prisma migrate dev --name add_pricing_fields
-```
+- `vendix-calculated-pricing`
+- `vendix-currency-formatting`
+- `vendix-angular-forms`
+- `vendix-prisma-schema`

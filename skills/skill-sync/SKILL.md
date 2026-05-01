@@ -5,7 +5,7 @@ description: >
   Trigger: When updating skill metadata (metadata.scope/metadata.auto_invoke), regenerating Auto-invoke tables, or running ./skills/skill-sync/assets/sync.sh (including --dry-run/--scope).
 license: Apache-2.0
 metadata:
-  author: skill-init
+  author: rzyfront
   version: "1.0"
   scope: [root]
   auto_invoke:
@@ -15,103 +15,80 @@ metadata:
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
+# Skill Sync
+
 ## Purpose
 
-Keeps AGENTS.md Auto-invoke sections in sync with skill metadata. When you create or modify a skill, run the sync script to automatically update all affected AGENTS.md files.
+Use this skill to keep `AGENTS.md` auto-invoke tables and provider-specific skill copies aligned with the source files in `skills/`.
 
-## Required Skill Metadata
+## Source Of Truth
 
-Each skill that should appear in Auto-invoke sections needs these fields in `metadata`.
+- Source skills live in `skills/{skill-name}/SKILL.md`.
+- `metadata.scope` and `metadata.auto_invoke` generate `AGENTS.md` auto-invoke rows.
+- Provider copies live in `.claude/skills`, `.opencode/skills`, and `.agent/skills` after setup sync.
+- Do not manually edit generated provider copies; edit `skills/` and sync.
 
-`auto_invoke` can be either a single string **or** a list of actions:
+## Standard Frontmatter
 
 ```yaml
+---
+name: my-skill
+description: >
+  Short description.
+  Trigger: Specific situation that should load this skill.
+license: MIT
 metadata:
-  author: your-org
+  author: rzyfront
   version: "1.0"
-  scope: [root]                                    # Which AGENTS.md: root, backend, frontend
-  
-  # Option A: single action
-  auto_invoke: "Creating/modifying components"
-
-  # Option B: multiple actions
-  # auto_invoke:
-  #   - "Creating/modifying components"
-  #   - "Refactoring component folder placement"
-```
-
-### Scope Values
-
-| Scope | Updates |
-|-------|---------|
-| `root` | `AGENTS.md` (repo root) |
-| `backend` | `apps/backend/AGENTS.md` (example) |
-| `frontend` | `apps/frontend/AGENTS.md` (example) |
-
-Skills can have multiple scopes: `scope: [root, backend]`
-
----
-
-## Usage
-
-### After Creating/Modifying a Skill
-
-```bash
-./skills/skill-sync/assets/sync.sh
-```
-
-### What It Does
-
-1. Reads all `skills/*/SKILL.md` files
-2. Extracts `metadata.scope` and `metadata.auto_invoke`
-3. Generates Auto-invoke tables for each AGENTS.md
-4. Updates the `### Auto-invoke Skills` section in each file
-
----
-
-## Example
-
-Given this skill metadata:
-
-```yaml
-# skills/my-skill/SKILL.md
-metadata:
   scope: [root]
-  auto_invoke: "Creating/modifying React components"
-```
-
-The sync script generates in `AGENTS.md`:
-
-```markdown
-### Auto-invoke Skills
-
-When performing these actions, ALWAYS invoke the corresponding skill FIRST:
-
-| Action | Skill |
-|--------|-------|
-| Creating/modifying React components | `my-skill` |
-```
-
+  auto_invoke:
+    - "Action that should load this skill"
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
+```
+
+`allowed-tools` is optional and stays at the top level, not inside `metadata`.
+
+## Scope Values
+
+| Scope | Target |
+| --- | --- |
+| `root` | `AGENTS.md` |
+| `backend` | `apps/backend/AGENTS.md` if present |
+| `frontend` | `apps/frontend/AGENTS.md` if present |
+| `ecommerce` | `apps/ecommerce/AGENTS.md` if present |
+
+If a scoped `AGENTS.md` file does not exist, the sync script warns and skips that scope.
 
 ## Commands
 
 ```bash
-# Sync all AGENTS.md files
+# Update AGENTS.md auto-invoke tables from metadata
 ./skills/skill-sync/assets/sync.sh
 
-# Dry run (show what would change)
+# Preview auto-invoke table changes
 ./skills/skill-sync/assets/sync.sh --dry-run
 
-# Sync specific scope only
+# Sync only one scope
 ./skills/skill-sync/assets/sync.sh --scope root
+
+# Copy source skills to provider-specific locations
+./skills/setup.sh --sync
 ```
 
----
+## Required Workflow
 
-## Checklist After Modifying Skills
+After creating or modifying a skill:
 
-- [ ] Added `metadata.scope` to new/modified skill
-- [ ] Added `metadata.auto_invoke` with action description
-- [ ] Ran `./skills/skill-sync/assets/sync.sh`
-- [ ] Verified AGENTS.md files updated correctly
+1. Update the source file under `skills/`.
+2. Ensure frontmatter has `metadata.scope` and `metadata.auto_invoke` when the skill should auto-load.
+3. Run `./skills/skill-sync/assets/sync.sh`.
+4. Run `./skills/setup.sh --sync`.
+5. Run `./skills/skill-sync/assets/sync.sh` again if provider sync rewrote generated root instructions.
+6. Verify the source skill, generated provider copy, and `AGENTS.md` entries.
+
+## Troubleshooting
+
+- Missing from `AGENTS.md`: check `metadata.scope` and `metadata.auto_invoke`.
+- Warning for missing scoped `AGENTS.md`: either create that scoped file intentionally or use `scope: [root]`.
+- Provider copy stale: run `./skills/setup.sh --sync` after editing source skills.

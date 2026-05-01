@@ -1,258 +1,126 @@
 ---
 name: vendix-ai-platform-core
 description: >
-  Core AI Platform Layer patterns: provider abstraction, run/stream methods, rate limiting (Redis), cost tracking, logging, events, and configuration-driven behavior.
-  Trigger: When working with AIEngineService, adding providers, configuring AI applications, or understanding the AI Platform architecture.
+  Core AI Platform Layer: AIEngineService, providers, run/runStream, rate limiting,
+  response sanitization, logging, cost tracking, and super-admin AI config/app CRUD.
+  Trigger: When working with AIEngineService, adding providers, configuring AI applications,
+  rate limiting, cost tracking, logging, or debugging AI requests.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Working with AIEngineService core methods"
     - "Adding a new AI provider"
     - "Configuring AI rate limiting"
-    - "Understanding AI cost tracking"
     - "Working with AI logging and observability"
+    - "Understanding AI cost tracking"
     - "Debugging AI request failures"
+    - "Configuring AI providers or applications"
 ---
 
-## When to Use
+## Source of Truth
 
-- Working with `AIEngineService` methods (`run()`, `runStream()`, `chat()`, `complete()`)
-- Adding a new AI provider (beyond OpenAI/Anthropic)
-- Configuring rate limiting, cost tracking, or logging
-- Understanding the AI Platform Layer architecture
-- Debugging AI request failures or provider issues
+- Core service: `apps/backend/src/ai-engine/ai-engine.service.ts`
+- Provider interfaces: `apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts`
+- Providers: `apps/backend/src/ai-engine/providers/`
+- Logging/cost: `apps/backend/src/ai-engine/ai-logging.service.ts`
+- Super-admin backend: `apps/backend/src/domains/superadmin/ai-engine/`
+- Super-admin frontend: `apps/frontend/src/app/private/modules/super-admin/ai-engine/`
 
----
+## AIEngineService Methods
 
-## Architecture Overview
+- Config/lifecycle: `onModuleInit()`, `reloadConfigurations()`, `isConfigured()`.
+- Direct calls: `chat()`, `complete()`, `chatWith(configId, ...)`.
+- Application calls: `run(appKey, variables?, extraMessages?)`, `runStream(appKey, variables?, extraMessages?)`.
+- Admin/testing: `testProvider(configId)`, `getApplication(appKey)`.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        AI Platform Layer                         │
-│                                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ Providers │  │ Agent    │  │ RAG      │  │ MCP Gateway    │  │
-│  │ OpenAI+  │  │ Loop     │  │ Pipeline │  │ 7 endpoints    │  │
-│  │ Anthropic │  │ ReAct    │  │ pgvector │  │ auth+audit     │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────────┘  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────────┐  │
-│  │ Tool     │  │ Chat     │  │ Embedding│  │ Usage & Cost   │  │
-│  │ Registry │  │ Memory   │  │ Pipeline │  │ Tracker        │  │
-│  └──────────┘  └──────────┘  └──────────┘  └────────────────┘  │
-│                                                                   │
-│  Storage: PostgreSQL + pgvector │ Cache: Redis │ Queue: BullMQ   │
-└─────────────────────────────────────────────────────────────────┘
-```
+`AIEngineModule` is global; inject `AIEngineService` directly.
 
-**AIEngineModule** is `@Global()` — inject `AIEngineService` anywhere without importing the module.
+## Providers
 
----
+Backend `SdkType` is currently only:
 
-## Critical Patterns
+- `openai_compatible`
+- `anthropic_compatible`
 
-### 1. Always Use `run()` for Domain Features
+Other provider names like DeepSeek, Groq, Mistral, Ollama, Azure, or Google are presets/custom base URLs through OpenAI-compatible config, not separate backend provider classes.
 
-```typescript
-// CORRECT — Configurable from superadmin
-const response = await this.ai_engine.run('product_description_creator', {
-  name: dto.name,
-  context: JSON.stringify(data),
-});
+API key resolution uses `api_key_ref` when configured; otherwise env key `AI_${PROVIDER}_API_KEY`.
 
-// WRONG — Hardcoded, not configurable
-const response = await this.ai_engine.complete('Generate a description for...');
-```
+`AIMessage.content` supports strings and multimodal content parts, including image URL parts used by invoice OCR.
 
-**Why:** `run()` loads prompt template, system prompt, temperature, rate limits, and retry config from the database. Superadmin can tweak behavior without code changes.
+## run() Behavior
 
-### 2. Method Selection Guide
+`run()`:
 
-| Method | Use Case | Configurable | Logged |
-|--------|----------|-------------|--------|
-| `run(appKey, variables)` | Domain features (preferred) | Yes | Yes |
-| `runStream(appKey, variables)` | Streaming responses | Yes | Yes |
-| `chat(messages, options)` | Direct LLM call with messages | No | No |
-| `complete(prompt, options)` | Simple one-off prompt | No | No |
-| `chatWith(configId, messages)` | Specific provider call | Partial | No |
+- Loads `ai_engine_applications` by key.
+- Validates active app and provider config/default.
+- Runs subscription gate when `ai_feature_category` maps to a feature.
+- Enforces per-app Redis rate limit if configured.
+- Builds messages from `system_prompt`, interpolated `prompt_template`, and `extraMessages`.
+- Uses app `temperature`, `max_tokens`, output format, and retry config.
+- Sanitizes `<think>...</think>` unless config `settings.thinking === true`.
+- Formats JSON output by extracting fenced or raw JSON.
+- Consumes subscription quota after success for gated categories.
+- Logs in `finally` and emits `ai.request.completed`.
 
-### 3. Rate Limiting (Redis-Backed)
+Common errors: `AI_APP_001`, `AI_APP_003`, `AI_CONFIG_001`, `AI_PROVIDER_002`, `AI_APP_004`, `AI_REQUEST_001`.
 
-Rate limits are configured per AI Application in the database:
+## runStream() Behavior
 
-```json
-{
-  "rate_limit": {
-    "maxRequests": 100,
-    "windowSeconds": 3600
-  }
-}
-```
+`runStream()` follows the same lookup/gate/rate/provider/message path as `run()`, but:
 
-**Implementation:** Atomic Redis `INCR` + `EXPIRE` via pipeline (no race conditions):
+- Uses provider `chatStream()`.
+- Does not use retry logic.
+- Yields `{ type: 'error', error }` for failures instead of throwing in most cases.
+- Consumes quota only when the final chunk is `done`.
+- Logs after completion, but current logging does not emit `ai.request.completed` and logs `model` as `undefined`.
 
-```typescript
-const pipeline = this.redis.pipeline();
-pipeline.incr(key);       // ai:ratelimit:{appKey}
-pipeline.expire(key, windowSeconds);
-const results = await pipeline.exec();
-```
+## Rate Limit
 
-**Multi-layer rate limiting:**
-- Backend: Redis per AI Application (`run()` enforces)
-- Frontend: UI signal `aiUsesLeft` per component (3 default)
-- MCP: Redis per store (100 req/min)
+Per-app Redis key: `ai:ratelimit:${app.key}`.
 
-### 4. Cost Tracking
+- Uses `pipeline.incr(key)` and `pipeline.expire(key, windowSeconds)`.
+- Enforced only when `rate_limit.maxRequests` and `rate_limit.windowSeconds` exist.
+- Current limit is global per app key, not per user/store/org.
 
-Configure pricing in `ai_engine_configs.settings`:
+## Logging And Cost
 
-```json
-{
-  "pricing": {
-    "input_per_1k": 0.003,
-    "output_per_1k": 0.015
-  }
-}
-```
+`AILoggingService.logRequest()` writes `ai_engine_logs` and swallows logging errors.
 
-Cost is calculated automatically by `AILoggingService.calculateCost()` and stored in `ai_engine_logs.cost_usd`.
+- `input_preview` is truncated to 500 chars.
+- Cost reads `settings.pricing.input_per_1k` and `settings.pricing.output_per_1k`.
+- Usage stats are cached for 30 seconds.
+- DB has default `request_id`, but `logRequest()` currently does not write request id from context.
 
-### 5. Logging (Automatic)
+## Super-Admin AI Panel
 
-Every `run()` call is logged to `ai_engine_logs` with:
-- `request_id`, `app_key`, `config_id`
-- `organization_id`, `store_id`, `user_id` (from RequestContext)
-- `prompt_tokens`, `completion_tokens`, `cost_usd`
-- `latency_ms`, `status`, `error_message`
-- `input_preview` (first 500 chars of variables)
+Backend config endpoints are under `/superadmin/ai-engine`. App endpoints are under `/superadmin/ai-engine/applications`.
 
-Event emitted: `ai.request.completed`
+Frontend panel currently:
 
-### 6. Adding a New Provider
+- Lists/filters/paginates configs and apps.
+- Creates/edits/deletes/tests configs and apps.
+- Supports config provider preset, sdk type, label, model, base URL, API key ref, default/active, thinking mode.
+- Supports app key/name/prompts, config, temperature, max tokens, output format, rate limit, retry config, active.
+- Does not currently expose usage/cost dashboards, metadata JSON, or `ai_feature_category`.
 
-```
-1. Create `apps/backend/src/ai-engine/providers/new-provider.provider.ts`
-   └─ Implement AIProvider interface (chat, complete, testConnection, chatStream?)
+## Adding Providers
 
-2. Add SdkType to union:
-   └─ `apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts`
-   └─ type SdkType = 'openai_compatible' | 'anthropic_compatible' | 'new_type';
+Only add a provider when OpenAI-compatible or Anthropic-compatible cannot support the SDK/protocol.
 
-3. Add case to initializeProvider():
-   └─ `apps/backend/src/ai-engine/ai-engine.service.ts`
-   └─ case 'new_type': provider = new NewProvider(config); break;
+Required steps:
 
-4. Create config in superadmin panel with sdk_type: 'new_type'
-```
-
-### 7. Configuration Reloading
-
-```typescript
-// Reload all providers from database (after config changes)
-await this.aiEngine.reloadConfigurations();
-```
-
-Called automatically by superadmin config CRUD endpoints.
-
----
-
-## Interfaces
-
-```typescript
-interface AIProvider {
-  chat(messages: AIMessage[], options?: AIRequestOptions): Promise<AIResponse>;
-  complete(prompt: string, options?: AIRequestOptions): Promise<AIResponse>;
-  testConnection(): Promise<{ success: boolean; message: string }>;
-  chatStream?(messages: AIMessage[], options?: AIRequestOptions): AsyncGenerator<AIStreamChunk>;
-}
-
-interface AIMessage {
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  tool_calls?: AIToolCall[];
-  tool_call_id?: string;
-}
-
-interface AIRequestOptions {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  systemPrompt?: string;
-  thinking?: boolean;
-  tools?: AIToolDefinition[];
-  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
-}
-
-interface AIResponse {
-  success: boolean;
-  content?: string;
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
-  model?: string;
-  error?: string;
-  tool_calls?: AIToolCall[];
-  finish_reason?: 'stop' | 'tool_calls' | 'length';
-}
-```
-
----
-
-## Error Codes
-
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `AI_CONFIG_001` | 404 | Configuration not found |
-| `AI_CONFIG_002` | 409 | Duplicate provider+model |
-| `AI_PROVIDER_001` | 502 | Provider connection failed |
-| `AI_PROVIDER_002` | 400 | No default provider configured |
-| `AI_REQUEST_001` | 500 | AI request failed |
-| `AI_APP_001` | 404 | Application not found |
-| `AI_APP_002` | 409 | Duplicate application key |
-| `AI_APP_003` | 400 | Application disabled |
-| `AI_APP_004` | 429 | Rate limit exceeded |
-| `AI_LOG_001` | 500 | Failed to log AI request |
-| `AI_STREAM_001` | 400 | Streaming not supported |
-| `AI_STREAM_002` | 500 | Streaming failed |
-
----
-
-## File Reference
-
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/ai-engine/ai-engine.service.ts` | Core: run(), runStream(), providers, rate limiting |
-| `apps/backend/src/ai-engine/ai-engine.module.ts` | @Global module, tool registration in onModuleInit |
-| `apps/backend/src/ai-engine/ai-logging.service.ts` | Logging, cost calculation, usage stats |
-| `apps/backend/src/ai-engine/ai-stream.controller.ts` | SSE endpoint for streaming |
-| `apps/backend/src/ai-engine/interfaces/ai-provider.interface.ts` | All AI types and interfaces |
-| `apps/backend/src/ai-engine/providers/openai-compatible.provider.ts` | OpenAI SDK provider |
-| `apps/backend/src/ai-engine/providers/anthropic-compatible.provider.ts` | Anthropic SDK provider |
-| `apps/backend/src/common/redis/redis.module.ts` | Redis client (@Global) |
-| `apps/backend/src/common/queue/queue.module.ts` | BullMQ config (@Global) |
-| `apps/backend/src/common/cache/cache.module.ts` | Cache manager (@Global) |
-
----
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Hardcoding prompts in service | Use `run('app_key', variables)` |
-| Importing AIEngineModule | Not needed — it's `@Global` |
-| Not checking `response.success` | Always check and throw `AI_REQUEST_001` |
-| Using `complete()` for features | Use `run()` — enables superadmin config |
-| Not awaiting `checkRateLimit()` | It's async (Redis) — must await |
-| Missing pricing in config | Set `settings.pricing` for cost tracking |
-
----
+1. Implement `AIProvider` in `apps/backend/src/ai-engine/providers/`.
+2. Extend `SdkType` union.
+3. Add initialization case in `AIEngineService`.
+4. Add DTO validation and super-admin UI support if needed.
 
 ## Related Skills
 
-- `vendix-ai-agent-tools` — Tool Registry and Agent Loop
-- `vendix-ai-chat` — Conversation management and chat widget
-- `vendix-ai-streaming` — SSE streaming patterns
-- `vendix-ai-embeddings-rag` — Embeddings and RAG pipeline
-- `vendix-mcp-server` — MCP Gateway
-- `vendix-ai-queue` — Async queue processing
+- `vendix-ai-engine`
+- `vendix-ai-streaming`
+- `vendix-subscription-gate`
+- `vendix-ai-chat`

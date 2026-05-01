@@ -1,7 +1,7 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
+  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   computed,
   signal,
@@ -43,19 +43,28 @@ import { SupportRequestModalComponent } from '../../components/support-request-m
   ],
   templateUrl: './dunning-board.component.html',
   styleUrls: ['./dunning-board.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class DunningBoardComponent implements OnInit, OnDestroy {
+export class DunningBoardComponent {
   private readonly facade = inject(SubscriptionFacade);
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly dunning = this.facade.dunning;
   readonly retrying = this.facade.retryingPayment;
   readonly currentSubscription = this.facade.current;
+  readonly loading = this.facade.loading;
 
-  // Live tick for countdown updates (refreshed once per minute).
+  // Live tick for countdown updates (refreshed every 30s). Writing to the
+  // signal is what triggers re-render — fully Zoneless-compatible because
+  // signals propagate via the reactive graph, not via the NgZone task queue.
   private readonly tickMs = signal(Date.now());
-  private intervalHandle: any = null;
+
+  // Page is "ready" once dunning snapshot is loaded — gates the template
+  // against the empty-default flash where bannerTitle falls to the catch-all
+  // "Tu suscripción requiere atención" while the real payload is in flight.
+  readonly ready = computed(() => this.dunning() !== null);
 
   readonly state = computed(() => this.dunning()?.state ?? 'none');
 
@@ -141,7 +150,21 @@ export class DunningBoardComponent implements OnInit, OnDestroy {
     return `${hours} h ${minutes} min`;
   });
 
+  // Track whether the user has actually clicked retry, so we don't auto-leave
+  // the page on the first load if the subscription happens to already be
+  // active (e.g. the user navigated here manually).
+  private readonly didRetry = signal(false);
+
   constructor() {
+    this.facade.loadCurrent();
+    this.facade.loadDunningState();
+
+    // Tick every 30s. DestroyRef-based cleanup avoids the OnDestroy
+    // interface + handle-field ceremony and keeps the lifecycle co-located
+    // with the constructor.
+    const handle = setInterval(() => this.tickMs.set(Date.now()), 30 * 1000);
+    this.destroyRef.onDestroy(() => clearInterval(handle));
+
     // When retry transitions the subscription back to active, redirect home.
     effect(() => {
       const sub = this.currentSubscription();
@@ -160,24 +183,6 @@ export class DunningBoardComponent implements OnInit, OnDestroy {
     });
   }
 
-  // Track whether the user has actually clicked retry, so we don't auto-leave
-  // the page on the first load if the subscription happens to already be
-  // active (e.g. the user navigated here manually).
-  private readonly didRetry = signal(false);
-
-  ngOnInit(): void {
-    this.facade.loadCurrent();
-    this.facade.loadDunningState();
-    this.intervalHandle = setInterval(
-      () => this.tickMs.set(Date.now()),
-      30 * 1000,
-    );
-  }
-
-  ngOnDestroy(): void {
-    if (this.intervalHandle) clearInterval(this.intervalHandle);
-  }
-
   onRetryPayment(): void {
     if (!this.hasInvoices()) {
       this.toast.error('No hay invoices pendientes de pago');
@@ -186,6 +191,31 @@ export class DunningBoardComponent implements OnInit, OnDestroy {
     this.didRetry.set(true);
     this.facade.retryPayment();
     this.toast.info('Procesando pago…');
+  }
+
+  /**
+   * Single entry point for the "Pagar ahora" CTA. Two paths:
+   *   1. There's an overdue invoice → retry it inline (current dunning flow).
+   *   2. No invoice yet (grace triggered without a generated invoice — happens
+   *      with manual fixtures or when the renewal job hasn't created one) →
+   *      route the user to the checkout for their current plan so they can
+   *      complete the renewal manually.
+   * Routing to the existing `/admin/subscription/checkout/:planId` keeps the
+   * dunning board out of the payment-form business; the checkout page already
+   * handles preview, Wompi widget, COF tokenize and PM persistence.
+   */
+  onPayNow(): void {
+    if (this.hasInvoices()) {
+      this.onRetryPayment();
+      return;
+    }
+    const sub = this.currentSubscription();
+    const planId = sub?.plan_id ?? sub?.paid_plan_id;
+    if (!planId) {
+      this.toast.error('No se encontró un plan vigente para renovar');
+      return;
+    }
+    this.router.navigateByUrl(`/admin/subscription/checkout/${planId}`);
   }
 
   /**

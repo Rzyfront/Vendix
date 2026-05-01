@@ -71,10 +71,10 @@ main {
 }
 
 .footer-info-item {
-  padding: 0.3rem 0.4rem;
+  padding: 0.3rem 0.35rem;
   background: linear-gradient(135deg,
-    rgba(var(--color-primary-rgb), 0.08) 0%,
-    rgba(var(--color-secondary-rgb), 0.12) 100%
+    rgba(var(--color-primary-rgb), 0.10) 0%,
+    rgba(var(--color-secondary-rgb), 0.10) 100%
   );
   border-radius: var(--radius-md);
   border: 1px solid rgba(var(--color-primary-rgb), 0.2);
@@ -136,7 +136,7 @@ main {
   flex: 1;
   min-width: 0;
   border-radius: 6px;
-  padding: 0.15rem 0.3rem;
+  padding: 0.1rem 0.25rem;
   transition: flex 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
               transform 0.2s ease,
@@ -228,6 +228,67 @@ main {
   width: 100%;
 }
 
+/* Plan footer — circular cycle-consumption ring + plan info column.
+   Primary drives the active arc; secondary is the muted track and the
+   ambient drop-shadow accent. */
+.footer-plan-content {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.footer-progress-ring {
+  position: relative;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+
+  .ring-svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+    overflow: visible;
+  }
+
+  .ring-bg {
+    fill: none;
+    stroke: rgba(var(--color-secondary-rgb), 0.45);
+    stroke-width: 3.5;
+  }
+
+  .ring-fg {
+    fill: none;
+    stroke: rgb(var(--color-primary-rgb));
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    transition: stroke-dasharray 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    filter: drop-shadow(0 0 1.5px rgba(var(--color-secondary-rgb), 0.55));
+  }
+
+  .ring-percent {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.45rem;
+    font-weight: 700;
+    color: var(--color-text-primary);
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+}
+
+.footer-plan-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+  gap: 0.05rem;
+}
+
 .footer-info-header {
   display: flex;
   align-items: center;
@@ -235,20 +296,22 @@ main {
 }
 
 .footer-info-label {
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   color: var(--color-text-secondary);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  line-height: 1;
 }
 
 .footer-info-value {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   color: var(--color-text-primary);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  line-height: 1.1;
 }
 
 .footer-divider {

@@ -1,202 +1,77 @@
 ---
 name: vendix-frontend-modal
-description: Implementation patterns for modals in the Vendix frontend.
+description: >
+  Modal implementation patterns for Vendix frontend: app-modal API, model-based visibility,
+  slots, outputs, zoneless-safe close/open behavior, and modal wrapper usage in feature flows.
+  Trigger: When creating or modifying modals in frontend.
+license: MIT
 metadata:
+  author: rzyfront
+  version: "2.0"
   scope: [root]
   auto_invoke: "Creating or modifying modals in frontend"
 ---
 
-# Vendix Frontend Modal Pattern
+# Vendix Frontend Modal
 
-> **⚠️ PREREQUISITO CRÍTICO**: Invocar **`vendix-zoneless-signals`** — el two-way binding de `model()` y el antipatrón de `output()` manuales con `model()` (§14) son el corazón del patrón modal. Sin signals, `[(isOpen)]` falla silenciosamente.
+## Source of Truth
 
-> **Tip**: Antes de usar app-modal, consulta su README en `apps/frontend/src/app/shared/components/modal/README.md` para conocer sus inputs, outputs, gotchas y patrones de uso.
+- `apps/frontend/src/app/shared/components/modal/modal.component.ts`
+- `apps/frontend/src/app/shared/components/modal/README.md`
 
-This skill describes the standard pattern for implementing modals in Vendix, using `app-modal` and the Modal-First architecture.
+## Current `app-modal` API
 
-## Critical Rules (Best Practices)
+`app-modal` is a standalone shared component using signal APIs.
 
-1.  **System Components Only**: Inside the modal, ALWAYS use system components (`app-input`, `app-selector`, `app-textarea`). Avoid raw HTML inputs to maintain consistency and prevent event conflicts.
-2.  **Two-Way Binding con `model()`**: `app-modal` usa `model()` para `isOpen`.
-    Usar siempre `[(isOpen)]` para two-way binding.
-    - Correcto: `[(isOpen)]="showModal"`
-    - También válido (one-way + handler): `[isOpen]="showModal" (isOpenChange)="onClose($event)"`
-    - El NG0100 ya no aplica con `model()` — el cierre es reactivo por diseño.
-3.  **Single-View Architecture**: For simple CRUD modules, avoid creating child routes (`/create`, `/edit/:id`). Use a single "List" view and handle Creation/Editing through modals on the same view.
+Inputs:
 
----
+- `isOpen` via `model<boolean>(false)`
+- `title`
+- `subtitle`
+- `size`: `sm | md | lg | xl-mid | xl`
+- `centered`
+- `closeOnBackdrop`
+- `closeOnEscape`
+- `showCloseButton`
+- `overlayCloseButton`
+- `customClasses`
 
-## Component Structure (Modal Wrapper)
+Outputs:
 
-Follow this template to create robust modals:
+- `opened`
+- `closed`
+- `cancel`
 
-**File:** `feature-create/feature-create.component.ts`
+Slots/content areas:
 
-```typescript
-import { Component, model, signal, inject } from "@angular/core";
-import { CommonModule } from "@angular/common";
-import {
-  ReactiveFormsModule,
-  FormGroup,
-  FormBuilder,
-  Validators,
-} from "@angular/forms";
-import {
-  ModalComponent,
-  ButtonComponent,
-  InputComponent,
-  SelectorComponent,
-  TextareaComponent,
-} from "@/shared/components";
+- default body content
+- `[slot=header]`
+- `[slot=header-end]`
+- `[slot=footer]`
 
-@Component({
-  selector: "app-feature-create",
-  standalone: true,
-  imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    ModalComponent,
-    ButtonComponent,
-    InputComponent,
-    SelectorComponent,
-    TextareaComponent,
-  ],
-  template: `
-    <app-modal
-      [(isOpen)]="isOpen"
-      (cancel)="onClose()"
-      title="New Item"
-      size="md"
-    >
-      <!-- Body -->
-      <div class="p-4 space-y-4">
-        <form [formGroup]="form">
-          <app-input
-            label="Name"
-            formControlName="name"
-            [control]="form.get('name')"
-            [required]="true"
-          ></app-input>
-        </form>
-      </div>
+## Rules
 
-      <!-- Footer -->
-      <div slot="footer" class="flex gap-3 justify-end w-full">
-        <app-button variant="ghost" (clicked)="onClose()">Cancelar</app-button>
-        <app-button variant="primary" [loading]="isSubmitting()" (clicked)="onSubmit()">
-          Guardar
-        </app-button>
-      </div>
-    </app-modal>
-  `,
-})
-export class FeatureCreateComponent {
-  private fb = inject(FormBuilder);
+- Always follow `vendix-zoneless-signals` patterns when wrapping modals.
+- Use `[(isOpen)]` with a signal/model in the parent or wrapper component.
+- Prefer shared system components inside the modal body, but this is a preference, not a false hard rule.
+- Use the footer slot for action buttons.
+- Listen to `cancel` when the wrapper needs cleanup on close.
 
-  // Two-way binding con el padre — model() reemplaza @Input() + @Output()
-  readonly isOpen = model<boolean>(false);
+## Behavior Notes
 
-  // Estado local con signals
-  readonly isSubmitting = signal(false);
+- `opened` and `closed` are emitted from an `effect()` observing `isOpen()` transitions.
+- `close()` sets `isOpen(false)` and emits `cancel`.
+- Escape closing is wired through a browser-only keydown listener.
+- Current backdrop-close handling is attached to the wrapper `dblclick` path plus outside-container detection; document current behavior, do not assume a different click contract without checking the component.
 
-  form = this.fb.group({
-    name: ['', Validators.required],
-  });
+## Wrapper Pattern
 
-  onClose(): void {
-    this.isOpen.set(false);
-  }
+- Wrapper components should own form state, submit state, and domain-specific cleanup.
+- `app-modal` owns only generic modal chrome/visibility behavior.
+- Keep create/edit flows on the same screen when that matches the surrounding module pattern; do not force route-based CRUD when the existing UX is modal-first.
 
-  onSubmit(): void {
-    if (this.form.invalid) return;
-    this.isSubmitting.set(true);
-    // ... lógica de submit
-  }
-}
-```
+## Related Skills
 
-> **Nota sobre patrones legacy**: Si encuentras modales con `@Input() isOpen` y `@Output() isOpenChange = new EventEmitter()`, son componentes que aún no se han migrado. En código nuevo, **siempre usar `model()`**.
-
----
-
-## Uso desde el Padre
-
-El componente padre declara un signal local y lo pasa con two-way binding:
-
-```html
-<!-- padre.component.html -->
-<app-feature-create [(isOpen)]="showCreateModal" />
-
-<app-button (clicked)="showCreateModal.set(true)">Crear</app-button>
-```
-
-```typescript
-// padre.component.ts
-readonly showCreateModal = signal(false);
-```
-
----
-
-## `app-modal` Properties
-
-| Property          | Type                           | Description                                                        |
-| ----------------- | ------------------------------ | ------------------------------------------------------------------ |
-| `isOpen`          | `boolean`                      | Controls the modal visibility.                                     |
-| `size`            | `'sm' \| 'md' \| 'lg' \| 'xl'` | Defines the maximum width of the modal.                            |
-| `title`           | `string`                       | Main title in the header.                                          |
-| `subtitle`        | `string`                       | Secondary description below the title.                             |
-| `showCloseButton` | `boolean`                      | Shows the 'X' button in the top-right corner (defaults to `true`). |
-
----
-
-## Footer Styling
-
-The footer typically has the following characteristics:
-
-- Light gray background: `bg-gray-50`.
-- Bottom rounded corners: `rounded-b-xl`.
-- Flex container: `flex items-center justify-end gap-3`.
-- Buttons: Always include a cancel button (outline) and a primary action button (primary).
-
----
-
-## Best Practices
-
-1.  **Using Slots**: Use `slot="footer"` for the bottom action area.
-2.  **Two-Way Binding**: Usar `model<boolean>(false)` para `isOpen`. El padre usa `[(isOpen)]="showModal"` con un signal local.
-3.  **Close Handling**: Listen to the `(cancel)` event from `app-modal` to clean up state or properly close the modal when the user presses Escape or clicks outside.
-4.  **Form Validation**: Disable the primary action button if the form is invalid or if an operation is in progress (`isSubmitting`).
-5.  **Responsiveness**: Use Tailwind classes like `p-2 md:p-4` to adjust padding based on screen size.
-
----
-
-## Troubleshooting Common Issues
-
-### Modal closes when clicking inside (Click Propagation)
-
-**Cause**: Event bubbling from inner elements to the backdrop.
-**Solution**: The `app-modal` component already implements a robust verification (`contains` check) in its click handler.
-
-1. Make sure you are using the latest version of `app-modal`.
-2. **Do NOT use `stopPropagation` hacks** in your inner containers; the modal handles this natively.
-3. Use `app-input` and system components, as they have predictable event handling.
-
-### NG0100 Error (ExpressionChangedAfterItHasBeenCheckedError)
-
-**Estado**: Ya no aplica con `model()`. El two-way binding reactivo de `model()` gestiona el estado de apertura de forma sincrónica dentro del ciclo de Signals, eliminando este error por diseño.
-
-**Si aún aparece en código legacy** (componentes con `@Input()/@Output()`): La causa es mapear `isOpenChange` a una función que fuerza `false` inmediatamente. La solución legacy era usar `(isOpenChange)="isOpenChange.emit($event)"`. La solución definitiva es migrar a `model()`.
-
-### Double borders or strange styles
-
-**Cause**: Wrapping components like `app-table` in divs with additional borders inside the modal.
-**Solution**: System components (`app-table`) already have their own borders. Place them directly in the modal container without extra decorative wrappers.
-
----
-
-## Key File Reference
-
-| File                                                                                                | Purpose                     |
-| --------------------------------------------------------------------------------------------------- | --------------------------- |
-| `apps/frontend/src/app/shared/components/modal/modal.component.ts`                                  | Base modal implementation.  |
-| `apps/frontend/src/app/private/modules/store/products/components/product-create-modal.component.ts` | Analyzed reference example. |
+- `vendix-zoneless-signals`
+- `vendix-frontend-component`
+- `vendix-angular-forms`

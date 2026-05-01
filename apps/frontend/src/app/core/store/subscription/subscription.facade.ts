@@ -22,10 +22,13 @@ export type SubscriptionUiState =
       toPlanName: string;
       invoiceId: number | null;
     }
-  | { kind: 'grace_soft'; daysRemaining: number }
-  | { kind: 'grace_hard'; daysRemaining: number }
+  | { kind: 'grace_soft'; daysRemaining: number; daysOverdue: number }
+  | { kind: 'grace_hard'; daysRemaining: number; daysOverdue: number }
   | { kind: 'expiring_soon'; daysUntilRenewal: number }
   | { kind: 'cancelled' }
+  | { kind: 'expired' }
+  | { kind: 'suspended' }
+  | { kind: 'blocked' }
   | { kind: 'no_plan' };
 
 const EXPIRING_SOON_THRESHOLD_DAYS = 7;
@@ -35,6 +38,13 @@ function daysBetween(future: string | Date | null | undefined): number {
   const ts = typeof future === 'string' ? new Date(future).getTime() : future.getTime();
   if (Number.isNaN(ts)) return 0;
   return Math.max(0, Math.ceil((ts - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
+function daysSince(past: string | Date | null | undefined): number {
+  if (!past) return 0;
+  const ts = typeof past === 'string' ? new Date(past).getTime() : past.getTime();
+  if (Number.isNaN(ts)) return 0;
+  return Math.max(0, Math.floor((Date.now() - ts) / (1000 * 60 * 60 * 24)));
 }
 
 const DAY_MS = 1000 * 60 * 60 * 24;
@@ -175,16 +185,27 @@ export class SubscriptionFacade {
       return {
         kind: 'grace_hard',
         daysRemaining: daysBetween(graceDeadline(sub, 'grace_hard_until', 'grace_period_hard_days')),
+        daysOverdue: daysSince(sub.current_period_end),
       };
     }
     if (state === 'grace_soft') {
       return {
         kind: 'grace_soft',
         daysRemaining: daysBetween(graceDeadline(sub, 'grace_soft_until', 'grace_period_soft_days')),
+        daysOverdue: daysSince(sub.current_period_end),
       };
     }
-    if (state === 'cancelled' || state === 'expired') {
+    if (state === 'cancelled' || state === 'canceled') {
       return { kind: 'cancelled' };
+    }
+    if (state === 'expired') {
+      return { kind: 'expired' };
+    }
+    if (state === 'suspended') {
+      return { kind: 'suspended' };
+    }
+    if (state === 'blocked') {
+      return { kind: 'blocked' };
     }
     if (state === 'no_plan') {
       return { kind: 'no_plan' };
@@ -217,6 +238,20 @@ export class SubscriptionFacade {
         kind: 'pending_change_abandoned',
         fromPlanName: planName,
         toPlanName: pendingPlanName,
+        invoiceId: pendingInvoiceId,
+      };
+    }
+    // Recovery-payment-abandoned: user was in grace/suspended, started a
+    // checkout for the SAME plan (so paid_plan_id == pending_plan_id), then
+    // walked away from the Wompi widget. Without this branch the discriminated
+    // union fell to 'healthy' and the UI showed neither the prior dunning
+    // banner nor a "complete payment" CTA — the sub was stuck silent.
+    // Surfacing it as `pending_initial_payment` reuses the existing
+    // "Completa tu pago / Cancelar" banner with no new template work.
+    if (state === 'pending_payment' && pendingPlanId != null) {
+      return {
+        kind: 'pending_initial_payment',
+        planName: pendingPlanName,
         invoiceId: pendingInvoiceId,
       };
     }

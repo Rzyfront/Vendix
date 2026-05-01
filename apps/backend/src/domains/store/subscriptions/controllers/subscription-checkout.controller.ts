@@ -115,13 +115,10 @@ export class SubscriptionCheckoutController {
       dto.coupon_code,
     );
 
-    // Use the explicit `is_free` flag (added by
-    // 20260429235000_add_is_free_to_subscription_plans). Legacy heuristic was
-    // `effective_price <= 0` which masked partner-override edge cases.
-    if (
-      targetPlan.is_free === true &&
-      targetPricing.margin_amount.lte(DECIMAL_ZERO)
-    ) {
+    // Free/no-charge preview: use the resolved effective target price so legacy
+    // or promotional rows that cost 0 are handled like the commit path, while
+    // partner surcharges still make the plan paid.
+    if (targetPricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO)) {
       const result: CheckoutPreviewResult = {
         proration: null,
         invoice: null,
@@ -405,16 +402,34 @@ export class SubscriptionCheckoutController {
       where: { store_id: storeId },
     });
 
-    // Free-plan detection: when the plan is explicitly marked `is_free=true`
-    // the commit emits no charge, so the no-refund acknowledgement is
-    // semantically vacuous. Mirrors the frontend which hides the policy block
-    // for free plans. Replaces the legacy `base_price <= 0` heuristic that
-    // failed silently when the row pricing snapshot was stale.
+    // Free/no-charge detection: use the target plan's live effective price
+    // (including partner override) instead of only the `is_free` flag. This
+    // preserves paid-plan protection while allowing legacy/promotional rows
+    // whose effective target charge is actually 0.
     const targetPlan = await this.prisma.subscription_plans.findUnique({
       where: { id: dto.planId },
-      select: { base_price: true, is_free: true },
+      select: {
+        id: true,
+        base_price: true,
+        max_partner_margin_pct: true,
+        is_free: true,
+      },
     });
-    const isFreePlan = !!targetPlan && targetPlan.is_free === true;
+    const targetPricing = targetPlan
+      ? await this.resolveTargetPricing(
+          {
+            id: targetPlan.id,
+            base_price: targetPlan.base_price,
+            max_partner_margin_pct: targetPlan.max_partner_margin_pct,
+          },
+          (sub as any)?.partner_override_id ?? null,
+        )
+      : null;
+    const isFreePlan = !!(
+      targetPlan &&
+      targetPricing &&
+      targetPricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO)
+    );
 
     // S3.4 — A trial-state plan swap is a free deferred change ONLY when the
     // target is also free. Trial → paid is now handled as an immediate
@@ -918,8 +933,8 @@ export class SubscriptionCheckoutController {
 
     // S3.4 — Re-evaluate proration server-side BEFORE applying so we can
     // branch on `trial_plan_swap` and skip the no-refund-bound invoice/charge
-    // pipeline. The trial swap path is free; no invoice is emitted, no
-    // charge runs, and the subscription stays in `trial`.
+    // pipeline. Trial → free is immediate: no invoice/widget, and the old
+    // trial window is closed so the destination free cycle starts now.
     const previewResult = await this.proration.preview(sub.id, dto.planId);
     if (previewResult.kind === 'trial_plan_swap') {
       const updated = await this.proration.apply(sub.id, dto.planId);
@@ -937,9 +952,9 @@ export class SubscriptionCheckoutController {
         {
           subscription: updated,
           mode: 'trial_plan_swap',
-          trial_ends_at: previewResult.trial_swap?.trial_ends_at ?? null,
+          trial_ends_at: null,
         },
-        'Checkout committed (trial plan swap)',
+        'Checkout committed (trial to free plan)',
       );
     }
 
@@ -1440,14 +1455,11 @@ export class SubscriptionCheckoutController {
     // Paid plans MUST land in `pending_payment` until the Wompi webhook (or
     // POS confirm) reports the charge as APPROVED. Only the SubscriptionState
     // Listener (subscription.payment.succeeded) is allowed to promote them
-    // to `active`. Free plans (effective_price <= 0 and no partner margin)
-    // skip the invoice/charge cycle and go straight to `active`.
-    // Use explicit is_free flag rather than effective_price heuristic so that
-    // partner-margin edge cases on base-free plans are still routed through
-    // the paid pipeline (issueInvoice + Wompi widget).
-    const isFreePlan =
-      plan.is_free === true &&
-      pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO);
+    // to `active`. No-charge plans skip the invoice/charge cycle and go
+    // straight to `active`. The resolved effective price already includes
+    // partner surcharges/margins, so base-free plans with a surcharge still
+    // remain in the paid pipeline.
+    const isFreePlan = pricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO);
     const initialState = isFreePlan ? 'active' : 'pending_payment';
 
     return this.prisma.$transaction(async (tx) => {

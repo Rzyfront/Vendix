@@ -1,4 +1,4 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, effect, input, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { InputComponent } from '../../../../../shared/components';
 
@@ -8,10 +8,18 @@ import { InputComponent } from '../../../../../shared/components';
   imports: [FormsModule, InputComponent],
   template: `
     <div class="space-y-4">
+      <div class="rounded-lg border border-border bg-background p-3 space-y-1">
+        <p class="text-sm font-medium text-text-primary">Gracia suave</p>
+        <p class="text-sm text-text-secondary">
+          Durante estos dias despues del vencimiento, la tienda puede seguir operando con avisos
+          de pago. Al terminar, las reglas de gracia dura y suspension toman control.
+        </p>
+      </div>
+
       <div class="flex items-center gap-4">
         <app-input
           type="number"
-          label="Grace Period (days)"
+          label="Dias de gracia suave"
           [(ngModel)]="days"
           (ngModelChange)="emitChange()"
           [min]="0"
@@ -29,13 +37,14 @@ import { InputComponent } from '../../../../../shared/components';
             [class.text-primary]="days() === preset"
             (click)="setDays(preset)"
           >
-            {{ preset }} days
+            {{ preset }} dias
           </button>
         }
       </div>
 
       <p class="text-sm text-text-secondary">
-        Subscriptions will enter grace period for <strong>{{ days() }}</strong> days after the billing cycle ends before suspension.
+        Las suscripciones entran en gracia suave por <strong>{{ days() }}</strong> dias despues
+        de terminar el ciclo de cobro. Usa cero si el plan debe pasar directo a la siguiente etapa.
       </p>
     </div>
   `,
@@ -46,20 +55,26 @@ export class GraceThresholdEditorComponent {
 
   readonly initialValue = input<number | undefined>(undefined);
   readonly presets = [3, 7, 14, 30];
+  private readonly userTouched = signal(false);
 
   constructor() {
-    const initial = this.initialValue();
-    if (initial !== undefined) {
-      this.days.set(initial);
-    }
+    effect(() => {
+      const initial = this.initialValue();
+      const touched = untracked(() => this.userTouched());
+      if (initial !== undefined && !touched) {
+        this.days.set(initial);
+      }
+    });
   }
 
   setDays(value: number): void {
+    this.userTouched.set(true);
     this.days.set(value);
     this.emitChange();
   }
 
   emitChange(): void {
+    this.userTouched.set(true);
     this.valueChange.emit(this.days());
   }
 }

@@ -1,154 +1,135 @@
 ---
 name: vendix-ecommerce-checkout
-description: Checkout flow for the ecommerce module.
+description: >
+  Checkout flow for STORE_ECOMMERCE: cart, shipping, payment methods, Wompi,
+  WhatsApp checkout, bookings, and stock reservations. Trigger: When implementing
+  or debugging ecommerce checkout, cart checkout, shipping/payment selection, or Wompi checkout.
+license: MIT
 metadata:
-  scope: [ecommerce]
+  author: rzyfront
+  version: "1.1"
+  scope: [root]
   auto_invoke: "Implementing ecommerce checkout"
 ---
-# Vendix Ecommerce Checkout Flow
 
-> **Complete Checkout Flow** - From cart to order creation, including shipping and payment.
+## When to Use
 
-## 🎯 Overview
+- Editing backend checkout/cart APIs under `apps/backend/src/domains/ecommerce/`.
+- Editing frontend checkout/cart pages under `apps/frontend/src/app/private/modules/ecommerce/`.
+- Working with ecommerce payment method filtering, Wompi widget checkout, WhatsApp checkout, shipping estimates, bookings, or cart sync.
 
-The ecommerce checkout handles online sales through `STORE_ECOMMERCE` app. It processes cart items, validates shipping, calculates totals, and creates orders.
+## Backend API
 
----
+Checkout controller routes:
 
-## 📊 Data Flow
+- `GET /ecommerce/checkout/payment-methods?shipping_type=...` with `JwtAuthGuard`.
+- `POST /ecommerce/checkout` with `JwtAuthGuard`.
+- `POST /ecommerce/checkout/prepare-wompi` with `JwtAuthGuard`.
+- `POST /ecommerce/checkout/confirm-wompi-payment/:orderId` with `JwtAuthGuard`.
+- `POST /ecommerce/checkout/whatsapp` with `@OptionalAuth()`.
 
-```mermaid
-sequenceDiagram
-    participant FE as Frontend
-    participant API as POST /ecommerce/checkout
-    participant Cart as CartService
-    participant Ship as ShippingRates
-    participant Pay as PaymentMethods
-    participant DB as Database
+Cart routes are authenticated: `GET /ecommerce/cart`, `POST /ecommerce/cart/items`, `PUT /ecommerce/cart/items/:id`, `DELETE /ecommerce/cart/items/:id`, `DELETE /ecommerce/cart`, and `POST /ecommerce/cart/sync`.
 
-    FE->>API: CheckoutRequest
-    API->>Cart: getCart()
-    API->>Ship: validate rate (if provided)
-    API->>Pay: validate payment method
-    API->>DB: create order + items + payment
-    API->>Cart: clearCart()
-    API-->>FE: { order_id, order_number, total }
-```
+## DTO Shape
 
----
+`CheckoutDto` supports:
 
-## 🔧 Backend Components
+- `payment_method_id` required.
+- `shipping_method_id`, `shipping_rate_id`, `shipping_address_id`, or inline `shipping_address`.
+- `notes`.
+- `items` fallback for cart-less checkout payloads.
+- `bookings` for bookable service products.
 
-### CheckoutDto
+`WhatsappCheckoutDto` supports `notes`, `items`, `shipping_method_id`, and `shipping_rate_id`.
 
-```typescript
-// apps/backend/src/domains/ecommerce/checkout/dto/checkout.dto.ts
-export class CheckoutDto {
-    @IsOptional() @IsInt() shipping_method_id?: number;
-    @IsOptional() @IsInt() shipping_rate_id?: number;
-    @IsOptional() @IsInt() shipping_address_id?: number;
-    @IsOptional() @IsObject() shipping_address?: ShippingAddressDto;
-    @IsInt() payment_method_id: number;
-    @IsOptional() @IsString() notes?: string;
-}
-```
+## Normal Checkout Flow
 
-### CheckoutService Key Steps
+The backend reads the authenticated user's ecommerce cart through `EcommercePrismaService`. If the backend cart is empty and DTO `items` exist, it uses those DTO items as fallback.
 
-1. **Get Cart** - Retrieve cart with items
-2. **Validate Payment Method** - Check enabled and belongs to store
-3. **Validate Stock** - Ensure all items have sufficient stock
-4. **Process Address** - Create new or use existing
-5. **Validate Shipping** - Check rate/method if provided
-6. **Calculate Totals** - subtotal + shipping_cost = grand_total
-7. **Create Order** - With items, addresses, shipping info
-8. **Create Payment** - Pending payment record
-9. **Update Stock** - Decrement quantities
-10. **Clear Cart** - Remove cart items
+Current flow:
 
----
+1. Validate non-empty items.
+2. Resolve store currency.
+3. Validate enabled store payment method.
+4. Validate variants; products with variants require `product_variant_id`.
+5. Validate stock through `StockValidatorService`.
+6. Detect physical items; service/no-shipping products can skip address/shipping.
+7. Create or load shipping address when required.
+8. Validate shipping rate or method through store-scoped queries.
+9. Resolve item prices with `PriceResolverService` and taxes with `TaxesService`.
+10. Create order with `channel: 'ecommerce'` and `state: 'pending_payment'`.
+11. Emit `order.created`.
+12. Create pending payment row.
+13. Reserve stock through `StockLevelManager.reserveStock()`; checkout does not directly decrement stock.
+14. Create booking reservations when `bookings` are present; failures are logged and do not fail checkout.
+15. Clear backend cart.
+16. Return `order_id`, `order_number`, `total`, `state`, and `message`.
 
-## 🌐 Frontend Components
+## Payment Method Filtering
 
-### Key Files
+`GET /ecommerce/checkout/payment-methods` filters enabled store payment methods by `system_payment_method.processing_mode` and shipping type:
 
-| File | Purpose |
-|------|---------|
-| `checkout.component.ts` | Main checkout page component |
-| `checkout.service.ts` | API calls for checkout |
-| `cart.service.ts` | Cart management + shipping estimates |
+- `pickup`: `DIRECT`, `ONLINE`.
+- Delivery/other shipping types: `ONLINE`, `ON_DELIVERY`.
+- No shipping type: all supported modes.
 
-### CheckoutRequest Interface
+Frontend reloads payment methods after shipping selection because shipping method type changes eligible payment methods.
 
-```typescript
-export interface CheckoutRequest {
-    shipping_address_id?: number;
-    shipping_address?: AddressDto;
-    shipping_method_id?: number;
-    shipping_rate_id?: number;
-    payment_method_id: number;
-    notes?: string;
-}
-```
+## Wompi Flow
 
-### Checkout Steps UI
+Frontend normal checkout creates the order first, then prepares/opens Wompi.
 
-1. **Address Selection** - Pick existing or enter new
-2. **Shipping Method** - Load options via `getShippingEstimates()`
-3. **Payment Method** - Select from store's enabled methods
-4. **Confirmation** - Review and place order
+Backend endpoints:
 
----
+- `prepare-wompi` builds widget config, reuses existing `payments.gateway_reference` when present, and validates redirect host against domain settings.
+- `confirm-wompi-payment/:orderId` polls Wompi by `transaction_id` or `gateway_reference`, then applies the result through `WebhookHandlerService.applyWompiTransaction`.
 
-## 📦 Database Models
+Frontend detects Wompi when selected method has `type === 'wompi'` or `provider === 'wompi'`, opens the Wompi widget via shared `WompiService`, and confirms approved/declined/error callbacks as a UX fallback.
 
-### orders
+## WhatsApp Checkout
 
-```prisma
-model orders {
-    id                    Int
-    store_id              Int
-    customer_id           Int?
-    order_number          String
-    channel               order_channel_enum  // 'pos' | 'ecommerce' | 'agent' | 'whatsapp' | 'marketplace'
-    shipping_address_id   Int?
-    shipping_method_id    Int?
-    shipping_cost         Decimal
-    subtotal_amount       Decimal
-    grand_total           Decimal
-    state                 order_state_enum
-    // ... relationships
-}
-```
+WhatsApp checkout is separate from normal checkout.
 
-> **Note:** The `channel` field is auto-assigned:
-> - `'ecommerce'` - Orders from CheckoutService (online storefront)
-> - `'pos'` - Orders from PaymentsService.processPosPayment (point of sale)
+- Route: `POST /ecommerce/checkout/whatsapp`.
+- Auth is optional.
+- Authenticated users can use backend cart or DTO items.
+- Guests must send DTO `items` from localStorage cart.
+- Creates order with `channel: 'whatsapp'` and `state: 'created'`.
+- Does not create a payment row.
+- Backend clears cart only for authenticated backend carts; frontend clears guest localStorage after success.
 
-### Related Models
+## Frontend Flow
 
-- `cart_items` - Items being purchased
-- `shipping_methods` - Delivery options
-- `shipping_rates` - Zone-specific pricing
-- `store_payment_methods` - Enabled payments
+Frontend files:
 
----
+- `apps/frontend/src/app/private/modules/ecommerce/pages/checkout/checkout.component.ts`
+- `apps/frontend/src/app/private/modules/ecommerce/services/checkout.service.ts`
+- `apps/frontend/src/app/private/modules/ecommerce/services/cart.service.ts`
+- `apps/frontend/src/app/private/modules/ecommerce/pages/cart/cart.component.ts`
 
-## ⚠️ Error Handling
+The normal `/checkout` route is protected by `AuthGuard`. Guest purchase is handled through WhatsApp checkout unless store config requires registration.
 
-| Error | Cause | Message |
-|-------|-------|---------|
-| 400 | Empty cart | "Cart is empty" |
-| 400 | Invalid payment | "Invalid payment method" |
-| 400 | Stock issue | "Insufficient stock for {product}" |
-| 400 | Bad shipping | "Invalid shipping method" |
-| 400 | Wrong store | "Shipping method not available for this store" |
+The checkout component uses signals/computed for core state and `takeUntilDestroyed`. Some shipping fields are still plain mutable fields in current code; avoid copying that pattern into new code.
 
----
+Step selection is dynamic:
 
-## 🔗 Related Skills
+- Service-only carts can skip address/shipping.
+- Physical carts require address and shipping/payment.
+- Bookable service products add a booking step.
 
-- `vendix-backend-api` - API patterns
-- `vendix-error-handling` - Error handling
-- `vendix-frontend-state` - State management
-- `vendix-multi-tenant-context` - Store context
+Shipping estimates are calculated by `CartService.getShippingEstimates()` through `POST /shipping/calculate?store_id=...`, not a checkout-owned endpoint.
+
+## Cart Behavior
+
+- Authenticated cart uses backend `/ecommerce/cart`.
+- Guest cart uses localStorage key `vendix_cart`.
+- On login, local cart syncs to backend through `/ecommerce/cart/sync`, then localStorage is cleared.
+- Cart page blocks normal checkout for guests by opening login, but can start WhatsApp checkout if config allows.
+
+## Related Skills
+
+- `vendix-customer-auth` - Customer login/register and guest boundary
+- `vendix-payment-processors` - Wompi and payment processor internals
+- `vendix-inventory-stock` - Reservation and stock validation behavior
+- `vendix-multi-tenant-context` - Ecommerce store/user context
+- `vendix-zoneless-signals` - Frontend signal state

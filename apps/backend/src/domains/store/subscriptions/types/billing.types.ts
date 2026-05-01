@@ -17,6 +17,9 @@ export interface InvoiceLineItem {
     billing_cycle: string;
     prorated?: boolean;
     fresh_purchase?: boolean;
+    plan_change?: boolean;
+    kind?: ProrationKind;
+    unused_credit_applied?: string;
   };
 }
 
@@ -47,9 +50,9 @@ export type ProrationKind =
   | 're_subscribe';
 
 /**
- * S3.4 — Trial plan-swap metadata. Surfaced when subscription.state === 'trial'
- * AND trial_ends_at is in the future. The swap is free: no invoice, no state
- * change. The first paid charge happens at trial_ends_at.
+ * Legacy trial plan-swap metadata. Kept for backwards compatibility with old
+ * clients, but current trial → free checkout starts a fresh free cycle
+ * immediately and does not carry trial_ends_at forward.
  */
 export interface TrialPlanSwapInfo {
   old_plan: { id: number; code: string; name: string; base_price: string };
@@ -62,9 +65,7 @@ export interface TrialPlanSwapInfo {
 export interface ProrationPreview {
   kind: ProrationKind;
   /**
-   * S3.4 — Free-form mode mirroring `kind` for finer-grained UI branches. For
-   * trial swaps it is `'trial_plan_swap'`; for the other paths it equals the
-   * literal `kind` value.
+   * S3.4 — Free-form mode mirroring `kind` for finer-grained UI branches.
    */
   mode?: ProrationKind;
   days_remaining: number;
@@ -77,14 +78,13 @@ export interface ProrationPreview {
   invoice_to_issue: InvoicePreview | null;
   credit_to_apply_next_cycle: string; // Decimal serialized
   /**
-   * S3.4 — Set only when kind === 'trial_plan_swap'. Carries the data the
-   * frontend needs to render the trial-swap variant (without re-fetching
-   * plan metadata).
+   * Legacy payload for older trial-swap previews. New trial → free previews do
+   * not set it because the change is immediate.
    */
   trial_swap?: TrialPlanSwapInfo;
   /**
-   * S3.4 — When the change is deferred (trial swap), this is the moment the
-   * new plan starts being billed. For immediate paths it mirrors `now`.
+   * Moment when the destination plan takes effect. For immediate paths it
+   * mirrors `now`.
    */
   effective_at?: string; // ISO
   /**

@@ -160,9 +160,9 @@ describe('SubscriptionProrationService', () => {
     expect(res.direction).toBe('credit');
   });
 
-  // S3.4 — Trial plan-swap edge case: trial → free plan swap (targetIsFree=true).
-  // Requires is_free=true on newPlan (not heuristic base_price<=0).
-  it('preview during active trial returns mode=trial_plan_swap with proration_amount=0', async () => {
+  // S3.4 — Trial → free plan swap (targetIsFree=true). It is immediate and
+  // starts a fresh free cycle; remaining trial days are not carried over.
+  it('preview during active trial to free is immediate with proration_amount=0', async () => {
     const trialEndsAt = new Date(Date.now() + 5 * 86400000); // +5d
     prismaMock.store_subscriptions.findUnique.mockResolvedValue(
       subFixture({ state: 'trial', trial_ends_at: trialEndsAt }),
@@ -192,12 +192,14 @@ describe('SubscriptionProrationService', () => {
     expect(preview.mode).toBe('trial_plan_swap');
     expect(preview.proration_amount).toBe('0.00');
     expect(preview.invoice_to_issue).toBeNull();
-    expect(preview.applies_immediately).toBe(false);
+    expect(preview.applies_immediately).toBe(true);
     expect(preview.credit_to_apply_next_cycle).toBe('0.00');
-    expect(preview.trial_swap?.new_plan.id).toBe(6);
-    expect(preview.trial_swap?.old_plan.id).toBe(5);
-    expect(preview.trial_swap?.trial_ends_at).toBe(trialEndsAt.toISOString());
-    expect(preview.effective_at).toBe(trialEndsAt.toISOString());
+    expect(preview.days_remaining).toBe(0);
+    expect(preview.cycle_days).toBe(30);
+    expect(preview.trial_swap).toBeUndefined();
+    expect(new Date(preview.effective_at ?? '').getTime()).toBeLessThan(
+      trialEndsAt.getTime(),
+    );
   });
 
   it('preview when state=active does NOT enter trial_plan_swap branch', async () => {
@@ -258,7 +260,7 @@ describe('SubscriptionProrationService', () => {
     expect(preview.kind).not.toBe('trial_plan_swap');
   });
 
-  it('apply on trial_plan_swap path emits plan_changed with mode and skips invoice', async () => {
+  it('apply on trial_plan_swap activates free plan with a fresh cycle and skips invoice', async () => {
     const trialEndsAt = new Date(Date.now() + 5 * 86400000);
     prismaMock.store_subscriptions.findUnique.mockResolvedValue(
       subFixture({ state: 'trial', trial_ends_at: trialEndsAt }),
@@ -288,17 +290,35 @@ describe('SubscriptionProrationService', () => {
     // Invoice MUST NOT be issued during trial swap.
     expect(billingMock.issueInvoice).not.toHaveBeenCalled();
 
+    const updateArg = prismaMock.store_subscriptions.update.mock.calls[0][0];
+    expect(updateArg.data.state).toBe('active');
+    expect(updateArg.data.plan_id).toBe(6);
+    expect(updateArg.data.paid_plan_id).toBe(6);
+    expect(updateArg.data.trial_ends_at).toBeNull();
+    expect(updateArg.data.current_period_start).toBeInstanceOf(Date);
+    expect(updateArg.data.current_period_end).toBeInstanceOf(Date);
+    expect(updateArg.data.current_period_end.getTime()).toBeGreaterThan(
+      updateArg.data.current_period_start.getTime(),
+    );
+
+    const transitionArg = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(transitionArg.data.type).toBe('state_transition');
+    expect(transitionArg.data.from_state).toBe('trial');
+    expect(transitionArg.data.to_state).toBe('active');
+
     // The plan_changed event must carry mode=trial_plan_swap.
-    const evtArg = prismaMock.subscription_events.create.mock.calls[0][0];
+    const evtArg = prismaMock.subscription_events.create.mock.calls[1][0];
     expect(evtArg.data.type).toBe('plan_changed');
     expect(evtArg.data.payload.mode).toBe('trial_plan_swap');
     expect(evtArg.data.payload.proration_amount).toBe('0.00');
+    expect(evtArg.data.payload.applies_immediately).toBe(true);
 
     // Bus event mirrors the kind.
     const [eventName, eventPayload] = eventEmitterMock.emit.mock.calls[0];
     expect(eventName).toBe('subscription.plan.changed');
     expect(eventPayload.kind).toBe('trial_plan_swap');
     expect(eventPayload.mode).toBe('trial_plan_swap');
+    expect(eventPayload.appliesImmediately).toBe(true);
   });
 
   // ──────────────────────────────────────────────────────────────────────────

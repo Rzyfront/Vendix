@@ -8,6 +8,30 @@ export type PlanBillingCycle =
   | 'annual'
   | 'lifetime';
 
+export type AIFeatureKey =
+  | 'text_generation'
+  | 'streaming_chat'
+  | 'conversations'
+  | 'tool_agents'
+  | 'rag_embeddings'
+  | 'async_queue';
+
+export type AIFeatureDegradation = 'warn' | 'block';
+
+export interface AIFeatureConfig {
+  enabled: boolean;
+  monthly_tokens_cap?: number | null;
+  daily_messages_cap?: number | null;
+  retention_days?: number | null;
+  tools_allowed?: string[];
+  indexed_docs_cap?: number | null;
+  monthly_jobs_cap?: number | null;
+  degradation?: AIFeatureDegradation;
+  period?: 'daily' | 'monthly';
+}
+
+export type AIFeatureFlags = Partial<Record<AIFeatureKey, AIFeatureConfig>>;
+
 export interface SubscriptionPlan {
   // Identity
   id: string;
@@ -24,6 +48,7 @@ export interface SubscriptionPlan {
   base_price: number;
   currency: string;
   setup_fee: number | null;
+  is_free: boolean;
 
   // Trial + dunning
   trial_days: number;
@@ -42,6 +67,7 @@ export interface SubscriptionPlan {
 
   // Promotional
   is_promotional: boolean;
+  redemption_code: string | null;
   promo_rules: Record<string, unknown> | null;
   promo_priority: number;
 
@@ -64,21 +90,9 @@ export interface SubscriptionPlan {
   grace_threshold_days: number; // alias of grace_period_soft_days
 }
 
-export interface AIFeatureFlags {
-  chat_enabled: boolean;
-  embeddings_enabled: boolean;
-  agent_enabled: boolean;
-  rag_enabled: boolean;
-  streaming_enabled: boolean;
-  max_tokens_per_month: number;
-  max_conversations: number;
-  allowed_models: string[];
-  custom_tools_enabled: boolean;
-}
-
 export interface PlanPricing {
   id: string;
-  billing_cycle: 'monthly' | 'quarterly' | 'biannual' | 'annual';
+  billing_cycle: Extract<PlanBillingCycle, 'monthly' | 'quarterly' | 'semiannual' | 'annual'>;
   price: number;
   currency_code: string;
   is_default: boolean;
@@ -201,6 +215,7 @@ export interface PlanFormData {
   base_price: number;
   currency: string;
   setup_fee: number | null;
+  is_free: boolean;
   // Trial + dunning
   trial_days: number;
   grace_period_soft_days: number;
@@ -212,6 +227,7 @@ export interface PlanFormData {
   max_partner_margin_pct: number | null;
   // Promotional
   is_promotional: boolean;
+  redemption_code?: string | null;
   promo_priority: number;
   // Display
   is_popular: boolean;
@@ -237,6 +253,7 @@ export interface CreatePlanDto {
   base_price: number;
   currency: string;
   setup_fee?: number | null;
+  is_free?: boolean;
   // Trial + dunning
   trial_days?: number;
   grace_period_soft_days?: number;
@@ -248,6 +265,7 @@ export interface CreatePlanDto {
   max_partner_margin_pct?: number | null;
   // Promotional
   is_promotional?: boolean;
+  redemption_code?: string | null;
   promo_priority?: number;
   // Display
   is_popular?: boolean;

@@ -1,306 +1,82 @@
 ---
 name: vendix-ai-streaming
 description: >
-  AI streaming patterns: SSE endpoints, AsyncGenerator in NestJS, provider streaming (OpenAI/Anthropic), frontend EventSource, and streaming components.
+  AI streaming patterns with provider AsyncGenerators, AIEngineService.runStream,
+  NestJS SSE endpoints, Angular EventSource wrappers, and streaming UI components.
   Trigger: When implementing streaming AI responses, working with SSE endpoints, or creating streaming UI components.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Implementing AI streaming"
+    - "Working with AI streaming"
     - "Working with SSE endpoints for AI"
+    - "Working with EventSource for AI"
     - "Creating streaming UI components"
     - "Working with AIStreamController"
-    - "Working with EventSource for AI"
 ---
 
-> **Tip**: Antes de usar app-ai-text-stream, consulta su README en `apps/frontend/src/app/shared/components/ai-text-stream/README.md` para conocer sus inputs, outputs y patrones de streaming.
+## Source of Truth
 
-## When to Use
+- Backend stream controller: `apps/backend/src/ai-engine/ai-stream.controller.ts`
+- Core stream method: `apps/backend/src/ai-engine/ai-engine.service.ts`
+- Providers: `apps/backend/src/ai-engine/providers/`
+- Angular stream service: `apps/frontend/src/app/core/services/ai-stream.service.ts`
+- Text component: `apps/frontend/src/app/shared/components/ai-text-stream/`
+- Chat SSE endpoint: `apps/backend/src/domains/store/ai-chat/ai-chat.controller.ts`
 
-- Implementing streaming AI responses (token-by-token)
-- Creating SSE endpoints for AI features
-- Working with `runStream()` or `chatStream()`
-- Building frontend streaming components
-- Understanding the stream lifecycle
+## Backend Streaming
 
----
+`AIEngineService.runStream(appKey, variables?, extraMessages?)` validates app/provider, runs subscription gate, checks rate limit, builds messages, requires provider `chatStream()`, yields chunks, consumes quota on final `done`, and logs in `finally`.
 
-## Architecture
-
-```
-Provider (OpenAI/Anthropic)
-    │ async generator (chatStream)
-    ▼
-AIEngineService.runStream()
-    │ AsyncGenerator<AIStreamChunk>
-    ▼
-AIStreamController (@Sse)
-    │ Observable<MessageEvent>
-    ▼
-EventSource (browser)
-    │ 'ai-chunk' events
-    ▼
-AIStreamService (Angular)
-    │ Observable<AIStreamEvent>
-    ▼
-Component (signal-based rendering)
-```
-
----
-
-## Backend Patterns
-
-### 1. Provider Streaming
-
-Both providers implement `chatStream()`:
-
-**OpenAI:**
+Chunk shape:
 
 ```typescript
-async *chatStream(messages, options): AsyncGenerator<AIStreamChunk> {
-  const stream = await this.client.chat.completions.create({
-    ...params,
-    stream: true,
-    // tools and tool_choice also supported in streaming
-  });
-
-  for await (const chunk of stream) {
-    if (chunk.choices[0]?.delta?.content) {
-      yield { type: 'text', content: chunk.choices[0].delta.content };
-    }
-  }
-
-  yield { type: 'done', usage: { promptTokens, completionTokens, totalTokens } };
-}
+type AIStreamChunk =
+  | { type: 'text'; content: string }
+  | { type: 'done'; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } }
+  | { type: 'error'; error: string };
 ```
 
-**Anthropic:**
+OpenAI-compatible provider streams text deltas and final `done`; usage may remain zero unless stream usage is explicitly requested. Anthropic provider uses `client.messages.stream()` and `finalMessage()` for usage.
 
-```typescript
-async *chatStream(messages, options): AsyncGenerator<AIStreamChunk> {
-  const stream = this.client.messages.stream({ ...params });
+## SSE Endpoints
 
-  for await (const event of stream) {
-    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-      yield { type: 'text', content: event.delta.text };
-    }
-  }
+Generic AI endpoint:
 
-  const final = await stream.finalMessage();
-  yield { type: 'done', usage: { ... } };
-}
-```
+- `GET /store/ai/stream/:appKey`.
+- Query params become variables; `token` is stripped.
+- Emits custom event type `ai-chunk` with JSON chunks.
 
-### 2. AIEngineService.runStream()
+Chat endpoint:
 
-```typescript
-async *runStream(appKey, variables?, extraMessages?): AsyncGenerator<AIStreamChunk> {
-  // Same validation as run(): app lookup, active check, rate limit
-  // But uses provider.chatStream() instead of provider.chat()
-  // CRITICAL: try/finally ensures logging always happens
-  try {
-    for await (const chunk of provider.chatStream(messages, options)) {
-      lastChunk = chunk;
-      yield chunk;
-    }
-  } finally {
-    // Always log: latency, tokens, cost, status
-    this.aiLoggingService.logRequest({ ... });
-  }
-}
-```
+- `SSE /store/ai-chat/conversations/:id/stream`.
+- Reads message content from query param `content`.
+- Emits `ai-chunk` events and completes on `done`/`error`.
 
-### 3. SSE Controller Pattern
+## Frontend Streaming
 
-```typescript
-@Controller("store/ai")
-export class AIStreamController {
-  @Sse("stream/:appKey")
-  streamRun(
-    @Param("appKey") appKey: string,
-    @Query() query,
-  ): Observable<MessageEvent> {
-    return new Observable<MessageEvent>((subscriber) => {
-      (async () => {
-        for await (const chunk of this.aiEngine.runStream(appKey, variables)) {
-          subscriber.next({ data: JSON.stringify(chunk), type: "ai-chunk" });
+`AIStreamService.streamRun(appKey, variables?, token?)` uses `EventSource`, listens to `ai-chunk`, parses JSON, closes on `done`, `error`, parser failure, or unsubscribe.
 
-          if (chunk.type === "done" || chunk.type === "error") {
-            subscriber.complete();
-            return;
-          }
-        }
-        subscriber.complete();
-      })();
-    });
-  }
-}
-```
+`app-ai-text-stream` accepts `stream$: Observable<string> | null`, appends emitted strings to `displayText`, and shows a cursor while streaming.
 
-**Key:** Wraps AsyncGenerator in Observable for NestJS @Sse compatibility.
+Current caveat: `app-ai-text-stream` cleans up on component destroy, but replacing `stream$` is not a full old-stream cleanup pattern. Verify before using it for frequently swapped streams.
 
-### 4. Stream Chunk Types
+## Chat Streaming Caveat
 
-```typescript
-interface AIStreamChunk {
-  type: "text" | "done" | "error";
-  content?: string; // Text content (type: 'text')
-  usage?: {
-    // Token usage (type: 'done')
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
-  error?: string; // Error message (type: 'error')
-}
-```
+Chat reducer supports streaming chunk accumulation, but current `AIChatEffects` use sync HTTP send and do not dispatch streaming actions. Do not document chat SSE as active frontend behavior unless wiring is added.
 
----
+## Rules
 
-## Frontend Patterns
-
-### 1. AIStreamService
-
-```typescript
-@Injectable({ providedIn: "root" })
-export class AIStreamService {
-  streamRun(
-    appKey: string,
-    variables?: Record<string, string>,
-    token?: string,
-  ): Observable<AIStreamEvent> {
-    return new Observable((subscriber) => {
-      const url = `${apiUrl}/store/ai/stream/${appKey}?token=${token}&...`;
-      const eventSource = new EventSource(url);
-
-      eventSource.addEventListener("ai-chunk", (event) => {
-        const data = JSON.parse(event.data);
-        subscriber.next(data);
-        if (data.type === "done" || data.type === "error") {
-          eventSource.close();
-          subscriber.complete();
-        }
-      });
-
-      eventSource.onerror = () => {
-        eventSource.close();
-        subscriber.complete();
-      };
-
-      return () => eventSource.close(); // Cleanup on unsubscribe
-    });
-  }
-}
-```
-
-### 2. AITextStreamComponent
-
-```typescript
-@Component({
-  selector: "app-ai-text-stream",
-  standalone: true,
-  template: `
-    <span>{{ displayText() }}</span>
-    @if (isStreaming()) {
-      <span class="ai-cursor"></span>
-    }
-  `,
-})
-export class AITextStreamComponent {
-  stream$ = input<Observable<string> | null>(null);
-  displayText = signal("");
-  isStreaming = signal(false);
-
-  // effect() subscribes to stream$, accumulates text
-  // Cleanup in ngOnDestroy
-}
-```
-
-### 3. Streaming in NgRx (Chat)
-
-```typescript
-// Reducer accumulates chunks:
-on(AIChatActions.receiveStreamChunk, (state, { content }) => ({
-  ...state,
-  streamingContent: state.streamingContent + content,
-})),
-
-// On completion, move to messages:
-on(AIChatActions.streamComplete, (state) => ({
-  ...state,
-  isStreaming: false,
-  messages: [...state.messages, { role: 'assistant', content: state.streamingContent }],
-  streamingContent: '',
-})),
-```
-
----
-
-## CSS: Animated Cursor
-
-```css
-.ai-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  background: rgba(var(--color-primary-rgb), 0.8);
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  animation: ai-cursor-blink 0.8s ease-in-out infinite;
-}
-
-@keyframes ai-cursor-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-```
-
----
-
-## Error Codes
-
-| Code            | HTTP | Meaning                            |
-| --------------- | ---- | ---------------------------------- |
-| `AI_STREAM_001` | 400  | Provider doesn't support streaming |
-| `AI_STREAM_002` | 500  | Streaming failed                   |
-
----
-
-## File Reference
-
-| File                                                                    | Purpose                  |
-| ----------------------------------------------------------------------- | ------------------------ |
-| `apps/backend/src/ai-engine/ai-stream.controller.ts`                    | SSE endpoint             |
-| `apps/backend/src/ai-engine/ai-engine.service.ts`                       | `runStream()` method     |
-| `apps/backend/src/ai-engine/providers/openai-compatible.provider.ts`    | `chatStream()`           |
-| `apps/backend/src/ai-engine/providers/anthropic-compatible.provider.ts` | `chatStream()`           |
-| `apps/frontend/src/app/core/services/ai-stream.service.ts`              | EventSource wrapper      |
-| `apps/frontend/src/app/shared/components/ai-text-stream/`               | Streaming text component |
-
----
-
-## Common Mistakes
-
-| Mistake                           | Fix                                               |
-| --------------------------------- | ------------------------------------------------- |
-| Not closing EventSource           | Always close in cleanup/unsubscribe               |
-| Missing try/finally in runStream  | Logging must happen even on error                 |
-| Not completing subscriber on done | Check chunk.type and call subscriber.complete()   |
-| Using WebSocket for streaming     | Use SSE — simpler, sufficient for one-way streams |
-| Accumulating in component state   | Use NgRx `streamingContent` for shared state      |
-
----
+- Always close `EventSource` on completion/error/unsubscribe.
+- Complete Nest subscribers on `done` or `error` chunks.
+- Keep logging in `finally` for backend streams.
+- Do not use WebSocket for simple one-way AI token streams unless requirements change.
 
 ## Related Skills
 
-- `vendix-ai-platform-core` — Core AI Engine
-- `vendix-ai-chat` — Streaming in chat context
-- `vendix-notifications-system` — SSE pattern reference
+- `vendix-ai-platform-core`
+- `vendix-ai-chat`
+- `vendix-notifications-system`

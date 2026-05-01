@@ -1,54 +1,76 @@
-# Vendix EC2 Maintenance & Troubleshooting
+---
+name: vendix-ec2-maintenance
+description: >
+  Vendix EC2 production maintenance and troubleshooting: GitHub Actions to ECR + EC2 deploy,
+  targeted Docker cleanup, CloudWatch/monitoring-first diagnosis, and safe SSH/AWS access
+  expectations. Trigger: When dealing with EC2 deployment failures, disk pressure, Docker
+  pull/layer errors, or server cleanup.
+license: MIT
+metadata:
+  author: rzyfront
+  version: "2.0"
+  scope: [root]
+  auto_invoke: "EC2 maintenance, deployment disk issues, or Docker layer/pull failures"
+---
 
-## Description
+# Vendix EC2 Maintenance
 
-Guidelines for troubleshooting and maintaining EC2 instances, specifically for deployment failures related to disk space or Docker issues.
+## Source of Truth
 
-## Trigger
+- `.github/workflows/deploy-backend-ec2.yml`
+- `.github/workflows/deploy-s3.yml`
+- backend monitoring services under `apps/backend/src/domains/superadmin/monitoring/`
+- `docker-compose.yml`
 
-- "no space left on device" error in deployment logs.
-- "failed to register layer" error in Docker build/pull.
-- Deployment hangs or fails mysteriously on EC2.
-- User asks to check or clean the server.
+## Production Reality
 
-## Protocols
+- Backend is built in GitHub Actions, pushed to ECR, and deployed on EC2.
+- Frontend is deployed separately to S3/CloudFront, not through the EC2 backend workflow.
+- Deploy workflow fetches secrets from AWS Secrets Manager.
 
-### 1. 🛑 Security First
+## Access Expectations
 
-- **NEVER** assume the location or name of the SSH private key (`.pem`).
-- **ALWAYS** ask the user to provide the path to the SSH key for the specific environment (dev/prod).
-- **DO NOT** search for keys in `.ssh/` automatically unless explicitly instructed by the user in the current session.
-- Example: _"To proceed, I need you to provide the path to the .pem key to connect to the server."_
+- Do not hard-require a user-provided local `.pem` path in the skill text.
+- For this repo, automation commonly uses GitHub secret `VENDIX_SSH_PRIVATE_KEY` and resolves host/instance data through AWS.
+- If manual access is needed, confirm the approved access method first: AWS CLI, SSM/SSH, bastion, or a provided key.
 
-### 2. 🔍 Diagnosis
+## Diagnosis Order
 
-Connect to the server and check disk usage:
+Prefer evidence in this order:
 
-```bash
-ssh -i <USER_PROVIDED_KEY> ec2-user@<SERVER_IP> "df -h && docker system df"
-```
+1. GitHub Actions deploy logs.
+2. Superadmin infrastructure/monitoring views backed by CloudWatch.
+3. AWS CLI inspection if available.
+4. SSH only when server-level state is needed.
 
-### 3. 🧹 Cleanup (Disk Space)
+## Disk / Docker Cleanup
 
-If disk usage is high (>85%) or Docker cache is large:
+Avoid blanket `docker system prune -a -f` as the default advice.
 
-**Prune Unused Docker Objects:**
+Prefer the repo’s targeted cleanup sequence when disk pressure or layer registration failures appear:
 
-```bash
-docker system prune -a -f
-```
+- container prune
+- image prune
+- volume prune
+- builder prune
+- package/cache cleanup as used in deploy automation
 
-_Note: This removes all stopped containers and unused images. It is usually safe for CI/CD servers that pull fresh images on deploy._
+Be careful with persistent infra components such as shared Docker network/Redis state.
 
-**Check Specific Volumes:**
-If `docker prune` isn't enough, check for large log files or orphan volumes:
+## Common Symptoms
 
-```bash
-du -sh /var/log/*
-docker volume ls
-```
+- `no space left on device`
+- Docker layer registration or pull failures
+- stale images/containers consuming disk during deploy
 
-### 4. 🔄 Common Issues
+`npm install` failure is not a primary EC2 deploy symptom for this repo because production backend images are built before reaching the instance.
 
-- **Docker Layer Registration Failed:** Indicates disk full. Run cleanup immediately.
-- **npm install fails:** May indicate OOM (Out of Memory) or disk full. Check `free -m` and `df -h`.
+## Live Infra Note
+
+AWS CLI checks such as `aws sts get-caller-identity` are safe for validating access context. Use live infra reads only when repository evidence is insufficient.
+
+## Related Skills
+
+- `vendix-monorepo-workspaces`
+- `buildcheck-dev`
+- `git-workflow`

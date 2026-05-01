@@ -1,78 +1,42 @@
 ---
 name: {skill-name}
 description: >
-  {Brief description of what this skill enables}.
-  Trigger: {When the AI should load this skill - be specific}.
-license: Apache-2.0
+  {Short description of what this skill governs}.
+  Trigger: {Specific action, file type, domain, or workflow that should load it}.
+license: MIT
 metadata:
-  author: gentleman-programming
+  author: rzyfront
   version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "{Specific action that should load this skill}"
+allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-## When to Use
+# {Skill Title}
 
-Use this skill when:
-- {Condition 1}
-- {Condition 2}
-- {Condition 3}
+## Purpose
 
----
+{What this skill governs and what it does not govern.}
 
-## Critical Patterns
+## Core Rules
 
-{The MOST important rules - what AI MUST follow}
+- {Critical rule 1}
+- {Critical rule 2}
+- {Critical rule 3}
 
-### Pattern 1: {Name}
+## Workflow
 
-```{language}
-{code example}
-```
+1. {Step 1 if sequence matters}
+2. {Step 2}
+3. {Step 3}
 
-### Pattern 2: {Name}
+## Decision Rules
 
-```{language}
-{code example}
-```
+| Situation | Use |
+| --- | --- |
+| {Condition} | {Action} |
 
----
+## Related Skills
 
-## Decision Tree
-
-```
-{Question 1}? → {Action A}
-{Question 2}? → {Action B}
-Otherwise    → {Default action}
-```
-
----
-
-## Code Examples
-
-### Example 1: {Description}
-
-```{language}
-{minimal, focused example}
-```
-
-### Example 2: {Description}
-
-```{language}
-{minimal, focused example}
-```
-
----
-
-## Commands
-
-```bash
-{command 1}  # {description}
-{command 2}  # {description}
-{command 3}  # {description}
-```
-
----
-
-## Resources
-
-- **Templates**: See [assets/](assets/) for {description of templates}
-- **Documentation**: See [references/](references/) for local developer guide links
+- `{related-skill}` - {Why it is related}

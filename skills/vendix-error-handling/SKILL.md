@@ -1,208 +1,74 @@
 ---
 name: vendix-error-handling
-description: Standardized error code system with VendixHttpException, error registry, and UX message mapping.
+description: >
+  Standardized backend/frontend error handling with VendixHttpException, error-codes.ts,
+  AllExceptionsFilter, validation error mapping, frontend parseApiError, and UX message
+  mapping. Trigger: When adding errors, handling exceptions, mapping API errors, or
+  replacing generic Nest exceptions.
+license: MIT
 metadata:
+  author: rzyfront
+  version: "2.0"
   scope: [root]
   auto_invoke: "Handling Errors"
 ---
-# Vendix Error Handling - Standardized Error Codes
 
-> **Error Code Format:** `{DOMAIN}_{FUNCTIONALITY}_{NNN}`
-> Example: `PAY_FIND_001` = Payment domain, Find functionality, first error
+# Vendix Error Handling
 
----
+## Source of Truth
 
-## Error Code System Architecture
+- Backend codes: `apps/backend/src/common/errors/error-codes.ts`.
+- Exception class: `apps/backend/src/common/errors/vendix-http.exception.ts`.
+- Global filter: `apps/backend/src/common/filters/http-exception.filter.ts`.
+- Frontend messages: `apps/frontend/src/app/core/utils/error-messages.ts`.
+- Frontend parser: `apps/frontend/src/app/core/utils/parse-api-error.ts` and `api-error-handler.ts`.
 
-```
-Backend (throw)                    Frontend (display)
-VendixHttpException ──> AllExceptionsFilter ──> { error_code } ──> parseApiError() ──> ERROR_MESSAGES[code]
-```
+## Backend Pattern
 
-### Domain Prefixes
-
-| Prefix | Domain | Status |
-|--------|--------|--------|
-| `SYS_` | System (generic) | Active |
-| `PAY_` | Payments | Active |
-| `ORD_` | Orders | Pending |
-| `AUTH_` | Authentication | Pending |
-| `PROD_` | Products | Pending |
-| `CUST_` | Customers | Pending |
-| `INV_` | Inventory | Pending |
-| `SHIP_` | Shipping | Pending |
-| `CAT_` | Catalog | Pending |
-| `STORE_` | Store settings | Pending |
-| `ORG_` | Organization | Pending |
-| `ECOM_` | Ecommerce | Pending |
-
-### Functionality Suffixes
-
-| Suffix | Use | Typical HTTP Status |
-|--------|-----|---------------------|
-| `FIND_` | Resource not found | 404 |
-| `CREATE_` | Error creating | 400 |
-| `VALIDATE_` | Business validation | 400/422 |
-| `DUP_` | Duplicate/conflict | 409 |
-| `STATUS_` | Invalid state transition | 400 |
-| `PERM_` | No permissions | 403 |
-| `TOKEN_` | Invalid/expired token | 401 |
-
----
-
-## Backend: Throwing Errors
-
-### Using VendixHttpException
+Prefer `VendixHttpException` with an existing `ErrorCodes` entry:
 
 ```typescript
-import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-
-// Simple throw
-throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
-
-// With custom detail (for logs, NOT shown to user)
-throw new VendixHttpException(ErrorCodes.PAY_FIND_001, 'Payment abc-123 not found');
-
-// With extra details object
-throw new VendixHttpException(ErrorCodes.PAY_VALIDATE_001, 'Amount below minimum', { min: 1000 });
+throw new VendixHttpException(ErrorCodes.PAYMENT_SOURCE_NOT_FOUND, undefined, { payment_source_id });
 ```
 
-### Adding New Error Codes
+The registry contains mixed naming styles. Do not invent a stricter format than the current file; follow nearby domain naming.
 
-1. Add to `apps/backend/src/common/errors/error-codes.ts`:
+## Response Shape
+
+Responses include:
+
+- `statusCode`
+- `error_code`
+- `message`
+- `timestamp`
+- `path`
+- optional `details`
+- optional non-production `devDetails`
+
+Validation arrays are mapped by `AllExceptionsFilter` to `SYS_VALIDATION_001`. Unknown errors map to `SYS_INTERNAL_001`.
+
+## Frontend Pattern
+
+Use `extractApiErrorMessage(error)` for simple display. It delegates to `parseApiError()` when `error_code` exists and maps to `ERROR_MESSAGES`.
+
+Use `parseApiError()` directly only when component behavior depends on the code:
 
 ```typescript
-export const ErrorCodes = {
-  // ... existing codes
-  ORD_FIND_001: { code: 'ORD_FIND_001', httpStatus: 404, devMessage: 'Order not found' },
-} as const satisfies Record<string, ErrorCodeEntry>;
+const { errorCode, userMessage } = parseApiError(error);
+this.toastService.error(userMessage);
 ```
 
-2. Add UX message to `apps/frontend/src/app/core/utils/error-messages.ts`:
+Never display backend developer details to users.
 
-```typescript
-export const ERROR_MESSAGES: Record<string, string> = {
-  // ... existing messages
-  ORD_FIND_001: 'The order was not found.',
-};
-```
+## Adding A New Error
 
-3. Use in service:
-
-```typescript
-throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
-```
-
-### Early Return Validation Order
-
-Always validate in this order in services:
-
-```typescript
-async updateOrder(id: number, dto: UpdateOrderDto) {
-  // 1. Auth/Permissions
-  if (!user.can('update_orders')) throw new VendixHttpException(ErrorCodes.SYS_FORBIDDEN_001);
-
-  // 2. Input validation (beyond DTO)
-  if (dto.amount < 0) throw new VendixHttpException(ErrorCodes.ORD_VALIDATE_001);
-
-  // 3. Resource lookup
-  const order = await this.prisma.orders.findUnique({ where: { id } });
-  if (!order) throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
-
-  // 4. Business logic
-  if (order.state === 'finished') throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
-
-  // 5. Execute
-  return this.prisma.orders.update({ ... });
-}
-```
-
----
-
-## Frontend: Displaying Errors
-
-### NEVER show backend devMessage to users
-
-The `extractApiErrorMessage()` function (used by 14+ files) automatically detects `error_code` and returns the UX message from `ERROR_MESSAGES`. No changes needed in components.
-
-```typescript
-// This already works - parseApiError is called internally
-const msg = extractApiErrorMessage(httpError);
-this.toast_service.error(msg); // Shows UX message, NOT devMessage
-```
-
-### For advanced error handling (e.g., conditional actions):
-
-```typescript
-import { parseApiError } from '@core/utils/parse-api-error';
-
-this.api.createPayment(dto).subscribe({
-  error: (err) => {
-    const { errorCode, userMessage } = parseApiError(err);
-    this.toast_service.error(userMessage);
-
-    if (errorCode === 'PAY_DUPLICATE_001') {
-      this.router.navigate(['/orders', orderId]);
-    }
-  }
-});
-```
-
----
-
-## AllExceptionsFilter Behavior
-
-The filter at `common/filters/http-exception.filter.ts` handles all exception types:
-
-| Exception Type | `error_code` in response |
-|---------------|-------------------------|
-| `VendixHttpException` | From `errorCode` property |
-| `HttpException` with `error_code` body | Passed through |
-| `HttpException` with validation array | `SYS_VALIDATION_001` |
-| Unknown exception | `SYS_INTERNAL_001` |
-
-Response shape:
-
-```json
-{
-  "statusCode": 404,
-  "error_code": "PAY_FIND_001",
-  "message": "Payment not found",
-  "timestamp": "2026-03-07T...",
-  "path": "/api/payments/abc"
-}
-```
-
----
-
-## Migration Checklist (per domain)
-
-- [ ] Add `{DOMAIN}_*` codes to `error-codes.ts`
-- [ ] Replace `throw new NotFoundException('...')` with `throw new VendixHttpException(ErrorCodes.XXX_FIND_001)`
-- [ ] Apply early return order: Auth -> Validation -> Lookup -> Business Logic
-- [ ] Add UX messages to frontend `error-messages.ts`
-- [ ] No component changes needed (extractApiErrorMessage handles it)
-
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/common/errors/error-codes.ts` | Error code registry |
-| `apps/backend/src/common/errors/vendix-http.exception.ts` | Exception class |
-| `apps/backend/src/common/errors/index.ts` | Barrel export |
-| `apps/backend/src/common/filters/http-exception.filter.ts` | Global error filter |
-| `apps/backend/src/common/responses/response.interface.ts` | ErrorResponse with error_code |
-| `apps/backend/src/common/responses/response.service.ts` | error() with errorCode param |
-| `apps/frontend/src/app/core/utils/error-messages.ts` | UX message map |
-| `apps/frontend/src/app/core/utils/parse-api-error.ts` | Error parser |
-| `apps/frontend/src/app/core/utils/api-error-handler.ts` | extractApiErrorMessage (auto-integration) |
-
----
+1. Add the backend code in `error-codes.ts` near the owning domain.
+2. Use `VendixHttpException` at the service/controller boundary.
+3. Add or update frontend UX copy in `error-messages.ts` if the error can reach UI.
+4. Keep `details` safe for clients; put sensitive diagnostics only in logs/dev details.
 
 ## Related Skills
 
-- `vendix-validation` - DTO validation patterns
-- `vendix-backend-api` - API response patterns
-- `vendix-backend-domain` - Service layer architecture
+- `vendix-validation`
+- `vendix-backend-api`
+- `vendix-frontend`

@@ -97,6 +97,9 @@ export class GatewayComponent {
   readonly loading = signal<boolean>(true);
   readonly saving = signal<boolean>(false);
   readonly testing = signal<boolean>(false);
+  readonly selectedEnvironment = signal<GatewayEnvironment>('sandbox');
+  readonly formInvalid = signal<boolean>(true);
+  readonly secretsFilled = signal<boolean>(false);
 
   /**
    * `true` when the backend already has a valid (parseable) configuration.
@@ -161,7 +164,7 @@ export class GatewayComponent {
         this.saving() ||
         // When NOT configured the user must fill the secrets first.
         // When configured we can re-test stored credentials.
-        (!this.isConfigured() && !this.allSecretsFilled()),
+        (!this.isConfigured() && !this.secretsFilled()),
     },
     {
       id: 'save',
@@ -169,7 +172,7 @@ export class GatewayComponent {
       variant: 'primary',
       icon: 'save',
       loading: this.saving(),
-      disabled: this.saving() || this.testing() || this.form.invalid,
+      disabled: this.saving() || this.testing() || this.formInvalid(),
     },
   ]);
 
@@ -178,17 +181,27 @@ export class GatewayComponent {
    * decide whether the "test" button can run on un-saved credentials.
    */
   allSecretsFilled(): boolean {
+    return this.secretsFilled();
+  }
+
+  private refreshFormSignals(): void {
     const v = this.form.getRawValue();
-    return !!(
+    this.selectedEnvironment.set(v.environment);
+    this.formInvalid.set(this.form.invalid);
+    this.secretsFilled.set(!!(
       v.public_key &&
       v.private_key &&
       v.events_secret &&
       v.integrity_secret
-    );
+    ));
   }
 
   constructor() {
     this.loadConfig();
+
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.refreshFormSignals());
 
     // When environment changes back to sandbox, reset the production
     // confirmation flag so the form becomes valid again.
@@ -201,6 +214,7 @@ export class GatewayComponent {
           });
         }
         this.form.updateValueAndValidity({ emitEvent: false });
+        this.refreshFormSignals();
       });
   }
 
@@ -281,6 +295,7 @@ export class GatewayComponent {
       c.updateValueAndValidity({ emitEvent: false }),
     );
     this.form.updateValueAndValidity({ emitEvent: false });
+    this.refreshFormSignals();
   }
 
   // ── Header callback ───────────────────────────────────────────────

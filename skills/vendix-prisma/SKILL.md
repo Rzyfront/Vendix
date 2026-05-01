@@ -1,337 +1,75 @@
 ---
 name: vendix-prisma
 description: >
-  Prisma ORM patterns for Vendix database operations.
-  Trigger: When editing schema.prisma, creating migrations, or using Prisma client.
-license: MIT
+  Prisma ORM overview for Vendix: Prisma 7 config, schema location, scoped services,
+  migrations, seeds, and correct workspace commands. Trigger: When editing schema.prisma,
+  creating migrations, using Prisma client, or seeding database data.
+license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.1"
+  scope: [root]
+  auto_invoke: "When editing schema.prisma, creating migrations, or using Prisma client"
 ---
 
 ## When to Use
 
-Use this skill when:
+- Editing `apps/backend/prisma/schema.prisma`.
+- Creating or reviewing migrations.
+- Choosing the right Prisma service in NestJS.
+- Running or updating seeds.
 
-- Modifying Prisma schema
-- Creating or running migrations
-- Using Prisma Client in services
-- Seeding database
+## Current Prisma Setup
 
-## Critical Patterns
+- Prisma packages are in `apps/backend/package.json` and currently use Prisma 7.x.
+- Schema path: `apps/backend/prisma/schema.prisma`.
+- Prisma config path: `apps/backend/prisma.config.ts`.
+- Datasource URL is configured in `prisma.config.ts` from `process.env.DATABASE_URL`, not in `schema.prisma`.
+- Client uses `@prisma/adapter-pg` and `pg.Pool` in backend Prisma services.
+- Models and fields are mostly `snake_case`; enum values are mixed. Treat the schema as source of truth.
 
-### Pattern 1: Schema Structure
+## Scoped Services
 
-**apps/backend/prisma/schema.prisma**:
+Use domain-appropriate services instead of raw `PrismaClient` in request handlers:
 
-```prisma
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+| Domain | Service |
+| --- | --- |
+| `domains/superadmin/` | `GlobalPrismaService` |
+| `domains/organization/` | `OrganizationPrismaService` |
+| `domains/store/` | `StorePrismaService` |
+| `domains/ecommerce/` | `EcommercePrismaService` |
+| jobs/seeds/system scripts | `GlobalPrismaService` or explicit approved `withoutScope()` |
 
-generator client {
-  provider = "prisma-client-js"
-}
-
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  orders    Order[]
-}
-
-model Order {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  status    String   @default("PENDING")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  items     OrderItem[]
-}
-
-model OrderItem {
-  id        String   @id @default(uuid())
-  orderId   String
-  order     Order    @relation(fields: [orderId], references: [id])
-  productId String
-  quantity  Int
-  price     Decimal  @db.Decimal(10, 2)
-}
-```
-
-### Pattern 2: Prisma Service Architecture
-
-Vendix uses **domain-scoped Prisma services** built on an abstract `BasePrismaService`. Each domain injects the appropriate scoped service:
-
-| Service                     | Scope                  | Use Case                    |
-| --------------------------- | ---------------------- | --------------------------- |
-| `GlobalPrismaService`       | None                   | Superadmin, background jobs |
-| `OrganizationPrismaService` | `organization_id`      | Org admin                   |
-| `StorePrismaService`        | `store_id`             | Store admin, POS            |
-| `EcommercePrismaService`    | `store_id` + `user_id` | Customer e-commerce         |
-
-> **For complete scoping documentation, model registration rules, and `withoutScope()` guidelines, see `vendix-prisma-scopes` skill.**
-
-### Pattern 3: Using Prisma in Services
-
-```typescript
-import { Injectable } from "@nestjs/common";
-import { StorePrismaService } from "@/prisma/services/store-prisma.service";
-
-@Injectable()
-export class UsersService {
-  constructor(private readonly prisma: StorePrismaService) {}
-
-  async findAll() {
-    // store_id auto-applied by scope
-    return this.prisma.store_users.findMany();
-  }
-
-  async findOne(id: number) {
-    return this.prisma.store_users.findUnique({
-      where: { id },
-    });
-  }
-
-  async create(data: { user_name: string; email: string }) {
-    // store_id auto-injected on create
-    return this.prisma.store_users.create({ data });
-  }
-
-  async update(id: number, data: { user_name?: string }) {
-    return this.prisma.store_users.update({
-      where: { id },
-      data,
-    });
-  }
-
-  async remove(id: number) {
-    return this.prisma.store_users.delete({
-      where: { id },
-    });
-  }
-}
-```
-
-### Pattern 4: Transaction Handling
-
-```typescript
-async createOrderWithItems(orderData: CreateOrderDto) {
-  return this.prisma.$transaction(async (tx) => {
-    const order = await tx.order.create({
-      data: {
-        userId: orderData.userId,
-        status: 'PENDING',
-      },
-    });
-
-    await tx.orderItem.createMany({
-      data: orderData.items.map((item) => ({
-        orderId: order.id,
-        productId: item.productId,
-        quantity: item.quantity,
-        price: item.price,
-      })),
-    });
-
-    return order;
-  });
-}
-```
-
-### Pattern 5: Complex Queries with Relations
-
-```typescript
-// Find orders with user and items
-async getOrdersWithDetails() {
-  return this.prisma.order.findMany({
-    include: {
-      user: true,
-      items: {
-        include: {
-          product: true,
-        },
-      },
-    },
-  });
-}
-
-// Find with filtering
-async getOrdersByStatus(status: string) {
-  return this.prisma.order.findMany({
-    where: { status },
-    include: { items: true },
-  });
-}
-
-// Find with pagination
-async getOrdersPaginated(page: number, limit: number) {
-  const skip = (page - 1) * limit;
-  const [orders, total] = await Promise.all([
-    this.prisma.order.findMany({
-      skip,
-      take: limit,
-      include: { user: true },
-    }),
-    this.prisma.order.count(),
-  ]);
-
-  return { orders, total, page, limit };
-}
-```
-
-## Decision Tree
-
-```
-Modifying database schema?
-├── Edit schema.prisma
-├── Run migration: npx prisma migrate dev
-├── Review generated SQL
-└── Regenerate Prisma Client
-
-Adding new model?
-├── Add model to schema.prisma
-├── Define relations with @relation
-├── Create migration
-└── Update services to use new model
-
-Seeding database?
-├── Create seed file in prisma/seed.ts
-├── Add to package.json: "prisma": { "seed": "ts-node ..." }
-├── Run: npx prisma migrate reset
-└── Data seeded automatically
-
-Debugging Prisma?
-├── Enable query logging in PrismaService
-├── Use Prisma Studio: npx prisma studio
-└── Check DATABASE_URL in .env
-```
-
-## Code Examples
-
-### Example 1: Creating Migration
-
-```bash
-# After editing schema.prisma
-cd apps/backend
-npx prisma migrate dev --name add_user_roles
-
-# This creates:
-# - prisma/migrations/TIMESTAMP_add_user_roles/migration.sql
-# - Regenerates Prisma Client
-```
-
-### Example 2: Seeding Database
-
-**prisma/seed.ts**:
-
-```typescript
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
-
-async function main() {
-  await prisma.user.createMany({
-    data: [
-      { email: "admin@vendix.com", name: "Admin" },
-      { email: "user@vendix.com", name: "User" },
-    ],
-  });
-}
-
-main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
-```
-
-**package.json**:
-
-```json
-{
-  "prisma": {
-    "seed": "ts-node prisma/seed.ts"
-  }
-}
-```
-
-### Example 3: Error Handling
-
-```typescript
-async updateWithConflictHandling(id: string, email: string) {
-  try {
-    return await this.prisma.user.update({
-      where: { id },
-      data: { email },
-    });
-  } catch (error) {
-    if (error.code === 'P2002') {
-      // Unique constraint violation
-      throw new ConflictException('Email already exists');
-    }
-    if (error.code === 'P2025') {
-      // Record not found
-      throw new NotFoundException('User not found');
-    }
-    throw error;
-  }
-}
-```
+For model registration and tenant isolation details, use `vendix-prisma-scopes`.
 
 ## Commands
 
+Run from repo root unless stated otherwise:
+
 ```bash
-# Create migration after schema change
-cd apps/backend
-npx prisma migrate dev --name describe_change
-
-# Reset database (WARNING: deletes all data)
-npx prisma migrate reset
-
-# Deploy migrations in production
-npx prisma migrate deploy
-
-# Open Prisma Studio (GUI)
-npx prisma studio
-
-# Seed database
-npx prisma db seed
-
-# Format Prisma schema
-npx prisma format
-
-# Validate Prisma schema
-npx prisma validate
-
-# Generate Prisma Client (if needed manually)
-npx prisma generate
+npm run prisma:generate -w apps/backend
+npm run prisma:studio -w apps/backend
+npm run db:migrate:dev -w apps/backend
+npm run db:migrate:prod -w apps/backend
+npm run db:seed -w apps/backend
+npm run db:reset -w apps/backend
+npm run db:clean -w apps/backend
+npm run db:reset-seed
 ```
 
-## Environment Variables
+Use `vendix-prisma-migrations` before creating/reviewing migration SQL.
 
-**apps/backend/.env**:
+## Rules
 
-```env
-DATABASE_URL="postgresql://postgres:password@localhost:5432/vendix_db?schema=public"
-```
+- Do not use generic PascalCase Prisma examples in Vendix code; real model names are generally snake_case.
+- Do not manually add tenant filters when the scoped service already applies them, unless using a documented base-client/manual-scope getter.
+- Do not use `withoutScope()` in request handlers without explicit approval.
+- Do not run destructive DB reset/clean commands unless the user explicitly asks.
+- Always review generated SQL before committing migrations.
 
-**Docker DATABASE_URL** (for containers):
+## Related Skills
 
-```env
-DATABASE_URL="postgresql://postgres:password@db:5432/vendix_db?schema=public"
-```
-
-## Resources
-
-- **Prisma Schema**: [apps/backend/prisma/schema.prisma](../../../apps/backend/prisma/schema.prisma)
-- **Prisma Scopes**: See [skills/vendix-prisma-scopes/SKILL.md](../vendix-prisma-scopes/SKILL.md) for scoping system
-- **Prisma Docs**: https://www.prisma.io/docs
-- **Reference**: See [skills/vendix-backend/SKILL.md](../vendix-backend/SKILL.md) for NestJS integration
+- `vendix-prisma-schema`
+- `vendix-prisma-migrations`
+- `vendix-prisma-scopes`
+- `vendix-prisma-seed`

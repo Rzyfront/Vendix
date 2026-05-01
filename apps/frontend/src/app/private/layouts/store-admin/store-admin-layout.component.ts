@@ -68,21 +68,42 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
             [attr.aria-label]="'Ir al módulo de suscripción · ' + planDisplayName()"
           >
             <div class="footer-info-row">
-              <div class="footer-info-block footer-block-gradient-secondary">
-                <div class="footer-info-content">
-                  <div class="footer-info-header">
-                    <app-icon name="tag" [size]="9"></app-icon>
-                    <span class="footer-info-label">Plan</span>
+              <div class="footer-info-block footer-block-gradient-primary">
+                <div class="footer-plan-content">
+                  @if (cyclePercent() !== null) {
+                    <div
+                      class="footer-progress-ring"
+                      role="img"
+                      [attr.aria-label]="'Consumo del ciclo: ' + cyclePercent() + ' por ciento'"
+                    >
+                      <svg viewBox="0 0 36 36" class="ring-svg" aria-hidden="true">
+                        <circle class="ring-bg" cx="18" cy="18" r="15.915"></circle>
+                        <circle
+                          class="ring-fg"
+                          cx="18"
+                          cy="18"
+                          r="15.915"
+                          [attr.stroke-dasharray]="cyclePercent() + ', 100'"
+                        ></circle>
+                      </svg>
+                      <span class="ring-percent">{{ cyclePercent() }}%</span>
+                    </div>
+                  }
+                  <div class="footer-plan-info">
+                    <div class="footer-info-header">
+                      <app-icon name="tag" [size]="9"></app-icon>
+                      <span class="footer-info-label">Plan</span>
+                      @if (hasPendingChange()) {
+                        <span class="pending-plan-badge" title="Cambio de plan pendiente de pago">
+                          <app-icon name="clock" [size]="9"></app-icon>
+                        </span>
+                      }
+                    </div>
+                    <span class="footer-info-value">{{ planDisplayName() }}</span>
                     @if (hasPendingChange()) {
-                      <span class="pending-plan-badge" title="Cambio de plan pendiente de pago">
-                        <app-icon name="clock" [size]="9"></app-icon>
-                      </span>
+                      <span class="pending-plan-label">Cambio pendiente</span>
                     }
                   </div>
-                  <span class="footer-info-value">{{ planDisplayName() }}</span>
-                  @if (hasPendingChange()) {
-                    <span class="pending-plan-label">Cambio pendiente</span>
-                  }
                 </div>
               </div>
             </div>
@@ -179,6 +200,15 @@ export class StoreAdminLayoutComponent {
     // the sidebar footer. Backend strips `plan` from the `current` payload
     // when state='no_plan' so this fallback is the canonical render.
     if (!sub || sub.state === 'no_plan') return 'Sin plan activo';
+    // Trial subscriptions are granted by `plan_id`; `paid_plan_id` is null by
+    // design until a real payment clears. Show the trial plan instead of the
+    // paid-plan fallback.
+    if (sub.state === 'trial' || sub.state === 'trialing') {
+      return sub.plan?.name ?? sub.paid_plan?.name ?? 'Plan de prueba';
+    }
+    if (sub.state === 'active' && sub.plan_id != null && sub.paid_plan_id == null) {
+      return sub.plan?.name ?? 'Plan activo';
+    }
     // RNC-PaidPlan — Always reflect the PAID plan; never the pending one.
     // `paid_plan_id == null` means the user is mid initial-purchase, so
     // there is no plan to display.
@@ -194,6 +224,44 @@ export class StoreAdminLayoutComponent {
   readonly hasPendingChange = computed(() => {
     const kind = this.subscriptionFacade.subscriptionUiState().kind;
     return kind === 'pending_initial_payment' || kind === 'pending_change_abandoned';
+  });
+
+  /**
+   * Cycle consumption % for the sidebar footer ring. Returns `null` when no
+   * meaningful cycle exists (no plan / mid-purchase) so the template can hide
+   * the ring entirely. Logic mirrors `MySubscriptionComponent.cycleProgress`
+   * (current_period_end-driven) so the sidebar and the page never disagree.
+   */
+  readonly cyclePercent = computed<number | null>(() => {
+    const sub: any = this.subscriptionFacade.current();
+    if (!sub || sub.state === 'no_plan') return null;
+
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const state = sub.state;
+
+    if (state === 'trialing' || state === 'trial') {
+      const start = sub.current_period_start;
+      const trialEnd = sub.trial_ends_at;
+      if (!start || !trialEnd) return null;
+      const total = new Date(trialEnd).getTime() - new Date(start).getTime();
+      if (total <= 0) return 0;
+      const elapsed = Date.now() - new Date(start).getTime();
+      return Math.round(Math.min(100, Math.max(0, (elapsed / total) * 100)));
+    }
+
+    if (sub.paid_plan_id == null && sub.plan_id == null) return null;
+
+    const cycleRaw =
+      sub.billing_cycle ?? sub.plan?.billing_cycle ?? sub.paid_plan?.billing_cycle;
+    const cycle = cycleRaw === 'annual' ? 'yearly' : cycleRaw;
+    const totalDays = cycle === 'yearly' ? 365 : cycle === 'monthly' ? 30 : null;
+    const end = sub.current_period_end;
+    if (!totalDays || !end) return null;
+
+    const totalMs = totalDays * DAY_MS;
+    const remainingMs = new Date(end).getTime() - Date.now();
+    const elapsedMs = totalMs - remainingMs;
+    return Math.round(Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100)));
   });
 
   // --- Panel UI menu items ---

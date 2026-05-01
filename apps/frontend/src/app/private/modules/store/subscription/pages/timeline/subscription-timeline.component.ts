@@ -54,6 +54,8 @@ interface EventTypeMeta {
         subtitle="Eventos importantes (pagos, cambios de plan, renovaciones)"
         icon="history"
         variant="glass"
+        [showBackButton]="true"
+        backRoute="/admin/subscription"
       ></app-sticky-header>
 
       <div class="max-w-4xl mx-auto px-4 py-6 lg:py-8 space-y-5">

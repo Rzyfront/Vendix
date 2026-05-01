@@ -1,12 +1,13 @@
 ---
 name: vendix-ai-queue
 description: >
-  AI async queue system: BullMQ queues (generation, embedding, agent), processors, job lifecycle, retry strategies, and event emission.
-  Trigger: When working with AI async processing, BullMQ queues, or AI job processors.
+  AI async queue system using BullMQ: generation jobs, embedding jobs, queue registration,
+  processors, retries, and job status. Trigger: When working with AI async processing,
+  BullMQ queues, AI job processors, or embedding/generation background jobs.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "Working with AI async processing"
@@ -15,183 +16,73 @@ metadata:
     - "Debugging AI job failures"
 ---
 
-## When to Use
+## Source of Truth
 
-- Working with `AIQueueService` (enqueueing AI jobs)
-- Creating new queue processors
-- Configuring retry strategies for AI operations
-- Monitoring AI job status
-- Understanding the async AI pipeline
+- Queue module: `apps/backend/src/ai-engine/queue/ai-queue.module.ts`
+- Queue service: `apps/backend/src/ai-engine/queue/ai-queue.service.ts`
+- Generation processor: `apps/backend/src/ai-engine/queue/processors/ai-generation.processor.ts`
+- Embedding processor: `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts`
+- Embedding module registration: `apps/backend/src/ai-engine/embeddings/embedding.module.ts`
 
----
+## Queues
 
-## Architecture
+`AIQueueModule` registers queues:
 
-```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│ AIQueueService│ ──→ │ Redis/BullMQ │ ──→ │ Processor    │
-│  enqueue*()  │     │ 3 queues     │     │ WorkerHost   │
-└──────────────┘     └──────────────┘     └──────┬───────┘
-                                                  │
-                                           EventEmitter2
-                                         ai.generation.*
-```
+- `ai-generation`
+- `ai-embedding`
+- `ai-agent`
 
----
+Current processor reality:
 
-## Three Queues
+- `AIGenerationProcessor` is registered in `AIQueueModule`.
+- `AIEmbeddingProcessor` exists but is registered in `EmbeddingModule`, not `AIQueueModule`.
+- No `AIAgentProcessor` was found for `ai-agent`; `enqueueAgentTask()` can enqueue jobs without a processor unless one is added.
 
-| Queue | Purpose | Retries | Backoff |
-|-------|---------|---------|---------|
-| `ai-generation` | Background AI content generation | 3 | Exponential 2s |
-| `ai-embedding` | Embedding generation & storage | 2 | Exponential 3s |
-| `ai-agent` | Long-running agent tasks | 1 | None |
+## Job Methods
 
----
+`AIQueueService.enqueueGeneration()`:
 
-## Enqueueing Jobs
+- Queue `ai-generation`, job `generate`.
+- Attempts 3, exponential backoff 2000ms.
+- Keeps completed 100, failed 50.
+- Adds `request_id`.
 
-```typescript
-// Inject AIQueueService (available globally via AIEngineModule)
-constructor(private readonly aiQueue: AIQueueService) {}
+`enqueueEmbedding()`:
 
-// Background AI generation
-const job = await this.aiQueue.enqueueGeneration({
-  app_key: 'product_description_creator',
-  variables: { name: 'Product X' },
-  store_id: 1,
-  organization_id: 1,
-  callback_event: 'product.description.ready', // Optional
-});
+- Queue `ai-embedding`, job `embed`.
+- Attempts 2, exponential backoff 3000ms.
+- Keeps completed 500, failed 100.
 
-// Embedding generation
-const job = await this.aiQueue.enqueueEmbedding({
-  store_id: 1,
-  organization_id: 1,
-  entity_type: 'product',
-  entity_id: 42,
-  content: 'Product description text',
-});
+`enqueueAgentTask()`:
 
-// Agent task
-const job = await this.aiQueue.enqueueAgentTask({
-  goal: 'Analyze sales trends',
-  store_id: 1,
-  organization_id: 1,
-  max_iterations: 10,
-});
+- Queue `ai-agent`, job `agent-task`.
+- Attempts 1.
+- Requires a processor before relying on it operationally.
 
-// Check status
-const status = await this.aiQueue.getJobStatus('ai-generation', job.id);
-// { job_id, status: 'waiting'|'active'|'completed'|'failed', result?, error? }
-```
+## Processors
 
----
+Generation processor:
 
-## Creating a Processor
+- Recreates request context with `RequestContextService.run()`.
+- Calls `aiEngine.run(app_key, variables, messages)`.
+- Emits `ai.generation.completed` or `ai.generation.failed`.
 
-```typescript
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
+Embedding processor:
 
-@Processor('my-queue-name')
-export class MyProcessor extends WorkerHost {
-  constructor(
-    private readonly myService: MyService,
-    private readonly eventEmitter: EventEmitter2,
-  ) {
-    super();
-  }
+- Handles `delete-embedding` specially.
+- Otherwise stores embedding through `EmbeddingService.storeEmbedding()`.
+- Does not emit completion/failure events.
 
-  async process(job: Job<MyJobData>): Promise<any> {
-    // 1. Extract job data
-    const { param1, param2 } = job.data;
+## Rules
 
-    // 2. Execute business logic
-    const result = await this.myService.doWork(param1, param2);
-
-    // 3. Emit completion event
-    this.eventEmitter.emit('my.job.completed', { job_id: job.id, result });
-
-    // 4. Return result (stored in job.returnvalue)
-    return result;
-  }
-}
-```
-
-**Register** the processor in the module's `providers` array.
-
----
-
-## Job Configuration
-
-```typescript
-await queue.add('job-name', data, {
-  attempts: 3,                              // Max retry attempts
-  backoff: { type: 'exponential', delay: 2000 }, // 2s → 4s → 8s
-  removeOnComplete: { count: 100 },         // Keep last 100 completed
-  removeOnFail: { count: 50 },              // Keep last 50 failed
-});
-```
-
----
-
-## Events Emitted
-
-| Event | Source | Payload |
-|-------|--------|---------|
-| `ai.generation.completed` | AIGenerationProcessor | `{ job_id, app_key, success, result }` |
-| `ai.generation.failed` | AIGenerationProcessor | `{ job_id, app_key, error }` |
-
----
-
-## Error Codes
-
-| Code | HTTP | Meaning |
-|------|------|---------|
-| `AI_QUEUE_001` | 500 | Failed to enqueue job |
-| `AI_QUEUE_002` | 404 | Job not found |
-
----
-
-## File Reference
-
-| File | Purpose |
-|------|---------|
-| `apps/backend/src/ai-engine/queue/ai-queue.module.ts` | Queue registration |
-| `apps/backend/src/ai-engine/queue/ai-queue.service.ts` | Enqueue + status methods |
-| `apps/backend/src/ai-engine/queue/processors/ai-generation.processor.ts` | Generation processor |
-| `apps/backend/src/ai-engine/queue/processors/ai-embedding.processor.ts` | Embedding processor |
-| `apps/backend/src/ai-engine/queue/interfaces/ai-queue.interface.ts` | Job interfaces |
-| `apps/backend/src/common/queue/queue.module.ts` | BullMQ global config |
-| `apps/backend/src/common/redis/redis.module.ts` | Redis connection |
-
----
-
-## Redis Configuration
-
-Redis eviction policy warning: BullMQ recommends `noeviction`. Update in `docker-compose.yml`:
-
-```yaml
-command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy noeviction
-```
-
----
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Registering queue in multiple modules | Use single source (AIQueueModule) |
-| Not awaiting enqueue | `await aiQueue.enqueueGeneration(...)` |
-| Missing processor registration | Add to module `providers` array |
-| No error handling in processor | Throw error — Bull handles retry |
-| Accessing RequestContext in processor | Context not available — pass data in job |
-
----
+- Pass required tenant/user context in job data; request context is not naturally available in workers.
+- Do not assume all registered queues have processors.
+- Add processors to module providers explicitly.
+- Let BullMQ retry by throwing from processors on failures.
+- Use `getJobStatus(queueName, jobId)` for status checks.
 
 ## Related Skills
 
-- `vendix-ai-platform-core` — Core AI Engine
-- `vendix-ai-embeddings-rag` — Embedding queue usage
-- `vendix-ai-agent-tools` — Agent queue usage
+- `vendix-ai-platform-core`
+- `vendix-ai-embeddings-rag`
+- `vendix-ai-agent-tools`
