@@ -46,8 +46,8 @@ export class PosSettingsForm implements OnInit {
   }
 
   form: FormGroup = new FormGroup({
-    allow_anonymous_sales: new FormControl(false),
-    anonymous_sales_as_default: new FormControl(false),
+    allow_anonymous_sales: new FormControl(true),
+    anonymous_sales_as_default: new FormControl(true),
     business_hours: new FormControl(this.getDefaultBusinessHours()),
     enable_schedule_validation: new FormControl(false),
     show_onscreen_keypad: new FormControl(true),
@@ -296,13 +296,13 @@ export class PosSettingsForm implements OnInit {
 
   onFieldChange() {
     if (this.form.valid) {
-      this.settingsChange.emit(this.form.value);
+      this.settingsChange.emit(this.form.getRawValue());
     }
   }
 
   onBusinessHoursChange() {
     if (this.form.valid) {
-      this.settingsChange.emit(this.form.value);
+      this.settingsChange.emit(this.form.getRawValue());
     }
   }
 

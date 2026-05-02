@@ -9,6 +9,8 @@ import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
+import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 
 @Injectable()
 export class CartService {
@@ -18,6 +20,8 @@ export class CartService {
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
     private readonly settingsService: SettingsService,
+    private readonly stockValidatorService: StockValidatorService,
+    private readonly priceResolverService: PriceResolverService,
   ) {}
 
   private readonly cartInclude = {
@@ -82,7 +86,6 @@ export class CartService {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
     }
 
-    let available_stock = product.stock_quantity || 0;
     let variant: any = null;
 
     if (dto.product_variant_id) {
@@ -92,12 +95,9 @@ export class CartService {
       if (!variant || variant.product_id !== dto.product_id) {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
-      available_stock = variant.stock_quantity || 0;
     }
 
-    if (product.track_inventory && dto.quantity > available_stock) {
-      throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
-    }
+    await this.validateStock(product, variant, dto.quantity);
 
     // Fetch product with taxes for price calculation
     const productWithTaxes = await this.prisma.products.findUnique({
@@ -147,9 +147,7 @@ export class CartService {
 
     if (existing_item) {
       const new_quantity = existing_item.quantity + dto.quantity;
-      if (product.track_inventory && new_quantity > available_stock) {
-        throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
-      }
+      await this.validateStock(product, variant, new_quantity);
 
       await this.prisma.cart_items.update({
         where: { id: existing_item.id },
@@ -191,15 +189,7 @@ export class CartService {
       throw new NotFoundException('Cart item not found');
     }
 
-    if (item.product.track_inventory) {
-      const available_stock =
-        item.product_variant?.stock_quantity ??
-        item.product.stock_quantity ??
-        0;
-      if (dto.quantity > available_stock) {
-        throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
-      }
-    }
+    await this.validateStock(item.product, item.product_variant, dto.quantity);
 
     await this.prisma.cart_items.update({
       where: { id: item_id },
@@ -332,19 +322,6 @@ export class CartService {
   }
 
   /**
-   * Calculates the effective base price for a product, considering variant overrides.
-   * Pricing hierarchy: variant.price_override > product.sale_price (if on sale) > product.base_price
-   */
-  private getEffectiveBasePrice(product: any, variant?: any): number {
-    if (variant?.price_override) {
-      return Number(variant.price_override);
-    }
-    return product.is_on_sale && product.sale_price
-      ? Number(product.sale_price)
-      : Number(product.base_price);
-  }
-
-  /**
    * Calculates the sum of tax rates for a product.
    * Tax rates are stored as decimals in DB (e.g., 0.19 for 19%).
    */
@@ -367,9 +344,54 @@ export class CartService {
    * Supports variant price overrides.
    */
   private calculateFinalPrice(product: any, variant?: any): number {
-    const basePrice = this.getEffectiveBasePrice(product, variant);
     const totalTaxRate = this.getTotalTaxRate(product);
-    const finalPrice = basePrice * (1 + totalTaxRate);
-    return Math.round(finalPrice * 100) / 100;
+    const priceResult = this.priceResolverService.resolvePrice(
+      this.toPriceResolverParams(product, variant),
+      totalTaxRate,
+    );
+    return Math.round(priceResult.unitPriceWithTax * 100) / 100;
+  }
+
+  private async validateStock(product: any, variant: any, quantity: number) {
+    const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
+      product,
+      variant ?? undefined,
+    );
+
+    if (!shouldTrack) return;
+
+    const availability = await this.stockValidatorService.validateAvailability(
+      product.id,
+      variant?.id,
+      quantity,
+    );
+
+    if (!availability.isAvailable) {
+      throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
+    }
+  }
+
+  private toPriceResolverParams(product: any, variant?: any) {
+    return {
+      product: {
+        base_price: Number(product.base_price),
+        is_on_sale: product.is_on_sale,
+        sale_price:
+          product.sale_price != null ? Number(product.sale_price) : null,
+        track_inventory: product.track_inventory,
+      },
+      variant: variant
+        ? {
+            price_override:
+              variant.price_override != null
+                ? Number(variant.price_override)
+                : null,
+            is_on_sale: variant.is_on_sale,
+            sale_price:
+              variant.sale_price != null ? Number(variant.sale_price) : null,
+            track_inventory_override: variant.track_inventory_override,
+          }
+        : undefined,
+    };
   }
 }

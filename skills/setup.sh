@@ -6,6 +6,7 @@
 # - OpenCode: .opencode/skills/
 # - Claude:   .claude/skills/
 # - Gemini:   .agent/skills/
+# - Agents:   .agents/skills/
 #
 # Also generates entry point configurations (CLAUDE.md, etc.)
 # ============================================================================
@@ -183,6 +184,16 @@ OPENCODE_EOF
     log_success "Created $opencode_file and synced to $skills_dest"
 }
 
+generate_agents() {
+    local skills_dest=".agents/skills"
+
+    log_info "Configuring for generic Agents..."
+
+    sync_skills_to_dir "$REPO_ROOT/$skills_dest"
+
+    log_success "Synced skills to $skills_dest"
+}
+
 main() {
     cd "$REPO_ROOT"
     
@@ -191,13 +202,15 @@ main() {
         generate_copilot
         generate_gemini
         generate_opencode
+        generate_agents
     else
         case "$1" in
             --claude) generate_claude ;;
             --copilot) generate_copilot ;;
             --gemini) generate_gemini ;;
             --opencode) generate_opencode ;;
-            *) echo "Usage: $0 [--all|--sync|--claude|--copilot|--gemini|--opencode]" ;;
+            --agents) generate_agents ;;
+            *) echo "Usage: $0 [--all|--sync|--claude|--copilot|--gemini|--opencode|--agents]" ;;
         esac
     fi
 }

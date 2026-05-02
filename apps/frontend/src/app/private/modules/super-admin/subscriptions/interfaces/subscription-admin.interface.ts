@@ -50,8 +50,7 @@ export interface SubscriptionPlan {
   setup_fee: number | null;
   is_free: boolean;
 
-  // Trial + dunning
-  trial_days: number;
+  // Grace + dunning
   grace_period_soft_days: number;
   grace_period_hard_days: number;
   suspension_day: number;
@@ -216,8 +215,7 @@ export interface PlanFormData {
   currency: string;
   setup_fee: number | null;
   is_free: boolean;
-  // Trial + dunning
-  trial_days: number;
+  // Grace + dunning
   grace_period_soft_days: number;
   grace_period_hard_days: number;
   suspension_day: number;
@@ -254,8 +252,7 @@ export interface CreatePlanDto {
   currency: string;
   setup_fee?: number | null;
   is_free?: boolean;
-  // Trial + dunning
-  trial_days?: number;
+  // Grace + dunning
   grace_period_soft_days?: number;
   grace_period_hard_days?: number;
   suspension_day?: number;

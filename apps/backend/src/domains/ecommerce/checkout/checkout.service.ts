@@ -129,6 +129,12 @@ export class CheckoutService {
             product_variant = await this.prisma.product_variants.findUnique({
               where: { id: item.product_variant_id },
             });
+            if (
+              !product_variant ||
+              product_variant.product_id !== item.product_id
+            ) {
+              throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
+            }
           }
 
           return {
@@ -459,7 +465,7 @@ export class CheckoutService {
     });
 
     for (const item of cart_items) {
-      if (!item.product.track_inventory) continue;
+      if (!this.shouldReserveStock(item)) continue;
       try {
         const location_id =
           await this.stockLevelManager.getDefaultLocationForProduct(
@@ -491,6 +497,7 @@ export class CheckoutService {
           await this.reservationsService.create({
             customer_id: user_id!,
             product_id: booking.product_id,
+            product_variant_id: booking.product_variant_id,
             date: booking.date,
             start_time: booking.start_time,
             end_time: booking.end_time,
@@ -608,7 +615,10 @@ export class CheckoutService {
             product_variant = await this.prisma.product_variants.findUnique({
               where: { id: item.product_variant_id },
             });
-            if (!product_variant) {
+            if (
+              !product_variant ||
+              product_variant.product_id !== item.product_id
+            ) {
               throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
             }
           }
@@ -871,7 +881,7 @@ export class CheckoutService {
     });
 
     for (const item of cart_items) {
-      if (!item.product.track_inventory) continue;
+      if (!this.shouldReserveStock(item)) continue;
       try {
         const location_id =
           await this.stockLevelManager.getDefaultLocationForProduct(
@@ -1330,5 +1340,12 @@ export class CheckoutService {
       transactionId: finalPayment?.transaction_id ?? payment.transaction_id,
       alreadyConfirmed: false,
     };
+  }
+
+  private shouldReserveStock(item: any): boolean {
+    return this.stockValidatorService.resolveEffectiveTracking(
+      item.product,
+      item.product_variant ?? undefined,
+    );
   }
 }

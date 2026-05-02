@@ -172,7 +172,8 @@ export class SubscriptionTrialService {
       return null;
     }
 
-    // 4. Compute trial duration: plan override > platform default > 14.
+    // 4. Compute trial duration: platform default > 14. The plan only owns
+    //    access/features; per-plan trial durations are intentionally unsupported.
     //    Migration 20260427000000_platform_settings_seed_core guarantees
     //    that the canonical row with key='core' exists, so we use the
     //    deterministic findUnique() instead of findFirst().
@@ -180,10 +181,7 @@ export class SubscriptionTrialService {
       where: { key: 'core' },
     });
     const platformDefaultTrialDays = platformSettings?.default_trial_days ?? 14;
-    const trialDays =
-      plan.trial_days && plan.trial_days > 0
-        ? plan.trial_days
-        : platformDefaultTrialDays;
+    const trialDays = platformDefaultTrialDays;
     const now = new Date();
     const trialEndsAt = new Date(
       now.getTime() + trialDays * 24 * 60 * 60 * 1000,

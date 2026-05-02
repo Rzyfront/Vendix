@@ -83,8 +83,7 @@ export class SubscriptionAdminService {
     }
     if (d.is_free !== undefined) payload['is_free'] = Boolean(d.is_free);
 
-    // Trial + dunning
-    if (d.trial_days !== undefined) payload['trial_days'] = Number(d.trial_days);
+    // Grace + dunning
     if (d.grace_period_soft_days !== undefined) payload['grace_period_soft_days'] = Number(d.grace_period_soft_days);
     if (d.grace_period_hard_days !== undefined) payload['grace_period_hard_days'] = Number(d.grace_period_hard_days);
     if (d.suspension_day !== undefined) payload['suspension_day'] = Number(d.suspension_day);
@@ -161,7 +160,6 @@ export class SubscriptionAdminService {
       setup_fee,
       is_free: Boolean(raw.is_free),
 
-      trial_days: Number(raw.trial_days ?? 0),
       grace_period_soft_days,
       grace_period_hard_days: Number(raw.grace_period_hard_days ?? 0),
       suspension_day: Number(raw.suspension_day ?? 0),

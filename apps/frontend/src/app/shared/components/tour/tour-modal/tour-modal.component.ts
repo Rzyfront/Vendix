@@ -75,7 +75,7 @@ interface SpotlightPosition {
         <div class="tooltip-content" [class.expanded]="!isMinimized">
           <p class="tooltip-description">{{ currentStep?.description }}</p>
           @if (currentStep?.action) {
-            <p class="tooltip-action">👆 {{ currentStep?.action }}</p>
+            <p class="tooltip-action">{{ currentStep?.action }}</p>
           }
         </div>
         <!-- Footer Navigation -->
@@ -156,27 +156,31 @@ interface SpotlightPosition {
       }
 
       /* ============================================================
-       MOBILE: Ultra-compact tooltip (NOT bottom sheet)
-       Small, positioned near target, doesn't block content
-       Can be minimized to reduce blocking
+       MOBILE: Readable compact tooltip (NOT bottom sheet)
+       Positioned near target without sacrificing legibility.
+       Can be minimized to reduce blocking.
        ============================================================ */
       .tour-tooltip.is-mobile {
         position: fixed;
         z-index: 10004;
-        max-width: 280px;
-        min-width: 200px;
+        width: calc(100vw - 24px);
+        max-width: 340px;
+        min-width: min(280px, calc(100vw - 24px));
         /* Compact card design */
         background: var(--color-surface, #1e1e1e);
-        border: 2px solid var(--color-primary, #10b981);
+        border: 1px solid var(--color-primary, #10b981);
         border-radius: 12px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.38);
         /* Allow dynamic positioning via inline styles */
         display: flex;
         flex-direction: column;
         /* Safe area support */
-        padding: 12px;
+        padding: 14px;
         /* IMPORTANT: Leave space for mobile footer (checkout button) */
-        max-height: calc(100vh - 140px - env(safe-area-inset-bottom, 20px));
+        max-height: min(
+          260px,
+          calc(100vh - 140px - env(safe-area-inset-bottom, 20px))
+        );
         overflow-y: auto;
         /* Fade in animation */
         animation: fade-in-mobile 0.2s ease-out;
@@ -187,8 +191,8 @@ interface SpotlightPosition {
 
       /* Minimized state - shows only header with minimize button */
       .tour-tooltip.is-mobile.is-minimized {
-        max-height: 50px;
-        min-height: 50px;
+        max-height: 52px;
+        min-height: 52px;
         overflow: hidden;
         padding: 8px 12px;
         opacity: 0.9;
@@ -210,9 +214,9 @@ interface SpotlightPosition {
         }
       }
 
-      /* Mobile header - more compact with minimize button */
+      /* Mobile header - readable with minimize button */
       .tour-tooltip.is-mobile .tooltip-header {
-        padding: 4px 0;
+        padding: 2px 0 4px;
         flex-shrink: 0;
         display: flex;
         align-items: center;
@@ -221,10 +225,10 @@ interface SpotlightPosition {
       }
 
       .tour-tooltip.is-mobile .tooltip-title {
-        font-size: 0.875rem;
+        font-size: 1rem;
         font-weight: 600;
         line-height: 1.3;
-        min-height: 20px;
+        min-height: 22px;
         flex: 1;
         margin: 0;
       }
@@ -232,9 +236,9 @@ interface SpotlightPosition {
       /* Minimize button for mobile */
       .tour-tooltip.is-mobile .minimize-btn {
         flex-shrink: 0;
-        width: 28px;
-        height: 28px;
-        padding: 4px;
+        width: 36px;
+        height: 36px;
+        padding: 8px;
         background: rgba(var(--color-primary-rgb, 16, 185, 129), 0.15);
         border: 1px solid var(--color-primary, #10b981);
         border-radius: 6px;
@@ -264,10 +268,10 @@ interface SpotlightPosition {
 
       /* Mobile content - concise with smooth expand/collapse */
       .tour-tooltip.is-mobile .tooltip-content {
-        padding: 6px 0;
+        padding: 8px 0 6px;
         flex: 1;
         min-height: 0;
-        max-height: 200px;
+        max-height: 164px;
         overflow: hidden;
         opacity: 1;
         transition:
@@ -286,16 +290,17 @@ interface SpotlightPosition {
       }
 
       .tour-tooltip.is-mobile .tooltip-description {
-        font-size: 0.8125rem;
-        line-height: 1.4;
+        font-size: 0.9375rem;
+        line-height: 1.45;
         margin: 0;
-        max-height: 80px;
+        max-height: 104px;
         overflow-y: auto;
       }
 
       .tour-tooltip.is-mobile .tooltip-action {
-        font-size: 0.75rem;
-        margin: 4px 0 0;
+        font-size: 0.875rem;
+        line-height: 1.35;
+        margin: 6px 0 0;
       }
 
       /* Mobile footer - horizontal, 2 buttons only with smooth transition */
@@ -338,21 +343,21 @@ interface SpotlightPosition {
         flex: 1 1 auto;
         display: flex;
         justify-content: flex-end;
-        gap: 6px;
+        gap: 8px;
       }
 
       .tour-tooltip.is-mobile .skip-btn {
-        min-width: 60px;
-        min-height: 36px;
-        padding: 6px 10px;
-        font-size: 0.75rem;
+        min-width: 68px;
+        min-height: 44px;
+        padding: 8px 12px;
+        font-size: 0.875rem;
       }
 
       .tour-tooltip.is-mobile .next-btn {
-        min-width: 90px;
-        min-height: 36px;
-        padding: 6px 12px;
-        font-size: 0.8125rem;
+        min-width: 104px;
+        min-height: 44px;
+        padding: 8px 14px;
+        font-size: 0.9375rem;
       }
 
       /* ============================================================
@@ -362,12 +367,14 @@ interface SpotlightPosition {
         position: fixed;
         z-index: 10004;
         background: var(--color-surface, #1e1e1e);
-        border: 2px solid var(--color-primary, #10b981);
-        border-radius: 16px;
-        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-        max-width: 380px;
-        min-width: 280px;
-        padding: 16px;
+        border: 1px solid var(--color-primary, #10b981);
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+        max-width: 320px;
+        min-width: 240px;
+        max-height: 200px;
+        padding: 12px;
+        overflow-y: auto;
         animation: tooltip-appear-desktop 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
 
@@ -384,32 +391,32 @@ interface SpotlightPosition {
 
       /* Desktop header styling */
       .tour-tooltip.is-desktop .tooltip-header {
-        padding: 0 0 12px 0;
-        margin-bottom: 12px;
+        padding: 0 0 8px 0;
+        margin-bottom: 8px;
       }
 
       .tour-tooltip.is-desktop .tooltip-title {
-        font-size: 1.125rem;
+        font-size: 1rem;
         font-weight: 600;
-        line-height: 1.4;
+        line-height: 1.3;
       }
 
       /* Desktop content styling */
       .tour-tooltip.is-desktop .tooltip-content {
         padding: 0;
-        margin-bottom: 16px;
-      }
-
-      .tour-tooltip.is-desktop .tooltip-description {
-        font-size: 0.9375rem;
-        line-height: 1.6;
         margin-bottom: 12px;
       }
 
-      .tour-tooltip.is-desktop .tooltip-action {
+      .tour-tooltip.is-desktop .tooltip-description {
         font-size: 0.875rem;
+        line-height: 1.45;
+        margin-bottom: 8px;
+      }
+
+      .tour-tooltip.is-desktop .tooltip-action {
+        font-size: 0.8125rem;
         margin: 0;
-        padding: 8px 12px;
+        padding: 6px 10px;
         background: rgba(255, 255, 255, 0.05);
         border-radius: 8px;
         display: inline-block;
@@ -464,7 +471,7 @@ interface SpotlightPosition {
           flex-direction: row;
           align-items: center;
           justify-content: space-between;
-          gap: 12px;
+          gap: 8px;
           padding: 0;
           margin-top: 0;
         }
@@ -495,16 +502,16 @@ interface SpotlightPosition {
         .tour-tooltip.is-desktop .skip-btn,
         .tour-tooltip.is-desktop .next-btn {
           min-width: auto;
-          min-height: 40px;
-          padding: 10px 18px;
-          font-size: 0.875rem;
+          min-height: 38px;
+          padding: 8px 14px;
+          font-size: 0.8125rem;
         }
 
         .tour-tooltip.is-desktop .tour-progress {
-          padding: 6px 14px;
+          padding: 5px 10px;
           background: rgba(255, 255, 255, 0.08);
           border-radius: 20px;
-          font-size: 0.8125rem;
+          font-size: 0.75rem;
         }
       }
 
@@ -584,10 +591,11 @@ export class TourModalComponent {
   }
 
   private checkMobile(): void {
-    this.isMobile = window.innerWidth < 768;
-    // Auto-minimize on mobile by default
-    if (this.isMobile) {
-      this.isMinimized = true;
+    this.isMobile = window.innerWidth < 1024;
+
+    if (this.isMobile && this.isOpen()) {
+      this.clearSpotlight();
+      this.isOpen.set(false);
     }
   }
 
@@ -957,9 +965,11 @@ export class TourModalComponent {
   }
 
   private positionTooltip(elementRect: DOMRect): void {
-    const tooltipWidth = this.isMobile ? 280 : 380;
-    const tooltipHeight = this.isMobile ? 180 : 220;
-    const margin = this.isMobile ? 12 : 20;
+    const tooltipWidth = this.isMobile
+      ? Math.min(window.innerWidth - 24, 340)
+      : 320;
+    const tooltipHeight = this.isMobile ? 240 : 190;
+    const margin = this.isMobile ? 12 : 16;
 
     if (this.isMobile) {
       // Mobile: Smart positioning - place tooltip to NOT overlap the target element
@@ -1059,9 +1069,11 @@ export class TourModalComponent {
   }
 
   private centerTooltip(): void {
-    const tooltipWidth = this.isMobile ? 280 : 380;
-    const tooltipHeight = this.isMobile ? 180 : 260;
-    const margin = this.isMobile ? 12 : 20;
+    const tooltipWidth = this.isMobile
+      ? Math.min(window.innerWidth - 24, 340)
+      : 320;
+    const tooltipHeight = this.isMobile ? 240 : 200;
+    const margin = this.isMobile ? 12 : 16;
 
     if (this.isMobile) {
       // Mobile: Center in upper portion of screen, avoid blocking important content
@@ -1171,6 +1183,14 @@ export class TourModalComponent {
   }
 
   async startTour(): Promise<void> {
+    this.checkMobile();
+
+    if (this.isMobile) {
+      this.clearSpotlight();
+      this.isOpen.set(false);
+      return;
+    }
+
     this.currentIndex = 0;
     this.currentStep = this.tourConfig().steps[0];
 

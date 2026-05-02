@@ -40,7 +40,6 @@ export interface PublicPlanDto {
   billing_cycle: string;
   base_price: string;
   currency: string;
-  trial_days: number;
   is_popular: boolean;
   is_promotional: boolean;
   sort_order: number;
@@ -78,7 +77,6 @@ export class PublicPlansService {
         billing_cycle: true,
         base_price: true,
         currency: true,
-        trial_days: true,
         is_popular: true,
         is_promotional: true,
         sort_order: true,
@@ -98,7 +96,6 @@ export class PublicPlansService {
       billing_cycle: plan.billing_cycle,
       base_price: plan.base_price.toString(),
       currency: plan.currency,
-      trial_days: plan.trial_days,
       is_popular: plan.is_popular,
       is_promotional: plan.is_promotional,
       sort_order: plan.sort_order,

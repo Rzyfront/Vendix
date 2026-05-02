@@ -10,6 +10,8 @@ import {
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionBillingService } from '../domains/store/subscriptions/services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
+import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
+import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 
 describe('SubscriptionRenewalBillingJob', () => {
   let job: SubscriptionRenewalBillingJob;
@@ -18,14 +20,26 @@ describe('SubscriptionRenewalBillingJob', () => {
   };
   let billing: { issueInvoice: jest.Mock };
   let payment: { chargeInvoice: jest.Mock };
+  let state: { transition: jest.Mock };
   let retryQueue: { add: jest.Mock };
   let config: { get: jest.Mock };
+  let gateConfig: { isCronDryRun: jest.Mock };
   let emitter: { emit: jest.Mock };
 
   const subRow = {
     id: 10,
     store_id: 5,
+    state: 'active',
+    plan_id: 1,
+    current_period_end: new Date('2026-04-01T00:00:00Z'),
+    next_billing_at: new Date('2026-04-01T00:00:00Z'),
     scheduled_cancel_at: null as Date | null,
+    plan: {
+      state: 'active',
+      archived_at: null as Date | null,
+      grace_period_soft_days: 3,
+      grace_period_hard_days: 7,
+    },
   };
   const invoice = {
     id: 100,
@@ -42,8 +56,10 @@ describe('SubscriptionRenewalBillingJob', () => {
     };
     billing = { issueInvoice: jest.fn().mockResolvedValue(invoice) };
     payment = { chargeInvoice: jest.fn() };
+    state = { transition: jest.fn().mockResolvedValue(undefined) };
     retryQueue = { add: jest.fn().mockResolvedValue(undefined) };
     config = { get: jest.fn().mockReturnValue('true') };
+    gateConfig = { isCronDryRun: jest.fn().mockReturnValue(false) };
     emitter = { emit: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -52,7 +68,9 @@ describe('SubscriptionRenewalBillingJob', () => {
         { provide: GlobalPrismaService, useValue: prisma },
         { provide: SubscriptionBillingService, useValue: billing },
         { provide: SubscriptionPaymentService, useValue: payment },
+        { provide: SubscriptionStateService, useValue: state },
         { provide: ConfigService, useValue: config },
+        { provide: SubscriptionGateConfig, useValue: gateConfig },
         { provide: EventEmitter2, useValue: emitter },
         {
           provide: getQueueToken('subscription-payment-retry'),
@@ -185,5 +203,76 @@ describe('SubscriptionRenewalBillingJob', () => {
         reason: 'scheduled_cancel_executed',
       }),
     );
+  });
+
+  it('archived plan and ended period: moves active subscription to grace_soft without billing', async () => {
+    const periodEnd = new Date(Date.now() - 60 * 60 * 1000);
+    const archivedAt = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      {
+        ...subRow,
+        current_period_end: periodEnd,
+        next_billing_at: periodEnd,
+        plan: { ...subRow.plan, state: 'archived', archived_at: archivedAt },
+      },
+    ]);
+
+    await job.handleRenewalBilling();
+
+    expect(billing.issueInvoice).not.toHaveBeenCalled();
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(retryQueue.add).not.toHaveBeenCalled();
+    expect(state.transition).toHaveBeenCalledWith(
+      subRow.store_id,
+      'grace_soft',
+      expect.objectContaining({
+        reason: 'current_plan_unavailable_at_renewal',
+        triggeredByJob: 'subscription-renewal-billing',
+        graceSoftUntil: expect.any(Date),
+        graceHardUntil: expect.any(Date),
+        payload: expect.objectContaining({
+          plan_id: subRow.plan_id,
+          plan_state: 'archived',
+          archived_at: archivedAt.toISOString(),
+        }),
+      }),
+    );
+  });
+
+  it('archived plan before period end: skips billing without transitioning early', async () => {
+    const periodEnd = new Date(Date.now() + 60 * 60 * 1000);
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      {
+        ...subRow,
+        current_period_end: periodEnd,
+        next_billing_at: periodEnd,
+        plan: { ...subRow.plan, state: 'archived' },
+      },
+    ]);
+
+    await job.handleRenewalBilling();
+
+    expect(billing.issueInvoice).not.toHaveBeenCalled();
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(state.transition).not.toHaveBeenCalled();
+  });
+
+  it('archived plan already in grace: skips billing without resetting grace state', async () => {
+    const periodEnd = new Date(Date.now() - 60 * 60 * 1000);
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      {
+        ...subRow,
+        state: 'grace_soft',
+        current_period_end: periodEnd,
+        next_billing_at: periodEnd,
+        plan: { ...subRow.plan, state: 'archived' },
+      },
+    ]);
+
+    await job.handleRenewalBilling();
+
+    expect(billing.issueInvoice).not.toHaveBeenCalled();
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(state.transition).not.toHaveBeenCalled();
   });
 });

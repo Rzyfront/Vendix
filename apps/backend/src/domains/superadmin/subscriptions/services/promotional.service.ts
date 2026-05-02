@@ -31,7 +31,6 @@ export class PromotionalService {
         billing_cycle: (dto.billing_cycle as any) || 'monthly',
         base_price: dto.base_price,
         currency: dto.currency || 'COP',
-        trial_days: dto.trial_days ?? 0,
         grace_period_soft_days: dto.grace_period_soft_days ?? 5,
         grace_period_hard_days: dto.grace_period_hard_days ?? 10,
         suspension_day: dto.suspension_day ?? 14,
@@ -151,7 +150,6 @@ export class PromotionalService {
         ...(dto.billing_cycle && { billing_cycle: dto.billing_cycle as any }),
         ...(dto.base_price !== undefined && { base_price: dto.base_price }),
         ...(dto.currency && { currency: dto.currency }),
-        ...(dto.trial_days !== undefined && { trial_days: dto.trial_days }),
         ...(dto.grace_period_soft_days !== undefined && {
           grace_period_soft_days: dto.grace_period_soft_days,
         }),

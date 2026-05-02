@@ -220,7 +220,6 @@ export interface FreePlanInfo {
     name: string;
     effective_price: string;
     billing_cycle: string;
-    trial_days: number;
   };
 }
 

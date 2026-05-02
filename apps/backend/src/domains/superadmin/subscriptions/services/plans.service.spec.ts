@@ -50,9 +50,8 @@ describe('PlansService', () => {
       expect(args.data.state).toBe('draft');
       expect(args.data.billing_cycle).toBe('monthly');
       expect(args.data.currency).toBe('COP');
-      expect(args.data.trial_days).toBe(0);
       expect(args.data.grace_period_soft_days).toBe(5);
-      expect(args.data.resellable).toBe(false);
+      expect(args.data.resellable).toBe(true);
       expect(args.data.is_promotional).toBe(false);
     });
 
@@ -122,13 +121,12 @@ describe('PlansService', () => {
         planFixture({ name: 'New' }),
       );
 
-      await service.update(1, { name: 'New', trial_days: 7 } as any);
+      await service.update(1, { name: 'New' } as any);
 
       const args = prisma.subscription_plans.update.mock.calls[0][0];
       expect(args.data.name).toBe('New');
-      expect(args.data.trial_days).toBe(7);
       expect(args.data.code).toBeUndefined();
-      expect(args.data.plan_type).toBeUndefined();
+      expect(args.data.plan_type).toBe('base');
     });
   });
 

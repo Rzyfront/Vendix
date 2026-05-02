@@ -42,45 +42,9 @@
         </div>
       </div>
 
-      <!-- Track Inventory Toggle -->
-      <app-setting-toggle
-        formControlName="track_inventory"
-        label="Controlar inventario"
-        [description]="
-          productForm.get('track_inventory')?.value
-            ? 'Se controla el stock de este producto'
-            : 'Producto bajo pedido — siempre disponible para venta'
-        "
-      >
-      </app-setting-toggle>
-
-      <!-- Stock Field: Only shown when track_inventory is enabled -->
-      @if (productForm.get("track_inventory")?.value) {
-        <div class="grid grid-cols-1 gap-2 md:gap-4">
-          <!-- Stock Field: Different behavior for create vs edit mode -->
-          @if (!isEditMode) {
-            <div>
-              <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
-                [error]="getErrorMessage('stock_quantity')" placeholder="0"
-              tooltipText="Stock inicial del producto" [required]="true"></app-input>
-            </div>
-          }
-
-          @if (isEditMode) {
-            <div class="relative">
-              <div (click)="onStockAdjustmentClick()" class="cursor-pointer group" title="Click para ajustar stock">
-                <app-input label="Stock" type="number" formControlName="stock_quantity"
-                  [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
-                  [suffixIcon]="true">
-                  <ng-container slot="suffix-icon">
-                    <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                    </svg>
-                  </ng-container>
-                </app-input>
-              </div>
-            </div>
-          }
+      @if (!isEditMode) {
+        <div class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          Este producto se creará como definición comercial, sin control ni stock inicial. La entrada de existencias se realiza desde Inventario o Compra de inventario.
         </div>
       }
 

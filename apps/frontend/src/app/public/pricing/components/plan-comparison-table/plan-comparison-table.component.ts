@@ -110,29 +110,6 @@ interface ComparisonRow {
               }
             </tr>
 
-            <!-- Trial row -->
-            @if (anyHasTrial()) {
-              <tr class="border-b border-[var(--color-border)] hover:bg-gray-50">
-                <th
-                  scope="row"
-                  class="sticky left-0 z-10 bg-white text-left p-4 font-medium text-[var(--color-text-primary)]"
-                >
-                  Periodo de prueba
-                </th>
-                @for (plan of plans(); track plan.id) {
-                  <td class="text-center p-4" [ngClass]="popularCellClass(plan)">
-                    @if ((plan.trial_days ?? 0) > 0) {
-                      <span class="text-sm text-[var(--color-text-primary)]">
-                        {{ plan.trial_days }} días
-                      </span>
-                    } @else {
-                      <app-icon name="x" [size]="16" class="text-red-400 inline-block"></app-icon>
-                    }
-                  </td>
-                }
-              </tr>
-            }
-
             <!-- Feature rows -->
             @for (row of featureRows(); track row.label) {
               <tr
@@ -193,10 +170,6 @@ interface ComparisonRow {
 export class PlanComparisonTableComponent {
   readonly plans = input.required<PublicPlan[]>();
   readonly select = output<PublicPlan>();
-
-  readonly anyHasTrial = computed(() =>
-    this.plans().some((p) => (p.trial_days ?? 0) > 0),
-  );
 
   /**
    * Build the union of feature keys across all plans, then for each plan emit

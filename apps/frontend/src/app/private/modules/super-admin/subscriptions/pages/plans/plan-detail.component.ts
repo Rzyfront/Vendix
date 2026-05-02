@@ -122,14 +122,10 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 
             <div>
               <h2 class="text-sm font-semibold text-text-primary mb-3">Configuración</h2>
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                 <div class="p-3 bg-background rounded-lg border border-border">
                   <div class="text-text-secondary text-xs mb-1">Tipo</div>
                   <div class="font-medium text-text-primary capitalize">{{ plan()?.['plan_type'] ?? '—' }}</div>
-                </div>
-                <div class="p-3 bg-background rounded-lg border border-border">
-                  <div class="text-text-secondary text-xs mb-1">Días de prueba</div>
-                  <div class="font-medium text-text-primary">{{ plan()?.['trial_days'] ?? 0 }}</div>
                 </div>
                 <div class="p-3 bg-background rounded-lg border border-border">
                   <div class="text-text-secondary text-xs mb-1">Gracia suave</div>

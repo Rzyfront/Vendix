@@ -129,7 +129,6 @@ export class SubscriptionCheckoutController {
             name: targetPlan.name,
             effective_price: targetPricing.effective_price.toFixed(2),
             billing_cycle: targetPlan.billing_cycle,
-            trial_days: targetPlan.trial_days ?? 0,
           },
         },
         coupon: couponPreview,
@@ -683,6 +682,10 @@ export class SubscriptionCheckoutController {
       if (!invoice) {
         // Free plan re-subscribe (rare). Promote straight to active because
         // there is no charge to wait for.
+        await this.prisma.store_subscriptions.update({
+          where: { id: reactivated.id },
+          data: { paid_plan_id: dto.planId },
+        });
         await this.stateService.transition(storeId, 'active', {
           reason: 're_subscribe_free_plan',
           triggeredByUserId: context?.user_id ?? undefined,
@@ -1484,6 +1487,7 @@ export class SubscriptionCheckoutController {
         data: {
           store_id: storeId,
           plan_id: isFreePlan ? plan.id : null,
+          paid_plan_id: isFreePlan ? plan.id : null,
           partner_override_id: null,
           state: initialState,
           effective_price: pricing.effective_price,

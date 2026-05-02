@@ -690,7 +690,15 @@ export class ProductsService {
                 sku: true,
                 price_override: true,
                 cost_price: true,
+                profit_margin: true,
+                is_on_sale: true,
+                sale_price: true,
                 stock_quantity: true,
+                track_inventory_override: true,
+                service_duration_minutes: true,
+                service_pricing_type: true,
+                buffer_minutes: true,
+                preparation_time_minutes: true,
                 attributes: true,
                 name: true,
                 stock_levels: {
@@ -750,8 +758,18 @@ export class ProductsService {
                 cost_price: variant.cost_price
                   ? Number(variant.cost_price)
                   : null,
+                profit_margin: variant.profit_margin
+                  ? Number(variant.profit_margin)
+                  : null,
+                is_on_sale: variant.is_on_sale,
+                sale_price: variant.sale_price ? Number(variant.sale_price) : null,
                 stock: variantStock,
                 stock_quantity: variantStock,
+                track_inventory_override: variant.track_inventory_override,
+                service_duration_minutes: variant.service_duration_minutes,
+                service_pricing_type: variant.service_pricing_type,
+                buffer_minutes: variant.buffer_minutes,
+                preparation_time_minutes: variant.preparation_time_minutes,
                 image_url: variantImageUrl,
                 attributes: this.parseVariantAttributes(variant.attributes),
               };
@@ -857,7 +875,17 @@ export class ProductsService {
               cost_price: variant.cost_price
                 ? Number(variant.cost_price)
                 : null,
+              profit_margin: variant.profit_margin
+                ? Number(variant.profit_margin)
+                : null,
+              is_on_sale: variant.is_on_sale,
+              sale_price: variant.sale_price ? Number(variant.sale_price) : null,
               stock_quantity: this.sumVariantStock(variant),
+              track_inventory_override: variant.track_inventory_override,
+              service_duration_minutes: variant.service_duration_minutes,
+              service_pricing_type: variant.service_pricing_type,
+              buffer_minutes: variant.buffer_minutes,
+              preparation_time_minutes: variant.preparation_time_minutes,
               attributes: this.parseVariantAttributes(variant.attributes),
             })) || []
           : undefined;

@@ -5825,7 +5825,6 @@ model subscription_plans {
   base_price              Decimal                         @db.Decimal(12, 2)
   currency                String                          @default("COP") @db.VarChar(3)
   setup_fee               Decimal?                        @db.Decimal(12, 2)
-  trial_days              Int                             @default(0)
   grace_period_soft_days  Int                             @default(5)
   grace_period_hard_days  Int                             @default(10)
   suspension_day          Int                             @default(14)

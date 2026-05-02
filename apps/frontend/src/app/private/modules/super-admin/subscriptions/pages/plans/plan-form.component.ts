@@ -43,8 +43,7 @@ interface PlanFormControls {
   // Money
   setup_fee: FormControl<number | null>;
   is_free: FormControl<boolean>;
-  // Trial + dunning
-  trial_days: FormControl<number>;
+  // Grace + dunning
   grace_period_soft_days: FormControl<number>;
   grace_period_hard_days: FormControl<number>;
   suspension_day: FormControl<number>;
@@ -305,27 +304,8 @@ interface PlanFormControls {
 
         @if (activeTab() === 'grace') {
           <div class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-6">
-            <!-- Trial -->
-            <div class="space-y-4">
-              <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
-                Trial
-              </h2>
-              <p class="text-sm text-text-secondary">
-                El trial define cuantos dias obtiene la tienda antes del primer cobro. En Vendix,
-                el plan por defecto se usa para la primera tienda de una organizacion cuando aplica
-                prueba inicial.
-              </p>
-              <app-input
-                label="Días de trial"
-                type="number"
-                [min]="0"
-                formControlName="trial_days"
-                [control]="form.get('trial_days')"
-              ></app-input>
-            </div>
-
             <!-- Período de gracia -->
-            <div class="space-y-4 pt-4 border-t border-border">
+            <div class="space-y-4">
               <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
                 Período de gracia
               </h2>
@@ -404,7 +384,7 @@ export class PlanFormComponent {
     { id: 'overview', label: 'Resumen', icon: 'file-text' },
     { id: 'ai-matrix', label: 'Matriz IA', icon: 'bot' },
     { id: 'pricing', label: 'Precios', icon: 'credit-card' },
-    { id: 'grace', label: 'Trial & Gracia', icon: 'clock' },
+    { id: 'grace', label: 'Gracia y cobranza', icon: 'clock' },
   ];
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
@@ -448,8 +428,7 @@ export class PlanFormComponent {
     // Money
     setup_fee: this.fb.control<number | null>(null, [Validators.min(0)]),
     is_free: this.fb.nonNullable.control(false),
-    // Trial + dunning
-    trial_days: this.fb.nonNullable.control(0, [Validators.min(0)]),
+    // Grace + dunning
     grace_period_soft_days: this.fb.nonNullable.control(3, [Validators.min(0)]),
     grace_period_hard_days: this.fb.nonNullable.control(7, [Validators.min(0)]),
     suspension_day: this.fb.nonNullable.control(14, [Validators.min(0)]),
@@ -688,7 +667,6 @@ export class PlanFormComponent {
             state: plan.state,
             setup_fee: plan.setup_fee,
             is_free: plan.is_free,
-            trial_days: plan.trial_days ?? 0,
             grace_period_soft_days: plan.grace_period_soft_days ?? 0,
             grace_period_hard_days: plan.grace_period_hard_days ?? 0,
             suspension_day: plan.suspension_day ?? 0,

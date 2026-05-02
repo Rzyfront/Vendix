@@ -81,6 +81,11 @@ class CheckoutBookingDto {
   @Min(1)
   product_id: number;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
+
   @IsDateString()
   date: string;
 

@@ -49,7 +49,6 @@ export class PlansService {
         currency: dto.currency || 'COP',
         setup_fee: dto.is_free ? null : dto.setup_fee || null,
         is_free: dto.is_free ?? false,
-        trial_days: dto.trial_days ?? 0,
         grace_period_soft_days: dto.grace_period_soft_days ?? 5,
         grace_period_hard_days: dto.grace_period_hard_days ?? 10,
         suspension_day: dto.suspension_day ?? 14,
@@ -185,7 +184,6 @@ export class PlansService {
             ? { setup_fee: dto.setup_fee }
             : {}),
         ...(dto.is_free !== undefined && { is_free: dto.is_free }),
-        ...(dto.trial_days !== undefined && { trial_days: dto.trial_days }),
         ...(dto.grace_period_soft_days !== undefined && {
           grace_period_soft_days: dto.grace_period_soft_days,
         }),

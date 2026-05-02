@@ -86,11 +86,6 @@ const COUPON_REASON_COPY: Record<string, string> = {
             </div>
             <h2 class="text-2xl font-extrabold text-text-primary">{{ fp.plan.name }}</h2>
             <p class="text-3xl font-extrabold text-primary">Gratis</p>
-            @if (fp.plan.trial_days > 0) {
-              <span class="inline-block bg-amber-100 text-amber-800 text-xs font-semibold uppercase tracking-wide px-3 py-1 rounded-full">
-                Incluye {{ fp.plan.trial_days }} días de prueba
-              </span>
-            }
             <p class="text-sm text-text-secondary max-w-md mx-auto">
               Este plan no genera ningún cargo. Tu próxima facturación será gratuita.
             </p>

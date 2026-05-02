@@ -183,7 +183,7 @@ import {
                 <!-- Plan avatar -->
                 <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center shrink-0">
                   <app-icon
-                    [name]="isTerminal() || isSuspendedOrBlocked() ? 'alert-octagon' : (isGrace() ? 'alert-triangle' : (isTrial() ? 'hourglass' : 'sparkles'))"
+                    [name]="isTerminal() || isSuspendedOrBlocked() ? 'alert-octagon' : (currentPlanUnavailable() || isGrace() ? 'alert-triangle' : (isTrial() ? 'hourglass' : 'sparkles'))"
                     [size]="28"
                     class="text-white"
                   ></app-icon>
@@ -200,7 +200,7 @@ import {
                   class="inline-flex items-center gap-1.5 bg-white/20 backdrop-blur border border-white/30 px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wide shrink-0"
                 >
                   <span class="w-1.5 h-1.5 rounded-full bg-white animate-pulse"></span>
-                  {{ getStatusLabel() }}
+                  {{ currentPlanUnavailable() ? 'Plan no disponible' : getStatusLabel() }}
                 </span>
               </div>
 
@@ -211,6 +211,30 @@ import {
                 </span>
                 <span class="text-base text-white/80 font-medium">/{{ cycleSuffix() }}</span>
               </div>
+
+              <!-- Archived / disabled plan notice. Existing subscriptions can
+                    keep pointing to a plan that is no longer sellable; surface
+                    that legacy state so the store owner changes plan instead of
+                    seeing a healthy green card. -->
+              @if (currentPlanUnavailable()) {
+                <div class="flex flex-col sm:flex-row sm:items-start gap-3 bg-red-400/25 backdrop-blur border border-red-200/40 rounded-lg px-3 py-2">
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon name="alert-triangle" [size]="16" class="text-red-100 mt-0.5 shrink-0"></app-icon>
+                    <span class="text-xs text-red-50 leading-relaxed">
+                      <span class="font-bold">Este plan ya no está disponible.</span>
+                      No podrá renovarse como una suscripción nueva. Cambia a un plan vigente para evitar interrupciones cuando termine el ciclo.
+                    </span>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="goToPlans()"
+                  >
+                    <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                    Cambiar plan
+                  </app-button>
+                </div>
+              }
 
               <!-- Scheduled cancellation notice — shown when the user
                     triggered "cancel at end of cycle" but the period has not
@@ -419,7 +443,7 @@ import {
                         ></app-icon>
                       </div>
                       <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
-                        Consumo del Ciclo
+                      {{ cycleIsOverdue() ? 'Ciclo vencido' : 'Consumo del Ciclo' }}
                       </span>
                     </div>
                   </div>
@@ -436,7 +460,9 @@ import {
                     >
                       {{ cycleDaysConsumed() }}
                     </p>
-                    <p class="text-xs text-text-secondary">de {{ cycleTotalDays() }} días</p>
+                    <p class="text-xs text-text-secondary">
+                      {{ cycleIsOverdue() ? 'renovación pendiente' : 'de ' + cycleTotalDays() + ' días' }}
+                    </p>
                   </div>
                   <div
                     class="w-full rounded-full h-1.5 overflow-hidden"
@@ -473,7 +499,7 @@ import {
                       <app-icon name="calendar" [size]="14" class="text-blue-600"></app-icon>
                     </div>
                     <span class="text-[11px] font-bold text-text-secondary uppercase tracking-wider">
-                      Próximo cobro
+                      {{ cycleIsOverdue() ? 'Cobro pendiente' : 'Próximo cobro' }}
                     </span>
                   </div>
                   <div>
@@ -481,7 +507,7 @@ import {
                       {{ next | date:'mediumDate' }}
                     </p>
                     <p class="text-xs text-text-secondary mt-0.5">
-                      {{ daysToNextBilling() }} días restantes
+                      {{ nextBillingHelperText() }}
                     </p>
                   </div>
                   <div class="text-xs text-text-secondary">
@@ -800,6 +826,14 @@ export class MySubscriptionComponent implements OnInit {
     'linear-gradient(135deg, #f87171 0%, #b91c1c 60%, #7f1d1d 100%)';
   readonly graceGradient =
     'linear-gradient(135deg, #fb923c 0%, #ea580c 60%, #9a3412 100%)';
+  readonly unavailableGradient =
+    'linear-gradient(135deg, #f97316 0%, #dc2626 62%, #7f1d1d 100%)';
+
+  readonly currentPlanUnavailable = computed(() => {
+    const sub: any = this.current();
+    const plan = sub?.plan ?? sub?.paid_plan;
+    return !!plan && (plan.archived_at != null || plan.state !== 'active');
+  });
 
   readonly isGrace = computed(() => {
     const s = this.status();
@@ -848,6 +882,7 @@ export class MySubscriptionComponent implements OnInit {
   readonly heroGradient = computed(() => {
     if (this.isTerminal()) return this.cancelledGradient;
     if (this.isSuspendedOrBlocked()) return this.cancelledGradient;
+    if (this.currentPlanUnavailable()) return this.unavailableGradient;
     if (this.isGrace()) return this.graceGradient;
     if (this.isTrial()) return this.trialGradient;
     return this.activeGradient;
@@ -898,6 +933,31 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly daysToNextBilling = computed(() => {
     return Math.max(0, this.cycleTotalDays() - this.cycleDaysConsumed());
+  });
+
+  readonly cycleIsOverdue = computed(() => {
+    const end = this.current()?.current_period_end;
+    return !!end && new Date(end).getTime() <= Date.now();
+  });
+
+  readonly cycleOverdueLabel = computed(() => {
+    const end = this.current()?.current_period_end;
+    if (!end) return '0 h';
+    const diffMs = Math.max(0, Date.now() - new Date(end).getTime());
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    if (hours < 1) return 'menos de 1 h';
+    if (hours < 24) return `${hours} h`;
+    const days = Math.floor(hours / 24);
+    const extraHours = hours % 24;
+    const dayLabel = `${days} día${days === 1 ? '' : 's'}`;
+    return extraHours > 0 ? `${dayLabel} ${extraHours} h` : dayLabel;
+  });
+
+  readonly nextBillingHelperText = computed(() => {
+    if (this.cycleIsOverdue()) {
+      return `Vencido hace ${this.cycleOverdueLabel()}`;
+    }
+    return `${this.daysToNextBilling()} días restantes`;
   });
 
   readonly trialProgress = computed(() => {
@@ -1014,12 +1074,14 @@ export class MySubscriptionComponent implements OnInit {
     if (this.loading()) return 'Cargando información...';
     if (!this.current() || this.isNoPlan())
       return 'Selecciona un plan para activar esta tienda';
+    if (this.currentPlanUnavailable()) return 'Tu plan actual ya no está disponible';
     if (this.isTrial()) return `${this.daysRemaining()} días de prueba restantes`;
     return 'Plan activo y uso de funciones IA';
   });
 
   readonly headerIcon = computed(() => {
     if (this.isNoPlan()) return 'sparkles';
+    if (this.currentPlanUnavailable()) return 'alert-triangle';
     if (this.isTrial()) return 'hourglass';
     if (this.isActive()) return 'crown';
     return 'sparkles';
@@ -1032,6 +1094,7 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly needsAttention = computed(() => {
     const s = this.status();
+    if (this.currentPlanUnavailable()) return true;
     return (
       this.isTrial() ||
       s === 'past_due' ||
@@ -1047,6 +1110,7 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly badgeColor = computed<StickyHeaderBadgeColor>(() => {
     const s = this.status();
+    if (this.currentPlanUnavailable()) return 'red';
     if (s === 'active') return 'green';
     if (s === 'trial' || s === 'trialing') return 'yellow';
     if (

@@ -1845,6 +1845,20 @@ export class ProductCreatePageComponent {
           return;
         }
       }
+
+      const invalidSaleVariant = this.generatedVariants.find((v) => {
+        if (!v.is_on_sale) return false;
+        const salePrice = Number(v.sale_price || 0);
+        const regularPrice = Number(v.price || 0);
+        return salePrice <= 0 || salePrice >= regularPrice;
+      });
+      if (invalidSaleVariant) {
+        this.toastService.error(
+          `La oferta de la variante ${invalidSaleVariant.sku} debe ser mayor a 0 y menor que su precio regular.`,
+          'Precio de oferta inválido',
+        );
+        return;
+      }
     }
 
     this.isSubmitting.set(true);

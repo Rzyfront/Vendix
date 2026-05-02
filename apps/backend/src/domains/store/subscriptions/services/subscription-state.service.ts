@@ -470,6 +470,8 @@ export class SubscriptionStateService {
       include: {
         plan: {
           select: {
+            state: true,
+            archived_at: true,
             grace_period_soft_days: true,
             grace_period_hard_days: true,
             suspension_day: true,
@@ -582,6 +584,9 @@ export class SubscriptionStateService {
       const hardDays = plan?.grace_period_hard_days ?? 10;
       const suspensionDay = plan?.suspension_day ?? 14;
       const cancellationDay = plan?.cancellation_day ?? 45;
+      const planUnavailable =
+        !!plan &&
+        ((plan.state != null && plan.state !== 'active') || !!plan.archived_at);
 
       const softDeadline = new Date(
         periodEnd.getTime() + softDays * 24 * 60 * 60 * 1000,
@@ -608,9 +613,11 @@ export class SubscriptionStateService {
       } else if (now >= hardDeadline) {
         targetState = 'grace_hard';
         reason = 'Past hard grace period';
-      } else if (now >= softDeadline) {
+      } else if (now >= softDeadline || planUnavailable) {
         targetState = 'grace_soft';
-        reason = 'Past soft grace period';
+        reason = planUnavailable
+          ? 'Current plan unavailable after period end'
+          : 'Past soft grace period';
       }
 
       if (targetState && targetState !== currentState) {
@@ -625,6 +632,9 @@ export class SubscriptionStateService {
             hard_deadline: hardDeadline.toISOString(),
             suspend_deadline: suspendDeadline.toISOString(),
             cancel_deadline: cancelDeadline.toISOString(),
+            plan_unavailable: planUnavailable,
+            plan_state: plan?.state ?? null,
+            plan_archived_at: plan?.archived_at?.toISOString() ?? null,
           },
         });
       }

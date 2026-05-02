@@ -99,7 +99,6 @@ export class SubscriptionRedemptionService {
         description: true,
         plan_type: true,
         base_price: true,
-        trial_days: true,
         billing_cycle: true,
         promo_rules: true,
       },

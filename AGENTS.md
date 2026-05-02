@@ -28,6 +28,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-app-architecture` |
 | -- | `vendix-auto-entries` |
 | -- | `vendix-backend-auth` |
+| -- | `vendix-business-analysis` |
 | -- | `vendix-core` |
 | -- | `vendix-currency-formatting` |
 | -- | `vendix-customer-auth` |
@@ -76,6 +77,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
+| Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
@@ -106,6 +108,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating lazy-loaded frontend routes | `vendix-frontend-routing` |
 | Creating migrations, editing migration SQL, deploying migrations to production, recovering from P3009, failed migration recovery, ALTER TYPE ADD VALUE, checksum mismatch, modified migration after apply | `vendix-prisma-migrations` |
 | Creating new AI tools | `vendix-ai-agent-tools` |
+| Creating or editing product variants | `vendix-product-variants` |
+| Creating or editing service variants | `vendix-product-variants` |
 | Creating or modifying guided tours in frontend | `vendix-tour` |
 | Creating or modifying modals in frontend | `vendix-frontend-modal` |
 | Creating or refactoring standard admin modules (stats + table) | `vendix-frontend-standard-module` |
@@ -121,6 +125,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
+| Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
@@ -134,6 +139,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating frontend web code | `vendix-frontend` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
+| Fixing bugs where variants are hidden or blocked because stock_quantity is zero | `vendix-product-variants` |
 | Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
 | Fixing date display off-by-one bugs | `vendix-date-timezone` |
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
@@ -190,9 +196,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Updating notification subscriptions or notification preferences | `vendix-notifications-system` |
 | Updating skill guidance or documenting repeatable AI patterns | `skill-creator` |
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
+| User explicitly requests business analysis | `vendix-business-analysis` |
 | User requests agent teams, subordinate agents, parallel agents, or background agents | `agent-teams` |
 | Using input(), output(), model(), signal(), computed(), effect(), or toSignal() | `vendix-zoneless-signals` |
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
+| Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verifying Build | `buildcheck-dev` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
@@ -241,6 +249,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with journal entries, mapping keys, PUC accounts, payroll provisions, parafiscales, or debit/credit logic | `vendix-accounting-rules` |
 | Working with notifications SSE or Web Push | `vendix-notifications-system` |
 | Working with permissions-roles seed | `vendix-permissions` |
+| Working with products that have variants but do not track stock | `vendix-product-variants` |
+| Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |

@@ -114,7 +114,6 @@ export interface FreePlanInfo {
     name: string;
     effective_price: string; // Decimal serialized — always "0" or "0.00"
     billing_cycle: string;
-    trial_days: number;
   };
 }
 

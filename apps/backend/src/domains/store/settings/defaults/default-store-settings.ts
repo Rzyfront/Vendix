@@ -73,8 +73,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       new_order_alerts_phone: null,
     },
     pos: {
-      allow_anonymous_sales: false,
-      anonymous_sales_as_default: false,
+      allow_anonymous_sales: true,
+      anonymous_sales_as_default: true,
       business_hours: getDefaultBusinessHours(),
       enable_schedule_validation: false,
       offline_mode_enabled: false,

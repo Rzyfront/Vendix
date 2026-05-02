@@ -118,11 +118,6 @@ export class CreateVariantWithStockDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -730,11 +725,6 @@ export class CreateProductVariantDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -757,11 +747,6 @@ export class CreateProductVariantDto {
   @IsBoolean()
   @Type(() => Boolean)
   track_inventory_override?: boolean | null;
-  @IsOptional()
-  @IsString()
-  @IsIn(['first', 'distribute', 'reset'])
-  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
-
   @ApiPropertyOptional({
     description: 'Override of service duration in minutes',
   })
@@ -837,11 +822,6 @@ export class UpdateProductVariantDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -860,11 +840,6 @@ export class UpdateProductVariantDto {
   @IsBoolean()
   @Type(() => Boolean)
   track_inventory_override?: boolean | null;
-  @IsOptional()
-  @IsString()
-  @IsIn(['first', 'distribute', 'reset'])
-  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
-
   @ApiPropertyOptional({
     description: 'Override of service duration in minutes',
   })

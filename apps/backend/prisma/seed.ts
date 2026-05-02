@@ -15,6 +15,7 @@ import { seedTestOrders } from './seeds/test-orders.seed';
 import { seedHelpArticles } from './seeds/help-articles.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
+import { seedWithholdingTax } from './seeds/withholding-tax.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
@@ -122,6 +123,11 @@ const seedModules = [
     name: 'ICA Municipal Rates',
     fn: seedIcaMunicipalRates,
     description: 'ICA tax rates for Colombian municipalities',
+  },
+  {
+    name: 'Withholding Tax',
+    fn: seedWithholdingTax,
+    description: 'UVT values and withholding concepts for Colombian tax compliance',
   },
   {
     name: 'AI Engine Applications',
@@ -248,6 +254,7 @@ export * from './seeds/test-orders.seed';
 export * from './seeds/help-articles.seed';
 export * from './seeds/default-payroll-rules.seed';
 export * from './seeds/ica-municipal-rates.seed';
+export * from './seeds/withholding-tax.seed';
 export * from './seeds/ai-engine-apps.seed';
 export * from './seeds/payroll-system-defaults.seed';
 export * from './seeds/subscription-plans.seed';

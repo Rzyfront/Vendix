@@ -20,7 +20,6 @@ export interface PricingCardPlan {
   currency: string;
   billing_cycle: 'monthly' | 'yearly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime' | string;
   features: PricingCardFeature[];
-  trial_days?: number;
   is_current?: boolean;
   is_popular?: boolean;
 }
@@ -100,17 +99,6 @@ export interface PricingCardSelectEvent {
                 [class.text-white]="isPopular()"
               >
                 Plan actual
-              </span>
-            }
-            @if ((plan().trial_days ?? 0) > 0) {
-              <span
-                class="text-[9px] md:text-[10px] uppercase tracking-wide font-bold px-1.5 md:px-2 py-0.5 rounded-full shrink-0"
-                [class.bg-amber-100]="!isPopular()"
-                [class.text-amber-800]="!isPopular()"
-                [class.bg-white\\/20]="isPopular()"
-                [class.text-white]="isPopular()"
-              >
-                {{ plan().trial_days }} días gratis
               </span>
             }
           </div>

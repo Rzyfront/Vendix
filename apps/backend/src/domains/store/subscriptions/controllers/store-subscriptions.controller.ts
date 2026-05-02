@@ -381,19 +381,14 @@ export class StoreSubscriptionsController {
       partnerMarginAmount = pricing.margin_amount;
     }
 
-    const trialDays = plan.trial_days ?? 0;
-    const initialState =
-      trialDays > 0 ? ('trial' as const) : ('active' as const);
-    const trialEndsAt =
-      trialDays > 0
-        ? new Date(now.getTime() + trialDays * 24 * 60 * 60 * 1000)
-        : null;
+    const initialState = 'active' as const;
 
     const subscription = await this.prisma.$transaction(async (tx) => {
       const created = await tx.store_subscriptions.create({
         data: {
           store_id: storeId,
           plan_id: plan.id,
+          paid_plan_id: plan.id,
           partner_override_id: partnerOverrideId,
           state: initialState,
           effective_price: effectivePrice,
@@ -401,10 +396,10 @@ export class StoreSubscriptionsController {
           partner_margin_amount: partnerMarginAmount,
           currency: 'COP',
           resolved_features: {},
-          trial_ends_at: trialEndsAt,
+          trial_ends_at: null,
           current_period_start: now,
           current_period_end: periodEnd,
-          next_billing_at: trialDays > 0 ? trialEndsAt : periodEnd,
+          next_billing_at: periodEnd,
         },
         include: { plan: true },
       });

@@ -21,8 +21,8 @@ export interface SeedSubscriptionPlansResult {
  * (subscription_plans_unique_default_active) which guarantees only ONE
  * active, non-archived default at any time.
  *
- * No dependencies on other seeds. base_price=0 so the free-plan guard
- * in subscription-billing.service skips invoicing entirely.
+  * No dependencies on other seeds. Trial duration comes from
+  * platform_settings.default_trial_days; this plan only owns access/features.
  */
 export async function seedSubscriptionPlans(
   prisma?: PrismaClient,
@@ -77,13 +77,12 @@ export async function seedSubscriptionPlans(
     code: TRIAL_DEFAULT_CODE,
     name: 'Trial Inicial',
     description:
-      'Plan trial por defecto. Acceso completo a todas las funciones de IA durante 14 dias. Editable desde el panel super-admin.',
+      'Plan trial por defecto. Acceso completo a todas las funciones de IA durante el periodo de prueba global. Editable desde el panel super-admin.',
     plan_type: 'base' as const,
     state: 'active' as const,
     billing_cycle: 'monthly' as const,
     base_price: 0,
     currency: 'COP',
-    trial_days: 14,
     grace_period_soft_days: 3,
     grace_period_hard_days: 7,
     suspension_day: 14,
@@ -134,7 +133,6 @@ export async function seedSubscriptionPlans(
           billing_cycle: planData.billing_cycle,
           base_price: planData.base_price,
           currency: planData.currency,
-          trial_days: planData.trial_days,
           grace_period_soft_days: planData.grace_period_soft_days,
           grace_period_hard_days: planData.grace_period_hard_days,
           suspension_day: planData.suspension_day,

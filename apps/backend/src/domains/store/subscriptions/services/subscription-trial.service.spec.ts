@@ -9,10 +9,10 @@ import { VendixHttpException } from '../../../../common/errors';
  *     store_subscriptions(state=trial), writes subscription_events(trial_started),
  *     INSERTs organization_trial_consumptions(organization_id), and dual-writes
  *     organizations.has_consumed_trial=true for back-compat.
- *   - Org with has_consumed_trial=true -> no-op (returns null, no DB writes
- *     beyond the FOR UPDATE select).
+ *   - Org with has_consumed_trial=true -> creates no_plan subscription and
+ *     returns null.
  *   - No default plan -> returns null and logs error.
- *   - Plan trial_days override wins over platform_settings.default_trial_days.
+ *   - Trial length always comes from platform_settings.default_trial_days.
  *   - Concurrent trial consumption -> P2002 from
  *     organization_trial_consumptions UNIQUE(organization_id) is surfaced as
  *     VendixHttpException(SUBSCRIPTION_TRIAL_001) with Spanish message.
@@ -27,7 +27,6 @@ describe('SubscriptionTrialService', () => {
     id: 1,
     code: 'trial-default',
     currency: 'USD',
-    trial_days: 0,
     ai_feature_flags: { text_generation: { enabled: true } },
   };
 
@@ -170,14 +169,21 @@ describe('SubscriptionTrialService', () => {
     expect(txMock.organizations.update).not.toHaveBeenCalled();
   });
 
-  it('skips silently when org has_consumed_trial=true (returns null)', async () => {
+  it('creates no_plan subscription when org has_consumed_trial=true (returns null)', async () => {
     txMock.$queryRaw.mockResolvedValue([{ id: 5, has_consumed_trial: true }]);
 
     const result = await service.createTrialForStore(10, 5);
 
     expect(result).toBeNull();
     expect(txMock.subscription_plans.findFirst).not.toHaveBeenCalled();
-    expect(txMock.store_subscriptions.create).not.toHaveBeenCalled();
+    expect(txMock.store_subscriptions.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        store_id: 10,
+        plan_id: null,
+        state: 'no_plan',
+        auto_renew: false,
+      }),
+    });
     expect(txMock.subscription_events.create).not.toHaveBeenCalled();
     expect(
       txMock.organization_trial_consumptions.create,
@@ -213,35 +219,9 @@ describe('SubscriptionTrialService', () => {
     expect(txMock.organizations.update).not.toHaveBeenCalled();
   });
 
-  it('uses plan.trial_days when > 0 (overrides platform default)', async () => {
+  it('uses platform_settings.default_trial_days for trial length', async () => {
     txMock.$queryRaw.mockResolvedValue([{ id: 5, has_consumed_trial: false }]);
-    txMock.subscription_plans.findFirst.mockResolvedValue({
-      ...trialPlan,
-      trial_days: 30,
-    });
-    txMock.platform_settings.findUnique.mockResolvedValue({
-      key: 'core',
-      default_trial_days: 14,
-    });
-    txMock.store_subscriptions.create.mockResolvedValue({ id: 100 });
-    txMock.organization_trial_consumptions.create.mockResolvedValue({ id: 1 });
-
-    const before = Date.now();
-    await service.createTrialForStore(10, 5);
-
-    const createArg = txMock.store_subscriptions.create.mock.calls[0][0];
-    const trialEndsAt: Date = createArg.data.trial_ends_at;
-    const diffDays = (trialEndsAt.getTime() - before) / (24 * 60 * 60 * 1000);
-    expect(diffDays).toBeGreaterThan(29);
-    expect(diffDays).toBeLessThan(31);
-  });
-
-  it('falls back to platform_settings.default_trial_days when plan.trial_days=0', async () => {
-    txMock.$queryRaw.mockResolvedValue([{ id: 5, has_consumed_trial: false }]);
-    txMock.subscription_plans.findFirst.mockResolvedValue({
-      ...trialPlan,
-      trial_days: 0,
-    });
+    txMock.subscription_plans.findFirst.mockResolvedValue(trialPlan);
     txMock.platform_settings.findUnique.mockResolvedValue({
       key: 'core',
       default_trial_days: 21,
@@ -259,12 +239,9 @@ describe('SubscriptionTrialService', () => {
     expect(diffDays).toBeLessThan(22);
   });
 
-  it('falls back to 14 days when both plan.trial_days=0 and platform_settings missing', async () => {
+  it('falls back to 14 days when platform_settings missing', async () => {
     txMock.$queryRaw.mockResolvedValue([{ id: 5, has_consumed_trial: false }]);
-    txMock.subscription_plans.findFirst.mockResolvedValue({
-      ...trialPlan,
-      trial_days: 0,
-    });
+    txMock.subscription_plans.findFirst.mockResolvedValue(trialPlan);
     txMock.platform_settings.findUnique.mockResolvedValue(null);
     txMock.store_subscriptions.create.mockResolvedValue({ id: 100 });
     txMock.organization_trial_consumptions.create.mockResolvedValue({ id: 1 });

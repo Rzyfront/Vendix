@@ -58,11 +58,6 @@ export class CreatePlanDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  trial_days?: number;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
   grace_period_soft_days?: number;
 
   @IsOptional()

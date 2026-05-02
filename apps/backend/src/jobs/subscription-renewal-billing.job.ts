@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionBillingService } from '../domains/store/subscriptions/services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
+import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
 import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -20,6 +21,7 @@ export const BACKOFF_DELAYS = [
   72 * 60 * 60 * 1000, // 72h
 ];
 export const MAX_ATTEMPTS = 4;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class SubscriptionRenewalBillingJob {
@@ -30,6 +32,7 @@ export class SubscriptionRenewalBillingJob {
     private readonly prisma: GlobalPrismaService,
     private readonly billingService: SubscriptionBillingService,
     private readonly paymentService: SubscriptionPaymentService,
+    private readonly stateService: SubscriptionStateService,
     private readonly eventEmitter: EventEmitter2,
     private readonly config: ConfigService,
     private readonly gateConfig: SubscriptionGateConfig,
@@ -58,7 +61,23 @@ export class SubscriptionRenewalBillingJob {
           // RNC-39: defensive — never bill subscriptions without a plan.
           plan_id: { not: null },
         },
-        select: { id: true, store_id: true, scheduled_cancel_at: true },
+        select: {
+          id: true,
+          store_id: true,
+          state: true,
+          plan_id: true,
+          current_period_end: true,
+          next_billing_at: true,
+          scheduled_cancel_at: true,
+          plan: {
+            select: {
+              state: true,
+              archived_at: true,
+              grace_period_soft_days: true,
+              grace_period_hard_days: true,
+            },
+          },
+        },
         take: 20,
       });
 
@@ -131,6 +150,11 @@ export class SubscriptionRenewalBillingJob {
               triggeredByJob: 'subscription-renewal-billing',
             });
 
+            continue;
+          }
+
+          if (this.isPlanUnavailable(sub)) {
+            await this.handleUnavailablePlanAtRenewal(sub);
             continue;
           }
 
@@ -235,6 +259,67 @@ export class SubscriptionRenewalBillingJob {
         error?.message ?? 'Unknown charge error',
       );
     }
+  }
+
+  private isPlanUnavailable(sub: {
+    plan: { state: string; archived_at: Date | null } | null;
+  }): boolean {
+    return !sub.plan || sub.plan.state !== 'active' || !!sub.plan.archived_at;
+  }
+
+  private async handleUnavailablePlanAtRenewal(sub: {
+    id: number;
+    store_id: number;
+    state: string;
+    plan_id: number | null;
+    current_period_end: Date | null;
+    next_billing_at: Date | null;
+    plan: {
+      state: string;
+      archived_at: Date | null;
+      grace_period_soft_days: number;
+      grace_period_hard_days: number;
+    } | null;
+  }): Promise<void> {
+    const now = new Date();
+    const periodEnd = sub.current_period_end ?? sub.next_billing_at;
+
+    this.logger.warn(
+      JSON.stringify({
+        event: 'RENEWAL_SKIPPED_PLAN_UNAVAILABLE',
+        subscription_id: sub.id,
+        store_id: sub.store_id,
+        plan_id: sub.plan_id,
+        plan_state: sub.plan?.state ?? null,
+        archived_at: sub.plan?.archived_at?.toISOString() ?? null,
+        current_period_end: sub.current_period_end?.toISOString() ?? null,
+        next_billing_at: sub.next_billing_at?.toISOString() ?? null,
+      }),
+    );
+
+    if (!periodEnd || periodEnd.getTime() > now.getTime()) {
+      return;
+    }
+
+    if (sub.state !== 'active') {
+      return;
+    }
+
+    const softDays = sub.plan?.grace_period_soft_days ?? 5;
+    const hardDays = sub.plan?.grace_period_hard_days ?? 10;
+    await this.stateService.transition(sub.store_id, 'grace_soft', {
+      reason: 'current_plan_unavailable_at_renewal',
+      triggeredByJob: 'subscription-renewal-billing',
+      graceSoftUntil: new Date(periodEnd.getTime() + softDays * DAY_MS),
+      graceHardUntil: new Date(periodEnd.getTime() + hardDays * DAY_MS),
+      payload: {
+        plan_id: sub.plan_id,
+        plan_state: sub.plan?.state ?? null,
+        archived_at: sub.plan?.archived_at?.toISOString() ?? null,
+        current_period_end: sub.current_period_end?.toISOString() ?? null,
+        next_billing_at: sub.next_billing_at?.toISOString() ?? null,
+      },
+    });
   }
 
   private async handleChargeFailure(

@@ -38,11 +38,6 @@ export class CreatePromotionalDto {
   currency?: string;
 
   @IsOptional()
-  @IsNumber()
-  @Min(0)
-  trial_days?: number;
-
-  @IsOptional()
   @IsObject()
   feature_matrix?: Record<string, any>;
 

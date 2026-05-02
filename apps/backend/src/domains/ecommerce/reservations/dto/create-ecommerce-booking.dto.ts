@@ -10,6 +10,10 @@ export class CreateEcommerceBookingDto {
   @IsInt()
   product_id: number;
 
+  @IsOptional()
+  @IsInt()
+  product_variant_id?: number;
+
   @IsDateString()
   date: string;
 
