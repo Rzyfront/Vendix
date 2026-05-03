@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 export interface AutoEntryEventData {
   source_type: string;
   source_id: number;
   organization_id: number;
   store_id?: number;
+  accounting_entity_id?: number;
   entry_date: Date;
   description: string;
   lines: (AutoEntryLine | null)[];
@@ -38,6 +40,7 @@ export class AutoEntryService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly account_mapping_service: AccountMappingService,
+    private readonly operating_scope_service: OperatingScopeService,
   ) {}
 
   /**
@@ -76,11 +79,27 @@ export class AutoEntryService {
       source_id,
       organization_id,
       store_id,
+      accounting_entity_id,
       entry_date,
       description,
       lines,
       user_id,
     } = event_data;
+
+    const accounting_entity = accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findUnique({
+          where: { id: accounting_entity_id },
+        })
+      : await this.operating_scope_service.resolveAccountingEntity({
+          organization_id,
+          store_id,
+        });
+
+    if (!accounting_entity) {
+      throw new Error(
+        `Unable to resolve accounting entity for organization #${organization_id}`,
+      );
+    }
 
     // Filter out null lines (from unconfigured mappings)
     const valid_lines = lines.filter(Boolean) as AutoEntryLine[];
@@ -117,10 +136,15 @@ export class AutoEntryService {
     const fiscal_period = await this.prisma.fiscal_periods.findFirst({
       where: {
         organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
         status: 'open',
         start_date: { lte: entry_date },
         end_date: { gte: entry_date },
       },
+      orderBy: { accounting_entity_id: 'desc' },
     });
 
     if (!fiscal_period) {
@@ -138,11 +162,22 @@ export class AutoEntryService {
     const accounts = await this.prisma.chart_of_accounts.findMany({
       where: {
         organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
         code: { in: account_codes },
       },
+      orderBy: { accounting_entity_id: 'desc' },
     });
 
-    const account_map = new Map(accounts.map((a: any) => [a.code, a]));
+    const account_map = new Map<string, any>();
+    for (const account of accounts as any[]) {
+      const current = account_map.get(account.code);
+      if (!current || account.accounting_entity_id === accounting_entity.id) {
+        account_map.set(account.code, account);
+      }
+    }
 
     // Validate all account codes exist
     for (const code of account_codes) {
@@ -197,6 +232,7 @@ export class AutoEntryService {
     const latest = await this.prisma.accounting_entries.findFirst({
       where: {
         organization_id,
+        accounting_entity_id: accounting_entity.id,
         entry_number: { startsWith: prefix },
       },
       orderBy: { entry_number: 'desc' },
@@ -217,6 +253,7 @@ export class AutoEntryService {
         data: {
           organization_id,
           store_id: store_id || null,
+          accounting_entity_id: accounting_entity.id,
           entry_number,
           entry_type: entry_type as any,
           status: 'posted',
@@ -2416,6 +2453,7 @@ export class AutoEntryService {
     transfer_id: number;
     transfer_number: string;
     organization_id: number;
+    store_id?: number;
     from_location_id: number;
     to_location_id: number;
     total_cost: number;
@@ -2430,6 +2468,7 @@ export class AutoEntryService {
         `Inventario destino (transferencia ${data.transfer_number})`,
         data.total_cost,
         0,
+        data.store_id,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -2437,6 +2476,7 @@ export class AutoEntryService {
         `Inventario origen (transferencia ${data.transfer_number})`,
         0,
         data.total_cost,
+        data.store_id,
       ),
     ]);
 
@@ -2444,6 +2484,7 @@ export class AutoEntryService {
       source_type: 'stock_transfer',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
+      store_id: data.store_id,
       entry_date: new Date(),
       description: `Transferencia de inventario ${data.transfer_number}`,
       lines,

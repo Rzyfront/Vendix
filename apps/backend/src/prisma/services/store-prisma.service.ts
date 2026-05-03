@@ -119,6 +119,7 @@ export class StorePrismaService extends BasePrismaService {
       'payments', // Relational
       'product_images', // Relational
       'stock_transfers', // Org scoped
+      'stock_transfer_items', // Relational
       'sales_orders', // Org scoped
       'return_orders', // Org scoped
       'sales_order_items', // Relational
@@ -128,7 +129,10 @@ export class StorePrismaService extends BasePrismaService {
       'inventory_movements', // Relational
       'stock_reservations', // Relational
       'inventory_transactions', // Relational
+      'inventory_cost_layers', // Relational
+      'inventory_valuation_snapshots', // Store/org scoped
       'purchase_orders', // Relational
+      'supplier_products', // Relational
       'shipping_rates', // Relational
       'expense_categories', // Org scoped
       'product_tax_assignments', // Relational
@@ -147,6 +151,7 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
+      'accounting_account_mappings', // Org/store scoped
       'employees', // Org scoped (multi-store via employee_stores junction)
       'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
@@ -280,6 +285,10 @@ export class StorePrismaService extends BasePrismaService {
         ],
       },
       inventory_transactions: { products: { store_id: context.store_id } },
+      inventory_cost_layers: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      inventory_valuation_snapshots: { store_id: context.store_id },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
       product_tax_assignments: { products: { store_id: context.store_id } },
       invoice_items: { invoice: { store_id: context.store_id } },
@@ -287,6 +296,16 @@ export class StorePrismaService extends BasePrismaService {
       dian_audit_logs: { dian_configuration: { store_id: context.store_id } },
       accounting_entry_lines: {
         entry: { organization_id: context.organization_id },
+      },
+      accounting_account_mappings: {
+        organization_id: context.organization_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
+      },
+      supplier_products: {
+        suppliers: { organization_id: context.organization_id },
+      },
+      stock_transfer_items: {
+        stock_transfers: { organization_id: context.organization_id },
       },
       payroll_items: {
         payroll_run: { organization_id: context.organization_id },
@@ -387,6 +406,7 @@ export class StorePrismaService extends BasePrismaService {
       'withholding_calculations',
       'uvt_values',
       'accounts_payable',
+      'accounting_entities',
     ];
 
     if (this.store_scoped_models.includes(model)) {
@@ -497,6 +517,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.stock_transfers;
   }
 
+  get stock_transfer_items() {
+    return this.scoped_client.stock_transfer_items;
+  }
+
   get sales_orders() {
     return this.scoped_client.sales_orders;
   }
@@ -547,7 +571,11 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get inventory_cost_layers() {
-    return this.baseClient.inventory_cost_layers;
+    return this.scoped_client.inventory_cost_layers;
+  }
+
+  get inventory_valuation_snapshots() {
+    return this.scoped_client.inventory_valuation_snapshots;
   }
 
   // Global models (no scoping applied)
@@ -578,6 +606,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get stores() {
     return this.baseClient.stores;
+  }
+
+  get accounting_entities() {
+    return this.scoped_client.accounting_entities;
   }
 
   get suppliers() {
@@ -738,7 +770,7 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get accounting_account_mappings() {
-    return this.baseClient.accounting_account_mappings;
+    return this.scoped_client.accounting_account_mappings;
   }
 
   // Bank Reconciliation models

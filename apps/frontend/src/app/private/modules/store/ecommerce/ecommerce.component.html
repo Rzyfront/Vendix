@@ -435,7 +435,9 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <app-input
                         label="Título del Slide"
-                        [ngModel]="sliderImages()[activeImageIndex()].title || ''"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].title || ''
+                        "
                         [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onTitleInputChange($event)"
                         placeholder="Ej: Nueva Colección 2024"
@@ -443,7 +445,9 @@
                       ></app-input>
                       <app-input
                         label="Párrafo Descriptivo (Leyenda)"
-                        [ngModel]="sliderImages()[activeImageIndex()].caption || ''"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].caption || ''
+                        "
                         [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onCaptionInputChange($event)"
                         placeholder="Ej: Descubre nuestras ofertas exclusivas..."
@@ -600,6 +604,11 @@
               ></app-input>
               <!-- Toggles del Checkout -->
               <app-setting-toggle
+                [formControl]="requireRegistrationControl"
+                label="Requerir registro"
+                description="Obligar a crear cuenta"
+              ></app-setting-toggle>
+              <app-setting-toggle
                 [formControl]="whatsappCheckoutControl"
                 label="Whatsapp Checkout"
                 description="Permitir terminar compra en whatsapp"
@@ -633,11 +642,6 @@
                   </div>
                 </div>
               }
-              <app-setting-toggle
-                [formControl]="requireRegistrationControl"
-                label="Requerir registro"
-                description="Obligar a crear cuenta"
-              ></app-setting-toggle>
             </div>
           </div>
         </div>

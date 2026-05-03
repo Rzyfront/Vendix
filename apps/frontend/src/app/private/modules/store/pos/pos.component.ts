@@ -737,6 +737,7 @@ export class PosComponent {
   // Booking desde POS
   showReservationModal = signal(false);
   pendingBookingProduct = signal<any>(null);
+  pendingBookingVariant = signal<any>(null);
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -1263,8 +1264,13 @@ export class PosComponent {
     this.onClearCart();
   }
 
-  onBookingRequired(product: any): void {
-    this.pendingBookingProduct.set(product);
+  onBookingRequired(event: any): void {
+    const product = event?.product ?? event;
+    const variant = event?.variant ?? null;
+    this.pendingBookingProduct.set(
+      variant ? { ...product, selected_variant: variant } : product,
+    );
+    this.pendingBookingVariant.set(variant);
     this.showReservationModal.set(true);
   }
 
@@ -1302,6 +1308,10 @@ export class PosComponent {
             booking.product?.name ||
             this.pendingBookingProduct()?.name ||
             'Servicio',
+          product_variant_id:
+            booking.product_variant_id || this.pendingBookingVariant()?.id,
+          variant_name:
+            booking.product_variant?.name || this.pendingBookingVariant()?.name,
           customer_id: booking.customer_id || booking.customer?.id,
           date: booking.date,
           start_time: booking.start_time,
@@ -1314,7 +1324,11 @@ export class PosComponent {
 
     if (this.pendingBookingProduct()) {
       this.cartService
-        .addToCart({ product: this.pendingBookingProduct(), quantity: 1 })
+        .addToCart({
+          product: this.pendingBookingProduct(),
+          quantity: 1,
+          variant: this.pendingBookingVariant() ?? undefined,
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -1322,12 +1336,14 @@ export class PosComponent {
               'Reserva creada y servicio agregado al carrito',
             );
             this.pendingBookingProduct.set(null);
+            this.pendingBookingVariant.set(null);
           },
           error: () => {
             this.toastService.error(
               'Reserva creada, pero no se pudo agregar al carrito',
             );
             this.pendingBookingProduct.set(null);
+            this.pendingBookingVariant.set(null);
           },
         });
     }
@@ -1336,6 +1352,7 @@ export class PosComponent {
   onBookingModalClosed(): void {
     this.showReservationModal.set(false);
     this.pendingBookingProduct.set(null);
+    this.pendingBookingVariant.set(null);
   }
 
   onViewOrderDetail(orderId: string): void {

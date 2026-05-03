@@ -90,7 +90,7 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
-  track_inventory_override?: boolean;
+  track_inventory_override?: boolean | null;
 }
 
 export type { GeneratedVariant };
@@ -588,6 +588,7 @@ export class ProductCreatePageComponent {
         if (next !== this.requiresBookingSig()) {
           this.requiresBookingSig.set(next);
         }
+        this.normalizeVariantTrackingForParent();
       });
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
@@ -952,6 +953,7 @@ export class ProductCreatePageComponent {
       );
 
       this.removedVariantKeys.clear();
+      this.normalizeVariantTrackingForParent();
     }
   }
 
@@ -1233,8 +1235,8 @@ export class ProductCreatePageComponent {
         continue;
       }
 
-      // New variant — defaults to track_inventory_override=true
-      // (la variante maneja su propio stock, no hereda del producto base).
+      // New stock-tracked product variants manage their own stock. Variants for
+      // products sold on demand inherit the parent availability instead.
       newVariants.push({
         name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : '',
@@ -1245,11 +1247,36 @@ export class ProductCreatePageComponent {
         sale_price: 0,
         stock: 0,
         attributes,
-        track_inventory_override: true,
+        track_inventory_override: this.getDefaultVariantTrackInventoryOverride(),
       });
     }
 
     this.generatedVariants = newVariants;
+  }
+
+  private getDefaultVariantTrackInventoryOverride(): boolean | undefined {
+    return this.productForm.get('track_inventory')?.value === true
+      ? true
+      : undefined;
+  }
+
+  private normalizeVariantTrackingForParent(): void {
+    if (this.productForm.get('track_inventory')?.value === true) return;
+
+    let changed = false;
+    this.generatedVariants = this.generatedVariants.map((variant) => {
+      if (variant.track_inventory_override !== true) return variant;
+
+      changed = true;
+      return {
+        ...variant,
+        track_inventory_override: undefined,
+      };
+    });
+
+    if (changed) {
+      this.formUpdateTrigger.update((value) => value + 1);
+    }
   }
 
   onAttributeNameBlur(attrIndex: number): void {

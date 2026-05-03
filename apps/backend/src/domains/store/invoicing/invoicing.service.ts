@@ -229,6 +229,10 @@ export class InvoicingService {
             document_number: true,
           },
         },
+        invoice_data_requests: {
+          orderBy: { created_at: 'desc' },
+          take: 1,
+        },
       },
     });
 
@@ -239,13 +243,14 @@ export class InvoicingService {
     const { invoice_number, resolution_id } =
       await this.invoice_number_generator.generateNextNumber();
 
-    const items = (order.order_items || []).map((item: any) => {
+    const productItems = (order.order_items || []).map((item: any) => {
       const description = item.product_name || item.products?.name || 'Product';
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount_amount || 0);
-      const tax = Number(item.tax_amount_item || 0);
-      const total_amount = quantity * unit_price - discount + tax;
+      const tax = Number(item.tax_amount_item || 0) * quantity;
+      const total_amount =
+        Number(item.total_price || quantity * unit_price - discount) + tax;
       return {
         product_id: item.product_id,
         product_variant_id: item.product_variant_id,
@@ -257,6 +262,23 @@ export class InvoicingService {
         total_amount: new Prisma.Decimal(total_amount),
       };
     });
+    const shippingCost = Number(order.shipping_cost || 0);
+    const items =
+      shippingCost > 0
+        ? [
+            ...productItems,
+            {
+              product_id: null,
+              product_variant_id: null,
+              description: 'Envio',
+              quantity: new Prisma.Decimal(1),
+              unit_price: new Prisma.Decimal(shippingCost),
+              discount_amount: new Prisma.Decimal(0),
+              tax_amount: new Prisma.Decimal(0),
+              total_amount: new Prisma.Decimal(shippingCost),
+            },
+          ]
+        : productItems;
 
     const subtotal = items.reduce(
       (acc: number, item: any) =>
@@ -273,9 +295,13 @@ export class InvoicingService {
     );
     const total = subtotal - discount + tax;
 
+    const invoiceDataRequest = order.invoice_data_requests?.[0];
+    const guest_customer_name = invoiceDataRequest
+      ? `${invoiceDataRequest.first_name || ''} ${invoiceDataRequest.last_name || ''}`.trim()
+      : '';
     const customer_name = order.users
       ? `${order.users.first_name || ''} ${order.users.last_name || ''}`.trim()
-      : undefined;
+      : guest_customer_name || 'Consumidor Final';
 
     const invoice = await this.prisma.invoices.create({
       data: {
@@ -286,7 +312,10 @@ export class InvoicingService {
         status: 'draft',
         customer_id: order.customer_id,
         customer_name,
-        customer_tax_id: order.users?.document_number || undefined,
+        customer_tax_id:
+          order.users?.document_number ||
+          invoiceDataRequest?.document_number ||
+          undefined,
         order_id: order.id,
         resolution_id,
         subtotal_amount: new Prisma.Decimal(subtotal),

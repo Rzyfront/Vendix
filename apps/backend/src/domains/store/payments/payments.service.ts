@@ -803,8 +803,9 @@ export class PaymentsService {
           createPosPaymentDto.requires_payment &&
           order.delivery_type !== 'home_delivery';
 
+        let inventoryCost = 0;
         if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
-          await this.updateInventoryFromOrder(tx, order);
+          inventoryCost = await this.updateInventoryFromOrder(tx, order);
         }
 
         // 4. Emit order.created event
@@ -837,11 +838,7 @@ export class PaymentsService {
 
           // 5b. Emit order.completed for COGS on direct POS sales
           if (order.delivery_type === 'direct_delivery') {
-            const total_cost = order.order_items.reduce(
-              (sum: number, item: any) =>
-                sum + Number(item.cost_price || 0) * item.quantity,
-              0,
-            );
+            const total_cost = inventoryCost;
             if (total_cost > 0) {
               this.eventEmitter.emit('order.completed', {
                 order_id: order.id,
@@ -1482,7 +1479,8 @@ export class PaymentsService {
   /**
    * Update inventory from order
    */
-  private async updateInventoryFromOrder(tx: any, order: any) {
+  private async updateInventoryFromOrder(tx: any, order: any): Promise<number> {
+    let totalCost = 0;
     for (const item of order.order_items) {
       const product = await tx.products.findUnique({
         where: { id: item.product_id },
@@ -1514,7 +1512,7 @@ export class PaymentsService {
         );
 
         // Now deduct stock — available was restored, so validation passes
-        await this.stockLevelManager.updateStock(
+        const stockUpdate = await this.stockLevelManager.updateStock(
           {
             product_id: item.product_id,
             variant_id: item.product_variant_id,
@@ -1529,6 +1527,7 @@ export class PaymentsService {
           },
           tx,
         );
+        totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
       } else {
         // Fallback: reservation failed silently in Phase 1, use default location
         const defaultLocation = await tx.inventory_locations.findFirst({
@@ -1538,7 +1537,7 @@ export class PaymentsService {
 
         if (!defaultLocation) continue;
 
-        await this.stockLevelManager.updateStock(
+        const stockUpdate = await this.stockLevelManager.updateStock(
           {
             product_id: item.product_id,
             variant_id: item.product_variant_id,
@@ -1553,8 +1552,11 @@ export class PaymentsService {
           },
           tx,
         );
+        totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
       }
     }
+
+    return totalCost;
   }
 
   /**

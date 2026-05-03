@@ -9,6 +9,24 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
+const DOMAIN_STATUSES = [
+  'pending_dns',
+  'pending_ssl',
+  'active',
+  'disabled',
+  'pending_ownership',
+  'verifying_ownership',
+  'pending_certificate',
+  'issuing_certificate',
+  'pending_alias',
+  'propagating',
+  'failed_ownership',
+  'failed_certificate',
+  'failed_alias',
+];
+
+const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+
 export class CreateStoreDomainDto {
   @IsString()
   @IsNotEmpty()
@@ -17,6 +35,10 @@ export class CreateStoreDomainDto {
   @IsOptional()
   @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
   domain_type?: string;
+
+  @IsOptional()
+  @IsIn(STORE_APP_TYPES)
+  app_type?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -42,11 +64,15 @@ export class UpdateStoreDomainDto {
   domain_type?: string;
 
   @IsOptional()
+  @IsIn(STORE_APP_TYPES)
+  app_type?: string;
+
+  @IsOptional()
   @IsBoolean()
   is_primary?: boolean;
 
   @IsOptional()
-  @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
+  @IsIn(DOMAIN_STATUSES)
   status?: string;
 
   @IsOptional()
@@ -88,6 +114,6 @@ export class StoreDomainQueryDto {
   domain_type?: string;
 
   @IsOptional()
-  @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
+  @IsIn(DOMAIN_STATUSES)
   status?: string;
 }

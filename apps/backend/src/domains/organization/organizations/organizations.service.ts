@@ -613,6 +613,7 @@ export class OrganizationsService {
       where: { id: context.organization_id },
       data: {
         account_type: 'MULTI_STORE_ORG',
+        operating_scope: 'ORGANIZATION' as any,
         updated_at: new Date(),
       },
     });

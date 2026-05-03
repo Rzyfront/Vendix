@@ -224,7 +224,7 @@ export class InventoryAdjustmentsService {
       });
 
       // 4. Actualizar stock levels (siempre, tanto para lote como para stock general)
-      await this.stockLevelManager.updateStock({
+      const stockUpdate = await this.stockLevelManager.updateStock({
         product_id: productId,
         variant_id: variantId ?? undefined,
         location_id: locationId,
@@ -246,25 +246,17 @@ export class InventoryAdjustmentsService {
         userId: userId || undefined,
       });
 
-      // 6. Fetch product cost for accounting event
-      const product = await prisma.products.findUnique({
-        where: { id: productId },
-        select: { cost_price: true },
-      });
-
-      // 7. Transformar respuesta para mapear nombres de relaciones
+      // 6. Transformar respuesta para mapear nombres de relaciones
       return {
         adjustment: this.mapAdjustmentResponse(adjustment),
         quantity_change: quantityChange,
-        cost_per_unit: Number(product?.cost_price || 0),
+        cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
       };
     });
 
     // Emit inventory.adjusted for accounting after successful transaction
     try {
-      const cost_amount = Math.abs(
-        adjustment_result.quantity_change * adjustment_result.cost_per_unit,
-      );
+      const cost_amount = Math.abs(Number(adjustment_result.cost_amount || 0));
       if (cost_amount > 0) {
         this.eventEmitter.emit('inventory.adjusted', {
           adjustment_id: adjustment_result.adjustment.id,

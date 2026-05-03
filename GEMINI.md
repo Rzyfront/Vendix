@@ -84,6 +84,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
+| Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
+| Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
@@ -159,6 +161,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing customer auth in e-commerce | `vendix-customer-auth` |
 | Implementing ecommerce checkout | `vendix-ecommerce-checkout` |
 | Implementing feature caps with auto-reset at period rollover | `vendix-redis-quota` |
+| Implementing historical inventory valuation | `vendix-inventory-valuation` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
 | Implementing semantic search | `vendix-ai-embeddings-rag` |
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
@@ -188,6 +191,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
@@ -251,8 +255,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with default_templates | `vendix-settings-system` |
 | Working with embeddings or pgvector | `vendix-ai-embeddings-rag` |
 | Working with inventory transactions or movements | `vendix-inventory-stock` |
+| Working with inventory valuation | `vendix-inventory-valuation` |
 | Working with journal entries, mapping keys, PUC accounts, payroll provisions, parafiscales, or debit/credit logic | `vendix-accounting-rules` |
 | Working with notifications SSE or Web Push | `vendix-notifications-system` |
+| Working with organization operating scope STORE vs ORGANIZATION | `vendix-operating-scope` |
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |

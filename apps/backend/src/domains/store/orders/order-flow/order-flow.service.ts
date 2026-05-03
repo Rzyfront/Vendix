@@ -171,50 +171,7 @@ export class OrderFlowService {
       new_state: newState,
     });
 
-    // Emit order.completed for accounting (COGS journal entry)
     if (newState === 'finished') {
-      try {
-        const order_with_items = await this.prisma.orders.findUnique({
-          where: { id: orderId },
-          include: {
-            stores: { select: { id: true, organization_id: true } },
-            order_items: {
-              select: {
-                quantity: true,
-                cost_price: true,
-                item_type: true,
-              },
-            },
-          },
-        });
-
-        if (order_with_items?.order_items) {
-          const total_cost = order_with_items.order_items.reduce(
-            (sum, item) => {
-              // Services don't have inventory COGS
-              if (item.item_type === 'service') return sum;
-              return sum + Number(item.cost_price || 0) * Number(item.quantity);
-            },
-            0,
-          );
-
-          if (total_cost > 0) {
-            this.eventEmitter.emit('order.completed', {
-              order_id: orderId,
-              order_number: previous_order?.order_number || '',
-              organization_id: order_with_items.stores?.organization_id,
-              store_id: updated_order.store_id,
-              total_cost,
-              user_id: RequestContextService.getUserId(),
-            });
-          }
-        }
-      } catch (error) {
-        this.logger.error(
-          `Failed to emit order.completed for order #${orderId}: ${error.message}`,
-        );
-      }
-
       // Consume reserved stock: decrement quantity_on_hand + release reservation
       // Note: POS direct delivery handles its own inventory via PaymentsService.updateInventoryFromOrder()
       // and sets state to 'finished' directly (bypasses updateOrderState), so this block only runs
@@ -223,6 +180,7 @@ export class OrderFlowService {
         const orderWithItems = await this.prisma.orders.findUnique({
           where: { id: orderId },
           include: {
+            stores: { select: { organization_id: true } },
             order_items: {
               include: {
                 products: {
@@ -238,6 +196,7 @@ export class OrderFlowService {
           },
         });
 
+        let totalCost = 0;
         for (const item of orderWithItems?.order_items || []) {
           if (
             !item.products?.track_inventory ||
@@ -251,7 +210,7 @@ export class OrderFlowService {
               item.product_variant_id || undefined,
             );
 
-          await this.stockLevelManager.updateStock({
+          const stockUpdate = await this.stockLevelManager.updateStock({
             product_id: item.product_id,
             variant_id: item.product_variant_id || undefined,
             location_id,
@@ -262,6 +221,7 @@ export class OrderFlowService {
             order_item_id: item.id,
             create_movement: true,
           });
+          totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
         }
 
         // Release all reservations by reference (fixes mismatched location bug)
@@ -269,7 +229,20 @@ export class OrderFlowService {
           'order',
           orderId,
           'consumed',
+          undefined,
+          { decrementOnHand: false },
         );
+
+        if (totalCost > 0) {
+          this.eventEmitter.emit('order.completed', {
+            order_id: orderId,
+            order_number: previous_order?.order_number || '',
+            organization_id: orderWithItems?.stores?.organization_id,
+            store_id: updated_order.store_id,
+            total_cost: totalCost,
+            user_id: RequestContextService.getUserId(),
+          });
+        }
       } catch (error) {
         this.logger.error(
           `Failed to update stock for finished order #${orderId}: ${error.message}`,

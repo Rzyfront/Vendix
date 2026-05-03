@@ -39,6 +39,7 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/index';
 import { StoreBindingPickerComponent } from '../store-binding-picker/store-binding-picker.component';
+import { environment } from '../../../../../../../environments/environment';
 
 type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'integrations' | 'security' | 'performance';
 
@@ -115,7 +116,7 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
                   <span
                     class="text-sm text-[var(--color-text-secondary)] whitespace-nowrap"
                     >
-                    .vendix.com
+                    .{{ vendixDomain }}
                   </span>
                 }
               </div>
@@ -446,6 +447,7 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
 export class DomainCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private fb = FormBuilder;
+  readonly vendixDomain = environment.vendixDomain;
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
   readonly stores = input<{ id: number; name: string; slug: string }[]>([]);
@@ -605,7 +607,7 @@ export class DomainCreateModalComponent implements OnInit {
 
   get hostnameHelperText(): string {
     if (this.isVendixSubdomain) {
-      return 'Tu subdominio se creará como: [nombre].vendix.com';
+      return `Tu subdominio se creará como: [nombre].${this.vendixDomain}`;
     }
     return 'Ingresa tu dominio completo (ej: tienda.tuempresa.com)';
   }
@@ -642,7 +644,7 @@ export class DomainCreateModalComponent implements OnInit {
     // Build hostname with suffix for Vendix subdomains
     let hostname = formValue.hostname;
     if (formValue.ownership === DomainOwnership.VENDIX_SUBDOMAIN) {
-      hostname = `${formValue.hostname}.vendix.com`;
+      hostname = `${formValue.hostname}.${this.vendixDomain}`;
     }
 
     // Build config only for non-Vendix subdomains

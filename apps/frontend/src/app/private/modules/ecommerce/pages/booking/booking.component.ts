@@ -233,6 +233,12 @@ export class BookingComponent implements OnInit {
     }
 
     this.productId.set(Number(idParam));
+    const variantId = Number(
+      this.route.snapshot.queryParamMap.get('variant_id'),
+    );
+    if (Number.isFinite(variantId) && variantId > 0) {
+      this.selectedVariantId.set(variantId);
+    }
 
     // Check auth state
     this.authFacade.isAuthenticated$
@@ -266,6 +272,10 @@ export class BookingComponent implements OnInit {
           if (response.success) {
             this.product.set(response.data);
             this.variants.set(response.data.variants ?? []);
+            if (!this.selectedVariantId() && response.data.variants?.length) {
+              this.selectedVariantId.set(response.data.variants[0].id);
+              this.loadAvailabilityForMonth();
+            }
             this.isFreeBooking.set(
               response.data.booking_mode === 'free_booking',
             );

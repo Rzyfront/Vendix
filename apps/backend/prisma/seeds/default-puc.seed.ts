@@ -28,51 +28,69 @@ export async function seedDefaultPuc(
   const accounts = getPucAccounts();
   let accounts_created = 0;
 
-  for (const account of accounts) {
-    // Resolve parent_id by looking up parent code
-    let parent_id: number | null = null;
-    if (account.parent_code) {
-      const parent = await client.chart_of_accounts.findUnique({
-        where: {
-          organization_id_code: {
+  const accounting_entities = await client.accounting_entities.findMany({
+    where: { organization_id, is_active: true },
+    select: { id: true },
+  });
+  const accounting_entity_ids = accounting_entities.length
+    ? accounting_entities.map((entity) => entity.id)
+    : [null];
+
+  for (const accounting_entity_id of accounting_entity_ids) {
+    for (const account of accounts) {
+      // Resolve parent_id by looking up parent code inside the same accounting entity.
+      let parent_id: number | null = null;
+      if (account.parent_code) {
+        const parent = await client.chart_of_accounts.findFirst({
+          where: {
             organization_id,
+            accounting_entity_id,
             code: account.parent_code,
           },
-        },
-      });
-      parent_id = parent?.id ?? null;
-    }
+        });
+        parent_id = parent?.id ?? null;
+      }
 
-    await client.chart_of_accounts.upsert({
-      where: {
-        organization_id_code: {
+      const existing = await client.chart_of_accounts.findFirst({
+        where: {
           organization_id,
+          accounting_entity_id,
           code: account.code,
         },
-      },
-      update: {
-        name: account.name,
-        account_type: account.account_type,
-        nature: account.nature,
-        parent_id,
-        level: account.level,
-        is_active: true,
-        accepts_entries: account.accepts_entries,
-      },
-      create: {
-        organization_id,
-        code: account.code,
-        name: account.name,
-        account_type: account.account_type,
-        nature: account.nature,
-        parent_id,
-        level: account.level,
-        is_active: true,
-        accepts_entries: account.accepts_entries,
-      },
-    });
+      });
 
-    accounts_created++;
+      if (existing) {
+        await client.chart_of_accounts.update({
+          where: { id: existing.id },
+          data: {
+            name: account.name,
+            account_type: account.account_type,
+            nature: account.nature,
+            parent_id,
+            level: account.level,
+            is_active: true,
+            accepts_entries: account.accepts_entries,
+          },
+        });
+      } else {
+        await client.chart_of_accounts.create({
+          data: {
+            organization_id,
+            accounting_entity_id,
+            code: account.code,
+            name: account.name,
+            account_type: account.account_type,
+            nature: account.nature,
+            parent_id,
+            level: account.level,
+            is_active: true,
+            accepts_entries: account.accepts_entries,
+          },
+        });
+      }
+
+      accounts_created++;
+    }
   }
 
   console.log(

@@ -107,6 +107,10 @@ export class InventoryAnalyticsQueryDto extends AnalyticsQueryDto {
   location_id?: number;
 
   @IsOptional()
+  @IsDateString()
+  as_of?: string;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   category_id?: number;

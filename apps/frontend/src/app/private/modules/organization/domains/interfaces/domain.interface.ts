@@ -27,6 +27,15 @@ export enum DomainOwnership {
 export enum DomainStatus {
   PENDING_DNS = 'pending_dns',
   PENDING_SSL = 'pending_ssl',
+  PENDING_OWNERSHIP = 'pending_ownership',
+  VERIFYING_OWNERSHIP = 'verifying_ownership',
+  PENDING_CERTIFICATE = 'pending_certificate',
+  ISSUING_CERTIFICATE = 'issuing_certificate',
+  PENDING_ALIAS = 'pending_alias',
+  PROPAGATING = 'propagating',
+  FAILED_OWNERSHIP = 'failed_ownership',
+  FAILED_CERTIFICATE = 'failed_certificate',
+  FAILED_ALIAS = 'failed_alias',
   ACTIVE = 'active',
   DISABLED = 'disabled',
 }

@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import * as dns from 'node:dns/promises';
 import {
   CreateDomainSettingDto,
   UpdateDomainSettingDto,
@@ -18,6 +17,20 @@ import {
 } from './dto/domain-settings.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { BlocklistService } from 'src/common/services/blocklist/blocklist.service';
+import { DnsResolverService } from 'src/common/services/dns/dns-resolver.service';
+
+const APP_TYPES = [
+  'VENDIX_LANDING',
+  'VENDIX_ADMIN',
+  'ORG_LANDING',
+  'ORG_ADMIN',
+  'STORE_LANDING',
+  'STORE_ADMIN',
+  'STORE_ECOMMERCE',
+];
+const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+const ORG_APP_TYPES = ['ORG_LANDING', 'ORG_ADMIN'];
+const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
 
 interface DomainStats {
   total: number;
@@ -38,6 +51,7 @@ export class DomainsService implements OnModuleInit {
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
     private blocklist: BlocklistService,
+    private dnsResolver: DnsResolverService,
   ) {}
 
   async onModuleInit() {}
@@ -64,17 +78,17 @@ export class DomainsService implements OnModuleInit {
     hostname: string,
     hasStore: boolean,
     provided?: string,
+    appType?: string,
   ): string {
     if (provided) return provided;
+    if (appType === 'STORE_ECOMMERCE') return 'ecommerce';
+    if (STORE_APP_TYPES.includes(appType || '')) return 'store';
+    if (ORG_APP_TYPES.includes(appType || '')) return 'organization';
 
     // If has store, it's store-specific
-    if (hasStore) return 'store_domain';
+    if (hasStore) return 'store';
 
-    // Check if it's a subdomain
-    const parts = hostname.split('.');
-    if (parts.length > 2) return 'subdomain';
-
-    return 'primary_domain';
+    return 'organization';
   }
 
   private inferOwnership(
@@ -87,11 +101,60 @@ export class DomainsService implements OnModuleInit {
     // Platform subdomains
     if (hostname.includes('vendix')) return 'vendix_subdomain';
 
-    // Custom domains
-    if (domainType === 'primary_domain') return 'custom_domain';
+    const baseDomain = process.env.BASE_DOMAIN || 'vendix.online';
+    if (hostname.endsWith(`.${baseDomain}`) || hostname.includes('vendix')) {
+      return 'vendix_subdomain';
+    }
+
+    const parts = hostname.split('.');
+    if (parts.length <= 2) return 'custom_domain';
 
     // Subdomains
     return 'custom_subdomain';
+  }
+
+  private inferAppType(storeId?: number | null, provided?: string): string {
+    if (provided) return provided;
+    return storeId ? 'STORE_ECOMMERCE' : 'ORG_LANDING';
+  }
+
+  private validateAppAssignment(appType: string, storeId?: number | null): void {
+    if (!APP_TYPES.includes(appType)) {
+      throw new BadRequestException('Invalid app_type');
+    }
+
+    if (STORE_APP_TYPES.includes(appType) && !storeId) {
+      throw new BadRequestException(`${appType} requires a store_id`);
+    }
+
+    if (ORG_APP_TYPES.includes(appType) && storeId) {
+      throw new BadRequestException(`${appType} cannot be assigned to a store`);
+    }
+  }
+
+  private getTxtRecordName(hostname: string): string {
+    return `_vendix-verify.${hostname}`;
+  }
+
+  private getEdgeHost(): string {
+    return (
+      process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
+    );
+  }
+
+  private async ensureVerificationToken(domain: {
+    id: number;
+    verification_token: string | null;
+  }): Promise<string> {
+    if (domain.verification_token) return domain.verification_token;
+
+    const verification_token = this.generateVerificationToken();
+    await this.prisma.domain_settings.update({
+      where: { id: domain.id },
+      data: { verification_token, updated_at: new Date() },
+    });
+
+    return verification_token;
   }
 
   // ==================== PRIMARY DOMAIN MANAGEMENT ====================
@@ -108,6 +171,28 @@ export class DomainsService implements OnModuleInit {
         is_primary: true,
       },
       data: { is_primary: false },
+    });
+  }
+
+  private async ensureSingleActiveApp(
+    organizationId: number | undefined | null,
+    storeId: number | undefined | null,
+    appType: string,
+    excludeId?: number,
+  ) {
+    await this.prisma.domain_settings.updateMany({
+      where: {
+        organization_id: organizationId || null,
+        store_id: storeId || null,
+        app_type: appType as any,
+        status: 'active',
+        id: excludeId ? { not: excludeId } : undefined,
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
     });
   }
 
@@ -307,20 +392,21 @@ export class DomainsService implements OnModuleInit {
       throw new ConflictException(`Domain ${data.hostname} already exists`);
     }
 
+    const app_type = this.inferAppType(data.store_id, data.app_type);
+    this.validateAppAssignment(app_type, data.store_id);
+
     // Infer domain type and ownership
     const inferred_type = this.inferDomainType(
       data.hostname,
       !!data.store_id,
       data.domain_type,
+      app_type,
     );
     const inferred_ownership = this.inferOwnership(
       data.hostname,
       inferred_type,
       data.ownership,
     );
-
-    // Handle primary domain logic and status
-    const is_primary = data.is_primary || false;
 
     // Vendix subdomains are automatically active (Vendix controls the DNS).
     // Custom domains ALWAYS enter pending_ownership regardless of is_primary —
@@ -329,12 +415,13 @@ export class DomainsService implements OnModuleInit {
     const status = isVendixSubdomain
       ? ('active' as any)
       : ('pending_ownership' as any);
+    const is_primary = isVendixSubdomain ? data.is_primary || false : false;
 
     if (is_primary || status === 'active') {
-      await this.ensureSingleActiveType(
+      await this.ensureSingleActiveApp(
         data.organization_id,
         data.store_id,
-        inferred_type,
+        app_type,
       );
     }
 
@@ -362,6 +449,7 @@ export class DomainsService implements OnModuleInit {
         store_id: data.store_id,
         config: data.config as any,
         domain_type: inferred_type as any,
+        app_type: app_type as any,
         status,
         ssl_status,
         is_primary,
@@ -532,14 +620,34 @@ export class DomainsService implements OnModuleInit {
   ) {
     const existing_record = await this.getDomainSettingByHostname(hostname);
 
-    const domain_type = updateData.domain_type || existing_record.domain_type;
+    const app_type = updateData.app_type || existing_record.app_type;
+    this.validateAppAssignment(app_type, existing_record.store_id);
+
+    const domain_type =
+      updateData.domain_type ||
+      this.inferDomainType(
+        existing_record.hostname,
+        !!existing_record.store_id,
+        undefined,
+        app_type,
+      );
+
+    if (
+      (updateData.status === 'active' || updateData.is_primary === true) &&
+      CUSTOM_OWNERSHIPS.includes(existing_record.ownership) &&
+      existing_record.status !== 'active'
+    ) {
+      throw new ConflictException(
+        'Custom domains must be verified before being activated',
+      );
+    }
 
     // Handle activation logic
     if (updateData.status === 'active' || updateData.is_primary === true) {
-      await this.ensureSingleActiveType(
+      await this.ensureSingleActiveApp(
         existing_record.organization_id,
         existing_record.store_id,
-        domain_type,
+        app_type,
         existing_record.id,
       );
 
@@ -550,6 +658,7 @@ export class DomainsService implements OnModuleInit {
 
     const updates: any = {
       ...updateData,
+      domain_type: domain_type as any,
       updated_at: new Date(),
     };
 
@@ -641,6 +750,7 @@ export class DomainsService implements OnModuleInit {
       store_id: source.store_id,
       config: source.config,
       domain_type: source.domain_type,
+      app_type: source.app_type,
       ownership: source.ownership,
       is_primary: false, // Duplicates are not primary by default
     });
@@ -674,34 +784,58 @@ export class DomainsService implements OnModuleInit {
   ): Promise<VerifyDomainResult> {
     const domain = await this.getDomainSettingByHostname(hostname);
 
-    // Basic verification logic
-    const verifiable_types = ['custom_domain', 'custom_subdomain'];
-    if (!verifiable_types.includes(domain.ownership)) {
+    if (!CUSTOM_OWNERSHIPS.includes(domain.ownership)) {
       throw new BadRequestException('Domain type not verifiable');
     }
 
     const status_before = domain.status;
+    const verification_token = await this.ensureVerificationToken(domain);
+    const txt_name = this.getTxtRecordName(hostname);
 
-    // Simulate verification checks
-    const checks_to_run = body.checks || ['cname'];
+    const checks_to_run = Array.from(new Set([...(body.checks || []), 'txt']));
 
     const results: any = {};
 
+    if (checks_to_run.includes('txt')) {
+      const txt = await this.dnsResolver.hasTxtRecord(
+        txt_name,
+        verification_token,
+      );
+      results.txt = {
+        valid: txt.found,
+        name: txt_name,
+        expected: verification_token,
+        seenIn: txt.seenIn,
+        reason: txt.found ? undefined : 'TXT ownership record not found',
+      };
+    }
+
     if (checks_to_run.includes('cname')) {
       try {
-        const records = await dns.resolveCname(hostname);
-        results.cname = { valid: records.length > 0 };
+        const records = await this.dnsResolver.resolveCname(hostname);
+        results.cname = {
+          valid: records.records.length > 0,
+          records: records.records,
+          reason:
+            records.records.length > 0 ? undefined : 'CNAME resolution failed',
+        };
       } catch (error) {
         results.cname = { valid: false, reason: 'CNAME resolution failed' };
       }
     }
 
-    const all_valid = Object.values(results).every((check: any) => check.valid);
+    const ownership_valid = results.txt?.valid === true;
 
     let status_after = status_before;
     let ssl_status = domain.ssl_status;
 
-    if (all_valid) {
+    if (ownership_valid) {
+      await this.ensureSingleActiveApp(
+        domain.organization_id,
+        domain.store_id,
+        domain.app_type,
+        domain.id,
+      );
       status_after = 'active';
       ssl_status = 'issued';
       const updated = await this.prisma.domain_settings.update({
@@ -710,6 +844,8 @@ export class DomainsService implements OnModuleInit {
           status: 'active',
           ssl_status: 'issued',
           last_verified_at: new Date(),
+          last_error: null,
+          updated_at: new Date(),
         },
       });
 
@@ -719,6 +855,16 @@ export class DomainsService implements OnModuleInit {
         organization_id: updated.organization_id,
         store_id: updated.store_id,
       });
+    } else {
+      status_after = 'failed_ownership';
+      await this.prisma.domain_settings.update({
+        where: { hostname },
+        data: {
+          status: 'failed_ownership',
+          last_error: 'TXT ownership record not found',
+          updated_at: new Date(),
+        },
+      });
     }
 
     return {
@@ -726,8 +872,14 @@ export class DomainsService implements OnModuleInit {
       status_before: status_before,
       status_after: status_after,
       ssl_status: ssl_status,
-      verified: all_valid,
+      verified: ownership_valid,
       checks: results,
+      suggested_fixes: ownership_valid
+        ? []
+        : [
+            `Create a TXT record named ${txt_name} with value ${verification_token}`,
+            'Wait for DNS propagation and retry verification.',
+          ],
       timestamp: new Date().toISOString(),
     };
   }
@@ -786,9 +938,7 @@ export class DomainsService implements OnModuleInit {
   }> {
     const domain = await this.getDomainSettingByHostname(hostname);
 
-    const edgeHost =
-      process.env.EDGE_HOST ||
-      `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`;
+    const edgeHost = this.getEdgeHost();
 
     const isSubdomain =
       domain.ownership === 'custom_subdomain' ||
@@ -808,14 +958,27 @@ export class DomainsService implements OnModuleInit {
       name: string;
       value: string;
       ttl: number;
-    }[] = [
-      {
-        record_type: 'CNAME',
-        name: isSubdomain ? hostname.split('.')[0] : '@',
-        value: target,
+      purpose?: string;
+    }[] = [];
+
+    if (CUSTOM_OWNERSHIPS.includes(domain.ownership)) {
+      const verification_token = await this.ensureVerificationToken(domain);
+      instructions.push({
+        record_type: 'TXT',
+        name: this.getTxtRecordName(hostname),
+        value: verification_token,
         ttl: 300,
-      },
-    ];
+        purpose: 'ownership',
+      });
+    }
+
+    instructions.push({
+      record_type: 'CNAME',
+      name: isSubdomain ? hostname.split('.')[0] : '@',
+      value: target,
+      ttl: 300,
+      purpose: 'routing',
+    });
 
     return {
       hostname,

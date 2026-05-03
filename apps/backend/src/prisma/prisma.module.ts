@@ -6,6 +6,7 @@ import { EcommercePrismaService } from './services/ecommerce-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Module({
   providers: [
@@ -16,6 +17,7 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
     RequestContextService,
     AccessValidationService,
     StoreContextRunner,
+    OperatingScopeService,
   ],
   exports: [
     GlobalPrismaService,
@@ -25,6 +27,7 @@ import { StoreContextRunner } from '@common/context/store-context-runner.service
     RequestContextService,
     AccessValidationService,
     StoreContextRunner,
+    OperatingScopeService,
   ],
 })
 export class PrismaModule {}

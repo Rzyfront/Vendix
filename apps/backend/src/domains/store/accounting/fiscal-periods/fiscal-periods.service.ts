@@ -4,10 +4,14 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class FiscalPeriodsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly operatingScopeService: OperatingScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -18,7 +22,14 @@ export class FiscalPeriodsService {
   }
 
   async findAll() {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     return this.prisma.fiscal_periods.findMany({
+      where: { accounting_entity_id: accountingEntity.id },
       orderBy: { start_date: 'desc' },
       include: {
         closed_by_user: {
@@ -53,6 +64,10 @@ export class FiscalPeriodsService {
 
   async create(create_dto: CreateFiscalPeriodDto) {
     const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
     const start_date = new Date(create_dto.start_date);
     const end_date = new Date(create_dto.end_date);
 
@@ -67,6 +82,7 @@ export class FiscalPeriodsService {
     // Check for overlapping periods
     const overlapping = await this.prisma.fiscal_periods.findFirst({
       where: {
+        accounting_entity_id: accountingEntity.id,
         OR: [
           {
             start_date: { lte: end_date },
@@ -84,7 +100,7 @@ export class FiscalPeriodsService {
 
     // Check name uniqueness (handled by @@unique but give better error)
     const existing_name = await this.prisma.fiscal_periods.findFirst({
-      where: { name: create_dto.name },
+      where: { name: create_dto.name, accounting_entity_id: accountingEntity.id },
     });
 
     if (existing_name) {
@@ -99,7 +115,8 @@ export class FiscalPeriodsService {
         start_date,
         end_date,
         status: 'open',
-        organization_id: context.organization_id,
+        organization_id: context.organization_id!,
+        accounting_entity_id: accountingEntity.id,
       },
       include: {
         _count: {
@@ -138,6 +155,7 @@ export class FiscalPeriodsService {
       const overlapping = await this.prisma.fiscal_periods.findFirst({
         where: {
           id: { not: id },
+          accounting_entity_id: period.accounting_entity_id,
           OR: [
             {
               start_date: { lte: end_date },
@@ -159,6 +177,7 @@ export class FiscalPeriodsService {
       const existing_name = await this.prisma.fiscal_periods.findFirst({
         where: {
           name: update_dto.name,
+          accounting_entity_id: period.accounting_entity_id,
           id: { not: id },
         },
       });

@@ -12,6 +12,8 @@ import { WompiModule } from '../../store/payments/processors/wompi/wompi.module'
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
 import { PaymentsModule } from '../../store/payments/payments.module';
 import { ReservationsModule } from '../../store/reservations/reservations.module';
+import { InvoicingModule } from '../../store/invoicing/invoicing.module';
+import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { ReservationsModule } from '../../store/reservations/reservations.module
     // OrderFlow/Orders/PaymentLinks via forwardRef.
     forwardRef(() => PaymentsModule),
     ReservationsModule,
+    InvoicingModule,
+    InvoiceDataRequestsModule,
   ],
   controllers: [CheckoutController],
   providers: [CheckoutService, PaymentEncryptionService],

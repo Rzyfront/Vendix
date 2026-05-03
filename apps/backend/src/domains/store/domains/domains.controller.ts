@@ -132,4 +132,38 @@ export class StoreDomainsController {
       );
     }
   }
+
+  @Get(':id/dns-instructions')
+  @Permissions('store:domains:read')
+  async getDnsInstructions(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const instructions = await this.domains_service.getDnsInstructions(id);
+      return this.response_service.success(
+        instructions,
+        'Instrucciones DNS obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al obtener instrucciones DNS',
+        error.message,
+      );
+    }
+  }
+
+  @Post(':id/verify')
+  @Permissions('store:domains:update')
+  async verifyDomain(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.domains_service.verifyDomain(id);
+      return this.response_service.success(
+        result,
+        'Verificación DNS ejecutada exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al verificar el dominio',
+        error.message,
+      );
+    }
+  }
 }

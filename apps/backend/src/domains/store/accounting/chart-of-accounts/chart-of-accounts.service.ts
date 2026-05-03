@@ -6,10 +6,14 @@ import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { QueryAccountDto } from './dto/query-account.dto';
 import { Prisma } from '@prisma/client';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class ChartOfAccountsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly operatingScopeService: OperatingScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -29,8 +33,14 @@ export class ChartOfAccountsService {
       is_active,
       tree,
     } = query;
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
 
     const where: Prisma.chart_of_accountsWhereInput = {
+      accounting_entity_id: accountingEntity.id,
       ...(search && {
         OR: [
           { code: { contains: search, mode: 'insensitive' as const } },
@@ -72,7 +82,14 @@ export class ChartOfAccountsService {
   }
 
   async getTree() {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     const all_accounts = await this.prisma.chart_of_accounts.findMany({
+      where: { accounting_entity_id: accountingEntity.id },
       orderBy: { code: 'asc' },
       include: {
         children: {
@@ -130,12 +147,16 @@ export class ChartOfAccountsService {
 
   async create(create_dto: CreateAccountDto) {
     const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
     let level = 1;
 
     // Validate parent exists and set level
     if (create_dto.parent_id) {
       const parent = await this.prisma.chart_of_accounts.findFirst({
-        where: { id: create_dto.parent_id },
+        where: { id: create_dto.parent_id, accounting_entity_id: accountingEntity.id },
       });
 
       if (!parent) {
@@ -152,6 +173,7 @@ export class ChartOfAccountsService {
     const existing = await this.prisma.chart_of_accounts.findFirst({
       where: {
         code: create_dto.code,
+        accounting_entity_id: accountingEntity.id,
       },
     });
 
@@ -171,7 +193,8 @@ export class ChartOfAccountsService {
         level,
         is_active: create_dto.is_active ?? true,
         accepts_entries: create_dto.accepts_entries ?? false,
-        organization_id: context.organization_id,
+        organization_id: context.organization_id!,
+        accounting_entity_id: accountingEntity.id,
       },
       include: {
         parent: {
@@ -201,7 +224,10 @@ export class ChartOfAccountsService {
         }
 
         const parent = await this.prisma.chart_of_accounts.findFirst({
-          where: { id: update_dto.parent_id },
+          where: {
+            id: update_dto.parent_id,
+            accounting_entity_id: account.accounting_entity_id,
+          },
         });
 
         if (!parent) {
@@ -220,6 +246,7 @@ export class ChartOfAccountsService {
       const existing = await this.prisma.chart_of_accounts.findFirst({
         where: {
           code: update_dto.code,
+          accounting_entity_id: account.accounting_entity_id,
           id: { not: id },
         },
       });

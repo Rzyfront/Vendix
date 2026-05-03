@@ -563,6 +563,7 @@ export class AuthService {
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
           account_type: 'MULTI_STORE_ORG', // Por defecto Multi-Store para nuevos owners
+          operating_scope: 'ORGANIZATION' as any,
         },
       });
 

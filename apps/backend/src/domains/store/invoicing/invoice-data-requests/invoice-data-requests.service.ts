@@ -11,6 +11,15 @@ import { Prisma } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
 import { InvoiceDataRequestEvent } from './interfaces/invoice-data-request-events.interface';
 
+interface InvoiceDataRequestCustomerData {
+  first_name?: string | null;
+  last_name?: string | null;
+  document_type?: string | null;
+  document_number?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
 @Injectable()
 export class InvoiceDataRequestsService {
   private readonly logger = new Logger(InvoiceDataRequestsService.name);
@@ -24,7 +33,12 @@ export class InvoiceDataRequestsService {
    * Create a new invoice data request when a CF sale is completed.
    * Called internally by the POS payment flow.
    */
-  async createRequest(storeId: number, orderId: number, invoiceId?: number) {
+  async createRequest(
+    storeId: number,
+    orderId: number,
+    invoiceId?: number,
+    customerData?: InvoiceDataRequestCustomerData | null,
+  ) {
     const token = uuidv4();
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30); // 30-day expiry
@@ -35,6 +49,12 @@ export class InvoiceDataRequestsService {
         order_id: orderId,
         invoice_id: invoiceId || null,
         token,
+        first_name: customerData?.first_name || null,
+        last_name: customerData?.last_name || null,
+        document_type: customerData?.document_type || null,
+        document_number: customerData?.document_number || null,
+        email: customerData?.email || null,
+        phone: customerData?.phone || null,
         status: 'pending',
         expires_at: expiresAt,
       },
@@ -102,6 +122,111 @@ export class InvoiceDataRequestsService {
     }
 
     return request;
+  }
+
+  /**
+   * Public read-only order summary for anonymous ecommerce checkouts.
+   * Unlike getByToken(), this endpoint must keep working after the invoice
+   * data request is submitted/completed so guests retain purchase support.
+   */
+  async getOrderSummaryByToken(token: string) {
+    const request = await this.prisma.invoice_data_requests.findUnique({
+      where: { token },
+      include: {
+        order: {
+          include: {
+            order_items: {
+              select: {
+                product_name: true,
+                variant_sku: true,
+                quantity: true,
+                unit_price: true,
+                total_price: true,
+                tax_amount_item: true,
+              },
+            },
+            payments: {
+              select: {
+                state: true,
+                amount: true,
+                paid_at: true,
+                store_payment_method: {
+                  select: {
+                    display_name: true,
+                    system_payment_method: {
+                      select: { display_name: true, type: true },
+                    },
+                  },
+                },
+              },
+            },
+            invoices: {
+              select: {
+                id: true,
+                invoice_number: true,
+                status: true,
+                pdf_url: true,
+              },
+              orderBy: { created_at: 'desc' },
+              take: 1,
+            },
+          },
+        },
+        store: {
+          select: {
+            id: true,
+            name: true,
+            logo_url: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND');
+    }
+
+    return {
+      token: request.token,
+      invoice_data_status: request.status,
+      invoice_data_expires_at: request.expires_at,
+      customer: {
+        first_name: request.first_name,
+        last_name: request.last_name,
+        document_type: request.document_type,
+        document_number: request.document_number,
+        email: request.email,
+        phone: request.phone,
+      },
+      store: request.store,
+      order: {
+        id: request.order.id,
+        order_number: request.order.order_number,
+        state: request.order.state,
+        channel: request.order.channel,
+        subtotal_amount: request.order.subtotal_amount,
+        discount_amount: request.order.discount_amount,
+        tax_amount: request.order.tax_amount,
+        shipping_cost: request.order.shipping_cost,
+        grand_total: request.order.grand_total,
+        currency: request.order.currency,
+        created_at: request.order.created_at,
+        placed_at: request.order.placed_at,
+        shipping_address: request.order.shipping_address_snapshot,
+        items: request.order.order_items,
+        payments: request.order.payments.map((payment) => ({
+          state: payment.state,
+          amount: payment.amount,
+          paid_at: payment.paid_at,
+          method:
+            payment.store_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.display_name ||
+            payment.store_payment_method?.system_payment_method?.type ||
+            null,
+        })),
+        invoice: request.order.invoices[0] || null,
+      },
+    };
   }
 
   /**
@@ -297,7 +422,7 @@ export class InvoiceDataRequestsService {
       } else {
         // Try to find invoice linked to this order
         originalInvoice = await this.prisma.invoices.findFirst({
-          where: { order_id: order.id, invoice_type: 'sales' },
+          where: { order_id: order.id, invoice_type: 'sales_invoice' },
           include: { invoice_items: true },
           orderBy: { created_at: 'desc' },
         });

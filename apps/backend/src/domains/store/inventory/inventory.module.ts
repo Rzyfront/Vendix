@@ -15,6 +15,7 @@ import { InventorySerialNumbersService } from './serial-numbers/inventory-serial
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CostingService } from './shared/services/costing.service';
+import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { CostingService } from './shared/services/costing.service';
     MovementsModule,
     SuppliersModule,
     InventoryAdjustmentsModule,
+    PrismaModule,
   ],
   controllers: [InventoryController],
   providers: [

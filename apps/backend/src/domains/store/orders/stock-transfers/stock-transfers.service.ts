@@ -7,6 +7,7 @@ import { CreateTransferDto } from './dto/create-transfer.dto';
 import { UpdateTransferDto } from './dto/update-transfer.dto';
 import { TransferQueryDto } from './dto/transfer-query.dto';
 import { transfer_status_enum } from '@prisma/client';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class StockTransfersService {
@@ -14,7 +15,70 @@ export class StockTransfersService {
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private readonly event_emitter: EventEmitter2,
+    private readonly operatingScopeService: OperatingScopeService,
   ) {}
+
+  private async validateTransferScope(
+    organizationId: number,
+    fromLocationId: number,
+    toLocationId: number,
+    tx: any,
+  ): Promise<{ store_id?: number | null }> {
+    const context = RequestContextService.getContext();
+    const { scope, locations } =
+      await this.operatingScopeService.validateLocationScope(
+        organizationId,
+        [fromLocationId, toLocationId],
+        tx,
+      );
+
+    if (scope === 'ORGANIZATION') {
+      return { store_id: null };
+    }
+
+    const storeId = locations[0].store_id;
+    if (!context?.store_id || context.store_id !== storeId) {
+      throw new BadRequestException(
+        'Cross-store stock transfers are not allowed in STORE operating scope',
+      );
+    }
+
+    return { store_id: storeId };
+  }
+
+  private async calculateTransferTotalCost(
+    items: any[] = [],
+    fromLocationId: number,
+    quantitySelector: (item: any) => number,
+  ): Promise<number> {
+    let totalCost = 0;
+
+    for (const item of items) {
+      const quantity = quantitySelector(item);
+      if (quantity <= 0) continue;
+
+      const stockLevel = await this.prisma.stock_levels.findFirst({
+        where: {
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          location_id: fromLocationId,
+        },
+        select: {
+          cost_per_unit: true,
+          products: { select: { cost_price: true } },
+          product_variants: { select: { cost_price: true } },
+        },
+      });
+
+      const unitCost =
+        Number(stockLevel?.cost_per_unit || 0) ||
+        Number(stockLevel?.product_variants?.cost_price || 0) ||
+        Number(stockLevel?.products?.cost_price || 0);
+      totalCost += quantity * unitCost;
+    }
+
+    return totalCost;
+  }
 
   async getStats() {
     const [total, draft, in_transit, completed, cancelled] = await Promise.all([
@@ -45,6 +109,13 @@ export class StockTransfersService {
           'Source and destination locations must be different',
         );
       }
+
+      await this.validateTransferScope(
+        context.organization_id,
+        createTransferDto.from_location_id,
+        createTransferDto.to_location_id,
+        tx,
+      );
 
       // Validate stock availability for all items
       for (const item of createTransferDto.items) {
@@ -114,6 +185,13 @@ export class StockTransfersService {
           'Source and destination locations must be different',
         );
       }
+
+      const transferScope = await this.validateTransferScope(
+        context.organization_id,
+        createTransferDto.from_location_id,
+        createTransferDto.to_location_id,
+        tx,
+      );
 
       // Validate stock availability for all items
       for (const item of createTransferDto.items) {
@@ -219,14 +297,17 @@ export class StockTransfersService {
       transfer_id: result.id,
       transfer_number: result.transfer_number,
       organization_id: result.organization_id,
+      store_id:
+        result.from_location?.store_id === result.to_location?.store_id
+          ? result.from_location?.store_id
+          : undefined,
       from_location_id: result.from_location_id,
       to_location_id: result.to_location_id,
-      total_cost:
-        result.stock_transfer_items?.reduce(
-          (sum, item) =>
-            sum + Number(item.quantity) * Number(item.unit_cost || 0),
-          0,
-        ) || 0,
+      total_cost: await this.calculateTransferTotalCost(
+        result.stock_transfer_items,
+        result.from_location_id,
+        (item) => Number(item.quantity || 0),
+      ),
       user_id: RequestContextService.getUserId(),
     });
 
@@ -354,6 +435,13 @@ export class StockTransfersService {
         include: { stock_transfer_items: true },
       });
 
+      await this.validateTransferScope(
+        stockTransfer.organization_id,
+        stockTransfer.from_location_id,
+        stockTransfer.to_location_id,
+        tx,
+      );
+
       if (stockTransfer.status !== transfer_status_enum.draft) {
         throw new BadRequestException('Only draft transfers can be approved');
       }
@@ -413,13 +501,20 @@ export class StockTransfersService {
         include: { stock_transfer_items: true },
       });
 
+      const transferScope = await this.validateTransferScope(
+        stockTransfer.organization_id,
+        stockTransfer.from_location_id,
+        stockTransfer.to_location_id,
+        tx,
+      );
+
       const context = RequestContextService.getContext();
 
       for (const item of stockTransfer.stock_transfer_items) {
         const receivedItem = items.find((i) => i.id === item.id);
         if (receivedItem && receivedItem.quantity_received > 0) {
           // Subtract from source
-          await this.stockLevelManager.updateStock(
+          const sourceStockUpdate = await this.stockLevelManager.updateStock(
             {
               product_id: item.product_id,
               variant_id: item.product_variant_id ?? undefined,
@@ -448,6 +543,9 @@ export class StockTransfersService {
               create_movement: true,
               from_location_id: stockTransfer.from_location_id,
               to_location_id: stockTransfer.to_location_id,
+              unit_cost: Number(
+                sourceStockUpdate.cost_snapshot?.unit_cost || 0,
+              ),
             },
             tx,
           );
@@ -460,6 +558,7 @@ export class StockTransfersService {
         stockTransfer.id,
         'consumed',
         tx,
+        { decrementOnHand: false },
       );
 
       const allItemsReceived = stockTransfer.stock_transfer_items.every(
@@ -500,15 +599,17 @@ export class StockTransfersService {
         transfer_id: result.id,
         transfer_number: result.transfer_number,
         organization_id: result.organization_id,
+        store_id:
+          result.from_location?.store_id === result.to_location?.store_id
+            ? result.from_location?.store_id
+            : undefined,
         from_location_id: result.from_location_id,
         to_location_id: result.to_location_id,
-        total_cost:
-          result.stock_transfer_items?.reduce(
-            (sum, item) =>
-              sum +
-              Number(item.quantity_received) * Number(item.unit_cost || 0),
-            0,
-          ) || 0,
+        total_cost: await this.calculateTransferTotalCost(
+          result.stock_transfer_items,
+          result.from_location_id,
+          (item) => Number(item.quantity_received || 0),
+        ),
         user_id: RequestContextService.getUserId(),
       });
     }

@@ -48,6 +48,8 @@ export interface PendingBooking {
   booking_number: string;
   product_id: number;
   product_name: string;
+  product_variant_id?: number;
+  variant_name?: string;
   customer_id: number;
   date: string;
   start_time: string;
@@ -95,4 +97,3 @@ export interface CartValidationError {
   message: string;
   itemId?: string;
 }
-

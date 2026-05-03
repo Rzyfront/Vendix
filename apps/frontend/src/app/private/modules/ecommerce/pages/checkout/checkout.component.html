@@ -4,7 +4,11 @@
   <!-- Steps indicator -->
   <div class="steps">
     @if (!cartHasOnlyServices) {
-      <div class="step" [class.active]="step() >= 1" [class.completed]="step() > 1">
+      <div
+        class="step"
+        [class.active]="step() >= 1"
+        [class.completed]="step() > 1"
+      >
         <span class="step-number">1</span>
         <span class="step-label">Direccion</span>
       </div>
@@ -65,7 +69,8 @@
                       <span
                         class="radio"
                         [class.checked]="
-                          selected_address_id() === addr.id && !use_new_address()
+                          selected_address_id() === addr.id &&
+                          !use_new_address()
                         "
                       ></span>
                     </div>
@@ -173,18 +178,20 @@
                 ></app-input>
 
                 <!-- Save address checkbox -->
-                <div class="save-address-option">
-                  <label class="checkbox-label">
-                    <input
-                      type="checkbox"
-                      [(ngModel)]="save_new_address"
-                      [ngModelOptions]="{ standalone: true }"
-                    />
-                    <span class="checkbox-text"
-                      >Guardar esta direccion para futuras compras</span
-                    >
-                  </label>
-                </div>
+                @if (is_authenticated()) {
+                  <div class="save-address-option">
+                    <label class="checkbox-label">
+                      <input
+                        type="checkbox"
+                        [(ngModel)]="save_new_address"
+                        [ngModelOptions]="{ standalone: true }"
+                      />
+                      <span class="checkbox-text"
+                        >Guardar esta direccion para futuras compras</span
+                      >
+                    </label>
+                  </div>
+                }
               </form>
             }
           </div>
@@ -198,18 +205,23 @@
               Selecciona la fecha y horario para tus servicios.
             </p>
 
-            @for (item of bookableItems; track item.product_id) {
+            @for (item of bookableItems; track item.id) {
               <app-booking-slot-picker
                 [productId]="item.product_id"
-                [productName]="item.product.name"
+                [productVariantId]="item.product_variant_id || undefined"
+                [productName]="
+                  item.variant
+                    ? item.product.name + ' - ' + item.variant.name
+                    : item.product.name
+                "
                 [serviceDuration]="item.product.service_duration_minutes || 60"
                 [bookingMode]="item.product.booking_mode || 'provider_required'"
-                (slotSelected)="onBookingSlotSelected(item.product_id, $event)"
+                (slotSelected)="onBookingSlotSelected(item, $event)"
               />
-              @if (hasBookingForProduct(item.product_id)) {
+              @if (hasBookingForItem(item)) {
                 <div class="booking-confirmed">
                   <i class="pi pi-check-circle"></i>
-                  <span>{{ getBookingSummary(item.product_id) }}</span>
+                  <span>{{ getBookingSummary(item) }}</span>
                 </div>
               }
             }
@@ -277,7 +289,9 @@
                   <div class="payment-radio">
                     <span
                       class="radio"
-                      [class.checked]="selected_payment_method_id() === method.id"
+                      [class.checked]="
+                        selected_payment_method_id() === method.id
+                      "
                     ></span>
                   </div>
                   @if (method.logo_url) {
@@ -352,11 +366,11 @@
               @if (cartHasBookableServices && bookingSelections.size > 0) {
                 <div class="confirm-block">
                   <h3>Reservas</h3>
-                  @for (item of bookableItems; track item.product_id) {
-                    @if (hasBookingForProduct(item.product_id)) {
+                  @for (item of bookableItems; track item.id) {
+                    @if (hasBookingForItem(item)) {
                       <p>
                         <strong>{{ item.product.name }}:</strong>
-                        {{ getBookingSummary(item.product_id) }}
+                        {{ getBookingSummary(item) }}
                       </p>
                     }
                   }
@@ -504,6 +518,8 @@
     (closed)="quickViewOpen.set(false)"
     (addedToCart)="onAddToCartFromSlider($event)"
   />
+
+  <app-guest-checkout-data-modal (completed)="onGuestDataCompleted($event)" />
 
   @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">

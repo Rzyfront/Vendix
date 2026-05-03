@@ -23,6 +23,8 @@ import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
 import { deriveDeliveryType } from '../../store/shipping/shipping-derivation.util';
+import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
+import { InvoicingService } from '../../store/invoicing/invoicing.service';
 
 @Injectable()
 export class CheckoutService {
@@ -43,6 +45,8 @@ export class CheckoutService {
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
     private readonly webhookHandler: WebhookHandlerService,
+    private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
+    private readonly invoicingService: InvoicingService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -97,24 +101,163 @@ export class CheckoutService {
     }));
   }
 
-  async checkout(dto: CheckoutDto) {
-    // store_id y user_id se aplican automáticamente por EcommercePrismaService
-    const cart = await this.prisma.carts.findFirst({
-      include: {
-        cart_items: {
-          include: {
-            product: true,
-            product_variant: true,
-          },
-        },
-      },
+  private async getCheckoutSettings(): Promise<{
+    require_registration: boolean;
+  }> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+    }
+
+    const storeSettings = await this.store_prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
     });
+    const checkout =
+      (storeSettings?.settings as any)?.ecommerce?.checkout || {};
+
+    return {
+      require_registration: !!checkout.require_registration,
+    };
+  }
+
+  private async assertGuestCheckoutAllowed(): Promise<void> {
+    if (RequestContextService.getUserId()) return;
+
+    const checkoutSettings = await this.getCheckoutSettings();
+    if (checkoutSettings.require_registration) {
+      throw new BadRequestException(
+        'Debes iniciar sesión o registrarte para completar esta compra',
+      );
+    }
+  }
+
+  private normalizeGuestCustomer(customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
+  }) {
+    if (!customer) return null;
+
+    const normalized = {
+      first_name: customer.first_name?.trim() || null,
+      last_name: customer.last_name?.trim() || null,
+      email: customer.email?.trim() || null,
+      phone: customer.phone?.trim() || null,
+      document_type: customer.document_type?.trim() || null,
+      document_number: customer.document_number?.trim() || null,
+    };
+
+    return Object.values(normalized).some(Boolean) ? normalized : null;
+  }
+
+  private async createInvoiceIfConfigured(
+    orderId: number,
+  ): Promise<number | null> {
+    const existing = await this.store_prisma.invoices.findFirst({
+      where: { order_id: orderId, invoice_type: 'sales_invoice' },
+      select: { id: true },
+    });
+    if (existing) return existing.id;
+
+    const now = new Date();
+    const [resolution, dianConfig] = await Promise.all([
+      this.store_prisma.invoice_resolutions.findFirst({
+        where: {
+          is_active: true,
+          valid_from: { lte: now },
+          valid_to: { gte: now },
+        },
+        select: { id: true },
+      }),
+      this.store_prisma.dian_configurations.findFirst({
+        where: { enablement_status: { in: ['testing', 'enabled'] } },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!resolution || !dianConfig) return null;
+
+    try {
+      const invoice = await this.invoicingService.createFromOrder(orderId);
+      return invoice.id;
+    } catch (error) {
+      this.logger.warn(
+        `Invoice creation skipped for ecommerce order ${orderId}: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  private async createGuestOrderArtifacts(
+    orderId: number,
+    guestCustomer?: {
+      first_name?: string | null;
+      last_name?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      document_type?: string | null;
+      document_number?: string | null;
+    } | null,
+  ): Promise<{ invoice_data_token: string; invoice_id: number | null } | null> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) return null;
+
+    const request = await this.invoiceDataRequestsService.createRequest(
+      store_id,
+      orderId,
+      undefined,
+      guestCustomer,
+    );
+    const invoice_id = await this.createInvoiceIfConfigured(orderId);
+
+    if (invoice_id) {
+      await this.store_prisma.invoice_data_requests.update({
+        where: { id: request.id },
+        data: { invoice_id, updated_at: new Date() },
+      });
+    }
+
+    return {
+      invoice_data_token: request.token,
+      invoice_id,
+    };
+  }
+
+  async checkout(dto: CheckoutDto) {
+    await this.assertGuestCheckoutAllowed();
+
+    const user_id = RequestContextService.getUserId();
+    const is_guest = !user_id;
+    const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
+
+    // Guest checkout must never read store-scoped backend carts because there
+    // is no customer_id filter without auth. Guests use DTO items from localStorage.
+    const cart = is_guest
+      ? null
+      : await this.prisma.carts.findFirst({
+          include: {
+            cart_items: {
+              include: {
+                product: true,
+                product_variant: true,
+              },
+            },
+          },
+        });
 
     // Fallback: if backend cart is empty but frontend sent items, build from DTO
     // This handles the case where localStorage cart was never synced to backend
     let cart_items = cart?.cart_items || [];
 
-    if (cart_items.length === 0 && dto.items && dto.items.length > 0) {
+    if (
+      (is_guest || cart_items.length === 0) &&
+      dto.items &&
+      dto.items.length > 0
+    ) {
       cart_items = await Promise.all(
         dto.items.map(async (item) => {
           const product = await this.prisma.products.findUnique({
@@ -124,7 +267,7 @@ export class CheckoutService {
             throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_001);
           }
 
-          let product_variant = null;
+          let product_variant: any = null;
           if (item.product_variant_id) {
             product_variant = await this.prisma.product_variants.findUnique({
               where: { id: item.product_variant_id },
@@ -215,10 +358,20 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
-    let shipping_address_id = dto.shipping_address_id;
+    let shipping_address_id: number | null | undefined =
+      dto.shipping_address_id;
     let shipping_address_snapshot: any = null;
 
-    if (dto.shipping_address && !shipping_address_id) {
+    if (is_guest && shipping_address_id) {
+      throw new BadRequestException(
+        'Los invitados deben enviar la dirección de envío en el checkout',
+      );
+    }
+
+    if (dto.shipping_address && is_guest) {
+      shipping_address_id = null;
+      shipping_address_snapshot = dto.shipping_address;
+    } else if (dto.shipping_address && !shipping_address_id) {
       // user_id se inyecta automáticamente
       const new_address = await this.prisma.addresses.create({
         data: {
@@ -310,6 +463,15 @@ export class CheckoutService {
 
       shipping_method_id = method.id;
       // En este caso, shipping_cost queda en 0 o se debería recalcular
+    }
+
+    if (
+      hasPhysicalItems &&
+      delivery_type !== 'pickup' &&
+      !shipping_address_id &&
+      !shipping_address_snapshot
+    ) {
+      throw new BadRequestException('La dirección de envío es requerida');
     }
 
     const order_number = await this.generateOrderNumber();
@@ -518,21 +680,36 @@ export class CheckoutService {
       }
     }
 
-    // store_id y user_id se resuelven automáticamente
-    await this.cart_service.clearCart();
+    const invoice_id = is_guest
+      ? null
+      : await this.createInvoiceIfConfigured(order.id);
+    const guestArtifacts = is_guest
+      ? await this.createGuestOrderArtifacts(order.id, guest_customer)
+      : null;
+
+    if (!is_guest) {
+      // store_id y user_id se resuelven automáticamente
+      await this.cart_service.clearCart();
+    }
 
     return {
       order_id: order.id,
       order_number: order.order_number,
       total: order.grand_total,
       state: order.state,
+      public_order_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       message: 'Order placed successfully',
     };
   }
 
   async whatsappCheckout(dto: WhatsappCheckoutDto) {
+    await this.assertGuestCheckoutAllowed();
+
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
+    const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
 
     // Fetch customer profile and primary address for authenticated users
     let customer_data: {
@@ -548,9 +725,16 @@ export class CheckoutService {
         postal_code: string | null;
         phone_number: string | null;
       } | null;
+      email?: string | null;
+      document_type?: string | null;
+      document_number?: string | null;
     } | null = null;
     let shipping_address_id: number | null = null;
     let shipping_address_snapshot: any = null;
+
+    if (dto.shipping_address) {
+      shipping_address_snapshot = dto.shipping_address;
+    }
 
     if (!is_guest) {
       const user = await this.prisma.users.findUnique({
@@ -581,9 +765,22 @@ export class CheckoutService {
           first_name: user.first_name || '',
           last_name: user.last_name || '',
           phone: user.phone || null,
+          email: null,
+          document_type: null,
+          document_number: null,
           address: shipping_address_snapshot,
         };
       }
+    } else if (guest_customer) {
+      customer_data = {
+        first_name: guest_customer.first_name || '',
+        last_name: guest_customer.last_name || '',
+        phone: guest_customer.phone || null,
+        email: guest_customer.email || null,
+        document_type: guest_customer.document_type || null,
+        document_number: guest_customer.document_number || null,
+        address: shipping_address_snapshot,
+      };
     }
 
     // Build cart_items from either backend cart (authenticated) or DTO items (guest)
@@ -610,7 +807,7 @@ export class CheckoutService {
             throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_001);
           }
 
-          let product_variant = null;
+          let product_variant: any = null;
           if (item.product_variant_id) {
             product_variant = await this.prisma.product_variants.findUnique({
               where: { id: item.product_variant_id },
@@ -910,10 +1107,20 @@ export class CheckoutService {
       await this.cart_service.clearCart();
     }
 
+    const invoice_id = is_guest
+      ? null
+      : await this.createInvoiceIfConfigured(order.id);
+    const guestArtifacts = is_guest
+      ? await this.createGuestOrderArtifacts(order.id, guest_customer)
+      : null;
+
     return {
       order_id: order.id,
       order_number: order.order_number,
       total: order.grand_total,
+      public_order_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
+      invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       subtotal: subtotal,
       tax: total_tax,
       item_count: cart_items.reduce((sum, i) => sum + i.quantity, 0),
@@ -978,7 +1185,41 @@ export class CheckoutService {
     currency?: string;
     customer_email?: string;
     redirect_url?: string;
+    public_order_token?: string;
   }) {
+    const userId = RequestContextService.getUserId();
+    const order = await this.store_prisma.orders.findFirst({
+      where: { id: dto.order_id },
+      select: {
+        id: true,
+        customer_id: true,
+        grand_total: true,
+        currency: true,
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException('No se encontró la orden');
+    }
+
+    if (!userId) {
+      if (!dto.public_order_token) {
+        throw new BadRequestException('Token público de orden requerido');
+      }
+
+      const publicOrder =
+        await this.store_prisma.invoice_data_requests.findFirst({
+          where: { token: dto.public_order_token, order_id: dto.order_id },
+          select: { id: true },
+        });
+
+      if (!publicOrder) {
+        throw new BadRequestException('Token público de orden inválido');
+      }
+    } else if (order.customer_id && order.customer_id !== userId) {
+      throw new NotFoundException('No se encontró la orden');
+    }
+
     // Find Wompi payment method for this store
     const wompiMethod = await this.store_prisma.store_payment_methods.findFirst(
       {
@@ -1046,8 +1287,8 @@ export class CheckoutService {
       }
     }
 
-    const amountInCents = Math.round(dto.amount * 100);
-    const currency = dto.currency || 'COP';
+    const amountInCents = Math.round(Number(order.grand_total) * 100);
+    const currency = order.currency || dto.currency || 'COP';
 
     const integritySignature = client.generateIntegritySignature(
       reference,
@@ -1249,7 +1490,8 @@ export class CheckoutService {
         (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
     };
 
-    const cacheKey = `store-${payment.orders?.stores?.id ?? 'unknown'}`;
+    const storeId = RequestContextService.getStoreId();
+    const cacheKey = `store-${storeId ?? 'unknown'}`;
     const client = this.wompiClientFactory.getClient(cacheKey, wompiConfig);
 
     // Try to fetch the Wompi transaction:

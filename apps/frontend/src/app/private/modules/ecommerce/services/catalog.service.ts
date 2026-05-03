@@ -37,6 +37,9 @@ export interface ProductVariantDetail {
   effective_base_price: number;
   final_price: number;
   stock_quantity: number;
+  track_inventory_override?: boolean | null;
+  effective_track_inventory?: boolean;
+  is_available?: boolean;
   attributes: any;
   image_url: string | null;
   is_on_sale: boolean;

@@ -818,15 +818,6 @@ export class PosProductSelectionComponent {
   }
 
   async onAddToCart(product: any): Promise<void> {
-    // Interceptar servicios que requieren reserva (SIEMPRE antes de validaciones de precio)
-    if (
-      product.product_type === 'service' ||
-      product.requires_booking === true
-    ) {
-      this.bookingRequired.emit(product);
-      return;
-    }
-
     if (product.price <= 0) {
       this.dialogService
         .confirm({
@@ -851,6 +842,11 @@ export class PosProductSelectionComponent {
       return;
     }
 
+    if (product.requires_booking === true) {
+      this.bookingRequired.emit(product);
+      return;
+    }
+
     await this.addToCartNormal(product);
   }
 
@@ -860,6 +856,11 @@ export class PosProductSelectionComponent {
     this.selectedProductForVariant.set(null);
 
     if (!product) return;
+
+    if (product.requires_booking === true) {
+      this.bookingRequired.emit({ product, variant });
+      return;
+    }
 
     // If product is weight-based and scale is enabled, prompt for weight
     const isWeightProduct =

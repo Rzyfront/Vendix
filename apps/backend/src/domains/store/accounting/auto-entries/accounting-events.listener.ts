@@ -762,6 +762,7 @@ export class AccountingEventsListener {
     transfer_id: number;
     transfer_number: string;
     organization_id: number;
+    store_id?: number;
     from_location_id: number;
     to_location_id: number;
     total_cost: number;
@@ -769,13 +770,14 @@ export class AccountingEventsListener {
   }) {
     try {
       if (
-        !(await this.isFlowEnabled((event as any).store_id, 'stock_transfers'))
+        !(await this.isFlowEnabled(event.store_id, 'stock_transfers'))
       )
         return;
       await this.auto_entry_service.onStockTransferCompleted({
         transfer_id: event.transfer_id,
         transfer_number: event.transfer_number,
         organization_id: event.organization_id,
+        store_id: event.store_id,
         from_location_id: event.from_location_id,
         to_location_id: event.to_location_id,
         total_cost: Number(event.total_cost),

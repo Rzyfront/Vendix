@@ -11,6 +11,8 @@ import {
     StoreDomainQueryDto,
     PaginatedDomainsResponse,
     SingleDomainResponse,
+    DnsInstructionsResponse,
+    VerifyDomainResponse,
 } from './domain.interface';
 
 @Injectable({
@@ -40,6 +42,7 @@ export class StoreDomainsService {
         if (query?.limit) params = params.set('limit', query.limit.toString());
         if (query?.search) params = params.set('search', query.search);
         if (query?.domain_type) params = params.set('domain_type', query.domain_type);
+        if (query?.app_type) params = params.set('app_type', query.app_type);
         if (query?.status) params = params.set('status', query.status);
 
         return this.http
@@ -88,6 +91,19 @@ export class StoreDomainsService {
     setAsPrimary(id: number): Observable<SingleDomainResponse> {
         return this.http.post<SingleDomainResponse>(
             `${this.api_url}/store/domains/${id}/set-primary`,
+            {},
+        );
+    }
+
+    getDnsInstructions(id: number): Observable<DnsInstructionsResponse> {
+        return this.http.get<DnsInstructionsResponse>(
+            `${this.api_url}/store/domains/${id}/dns-instructions`,
+        );
+    }
+
+    verifyDomain(id: number): Observable<VerifyDomainResponse> {
+        return this.http.post<VerifyDomainResponse>(
+            `${this.api_url}/store/domains/${id}/verify`,
             {},
         );
     }

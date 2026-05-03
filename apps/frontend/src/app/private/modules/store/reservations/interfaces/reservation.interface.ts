@@ -3,6 +3,7 @@ export interface Booking {
   store_id: number;
   customer_id: number;
   product_id: number;
+  product_variant_id?: number | null;
   booking_number: string;
   date: string;
   start_time: string;
@@ -17,6 +18,7 @@ export interface Booking {
   updated_at: string;
   customer?: { id: number; first_name: string; last_name: string; email: string; phone?: string };
   product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean };
+  product_variant?: { id: number; name?: string; sku?: string };
   created_by?: { id: number; first_name: string; last_name: string };
   order?: { id: number; order_number: string };
   provider_id?: number;
@@ -64,6 +66,7 @@ export interface BookingQuery {
 export interface CreateBookingDto {
   customer_id: number;
   product_id: number;
+  product_variant_id?: number;
   date: string;
   start_time: string;
   end_time: string;

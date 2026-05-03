@@ -58,6 +58,11 @@
           <span class="font-medium text-text-primary text-sm">{{
             initialProduct().name
           }}</span>
+          @if (selectedVariant()) {
+            <span class="text-xs text-text-secondary">
+              {{ selectedVariant().name || selectedVariant().sku }}
+            </span>
+          }
           <span
             class="ml-auto text-xs text-text-secondary bg-primary/10 px-2 py-0.5 rounded-full"
             >Pre-seleccionado</span

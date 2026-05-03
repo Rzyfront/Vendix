@@ -20,6 +20,7 @@ export class CheckoutController {
   constructor(private readonly checkout_service: CheckoutService) {}
 
   @Get('payment-methods')
+  @OptionalAuth()
   async getPaymentMethods(@Query('shipping_type') shippingType?: string) {
     // store_id se resuelve automáticamente desde el dominio
     // shipping_type filters payment methods by processing_mode:
@@ -30,6 +31,7 @@ export class CheckoutController {
   }
 
   @Post()
+  @OptionalAuth()
   async checkout(@Body() dto: CheckoutDto) {
     // store_id y user_id se resuelven automáticamente
     const data = await this.checkout_service.checkout(dto);
@@ -37,6 +39,7 @@ export class CheckoutController {
   }
 
   @Post('prepare-wompi')
+  @OptionalAuth()
   async prepareWompiPayment(
     @Body()
     dto: {
@@ -45,6 +48,7 @@ export class CheckoutController {
       currency?: string;
       customer_email?: string;
       redirect_url?: string;
+      public_order_token?: string;
     },
   ) {
     const data = await this.checkout_service.prepareWompiPayment(dto);
@@ -62,6 +66,7 @@ export class CheckoutController {
    * uses StorePrismaService which scopes by store).
    */
   @Post('confirm-wompi-payment/:orderId')
+  @OptionalAuth()
   async confirmWompiPayment(@Param('orderId', ParseIntPipe) orderId: number) {
     const data = await this.checkout_service.confirmWompiPayment(orderId);
     return { success: true, data };

@@ -121,7 +121,7 @@ import {
                 <span
                   class="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800 rounded"
                 >
-                  Opcional
+                  Requerido
                 </span>
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

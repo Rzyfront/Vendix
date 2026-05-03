@@ -38,14 +38,7 @@ export class PublicDomainsService {
     const domain = await this.globalPrisma.domain_settings.findFirst({
       where: {
         hostname,
-        status: {
-          notIn: [
-            'disabled',
-            'failed_ownership',
-            'failed_certificate',
-            'failed_alias',
-          ],
-        },
+        status: 'active',
       },
       include: {
         organization: {

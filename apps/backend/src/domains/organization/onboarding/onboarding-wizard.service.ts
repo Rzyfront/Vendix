@@ -137,6 +137,8 @@ export class OnboardingWizardService {
       selectAppTypeDto.app_type === 'ORG_ADMIN'
         ? 'MULTI_STORE_ORG'
         : 'SINGLE_STORE';
+    const operatingScope =
+      selectAppTypeDto.app_type === 'ORG_ADMIN' ? 'ORGANIZATION' : 'STORE';
 
     // Check if already selected the same type
     const userConfig = user.user_settings?.config;
@@ -145,6 +147,7 @@ export class OnboardingWizardService {
         success: true,
         app_type: selectAppTypeDto.app_type,
         account_type: accountType,
+        operating_scope: operatingScope,
         message: 'Application type already selected',
         already_completed: true,
       };
@@ -156,6 +159,7 @@ export class OnboardingWizardService {
         where: { id: user.organization_id },
         data: {
           account_type: accountType,
+          operating_scope: operatingScope as any,
           updated_at: new Date(),
         },
       });
@@ -196,6 +200,7 @@ export class OnboardingWizardService {
       success: true,
       app_type: selectAppTypeDto.app_type,
       account_type: accountType,
+      operating_scope: operatingScope,
       message: 'Application type selected successfully',
     };
   }
@@ -354,6 +359,7 @@ export class OnboardingWizardService {
           website: setupOrgDto.website,
           tax_id: setupOrgDto.tax_id,
           account_type: 'MULTI_STORE_ORG', // Ensure multi-store for organization flow
+          operating_scope: 'ORGANIZATION' as any,
           updated_at: new Date(),
         },
       });
