@@ -9,6 +9,7 @@ import {
   IsInt,
   IsBoolean,
   IsObject,
+  Equals,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -32,6 +33,11 @@ export enum OrganizationState {
 export enum OrganizationAccountType {
   SINGLE_STORE = 'SINGLE_STORE',
   MULTI_STORE_ORG = 'MULTI_STORE_ORG',
+}
+
+export enum OrganizationOperatingScope {
+  STORE = 'STORE',
+  ORGANIZATION = 'ORGANIZATION',
 }
 
 // CreateOrganizationDto eliminado - creación de organizaciones es función de superadmin
@@ -120,8 +126,13 @@ export class OrganizationDashboardDto {
  * Solo permite upgrade de SINGLE_STORE a MULTI_STORE_ORG (no downgrade)
  */
 export class UpgradeAccountTypeDto {
-  @IsEnum(OrganizationAccountType)
+  @Equals(OrganizationAccountType.MULTI_STORE_ORG)
   account_type: OrganizationAccountType.MULTI_STORE_ORG;
+}
+
+export class UpdateOperatingScopeDto {
+  @IsEnum(OrganizationOperatingScope)
+  operating_scope: OrganizationOperatingScope;
 }
 
 // UsersDashboardDto eliminado - gestión de usuarios es función del módulo users

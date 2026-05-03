@@ -166,4 +166,89 @@ export class StoreDomainsController {
       );
     }
   }
+
+  @Post(':id/certificate/request')
+  @Permissions('store:domains:update')
+  async startCertificateProvisioning(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const domain = await this.domains_service.startCertificateProvisioning(id);
+      return this.response_service.success(
+        domain,
+        'Solicitud de certificado iniciada exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al solicitar el certificado',
+        error.message,
+      );
+    }
+  }
+
+  @Get(':id/certificate/status')
+  @Permissions('store:domains:read')
+  async refreshCertificateStatus(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const domain = await this.domains_service.refreshCertificateStatus(id);
+      return this.response_service.success(
+        domain,
+        'Estado del certificado actualizado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al consultar el certificado',
+        error.message,
+      );
+    }
+  }
+
+  @Post(':id/cloudfront/alias')
+  @Permissions('store:domains:update')
+  async attachCloudFrontAlias(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const domain = await this.domains_service.attachCloudFrontAlias(id);
+      return this.response_service.success(
+        domain,
+        'Alias CloudFront configurado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al configurar alias CloudFront',
+        error.message,
+      );
+    }
+  }
+
+  @Get(':id/cloudfront/status')
+  @Permissions('store:domains:read')
+  async refreshCloudFrontStatus(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const domain = await this.domains_service.refreshCloudFrontStatus(id);
+      return this.response_service.success(
+        domain,
+        'Estado de CloudFront actualizado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al consultar CloudFront',
+        error.message,
+      );
+    }
+  }
+
+  @Post(':id/provision-next')
+  @Permissions('store:domains:update')
+  async provisionNext(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const domain = await this.domains_service.provisionNext(id);
+      return this.response_service.success(
+        domain,
+        'Provisioning del dominio actualizado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al provisionar el dominio',
+        error.message,
+      );
+    }
+  }
 }

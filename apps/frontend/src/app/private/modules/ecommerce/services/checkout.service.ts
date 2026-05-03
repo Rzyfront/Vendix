@@ -189,13 +189,14 @@ export class CheckoutService {
    */
   confirmWompiPayment(
     orderId: number,
+    publicOrderToken?: string | null,
   ): Observable<{ success: boolean; data: ConfirmWompiPaymentResponse }> {
     return this.http.post<{
       success: boolean;
       data: ConfirmWompiPaymentResponse;
     }>(
       `${this.api_url}/confirm-wompi-payment/${orderId}`,
-      {},
+      { public_order_token: publicOrderToken || undefined },
       { headers: this.getHeaders() },
     );
   }

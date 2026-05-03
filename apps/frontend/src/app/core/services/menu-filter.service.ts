@@ -132,8 +132,10 @@ export class MenuFilterService {
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:
     Configuración: 'settings',
+    Operación: ['settings_operations', 'settings'],
+    'Configuración de Aplicación': ['settings_application', 'settings'],
     General: 'settings_general',
-    'Métodos de Pago': 'settings_payments',
+    'Métodos de Pago': ['settings_payment_methods', 'settings_payments', 'settings'],
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)

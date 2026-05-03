@@ -43,7 +43,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
         subtitle="Reglas y normativas de la organización"
         icon="file-text"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">

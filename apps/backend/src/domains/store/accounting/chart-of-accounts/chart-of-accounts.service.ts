@@ -116,8 +116,14 @@ export class ChartOfAccountsService {
   }
 
   async findOne(id: number) {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     const account = await this.prisma.chart_of_accounts.findFirst({
-      where: { id },
+      where: { id, accounting_entity_id: accountingEntity.id },
       include: {
         parent: {
           select: { id: true, code: true, name: true },
@@ -312,8 +318,14 @@ export class ChartOfAccountsService {
    * Find account by code within the current organization scope
    */
   async findByCode(code: string) {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     return this.prisma.chart_of_accounts.findFirst({
-      where: { code },
+      where: { code, accounting_entity_id: accountingEntity.id },
     });
   }
 }

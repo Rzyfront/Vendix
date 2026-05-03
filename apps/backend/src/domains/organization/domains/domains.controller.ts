@@ -355,6 +355,93 @@ export class DomainsController {
     );
   }
 
+  @Post(':id/certificate/request')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async startCertificateProvisioning(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.startCertificateProvisioning(
+      domainId,
+    );
+    return this.responseService.success(
+      result,
+      'Certificate provisioning started successfully',
+    );
+  }
+
+  @Get(':id/certificate/status')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async refreshCertificateStatus(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.refreshCertificateStatus(domainId);
+    return this.responseService.success(
+      result,
+      'Certificate status refreshed successfully',
+    );
+  }
+
+  @Post(':id/cloudfront/alias')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async attachCloudFrontAlias(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.attachCloudFrontAlias(domainId);
+    return this.responseService.success(
+      result,
+      'CloudFront alias attached successfully',
+    );
+  }
+
+  @Get(':id/cloudfront/status')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async refreshCloudFrontStatus(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.refreshCloudFrontStatus(domainId);
+    return this.responseService.success(
+      result,
+      'CloudFront status refreshed successfully',
+    );
+  }
+
+  @Post(':id/provision-next')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async provisionNext(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.provisionNext(domainId);
+    return this.responseService.success(
+      result,
+      'Domain provisioning advanced successfully',
+    );
+  }
+
   /**
    * Obtener instrucciones DNS para un dominio
    */
@@ -373,6 +460,7 @@ export class DomainsController {
         name: string;
         value: string;
         ttl: number;
+        purpose?: string;
       }[];
     }>
   > {

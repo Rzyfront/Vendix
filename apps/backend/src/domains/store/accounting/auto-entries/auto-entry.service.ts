@@ -87,8 +87,13 @@ export class AutoEntryService {
     } = event_data;
 
     const accounting_entity = accounting_entity_id
-      ? await this.prisma.withoutScope().accounting_entities.findUnique({
-          where: { id: accounting_entity_id },
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: {
+            id: accounting_entity_id,
+            organization_id,
+            ...(store_id ? { store_id } : {}),
+            is_active: true,
+          },
         })
       : await this.operating_scope_service.resolveAccountingEntity({
           organization_id,
@@ -98,6 +103,16 @@ export class AutoEntryService {
     if (!accounting_entity) {
       throw new Error(
         `Unable to resolve accounting entity for organization #${organization_id}`,
+      );
+    }
+
+    if (
+      store_id &&
+      accounting_entity.scope === 'STORE' &&
+      accounting_entity.store_id !== store_id
+    ) {
+      throw new Error(
+        `Accounting entity #${accounting_entity.id} does not belong to store #${store_id}`,
       );
     }
 

@@ -174,7 +174,20 @@ export class OperatingScopeService {
     store_id: number | null,
     client: any,
   ): Promise<number> {
-    if (store_id) return store_id;
+    if (store_id) {
+      const store = await client.stores.findFirst({
+        where: { id: store_id, organization_id, is_active: true },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new BadRequestException(
+          'Store does not belong to the current organization',
+        );
+      }
+
+      return store.id;
+    }
 
     const stores = await client.stores.findMany({
       where: { organization_id, is_active: true },

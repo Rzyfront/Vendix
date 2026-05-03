@@ -81,29 +81,36 @@ export class OnboardingController {
   }
 
   @Put('organization/:organizationId/reset')
+  @Permissions('organization:onboarding:update')
   async resetOrganizationOnboarding(
     @Param('organizationId') organizationId: number,
+    @Req() req: AuthenticatedRequest,
   ): Promise<OrganizationOnboardingStatusDto> {
-    return this.onboardingService.resetOrganizationOnboarding(
-      Number(organizationId),
-    );
+    const orgId = Number(organizationId);
+    this.assertOwnOrganization(req, orgId);
+    return this.onboardingService.resetOrganizationOnboarding(orgId);
   }
 
   // ===== STORE ONBOARDING ENDPOINTS =====
 
   @Get('store/:storeId/status')
+  @Permissions('organization:onboarding:read')
   async getStoreOnboardingStatus(
     @Param('storeId') storeId: number,
+    @Req() req: AuthenticatedRequest,
   ): Promise<StoreOnboardingStatusDto> {
+    await this.assertOwnStore(req, Number(storeId));
     return this.onboardingService.getStoreOnboardingStatus(Number(storeId));
   }
 
   @Post('store/:storeId/complete')
+  @Permissions('organization:onboarding:update')
   async completeStoreOnboarding(
     @Param('storeId') storeId: number,
     @Body() completeDto: CompleteStoreOnboardingDto,
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
   ): Promise<StoreOnboardingStatusDto> {
+    await this.assertOwnStore(req, Number(storeId));
     return this.onboardingService.completeStoreOnboarding(Number(storeId), {
       ...completeDto,
       store_id: Number(storeId),
@@ -111,9 +118,38 @@ export class OnboardingController {
   }
 
   @Put('store/:storeId/reset')
+  @Permissions('organization:onboarding:update')
   async resetStoreOnboarding(
     @Param('storeId') storeId: number,
+    @Req() req: AuthenticatedRequest,
   ): Promise<StoreOnboardingStatusDto> {
+    await this.assertOwnStore(req, Number(storeId));
     return this.onboardingService.resetStoreOnboarding(Number(storeId));
+  }
+
+  private assertOwnOrganization(req: AuthenticatedRequest, organizationId: number): void {
+    if (
+      req.user.organization_id !== organizationId &&
+      !req.user.user_roles?.some((r) => r.roles?.name === UserRole.SUPER_ADMIN)
+    ) {
+      throw new UnauthorizedException(
+        'You can only access your own organization onboarding',
+      );
+    }
+  }
+
+  private async assertOwnStore(
+    req: AuthenticatedRequest,
+    storeId: number,
+  ): Promise<void> {
+    const status = await this.onboardingService.getStoreOnboardingStatus(storeId);
+    if (
+      req.user.organization_id !== status.organization_id &&
+      !req.user.user_roles?.some((r) => r.roles?.name === UserRole.SUPER_ADMIN)
+    ) {
+      throw new UnauthorizedException(
+        'You can only access stores from your organization',
+      );
+    }
   }
 }

@@ -33,7 +33,7 @@
         ></app-selector>
 
         <app-selector
-          label="Categoría legacy"
+          label="Tipo de dominio"
           formControlName="domain_type"
           [options]="domainTypeOptions"
           [required]="true"
@@ -85,7 +85,7 @@
                 <div class="rounded-md border border-amber-200 bg-white/80 p-3 text-xs">
                   <div class="mb-2 flex items-center justify-between gap-2">
                     <span class="font-semibold text-amber-950">
-                      {{ record.record_type }} {{ record.purpose === 'ownership' ? '(propiedad)' : '(routing)' }}
+                      {{ record.record_type }} {{ record.purpose === 'ownership' ? '(propiedad)' : record.purpose === 'certificate' ? '(certificado ACM)' : '(routing)' }}
                     </span>
                     <span class="text-amber-700">TTL {{ record.ttl }}</span>
                   </div>

@@ -68,7 +68,7 @@ interface RetentionType {
         subtitle="DIAN, retenciones y tasas de IVA"
         icon="credit-card"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">

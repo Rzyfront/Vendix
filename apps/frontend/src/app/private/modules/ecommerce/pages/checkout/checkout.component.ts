@@ -995,7 +995,10 @@ export class CheckoutComponent implements OnInit {
           ) {
             try {
               await firstValueFrom(
-                this.checkout_service.confirmWompiPayment(orderId),
+                this.checkout_service.confirmWompiPayment(
+                  orderId,
+                  publicOrderToken,
+                ),
               );
             } catch (err) {
               console.warn('confirm-wompi-payment failed', err);

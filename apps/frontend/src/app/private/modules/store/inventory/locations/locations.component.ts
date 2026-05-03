@@ -548,6 +548,7 @@ export class LocationsComponent implements OnInit {
 
   onSaveLocation(data: CreateLocationDto | UpdateLocationDto): void {
     this.is_submitting.set(true);
+    const shouldSetDefault = Boolean(data.is_default);
 
     const loc = this.selected_location();
     if (loc) {
@@ -556,10 +557,12 @@ export class LocationsComponent implements OnInit {
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
-            this.toastService.success('Ubicación actualizada correctamente');
-            this.is_submitting.set(false);
-            this.closeModal();
-            this.loadLocations();
+            if (shouldSetDefault) {
+              this.setDefaultAfterSave(loc.id, 'Ubicación actualizada correctamente');
+              return;
+            }
+
+            this.finishLocationSave('Ubicación actualizada correctamente');
           },
           error: (error) => {
             this.toastService.error(error || 'Error al actualizar ubicación');
@@ -571,18 +574,43 @@ export class LocationsComponent implements OnInit {
         .createLocation(data as CreateLocationDto)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: () => {
-            this.toastService.success('Ubicación creada correctamente');
-            this.is_submitting.set(false);
-            this.closeModal();
-            this.loadLocations();
+          next: (response) => {
+            const createdId = response.data?.id;
+            if (shouldSetDefault && createdId) {
+              this.setDefaultAfterSave(createdId, 'Ubicación creada correctamente');
+              return;
+            }
+
+            this.finishLocationSave('Ubicación creada correctamente');
           },
           error: (error) => {
             this.toastService.error(error || 'Error al crear ubicación');
             this.is_submitting.set(false);
           },
-        });
+      });
     }
+  }
+
+  private setDefaultAfterSave(locationId: number, successMessage: string): void {
+    this.locationsService
+      .setAsDefault(locationId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.finishLocationSave(successMessage),
+        error: (error) => {
+          this.toastService.error(
+            error || 'La ubicación se guardó, pero no se pudo marcar como principal',
+          );
+          this.is_submitting.set(false);
+        },
+      });
+  }
+
+  private finishLocationSave(message: string): void {
+    this.toastService.success(message);
+    this.is_submitting.set(false);
+    this.closeModal();
+    this.loadLocations();
   }
 
   confirmDelete(location: InventoryLocation): void {

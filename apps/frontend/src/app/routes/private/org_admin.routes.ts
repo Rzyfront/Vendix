@@ -5,9 +5,9 @@ export const orgAdminRoutes: Routes = [
   {
     path: 'admin',
     loadComponent: () =>
-      import(
-        '../../private/layouts/organization-admin/organization-admin-layout.component'
-      ).then((c) => c.OrganizationAdminLayoutComponent),
+      import('../../private/layouts/organization-admin/organization-admin-layout.component').then(
+        (c) => c.OrganizationAdminLayoutComponent,
+      ),
     canActivate: [AuthGuard],
     children: [
       {
@@ -18,16 +18,16 @@ export const orgAdminRoutes: Routes = [
       {
         path: 'dashboard',
         loadComponent: () =>
-          import(
-            '../../private/modules/organization/dashboard/dashboard.component'
-          ).then((c) => c.DashboardComponent),
+          import('../../private/modules/organization/dashboard/dashboard.component').then(
+            (c) => c.DashboardComponent,
+          ),
       },
       {
         path: 'stores',
         loadComponent: () =>
-          import(
-            '../../private/modules/organization/stores/stores.component'
-          ).then((c) => c.StoresComponent),
+          import('../../private/modules/organization/stores/stores.component').then(
+            (c) => c.StoresComponent,
+          ),
       },
       {
         path: 'users',
@@ -36,11 +36,10 @@ export const orgAdminRoutes: Routes = [
             path: '',
             pathMatch: 'full',
             loadComponent: () =>
-              import(
-                '../../private/modules/organization/users/users.component'
-              ).then((c) => c.UsersComponent),
+              import('../../private/modules/organization/users/users.component').then(
+                (c) => c.UsersComponent,
+              ),
           },
-
         ],
       },
       {
@@ -50,52 +49,46 @@ export const orgAdminRoutes: Routes = [
             path: '',
             pathMatch: 'full',
             loadComponent: () =>
-              import(
-                '../../private/modules/organization/orders/orders-list.component'
-              ).then((c) => c.OrdersListComponent),
+              import('../../private/modules/organization/orders/orders-list.component').then(
+                (c) => c.OrdersListComponent,
+              ),
           },
           {
             path: ':id',
             loadComponent: () =>
-              import(
-                '../../private/modules/organization/orders/components/order-details.component'
-              ).then((c) => c.OrderDetailsComponent),
+              import('../../private/modules/organization/orders/components/order-details.component').then(
+                (c) => c.OrderDetailsComponent,
+              ),
           },
         ],
       },
       {
         path: 'audit',
         loadChildren: () =>
-          import(
-            '../../private/modules/organization/audit/audit.routes'
-          ).then((m) => m.AuditRoutingModule),
+          import('../../private/modules/organization/audit/audit.routes').then(
+            (m) => m.AuditRoutingModule,
+          ),
       },
       {
         path: 'config',
-        children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            loadComponent: () =>
-              import(
-                '../../private/modules/organization/config/config.component'
-              ).then((c) => c.ConfigComponent),
-          },
-        ],
+        loadChildren: () =>
+          import('../../private/modules/organization/config/config.routes').then(
+            (m) => m.ConfigRoutingModule,
+          ),
       },
       {
         path: 'domains',
         loadComponent: () =>
-          import(
-            '../../private/modules/organization/domains/domains.component'
-          ).then((c) => c.DomainsComponent),
+          import('../../private/modules/organization/domains/domains.component').then(
+            (c) => c.DomainsComponent,
+          ),
       },
       {
         path: 'roles',
         loadComponent: () =>
-          import(
-            '../../private/modules/organization/roles/roles.component'
-          ).then((c) => c.RolesComponent),
+          import('../../private/modules/organization/roles/roles.component').then(
+            (c) => c.RolesComponent,
+          ),
       },
       // Accounting Routes (adaptive module — visible at org level)
       {

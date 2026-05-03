@@ -227,12 +227,48 @@ export class CheckoutService {
     };
   }
 
+  private async assertOrderAccess(
+    orderId: number,
+    customerId: number | null,
+    publicOrderToken?: string,
+  ): Promise<void> {
+    const userId = RequestContextService.getUserId();
+    const requiresPublicToken = !userId || customerId === null;
+
+    if (requiresPublicToken) {
+      if (!publicOrderToken) {
+        throw new BadRequestException('Token público de orden requerido');
+      }
+
+      const publicOrder =
+        await this.store_prisma.invoice_data_requests.findFirst({
+          where: { token: publicOrderToken, order_id: orderId },
+          select: { id: true },
+        });
+
+      if (!publicOrder) {
+        throw new BadRequestException('Token público de orden inválido');
+      }
+      return;
+    }
+
+    if (customerId !== userId) {
+      throw new NotFoundException('No se encontró la orden');
+    }
+  }
+
   async checkout(dto: CheckoutDto) {
     await this.assertGuestCheckoutAllowed();
 
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
     const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
+
+    if (is_guest && dto.bookings?.length) {
+      throw new BadRequestException(
+        'Debes iniciar sesión para reservar servicios con horario',
+      );
+    }
 
     // Guest checkout must never read store-scoped backend carts because there
     // is no customer_id filter without auth. Guests use DTO items from localStorage.
@@ -1187,7 +1223,6 @@ export class CheckoutService {
     redirect_url?: string;
     public_order_token?: string;
   }) {
-    const userId = RequestContextService.getUserId();
     const order = await this.store_prisma.orders.findFirst({
       where: { id: dto.order_id },
       select: {
@@ -1202,23 +1237,11 @@ export class CheckoutService {
       throw new NotFoundException('No se encontró la orden');
     }
 
-    if (!userId) {
-      if (!dto.public_order_token) {
-        throw new BadRequestException('Token público de orden requerido');
-      }
-
-      const publicOrder =
-        await this.store_prisma.invoice_data_requests.findFirst({
-          where: { token: dto.public_order_token, order_id: dto.order_id },
-          select: { id: true },
-        });
-
-      if (!publicOrder) {
-        throw new BadRequestException('Token público de orden inválido');
-      }
-    } else if (order.customer_id && order.customer_id !== userId) {
-      throw new NotFoundException('No se encontró la orden');
-    }
+    await this.assertOrderAccess(
+      dto.order_id,
+      order.customer_id,
+      dto.public_order_token,
+    );
 
     // Find Wompi payment method for this store
     const wompiMethod = await this.store_prisma.store_payment_methods.findFirst(
@@ -1264,8 +1287,27 @@ export class CheckoutService {
     // which would orphan the original reference and confuse webhook lookup.
     const existingPayment = await this.store_prisma.payments.findFirst({
       where: { order_id: dto.order_id },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
+
+    if (!existingPayment) {
+      throw new BadRequestException(
+        'No existe un pago pendiente para esta orden',
+      );
+    }
+
+    const paymentMethodType =
+      existingPayment.store_payment_method?.system_payment_method?.type;
+    const paymentMethodProvider =
+      existingPayment.store_payment_method?.system_payment_method?.provider;
+    if (paymentMethodType !== 'wompi' && paymentMethodProvider !== 'wompi') {
+      throw new BadRequestException('La orden no fue creada con Wompi');
+    }
 
     let reference: string;
     if (existingPayment?.gateway_reference) {
@@ -1276,15 +1318,13 @@ export class CheckoutService {
       reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
       // Persist on the existing pending payment row (don't overwrite
       // transaction_id — that's the placeholder/real-Wompi-id field).
-      if (existingPayment) {
-        await this.store_prisma.payments.update({
-          where: { id: existingPayment.id },
-          data: {
-            gateway_reference: reference,
-            updated_at: new Date(),
-          },
-        });
-      }
+      await this.store_prisma.payments.update({
+        where: { id: existingPayment.id },
+        data: {
+          gateway_reference: reference,
+          updated_at: new Date(),
+        },
+      });
     }
 
     const amountInCents = Math.round(Number(order.grand_total) * 100);
@@ -1417,7 +1457,10 @@ export class CheckoutService {
    * Returns the canonical payment state plus a flag indicating whether the
    * payment was already in a terminal state.
    */
-  async confirmWompiPayment(orderId: number): Promise<{
+  async confirmWompiPayment(
+    orderId: number,
+    publicOrderToken?: string,
+  ): Promise<{
     state: string;
     orderState: string;
     transactionId: string | null;
@@ -1427,13 +1470,37 @@ export class CheckoutService {
     // Use store-scoped client: customer-auth requests carry the resolved
     // store context, and we want defense in depth — the order MUST belong
     // to the store the customer is browsing.
+    const order = await this.store_prisma.orders.findFirst({
+      where: { id: orderId },
+      select: { customer_id: true, state: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('No se encontró la orden');
+    }
+
+    await this.assertOrderAccess(orderId, order.customer_id, publicOrderToken);
+
     const payment = await this.store_prisma.payments.findFirst({
       where: { order_id: orderId },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
 
     if (!payment) {
       throw new NotFoundException('No payment record found for this order');
+    }
+
+    const paymentMethodType =
+      payment.store_payment_method?.system_payment_method?.type;
+    const paymentMethodProvider =
+      payment.store_payment_method?.system_payment_method?.provider;
+    if (paymentMethodType !== 'wompi' && paymentMethodProvider !== 'wompi') {
+      throw new BadRequestException('La orden no fue creada con Wompi');
     }
 
     // Idempotency: if payment is already in a terminal state, skip the
@@ -1446,10 +1513,6 @@ export class CheckoutService {
       'refunded',
     ];
     if (terminal.includes(payment.state)) {
-      const order = await this.store_prisma.orders.findUnique({
-        where: { id: orderId },
-        select: { state: true },
-      });
       return {
         state: payment.state,
         orderState: order?.state ?? 'unknown',
@@ -1569,7 +1632,7 @@ export class CheckoutService {
       where: { id: payment.id },
       select: { state: true, transaction_id: true, order_id: true },
     });
-    const order = finalPayment
+    const finalOrder = finalPayment
       ? await this.store_prisma.orders.findUnique({
           where: { id: finalPayment.order_id },
           select: { state: true },
@@ -1578,7 +1641,7 @@ export class CheckoutService {
 
     return {
       state: finalPayment?.state ?? mappedState ?? payment.state,
-      orderState: order?.state ?? 'unknown',
+      orderState: finalOrder?.state ?? 'unknown',
       transactionId: finalPayment?.transaction_id ?? payment.transaction_id,
       alreadyConfirmed: false,
     };

@@ -107,4 +107,11 @@ export class StoreDomainsService {
             {},
         );
     }
+
+    provisionNext(id: number): Observable<SingleDomainResponse> {
+        return this.http.post<SingleDomainResponse>(
+            `${this.api_url}/store/domains/${id}/provision-next`,
+            {},
+        );
+    }
 }

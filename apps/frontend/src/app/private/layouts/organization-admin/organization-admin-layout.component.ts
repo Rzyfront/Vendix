@@ -204,14 +204,19 @@ export class OrganizationAdminLayoutComponent {
       icon: 'settings',
       children: [
         {
+          label: 'Operación',
+          icon: 'settings',
+          route: '/admin/config/operations',
+        },
+        {
           label: 'Configuración de Aplicación',
           icon: 'sliders',
           route: '/admin/config/application',
         },
         {
-          label: 'Metodos de pago',
+          label: 'Métodos de Pago',
           icon: 'credit-card',
-          route: '/admin/config/payments-methods',
+          route: '/admin/config/payment-methods',
         },
       ],
     },

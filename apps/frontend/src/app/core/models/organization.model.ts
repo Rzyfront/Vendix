@@ -6,12 +6,21 @@ export interface Organization {
   status: 'active' | 'inactive' | 'suspended' | 'pending';
   plan: 'basic' | 'premium' | 'enterprise';
   settings: OrganizationSettings;
+  account_type?: OrganizationAccountType;
+  operating_scope?: OrganizationOperatingScope;
   branding: OrganizationBranding;
   contact: OrganizationContact;
   limits: OrganizationLimits;
   createdAt: Date;
   updatedAt: Date;
 }
+
+export enum OrganizationAccountType {
+  SINGLE_STORE = 'SINGLE_STORE',
+  MULTI_STORE_ORG = 'MULTI_STORE_ORG',
+}
+
+export type OrganizationOperatingScope = 'STORE' | 'ORGANIZATION';
 
 export interface OrganizationInventorySettings {
   mode: 'organizational' | 'independent';

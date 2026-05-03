@@ -18,6 +18,7 @@ import {
   Domain,
   VerifyDomainResult,
   DomainOwnership,
+  DnsInstructions,
 } from '../../interfaces/domain.interface';
 
 @Component({
@@ -169,6 +170,54 @@ import {
                 </div>
               </div>
             </div>
+            @if (certificateRecords.length > 0) {
+              @for (record of certificateRecords; track record.record_type + record.name + record.value) {
+                <div class="border border-[var(--color-border)] rounded-lg p-4">
+                  <div class="flex items-center justify-between mb-3">
+                    <h5 class="font-medium text-[var(--color-text-primary)]">
+                      Registro {{ record.record_type }} (Certificado ACM)
+                    </h5>
+                    <span
+                      class="px-2 py-1 text-xs font-medium bg-purple-100 text-purple-800 rounded"
+                    >
+                      Requerido para SSL
+                    </span>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                        Nombre/Host
+                      </label>
+                      <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-muted)] rounded border border-[var(--color-border)]">
+                        <code class="text-sm flex-1 truncate">{{ record.name }}</code>
+                        <button
+                          (click)="copyToClipboard(record.name)"
+                          class="text-[var(--color-primary)] hover:text-[var(--color-primary-hover)]"
+                          title="Copiar"
+                        >
+                          <app-icon name="copy" [size]="14"></app-icon>
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
+                        Valor/Destino
+                      </label>
+                      <div class="flex items-center gap-2 px-3 py-2 bg-[var(--color-muted)] rounded border border-[var(--color-border)]">
+                        <code class="text-sm flex-1 truncate">{{ record.value }}</code>
+                        <button
+                          (click)="copyToClipboard(record.value)"
+                          class="text-[var(--color-primary)] hover:text-[var(--color-primary-hover)]"
+                          title="Copiar"
+                        >
+                          <app-icon name="copy" [size]="14"></app-icon>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              }
+            }
           </div>
         }
 
@@ -207,7 +256,7 @@ import {
                   >
                     {{
                       verificationResult()?.verified
-                        ? 'Dominio Verificado'
+                        ? 'Propiedad Verificada'
                         : 'Verificación Fallida'
                     }}
                   </h4>
@@ -221,7 +270,7 @@ import {
                   >
                     {{
                       verificationResult()?.verified
-                        ? 'Tu dominio ha sido verificado correctamente y está activo.'
+                        ? 'Tu propiedad del dominio fue verificada. El certificado SSL queda pendiente de emisión.'
                         : 'No se pudo verificar tu dominio. Revisa la configuración DNS.'
                     }}
                   </p>
@@ -335,6 +384,7 @@ export class DomainVerifyModalComponent implements OnChanges {
   readonly isVerifying = input(false);
   readonly domain = input<Domain | null>(null);
   readonly verificationResult = input<VerifyDomainResult | null>(null);
+  readonly dnsInstructions = input<DnsInstructions | null>(null);
   // Edge host (CloudFront target) provided by backend `getDnsInstructions().target`.
   // Required so the modal does not hardcode the platform domain.
   readonly edgeHost = input.required<string>();
@@ -368,6 +418,14 @@ export class DomainVerifyModalComponent implements OnChanges {
     return (
       domain?.ownership === DomainOwnership.CUSTOM_DOMAIN ||
       domain?.ownership === DomainOwnership.CUSTOM_SUBDOMAIN
+    );
+  }
+
+  get certificateRecords() {
+    return (
+      this.dnsInstructions()?.instructions.filter(
+        (record) => record.purpose === 'certificate',
+      ) ?? []
     );
   }
 

@@ -1,5 +1,10 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import {
+  NavigationEnd,
+  Router,
+  RouterLink,
+  RouterOutlet,
+} from '@angular/router';
 import { filter } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../shared/components';
@@ -11,15 +16,36 @@ import { IconComponent } from '../../../../shared/components';
   template: `
     <div class="w-full">
       @if (showGrid()) {
-        <h1 class="text-2xl font-bold mb-6">Configuración de la organización</h1>
+        <h1 class="text-2xl font-bold mb-6">
+          Configuración de la organización
+        </h1>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <a
-            routerLink="/organization/config/application"
+            routerLink="operations"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="sliders" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="settings"
+                size="20"
+                class="text-primary"
+              ></app-icon>
+              <h3 class="text-lg font-semibold">Operación</h3>
+            </div>
+            <p class="text-gray-600">Alcance operativo y modelo multi-tienda</p>
+          </a>
+
+          <a
+            routerLink="application"
+            class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+          >
+            <div class="flex items-center gap-3 mb-2">
+              <app-icon
+                name="sliders"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">
                 Configuración de la aplicación
               </h3>
@@ -28,18 +54,22 @@ import { IconComponent } from '../../../../shared/components';
           </a>
 
           <a
-            routerLink="/organization/config/policies"
+            routerLink="policies"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="file-text" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="file-text"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Políticas</h3>
             </div>
             <p class="text-gray-600">Políticas y reglas organizacionales</p>
           </a>
 
           <a
-            routerLink="/organization/config/integrations"
+            routerLink="integrations"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
@@ -50,55 +80,77 @@ import { IconComponent } from '../../../../shared/components';
           </a>
 
           <a
-            routerLink="/organization/config/taxes"
+            routerLink="taxes"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="credit-card" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="credit-card"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Impuestos</h3>
             </div>
             <p class="text-gray-600">Configuración y tasas de impuestos</p>
           </a>
 
           <a
-            routerLink="/organization/config/inventory"
+            routerLink="inventory"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="warehouse" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="warehouse"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Inventario</h3>
             </div>
-            <p class="text-gray-600">Modo de inventario y configuración de stock</p>
+            <p class="text-gray-600">
+              Modo de inventario y configuración de stock
+            </p>
           </a>
 
           <a
-            routerLink="/organization/config/domains"
+            routerLink="domains"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="globe-2" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="globe-2"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Dominios</h3>
             </div>
             <p class="text-gray-600">Gestión de dominios</p>
           </a>
 
           <a
-            routerLink="/organization/config/payment-methods"
+            routerLink="payment-methods"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="credit-card" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="credit-card"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Métodos de pago</h3>
             </div>
             <p class="text-gray-600">Configuración de pago</p>
           </a>
 
           <a
-            routerLink="/organization/config/orphan-settings"
+            routerLink="orphan-settings"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >
             <div class="flex items-center gap-3 mb-2">
-              <app-icon name="settings" size="20" class="text-primary"></app-icon>
+              <app-icon
+                name="settings"
+                size="20"
+                class="text-primary"
+              ></app-icon>
               <h3 class="text-lg font-semibold">Configuración adicional</h3>
             </div>
             <p class="text-gray-600">Publicación, fuentes, flujos y panel</p>
@@ -121,8 +173,8 @@ export class ConfigComponent {
   private router = inject(Router);
   readonly currentUrl = signal(this.router.url);
   readonly showGrid = computed(() => {
-    const url = this.currentUrl();
-    return url === '/organization/config' || url === '/organization/config/';
+    const url = this.currentUrl().split(/[?#]/)[0];
+    return url.endsWith('/config') || url.endsWith('/config/');
   });
 
   constructor() {

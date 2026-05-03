@@ -16,7 +16,6 @@ import {
   AdjustmentType,
 } from './interfaces/inventory-adjustment.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { InventoryTransactionsService } from '../transactions/inventory-transactions.service';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 
 // Common include object for adjustment queries
@@ -41,6 +40,7 @@ const ADJUSTMENT_INCLUDE = {
       name: true,
       code: true,
       type: true,
+      store_id: true,
     },
   },
   inventory_batches: {
@@ -74,23 +74,12 @@ const ADJUSTMENT_INCLUDE = {
   },
 };
 
-// Map transaction type based on adjustment type
-// Note: Only 'adjustment_damage', 'damage', and 'expiration' are valid transaction types
-const getTransactionType = (
-  adjustmentType: AdjustmentType,
-): 'adjustment_damage' | 'damage' | 'expiration' => {
-  if (adjustmentType === 'damage') return 'damage';
-  if (adjustmentType === 'expiration') return 'expiration';
-  return 'adjustment_damage'; // Default for loss, theft, count_variance, manual_correction
-};
-
 @Injectable()
 export class InventoryAdjustmentsService {
   private readonly logger = new Logger(InventoryAdjustmentsService.name);
 
   constructor(
     private prisma: StorePrismaService,
-    private transactionsService: InventoryTransactionsService,
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
   ) {}
@@ -236,17 +225,7 @@ export class InventoryAdjustmentsService {
         validate_availability: false,
       });
 
-      // 5. Crear inventory transaction
-      await this.transactionsService.createTransaction({
-        productId: productId,
-        variantId: variantId ?? undefined,
-        type: getTransactionType(data.type),
-        quantityChange: quantityChange,
-        reason: `Inventory adjustment: ${data.type}${batchId ? ` (Batch: ${batchId})` : ''}`,
-        userId: userId || undefined,
-      });
-
-      // 6. Transformar respuesta para mapear nombres de relaciones
+      // 5. Transformar respuesta para mapear nombres de relaciones
       return {
         adjustment: this.mapAdjustmentResponse(adjustment),
         quantity_change: quantityChange,
@@ -261,6 +240,7 @@ export class InventoryAdjustmentsService {
         this.eventEmitter.emit('inventory.adjusted', {
           adjustment_id: adjustment_result.adjustment.id,
           organization_id: organizationId,
+          store_id: adjustment_result.adjustment.inventory_locations?.store_id,
           quantity_change: adjustment_result.quantity_change,
           cost_amount,
           user_id: userId,

@@ -5,21 +5,24 @@ import {
   output,
   signal,
   inject,
+  DestroyRef,
   OnInit,
   model,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { IconComponent, ButtonComponent, SpinnerComponent } from '../../../../../../shared/components/index';
 import { OrganizationDomainsService } from '../../services/organization-domains.service';
 
-export interface DnsInstruction {
+interface DnsInstruction {
   record_type: string;
   name: string;
   value: string;
   ttl: number;
+  purpose?: string;
 }
 
-export interface DnsInstructionsData {
+interface DnsInstructionsData {
   hostname: string;
   ownership: string;
   dns_type: 'CNAME' | 'A';
@@ -90,12 +93,17 @@ export interface DnsInstructionsData {
                 </tr>
               </thead>
               <tbody class="divide-y divide-[var(--color-border)]">
-                @for (instruction of dnsData()!.instructions; track instruction.record_type) {
+                @for (instruction of dnsData()!.instructions; track instruction.record_type + instruction.name + instruction.value) {
                   <tr>
                     <td class="px-3 py-2">
                       <span class="font-mono text-xs font-medium text-[var(--color-text-primary)]">
                         {{ instruction.record_type }}
                       </span>
+                      @if (instruction.purpose) {
+                        <div class="text-[10px] text-[var(--color-text-secondary)]">
+                          {{ formatPurpose(instruction.purpose) }}
+                        </div>
+                      }
                     </td>
                     <td class="px-3 py-2">
                       <span class="font-mono text-xs text-[var(--color-text-primary)]">
@@ -151,6 +159,7 @@ export interface DnsInstructionsData {
 })
 export class DnsInstructionsComponent implements OnInit {
   private domainsService = inject(OrganizationDomainsService);
+  private destroyRef = inject(DestroyRef);
 
   readonly hostname = input<string | null>(null);
   readonly isOpen = model<boolean>(false);
@@ -175,15 +184,26 @@ export class DnsInstructionsComponent implements OnInit {
     this.isLoading.set(true);
     this.error.set(null);
 
-    this.domainsService.getDnsInstructions(host).subscribe({
-      next: (response) => {
-        this.dnsData.set(response.data);
-        this.isLoading.set(false);
-      },
-      error: (err) => {
-        this.error.set('Error cargando instrucciones DNS');
-        this.isLoading.set(false);
-      },
-    });
+    this.domainsService.getDnsInstructions(host)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.dnsData.set(response.data);
+          this.isLoading.set(false);
+        },
+        error: (err) => {
+          this.error.set('Error cargando instrucciones DNS');
+          this.isLoading.set(false);
+        },
+      });
+  }
+
+  formatPurpose(purpose: string): string {
+    const labels: Record<string, string> = {
+      ownership: 'Propiedad',
+      routing: 'Routing',
+      certificate: 'Certificado ACM',
+    };
+    return labels[purpose] || purpose;
   }
 }

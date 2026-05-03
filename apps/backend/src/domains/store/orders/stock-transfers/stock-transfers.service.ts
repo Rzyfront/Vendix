@@ -244,7 +244,7 @@ export class StockTransfersService {
 
       // Move stock using StockLevelManager
       for (const item of stockTransfer.stock_transfer_items) {
-        await this.stockLevelManager.updateStock(
+        const sourceStockUpdate = await this.stockLevelManager.updateStock(
           {
             product_id: item.product_id,
             variant_id: item.product_variant_id ?? undefined,
@@ -272,6 +272,7 @@ export class StockTransfersService {
             create_movement: true,
             from_location_id: stockTransfer.from_location_id,
             to_location_id: stockTransfer.to_location_id,
+            unit_cost: Number(sourceStockUpdate.cost_snapshot?.unit_cost || 0),
           },
           tx,
         );

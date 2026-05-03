@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal } from '@angular/core';
+import { Component, DestroyRef, effect, inject, signal } from '@angular/core';
 import {
   FormGroup,
   FormControl,
@@ -43,7 +43,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
         subtitle="Ajustes de publicación, fuentes, flujos y paneles"
         icon="settings"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">
@@ -58,6 +58,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
           </app-alert-banner>
         } @else {
           <app-card [responsivePadding]="true">
+            <form [formGroup]="form" (ngSubmit)="onSave()">
             <app-scrollable-tabs [tabs]="tabs" [activeTab]="activeTab()" (tabChange)="activeTab.set($event)"></app-scrollable-tabs>
 
             <div class="mt-6">
@@ -228,6 +229,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
                 Guardar cambios
               </app-button>
             </div>
+            </form>
           </app-card>
         }
       </div>
@@ -241,6 +243,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
 })
 export class OrphanSettingsComponent {
   private settingsService = inject(OrganizationSettingsService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly loading = signal(false);
   readonly saving = signal(false);
@@ -453,10 +456,22 @@ export class OrphanSettingsComponent {
       },
     };
 
-    this.settingsService.saveSettings(settings as any).subscribe({
-      next: () => this.form.markAsPristine(),
-      error: () => {},
-    });
+    this.saving.set(true);
+    this.error.set(null);
+
+    this.settingsService
+      .saveSettings(settings as any)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.form.markAsPristine();
+          this.saving.set(false);
+        },
+        error: () => {
+          this.error.set('Error al guardar la configuración adicional.');
+          this.saving.set(false);
+        },
+      });
   }
 
   dismissError(): void {

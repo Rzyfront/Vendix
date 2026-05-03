@@ -38,6 +38,24 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
       key: 'settings',
       label: 'Configuraci\u00f3n',
       description: 'Ajustes de la organizaci\u00f3n',
+      isParent: true,
+      children: [
+        {
+          key: 'settings_operations',
+          label: 'Operaci\u00f3n',
+          description: 'Alcance operativo y modelo multi-tienda',
+        },
+        {
+          key: 'settings_application',
+          label: 'Configuraci\u00f3n de Aplicaci\u00f3n',
+          description: 'Configuraci\u00f3n general de la aplicaci\u00f3n',
+        },
+        {
+          key: 'settings_payment_methods',
+          label: 'M\u00e9todos de Pago',
+          description: 'Configuraci\u00f3n de m\u00e9todos de pago',
+        },
+      ],
     },
     {
       key: 'accounting',

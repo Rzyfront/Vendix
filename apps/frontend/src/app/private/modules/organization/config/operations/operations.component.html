@@ -1,0 +1,227 @@
+<div class="w-full space-y-6">
+  <app-sticky-header
+    title="Configuración operativa"
+    subtitle="Define si la organización opera por tienda o de forma consolidada"
+    icon="settings"
+    [showBackButton]="true"
+    backRoute="/admin/config"
+  ></app-sticky-header>
+
+  @if (loading()) {
+    <div class="flex justify-center py-12">
+      <app-spinner
+        size="lg"
+        text="Cargando configuración operativa..."
+      ></app-spinner>
+    </div>
+  } @else {
+    @if (error()) {
+      <app-alert-banner variant="danger" icon="alert-circle">
+        {{ error() }}
+        <button class="ml-3 font-semibold underline" (click)="dismissError()">
+          Cerrar
+        </button>
+      </app-alert-banner>
+    }
+
+    @if (config()) {
+      <app-card [responsivePadding]="true">
+        <div class="space-y-6">
+          <div
+            class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+          >
+            <div>
+              <p
+                class="text-xs font-bold uppercase tracking-wider text-gray-400"
+              >
+                Modelo de organización
+              </p>
+              <h2
+                class="mt-1 text-xl font-semibold text-[var(--color-text-primary)]"
+              >
+                {{ config()!.organization.name }}
+              </h2>
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+                {{
+                  isMultiStore()
+                    ? "Organización multi-tienda"
+                    : "Cuenta de una sola tienda"
+                }}
+              </p>
+            </div>
+
+            <div class="rounded-xl bg-[var(--color-surface)] px-4 py-3 text-sm">
+              <span class="block text-[var(--color-text-secondary)]"
+                >Tiendas activas</span
+              >
+              <strong class="text-lg text-[var(--color-text-primary)]">
+                {{ config()!.organization.stores_count }}
+              </strong>
+            </div>
+          </div>
+
+          <app-alert-banner variant="info" icon="info">
+            El alcance operativo se guarda en la organización y aplica a
+            inventario, proveedores, compras, contabilidad, valoración y
+            reportes. No se configura por tienda.
+          </app-alert-banner>
+
+          <div>
+            <p
+              class="mb-4 text-xs font-bold uppercase tracking-wider text-gray-400"
+            >
+              Alcance operativo
+            </p>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <button
+                type="button"
+                [class]="scopeCardClasses('STORE')"
+                [disabled]="saving()"
+                (click)="selectScope('STORE')"
+              >
+                <div class="flex items-start gap-4">
+                  <div class="mt-1 rounded-xl bg-blue-50 p-3 text-blue-600">
+                    <app-icon name="store" [size]="22"></app-icon>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <h3
+                        class="font-semibold text-[var(--color-text-primary)]"
+                      >
+                        Por tienda
+                      </h3>
+                      @if (currentScope() === "STORE") {
+                        <span
+                          class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700"
+                        >
+                          Activo
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+                      Cada tienda maneja sus propios proveedores, ubicaciones,
+                      inventario, compras, contabilidad y reportes operativos.
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                [class]="scopeCardClasses('ORGANIZATION')"
+                [disabled]="saving() || !isMultiStore()"
+                (click)="selectScope('ORGANIZATION')"
+              >
+                <div class="flex items-start gap-4">
+                  <div class="mt-1 rounded-xl bg-purple-50 p-3 text-purple-600">
+                    <app-icon name="building" [size]="22"></app-icon>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3
+                        class="font-semibold text-[var(--color-text-primary)]"
+                      >
+                        Organización consolidada
+                      </h3>
+                      @if (currentScope() === "ORGANIZATION") {
+                        <span
+                          class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700"
+                        >
+                          Activo
+                        </span>
+                      }
+                      @if (!isMultiStore()) {
+                        <span
+                          class="rounded-full bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-700"
+                        >
+                          Requiere multi-tienda
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+                      La organización puede consolidar operación, valoración,
+                      contabilidad y reportes entre tiendas.
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </app-card>
+
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <app-card [responsivePadding]="true">
+          <div class="flex items-start gap-3">
+            <app-icon
+              name="warehouse"
+              [size]="20"
+              class="text-primary"
+            ></app-icon>
+            <div>
+              <h3 class="font-semibold text-[var(--color-text-primary)]">
+                Inventario
+              </h3>
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+                El modo de inventario sigue en su propia sección y complementa
+                este alcance.
+              </p>
+            </div>
+          </div>
+        </app-card>
+
+        <app-card [responsivePadding]="true">
+          <div class="flex items-start gap-3">
+            <app-icon
+              name="receipt"
+              [size]="20"
+              class="text-primary"
+            ></app-icon>
+            <div>
+              <h3 class="font-semibold text-[var(--color-text-primary)]">
+                Contabilidad
+              </h3>
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+                El sistema resuelve entidades contables según el alcance
+                operativo actual.
+              </p>
+            </div>
+          </div>
+        </app-card>
+
+        <app-card [responsivePadding]="true">
+          <div class="flex items-start gap-3">
+            <app-icon
+              name="bar-chart"
+              [size]="20"
+              class="text-primary"
+            ></app-icon>
+            <div>
+              <h3 class="font-semibold text-[var(--color-text-primary)]">
+                Reportes
+              </h3>
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+                Los reportes respetan aislamiento por tienda o consolidación
+                organizacional.
+              </p>
+            </div>
+          </div>
+        </app-card>
+      </div>
+    }
+  }
+</div>
+
+@if (showConfirmModal()) {
+  <app-confirmation-modal
+    [title]="confirmTitle()"
+    [message]="confirmMessage()"
+    confirmText="Confirmar cambio"
+    cancelText="Cancelar"
+    confirmVariant="danger"
+    size="md"
+    (confirm)="confirmScopeChange()"
+    (cancel)="cancelScopeChange()"
+  ></app-confirmation-modal>
+}

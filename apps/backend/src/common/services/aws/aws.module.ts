@@ -1,7 +1,9 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from '../../../prisma/prisma.module';
 import { AcmService } from './acm.service';
 import { CloudFrontService } from './cloudfront.service';
+import { DomainProvisioningService } from './domain-provisioning.service';
 
 /**
  * Global module wiring AWS-managed control plane services (ACM, CloudFront).
@@ -11,8 +13,8 @@ import { CloudFrontService } from './cloudfront.service';
  */
 @Global()
 @Module({
-  imports: [ConfigModule],
-  providers: [AcmService, CloudFrontService],
-  exports: [AcmService, CloudFrontService],
+  imports: [ConfigModule, PrismaModule],
+  providers: [AcmService, CloudFrontService, DomainProvisioningService],
+  exports: [AcmService, CloudFrontService, DomainProvisioningService],
 })
 export class AwsModule {}

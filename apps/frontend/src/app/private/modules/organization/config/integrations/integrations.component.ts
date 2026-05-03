@@ -39,7 +39,7 @@ import { OrganizationSettingsService } from '../services/organization-settings.s
         subtitle="Conecta servicios de terceros"
         icon="link-2"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">

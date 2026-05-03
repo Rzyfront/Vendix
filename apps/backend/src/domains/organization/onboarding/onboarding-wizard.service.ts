@@ -155,6 +155,22 @@ export class OnboardingWizardService {
 
     // Update organization's account_type if user has an organization
     if (user.organization_id) {
+      const organization = await this.prismaService.organizations.findUnique({
+        where: { id: user.organization_id },
+        select: { account_type: true, operating_scope: true },
+      });
+
+      if (
+        organization &&
+        selectAppTypeDto.app_type !== 'ORG_ADMIN' &&
+        (organization.account_type === 'MULTI_STORE_ORG' ||
+          organization.operating_scope === 'ORGANIZATION')
+      ) {
+        throw new BadRequestException(
+          'Changing from consolidated organization to single-store operation requires manual review.',
+        );
+      }
+
       await this.prismaService.organizations.update({
         where: { id: user.organization_id },
         data: {

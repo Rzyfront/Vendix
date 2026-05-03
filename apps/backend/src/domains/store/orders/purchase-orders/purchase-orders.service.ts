@@ -776,6 +776,7 @@ export class PurchaseOrdersService {
           this.eventEmitter.emit('purchase_order.received', {
             purchase_order_id: result.updated_po.id,
             organization_id: result.updated_po.organization_id,
+            store_id: result.updated_po.location?.store_id,
             total_amount,
             user_id: RequestContextService.getUserId(),
           });

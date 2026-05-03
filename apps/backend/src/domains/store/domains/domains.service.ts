@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { BlocklistService } from '../../../common/services/blocklist/blocklist.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { DnsResolverService } from '../../../common/services/dns/dns-resolver.service';
+import { DomainProvisioningService } from '../../../common/services/aws/domain-provisioning.service';
 
 const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
@@ -21,6 +22,7 @@ export class StoreDomainsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly blocklist: BlocklistService,
     private readonly dnsResolver: DnsResolverService,
+    private readonly domainProvisioning: DomainProvisioningService,
   ) {}
 
   private generateVerificationToken(): string {
@@ -80,6 +82,8 @@ export class StoreDomainsService {
     ownership?: string;
     config: Record<string, any>;
   }) {
+    create_domain_dto.hostname = create_domain_dto.hostname.trim().toLowerCase();
+
     // Blocklist check — reject brand/financial/gov patterns
     const blockResult = await this.blocklist.isBlocked(
       create_domain_dto.hostname,
@@ -95,7 +99,7 @@ export class StoreDomainsService {
     // Check for existing hostname (excluyendo terminales — pueden re-claimarse)
     const existing_domain = await this.prisma.domain_settings.findFirst({
       where: {
-        hostname: create_domain_dto.hostname,
+        hostname: { equals: create_domain_dto.hostname, mode: 'insensitive' },
         status: {
           notIn: [
             'disabled',
@@ -485,12 +489,11 @@ export class StoreDomainsService {
     let ssl_status = domain.ssl_status;
 
     if (txt.found) {
-      await this.ensureSingleActiveApp(domain.app_type, domain.id);
       const updated = await this.prisma.domain_settings.update({
         where: { id: domain.id },
         data: {
-          status: 'active',
-          ssl_status: 'issued',
+          status: 'pending_certificate',
+          ssl_status: 'pending',
           last_verified_at: new Date(),
           last_error: null,
           updated_at: new Date(),
@@ -499,11 +502,9 @@ export class StoreDomainsService {
       status_after = updated.status;
       ssl_status = updated.ssl_status;
 
-      this.eventEmitter.emit('domain.activated', {
+      this.eventEmitter.emit('domain.updated', {
         domainId: updated.id,
         hostname: updated.hostname,
-        organization_id: updated.organization_id,
-        store_id: updated.store_id,
       });
     } else {
       await this.prisma.domain_settings.update({
@@ -532,6 +533,31 @@ export class StoreDomainsService {
           ],
       timestamp: new Date().toISOString(),
     };
+  }
+
+  async startCertificateProvisioning(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.startCertificateProvisioning(id);
+  }
+
+  async refreshCertificateStatus(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.refreshCertificateStatus(id);
+  }
+
+  async attachCloudFrontAlias(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.attachCloudFrontAlias(id);
+  }
+
+  async refreshCloudFrontStatus(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.refreshCloudFrontStatus(id);
+  }
+
+  async provisionNext(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.provisionNext(id);
   }
 
   async getDnsInstructions(id: number) {
@@ -563,8 +589,18 @@ export class StoreDomainsService {
       });
     }
 
+    if (domain.validation_cname_name && domain.validation_cname_value) {
+      instructions.push({
+        record_type: 'CNAME',
+        name: domain.validation_cname_name,
+        value: domain.validation_cname_value,
+        ttl: 300,
+        purpose: 'certificate',
+      });
+    }
+
     instructions.push({
-      record_type: 'CNAME',
+      record_type: !isSubdomain ? 'ALIAS/ANAME' : 'CNAME',
       name: isSubdomain ? domain.hostname.split('.')[0] : '@',
       value: edgeHost,
       ttl: 300,

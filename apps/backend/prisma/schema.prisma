@@ -669,6 +669,12 @@ model domain_settings {
   validation_cname_name      String?   @db.VarChar(255)
   validation_cname_value     String?   @db.VarChar(255)
   validation_dns_missing_at  DateTime? @db.Timestamptz(6)
+  acm_certificate_arn        String?   @db.VarChar(2048)
+  certificate_requested_at   DateTime? @db.Timestamptz(6)
+  certificate_issued_at      DateTime? @db.Timestamptz(6)
+  cloudfront_distribution_id String?   @db.VarChar(80)
+  cloudfront_alias_added_at  DateTime? @db.Timestamptz(6)
+  cloudfront_deployed_at     DateTime? @db.Timestamptz(6)
   cert_expires_at            DateTime? @db.Timestamptz(6)
   cloudfront_snapshot_before Json?
   last_error_code            String?   @db.VarChar(80)

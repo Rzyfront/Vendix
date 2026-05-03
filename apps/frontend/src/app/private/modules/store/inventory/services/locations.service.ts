@@ -35,14 +35,16 @@ export class LocationsService {
     }
 
     createLocation(data: CreateLocationDto): Observable<ApiResponse<InventoryLocation>> {
+        const payload = this.sanitizeLocationPayload(data);
         return this.http
-            .post<ApiResponse<InventoryLocation>>(this.api_url, data)
+            .post<ApiResponse<InventoryLocation>>(this.api_url, payload)
             .pipe(catchError(this.handleError));
     }
 
     updateLocation(id: number, data: UpdateLocationDto): Observable<ApiResponse<InventoryLocation>> {
+        const payload = this.sanitizeLocationPayload(data);
         return this.http
-            .patch<ApiResponse<InventoryLocation>>(`${this.api_url}/${id}`, data)
+            .patch<ApiResponse<InventoryLocation>>(`${this.api_url}/${id}`, payload)
             .pipe(catchError(this.handleError));
     }
 
@@ -80,6 +82,11 @@ export class LocationsService {
             }
         });
         return params;
+    }
+
+    private sanitizeLocationPayload<T extends CreateLocationDto | UpdateLocationDto>(data: T): Omit<T, 'is_default'> {
+        const { is_default: _is_default, ...payload } = data;
+        return payload;
     }
 
     private handleError(error: any): Observable<never> {

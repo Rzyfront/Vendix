@@ -40,7 +40,7 @@ import { OrganizationSettings, OrganizationBranding } from '../../../../../core/
         subtitle="Branding, idioma y valores por defecto"
         icon="sliders"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">

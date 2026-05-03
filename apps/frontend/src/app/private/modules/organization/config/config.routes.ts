@@ -8,6 +8,13 @@ const routes: Routes = [
     component: ConfigComponent,
     children: [
       {
+        path: 'operations',
+        loadComponent: () =>
+          import('./operations/operations.component').then(
+            (m) => m.OperationsComponent,
+          ),
+      },
+      {
         path: 'application',
         loadComponent: () =>
           import('./application/application.component').then(
@@ -58,11 +65,6 @@ const routes: Routes = [
           import('./orphan-settings/orphan-settings.component').then(
             (m) => m.OrphanSettingsComponent,
           ),
-      },
-      {
-        path: '',
-        redirectTo: 'application',
-        pathMatch: 'full',
       },
     ],
   },

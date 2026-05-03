@@ -67,8 +67,14 @@ export class CheckoutController {
    */
   @Post('confirm-wompi-payment/:orderId')
   @OptionalAuth()
-  async confirmWompiPayment(@Param('orderId', ParseIntPipe) orderId: number) {
-    const data = await this.checkout_service.confirmWompiPayment(orderId);
+  async confirmWompiPayment(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: { public_order_token?: string },
+  ) {
+    const data = await this.checkout_service.confirmWompiPayment(
+      orderId,
+      dto.public_order_token,
+    );
     return { success: true, data };
   }
 

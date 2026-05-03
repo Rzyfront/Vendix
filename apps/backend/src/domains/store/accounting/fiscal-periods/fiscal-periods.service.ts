@@ -43,8 +43,14 @@ export class FiscalPeriodsService {
   }
 
   async findOne(id: number) {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     const period = await this.prisma.fiscal_periods.findFirst({
-      where: { id },
+      where: { id, accounting_entity_id: accountingEntity.id },
       include: {
         closed_by_user: {
           select: { id: true, first_name: true, last_name: true },
@@ -269,8 +275,15 @@ export class FiscalPeriodsService {
    * Find the open fiscal period that contains a given date
    */
   async findOpenPeriodForDate(date: Date) {
+    const context = this.getContext();
+    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+      organization_id: context.organization_id!,
+      store_id: context.store_id,
+    });
+
     return this.prisma.fiscal_periods.findFirst({
       where: {
+        accounting_entity_id: accountingEntity.id,
         status: 'open',
         start_date: { lte: date },
         end_date: { gte: date },

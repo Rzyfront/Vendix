@@ -10,6 +10,14 @@ export interface StoreDomain {
     config: StoreDomainConfig;
     verification_token?: string;
     last_verified_at?: string;
+    validation_cname_name?: string;
+    validation_cname_value?: string;
+    acm_certificate_arn?: string;
+    certificate_requested_at?: string;
+    certificate_issued_at?: string;
+    cloudfront_distribution_id?: string;
+    cloudfront_alias_added_at?: string;
+    cloudfront_deployed_at?: string;
     last_error?: string;
     created_at: string;
     updated_at: string;
@@ -99,7 +107,7 @@ export interface DnsInstructionRecord {
     name: string;
     value: string;
     ttl: number;
-    purpose?: string;
+    purpose?: 'ownership' | 'routing' | 'certificate' | string;
 }
 
 export interface DnsInstructions {

@@ -18,6 +18,7 @@ import {
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { BlocklistService } from 'src/common/services/blocklist/blocklist.service';
 import { DnsResolverService } from 'src/common/services/dns/dns-resolver.service';
+import { DomainProvisioningService } from 'src/common/services/aws/domain-provisioning.service';
 
 const APP_TYPES = [
   'VENDIX_LANDING',
@@ -52,6 +53,7 @@ export class DomainsService implements OnModuleInit {
     private eventEmitter: EventEmitter2,
     private blocklist: BlocklistService,
     private dnsResolver: DnsResolverService,
+    private domainProvisioning: DomainProvisioningService,
   ) {}
 
   async onModuleInit() {}
@@ -253,7 +255,13 @@ export class DomainsService implements OnModuleInit {
         stats.active++;
       } else if (
         domain.status === 'pending_dns' ||
-        domain.status === 'pending_ssl'
+        domain.status === 'pending_ssl' ||
+        domain.status === 'pending_ownership' ||
+        domain.status === 'verifying_ownership' ||
+        domain.status === 'pending_certificate' ||
+        domain.status === 'issuing_certificate' ||
+        domain.status === 'pending_alias' ||
+        domain.status === 'propagating'
       ) {
         stats.pending++;
       }
@@ -360,6 +368,8 @@ export class DomainsService implements OnModuleInit {
   // ==================== CRUD OPERATIONS ====================
 
   async createDomainSetting(data: CreateDomainSettingDto) {
+    data.hostname = data.hostname.trim().toLowerCase();
+
     // Validate hostname
     this.validateHostnameFormat(data.hostname);
 
@@ -376,7 +386,7 @@ export class DomainsService implements OnModuleInit {
     // Check if hostname already exists (excluyendo terminales — pueden re-claimarse)
     const existing = await this.prisma.domain_settings.findFirst({
       where: {
-        hostname: data.hostname,
+        hostname: { equals: data.hostname, mode: 'insensitive' },
         status: {
           notIn: [
             'disabled',
@@ -585,8 +595,9 @@ export class DomainsService implements OnModuleInit {
   }
 
   async getDomainSettingByHostname(hostname: string) {
+    hostname = hostname.trim().toLowerCase();
     const domain_setting = await this.prisma.domain_settings.findFirst({
-      where: { hostname },
+      where: { hostname: { equals: hostname, mode: 'insensitive' } },
       include: {
         organization: true,
       },
@@ -691,7 +702,7 @@ export class DomainsService implements OnModuleInit {
     }
 
     const updated = await this.prisma.domain_settings.update({
-      where: { hostname },
+      where: { id: existing_record.id },
       data: updates,
     });
 
@@ -726,7 +737,7 @@ export class DomainsService implements OnModuleInit {
     const existing = await this.getDomainSettingByHostname(hostname);
 
     await this.prisma.domain_settings.delete({
-      where: { hostname },
+      where: { id: existing.id },
     });
 
     this.eventEmitter.emit('domain.disabled', {
@@ -759,7 +770,7 @@ export class DomainsService implements OnModuleInit {
   async validateHostname(hostname: string) {
     const exists = await this.prisma.domain_settings.findFirst({
       where: {
-        hostname,
+        hostname: { equals: hostname, mode: 'insensitive' },
         status: {
           notIn: [
             'disabled',
@@ -830,35 +841,27 @@ export class DomainsService implements OnModuleInit {
     let ssl_status = domain.ssl_status;
 
     if (ownership_valid) {
-      await this.ensureSingleActiveApp(
-        domain.organization_id,
-        domain.store_id,
-        domain.app_type,
-        domain.id,
-      );
-      status_after = 'active';
-      ssl_status = 'issued';
       const updated = await this.prisma.domain_settings.update({
-        where: { hostname },
+        where: { id: domain.id },
         data: {
-          status: 'active',
-          ssl_status: 'issued',
+          status: 'pending_certificate',
+          ssl_status: 'pending',
           last_verified_at: new Date(),
           last_error: null,
           updated_at: new Date(),
         },
       });
+      status_after = updated.status;
+      ssl_status = updated.ssl_status;
 
-      this.eventEmitter.emit('domain.activated', {
+      this.eventEmitter.emit('domain.updated', {
         domainId: updated.id,
         hostname: updated.hostname,
-        organization_id: updated.organization_id,
-        store_id: updated.store_id,
       });
     } else {
       status_after = 'failed_ownership';
       await this.prisma.domain_settings.update({
-        where: { hostname },
+        where: { id: domain.id },
         data: {
           status: 'failed_ownership',
           last_error: 'TXT ownership record not found',
@@ -923,6 +926,31 @@ export class DomainsService implements OnModuleInit {
     };
   }
 
+  async startCertificateProvisioning(domainId: number) {
+    await this.getDomainSettingById(domainId);
+    return this.domainProvisioning.startCertificateProvisioning(domainId);
+  }
+
+  async refreshCertificateStatus(domainId: number) {
+    await this.getDomainSettingById(domainId);
+    return this.domainProvisioning.refreshCertificateStatus(domainId);
+  }
+
+  async attachCloudFrontAlias(domainId: number) {
+    await this.getDomainSettingById(domainId);
+    return this.domainProvisioning.attachCloudFrontAlias(domainId);
+  }
+
+  async refreshCloudFrontStatus(domainId: number) {
+    await this.getDomainSettingById(domainId);
+    return this.domainProvisioning.refreshCloudFrontStatus(domainId);
+  }
+
+  async provisionNext(domainId: number) {
+    await this.getDomainSettingById(domainId);
+    return this.domainProvisioning.provisionNext(domainId);
+  }
+
   async getDnsInstructions(hostname: string): Promise<{
     hostname: string;
     ownership: string;
@@ -934,6 +962,7 @@ export class DomainsService implements OnModuleInit {
       name: string;
       value: string;
       ttl: number;
+      purpose?: string;
     }[];
   }> {
     const domain = await this.getDomainSettingByHostname(hostname);
@@ -972,8 +1001,18 @@ export class DomainsService implements OnModuleInit {
       });
     }
 
+    if (domain.validation_cname_name && domain.validation_cname_value) {
+      instructions.push({
+        record_type: 'CNAME',
+        name: domain.validation_cname_name,
+        value: domain.validation_cname_value,
+        ttl: 300,
+        purpose: 'certificate',
+      });
+    }
+
     instructions.push({
-      record_type: 'CNAME',
+      record_type: requiresAlias ? 'ALIAS/ANAME' : 'CNAME',
       name: isSubdomain ? hostname.split('.')[0] : '@',
       value: target,
       ttl: 300,

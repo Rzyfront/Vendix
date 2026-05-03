@@ -33,11 +33,12 @@ export class PublicDomainsService {
     subdomain?: string,
     forwardedHost?: string,
   ) {
+    hostname = hostname.trim().toLowerCase();
     this.logger.log(`🔍 Resolving domain: ${hostname}`);
 
     const domain = await this.globalPrisma.domain_settings.findFirst({
       where: {
-        hostname,
+        hostname: { equals: hostname, mode: 'insensitive' },
         status: 'active',
       },
       include: {

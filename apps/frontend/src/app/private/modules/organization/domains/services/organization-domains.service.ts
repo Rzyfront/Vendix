@@ -13,6 +13,7 @@ import {
   DomainStatus,
   DomainOwnership,
   AppType,
+  DnsInstructions,
 } from '../interfaces/domain.interface';
 
 export interface ApiResponse<T> {
@@ -162,8 +163,15 @@ export class OrganizationDomainsService {
     return [
       { value: DomainStatus.PENDING_DNS, label: 'Pendiente DNS' },
       { value: DomainStatus.PENDING_OWNERSHIP, label: 'Pendiente propiedad' },
+      { value: DomainStatus.VERIFYING_OWNERSHIP, label: 'Verificando propiedad' },
       { value: DomainStatus.PENDING_SSL, label: 'Pendiente SSL' },
+      { value: DomainStatus.PENDING_CERTIFICATE, label: 'Pendiente certificado' },
+      { value: DomainStatus.ISSUING_CERTIFICATE, label: 'Emitiendo certificado' },
+      { value: DomainStatus.PENDING_ALIAS, label: 'Pendiente alias' },
+      { value: DomainStatus.PROPAGATING, label: 'Propagando' },
       { value: DomainStatus.FAILED_OWNERSHIP, label: 'Falló propiedad' },
+      { value: DomainStatus.FAILED_CERTIFICATE, label: 'Falló certificado' },
+      { value: DomainStatus.FAILED_ALIAS, label: 'Falló alias' },
       { value: DomainStatus.ACTIVE, label: 'Activo' },
       { value: DomainStatus.DISABLED, label: 'Deshabilitado' },
     ];
@@ -205,34 +213,19 @@ export class OrganizationDomainsService {
     );
   }
 
+  provisionNext(domainId: number): Observable<ApiResponse<Domain>> {
+    return this.http.post<ApiResponse<Domain>>(
+      `${this.apiUrl}/organization/domains/${domainId}/provision-next`,
+      {},
+    );
+  }
+
   /**
    * Get DNS instructions for a domain
    */
-  getDnsInstructions(hostname: string): Observable<ApiResponse<{
-    hostname: string;
-    ownership: string;
-    dns_type: 'CNAME' | 'A';
-    target: string;
-    requires_alias?: boolean;
-    instructions: {
-      record_type: string;
-      name: string;
-      value: string;
-      ttl: number;
-    }[];
-  }>> {
-    return this.http.get<ApiResponse<{
-      hostname: string;
-      ownership: string;
-      dns_type: 'CNAME' | 'A';
-      target: string;
-      requires_alias?: boolean;
-      instructions: {
-        record_type: string;
-        name: string;
-        value: string;
-        ttl: number;
-      }[];
-    }>>(`${this.apiUrl}/organization/domains/dns-instructions/${hostname}`);
+  getDnsInstructions(hostname: string): Observable<ApiResponse<DnsInstructions>> {
+    return this.http.get<ApiResponse<DnsInstructions>>(
+      `${this.apiUrl}/organization/domains/dns-instructions/${hostname}`,
+    );
   }
 }

@@ -143,6 +143,7 @@ export class InventoryIntegrationService {
               0,
               stockLevel.quantity_reserved - releaseQuantity,
             ),
+            quantity_available: stockLevel.quantity_available + releaseQuantity,
             last_updated: new Date(),
           },
         });

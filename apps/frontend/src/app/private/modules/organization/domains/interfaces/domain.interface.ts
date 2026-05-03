@@ -63,6 +63,14 @@ export interface Domain {
   config: DomainConfig | null;
   verification_token: string | null;
   last_verified_at: string | null;
+  validation_cname_name?: string | null;
+  validation_cname_value?: string | null;
+  acm_certificate_arn?: string | null;
+  certificate_requested_at?: string | null;
+  certificate_issued_at?: string | null;
+  cloudfront_distribution_id?: string | null;
+  cloudfront_alias_added_at?: string | null;
+  cloudfront_deployed_at?: string | null;
   created_at: string;
   updated_at: string;
   organization?: {
@@ -229,6 +237,23 @@ export interface DnsCheckResult {
   valid: boolean;
   reason?: string;
   records?: string[];
+}
+
+export interface DnsInstruction {
+  record_type: string;
+  name: string;
+  value: string;
+  ttl: number;
+  purpose?: 'ownership' | 'routing' | 'certificate' | string;
+}
+
+export interface DnsInstructions {
+  hostname: string;
+  ownership: string;
+  dns_type: 'CNAME' | 'A';
+  target: string;
+  requires_alias?: boolean;
+  instructions: DnsInstruction[];
 }
 
 export interface DomainFilters {

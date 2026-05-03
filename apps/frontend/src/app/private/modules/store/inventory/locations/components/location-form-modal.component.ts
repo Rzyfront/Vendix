@@ -328,7 +328,7 @@ export class LocationFormModalComponent {
       if (loc) {
         this.patchForm(loc);
       } else if (isOpen && !loc) {
-        this.form.reset({ is_active: true, type: 'warehouse' });
+        this.form.reset({ is_active: true, is_default: false, type: 'warehouse' });
         this.showAddress.set(false);
       }
     });
@@ -453,6 +453,7 @@ export class LocationFormModalComponent {
       code: location.code,
       type: location.type || 'warehouse',
       is_active: location.is_active,
+      is_default: !!location.is_default,
     });
 
     if (location.address) {

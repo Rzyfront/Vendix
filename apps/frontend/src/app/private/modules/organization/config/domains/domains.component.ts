@@ -51,7 +51,7 @@ interface DomainItem {
         subtitle="Configura los dominios de tu organización"
         icon="globe-2"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <div class="mt-6">

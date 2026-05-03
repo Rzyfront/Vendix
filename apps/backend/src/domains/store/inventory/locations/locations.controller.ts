@@ -96,6 +96,27 @@ export class LocationsController {
     }
   }
 
+  @Patch(':id/set-default')
+  @Permissions('store:inventory:set-default-location')
+  async setAsDefault(
+    @Param('id') id: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    try {
+      const result = await this.locationsService.setAsDefault(+id);
+      return this.responseService.updated(
+        result,
+        'Ubicación principal actualizada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al marcar la ubicación como principal',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id')
   @Permissions('store:inventory:locations:update')
   async update(

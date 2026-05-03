@@ -45,7 +45,7 @@ import { PaymentMethodsService, StorePaymentMethod, SystemPaymentMethod, Payment
         subtitle="Gestiona los métodos de pago de tu tienda"
         icon="credit-card"
         [showBackButton]="true"
-        backRoute="/organization/config"
+        backRoute="/admin/config"
       ></app-sticky-header>
 
       <!-- Stats Cards -->

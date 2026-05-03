@@ -183,7 +183,8 @@
                     <label class="checkbox-label">
                       <input
                         type="checkbox"
-                        [(ngModel)]="save_new_address"
+                        [ngModel]="save_new_address()"
+                        (ngModelChange)="save_new_address.set($event)"
                         [ngModelOptions]="{ standalone: true }"
                       />
                       <span class="checkbox-text"
@@ -389,7 +390,8 @@
               <div class="notes-section">
                 <label>Notas del pedido (opcional)</label>
                 <textarea
-                  [(ngModel)]="notes"
+                  [ngModel]="notes()"
+                  (ngModelChange)="notes.set($event)"
                   placeholder="Instrucciones especiales para la entrega..."
                 ></textarea>
               </div>

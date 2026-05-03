@@ -11,6 +11,8 @@ import {
   OrganizationDashboardDto,
   UpgradeAccountTypeDto,
   OrganizationAccountType,
+  UpdateOperatingScopeDto,
+  OrganizationOperatingScope,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import { S3Service } from '@common/services/s3.service';
@@ -163,70 +165,20 @@ export class OrganizationsService {
       }),
 
       // Revenue Current Month (Profit)
-      Promise.all([
-        this.prisma.orders.aggregate({
-          where: {
-            stores: {
-              organization_id: org_id,
-              ...(store_id && { id: Number(store_id) }),
-            },
-            created_at: { gte: current_month_start },
-            state: 'finished',
-          },
-          _sum: { grand_total: true, shipping_cost: true },
-        }),
-        this.prisma.order_items.aggregate({
-          where: {
-            orders: {
-              stores: {
-                organization_id: org_id,
-                ...(store_id && { id: Number(store_id) }),
-              },
-              created_at: { gte: current_month_start },
-              state: 'finished',
-            },
-          },
-          _sum: { total_price: true },
-        }),
-      ]).then(([revenue_res, cost_res]) => {
-        const revenue = Number(revenue_res._sum.grand_total || 0);
-        const shipping_cost = Number(revenue_res._sum.shipping_cost || 0);
-        const cogs = Number(cost_res._sum.total_price || 0);
-        return { _sum: { profit: revenue - shipping_cost - cogs } };
-      }),
+      this.calculateOrderProfit(
+        org_id,
+        current_month_start,
+        undefined,
+        store_id ? Number(store_id) : undefined,
+      ),
 
       // Profit Last Month (Revenue - Costs)
-      Promise.all([
-        this.prisma.orders.aggregate({
-          where: {
-            stores: {
-              organization_id: org_id,
-              ...(store_id && { id: Number(store_id) }),
-            },
-            created_at: { gte: last_month_start, lte: last_month_end },
-            state: 'finished',
-          },
-          _sum: { grand_total: true, shipping_cost: true },
-        }),
-        this.prisma.order_items.aggregate({
-          where: {
-            orders: {
-              stores: {
-                organization_id: org_id,
-                ...(store_id && { id: Number(store_id) }),
-              },
-              created_at: { gte: last_month_start, lte: last_month_end },
-              state: 'finished',
-            },
-          },
-          _sum: { total_price: true },
-        }),
-      ]).then(([revenue_res, cost_res]) => {
-        const revenue = Number(revenue_res._sum.grand_total || 0);
-        const shipping_cost = Number(revenue_res._sum.shipping_cost || 0);
-        const cogs = Number(cost_res._sum.total_price || 0);
-        return { _sum: { profit: revenue - shipping_cost - cogs } };
-      }),
+      this.calculateOrderProfit(
+        org_id,
+        last_month_start,
+        last_month_end,
+        store_id ? Number(store_id) : undefined,
+      ),
     ]);
 
     const current_rev = Number(revenue_current_month._sum.profit || 0);
@@ -261,11 +213,138 @@ export class OrganizationsService {
     };
   }
 
+  async getConfig() {
+    const context = RequestContextService.getContext();
+
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const [organization, settings, stores_count] = await Promise.all([
+      this.prisma.organizations.findUnique({
+        where: { id: context.organization_id },
+        select: {
+          id: true,
+          name: true,
+          account_type: true,
+          operating_scope: true,
+        },
+      }),
+      this.prisma.organization_settings.findFirst({
+        select: { settings: true },
+      }),
+      this.prisma.stores.count({ where: { is_active: true } }),
+    ]);
+
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    return {
+      organization: {
+        ...organization,
+        stores_count,
+      },
+      settings: settings?.settings ?? {},
+    };
+  }
+
+  async updateOperatingScope(dto: UpdateOperatingScopeDto) {
+    const context = RequestContextService.getContext();
+
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: context.organization_id },
+      select: {
+        id: true,
+        account_type: true,
+        operating_scope: true,
+      },
+    });
+
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const currentScope =
+      organization.operating_scope as OrganizationOperatingScope;
+    const nextScope = dto.operating_scope;
+
+    if (currentScope === nextScope) {
+      return {
+        operating_scope: currentScope,
+        changed: false,
+      };
+    }
+
+    if (
+      nextScope === OrganizationOperatingScope.ORGANIZATION &&
+      organization.account_type !== OrganizationAccountType.MULTI_STORE_ORG
+    ) {
+      throw new BadRequestException(
+        'El alcance consolidado requiere una organización multi-tienda.',
+      );
+    }
+
+    if (
+      currentScope === OrganizationOperatingScope.ORGANIZATION &&
+      nextScope === OrganizationOperatingScope.STORE
+    ) {
+      throw new BadRequestException(
+        'Cambiar de organización consolidada a operación por tienda requiere revisión manual para evitar separar datos ya consolidados.',
+      );
+    }
+
+    const activeStores = await this.prisma.stores.count({
+      where: { is_active: true },
+    });
+
+    if (activeStores === 0) {
+      throw new BadRequestException(
+        'La organización necesita al menos una tienda activa para cambiar el alcance operativo.',
+      );
+    }
+
+    const updated = await this.prisma.organizations.update({
+      where: { id: organization.id },
+      data: {
+        operating_scope: nextScope as any,
+        updated_at: new Date(),
+      },
+      select: {
+        id: true,
+        account_type: true,
+        operating_scope: true,
+      },
+    });
+
+    return {
+      organization: updated,
+      previous_scope: currentScope,
+      operating_scope: updated.operating_scope,
+      changed: true,
+    };
+  }
+
   async getOrganizationStats(
     organizationId: number,
     query: OrganizationDashboardDto,
   ) {
     const { period } = query;
+    const context = RequestContextService.getContext();
+
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    if (context.organization_id !== organizationId) {
+      throw new ForbiddenException(
+        'No puedes consultar estadísticas de otra organización',
+      );
+    }
 
     // Validate organization exists
     const organization = await this.prisma.organizations.findUnique({
@@ -375,58 +454,10 @@ export class OrganizationsService {
       }),
 
       // Revenue Current Month (Profit)
-      Promise.all([
-        this.prisma.orders.aggregate({
-          where: {
-            stores: { organization_id: org_id },
-            created_at: { gte: current_month_start },
-            state: 'finished',
-          },
-          _sum: { grand_total: true, shipping_cost: true },
-        }),
-        this.prisma.order_items.aggregate({
-          where: {
-            orders: {
-              stores: { organization_id: org_id },
-              created_at: { gte: current_month_start },
-              state: 'finished',
-            },
-          },
-          _sum: { total_price: true },
-        }),
-      ]).then(([revenue_res, cost_res]) => {
-        const revenue = Number(revenue_res._sum.grand_total || 0);
-        const shipping_cost = Number(revenue_res._sum.shipping_cost || 0);
-        const cogs = Number(cost_res._sum.total_price || 0);
-        return { _sum: { profit: revenue - shipping_cost - cogs } };
-      }),
+      this.calculateOrderProfit(org_id, current_month_start),
 
       // Profit Last Month (Revenue - Costs)
-      Promise.all([
-        this.prisma.orders.aggregate({
-          where: {
-            stores: { organization_id: org_id },
-            created_at: { gte: last_month_start, lte: last_month_end },
-            state: 'finished',
-          },
-          _sum: { grand_total: true, shipping_cost: true },
-        }),
-        this.prisma.order_items.aggregate({
-          where: {
-            orders: {
-              stores: { organization_id: org_id },
-              created_at: { gte: last_month_start, lte: last_month_end },
-              state: 'finished',
-            },
-          },
-          _sum: { total_price: true },
-        }),
-      ]).then(([revenue_res, cost_res]) => {
-        const revenue = Number(revenue_res._sum.grand_total || 0);
-        const shipping_cost = Number(revenue_res._sum.shipping_cost || 0);
-        const cogs = Number(cost_res._sum.total_price || 0);
-        return { _sum: { profit: revenue - shipping_cost - cogs } };
-      }),
+      this.calculateOrderProfit(org_id, last_month_start, last_month_end),
 
       // Profit Trend - monthly aggregates
       (this.prisma.withoutScope() as any).$queryRaw<
@@ -453,7 +484,7 @@ export class OrganizationsService {
           SELECT
             EXTRACT(MONTH FROM o.created_at)::int as month,
             EXTRACT(YEAR FROM o.created_at)::int as year,
-            COALESCE(SUM(oi.total_price), 0) as costs
+            COALESCE(SUM(COALESCE(oi.cost_price, 0) * oi.quantity), 0) as costs
           FROM order_items oi
           INNER JOIN orders o ON oi.order_id = o.id
           INNER JOIN stores s ON s.id = o.store_id
@@ -565,6 +596,56 @@ export class OrganizationsService {
       profit_trend,
       store_distribution,
     };
+  }
+
+  private async calculateOrderProfit(
+    organizationId: number,
+    startDate: Date,
+    endDate?: Date,
+    storeId?: number,
+  ): Promise<{ _sum: { profit: number } }> {
+    const endFilter = endDate
+      ? Prisma.sql`AND o.created_at <= ${endDate}`
+      : Prisma.empty;
+    const storeFilter = storeId
+      ? Prisma.sql`AND o.store_id = ${storeId}`
+      : Prisma.empty;
+
+    const rows = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{ revenue: unknown; shipping_cost: unknown; cogs: unknown }>
+    >`
+      WITH order_totals AS (
+        SELECT
+          COALESCE(SUM(o.grand_total), 0) AS revenue,
+          COALESCE(SUM(o.shipping_cost), 0) AS shipping_cost
+        FROM orders o
+        INNER JOIN stores s ON s.id = o.store_id
+        WHERE s.organization_id = ${organizationId}
+          AND o.state = 'finished'
+          AND o.created_at >= ${startDate}
+          ${endFilter}
+          ${storeFilter}
+      ), item_costs AS (
+        SELECT COALESCE(SUM(COALESCE(oi.cost_price, 0) * oi.quantity), 0) AS cogs
+        FROM order_items oi
+        INNER JOIN orders o ON o.id = oi.order_id
+        INNER JOIN stores s ON s.id = o.store_id
+        WHERE s.organization_id = ${organizationId}
+          AND o.state = 'finished'
+          AND o.created_at >= ${startDate}
+          ${endFilter}
+          ${storeFilter}
+      )
+      SELECT order_totals.revenue, order_totals.shipping_cost, item_costs.cogs
+      FROM order_totals, item_costs
+    `;
+
+    const row = rows[0];
+    const revenue = Number(row?.revenue ?? 0);
+    const shippingCost = Number(row?.shipping_cost ?? 0);
+    const cogs = Number(row?.cogs ?? 0);
+
+    return { _sum: { profit: revenue - shippingCost - cogs } };
   }
 
   /**

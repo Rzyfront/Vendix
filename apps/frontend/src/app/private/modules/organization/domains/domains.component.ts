@@ -18,7 +18,8 @@ import {
   DomainOwnership,
   CreateDomainDto,
   UpdateDomainDto,
-  VerifyDomainResult} from './interfaces/domain.interface';
+  VerifyDomainResult,
+  DnsInstructions} from './interfaces/domain.interface';
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
 import { environment } from '../../../../../environments/environment';
@@ -124,7 +125,16 @@ interface StoreOption {
                 <option value="">Todos los Estados</option>
                 <option value="active">Activo</option>
                 <option value="pending_dns">Pendiente DNS</option>
+                <option value="pending_ownership">Pendiente propiedad</option>
+                <option value="verifying_ownership">Verificando propiedad</option>
                 <option value="pending_ssl">Pendiente SSL</option>
+                <option value="pending_certificate">Pendiente certificado</option>
+                <option value="issuing_certificate">Emitiendo certificado</option>
+                <option value="pending_alias">Pendiente alias</option>
+                <option value="propagating">Propagando</option>
+                <option value="failed_ownership">Falló propiedad</option>
+                <option value="failed_certificate">Falló certificado</option>
+                <option value="failed_alias">Falló alias</option>
                 <option value="disabled">Deshabilitado</option>
               </select>
 
@@ -248,6 +258,7 @@ interface StoreOption {
         [isVerifying]="isVerifyingDomain()"
         [domain]="selectedDomainForVerify()"
         [verificationResult]="verificationResult()"
+        [dnsInstructions]="dnsInstructions()"
         [edgeHost]="edgeHost()"
         (verify)="verifyDomain($event)"
         (cancel)="onVerifyModalCancel()"
@@ -347,7 +358,16 @@ export class DomainsComponent implements OnInit {
         colorMap: {
           active: '#22c55e',
           pending_dns: '#f59e0b',
+          pending_ownership: '#f59e0b',
+          verifying_ownership: '#f59e0b',
           pending_ssl: '#f97316',
+          pending_certificate: '#f97316',
+          issuing_certificate: '#f97316',
+          pending_alias: '#6366f1',
+          propagating: '#06b6d4',
+          failed_ownership: '#ef4444',
+          failed_certificate: '#ef4444',
+          failed_alias: '#ef4444',
           disabled: '#ef4444'}},
       transform: (value: string) => this.formatStatus(value)},
     {
@@ -406,6 +426,12 @@ export class DomainsComponent implements OnInit {
       variant: 'secondary',
       show: (domain: Domain) => this.canVerifyDomain(domain)},
     {
+      label: 'Provisionar',
+      icon: 'refresh-cw',
+      action: (domain: Domain) => this.provisionDomain(domain),
+      variant: 'warning',
+      show: (domain: Domain) => this.canProvisionDomain(domain)},
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (domain: Domain) => this.deleteDomain(domain),
@@ -425,7 +451,16 @@ export class DomainsComponent implements OnInit {
       colorMap: {
         active: '#22c55e',
         pending_dns: '#f59e0b',
+        pending_ownership: '#f59e0b',
+        verifying_ownership: '#f59e0b',
         pending_ssl: '#f97316',
+        pending_certificate: '#f97316',
+        issuing_certificate: '#f97316',
+        pending_alias: '#6366f1',
+        propagating: '#06b6d4',
+        failed_ownership: '#ef4444',
+        failed_certificate: '#ef4444',
+        failed_alias: '#ef4444',
         disabled: '#ef4444'}},
     badgeTransform: (val: string) => this.formatStatus(val),
     detailKeys: [
@@ -453,6 +488,7 @@ export class DomainsComponent implements OnInit {
   readonly isVerifyingDomain = signal(false);
   readonly selectedDomainForVerify = signal<Domain | null>(null);
   readonly verificationResult = signal<VerifyDomainResult | null>(null);
+  readonly dnsInstructions = signal<DnsInstructions | null>(null);
   // Edge host (CloudFront target) for the DNS CNAME value, fetched from
   // backend `getDnsInstructions().target`. Falls back to the platform domain
   // from environment so the modal never renders with an empty value.
@@ -707,6 +743,7 @@ private loadInitialData(): void {
   openVerifyModal(domain: Domain): void {
     this.selectedDomainForVerify.set(domain);
     this.verificationResult.set(null);
+    this.dnsInstructions.set(null);
     this.dnsInstructionsTarget.set(null);
     this.isVerifyModalOpen.set(true);
 
@@ -719,6 +756,7 @@ private loadInitialData(): void {
       .subscribe({
         next: (response) => {
           if (response.success && response.data?.target) {
+            this.dnsInstructions.set(response.data);
             this.dnsInstructionsTarget.set(response.data.target);
           }
         },
@@ -732,6 +770,7 @@ private loadInitialData(): void {
     this.isVerifyModalOpen.set(false);
     this.selectedDomainForVerify.set(null);
     this.verificationResult.set(null);
+    this.dnsInstructions.set(null);
     this.dnsInstructionsTarget.set(null);
   }
 
@@ -748,7 +787,9 @@ private loadInitialData(): void {
             if (response.data.verified) {
               this.loadDomains();
               this.loadStats();
-              this.toastService.success('Dominio verificado exitosamente');
+              this.toastService.success(
+                'Propiedad verificada. Certificado pendiente de emisión.',
+              );
             }
           }
           this.isVerifyingDomain.set(false);
@@ -759,6 +800,36 @@ private loadInitialData(): void {
             error.error?.message || 'Error al verificar el dominio',
           );
           this.isVerifyingDomain.set(false);
+        }});
+  }
+
+  canProvisionDomain(domain: Domain): boolean {
+    return (
+      this.canVerifyDomain(domain) &&
+      domain.last_verified_at != null &&
+      domain.status !== DomainStatus.ACTIVE &&
+      domain.status !== DomainStatus.FAILED_OWNERSHIP
+    );
+  }
+
+  provisionDomain(domain: Domain): void {
+    this.domainsService
+      .provisionNext(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.toastService.success('Provisioning actualizado');
+            this.refreshDomains();
+          } else {
+            this.toastService.error('Respuesta inválida al provisionar');
+          }
+        },
+        error: (error) => {
+          console.error('Error provisioning domain:', error);
+          this.toastService.error(
+            error.error?.message || 'Error al provisionar el dominio',
+          );
         }});
   }
 
@@ -826,7 +897,16 @@ private loadInitialData(): void {
     const statusMap: Record<string, string> = {
       active: 'Activo',
       pending_dns: 'DNS Pendiente',
+      pending_ownership: 'Propiedad pendiente',
+      verifying_ownership: 'Verificando propiedad',
       pending_ssl: 'SSL Pendiente',
+      pending_certificate: 'Certificado pendiente',
+      issuing_certificate: 'Emitiendo certificado',
+      pending_alias: 'Alias pendiente',
+      propagating: 'Propagando',
+      failed_ownership: 'Falló propiedad',
+      failed_certificate: 'Falló certificado',
+      failed_alias: 'Falló alias',
       disabled: 'Deshabilitado'};
     return statusMap[status] || status;
   }

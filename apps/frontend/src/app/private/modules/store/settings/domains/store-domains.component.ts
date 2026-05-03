@@ -280,8 +280,15 @@ readonly domains = signal<StoreDomain[]>([]);
         { value: 'active', label: 'Activo' },
         { value: 'pending_dns', label: 'Pendiente DNS' },
         { value: 'pending_ownership', label: 'Pendiente propiedad' },
+        { value: 'verifying_ownership', label: 'Verificando propiedad' },
         { value: 'pending_ssl', label: 'Pendiente SSL' },
+        { value: 'pending_certificate', label: 'Pendiente certificado' },
+        { value: 'issuing_certificate', label: 'Emitiendo certificado' },
+        { value: 'pending_alias', label: 'Pendiente alias' },
+        { value: 'propagating', label: 'Propagando' },
         { value: 'failed_ownership', label: 'Falló propiedad' },
+        { value: 'failed_certificate', label: 'Falló certificado' },
+        { value: 'failed_alias', label: 'Falló alias' },
         { value: 'disabled', label: 'Deshabilitado' },
       ]},
     {
@@ -354,6 +361,12 @@ readonly domains = signal<StoreDomain[]>([]);
       action: (item: StoreDomain) => this.verifyDomain(item),
       disabled: (row: StoreDomain) => !this.isCustomDomain(row) || row.status === 'active'},
     {
+      label: 'Provisionar',
+      icon: 'refresh-cw',
+      variant: 'warning',
+      action: (item: StoreDomain) => this.provisionDomain(item),
+      disabled: (row: StoreDomain) => !this.canProvisionDomain(row)},
+    {
       label: 'Establecer Principal',
       icon: 'star',
       variant: 'ghost',
@@ -418,6 +431,7 @@ loadDomains(query?: StoreDomainQueryDto): void {
         d.status === 'pending_ownership' ||
         d.status === 'verifying_ownership' ||
         d.status === 'pending_certificate' ||
+        d.status === 'issuing_certificate' ||
         d.status === 'pending_alias' ||
         d.status === 'propagating',
     ).length;
@@ -551,7 +565,9 @@ loadDomains(query?: StoreDomainQueryDto): void {
       .subscribe({
         next: (response) => {
           if (response.success && response.data.verified) {
-            this.toast_service.success('Dominio verificado y activado');
+            this.toast_service.success(
+              'Propiedad verificada. Certificado pendiente de emisión.',
+            );
             this.closeModal();
           } else {
             this.toast_service.warning('No se encontró el TXT de verificación');
@@ -561,6 +577,26 @@ loadDomains(query?: StoreDomainQueryDto): void {
         },
         error: () => {
           this.toast_service.error('Error al verificar el dominio');
+          this.is_saving.set(false);
+        }});
+  }
+
+  provisionDomain(domain: StoreDomain): void {
+    this.is_saving.set(true);
+    this.domains_service
+      .provisionNext(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast_service.success('Provisioning actualizado');
+          this.loadDomains();
+          if (this.editing_domain?.id === domain.id) {
+            this.loadDnsInstructions(domain);
+          }
+          this.is_saving.set(false);
+        },
+        error: () => {
+          this.toast_service.error('Error al provisionar el dominio');
           this.is_saving.set(false);
         }});
   }
@@ -663,6 +699,15 @@ loadDomains(query?: StoreDomainQueryDto): void {
     return (
       domain.ownership === 'custom_domain' ||
       domain.ownership === 'custom_subdomain'
+    );
+  }
+
+  canProvisionDomain(domain: StoreDomain): boolean {
+    return (
+      this.isCustomDomain(domain) &&
+      domain.last_verified_at != null &&
+      domain.status !== 'active' &&
+      domain.status !== 'failed_ownership'
     );
   }
 }
