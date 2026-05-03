@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
   TableColumn,
   TableAction} from '../../../../../../shared/components/table/table.component';
@@ -30,30 +31,68 @@ import { EChartsOption } from 'echarts';
     RouterModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Total Productos"
+          [value]="data().length"
+          smallText=" productos en el período"
+          iconName="package"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Unidades Vendidas"
+          [value]="getTotalUnits()"
+          smallText=" totales"
+          iconName="boxes"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ingresos Totales"
+          [value]="getTotalRevenue()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Producto Más Vendido"
+          [value]="getTopProductName()"
+          iconName="trophy"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
       >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
+            <a routerLink="/admin/analytics" class="hover:text-primary"
+              >Analíticas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary"
+            <a routerLink="/admin/analytics/sales" class="hover:text-primary"
               >Ventas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Por Producto</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
+          <h1 class="text-xl font-bold text-text-primary">
             Ventas por Producto
           </h1>
           <p class="text-text-secondary mt-1">
@@ -67,6 +106,33 @@ import { EChartsOption } from 'echarts';
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -74,7 +140,8 @@ import { EChartsOption } from 'echarts';
         </div>
       </div>
 
-      <!-- Main Content Card -->
+      <!-- Chart View -->
+      @if (activeView() === 'chart') {
       <app-card
         shadow="none"
         [padding]="false"
@@ -84,14 +151,11 @@ import { EChartsOption } from 'echarts';
         <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
-            <span
-              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-            >
+            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
               ({{ data().length }} productos)
             </span>
           </span>
         </div>
-
         <div class="p-4">
           @if (!loading() && topProductsChartOptions()) {
           <app-chart
@@ -102,8 +166,10 @@ import { EChartsOption } from 'echarts';
           }
         </div>
       </app-card>
+      }
 
-      <!-- Main Content Card -->
+      <!-- Table View -->
+      @if (activeView() === 'table') {
       <app-card
         shadow="none"
         [padding]="false"
@@ -113,14 +179,11 @@ import { EChartsOption } from 'echarts';
         <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
-            <span
-              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-            >
+            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
               ({{ data().length }} productos)
             </span>
           </span>
         </div>
-
         <div class="p-4">
           <app-responsive-data-view
             [data]="data()"
@@ -132,6 +195,7 @@ import { EChartsOption } from 'echarts';
           ></app-responsive-data-view>
         </div>
       </app-card>
+      }
     </div>
   `})
 export class SalesByProductComponent implements OnInit {
@@ -141,6 +205,7 @@ export class SalesByProductComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   loading = signal(true);
   exporting = signal(false);
+  activeView = signal<'chart' | 'table'>('chart');
   data = signal<SalesByProduct[]>([]);
   topProductsChartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
@@ -332,6 +397,21 @@ onDateRangeChange(range: DateRangeFilter): void {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  getTotalUnits(): number {
+    return this.data().reduce((sum, p) => sum + (p.units_sold || 0), 0);
+  }
+
+  getTotalRevenue(): string {
+    const total = this.data().reduce((sum, p) => sum + (p.revenue || 0), 0);
+    return this.currencyService.format(total, 0);
+  }
+
+  getTopProductName(): string {
+    if (!this.data().length) return '-';
+    const top = [...this.data()].sort((a, b) => b.units_sold - a.units_sold)[0];
+    return top?.product_name?.substring(0, 15) + (top.product_name.length > 15 ? '...' : '') || '-';
   }
 
 }

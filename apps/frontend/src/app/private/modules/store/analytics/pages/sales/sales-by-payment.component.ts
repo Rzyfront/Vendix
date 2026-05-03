@@ -7,6 +7,7 @@ import { RouterModule } from '@angular/router';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -35,30 +36,67 @@ import { EChartsOption } from 'echarts';
     RouterModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Métodos Pago"
+          [value]="getMethodCount()"
+          smallText=" métodos"
+          iconName="credit-card"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Transacciones"
+          [value]="getTotalTransactions()"
+          iconName="repeat"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ingresos Total"
+          [value]="getTotalRevenue()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Método Principal"
+          [value]="getTopMethod()"
+          iconName="trophy"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
       >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
+            <a routerLink="/admin/analytics" class="hover:text-primary"
+              >Analíticas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary"
+            <a routerLink="/admin/analytics/sales" class="hover:text-primary"
               >Ventas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Por Método de Pago</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
+          <h1 class="text-xl font-bold text-text-primary">
             Ventas por Método de Pago
           </h1>
           <p class="text-text-secondary mt-1">
@@ -72,6 +110,33 @@ import { EChartsOption } from 'echarts';
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -80,8 +145,9 @@ import { EChartsOption } from 'echarts';
       </div>
 
       <!-- Content Grid -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="grid grid-cols-1 gap-6">
         <!-- Pie Chart -->
+        @if (activeView() === 'chart') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -100,19 +166,20 @@ import { EChartsOption } from 'echarts';
                   class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
                 ></div>
               </div>
+            } @else if (data().length === 0) {
+              <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+                <app-icon name="credit-card" [size]="48" class="mb-2 opacity-50"></app-icon>
+                <p>No hay datos para el período seleccionado</p>
+              </div>
             } @else {
-              @defer (on viewport) {
-                <app-chart [options]="chartOptions()" size="large"></app-chart>
-              } @placeholder {
-                <div
-                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart [options]="chartOptions()" size="large"></app-chart>
             }
           </div>
         </app-card>
+        }
 
         <!-- Table -->
+        @if (activeView() === 'table') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -135,6 +202,7 @@ import { EChartsOption } from 'echarts';
             ></app-responsive-data-view>
           </div>
         </app-card>
+        }
       </div>
     </div>
   `})
@@ -145,6 +213,7 @@ export class SalesByPaymentComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
 loading = signal(true);
   exporting = signal(false);
+  activeView = signal<'chart' | 'table'>('chart');
   data = signal<SalesByPaymentMethod[]>([]);
   chartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
@@ -308,5 +377,24 @@ onDateRangeChange(range: DateRangeFilter): void {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  getMethodCount(): number {
+    return this.data().length;
+  }
+
+  getTotalTransactions(): number {
+    return this.data().reduce((sum, m) => sum + (m.transaction_count || 0), 0);
+  }
+
+  getTotalRevenue(): string {
+    const total = this.data().reduce((sum, m) => sum + (m.total_amount || 0), 0);
+    return this.currencyService.format(total, 0);
+  }
+
+  getTopMethod(): string {
+    if (!this.data().length) return '-';
+    const top = [...this.data()].sort((a, b) => b.total_amount - a.total_amount)[0];
+    return top?.display_name?.substring(0, 15) || '-';
   }
 }

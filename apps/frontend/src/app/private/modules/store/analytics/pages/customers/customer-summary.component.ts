@@ -277,7 +277,8 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
 
     const sorted = [...topCustomers].reverse();
     const names = sorted.map((c) => {
-      const fullName = `${c.first_name} ${c.last_name}`.trim();
+      // Prefer customer_name from backend, fallback to first+last or email
+      const fullName = c.customer_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
       return fullName || c.email;
     });
     const values = sorted.map((c) => c.total_spent);

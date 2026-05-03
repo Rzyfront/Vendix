@@ -49,24 +49,24 @@ import {
     ExportButtonComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
       >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
+            <a routerLink="/admin/analytics" class="hover:text-primary"
+              >Analíticas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+            <a routerLink="/admin/analytics/inventory" class="hover:text-primary"
               >Inventario</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Análisis de Movimientos</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
+          <h1 class="text-xl font-bold text-text-primary">
             Análisis de Movimientos
           </h1>
           <p class="text-text-secondary mt-1">
@@ -168,16 +168,10 @@ import {
               >Tendencia de Movimientos</span
             >
             <div class="h-[350px]">
-              @defer (on viewport) {
-                <app-chart
-                  [options]="trendsChartOptions()"
-                  [loading]="loadingTrends()"
-                ></app-chart>
-              } @placeholder {
-                <div
-                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart
+                [options]="trendsChartOptions()"
+                [loading]="loadingTrends()"
+              ></app-chart>
             </div>
           </app-card>
 
@@ -187,16 +181,10 @@ import {
               >Distribución por Tipo</span
             >
             <div class="h-[350px]">
-              @defer (on viewport) {
-                <app-chart
-                  [options]="distributionChartOptions()"
-                  [loading]="loadingSummary()"
-                ></app-chart>
-              } @placeholder {
-                <div
-                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart
+                [options]="distributionChartOptions()"
+                [loading]="loadingSummary()"
+              ></app-chart>
             </div>
           </app-card>
         </div>

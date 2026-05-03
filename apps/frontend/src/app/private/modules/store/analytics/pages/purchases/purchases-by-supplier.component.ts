@@ -2,6 +2,7 @@ import { Component, OnInit, inject, signal, viewChild, effect, TemplateRef } fro
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TableComponent, TableColumn } from '../../../../../../shared/components/table/table.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -10,15 +11,51 @@ import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, IconComponent, TableComponent, CurrencyPipe],
+  imports: [CommonModule, RouterModule, CardComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Proveedores"
+          [value]="data().length"
+          smallText=" proveedores"
+          iconName="truck"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Total Ordenes"
+          [value]="getTotalOrders()"
+          iconName="file-text"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+
+        <app-stats
+          title="Total Gastado"
+          [value]="getTotalSpent()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Proveedor Top"
+          [value]="getTopSupplier()"
+          iconName="trophy"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
       <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
         <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
         <app-icon name="chevron-right" [size]="14"></app-icon>
         <span>Compras</span>
       </div>
-      <h1 class="text-2xl font-bold text-text-primary">Compras por Proveedor</h1>
+      <h1 class="text-xl font-bold text-text-primary">Compras por Proveedor</h1>
 
       @if (loading()) {
         <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
@@ -134,5 +171,20 @@ export class PurchasesBySupplierComponent implements OnInit {
         this.loading.set(false);
       }
     });
+  }
+
+  getTotalOrders(): number {
+    return this.data().reduce((sum, s) => sum + (s.order_count || 0), 0);
+  }
+
+  getTotalSpent(): string {
+    const total = this.data().reduce((sum, s) => sum + (s.total_spent || 0), 0);
+    return '$' + total.toLocaleString('es-CO', { maximumFractionDigits: 0 });
+  }
+
+  getTopSupplier(): string {
+    if (!this.data().length) return '-';
+    const top = [...this.data()].sort((a, b) => b.total_spent - a.total_spent)[0];
+    return top?.supplier_name?.substring(0, 15) || '-';
   }
 }

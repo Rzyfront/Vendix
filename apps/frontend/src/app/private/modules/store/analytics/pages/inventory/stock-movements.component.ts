@@ -5,6 +5,7 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -32,6 +33,7 @@ import { EChartsOption } from 'echarts';
     FormsModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
     IconComponent,
@@ -39,24 +41,60 @@ import { EChartsOption } from 'echarts';
     ExportButtonComponent
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Movimientos"
+          [value]="data().length"
+          smallText=" registros"
+          iconName="repeat"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Entradas"
+          [value]="getInCount()"
+          iconName="arrow-down-circle"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Salidas"
+          [value]="getOutCount()"
+          iconName="arrow-up-circle"
+          iconBgColor="bg-red-100"
+          iconColor="text-red-600"
+        ></app-stats>
+
+        <app-stats
+          title="Neto"
+          [value]="getNetCount()"
+          iconName="trending-up"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
       >
         <div>
           <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
+            <a routerLink="/admin/analytics" class="hover:text-primary"
+              >Analíticas</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
+            <a routerLink="/admin/analytics/inventory" class="hover:text-primary"
               >Inventario</a
             >
             <app-icon name="chevron-right" [size]="14"></app-icon>
             <span>Movimientos</span>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
+          <h1 class="text-xl font-bold text-text-primary">
             Historial de Movimientos
           </h1>
           <p class="text-text-secondary mt-1">
@@ -83,10 +121,38 @@ import { EChartsOption } from 'echarts';
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
         </div>
       </div>
 
-      <!-- Main Content -->
+      <!-- Main Content Table -->
+      @if (activeView() === 'table') {
       <app-card
         shadow="none"
         [padding]="false"
@@ -115,8 +181,10 @@ import { EChartsOption } from 'echarts';
           ></app-responsive-data-view>
         </div>
       </app-card>
+      }
 
       <!-- Chart -->
+      @if (activeView() === 'chart') {
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
         <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
@@ -131,6 +199,7 @@ import { EChartsOption } from 'echarts';
         ></app-chart>
         }
       </app-card>
+      }
     </div>
   `})
 export class StockMovementsComponent implements OnInit {
@@ -139,6 +208,7 @@ export class StockMovementsComponent implements OnInit {
   private toastService = inject(ToastService);
   loading = signal(true);
   exporting = signal(false);
+  activeView = signal<'chart' | 'table'>('table');
   data = signal<StockMovementReport[]>([]);
   movementsChartOptions = signal<EChartsOption>({});
   typeFilter = signal<string>('');
@@ -390,4 +460,17 @@ onDateRangeChange(range: DateRangeFilter): void {
     });
   }
 
+  getInCount(): number {
+    return this.data().filter(m => m.movement_type === 'in').length;
+  }
+
+  getOutCount(): number {
+    return this.data().filter(m => m.movement_type === 'out').length;
+  }
+
+  getNetCount(): number {
+    const inCount = this.getInCount();
+    const outCount = this.getOutCount();
+    return inCount - outCount;
+  }
 }

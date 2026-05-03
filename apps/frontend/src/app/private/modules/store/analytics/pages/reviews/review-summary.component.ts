@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -21,6 +22,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
     AnalyticsCardComponent,
@@ -79,14 +81,14 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 
       <!-- Filter Bar -->
       <div
-        class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+        class="sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
       >
         <div class="flex items-center justify-between gap-2">
           <div class="min-w-0">
-            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+            <h2 class="text-sm font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
               Analíticas de Reseñas
             </h2>
-            <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+            <p class="text-xs text-gray-400 md:text-xs md:text-text-secondary truncate">
               Opiniones, valoraciones y satisfacción del cliente
             </p>
           </div>
@@ -130,11 +132,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              @defer (on viewport) {
-                <app-chart [options]="ratingDistributionChartOptions" size="large" [showLegend]="false"></app-chart>
-              } @placeholder {
-                <div class="h-64 bg-surface-secondary animate-pulse rounded-xl"></div>
-              }
+              <app-chart [options]="ratingDistributionChartOptions" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -156,11 +154,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              @defer (on viewport) {
-                <app-chart [options]="reviewsStatusChartOptions" size="large" [showLegend]="false"></app-chart>
-              } @placeholder {
-                <div class="h-64 bg-surface-secondary animate-pulse rounded-xl"></div>
-              }
+              <app-chart [options]="reviewsStatusChartOptions" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>

@@ -316,6 +316,60 @@ export class CustomersAnalyticsService {
     });
   }
 
+  async getCustomersChannels(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+    const context = RequestContextService.getContext();
+
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const customerRoleFilter = {
+      store_users: { some: { store_id: storeId } },
+      user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
+    };
+
+    const totalCustomers = await this.prisma.users.count({
+      where: customerRoleFilter,
+    });
+
+    const newCustomers = await this.prisma.users.count({
+      where: {
+        ...customerRoleFilter,
+        created_at: { gte: startDate, lte: endDate },
+      },
+    });
+
+    const channelStats = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        store_id: storeId,
+        status: { in: this.COMPLETED_STATES },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _count: { id: true },
+      _sum: { grand_total: true },
+    });
+
+    const channels = channelStats.map((ch) => ({
+      channel: ch.channel,
+      orders: ch._count.id,
+      revenue: Number(ch._sum.grand_total || 0),
+      percentage: ch._count.id > 0 ? (ch._count.id / (channelStats.reduce((a, b) => a + b._count.id, 0))) * 100 : 0,
+    }));
+
+    return {
+      summary: {
+        total_customers: totalCustomers,
+        total_new_customers: newCustomers,
+        total_orders: channelStats.reduce((a, b) => a + b._count.id, 0),
+        total_revenue: channelStats.reduce((a, b) => a + Number(b._sum.grand_total || 0), 0),
+      },
+      channels,
+    };
+  }
+
   async getCustomersForExport(query: AnalyticsQueryDto) {
     const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();

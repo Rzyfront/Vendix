@@ -10,13 +10,13 @@ import { EChartsOption } from 'echarts';
   standalone: true,
   imports: [RouterModule, IconComponent, CardComponent, ChartComponent],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-        <a routerLink="/admin/reports" class="hover:text-primary">Reportes</a>
+        <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
         <app-icon name="chevron-right" [size]="14"></app-icon>
         <span>Gastos</span>
       </div>
-      <h1 class="text-2xl font-bold text-text-primary">Gastos por Categoría</h1>
+      <h1 class="text-xl font-bold text-text-primary">Gastos por Categoría</h1>
       
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
         <div slot="header" class="flex flex-col">

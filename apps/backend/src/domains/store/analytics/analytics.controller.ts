@@ -465,6 +465,13 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('customers/channels')
+  @Permissions('store:analytics:read')
+  async getCustomersChannels(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getCustomersChannels(query);
+    return this.response_service.success(result);
+  }
+
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {

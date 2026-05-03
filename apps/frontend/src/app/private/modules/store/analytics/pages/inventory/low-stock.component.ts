@@ -107,13 +107,13 @@ imports: [
         >
           <!-- Search Section: sticky below stats on mobile, normal on desktop -->
           <div
-            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+            class="sticky top-[99px] z-10 bg-[#ffffff] px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
           >
             <div
               class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
             >
               <h2
-                class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal"
+                class="text-sm font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal"
               >
                 Productos
                 <span
