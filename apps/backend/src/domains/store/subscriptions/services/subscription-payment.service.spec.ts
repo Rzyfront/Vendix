@@ -164,6 +164,40 @@ describe('SubscriptionPaymentService', () => {
     expect(result.state).toBe('succeeded');
   });
 
+  it('handleChargeSuccess preserves existing payment metadata when storing gateway_response', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 77 });
+    prismaMock.subscription_payments.findUnique.mockResolvedValue({
+      metadata: {
+        idempotency_key: 'sub_inv_500_att_1',
+        reference: 'vendix_saas_200_500_123',
+        saved_payment_method_id: 33,
+      },
+    });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 77,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_abc',
+      gatewayResponse: { status: 'APPROVED' },
+    });
+
+    await service.charge(500);
+
+    const updateArg = prismaMock.subscription_payments.update.mock.calls[0][0];
+    expect(updateArg.data.metadata).toMatchObject({
+      idempotency_key: 'sub_inv_500_att_1',
+      reference: 'vendix_saas_200_500_123',
+      saved_payment_method_id: 33,
+      gateway_response: { status: 'APPROVED' },
+    });
+  });
+
   it('gateway failure → payment state=failed with failure_reason + event emitted', async () => {
     prismaMock.subscription_invoices.findUnique.mockResolvedValue(
       invoiceFixture(),

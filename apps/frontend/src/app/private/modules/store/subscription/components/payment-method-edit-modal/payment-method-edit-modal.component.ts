@@ -57,7 +57,7 @@ export interface PaymentMethodEditResult {
 }
 
 /**
- * S3.2 — "Configurar tarjeta" modal.
+ * S3.2 — "Configurar método de pago" modal.
  *
  * Replaces the previous stubbed `configureMethod()` handler (and the
  * scattered inline buttons on the cards list) with a single dedicated
@@ -117,7 +117,7 @@ export class PaymentMethodEditModalComponent {
   /** True while a default-toggle / delete / replace request is in flight. */
   readonly mutating = signal<boolean>(false);
 
-  /** Wompi widget visibility — opens only on "Reemplazar tarjeta" click. */
+  /** Wompi widget visibility — opens only on "Reemplazar método" click. */
   readonly showReplaceWidget = signal<boolean>(false);
 
   /**
@@ -255,7 +255,7 @@ export class PaymentMethodEditModalComponent {
    *   3) User flips ON on a non-default → call setDefault, refresh.
    *   4) User flips OFF on an active default that has alternatives →
    *      we don't have a one-shot "unset default" endpoint; instead
-   *      tell them to set another card as default explicitly.
+   *      tell them to set another method as default explicitly.
    */
   onDefaultToggleChange(next: boolean): void {
     const pm = this.paymentMethod();
@@ -265,8 +265,8 @@ export class PaymentMethodEditModalComponent {
       // Case 1 / 4: trying to unset default.
       this.toastService.info(
         this.isOnlyActiveDefault()
-          ? 'Debes agregar otra tarjeta antes de quitar la predeterminada.'
-          : 'Selecciona otra tarjeta como predeterminada para reemplazarla.',
+          ? 'Debes habilitar otro método antes de quitar el predeterminado.'
+          : 'Selecciona otro método como predeterminado para reemplazarlo.',
       );
       // Revert UI.
       this.isDefaultOptimistic.set(true);
@@ -281,13 +281,13 @@ export class PaymentMethodEditModalComponent {
         .subscribe({
           next: () => {
             this.mutating.set(false);
-            this.toastService.success('Tarjeta predeterminada actualizada');
+            this.toastService.success('Método predeterminado actualizado');
             this.closeWith({ action: 'saved', updatedId: pm.id });
           },
           error: () => {
             this.mutating.set(false);
             this.isDefaultOptimistic.set(false);
-            this.toastService.error('No se pudo actualizar la tarjeta predeterminada');
+            this.toastService.error('No se pudo actualizar el método predeterminado');
           },
         });
       return;
@@ -331,7 +331,7 @@ export class PaymentMethodEditModalComponent {
         next: (res) => {
           this.mutating.set(false);
           this.showReplaceWidget.set(false);
-          this.toastService.success('Tarjeta reemplazada exitosamente');
+          this.toastService.success('Método reemplazado exitosamente');
           this.closeWith({
             action: 'replaced',
             updatedId: res?.data?.id ?? pm.id,
@@ -340,7 +340,7 @@ export class PaymentMethodEditModalComponent {
         error: () => {
           this.mutating.set(false);
           this.showReplaceWidget.set(false);
-          this.toastService.error('No se pudo reemplazar la tarjeta');
+          this.toastService.error('No se pudo reemplazar el método');
         },
       });
   }
@@ -353,16 +353,16 @@ export class PaymentMethodEditModalComponent {
 
     if (!this.canDelete()) {
       this.toastService.info(
-        'Debes agregar otra tarjeta antes de eliminar la predeterminada.',
+        'Debes habilitar otro método antes de eliminar el predeterminado.',
       );
       return;
     }
 
-    // Skip confirm prompt if the card is already invalid — the user
+    // Skip confirm prompt if the method is already invalid — the user
     // already understands it is broken.
     if (pm.state !== 'invalid') {
       const ok = window.confirm(
-        '¿Eliminar esta tarjeta? Si tienes facturas pendientes ya no se cobrarán automáticamente con esta tarjeta.',
+        '¿Eliminar este método? Si tienes facturas pendientes ya no se cobrarán automáticamente con este método.',
       );
       if (!ok) return;
     }
@@ -374,13 +374,13 @@ export class PaymentMethodEditModalComponent {
       .subscribe({
         next: () => {
           this.mutating.set(false);
-          this.toastService.success('Tarjeta eliminada');
+          this.toastService.success('Método eliminado');
           this.closeWith({ action: 'deleted', updatedId: pm.id });
         },
         error: (err: { error?: { message?: string } }) => {
           this.mutating.set(false);
           this.toastService.error(
-            err?.error?.message ?? 'No se pudo eliminar la tarjeta',
+            err?.error?.message ?? 'No se pudo eliminar el método',
           );
         },
       });

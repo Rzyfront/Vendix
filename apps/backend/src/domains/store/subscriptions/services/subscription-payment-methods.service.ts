@@ -70,7 +70,6 @@ export class SubscriptionPaymentMethodsService {
     });
 
     return methods.map((m) => {
-      const meta = (m.metadata as Record<string, unknown> | null) ?? {};
       return {
         id: String(m.id),
         type: m.type as 'card' | 'bank_transfer',
@@ -83,7 +82,7 @@ export class SubscriptionPaymentMethodsService {
         expiry_month: m.expiry_month,
         expiry_year: m.expiry_year,
         state: m.state,
-        consecutive_failures: Number(meta.consecutive_failures ?? 0),
+        consecutive_failures: Number(m.consecutive_failures ?? 0),
         // Wompi Phase 5 — when present, the row already migrated to the
         // payment_source flow (recurrent:true charges available). The
         // frontend uses it to show the "Verificada para cobros recurrentes"

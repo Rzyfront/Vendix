@@ -221,9 +221,18 @@ export class StoreSubscriptionsController {
       return this.responseService.success(null, 'No active subscription');
     }
 
+    const resolved = await this.resolver.resolveSubscription(storeId);
+
     // RNC-39: stores in `no_plan` state have plan_id IS NULL (canonical), so
-    // sub.plan naturally resolves to null via the relation. No stripping needed.
-    return this.responseService.success(sub, 'Subscription retrieved');
+    // sub.plan naturally resolves to null via the relation. Always expose the
+    // live resolver output so Store Admin does not depend on stale snapshots.
+    return this.responseService.success(
+      {
+        ...sub,
+        resolved_features: resolved.features,
+      },
+      'Subscription retrieved',
+    );
   }
 
   /**
@@ -395,7 +404,8 @@ export class StoreSubscriptionsController {
           vendix_base_price: vendixBasePrice,
           partner_margin_amount: partnerMarginAmount,
           currency: 'COP',
-          resolved_features: {},
+          resolved_features:
+            (plan.ai_feature_flags as Prisma.InputJsonValue) ?? Prisma.JsonNull,
           trial_ends_at: null,
           current_period_start: now,
           current_period_end: periodEnd,

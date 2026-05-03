@@ -1,5 +1,24 @@
 <div class="w-full max-w-5xl mx-auto px-4 py-6 lg:py-8 flex flex-col gap-6">
   @if (!ready()) {
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-live="polite"
+      aria-label="Cargando estado de suscripción"
+    >
+      <div class="w-full max-w-sm rounded-2xl bg-surface p-6 shadow-xl border border-border text-center space-y-4">
+        <div class="flex justify-center">
+          <app-spinner size="lg" text="Cargando estado de pago..."></app-spinner>
+        </div>
+        <p class="text-xs text-text-secondary">
+          Estamos consultando el estado de tu suscripción y facturas pendientes.
+        </p>
+      </div>
+    </div>
+  }
+
+  @if (!ready()) {
     <!-- Skeleton while dunning snapshot loads. Avoids the empty-default flash
          where the banner falls to the catch-all "Tu suscripción requiere
          atención" copy and renders empty cards before the real payload
@@ -12,7 +31,15 @@
       </div>
       <div class="h-20 rounded-2xl bg-gray-200/70"></div>
     </div>
-  } @else {
+  }
+
+  <div
+    class="flex flex-col gap-6 transition-opacity duration-150"
+    [class.invisible]="!ready()"
+    [class.opacity-0]="!ready()"
+    [class.pointer-events-none]="!ready()"
+    [attr.aria-hidden]="!ready()"
+  >
   <!-- Critical banner -->
   <app-card customClasses="border-l-4 border-l-red-500 bg-red-50/40">
     <div class="p-5 flex items-start gap-4">
@@ -63,7 +90,11 @@
           Total adeudado
         </p>
         <p class="text-2xl lg:text-3xl font-bold text-text-primary">
-          {{ totalDue() | currency: "COP" : "symbol-narrow" : "1.0-0" }}
+          @if (hasInvoices()) {
+            {{ totalDue() | currency: "COP" : "symbol-narrow" : "1.0-0" }}
+          } @else {
+            Sin factura vencida
+          }
         </p>
         <p class="text-xs text-text-secondary">
           @if (hasInvoices()) {
@@ -95,7 +126,7 @@
               Tu método de pago no es válido
             </p>
             <p class="text-xs text-text-secondary mt-1">
-              Actualiza tu tarjeta para reintentar el cobro y recuperar el
+              Actualiza tu método de pago para reintentar el cobro y recuperar el
               acceso completo.
             </p>
           </div>
@@ -119,18 +150,14 @@
        triggered without a generated invoice), the click routes to the
        checkout flow for the current plan so the user can re-up the
        subscription manually. -->
-  <app-card>
+  <app-card id="subscription-dunning-pay-now">
     <div class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
       <div>
         <p class="text-sm font-semibold text-text-primary">
           Regulariza tu pago para recuperar el acceso completo
         </p>
         <p class="text-xs text-text-secondary mt-1">
-          @if (hasInvoices()) {
-            Procesaremos el cobro de la factura pendiente más reciente.
-          } @else {
-            Te llevaremos al checkout para renovar tu plan actual.
-          }
+          Te llevaremos al checkout para renovar tu plan actual.
         </p>
       </div>
       <app-button
@@ -251,7 +278,7 @@
     Las suscripciones canceladas no son reembolsables ni admiten créditos
     retroactivos.
   </p>
-  }
+  </div>
 </div>
 
 <app-support-request-modal

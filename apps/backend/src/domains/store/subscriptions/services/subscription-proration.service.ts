@@ -418,26 +418,19 @@ export class SubscriptionProrationService {
     //   • Upgrade  → charge `newPrice - unusedValueOfCurrent`. The unused
     //     portion of the current cycle (in value) is credited so the user
     //     doesn't "lose" what they already paid. Floor at 0 for safety.
-    //   • Downgrade from monthly → charge full new plan price, no credit.
-    //   • Downgrade from YEARLY → apply credit too. A yearly customer paid
-    //     up-front for 365 days; ignoring their unused balance on a downgrade
-    //     would slash up to 11 months of value, which is commercially
-    //     indefensible (would generate chargebacks/churn). The user's stated
-    //     "no credit on downgrade" rule was scoped to monthly-to-monthly
-    //     where unused value is at most 1 month.
+    //   • Downgrade → charge the full destination plan price, no credit,
+    //     regardless of the current billing cycle.
     //   • Same-tier → priceDiff = 0, charges 0.
     //   • Free origin → no baseline value to credit, charge full new price.
     const isUpgrade = kind === 'upgrade';
     const isDowngrade = kind === 'downgrade';
     const isPlanChange = isUpgrade || isDowngrade;
-    const currentCycleIsYearly =
-      (sub.plan?.billing_cycle ?? 'monthly') === 'annual';
-
     // Unused value of the current cycle: baselinePrice × (daysRemaining /
     // cycleDays). Only meaningful when there IS a paid baseline (not free
-    // origin) and there are days left in the cycle.
+    // origin), there are days left in the cycle, and the destination is an
+    // upgrade. Downgrades intentionally do not apply unused-cycle credit.
     const unusedValueOfCurrent =
-      isFreeOrigin || daysRemaining <= 0 || cycleDays <= 0
+      !isUpgrade || isFreeOrigin || daysRemaining <= 0 || cycleDays <= 0
         ? DECIMAL_ZERO
         : baselinePrice
             .times(new Prisma.Decimal(daysRemaining))
@@ -446,13 +439,6 @@ export class SubscriptionProrationService {
     let prorationAmount: Prisma.Decimal;
     let creditApplied: Prisma.Decimal = DECIMAL_ZERO;
     if (isUpgrade && !isFreeOrigin) {
-      const charge = newPricing.effective_price.minus(unusedValueOfCurrent);
-      prorationAmount = this.round2(
-        charge.greaterThan(DECIMAL_ZERO) ? charge : DECIMAL_ZERO,
-      );
-      creditApplied = unusedValueOfCurrent;
-    } else if (isDowngrade && currentCycleIsYearly && !isFreeOrigin) {
-      // Yearly→anything downgrade: protect the customer's bulk-paid balance.
       const charge = newPricing.effective_price.minus(unusedValueOfCurrent);
       prorationAmount = this.round2(
         charge.greaterThan(DECIMAL_ZERO) ? charge : DECIMAL_ZERO,
@@ -474,17 +460,13 @@ export class SubscriptionProrationService {
     // policy is "what you pay today is what you pay, no refund, no rollover".
     const creditToApply = DECIMAL_ZERO;
 
-    const downgradeWithCredit =
-      isDowngrade && currentCycleIsYearly && !isFreeOrigin;
     let invoicePreview: InvoicePreview | null = null;
     if (prorationAmount.greaterThan(DECIMAL_ZERO)) {
       const lineDescription = isUpgrade
         ? `Upgrade a plan ${newPlan.code} (con crédito por días no usados)`
-        : downgradeWithCredit
-          ? `Downgrade a plan ${newPlan.code} (con crédito por anual no consumido)`
-          : isDowngrade
-            ? `Cambio a plan ${newPlan.code} (ciclo nuevo, sin crédito)`
-            : `Plan ${newPlan.code} (${newPlan.billing_cycle})`;
+        : isDowngrade
+          ? `Cambio a plan ${newPlan.code} (ciclo nuevo, sin crédito)`
+          : `Plan ${newPlan.code} (${newPlan.billing_cycle})`;
       // Cycle resets server-side on confirmPendingChange, so the period the
       // user is actually paying for starts NOW and ends after one full cycle.
       const cycleDaysFresh = this.billingCycleDays(
@@ -644,6 +626,9 @@ export class SubscriptionProrationService {
               pending_change_started_at: null,
               pending_revert_state: null,
               auto_renew: true,
+              resolved_features:
+                (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
+                Prisma.JsonNull,
               resolved_at: now,
               updated_at: now,
             },
@@ -870,9 +855,14 @@ export class SubscriptionProrationService {
           where: { id: subscriptionId },
           data: {
             plan_id: newPlanId,
+            paid_plan_id: newPlanId,
             effective_price: newPricing.effective_price,
             vendix_base_price: newPricing.base_price,
             partner_margin_amount: newPricing.margin_amount,
+            resolved_features:
+              (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
+              Prisma.JsonNull,
+            resolved_at: new Date(),
             metadata: metadata as Prisma.InputJsonValue,
             scheduled_plan_change_at: null,
             scheduled_plan_id: null,
@@ -1122,7 +1112,9 @@ export class SubscriptionProrationService {
             grace_hard_until: null,
             suspend_at: null,
             auto_renew: true,
-            resolved_features: {},
+              resolved_features:
+                (newPlan.ai_feature_flags as Prisma.InputJsonValue) ??
+                Prisma.JsonNull,
             resolved_at: now,
             metadata: existingMeta as Prisma.InputJsonValue,
             updated_at: now,

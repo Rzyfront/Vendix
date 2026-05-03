@@ -355,11 +355,10 @@ export class SubscriptionCheckoutController {
     if (sub.state === 'trial') return 'trial_conversion';
 
     // Compare normalized monthly-equivalent prices to determine upgrade vs
-    // downgrade. Comparing raw `base_price` across cycles is wrong: a yearly
-    // plan's raw price is ~12× a monthly plan's, so a switch from monthly to
-    // yearly of the SAME tier would always classify as upgrade (and vice
-    // versa for yearly→monthly). Normalizing by cycle-months gives the true
-    // tier comparison the policy actually means.
+    // downgrade. Comparing raw `base_price` across cycles is wrong: longer
+    // cycles naturally have larger raw prices, so cross-cycle changes can be
+    // classified backwards. Normalizing by cycle-months gives the true tier
+    // comparison the policy actually means.
     const [currentPlan, newPlan] = await Promise.all([
       sub.paid_plan_id
         ? this.prisma.subscription_plans.findUnique({
@@ -375,8 +374,22 @@ export class SubscriptionCheckoutController {
 
     if (!currentPlan || !newPlan) return 'upgrade';
 
-    const cycleMonths = (cycle: string | null | undefined): number =>
-      cycle === 'yearly' ? 12 : 1;
+    const cycleMonths = (cycle: string | null | undefined): number => {
+      switch (cycle) {
+        case 'quarterly':
+          return 3;
+        case 'semiannual':
+          return 6;
+        case 'annual':
+        case 'yearly':
+          return 12;
+        case 'lifetime':
+          return 1200;
+        case 'monthly':
+        default:
+          return 1;
+      }
+    };
     const currentMonthly = new Prisma.Decimal(currentPlan.base_price).dividedBy(
       cycleMonths(currentPlan.billing_cycle),
     );
@@ -997,8 +1010,9 @@ export class SubscriptionCheckoutController {
     // and return the Wompi widget. confirmPendingChange() completes the mutation
     // once the gateway confirms.
     //
-    // Downgrade to paid plan: still goes through the widget flow (proration
-    // credit may apply, but any balance owed triggers a charge).
+    // Downgrade to paid plan: still goes through the widget flow, but it is a
+    // full destination-plan charge, not a prorated price. Only upgrades
+    // prorate because they credit unused value from the current cycle.
     // Scheduled downgrades (end-of-cycle) are handled separately by the billing
     // scheduler and do NOT pass through this path.
     const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
@@ -1018,16 +1032,24 @@ export class SubscriptionCheckoutController {
       dto.planId,
     );
 
-    // Preview proration to get the prorated amount for the invoice opts.
-    const proratedAmount = previewResult.proration_amount
+    // Only upgrades prorate. Downgrades use the preview invoice as the full
+    // target-plan charge so line_items/metadata don't point at the old plan.
+    const chargeAmount = previewResult.proration_amount
       ? new Prisma.Decimal(previewResult.proration_amount)
       : DECIMAL_ZERO;
+    const shouldProratePrice =
+      changeKind === 'upgrade' && chargeAmount.greaterThan(DECIMAL_ZERO);
 
     const midCycleInvoice = await this.billing.issueInvoice(sub.id, {
-      prorated: proratedAmount.greaterThan(DECIMAL_ZERO),
-      proratedAmount: proratedAmount.greaterThan(DECIMAL_ZERO)
-        ? proratedAmount
+      prorated: shouldProratePrice,
+      proratedAmount: shouldProratePrice
+        ? chargeAmount
         : undefined,
+      invoicePreview:
+        !shouldProratePrice && previewResult.invoice_to_issue
+          ? previewResult.invoice_to_issue
+          : undefined,
+      skipPendingCredit: !shouldProratePrice,
       fromPlanId: (sub as any).paid_plan_id ?? sub.plan_id,
       toPlanId: dto.planId,
       changeKind: changeKind as any,
@@ -1494,7 +1516,9 @@ export class SubscriptionCheckoutController {
           vendix_base_price: pricing.base_price,
           partner_margin_amount: pricing.margin_amount,
           currency: 'COP',
-          resolved_features: {},
+          resolved_features: isFreePlan
+            ? ((plan.ai_feature_flags as Prisma.InputJsonValue) ?? Prisma.JsonNull)
+            : {},
           trial_ends_at: null,
           current_period_start: now,
           current_period_end: periodEnd,

@@ -689,7 +689,7 @@
     </app-store-share-modal>
   }
 
-  @defer (when showTourModal) {
+  @defer (when showTourModal()) {
     <app-tour-modal
       [(isOpen)]="showTourModal"
       [tourConfig]="ecommerceTourConfig"

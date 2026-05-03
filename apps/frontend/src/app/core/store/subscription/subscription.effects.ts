@@ -319,11 +319,16 @@ export class SubscriptionEffects {
             data: { payment_id: number; invoice_id: number; state: string };
           }>(`${this.apiUrl}/store/subscriptions/retry-payment`, {})
           .pipe(
-            map((response) =>
-              SubscriptionActions.retryPaymentSuccess({
-                result: response.data,
-              }),
-            ),
+            map((response): Action => {
+              const result = response.data;
+              if (result?.state === 'failed') {
+                return SubscriptionActions.retryPaymentFailure({
+                  error:
+                    'El pago fue rechazado. Intenta con otro método de pago.',
+                });
+              }
+              return SubscriptionActions.retryPaymentSuccess({ result });
+            }),
             catchError((error) =>
               of(
                 SubscriptionActions.retryPaymentFailure({
@@ -561,13 +566,15 @@ export class SubscriptionEffects {
   );
 
   /**
-   * After a successful retry, refresh both the current subscription and the
-   * dunning snapshot so the UI immediately reflects state changes (e.g. back
-   * to active when the charge succeeded synchronously).
+   * After a retry finishes, refresh both the current subscription and the
+   * dunning snapshot so the UI immediately reflects payment/state changes.
    */
-  retryPaymentSuccessRefresh$ = createEffect(() =>
+  retryPaymentFinishedRefresh$ = createEffect(() =>
     this.actions$.pipe(
-      ofType(SubscriptionActions.retryPaymentSuccess),
+      ofType(
+        SubscriptionActions.retryPaymentSuccess,
+        SubscriptionActions.retryPaymentFailure,
+      ),
       mergeMap(() => [
         SubscriptionActions.loadCurrent(),
         SubscriptionActions.loadDunningState(),

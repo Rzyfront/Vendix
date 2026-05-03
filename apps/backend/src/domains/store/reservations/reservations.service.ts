@@ -69,7 +69,7 @@ export class ReservationsService {
         },
       },
     },
-    product_variant: {
+    product_variants: {
       select: {
         id: true,
         name: true,

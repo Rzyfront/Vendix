@@ -13,6 +13,7 @@ import { ShippingModule } from '../shipping/shipping.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { OrderEtaService } from './services/order-eta.service';
     OrderFlowModule,
     SettingsModule,
     ShippingModule,
+    PurchaseOrdersModule,
   ],
   controllers: [OrdersController],
   providers: [

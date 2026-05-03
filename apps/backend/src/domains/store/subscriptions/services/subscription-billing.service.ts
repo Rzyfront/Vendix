@@ -79,6 +79,8 @@ export class SubscriptionBillingService {
       fromPlanId?: number | null;
       toPlanId?: number | null;
       changeKind?: subscription_change_kind_enum | null;
+      invoicePreview?: InvoicePreview;
+      skipPendingCredit?: boolean;
     } = {},
   ): Promise<subscription_invoices | null> {
     if (!Number.isInteger(storeSubscriptionId) || storeSubscriptionId <= 0) {
@@ -236,23 +238,31 @@ export class SubscriptionBillingService {
 
         const pricing = this.computePricing(sub);
         const cycleMs = this.billingCycleMs(sub.plan.billing_cycle);
+        const previewTotal = opts.invoicePreview
+          ? new Prisma.Decimal(opts.invoicePreview.total)
+          : null;
 
         // Determine period window. On prorated upgrades we keep the current
         // period window (the upgrade applies immediately to the existing
         // cycle). On regular renewals we advance forward from current end.
         const now = new Date();
-        const basePeriodStart = opts.prorated
-          ? (sub.current_period_start ?? now)
-          : (sub.current_period_end ?? now);
-        const basePeriodEnd = opts.prorated
-          ? (sub.current_period_end ?? new Date(now.getTime() + cycleMs))
-          : new Date((sub.current_period_end ?? now).getTime() + cycleMs);
+        const basePeriodStart = opts.invoicePreview
+          ? new Date(opts.invoicePreview.period_start)
+          : opts.prorated
+            ? (sub.current_period_start ?? now)
+            : (sub.current_period_end ?? now);
+        const basePeriodEnd = opts.invoicePreview
+          ? new Date(opts.invoicePreview.period_end)
+          : opts.prorated
+            ? (sub.current_period_end ?? new Date(now.getTime() + cycleMs))
+            : new Date((sub.current_period_end ?? now).getTime() + cycleMs);
 
         const quantity = 1;
         const unitPrice =
-          opts.prorated && opts.proratedAmount
+          previewTotal ??
+          (opts.prorated && opts.proratedAmount
             ? opts.proratedAmount
-            : pricing.effective_price;
+            : pricing.effective_price);
 
         // Free-plan skip (non-prorated only).
         if (
@@ -295,7 +305,11 @@ export class SubscriptionBillingService {
         let subtotal = unitPrice.times(quantity);
         let creditApplied = DECIMAL_ZERO;
         let remainingCredit = DECIMAL_ZERO;
-        if (pendingCredit.greaterThan(DECIMAL_ZERO) && !opts.prorated) {
+        if (
+          pendingCredit.greaterThan(DECIMAL_ZERO) &&
+          !opts.prorated &&
+          !opts.skipPendingCredit
+        ) {
           // Cap credit so subtotal_after >= 0
           creditApplied = Prisma.Decimal.min(pendingCredit, subtotal);
           remainingCredit = pendingCredit.minus(creditApplied);
@@ -312,23 +326,24 @@ export class SubscriptionBillingService {
 
         const invoiceNumber = await this.allocateInvoiceNumber(tx);
 
-        const lineItems: InvoiceLineItem[] = [
-          {
-            description: opts.prorated
-              ? `Proration adjustment — plan ${sub.plan.code}`
-              : `Plan ${sub.plan.code} (${sub.plan.billing_cycle})`,
-            quantity,
-            unit_price: unitPrice.toFixed(2),
-            total: unitPrice.times(quantity).toFixed(2),
-            meta: {
-              plan_id: sub.plan.id,
-              plan_code: sub.plan.code,
-              margin_pct: pricing.margin_pct.toFixed(2),
-              billing_cycle: sub.plan.billing_cycle,
-              prorated: !!opts.prorated,
+        const lineItems: InvoiceLineItem[] =
+          opts.invoicePreview?.line_items ?? [
+            {
+              description: opts.prorated
+                ? `Proration adjustment — plan ${sub.plan.code}`
+                : `Plan ${sub.plan.code} (${sub.plan.billing_cycle})`,
+              quantity,
+              unit_price: unitPrice.toFixed(2),
+              total: unitPrice.times(quantity).toFixed(2),
+              meta: {
+                plan_id: sub.plan.id,
+                plan_code: sub.plan.code,
+                margin_pct: pricing.margin_pct.toFixed(2),
+                billing_cycle: sub.plan.billing_cycle,
+                prorated: !!opts.prorated,
+              },
             },
-          },
-        ];
+          ];
         if (creditApplied.greaterThan(DECIMAL_ZERO)) {
           lineItems.push({
             description: 'Downgrade credit (applied from previous cycle)',
@@ -343,16 +358,21 @@ export class SubscriptionBillingService {
           });
         }
 
-        const splitBreakdown: InvoiceSplitBreakdown = {
-          vendix_share: this.round2(pricing.base_price.times(quantity)).toFixed(
-            2,
-          ),
-          partner_share: this.round2(
-            pricing.margin_amount.times(quantity),
-          ).toFixed(2),
-          margin_pct_used: pricing.margin_pct.toFixed(2),
-          partner_org_id: pricing.partner_org_id,
-        };
+        const splitBreakdown: InvoiceSplitBreakdown =
+          opts.invoicePreview?.split_breakdown ?? {
+            vendix_share: this.round2(
+              pricing.base_price.times(quantity),
+            ).toFixed(2),
+            partner_share: this.round2(
+              pricing.margin_amount.times(quantity),
+            ).toFixed(2),
+            margin_pct_used: pricing.margin_pct.toFixed(2),
+            partner_org_id: pricing.partner_org_id,
+          };
+        const partnerOrgId = splitBreakdown.partner_org_id;
+        const partnerShare = this.round2(
+          new Prisma.Decimal(splitBreakdown.partner_share),
+        );
 
         const dueAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000); // +7d
 
@@ -360,7 +380,7 @@ export class SubscriptionBillingService {
           data: {
             store_subscription_id: sub.id,
             store_id: sub.store_id,
-            partner_organization_id: pricing.partner_org_id,
+            partner_organization_id: partnerOrgId,
             invoice_number: invoiceNumber,
             state: 'issued',
             issued_at: now,
@@ -421,15 +441,15 @@ export class SubscriptionBillingService {
         const isPromotionalPlan =
           sub.plan.plan_type === 'promotional' || sub.plan.is_promotional;
         if (
-          pricing.partner_org_id !== null &&
-          pricing.margin_amount.greaterThan(DECIMAL_ZERO) &&
+          partnerOrgId !== null &&
+          partnerShare.greaterThan(DECIMAL_ZERO) &&
           !isPromotionalPlan
         ) {
           await tx.partner_commissions.create({
             data: {
-              partner_organization_id: pricing.partner_org_id,
+              partner_organization_id: partnerOrgId,
               invoice_id: invoice.id,
-              amount: this.round2(pricing.margin_amount.times(quantity)),
+              amount: partnerShare,
               currency: sub.currency,
               state: 'accrued',
               accrued_at: now,

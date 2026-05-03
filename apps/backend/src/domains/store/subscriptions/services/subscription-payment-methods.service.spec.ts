@@ -20,6 +20,7 @@ const wompiCredsMock = {
 
 describe('SubscriptionPaymentMethodsService', () => {
   let service: SubscriptionPaymentMethodsService;
+  let pmFindMany: jest.Mock;
   let pmFindFirst: jest.Mock;
   let pmCount: jest.Mock;
   let subFindUnique: jest.Mock;
@@ -32,6 +33,7 @@ describe('SubscriptionPaymentMethodsService', () => {
   let getActiveCredentials: jest.Mock;
 
   beforeEach(async () => {
+    pmFindMany = jest.fn();
     pmFindFirst = jest.fn();
     pmCount = jest.fn().mockResolvedValue(0);
     subFindUnique = jest.fn();
@@ -56,7 +58,10 @@ describe('SubscriptionPaymentMethodsService', () => {
     };
 
     const prismaMock = {
-      subscription_payment_methods: { findFirst: pmFindFirst },
+      subscription_payment_methods: {
+        findMany: pmFindMany,
+        findFirst: pmFindFirst,
+      },
       store_subscriptions: { findUnique: subFindUnique },
       $transaction: jest.fn().mockImplementation(async (cb: any) => cb(txMock)),
     };
@@ -91,6 +96,38 @@ describe('SubscriptionPaymentMethodsService', () => {
 
   afterEach(() => {
     jest.restoreAllMocks();
+  });
+
+  // ── listForStore ───────────────────────────────────────────────────
+
+  describe('listForStore', () => {
+    it('returns consecutive_failures from the real column, not metadata', async () => {
+      pmFindMany.mockResolvedValue([
+        {
+          id: 10,
+          type: 'card',
+          last4: '4242',
+          brand: 'visa',
+          is_default: true,
+          created_at: new Date('2026-01-01T00:00:00Z'),
+          expiry_month: '12',
+          expiry_year: '2030',
+          state: 'invalid',
+          consecutive_failures: 2,
+          metadata: { consecutive_failures: 99 },
+          provider_payment_source_id: 'ps_123',
+        },
+      ]);
+
+      const result = await service.listForStore();
+
+      expect(pmFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ store_id: 42 }),
+        }),
+      );
+      expect(result[0].consecutive_failures).toBe(2);
+    });
   });
 
   // ── prepareWidgetConfig ────────────────────────────────────────────

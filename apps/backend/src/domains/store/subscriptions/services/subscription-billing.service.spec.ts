@@ -19,6 +19,7 @@ describe('SubscriptionBillingService', () => {
       subscription_invoices: {
         create: jest.fn(),
         update: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue(null),
       },
       subscription_events: {
         create: jest.fn(),
@@ -37,6 +38,8 @@ describe('SubscriptionBillingService', () => {
     return {
       id: 1,
       store_id: 10,
+      plan_id: 1,
+      state: 'active',
       currency: 'USD',
       current_period_start: new Date('2026-04-01T00:00:00Z'),
       current_period_end: new Date('2026-05-01T00:00:00Z'),
@@ -282,6 +285,71 @@ describe('SubscriptionBillingService', () => {
       expect(invArg.data.split_breakdown.vendix_share).toBe('100.00');
       // Partner commission accrued
       expect(prismaMock.partner_commissions.create).toHaveBeenCalled();
+    });
+
+    it('uses a non-prorated target invoice preview for downgrades', async () => {
+      prismaMock.$queryRaw
+        .mockResolvedValueOnce([{ id: 1 }])
+        .mockResolvedValueOnce([]);
+      prismaMock.store_subscriptions.findUniqueOrThrow = jest
+        .fn()
+        .mockResolvedValue(
+          subFixture({
+            metadata: { pending_credit: '999999.00' },
+            plan: {
+              id: 10,
+              code: 'pro_annual',
+              base_price: new Prisma.Decimal('1290000'),
+              max_partner_margin_pct: null,
+              billing_cycle: 'annual',
+            },
+          }),
+        );
+      prismaMock.subscription_invoices.create.mockResolvedValue({ id: 99 });
+
+      await service.issueInvoice(1, {
+        prorated: false,
+        fromPlanId: 10,
+        toPlanId: 20,
+        changeKind: 'downgrade',
+        skipPendingCredit: true,
+        invoicePreview: {
+          total: '119000.00',
+          period_start: '2026-05-02T00:00:00.000Z',
+          period_end: '2026-06-01T00:00:00.000Z',
+          line_items: [
+            {
+              description: 'Cambio a plan pro_monthly (ciclo nuevo, sin crédito)',
+              quantity: 1,
+              unit_price: '119000.00',
+              total: '119000.00',
+              meta: {
+                plan_id: 20,
+                plan_code: 'pro_monthly',
+                billing_cycle: 'monthly',
+                prorated: false,
+                plan_change: true,
+                kind: 'downgrade',
+              },
+            },
+          ],
+          split_breakdown: {
+            vendix_share: '119000.00',
+            partner_share: '0.00',
+            margin_pct_used: '0.00',
+            partner_org_id: null,
+          },
+        },
+      });
+
+      const invArg = prismaMock.subscription_invoices.create.mock.calls[0][0];
+      expect(invArg.data.subtotal.toFixed(2)).toBe('119000.00');
+      expect(invArg.data.total.toFixed(2)).toBe('119000.00');
+      expect(invArg.data.metadata.prorated).toBe(false);
+      expect(invArg.data.metadata.credit_applied).toBe('0.00');
+      expect(invArg.data.line_items[0].meta.plan_id).toBe(20);
+      expect(invArg.data.line_items[0].meta.prorated).toBe(false);
+      expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,7 +1,7 @@
 <app-modal
   [(isOpen)]="isOpen"
-  [title]="'Configurar tarjeta'"
-  [subtitle]="'Gestiona los detalles, predeterminado e historial de cobros'"
+  [title]="'Configurar método de pago'"
+  [subtitle]="'Gestiona el método predeterminado y el historial de cobros'"
   size="md"
   (closed)="onModalClosed()"
 >
@@ -30,7 +30,7 @@
                 <span>Vence {{ exp }}</span>
               }
               @if (createdAtLabel(); as cd) {
-                <span>Agregada {{ cd }}</span>
+                <span>Habilitado {{ cd }}</span>
               }
             </div>
             <div class="flex flex-wrap gap-2 pt-1">
@@ -44,7 +44,7 @@
                 <span
                   class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary"
                 >
-                  Predeterminada
+                  Predeterminado
                 </span>
               }
               @if ((pm.consecutive_failures ?? 0) > 0) {
@@ -64,7 +64,7 @@
       <section class="space-y-2">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <p class="font-medium text-text-primary">Marcar como predeterminada</p>
+            <p class="font-medium text-text-primary">Marcar como predeterminado</p>
             <p class="text-xs text-text-secondary">
               Se usará automáticamente para cobros futuros de tu suscripción.
             </p>
@@ -78,8 +78,8 @@
         </div>
         @if (isOnlyActiveDefault()) {
           <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
-            Esta es tu única tarjeta activa. Agrega otra antes de quitarla
-            como predeterminada.
+            Este es tu único método activo. Habilita otro antes de quitarlo
+            como predeterminado.
           </p>
         }
       </section>
@@ -97,7 +97,7 @@
             (clicked)="openReplaceWidget()"
           >
             <app-icon name="refresh-ccw" [size]="14" slot="icon"></app-icon>
-            Reemplazar tarjeta
+            Reemplazar método
           </app-button>
           <app-button
             variant="ghost"
@@ -106,13 +106,13 @@
             (clicked)="deletePaymentMethod()"
           >
             <app-icon name="trash-2" [size]="14" slot="icon" class="text-red-500"></app-icon>
-            <span class="text-red-600">Eliminar tarjeta</span>
+            <span class="text-red-600">Eliminar método</span>
           </app-button>
         </div>
         @if (!canDelete()) {
           <p class="text-xs text-text-secondary">
-            Para eliminar la tarjeta predeterminada, primero agrega o
-            promueve otra como predeterminada.
+            Para eliminar el método predeterminado, primero habilita o
+            promueve otro como predeterminado.
           </p>
         }
       </section>
@@ -138,7 +138,7 @@
 
         @if (!chargesLoading() && !chargesError() && !hasCharges()) {
           <p class="text-sm text-text-secondary py-2">
-            Aún no hay cobros registrados con esta tarjeta.
+            Aún no hay cobros registrados con este método.
           </p>
         }
 
@@ -222,7 +222,7 @@
   }
 </app-modal>
 
-<!-- Wompi tokenization for "Reemplazar tarjeta". Lives outside <app-modal>
+<!-- Wompi tokenization for "Reemplazar método". Lives outside <app-modal>
      so its own overlay stacks correctly above ours. -->
 <app-wompi-card-widget
   [isOpen]="showReplaceWidget()"

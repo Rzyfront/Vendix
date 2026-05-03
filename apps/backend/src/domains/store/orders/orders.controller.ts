@@ -34,12 +34,15 @@ import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { EcommercePrismaService } from 'src/prisma/services/ecommerce-prisma.service';
 import { ApiOperation, ApiQuery } from '@nestjs/swagger';
+import { PurchaseOrdersService } from './purchase-orders/purchase-orders.service';
+import { PurchaseOrderQueryDto } from './purchase-orders/dto/purchase-order-query.dto';
 
 @Controller('store/orders')
 @UseGuards(PermissionsGuard)
 export class OrdersController {
   constructor(
     private readonly ordersService: OrdersService,
+    private readonly purchaseOrdersService: PurchaseOrdersService,
     private readonly responseService: ResponseService,
     private readonly orderEtaService: OrderEtaService,
     private readonly settingsService: SettingsService,
@@ -148,6 +151,34 @@ export class OrdersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error computing ETA preview',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('purchase-orders')
+  @Permissions('store:orders:purchase_orders:read')
+  async findPurchaseOrders(@Query() query: PurchaseOrderQueryDto) {
+    try {
+      const result = await this.purchaseOrdersService.findAll(query);
+      if (result.data && result.meta) {
+        return this.responseService.paginated(
+          result.data,
+          result.meta.total,
+          result.meta.page,
+          result.meta.limit,
+          'Órdenes de compra obtenidas exitosamente',
+        );
+      }
+
+      return this.responseService.success(
+        result,
+        'Órdenes de compra obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener las órdenes de compra',
         error.response?.message || error.message,
         error.status || 400,
       );

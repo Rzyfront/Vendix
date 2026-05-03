@@ -14,21 +14,6 @@ describe('SubscriptionProrationService', () => {
   let eventEmitterMock: any;
   let redisMock: any;
 
-  // Default paid invoice baseline (effective_price=100, no partner split).
-  // All tests that call preview() need subscription_invoices.findFirst set up
-  // because getPaidBaseline() is called inside preview() (ADR-3).
-  // Override per-test if a different baseline is needed.
-  function defaultPaidInvoice(overrides: any = {}) {
-    return {
-      id: 99,
-      total: new Prisma.Decimal('100.00'),
-      to_plan_id: 5,
-      split_breakdown: { vendix_share: '100.00', partner_share: '0.00' },
-      updated_at: new Date(),
-      ...overrides,
-    };
-  }
-
   beforeEach(() => {
     prismaMock = {
       store_subscriptions: {
@@ -39,9 +24,7 @@ describe('SubscriptionProrationService', () => {
         findUnique: jest.fn(),
       },
       subscription_invoices: {
-        // Default: one paid invoice with effective_price=100 (current plan baseline).
-        // Override per-test for specific baseline scenarios.
-        findFirst: jest.fn().mockResolvedValue(defaultPaidInvoice()),
+        findFirst: jest.fn(),
       },
       subscription_events: {
         create: jest.fn(),
@@ -120,33 +103,113 @@ describe('SubscriptionProrationService', () => {
     expect(preview.credit_to_apply_next_cycle).toBe('0.00');
   });
 
-  it('preview downgrade → proration_amount < 0, credit applied next cycle', async () => {
-    prismaMock.store_subscriptions.findUnique.mockResolvedValue(subFixture());
-    prismaMock.subscription_plans.findUnique.mockResolvedValue({
-      id: 4,
-      code: 'starter',
-      base_price: new Prisma.Decimal(50),
-      max_partner_margin_pct: null,
-      billing_cycle: 'monthly',
-    });
-    // ADR-3: computePricing called once (new plan). Baseline=100 from defaultPaidInvoice.
-    // diff = 50 - 100 = -50 < 0 → 'downgrade'.
-    billingMock.computePricing.mockReturnValueOnce({
-      base_price: new Prisma.Decimal(50),
+  it('preview downgrade → charges destination plan price without credit', async () => {
+    prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+      subFixture({ paid_plan_id: 5 }),
+    );
+    prismaMock.subscription_plans.findUnique.mockImplementation(
+      async ({ where }: any) => {
+        if (where.id === 5) {
+          return {
+            id: 5,
+            code: 'pro',
+            base_price: new Prisma.Decimal(100),
+            max_partner_margin_pct: null,
+            billing_cycle: 'monthly',
+          };
+        }
+        return {
+          id: 4,
+          code: 'starter',
+          base_price: new Prisma.Decimal(50),
+          max_partner_margin_pct: null,
+          billing_cycle: 'monthly',
+        };
+      },
+    );
+    billingMock.computePricing.mockImplementation((input: any) => ({
+      base_price: input.plan.base_price,
       margin_pct: new Prisma.Decimal(0),
       margin_amount: new Prisma.Decimal(0),
       fixed_surcharge: new Prisma.Decimal(0),
-      effective_price: new Prisma.Decimal(50),
+      effective_price: input.plan.base_price,
       partner_org_id: null,
-    });
+    }));
 
     const preview = await service.preview(1, 4);
 
     expect(preview.kind).toBe('downgrade');
-    expect(Number(preview.proration_amount)).toBeLessThan(0);
-    expect(Number(preview.credit_to_apply_next_cycle)).toBeGreaterThan(0);
-    expect(preview.invoice_to_issue).toBeNull();
+    expect(preview.proration_amount).toBe('50.00');
+    expect(preview.credit_to_apply_next_cycle).toBe('0.00');
+    expect(preview.invoice_to_issue?.total).toBe('50.00');
   });
+
+  it.each<[string, string, number]>([
+    ['monthly', '200000', 29],
+    ['quarterly', '450000', 89],
+    ['semiannual', '780000', 179],
+    ['annual', '1290000', 364],
+    ['lifetime', '5000000', 36500],
+  ])(
+    'preview %s to monthly downgrade charges the monthly target price',
+    async (sourceCycle, sourcePrice, daysRemaining) => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        subFixture({
+          paid_plan_id: 10,
+          plan_id: 10,
+          current_period_start: new Date(Date.now() - 86400000),
+          current_period_end: new Date(Date.now() + daysRemaining * 86400000),
+          plan: {
+            id: 10,
+            code: `pro_${sourceCycle}`,
+            name: `Pro ${sourceCycle}`,
+            base_price: new Prisma.Decimal(sourcePrice),
+            max_partner_margin_pct: null,
+            billing_cycle: sourceCycle,
+          },
+        }),
+      );
+      prismaMock.subscription_plans.findUnique.mockImplementation(
+        async ({ where }: any) => {
+          if (where.id === 10) {
+            return {
+              id: 10,
+              code: `pro_${sourceCycle}`,
+              base_price: new Prisma.Decimal(sourcePrice),
+              max_partner_margin_pct: null,
+              billing_cycle: sourceCycle,
+            };
+          }
+          return {
+            id: 20,
+            code: 'pro_monthly',
+            base_price: new Prisma.Decimal('119000'),
+            max_partner_margin_pct: null,
+            billing_cycle: 'monthly',
+          };
+        },
+      );
+      billingMock.computePricing.mockImplementation((input: any) => ({
+        base_price: input.plan.base_price,
+        margin_pct: new Prisma.Decimal(0),
+        margin_amount: new Prisma.Decimal(0),
+        fixed_surcharge: new Prisma.Decimal(0),
+        effective_price: input.plan.base_price,
+        partner_org_id: null,
+      }));
+
+      const preview = await service.preview(1, 20);
+
+      expect(preview.kind).toBe('downgrade');
+      expect(preview.proration_amount).toBe('119000.00');
+      expect(preview.credit_to_apply_next_cycle).toBe('0.00');
+      expect(preview.invoice_to_issue?.total).toBe('119000.00');
+      expect(preview.invoice_to_issue?.line_items[0].meta.plan_id).toBe(20);
+      expect(preview.invoice_to_issue?.line_items[0].meta.billing_cycle).toBe(
+        'monthly',
+      );
+    },
+  );
 
   it('calculateProration clamps direction correctly for same-price diff=0', () => {
     const res = service.calculateProration(
@@ -326,19 +389,22 @@ describe('SubscriptionProrationService', () => {
   // ──────────────────────────────────────────────────────────────────────────
 
   describe('getPaidBaseline', () => {
-    it('returns parsed effectivePrice/basePrice/marginAmount from last paid invoice', async () => {
-      prismaMock.subscription_invoices = {
-        findFirst: jest.fn().mockResolvedValue({
-          id: 10,
-          total: new Prisma.Decimal('120.00'),
-          to_plan_id: 5,
-          split_breakdown: {
-            vendix_share: '100.00',
-            partner_share: '20.00',
-          },
-          updated_at: new Date(),
-        }),
-      };
+    it('returns computed effectivePrice/basePrice/marginAmount from the paid plan', async () => {
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        id: 5,
+        code: 'pro',
+        base_price: new Prisma.Decimal(100),
+        max_partner_margin_pct: null,
+        billing_cycle: 'monthly',
+      });
+      billingMock.computePricing.mockReturnValue({
+        base_price: new Prisma.Decimal(100),
+        margin_pct: new Prisma.Decimal(20),
+        margin_amount: new Prisma.Decimal(20),
+        fixed_surcharge: new Prisma.Decimal(0),
+        effective_price: new Prisma.Decimal(120),
+        partner_org_id: 7,
+      });
 
       const baseline = await service.getPaidBaseline(1, 5);
 
@@ -349,26 +415,36 @@ describe('SubscriptionProrationService', () => {
       expect(baseline!.planId).toBe(5);
     });
 
-    it('returns null when no paid invoice exists', async () => {
-      prismaMock.subscription_invoices = {
-        findFirst: jest.fn().mockResolvedValue(null),
-      };
+    it('returns null when no paid plan id exists', async () => {
+      const baseline = await service.getPaidBaseline(1, null);
+
+      expect(baseline).toBeNull();
+    });
+
+    it('returns null when the paid plan row no longer exists', async () => {
+      prismaMock.subscription_plans.findUnique.mockResolvedValue(null);
 
       const baseline = await service.getPaidBaseline(1, 5);
 
       expect(baseline).toBeNull();
     });
 
-    it('uses total as basePrice when split_breakdown is missing', async () => {
-      prismaMock.subscription_invoices = {
-        findFirst: jest.fn().mockResolvedValue({
-          id: 11,
-          total: new Prisma.Decimal('80.00'),
-          to_plan_id: null,
-          split_breakdown: null,
-          updated_at: new Date(),
-        }),
-      };
+    it('uses the paid plan base price when there is no partner override', async () => {
+      prismaMock.subscription_plans.findUnique.mockResolvedValue({
+        id: 5,
+        code: 'starter',
+        base_price: new Prisma.Decimal(80),
+        max_partner_margin_pct: null,
+        billing_cycle: 'monthly',
+      });
+      billingMock.computePricing.mockReturnValue({
+        base_price: new Prisma.Decimal(80),
+        margin_pct: new Prisma.Decimal(0),
+        margin_amount: new Prisma.Decimal(0),
+        fixed_surcharge: new Prisma.Decimal(0),
+        effective_price: new Prisma.Decimal(80),
+        partner_org_id: null,
+      });
 
       const baseline = await service.getPaidBaseline(1, 5);
 
@@ -378,46 +454,48 @@ describe('SubscriptionProrationService', () => {
   });
 
   describe('preview uses paid baseline (ADR-3)', () => {
-    it('upgrade proration uses last paid invoice total as baseline, not current computePricing', async () => {
-      // Sub is currently on plan 5 (paid $100 per last invoice), upgrading to plan 6 ($200)
-      prismaMock.store_subscriptions.findUnique.mockResolvedValue(subFixture());
-      prismaMock.subscription_plans.findUnique.mockResolvedValue({
-        id: 6,
-        code: 'business',
-        base_price: new Prisma.Decimal(200),
-        max_partner_margin_pct: null,
-        billing_cycle: 'monthly',
-      });
-      prismaMock.subscription_invoices = {
-        findFirst: jest.fn().mockResolvedValue({
-          id: 20,
-          total: new Prisma.Decimal('100.00'),
-          to_plan_id: 5,
-          split_breakdown: { vendix_share: '100.00', partner_share: '0.00' },
-          updated_at: new Date(),
-        }),
-      };
-
-      // computePricing only called once (for new plan, not current plan)
-      billingMock.computePricing.mockReturnValueOnce({
-        base_price: new Prisma.Decimal(200),
+    it('upgrade proration uses paid_plan_id pricing as baseline', async () => {
+      prismaMock.store_subscriptions.findUnique.mockResolvedValue(
+        subFixture({ paid_plan_id: 5 }),
+      );
+      prismaMock.subscription_plans.findUnique.mockImplementation(
+        async ({ where }: any) => {
+          if (where.id === 5) {
+            return {
+              id: 5,
+              code: 'pro',
+              base_price: new Prisma.Decimal(100),
+              max_partner_margin_pct: null,
+              billing_cycle: 'monthly',
+            };
+          }
+          return {
+            id: 6,
+            code: 'business',
+            base_price: new Prisma.Decimal(200),
+            max_partner_margin_pct: null,
+            billing_cycle: 'monthly',
+          };
+        },
+      );
+      billingMock.computePricing.mockImplementation((input: any) => ({
+        base_price: input.plan.base_price,
         margin_pct: new Prisma.Decimal(0),
         margin_amount: new Prisma.Decimal(0),
         fixed_surcharge: new Prisma.Decimal(0),
-        effective_price: new Prisma.Decimal(200),
+        effective_price: input.plan.base_price,
         partner_org_id: null,
-      });
+      }));
 
       const preview = await service.preview(1, 6);
 
       expect(preview.kind).toBe('upgrade');
       // proration_amount must be > 0 (diff between $200 and $100 prorated)
       expect(Number(preview.proration_amount)).toBeGreaterThan(0);
-      // old_effective_price comes from baseline, not computePricing
       expect(preview.old_effective_price).toBe('100.00');
     });
 
-    it('preview with no paid invoice treats origin as free (proration_amount = full new price)', async () => {
+    it('preview with no paid plan treats origin as free (proration_amount = full new price)', async () => {
       prismaMock.store_subscriptions.findUnique.mockResolvedValue(subFixture());
       prismaMock.subscription_plans.findUnique.mockResolvedValue({
         id: 6,

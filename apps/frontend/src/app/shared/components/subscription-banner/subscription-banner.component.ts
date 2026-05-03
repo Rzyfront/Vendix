@@ -6,8 +6,8 @@ import {
   OnInit,
   DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
+import { CommonModule, DOCUMENT } from '@angular/common';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import { SubscriptionFacade } from '../../../core/store/subscription';
@@ -56,7 +56,7 @@ function graceDetail(
 @Component({
   selector: 'app-subscription-banner',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [CommonModule, IconComponent],
   template: `
     @if (visible()) {
       <div class="sub-banner" [class]="'sub-banner--' + level()" role="status">
@@ -71,9 +71,10 @@ function graceDetail(
             }
           </div>
           <a
-            [routerLink]="ctaLink()"
+            [attr.href]="ctaLink()"
             class="sub-banner__cta"
             [attr.aria-label]="copy().ctaText"
+            (click)="onCtaClick($event)"
           >
             {{ copy().ctaText }}
             <app-icon name="chevron-right" [size]="14" />
@@ -98,6 +99,7 @@ export class SubscriptionBannerComponent implements OnInit {
   private readonly router = inject(Router);
   private readonly subscriptionService = inject(StoreSubscriptionService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly document = inject(DOCUMENT);
 
   private readonly dismissed = signal(false);
 
@@ -341,5 +343,32 @@ export class SubscriptionBannerComponent implements OnInit {
 
   onDismiss(): void {
     this.dismissed.set(true);
+  }
+
+  onCtaClick(event: MouseEvent): void {
+    const target = this.ctaLink();
+    const currentPath = this.router.url.split(/[?#]/)[0];
+
+    if (
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+
+    if (target === '/admin/subscription/dunning' && currentPath === target) {
+      event.preventDefault();
+      this.document.getElementById('subscription-dunning-pay-now')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+      return;
+    }
+
+    event.preventDefault();
+    this.router.navigateByUrl(target);
   }
 }

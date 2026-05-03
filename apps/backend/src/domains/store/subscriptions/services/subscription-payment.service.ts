@@ -738,12 +738,16 @@ export class SubscriptionPaymentService {
 
     // 7. Update the subscription (use UncheckedUpdateInput for scalar FK fields)
     const round2 = (d: Prisma.Decimal) => d.toDecimalPlaces(2, 6);
+    const resolvedFeaturesSnapshot =
+      (targetPlan.ai_feature_flags ?? {}) as Prisma.InputJsonValue;
     const updateData: Prisma.store_subscriptionsUncheckedUpdateInput = {
       plan_id: sub.pending_plan_id,
       paid_plan_id: sub.pending_plan_id,
       effective_price: round2(newPricing.effective_price),
       vendix_base_price: round2(newPricing.base_price),
       partner_margin_amount: round2(newPricing.margin_amount),
+      resolved_features: resolvedFeaturesSnapshot,
+      resolved_at: now,
       // Clear pending fields
       pending_plan_id: null,
       pending_change_invoice_id: null,
@@ -753,6 +757,9 @@ export class SubscriptionPaymentService {
       // Clear scheduled downgrade (upgrade cancels deferred downgrade)
       scheduled_plan_id: null,
       scheduled_plan_change_at: null,
+      // Buying a new plan voids any end-of-cycle cancellation.
+      scheduled_cancel_at: null,
+      auto_renew: true,
       // Clear grace fields when confirming payment
       grace_soft_until: null,
       grace_hard_until: null,
@@ -786,6 +793,13 @@ export class SubscriptionPaymentService {
         to_plan_id: invoice.to_plan_id,
         change_kind: changeKind,
         invoice_id: invoice.id,
+        ...(sub.scheduled_cancel_at
+          ? {
+              voided_scheduled_cancel_at:
+                sub.scheduled_cancel_at.toISOString(),
+              voided_scheduled_cancel_via: 'payment_confirmed',
+            }
+          : {}),
       },
     });
 
@@ -1615,6 +1629,16 @@ export class SubscriptionPaymentService {
       tx: Prisma.TransactionClient,
     ): Promise<subscription_payments> => {
       const now = new Date();
+      const existingPayment = await tx.subscription_payments.findUnique({
+        where: { id: paymentId },
+        select: { metadata: true },
+      });
+      const existingMetadata =
+        existingPayment?.metadata &&
+        typeof existingPayment.metadata === 'object' &&
+        !Array.isArray(existingPayment.metadata)
+          ? (existingPayment.metadata as Record<string, unknown>)
+          : {};
 
       const updatedPayment = await tx.subscription_payments.update({
         where: { id: paymentId },
@@ -1623,6 +1647,7 @@ export class SubscriptionPaymentService {
           gateway_reference: transactionId ?? null,
           paid_at: now,
           metadata: {
+            ...existingMetadata,
             ...(gatewayResponse ? { gateway_response: gatewayResponse } : {}),
           } as Prisma.InputJsonValue,
           updated_at: now,

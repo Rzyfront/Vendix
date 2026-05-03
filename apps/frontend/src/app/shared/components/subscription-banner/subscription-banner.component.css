@@ -7,7 +7,7 @@
   position: relative;
   width: 100%;
   border-bottom: 1px solid transparent;
-  z-index: 40;
+  z-index: calc(var(--z-header, 35) - 1);
   animation: sub-banner-slide 280ms ease-out both;
 }
 

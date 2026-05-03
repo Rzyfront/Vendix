@@ -72,7 +72,7 @@ export class EcommerceComponent {
   private tourService = inject(TourService);
   private destroyRef = inject(DestroyRef);
 // Tour
-  showTourModal = false;
+  readonly showTourModal = signal(false);
   readonly ecommerceTourConfig = ECOMMERCE_TOUR_CONFIG;
 
   // Currencies for selector
@@ -915,7 +915,7 @@ export class EcommerceComponent {
     const tourId = 'ecommerce-config-first-visit';
     if (this.tourService.canShowTour(tourId)) {
       setTimeout(() => {
-        this.showTourModal = true;
+        this.showTourModal.set(true);
       }, 1500);
     }
   }

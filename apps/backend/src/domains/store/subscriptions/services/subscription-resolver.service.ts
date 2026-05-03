@@ -187,6 +187,7 @@ export class SubscriptionResolverService {
       where: { store_id: storeId },
       include: {
         plan: true,
+        paid_plan: true,
         promotional_plan: true,
         partner_override: {
           include: { base_plan: true },
@@ -216,10 +217,12 @@ export class SubscriptionResolverService {
       };
     }
 
-    // RNC-39: stores in 'no_plan' state have no plan assigned. Surface empty
-    // features so the gate blocks all feature usage and consumers see a clear
-    // "no plan" signal rather than leaking placeholder plan info.
-    if (!sub.plan_id || !sub.plan) {
+    const effectivePlan =
+      sub.state === 'trial' ? sub.plan : (sub.paid_plan ?? null);
+
+    // RNC-39: stores in 'no_plan' state have no plan assigned. Paid states use
+    // paid_plan_id as the feature source; trial uses plan_id as its grant.
+    if (!effectivePlan) {
       return {
         found: true,
         storeId,
@@ -238,7 +241,7 @@ export class SubscriptionResolverService {
       };
     }
 
-    const baseFeatures = this.coerceFeatures(sub.plan.ai_feature_flags);
+    const baseFeatures = this.coerceFeatures(effectivePlan.ai_feature_flags);
     let features: ResolvedFeatures = baseFeatures;
 
     // 2. Partner override: restriction-only. Never enable above base, never
@@ -275,15 +278,15 @@ export class SubscriptionResolverService {
       // ADR: paid_plan_id is the source of truth for feature gating.
       // Trial carve-out: trial subs have no paid invoice yet; use plan_id (trial grant).
       planId: sub.paid_plan_id ?? (sub.state === 'trial' ? sub.plan_id : null),
-      planCode: sub.plan.code,
+      planCode: effectivePlan.code,
       paidPlanId: sub.paid_plan_id ?? null,
       pendingPlanId: sub.pending_plan_id ?? null,
       partnerOrgId: sub.partner_override?.organization_id ?? null,
       overlayActive,
       overlayExpiresAt,
       features,
-      gracePeriodSoftDays: sub.plan.grace_period_soft_days,
-      gracePeriodHardDays: sub.plan.grace_period_hard_days,
+      gracePeriodSoftDays: effectivePlan.grace_period_soft_days,
+      gracePeriodHardDays: effectivePlan.grace_period_hard_days,
       currentPeriodEnd: sub.current_period_end,
     };
   }
@@ -478,7 +481,9 @@ export class SubscriptionResolverService {
     sub: {
       id: number;
       resolved_at: Date;
+      resolved_features?: unknown;
       plan?: { updated_at: Date } | null;
+      paid_plan?: { updated_at: Date } | null;
       partner_override?: { updated_at: Date } | null;
       promotional_plan?: { updated_at: Date } | null;
     },
@@ -487,6 +492,7 @@ export class SubscriptionResolverService {
     try {
       const candidates: Date[] = [];
       if (sub.plan) candidates.push(sub.plan.updated_at);
+      if (sub.paid_plan) candidates.push(sub.paid_plan.updated_at);
       if (sub.partner_override)
         candidates.push(sub.partner_override.updated_at);
       if (sub.promotional_plan)
@@ -496,7 +502,15 @@ export class SubscriptionResolverService {
         (acc, d) => (d.getTime() > acc.getTime() ? d : acc),
         candidates[0],
       );
-      if (sub.resolved_at.getTime() >= maxSource.getTime()) return;
+      const snapshot = sub.resolved_features;
+      const snapshotIsEmpty =
+        !snapshot ||
+        typeof snapshot !== 'object' ||
+        Array.isArray(snapshot) ||
+        Object.keys(snapshot as Record<string, unknown>).length === 0;
+      if (!snapshotIsEmpty && sub.resolved_at.getTime() >= maxSource.getTime()) {
+        return;
+      }
 
       await this.prisma.store_subscriptions.update({
         where: { id: sub.id },

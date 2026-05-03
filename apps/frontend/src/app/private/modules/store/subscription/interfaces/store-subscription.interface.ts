@@ -296,10 +296,10 @@ export interface PaymentMethod {
   consecutive_failures?: number;
   /**
    * Fase 4 (Wompi recurrent migration) — populated by the backend once
-   * the card has been registered as a Wompi `payment_source` (COF) via
+   * Wompi enables the payment method as a `payment_source` (COF) via
    * the new tokenize endpoint. When present, the UI surfaces a
-   * "Verificada para cobros recurrentes" badge so the user knows the
-   * card will be charged automatically on renewal.
+   * "Protegido por Wompi" badge so the user knows the method can be charged
+   * automatically on renewal without Vendix storing full card data.
    *
    * Optional + defensive: legacy methods registered before Fase 5
    * shipped will not have this field.

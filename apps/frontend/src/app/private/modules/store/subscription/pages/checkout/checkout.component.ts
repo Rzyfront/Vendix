@@ -319,7 +319,12 @@ const COUPON_REASON_COPY: Record<string, string> = {
                     <ul class="text-xs text-amber-900 leading-relaxed space-y-1.5 list-disc pl-4">
                       <li>
                         <strong>Cobro recurrente:</strong>
-                        se cobra automáticamente al final de cada ciclo.
+                        se cobra automáticamente al final de cada ciclo mediante Wompi.
+                      </li>
+                      <li>
+                        <strong>Método de pago:</strong>
+                        al pagar con tarjeta, Wompi habilitará el método para renovaciones automáticas.
+                        Vendix no almacena el número completo de tu tarjeta ni el CVV.
                       </li>
                       <li>
                         <strong>No reembolsable:</strong>

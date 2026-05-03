@@ -28,13 +28,13 @@ interface SpotlightPosition {
   imports: [ButtonComponent],
   template: `
     <!-- Spotlight Overlay -->
-    @if (isOpen() && spotlight.visible && spotlight.width > 0) {
+    @if (isOpen() && spotlight().visible && spotlight().width > 0) {
       <div
         class="tour-spotlight-overlay"
-        [style.top.px]="spotlight.top"
-        [style.left.px]="spotlight.left"
-        [style.width.px]="spotlight.width"
-        [style.height.px]="spotlight.height"
+        [style.top.px]="spotlight().top"
+        [style.left.px]="spotlight().left"
+        [style.width.px]="spotlight().width"
+        [style.height.px]="spotlight().height"
       ></div>
     }
 
@@ -42,24 +42,24 @@ interface SpotlightPosition {
     @if (isOpen()) {
       <div
         class="tour-tooltip"
-        [class.is-mobile]="isMobile"
-        [class.is-desktop]="!isMobile"
-        [class.is-minimized]="isMinimized"
-        [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
-        [style.top.px]="tooltipPosition.top"
-        [style.left.px]="tooltipPosition.left"
+        [class.is-mobile]="isMobile()"
+        [class.is-desktop]="!isMobile()"
+        [class.is-minimized]="isMinimized()"
+        [attr.data-position-mode]="isMobile() ? 'compact' : 'absolute'"
+        [style.top.px]="tooltipPosition().top"
+        [style.left.px]="tooltipPosition().left"
       >
         <div class="tooltip-header">
-          <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
+          <h3 class="tooltip-title">{{ currentStep()?.title }}</h3>
           <!-- Minimize button for mobile -->
-          @if (isMobile) {
+          @if (isMobile()) {
             <button
               class="minimize-btn"
               (click)="toggleMinimize()"
-              [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
+              [attr.aria-label]="isMinimized() ? 'Expandir' : 'Minimizar'"
             >
               <svg
-                [class.rotated]="isMinimized"
+                [class.rotated]="isMinimized()"
                 width="16"
                 height="16"
                 viewBox="0 0 24 24"
@@ -72,18 +72,18 @@ interface SpotlightPosition {
             </button>
           }
         </div>
-        <div class="tooltip-content" [class.expanded]="!isMinimized">
-          <p class="tooltip-description">{{ currentStep?.description }}</p>
-          @if (currentStep?.action) {
-            <p class="tooltip-action">{{ currentStep?.action }}</p>
+        <div class="tooltip-content" [class.expanded]="!isMinimized()">
+          <p class="tooltip-description">{{ currentStep()?.description }}</p>
+          @if (currentStep()?.action) {
+            <p class="tooltip-action">{{ currentStep()?.action }}</p>
           }
         </div>
         <!-- Footer Navigation -->
-        <div class="tooltip-footer" [class.expanded]="!isMinimized">
+        <div class="tooltip-footer" [class.expanded]="!isMinimized()">
           <div class="footer-left">
             <app-button
               variant="outline"
-              [size]="isMobile ? 'xsm' : 'xsm'"
+              [size]="isMobile() ? 'xsm' : 'xsm'"
               (clicked)="skipTour()"
               class="skip-btn"
             >
@@ -91,19 +91,19 @@ interface SpotlightPosition {
             </app-button>
           </div>
           <!-- Progress indicator (desktop only) -->
-          @if (!isMobile) {
+          @if (!isMobile()) {
             <div class="footer-center">
               <span class="tour-progress">
-                {{ currentIndex + 1 }} de {{ totalSteps }}
+                {{ currentIndex() + 1 }} de {{ totalSteps }}
               </span>
             </div>
           }
           <div class="footer-right">
             <app-button
               variant="primary"
-              [size]="isMobile ? 'sm' : 'xsm'"
+              [size]="isMobile() ? 'sm' : 'xsm'"
               (clicked)="nextStep()"
-              [disabled]="isProcessing"
+              [disabled]="isProcessing()"
               class="next-btn"
             >
               {{ nextButtonText }}
@@ -540,21 +540,21 @@ export class TourModalComponent {
   readonly completed = output<void>();
   readonly skipped = output<void>();
 
-  currentIndex = 0;
-  currentStep: TourStep | null = null;
-  isProcessing = false;
-  isMobile = false;
-  isMinimized = false;
+  readonly currentIndex = signal(0);
+  readonly currentStep = signal<TourStep | null>(null);
+  readonly isProcessing = signal(false);
+  readonly isMobile = signal(false);
+  readonly isMinimized = signal(false);
 
-  spotlight: SpotlightPosition = {
+  readonly spotlight = signal<SpotlightPosition>({
     top: 0,
     left: 0,
     width: 0,
     height: 0,
     visible: false,
-  };
+  });
 
-  tooltipPosition = { top: 100, left: 100 };
+  readonly tooltipPosition = signal({ top: 100, left: 100 });
 
   private resizeObserver: ResizeObserver | null = null;
   private domObserver: MutationObserver | null = null;
@@ -591,12 +591,7 @@ export class TourModalComponent {
   }
 
   private checkMobile(): void {
-    this.isMobile = window.innerWidth < 1024;
-
-    if (this.isMobile && this.isOpen()) {
-      this.clearSpotlight();
-      this.isOpen.set(false);
-    }
+    this.isMobile.set(window.innerWidth < 1024);
   }
 
   private setupResizeObserver(): void {
@@ -639,8 +634,9 @@ export class TourModalComponent {
       clearTimeout(this.recalculateTimeout);
     }
     this.recalculateTimeout = setTimeout(() => {
-      if (this.isOpen() && this.currentStep?.target) {
-        this.updateSpotlight(this.currentStep.target);
+      const currentStep = this.currentStep();
+      if (this.isOpen() && currentStep?.target) {
+        this.updateSpotlight(currentStep.target);
       }
     }, 100);
   }
@@ -650,30 +646,43 @@ export class TourModalComponent {
   }
 
   get isLastStep(): boolean {
-    return this.currentIndex === this.totalSteps - 1;
+    return this.currentIndex() === this.totalSteps - 1;
   }
 
   get nextButtonText(): string {
-    if (this.isProcessing) return 'Procesando...';
-    if (this.currentIndex === 0) return 'Comenzar →';
+    if (this.isProcessing()) return 'Procesando...';
+    if (this.currentIndex() === 0) return 'Comenzar →';
     return this.isLastStep ? '✓ Terminar' : 'Siguiente →';
   }
 
   get progressPercentage(): number {
     if (this.totalSteps === 0) return 0;
-    return ((this.currentIndex + 1) / this.totalSteps) * 100;
+    return ((this.currentIndex() + 1) / this.totalSteps) * 100;
   }
 
   private setupPathListener(): void {
     let lastPath = window.location.pathname;
-    const checkPath = () => {
+    const checkPath = async () => {
       const currentPath = window.location.pathname;
-      if (currentPath !== lastPath && this.isOpen() && this.currentStep) {
+      const currentStep = this.currentStep();
+      if (currentPath !== lastPath && this.isOpen() && currentStep) {
         lastPath = currentPath;
-        this.validateCurrentStep();
+        const shouldAutoAdvance = !!currentStep.beforeNext;
+        const isValid = shouldAutoAdvance
+          ? await this.validateCurrentStep()
+          : false;
+        if (shouldAutoAdvance && isValid) {
+          if (this.isLastStep) {
+            this.completeTour();
+          } else {
+            await this.loadStep(this.currentIndex() + 1);
+          }
+          return;
+        }
         setTimeout(() => {
-          if (this.currentStep?.target) {
-            this.updateSpotlight(this.currentStep.target);
+          const step = this.currentStep();
+          if (step?.target) {
+            this.updateSpotlight(step.target);
           }
         }, 300);
       }
@@ -690,13 +699,14 @@ export class TourModalComponent {
 
   private setupClickListener(): void {
     this.clickListener = async (e: Event) => {
-      if (!this.isOpen() || !this.currentStep || this.isProcessing) return;
+      const currentStep = this.currentStep();
+      if (!this.isOpen() || !currentStep || this.isProcessing()) return;
 
       // Skip click detection for first and last steps
-      if (this.currentIndex === 0 || this.isLastStep) return;
+      if (this.currentIndex() === 0 || this.isLastStep) return;
 
       // Check both target (for spotlight) and autoAdvanceTarget (for click detection only)
-      const target = this.getDeviceSelector(this.currentStep.target || '');
+      const target = this.getDeviceSelector(currentStep.target || '');
       const autoAdvanceTarget = this.getDeviceAutoAdvanceTarget();
 
       if (!target && !autoAdvanceTarget) return;
@@ -723,7 +733,7 @@ export class TourModalComponent {
 
       if (isTargetClicked) {
         // Mobile: Close sidebar after clicking sidebar link
-        if (this.isMobile && target?.includes('app-sidebar')) {
+        if (this.isMobile() && target?.includes('app-sidebar')) {
           setTimeout(() => this.closeMobileSidebarForTour(), 100);
         }
 
@@ -736,7 +746,7 @@ export class TourModalComponent {
             if (this.isLastStep) {
               this.completeTour();
             } else {
-              this.loadStep(this.currentIndex + 1);
+              this.loadStep(this.currentIndex() + 1);
             }
           }
         });
@@ -758,37 +768,38 @@ export class TourModalComponent {
   async loadStep(index: number): Promise<void> {
     if (index < 0 || index >= this.totalSteps) return;
 
-    this.isProcessing = true;
-    this.currentIndex = index;
-    this.currentStep = this.tourConfig().steps[index];
+    this.isProcessing.set(true);
+    this.currentIndex.set(index);
+    this.currentStep.set(this.tourConfig().steps[index]);
 
     this.clearSpotlight();
 
     // Mobile: Open sidebar if target is in sidebar
-    const deviceSelector = this.getDeviceSelector(this.currentStep?.target);
-    if (this.isMobile && deviceSelector?.includes('app-sidebar')) {
+    const currentStep = this.currentStep();
+    const deviceSelector = this.getDeviceSelector(currentStep?.target);
+    if (this.isMobile() && deviceSelector?.includes('app-sidebar')) {
       await this.openMobileSidebarForTour();
       // Wait for sidebar animation to complete
       await this.delay(200);
     }
 
-    if (this.currentStep?.beforeShow) {
+    if (currentStep?.beforeShow) {
       try {
-        await this.currentStep.beforeShow();
+        await currentStep.beforeShow();
       } catch (error) {
         // Error in beforeShow hook
       }
     }
 
     if (
-      this.currentStep?.target ||
-      this.currentStep?.targetMobile ||
-      this.currentStep?.targetDesktop
+      currentStep?.target ||
+      currentStep?.targetMobile ||
+      currentStep?.targetDesktop
     ) {
-      const deviceSelector = this.getDeviceSelector(this.currentStep.target);
+      const deviceSelector = this.getDeviceSelector(currentStep.target);
       if (deviceSelector) {
         // On mobile, DON'T scroll to top for dynamic elements - they need to be in viewport
-        if (this.isMobile) {
+        if (this.isMobile()) {
           window.scrollTo({ top: 0, behavior: 'instant' });
           await this.delay(150);
         }
@@ -807,7 +818,7 @@ export class TourModalComponent {
       this.centerTooltip();
     }
 
-    this.isProcessing = false;
+    this.isProcessing.set(false);
   }
 
   private async waitForElement(
@@ -848,7 +859,7 @@ export class TourModalComponent {
 
       // On mobile, scroll down periodically ONLY for non-dynamic elements
       let scrollInterval: any = null;
-      if (this.isMobile && !isDynamicElement) {
+      if (this.isMobile() && !isDynamicElement) {
         let scrollY = 0;
         const maxScroll = document.body.scrollHeight - window.innerHeight;
         scrollInterval = setInterval(() => {
@@ -888,7 +899,7 @@ export class TourModalComponent {
 
     // If no selector available, center tooltip
     if (!deviceSelector) {
-      this.spotlight.visible = false;
+      this.spotlight.update((spotlight) => ({ ...spotlight, visible: false }));
       this.centerTooltip();
       return;
     }
@@ -908,7 +919,7 @@ export class TourModalComponent {
     }
 
     if (!element) {
-      this.spotlight.visible = false;
+      this.spotlight.update((spotlight) => ({ ...spotlight, visible: false }));
       this.centerTooltip();
       return;
     }
@@ -916,18 +927,18 @@ export class TourModalComponent {
     const rect = element.getBoundingClientRect();
 
     if (rect.width === 0 || rect.height === 0) {
-      this.spotlight.visible = false;
+      this.spotlight.update((spotlight) => ({ ...spotlight, visible: false }));
       this.centerTooltip();
       return;
     }
 
-    this.spotlight = {
+    this.spotlight.set({
       top: rect.top,
       left: rect.left,
       width: rect.width,
       height: rect.height,
       visible: true,
-    };
+    });
 
     this.highlightedElement = element;
     this.positionTooltip(rect);
@@ -944,34 +955,35 @@ export class TourModalComponent {
   private getDeviceSelector(
     baseSelector: string | undefined,
   ): string | undefined {
-    if (!this.currentStep) return baseSelector;
+    const currentStep = this.currentStep();
+    if (!currentStep) return baseSelector;
 
     // If no base selector, check device-specific first
     if (!baseSelector) {
-      return this.isMobile
-        ? this.currentStep.targetMobile
-        : this.currentStep.targetDesktop;
+      return this.isMobile()
+        ? currentStep.targetMobile
+        : currentStep.targetDesktop;
     }
 
     // Use device-specific target if available, otherwise fall back to base selector
-    if (this.isMobile && this.currentStep.targetMobile) {
-      return this.currentStep.targetMobile;
+    if (this.isMobile() && currentStep.targetMobile) {
+      return currentStep.targetMobile;
     }
-    if (!this.isMobile && this.currentStep.targetDesktop) {
-      return this.currentStep.targetDesktop;
+    if (!this.isMobile() && currentStep.targetDesktop) {
+      return currentStep.targetDesktop;
     }
 
     return baseSelector;
   }
 
   private positionTooltip(elementRect: DOMRect): void {
-    const tooltipWidth = this.isMobile
+    const tooltipWidth = this.isMobile()
       ? Math.min(window.innerWidth - 24, 340)
       : 320;
-    const tooltipHeight = this.isMobile ? 240 : 190;
-    const margin = this.isMobile ? 12 : 16;
+    const tooltipHeight = this.isMobile() ? 240 : 190;
+    const margin = this.isMobile() ? 12 : 16;
 
-    if (this.isMobile) {
+    if (this.isMobile()) {
       // Mobile: Smart positioning - place tooltip to NOT overlap the target element
       const safeAreaTop = this.env('safe-area-inset-top', 0);
       const safeAreaLeft = this.env('safe-area-inset-left', 0);
@@ -985,7 +997,7 @@ export class TourModalComponent {
       const availableRight = window.innerWidth - margin - safeAreaRight;
 
       // Check if target is in bottom footer (checkout button) by checking selector
-      const deviceSelector = this.getDeviceSelector(this.currentStep?.target);
+      const deviceSelector = this.getDeviceSelector(this.currentStep()?.target);
       const isFooterTarget =
         deviceSelector?.includes('pos-mobile-footer') ||
         deviceSelector?.includes('checkout-btn');
@@ -1033,7 +1045,7 @@ export class TourModalComponent {
         Math.min(top, availableBottom - tooltipHeight),
       );
 
-      this.tooltipPosition = { top, left };
+      this.tooltipPosition.set({ top, left });
       return;
     }
 
@@ -1050,10 +1062,10 @@ export class TourModalComponent {
       left = window.innerWidth - tooltipWidth - margin;
     }
 
-    this.tooltipPosition = {
+    this.tooltipPosition.set({
       top: Math.max(margin, top),
       left: Math.max(margin, left),
-    };
+    });
   }
 
   // Helper to get safe area inset value
@@ -1069,13 +1081,13 @@ export class TourModalComponent {
   }
 
   private centerTooltip(): void {
-    const tooltipWidth = this.isMobile
+    const tooltipWidth = this.isMobile()
       ? Math.min(window.innerWidth - 24, 340)
       : 320;
-    const tooltipHeight = this.isMobile ? 240 : 200;
-    const margin = this.isMobile ? 12 : 16;
+    const tooltipHeight = this.isMobile() ? 240 : 200;
+    const margin = this.isMobile() ? 12 : 16;
 
-    if (this.isMobile) {
+    if (this.isMobile()) {
       // Mobile: Center in upper portion of screen, avoid blocking important content
       const safeAreaTop = this.env('safe-area-inset-top', 0);
       const safeAreaLeft = this.env('safe-area-inset-left', 0);
@@ -1087,18 +1099,18 @@ export class TourModalComponent {
         safeAreaLeft +
         (window.innerWidth - safeAreaLeft * 2 - tooltipWidth) / 2;
 
-      this.tooltipPosition = {
+      this.tooltipPosition.set({
         top: Math.max(margin, top),
         left: Math.max(margin, left),
-      };
+      });
       return;
     }
 
     // Desktop: Bottom-right corner
-    this.tooltipPosition = {
+    this.tooltipPosition.set({
       top: Math.max(margin, window.innerHeight - tooltipHeight - margin),
       left: Math.max(margin, window.innerWidth - tooltipWidth - margin),
-    };
+    });
   }
 
   /**
@@ -1106,35 +1118,37 @@ export class TourModalComponent {
    * Falls back to the generic `autoAdvanceTarget` if device-specific target is not provided
    */
   private getDeviceAutoAdvanceTarget(): string | undefined {
-    if (!this.currentStep) return undefined;
+    const currentStep = this.currentStep();
+    if (!currentStep) return undefined;
 
     // Use device-specific target if available, otherwise fall back to base selector
-    if (this.isMobile && this.currentStep.autoAdvanceTargetMobile) {
-      return this.currentStep.autoAdvanceTargetMobile;
+    if (this.isMobile() && currentStep.autoAdvanceTargetMobile) {
+      return currentStep.autoAdvanceTargetMobile;
     }
-    if (!this.isMobile && this.currentStep.autoAdvanceTargetDesktop) {
-      return this.currentStep.autoAdvanceTargetDesktop;
+    if (!this.isMobile() && currentStep.autoAdvanceTargetDesktop) {
+      return currentStep.autoAdvanceTargetDesktop;
     }
 
-    return this.currentStep.autoAdvanceTarget;
+    return currentStep.autoAdvanceTarget;
   }
 
   private clearSpotlight(): void {
-    this.spotlight = {
+    this.spotlight.set({
       top: 0,
       left: 0,
       width: 0,
       height: 0,
       visible: false,
-    };
+    });
     this.highlightedElement = null;
   }
 
   private async validateCurrentStep(): Promise<boolean> {
-    if (!this.currentStep?.beforeNext) return true;
+    const currentStep = this.currentStep();
+    if (!currentStep?.beforeNext) return true;
 
     try {
-      const canProceed = await this.currentStep.beforeNext();
+      const canProceed = await currentStep.beforeNext();
       return canProceed;
     } catch (error) {
       console.error('[TourModal] Validation error:', error);
@@ -1143,9 +1157,9 @@ export class TourModalComponent {
   }
 
   async nextStep(): Promise<void> {
-    if (this.isProcessing) return;
+    if (this.isProcessing()) return;
 
-    if (this.currentIndex === 0) {
+    if (this.currentIndex() === 0) {
       await this.loadStep(1);
       return;
     }
@@ -1158,13 +1172,13 @@ export class TourModalComponent {
     if (this.isLastStep) {
       this.completeTour();
     } else {
-      await this.loadStep(this.currentIndex + 1);
+      await this.loadStep(this.currentIndex() + 1);
     }
   }
 
   async previousStep(): Promise<void> {
-    if (this.currentIndex > 0 && !this.isProcessing) {
-      await this.loadStep(this.currentIndex - 1);
+    if (this.currentIndex() > 0 && !this.isProcessing()) {
+      await this.loadStep(this.currentIndex() - 1);
     }
   }
 
@@ -1185,14 +1199,8 @@ export class TourModalComponent {
   async startTour(): Promise<void> {
     this.checkMobile();
 
-    if (this.isMobile) {
-      this.clearSpotlight();
-      this.isOpen.set(false);
-      return;
-    }
-
-    this.currentIndex = 0;
-    this.currentStep = this.tourConfig().steps[0];
+    this.currentIndex.set(0);
+    this.currentStep.set(this.tourConfig().steps[0]);
 
     // Clear any existing spotlight
     this.clearSpotlight();
@@ -1206,9 +1214,10 @@ export class TourModalComponent {
     // Wait for Angular to render, then run hooks
     await this.delay(100);
 
-    if (this.currentStep?.beforeShow) {
+    const currentStep = this.currentStep();
+    if (currentStep?.beforeShow) {
       try {
-        await this.currentStep.beforeShow();
+        await currentStep.beforeShow();
       } catch (error) {
         // Error in beforeShow hook
       }
@@ -1216,11 +1225,11 @@ export class TourModalComponent {
 
     // If there's a target, wait for it and update spotlight
     if (
-      this.currentStep?.target ||
-      this.currentStep?.targetMobile ||
-      this.currentStep?.targetDesktop
+      currentStep?.target ||
+      currentStep?.targetMobile ||
+      currentStep?.targetDesktop
     ) {
-      const deviceSelector = this.getDeviceSelector(this.currentStep.target);
+      const deviceSelector = this.getDeviceSelector(currentStep.target);
       if (deviceSelector) {
         // Check if this is a dynamic element (generated by ngFor like product cards)
         const isDynamicElement =
@@ -1228,13 +1237,13 @@ export class TourModalComponent {
           deviceSelector.includes('pos-product-selection');
 
         // On mobile, DON'T scroll to top for dynamic elements - they need to be in viewport
-        if (this.isMobile && !isDynamicElement) {
+        if (this.isMobile() && !isDynamicElement) {
           window.scrollTo({ top: 0, behavior: 'instant' });
           await this.delay(150);
         }
 
         // Use longer timeout for dynamic elements (API call + Angular rendering)
-        const timeout = this.isMobile
+        const timeout = this.isMobile()
           ? isDynamicElement
             ? 10000
             : 6000
@@ -1249,7 +1258,7 @@ export class TourModalComponent {
       }
     }
 
-    this.isProcessing = false;
+    this.isProcessing.set(false);
   }
 
   private delay(ms: number): Promise<void> {
@@ -1296,6 +1305,6 @@ export class TourModalComponent {
    * when user needs to interact with the highlighted element
    */
   toggleMinimize(): void {
-    this.isMinimized = !this.isMinimized;
+    this.isMinimized.update((isMinimized) => !isMinimized);
   }
 }

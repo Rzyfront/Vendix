@@ -22,6 +22,24 @@ import { StoreSubscriptionService } from '../../services/store-subscription.serv
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { SubscriptionPlan } from '../../interfaces/store-subscription.interface';
 
+type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
+
+const CYCLE_ORDER: BillingCycle[] = [
+  'monthly',
+  'quarterly',
+  'semiannual',
+  'annual',
+  'lifetime',
+];
+
+const CYCLE_LABEL: Record<BillingCycle, string> = {
+  monthly: 'Mensual',
+  quarterly: 'Trimestral',
+  semiannual: 'Semestral',
+  annual: 'Anual',
+  lifetime: 'Pago único',
+};
+
 /**
  * RNC-39 — "Soft picker" landing for stores in `no_plan` state.
  *
@@ -55,6 +73,7 @@ export class PickerComponent implements OnInit {
   readonly plans = signal<SubscriptionPlan[]>([]);
   readonly loading = signal(false);
   readonly subscriptionStatus = this.facade.status;
+  readonly selectedCycle = signal<BillingCycle | null>(null);
 
   /**
    * Filtro local: el backend ya excluye archivados y cuando entra al picker
@@ -62,7 +81,7 @@ export class PickerComponent implements OnInit {
    * `show_in_picker` por plan, esto extiende la regla:
    *   plan_type !== 'promotional' OR show_in_picker === true.
    */
-  readonly visiblePlans = computed(() =>
+  readonly selectablePlans = computed(() =>
     this.plans().filter((p) => {
       const planType =
         (p as unknown as { plan_type?: string | null }).plan_type ?? null;
@@ -73,6 +92,20 @@ export class PickerComponent implements OnInit {
       return true;
     }),
   );
+
+  readonly availableCycles = computed<BillingCycle[]>(() => {
+    const present = new Set(
+      this.selectablePlans().map((p) => p.billing_cycle as BillingCycle),
+    );
+    return CYCLE_ORDER.filter((c) => present.has(c));
+  });
+
+  readonly visiblePlans = computed(() => {
+    const cycle = this.selectedCycle();
+    const plans = this.selectablePlans();
+    if (!cycle) return plans;
+    return plans.filter((p) => p.billing_cycle === cycle);
+  });
 
   readonly skeletonPlan = {
     id: 0,
@@ -104,6 +137,7 @@ export class PickerComponent implements OnInit {
         next: (res) => {
           if (res.success && res.data) {
             this.plans.set(res.data);
+            this.syncSelectedCycle();
           }
           this.loading.set(false);
         },
@@ -118,7 +152,29 @@ export class PickerComponent implements OnInit {
     this.router.navigate(['/admin/subscription/checkout', event.plan.id]);
   }
 
+  cycleLabel(cycle: BillingCycle): string {
+    return CYCLE_LABEL[cycle];
+  }
+
+  selectCycle(cycle: BillingCycle): void {
+    this.selectedCycle.set(cycle);
+  }
+
   goToPlansCatalog(): void {
     this.router.navigateByUrl('/admin/subscription/plans');
+  }
+
+  private syncSelectedCycle(): void {
+    const cycles = this.availableCycles();
+    const selected = this.selectedCycle();
+
+    if (cycles.length === 0) {
+      this.selectedCycle.set(null);
+      return;
+    }
+
+    if (!selected || !cycles.includes(selected)) {
+      this.selectedCycle.set(cycles.includes('monthly') ? 'monthly' : cycles[0]);
+    }
   }
 }

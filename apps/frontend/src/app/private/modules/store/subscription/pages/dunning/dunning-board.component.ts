@@ -7,15 +7,19 @@ import {
   signal,
   effect,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
+import { Actions, ofType } from '@ngrx/effects';
 import {
   CardComponent,
   ButtonComponent,
   IconComponent,
+  SpinnerComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
+import * as SubscriptionActions from '../../../../../../core/store/subscription/subscription.actions';
 import { SupportRequestModalComponent } from '../../components/support-request-modal/support-request-modal.component';
 
 /**
@@ -37,6 +41,7 @@ import { SupportRequestModalComponent } from '../../components/support-request-m
     CardComponent,
     ButtonComponent,
     IconComponent,
+    SpinnerComponent,
     CurrencyPipe,
     DatePipe,
     SupportRequestModalComponent,
@@ -50,6 +55,7 @@ export class DunningBoardComponent {
   private readonly router = inject(Router);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly actions$ = inject(Actions);
 
   readonly dunning = this.facade.dunning;
   readonly retrying = this.facade.retryingPayment;
@@ -58,7 +64,7 @@ export class DunningBoardComponent {
 
   // Live tick for countdown updates (refreshed every 30s). Writing to the
   // signal is what triggers re-render — fully Zoneless-compatible because
-  // signals propagate via the reactive graph, not via the NgZone task queue.
+  // signals propagate via Angular's reactive graph, not task patching.
   private readonly tickMs = signal(Date.now());
 
   // Page is "ready" once dunning snapshot is loaded — gates the template
@@ -121,14 +127,26 @@ export class DunningBoardComponent {
     label: string;
     at: string | null;
   } | null>(() => {
+    const state = this.state();
     const d = this.dunning()?.deadlines;
     if (!d) return null;
-    if (d.grace_hard_at && this.isFuture(d.grace_hard_at)) {
+
+    if (
+      state === 'grace_soft' &&
+      d.grace_hard_at &&
+      this.isFuture(d.grace_hard_at)
+    ) {
       return { label: 'Entra en período crítico en', at: d.grace_hard_at };
     }
-    if (d.suspend_at && this.isFuture(d.suspend_at)) {
+
+    if (
+      (state === 'grace_soft' || state === 'grace_hard') &&
+      d.suspend_at &&
+      this.isFuture(d.suspend_at)
+    ) {
       return { label: 'Suspensión en', at: d.suspend_at };
     }
+
     if (d.cancel_at && this.isFuture(d.cancel_at)) {
       return { label: 'Cancelación definitiva en', at: d.cancel_at };
     }
@@ -154,10 +172,35 @@ export class DunningBoardComponent {
   // the page on the first load if the subscription happens to already be
   // active (e.g. the user navigated here manually).
   private readonly didRetry = signal(false);
+  private lastFallbackDunningLoadKey: string | null = null;
 
   constructor() {
     this.facade.loadCurrent();
     this.facade.loadDunningState();
+
+    // Zoneless guard: the global subscription banner can reset the NgRx slice
+    // via contextChanged() while this routed component is mounting. If that
+    // reset wins the race after the initial dunning request, `dunning` returns
+    // to null and the page stays on the loading branch until another user event
+    // happens. Re-request the snapshot when the current subscription confirms
+    // this route is still a dunning state.
+    effect(() => {
+      const dunning = this.dunning();
+      if (dunning !== null) {
+        this.lastFallbackDunningLoadKey = null;
+        return;
+      }
+
+      const sub = this.currentSubscription();
+      const status = sub?.state ?? sub?.status ?? null;
+      if (!this.isDunningState(status)) return;
+
+      const key = `${sub?.store_id ?? sub?.store?.id ?? 'current'}:${status}`;
+      if (this.lastFallbackDunningLoadKey === key) return;
+
+      this.lastFallbackDunningLoadKey = key;
+      queueMicrotask(() => this.facade.loadDunningState());
+    });
 
     // Tick every 30s. DestroyRef-based cleanup avoids the OnDestroy
     // interface + handle-field ceremony and keeps the lifecycle co-located
@@ -181,34 +224,50 @@ export class DunningBoardComponent {
         }
       }
     });
+
+    this.actions$
+      .pipe(
+        ofType(
+          SubscriptionActions.retryPaymentSuccess,
+          SubscriptionActions.retryPaymentFailure,
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((action) => {
+        if (!this.didRetry()) return;
+        if (action.type === SubscriptionActions.retryPaymentFailure.type) {
+          this.toast.error(this.retryPaymentErrorMessage(action.error));
+          this.didRetry.set(false);
+          return;
+        }
+        if (action.result.state === 'succeeded') {
+          this.toast.success('Pago procesado correctamente');
+        } else if (action.result.state === 'pending') {
+          this.toast.info('Pago pendiente de confirmación. Verificando…');
+        }
+      });
   }
 
   onRetryPayment(): void {
+    if (this.retrying()) return;
     if (!this.hasInvoices()) {
       this.toast.error('No hay invoices pendientes de pago');
       return;
     }
     this.didRetry.set(true);
     this.facade.retryPayment();
-    this.toast.info('Procesando pago…');
   }
 
   /**
    * Single entry point for the "Pagar ahora" CTA. Two paths:
-   *   1. There's an overdue invoice → retry it inline (current dunning flow).
-   *   2. No invoice yet (grace triggered without a generated invoice — happens
-   *      with manual fixtures or when the renewal job hasn't created one) →
-   *      route the user to the checkout for their current plan so they can
-   *      complete the renewal manually.
+   *   1. There is a current plan → route to checkout so the user can complete
+   *      the renewal manually, even when an overdue invoice already exists.
+   *   2. No current plan → surface an actionable error.
    * Routing to the existing `/admin/subscription/checkout/:planId` keeps the
    * dunning board out of the payment-form business; the checkout page already
    * handles preview, Wompi widget, COF tokenize and PM persistence.
    */
   onPayNow(): void {
-    if (this.hasInvoices()) {
-      this.onRetryPayment();
-      return;
-    }
     const sub = this.currentSubscription();
     const planId = sub?.plan_id ?? sub?.paid_plan_id;
     if (!planId) {
@@ -259,5 +318,27 @@ export class DunningBoardComponent {
 
   private isFuture(iso: string): boolean {
     return new Date(iso).getTime() > this.tickMs();
+  }
+
+  private isDunningState(status: string | null | undefined): boolean {
+    return (
+      status === 'grace_soft' ||
+      status === 'grace_hard' ||
+      status === 'suspended' ||
+      status === 'blocked'
+    );
+  }
+
+  private retryPaymentErrorMessage(error: unknown): string {
+    if (typeof error === 'string') return error;
+    if (error && typeof error === 'object') {
+      const payload = error as { message?: string; error?: string };
+      return (
+        payload.message ??
+        payload.error ??
+        'No se pudo procesar el pago. Intenta de nuevo.'
+      );
+    }
+    return 'No se pudo procesar el pago. Intenta de nuevo.';
   }
 }

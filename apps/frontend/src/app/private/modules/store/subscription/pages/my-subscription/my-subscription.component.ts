@@ -625,10 +625,10 @@ import {
             </div>
           </app-card>
 
-          <!-- Opt-in link to manage saved payment methods. Discreet by design:
+          <!-- Opt-in link to manage renewal-enabled payment methods. Discreet by design:
                the canonical pay-now flow is the pending-invoice retry (Wompi
-               widget) which auto-registers the PM on success. This page only
-               lets the user audit/remove cards already on file. -->
+               widget) which enables the PM on success. This page only lets
+               the user audit/remove methods enabled through Wompi. -->
           @if (showPaymentMethodsLink()) {
             <div class="flex justify-center pt-2">
               <button
@@ -637,7 +637,7 @@ import {
                 (click)="goToPaymentMethods()"
               >
                 <app-icon name="credit-card" [size]="14"></app-icon>
-                Ver métodos de pago guardados
+                Ver métodos de pago para renovaciones automáticas
               </button>
             </div>
           }

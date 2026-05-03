@@ -3,11 +3,26 @@ import * as SubscriptionActions from './subscription.actions';
 import { DunningState, AppliedCoupon, CouponValidationReason } from './subscription.actions';
 import { NormalizedApiPayload } from '../../utils/api-error-handler';
 
+export type SubscriptionFeatureConfig = {
+  enabled: boolean;
+  [key: string]: unknown;
+};
+
+export type SubscriptionFeatureMatrix = Record<string, SubscriptionFeatureConfig>;
+
+type SubscriptionFeaturePayload = {
+  resolved_features?: unknown;
+  featureMatrix?: unknown;
+  features?: unknown;
+  paid_plan?: { ai_feature_flags?: unknown } | null;
+  plan?: { ai_feature_flags?: unknown } | null;
+};
+
 export interface SubscriptionState {
   current: any | null;
   status: string;
   daysUntilDue: number;
-  featureMatrix: Record<string, any>;
+  featureMatrix: SubscriptionFeatureMatrix;
   access: any | null;
   loaded: boolean;
   loading: boolean;
@@ -40,6 +55,53 @@ export const initialSubscriptionState: SubscriptionState = {
   couponError: null,
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeFeatureMatrix(source: unknown): SubscriptionFeatureMatrix | null {
+  if (!isRecord(source) || Object.keys(source).length === 0) return null;
+
+  return Object.entries(source).reduce<SubscriptionFeatureMatrix>(
+    (matrix, [featureKey, config]) => {
+      if (typeof config === 'boolean') {
+        matrix[featureKey] = { enabled: config };
+        return matrix;
+      }
+
+      if (isRecord(config)) {
+        matrix[featureKey] = {
+          ...config,
+          enabled: config['enabled'] === true,
+        };
+      }
+
+      return matrix;
+    },
+    {},
+  );
+}
+
+function resolveFeatureMatrix(
+  subscription: SubscriptionFeaturePayload | null | undefined,
+  fallback: SubscriptionFeatureMatrix,
+): SubscriptionFeatureMatrix {
+  const sources = [
+    subscription?.resolved_features,
+    subscription?.featureMatrix,
+    subscription?.features,
+    subscription?.paid_plan?.ai_feature_flags,
+    subscription?.plan?.ai_feature_flags,
+  ];
+
+  for (const source of sources) {
+    const matrix = normalizeFeatureMatrix(source);
+    if (matrix && Object.keys(matrix).length > 0) return matrix;
+  }
+
+  return fallback;
+}
+
 export const subscriptionReducer = createReducer(
   initialSubscriptionState,
 
@@ -63,10 +125,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix:
-      subscription?.resolved_features ??
-      subscription?.featureMatrix ??
-      state.featureMatrix,
+    featureMatrix: resolveFeatureMatrix(subscription, state.featureMatrix),
     loaded: true,
     loading: false,
     error: null,
@@ -112,10 +171,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix:
-      subscription?.resolved_features ??
-      subscription?.featureMatrix ??
-      state.featureMatrix,
+    featureMatrix: resolveFeatureMatrix(subscription, state.featureMatrix),
     loaded: true,
     loading: false,
     error: null,
@@ -180,10 +236,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix:
-      subscription?.resolved_features ??
-      subscription?.featureMatrix ??
-      state.featureMatrix,
+    featureMatrix: resolveFeatureMatrix(subscription, state.featureMatrix),
     loaded: true,
     loading: false,
     error: null,
@@ -225,10 +278,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix:
-      subscription?.resolved_features ??
-      subscription?.featureMatrix ??
-      state.featureMatrix,
+    featureMatrix: resolveFeatureMatrix(subscription, state.featureMatrix),
     preview: null,
     loaded: true,
     loading: false,
@@ -275,7 +325,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix: subscription?.resolved_features ?? subscription?.featureMatrix ?? {},
+    featureMatrix: resolveFeatureMatrix(subscription, initialSubscriptionState.featureMatrix),
     loaded: true,
     loading: false,
     error: null,
@@ -292,7 +342,7 @@ export const subscriptionReducer = createReducer(
     current: subscription,
     status: subscription?.status ?? subscription?.state ?? state.status,
     daysUntilDue: subscription?.daysUntilDue ?? state.daysUntilDue,
-    featureMatrix: subscription?.resolved_features ?? subscription?.featureMatrix ?? state.featureMatrix,
+    featureMatrix: resolveFeatureMatrix(subscription, state.featureMatrix),
     loaded: true,
     loading: false,
     error: null,
