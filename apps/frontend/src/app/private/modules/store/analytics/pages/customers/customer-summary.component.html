@@ -115,56 +115,17 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
-        } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="trendsChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
-        }
-      </div>
-    </app-card>
-
-    <!-- Top 10 Customers by Spend -->
-    <app-card
-      shadow="none"
-      [padding]="false"
-      overflow="hidden"
-      [showHeader]="true"
-    >
-      <div slot="header" class="flex flex-col">
-        <span class="text-sm font-bold text-[var(--color-text-primary)]"
-          >Top 10 Clientes por Gasto</span
-        >
-        <span class="text-xs text-[var(--color-text-secondary)]"
-          >Clientes con mayor gasto total en el período</span
-        >
-      </div>
-      <div class="p-4">
-        @if (loadingTrends()) {
-          <div class="h-64 flex items-center justify-center">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
+        } @else if (!trendsChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="users" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
           </div>
         } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="topCustomersChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <app-chart
+            [options]="trendsChartOptions()"
+            size="large"
+            [showLegend]="false"
+          ></app-chart>
         }
       </div>
     </app-card>

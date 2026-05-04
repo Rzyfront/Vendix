@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject,
+import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
@@ -81,7 +81,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
   // Chart options (updated when trends change)
-  revenueChartOptions: EChartsOption = {};
+  revenueChartOptions= signal<EChartsOption>({});
 
   // Options dropdown config
   filterConfigs: FilterConfig[] = [
@@ -215,7 +215,6 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
   }
 
   private updateCharts(trends: SalesTrend[], granularity: string): void {
-    if (!trends.length) return;
 
     // Read theme-aware colors from CSS custom properties
     const style = getComputedStyle(document.documentElement);
@@ -230,7 +229,7 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
     );
     const revenues = trends.map((t) => t.revenue);
 
-    this.revenueChartOptions = {
+    this.revenueChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -276,7 +275,7 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
                 { offset: 1, color: `${successColor}0D` },
               ] } },
           itemStyle: { color: successColor } },
-      ] };
+      ] });
   }
 
 }

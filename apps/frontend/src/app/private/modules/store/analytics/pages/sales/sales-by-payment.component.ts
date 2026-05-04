@@ -329,27 +329,20 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       series: [{
           name: 'Ventas',
-          type: 'line',
+          type: 'bar',
           data: values,
-          smooth: 0.3,
-          symbol: 'circle',
-          symbolSize: 10,
-          showSymbol: true,
-          itemStyle: { color: '#3b82f6' },
-          lineStyle: { width: 3 },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#3b82f640' },
-                { offset: 1, color: '#3b82f605' },
+                { offset: 0, color: '#3b82f6' },
+                { offset: 1, color: '#3b82f680' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         }],
     });
   }

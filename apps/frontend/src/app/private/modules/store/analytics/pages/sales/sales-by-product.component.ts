@@ -302,7 +302,6 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(data: SalesByProduct[]): void {
-    if (!data.length) return;
 
     const top10 = [...data]
       .sort((a, b) => b.revenue - a.revenue)
@@ -353,22 +352,20 @@ onDateRangeChange(range: DateRangeFilter): void {
       series: [
         {
           name: 'Top Productos',
-          type: 'line',
+          type: 'bar',
           data: top10.map((p) => p.revenue),
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 1,
-              y2: 0,
+              x: 0, y: 0, x2: 1, y2: 0,
               colorStops: [
-                { offset: 0, color: primaryColor + '40' },
-                { offset: 1, color: primaryColor },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '99' },
               ],
             },
+            borderRadius: [0, 4, 4, 0],
           },
+          barMaxWidth: 32,
         },
       ],
     });

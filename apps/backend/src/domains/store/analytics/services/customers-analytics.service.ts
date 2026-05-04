@@ -345,7 +345,7 @@ export class CustomersAnalyticsService {
       by: ['channel'],
       where: {
         store_id: storeId,
-        status: { in: this.COMPLETED_STATES },
+        state: { in: this.COMPLETED_STATES },
         created_at: { gte: startDate, lte: endDate },
       },
       _count: { id: true },

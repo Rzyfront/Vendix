@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject,
+import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -89,8 +89,8 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
   // Chart options
-  topSellersChartOptions: EChartsOption = {};
-  unitsTrendChartOptions: EChartsOption = {};
+  topSellersChartOptions= signal<EChartsOption>({});
+  unitsTrendChartOptions= signal<EChartsOption>({});
 
   // Options dropdown config
   filterConfigs: FilterConfig[] = [
@@ -207,7 +207,6 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
   }
 
   private updateTrendsChart(trends: ProductTrend[], granularity: string): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const purpleColor = '#8b5cf6';
@@ -221,7 +220,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
     );
     const units = trends.map((t) => t.units_sold);
 
-    this.unitsTrendChartOptions = {
+    this.unitsTrendChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -254,27 +253,25 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       series: [
         {
           name: 'Unidades',
-          type: 'line',
-          smooth: true,
+          type: 'bar',
           data: units,
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${purpleColor}4D` },
-                { offset: 1, color: `${purpleColor}0D` },
-              ] } },
-          lineStyle: { color: purpleColor, width: 2 },
-          itemStyle: { color: purpleColor } },
-      ] };
+                { offset: 0, color: purpleColor },
+                { offset: 1, color: purpleColor + '80' },
+              ],
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
+          barMaxWidth: 40,
+        },
+      ] });
   }
 
   private updateTopSellersChart(topSellers: TopSellingProduct[]): void {
-    if (!topSellers.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor =
@@ -293,7 +290,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
     );
     const units = top5.map((p) => p.units_sold);
 
-    this.topSellersChartOptions = {
+    this.topSellersChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -329,24 +326,22 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       series: [
         {
           name: 'Unidades',
-          type: 'line',
+          type: 'bar',
           data: units,
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}4D` },
-                { offset: 1, color: `${primaryColor}0D` },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 }

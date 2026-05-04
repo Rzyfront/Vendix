@@ -133,7 +133,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="refundsBreakdownChartOptions" size="large" [showLegend]="true"></app-chart>
+              <app-chart [options]="refundsBreakdownChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -155,7 +155,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="refundsDistributionChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="refundsDistributionChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -181,8 +181,8 @@ export class RefundsSummaryComponent implements OnInit {
   exporting = signal(false);
   data = signal<RefundsSummary | null>(null);
 
-  refundsBreakdownChartOptions: EChartsOption = {};
-  refundsDistributionChartOptions: EChartsOption = {};
+  refundsBreakdownChartOptions= signal<EChartsOption>({});
+  refundsDistributionChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -215,11 +215,12 @@ export class RefundsSummaryComponent implements OnInit {
       next: (response) => {
         if (response?.data) {
           this.data.set(response.data);
-          this.updateCharts();
         }
+        this.updateCharts();
         this.loading.set(false);
       },
       error: () => {
+        this.updateCharts();
         this.loading.set(false);
       },
     });
@@ -258,14 +259,11 @@ export class RefundsSummaryComponent implements OnInit {
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const d = this.data();
-    if (!d) return;
-
-    // Refunds Breakdown Bar Chart
     const refundCats = ['Subtotal', 'Impuesto', 'Envío'];
-    const refundValues = [d.subtotal_refunds || 0, d.tax_refunds || 0, d.shipping_refunds || 0];
+    const refundValues = [d?.subtotal_refunds || 0, d?.tax_refunds || 0, d?.shipping_refunds || 0];
     const refundColors = ['#f97316', '#f59e0b', '#3b82f6'];
 
-    this.refundsBreakdownChartOptions = {
+    this.refundsBreakdownChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -304,10 +302,10 @@ export class RefundsSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: refundCats.map((cat, i) => ({
+      series: refundCats.map((cat: string, i: number) => ({
         name: cat,
-        type: 'line' as const,
-        data: refundCats.map((_, j) => j === i ? refundValues[i] : null),
+        type: 'bar' as const,
+        data: refundCats.map((_: string, j: number) => j === i ? refundValues[i] : null),
         itemStyle: { color: refundColors[i] },
         areaStyle: {
           color: {
@@ -323,14 +321,14 @@ export class RefundsSummaryComponent implements OnInit {
           },
         },
       })),
-    };
+    });
 
     // Refunds Distribution Horizontal Bar
     const distCats = ['Subtotal', 'Impuesto', 'Envío'];
-    const distValues = [d.subtotal_refunds || 0, d.tax_refunds || 0, d.shipping_refunds || 0];
+    const distValues = [d?.subtotal_refunds || 0, d?.tax_refunds || 0, d?.shipping_refunds || 0];
     const distColors = ['#f97316', '#f59e0b', '#3b82f6'];
 
-    this.refundsDistributionChartOptions = {
+    this.refundsDistributionChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -354,10 +352,10 @@ export class RefundsSummaryComponent implements OnInit {
         data: distCats,
         axisLabel: { color: textSecondary },
       },
-      series: distCats.map((cat, i) => ({
+      series: distCats.map((cat: string, i: number) => ({
         name: cat,
-        type: 'line' as const,
-        data: distCats.map((_, j) => j === i ? distValues[i] : null),
+        type: 'bar' as const,
+        data: distCats.map((_: string, j: number) => j === i ? distValues[i] : null),
         itemStyle: { color: distColors[i] },
         areaStyle: {
           color: {
@@ -373,6 +371,6 @@ export class RefundsSummaryComponent implements OnInit {
           },
         },
       })),
-    };
+    });
   }
 }

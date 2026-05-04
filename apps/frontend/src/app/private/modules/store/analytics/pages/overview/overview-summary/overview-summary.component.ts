@@ -132,8 +132,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   });
 
   // Chart options
-  gaugeChartOptions: EChartsOption = {};
-  comparativeChartOptions: EChartsOption = {};
+  gaugeChartOptions= signal<EChartsOption>({});
+  comparativeChartOptions= signal<EChartsOption>({});
 
   // Cached summary for template helper methods
   private currentSummary: OverviewSummary | null = null;
@@ -304,7 +304,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
 
   // Chart builders
   private updateGaugeChart(ratio: number): void {
-    this.gaugeChartOptions = {
+    this.gaugeChartOptions.set({
       series: [
         {
           type: 'gauge',
@@ -345,14 +345,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
             offsetCenter: [0, '20%'],
             color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
           data: [{ value: Math.min(ratio, 150) }] },
-      ] };
+      ] });
   }
 
   private updateComparativeChart(
     trends: OverviewTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const borderColor =
@@ -364,7 +363,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
       formatChartPeriod(t.period, granularity),
     );
 
-    this.comparativeChartOptions = {
+    this.comparativeChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -486,7 +485,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
                 { offset: 0, color: '#8b5cf64D' },
                 { offset: 1, color: '#8b5cf60D' },
               ] } } },
-      ] };
+      ] });
   }
 
 }

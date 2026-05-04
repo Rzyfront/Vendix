@@ -132,7 +132,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="ratingDistributionChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="ratingDistributionChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -154,7 +154,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="reviewsStatusChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="reviewsStatusChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -179,8 +179,8 @@ export class ReviewSummaryComponent implements OnInit {
   exporting = signal(false);
   summary = signal<ReviewsSummary | null>(null);
 
-  ratingDistributionChartOptions: EChartsOption = {};
-  reviewsStatusChartOptions: EChartsOption = {};
+  ratingDistributionChartOptions= signal<EChartsOption>({});
+  reviewsStatusChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -263,7 +263,7 @@ export class ReviewSummaryComponent implements OnInit {
     const stars = [5, 4, 3, 2, 1];
     const counts = stars.map((star) => (ratingDistribution as any)[star] || 0);
 
-    this.ratingDistributionChartOptions = {
+    this.ratingDistributionChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -319,10 +319,10 @@ export class ReviewSummaryComponent implements OnInit {
           },
         },
       ],
-    };
+    });
 
     // Reviews Status Line
-    this.reviewsStatusChartOptions = {
+    this.reviewsStatusChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -354,6 +354,6 @@ export class ReviewSummaryComponent implements OnInit {
           ],
         },
       ],
-    };
+    });
   }
 }

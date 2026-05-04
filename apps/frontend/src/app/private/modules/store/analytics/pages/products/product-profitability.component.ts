@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -92,9 +92,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   readonly topProfitable = toSignal(this.topProfitable$, { initialValue: [] });
   readonly mostProfitable = toSignal(this.mostProfitable$, { initialValue: null });
 
-  marginDistributionChartOptions: EChartsOption = {};
-  topProfitChartOptions: EChartsOption = {};
-  comparativeChartOptions: EChartsOption = {};
+  marginDistributionChartOptions= signal<EChartsOption>({});
+  topProfitChartOptions= signal<EChartsOption>({});
+  comparativeChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -237,7 +237,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const unprofitable = products.filter((p) => p.margin <= 0).length;
     const zeroMargin = products.filter((p) => p.margin === 0).length;
 
-    this.marginDistributionChartOptions = {
+    this.marginDistributionChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -271,28 +271,16 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Distribución',
-          type: 'line',
+          type: 'bar',
           data: [
             { value: profitable, itemStyle: { color: '#22c55e' } },
             { value: unprofitable, itemStyle: { color: '#ef4444' } },
             { value: zeroMargin, itemStyle: { color: '#f59e0b' } },
           ],
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f64D' },
-                { offset: 1, color: '#3b82f60D' },
-              ],
-            },
-          },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 
   private buildTopProfitChart(products: ProductProfitability[]): void {
@@ -311,7 +299,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     );
     const profits = top5.map((p) => p.profit);
 
-    this.topProfitChartOptions = {
+    this.topProfitChartOptions.set({
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -370,25 +358,23 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Ganancia',
-          type: 'line',
+          type: 'bar',
           data: profits,
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}4D` },
-                { offset: 1, color: `${primaryColor}0D` },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 
   private buildComparativeChart(
@@ -409,7 +395,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const profits = top5.map((p) => p.profit);
     const costs = top5.map((p) => p.total_cost);
 
-    this.comparativeChartOptions = {
+    this.comparativeChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -493,65 +479,59 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Ingresos',
-          type: 'line',
+          type: 'bar',
           data: revenues,
           yAxisIndex: 0,
-          itemStyle: { color: '#3b82f6' },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#3b82f64D' },
-                { offset: 1, color: '#3b82f60D' },
+                { offset: 0, color: '#3b82f6' },
+                { offset: 1, color: '#3b82f680' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
         {
           name: 'Costo',
-          type: 'line',
+          type: 'bar',
           data: costs,
           yAxisIndex: 1,
-          itemStyle: { color: redColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#ef44444D' },
-                { offset: 1, color: '#ef44440D' },
+                { offset: 0, color: redColor },
+                { offset: 1, color: `${redColor}80` },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
         {
           name: 'Ganancia',
-          type: 'line',
+          type: 'bar',
           data: profits,
           yAxisIndex: 2,
-          itemStyle: { color: greenColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#22c55e4D' },
-                { offset: 1, color: '#22c55e0D' },
+                { offset: 0, color: greenColor },
+                { offset: 1, color: `${greenColor}80` },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 }

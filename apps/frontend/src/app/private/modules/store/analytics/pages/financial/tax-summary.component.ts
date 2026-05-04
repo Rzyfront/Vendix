@@ -134,7 +134,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="taxComparisonChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="taxComparisonChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -156,7 +156,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="effectiveRateChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="effectiveRateChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -182,8 +182,8 @@ export class TaxSummaryComponent implements OnInit {
   exporting = signal(false);
   data = signal<TaxSummary | null>(null);
 
-  taxComparisonChartOptions: EChartsOption = {};
-  effectiveRateChartOptions: EChartsOption = {};
+  taxComparisonChartOptions= signal<EChartsOption>({});
+  effectiveRateChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -265,7 +265,7 @@ export class TaxSummaryComponent implements OnInit {
     const taxValues = [d.tax_collected || 0, -(d.tax_refunded || 0), d.net_tax || 0];
     const taxColors = ['#22c55e', '#ef4444', '#3b82f6'];
 
-    this.taxComparisonChartOptions = {
+    this.taxComparisonChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -312,11 +312,11 @@ export class TaxSummaryComponent implements OnInit {
         barMaxWidth: 60,
         barGap: '-100%',
       })),
-    };
+    });
 
     // Effective Rate Gauge
     const rate = Math.min((d.effective_rate || 0), 30);
-    this.effectiveRateChartOptions = {
+    this.effectiveRateChartOptions.set({
       series: [
         {
           type: 'gauge',
@@ -364,6 +364,6 @@ export class TaxSummaryComponent implements OnInit {
           data: [{ value: rate }],
         },
       ],
-    };
+    });
   }
 }

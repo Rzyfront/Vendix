@@ -133,7 +133,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="suppliersChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="suppliersChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -155,7 +155,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="ordersStatusChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="ordersStatusChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -182,8 +182,8 @@ export class PurchaseSummaryComponent implements OnInit {
   summary = signal<PurchasesSummary | null>(null);
   suppliers = signal<PurchasesBySupplier[]>([]);
 
-  suppliersChartOptions: EChartsOption = {};
-  ordersStatusChartOptions: EChartsOption = {};
+  suppliersChartOptions= signal<EChartsOption>({});
+  ordersStatusChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -212,18 +212,6 @@ export class PurchaseSummaryComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService.getPurchasesSummary({}).subscribe({
-      next: (response) => {
-        if (response?.data) {
-          this.summary.set(response.data);
-        }
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
-
     this.analyticsService.getPurchasesBySupplier({}).subscribe({
       next: (response: any) => {
         const data = Array.isArray(response?.data) ? response.data : (response?.data?.data || []);
@@ -232,6 +220,21 @@ export class PurchaseSummaryComponent implements OnInit {
         this.loading.set(false);
       },
       error: () => {
+        this.updateCharts();
+        this.loading.set(false);
+      },
+    });
+
+    this.analyticsService.getPurchasesSummary({}).subscribe({
+      next: (response) => {
+        if (response?.data) {
+          this.summary.set(response.data);
+        }
+        this.updateCharts();
+        this.loading.set(false);
+      },
+      error: () => {
+        this.updateCharts();
         this.loading.set(false);
       },
     });
@@ -274,7 +277,7 @@ export class PurchaseSummaryComponent implements OnInit {
     const completed = this.summary()?.completed_orders || 0;
 
     // Top Suppliers Horizontal Bar
-    this.suppliersChartOptions = {
+    this.suppliersChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -313,15 +316,15 @@ export class PurchaseSummaryComponent implements OnInit {
       series: [
         {
           name: 'Proveedores',
-          type: 'line',
+          type: 'bar',
           data: suppliersData.map((s) => s.total_spent).reverse(),
           itemStyle: { color: '#3b82f6' },
         },
       ],
-    };
+    });
 
     // Orders Status Line
-    this.ordersStatusChartOptions = {
+    this.ordersStatusChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -345,13 +348,13 @@ export class PurchaseSummaryComponent implements OnInit {
       series: [
         {
           name: 'Estado de Órdenes',
-          type: 'line',
+          type: 'bar',
           data: [
             { value: pending, itemStyle: { color: '#f59e0b' } },
             { value: completed, itemStyle: { color: '#22c55e' } },
           ],
         },
       ],
-    };
+    });
   }
 }

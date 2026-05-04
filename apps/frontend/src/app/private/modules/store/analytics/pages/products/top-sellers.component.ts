@@ -1,4 +1,4 @@
-import {Component, OnInit, inject,
+import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
@@ -8,6 +8,7 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../shared/components/item-list/item-list.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -29,6 +30,7 @@ import { EChartsOption } from 'echarts';
     CardComponent,
     ChartComponent,
     ResponsiveDataViewComponent,
+    IconComponent,
     DateRangeFilterComponent,
   ],
   templateUrl: './top-sellers.component.html',
@@ -58,7 +60,8 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
   readonly dateRange = toSignal(this.dateRange$);
 
-  topSellersChartOptions: EChartsOption = {};
+  topSellersChartOptions= signal<EChartsOption>({});
+  activeView = signal<'chart' | 'table'>('chart');
 
   tableColumns: TableColumn[] = [
     { key: 'product_name', label: 'Producto' },
@@ -114,7 +117,6 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(topSellers: TopSellingProduct[]): void {
-    if (!topSellers.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor =
@@ -132,7 +134,7 @@ onDateRangeChange(range: DateRangeFilter): void {
     );
     const revenues = reversed.map((p) => p.revenue);
 
-    this.topSellersChartOptions = {
+    this.topSellersChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -171,24 +173,22 @@ onDateRangeChange(range: DateRangeFilter): void {
       series: [
         {
           name: 'Ingresos',
-          type: 'line',
+          type: 'bar',
           data: revenues,
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}4D` },
-                { offset: 1, color: `${primaryColor}0D` },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 }

@@ -119,7 +119,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="movementTrendChartOptions"
+              [options]="movementTrendChartOptions()"
               size="large"
             ></app-chart>
           } @placeholder {
@@ -158,7 +158,7 @@
           } @else {
             @defer (on viewport) {
               <app-chart
-                [options]="valuationChartOptions"
+                [options]="valuationChartOptions()"
                 size="large"
               ></app-chart>
             } @placeholder {
@@ -195,7 +195,7 @@
           } @else {
             @defer (on viewport) {
               <app-chart
-                [options]="quantityChartOptions"
+                [options]="quantityChartOptions()"
                 size="large"
               ></app-chart>
             } @placeholder {

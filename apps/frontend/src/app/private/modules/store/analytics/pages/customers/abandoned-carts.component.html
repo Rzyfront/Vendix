@@ -115,18 +115,17 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
+        } @else if (!trendsChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="shopping-cart" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
+          </div>
         } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="trendsChartOptions"
-              size="large"
-              [showLegend]="true"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <app-chart
+            [options]="trendsChartOptions()"
+            size="large"
+            [showLegend]="true"
+          ></app-chart>
         }
       </div>
     </app-card>
@@ -153,56 +152,17 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
-        } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="recoveryRateChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
-        }
-      </div>
-    </app-card>
-
-    <!-- Abandoned Carts by Reason -->
-    <app-card
-      shadow="none"
-      [padding]="false"
-      overflow="hidden"
-      [showHeader]="true"
-    >
-      <div slot="header" class="flex flex-col">
-        <span class="text-sm font-bold text-[var(--color-text-primary)]"
-          >Razones de Abandono</span
-        >
-        <span class="text-xs text-[var(--color-text-secondary)]"
-          >Distribución por motivo de abandono</span
-        >
-      </div>
-      <div class="p-4">
-        @if (loadingTrends()) {
-          <div class="h-64 flex items-center justify-center">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
+        } @else if (!recoveryRateChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="refresh-cw" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
           </div>
         } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="byReasonChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <app-chart
+            [options]="recoveryRateChartOptions()"
+            size="large"
+            [showLegend]="false"
+          ></app-chart>
         }
       </div>
     </app-card>

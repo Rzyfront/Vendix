@@ -133,7 +133,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="revenueCostsChartOptions" size="large" [showLegend]="true"></app-chart>
+              <app-chart [options]="revenueCostsChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -155,7 +155,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="profitSummaryChartOptions" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="profitSummaryChartOptions()" size="large" [showLegend]="false"></app-chart>
             }
           </div>
         </app-card>
@@ -181,8 +181,8 @@ export class ProfitLossComponent implements OnInit {
   exporting = signal(false);
   data = signal<ProfitLossSummary | null>(null);
 
-  revenueCostsChartOptions: EChartsOption = {};
-  profitSummaryChartOptions: EChartsOption = {};
+  revenueCostsChartOptions= signal<EChartsOption>({});
+  profitSummaryChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -261,7 +261,7 @@ export class ProfitLossComponent implements OnInit {
     if (!d) return;
 
     // Revenue vs Costs Bar Chart
-    this.revenueCostsChartOptions = {
+    this.revenueCostsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -325,7 +325,7 @@ export class ProfitLossComponent implements OnInit {
           itemStyle: { color: '#8b5cf6' },
         },
       ],
-    };
+    });
 
     // Profit Summary Pie
     const grossProfit = d.costs?.gross_profit || 0;
@@ -333,7 +333,7 @@ export class ProfitLossComponent implements OnInit {
     const refunds = d.refunds?.total_refunds || 0;
     const expenses = d.operating_expenses || 0;
 
-    this.profitSummaryChartOptions = {
+    this.profitSummaryChartOptions.set({
       tooltip: {
         trigger: 'item',
         formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b>`,
@@ -370,7 +370,7 @@ export class ProfitLossComponent implements OnInit {
           },
         },
       ],
-    };
+    });
   }
 
   getNetProfitClass(): string {

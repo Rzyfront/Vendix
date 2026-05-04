@@ -162,11 +162,6 @@ import { EChartsOption } from 'echarts';
             <div class="h-80 flex items-center justify-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
-          } @else if (!loading() && !topCustomersChartOptions()) {
-            <div class="h-80 flex flex-col items-center justify-center text-text-secondary">
-              <app-icon name="users" [size]="48" class="mb-2 opacity-50"></app-icon>
-              <p>No hay datos para el período seleccionado</p>
-            </div>
           } @else {
             <app-chart
               [options]="topCustomersChartOptions()"
@@ -302,11 +297,14 @@ onDateRangeChange(range: DateRangeFilter): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.data.set(response.data);
-          this.updateChart(response.data);
+          const customers = Array.isArray(response?.data) ? response.data : [];
+          this.data.set(customers);
+          this.updateChart(customers);
           this.loading.set(false);
         },
         error: () => {
+          this.data.set([]);
+          this.updateChart([]);
           this.toastService.error('Error al cargar ventas por cliente');
           this.loading.set(false);
         }});
@@ -338,12 +336,10 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(data: SalesByCustomer[]): void {
-    if (!data.length) return;
 
-    const top10 = [...data]
-      .sort((a, b) => b.total_spent - a.total_spent)
-      .slice(0, 10)
-      .reverse();
+    const top10 = Array.isArray(data) && data.length > 0
+      ? [...data].sort((a, b) => b.total_spent - a.total_spent).slice(0, 10).reverse()
+      : [];
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
@@ -355,6 +351,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
+          if (!params?.[0]) return '';
           const p = params[0];
           const customer = top10.find((c) => c.total_spent === p.value);
           return `${p.name}<br/>Total: ${this.currencyService.format(p.value)}<br/>Órdenes: ${customer?.total_orders || 0}`;
@@ -383,7 +380,9 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       yAxis: {
         type: 'category',
-        data: top10.map((c) => c.customer_name.length > 20 ? c.customer_name.substring(0, 20) + '...' : c.customer_name),
+        data: top10.length > 0
+          ? top10.map((c) => c.customer_name.length > 20 ? c.customer_name.substring(0, 20) + '...' : c.customer_name)
+          : ['Sin datos'],
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 11 },
       },
@@ -391,7 +390,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Top Clientes',
           type: 'bar',
-          data: top10.map((p) => p.total_spent),
+          data: top10.length > 0 ? top10.map((p) => p.total_spent) : [0],
           itemStyle: {
             color: {
               type: 'linear',

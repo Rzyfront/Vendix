@@ -57,20 +57,20 @@ export class ExpensesByCategoryComponent {
       series: [
         {
           name: 'Gastos',
-          type: 'line',
+          type: 'bar',
           data: [0, 0, 0, 0, 0],
-          itemStyle: { color: '#f59e0b' },
-          lineStyle: { color: '#f59e0b', width: 2 },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#f59e0b4D' },
-                { offset: 1, color: '#f59e0b0D' },
+                { offset: 0, color: '#f59e0b' },
+                { offset: 1, color: '#f59e0b80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
     });

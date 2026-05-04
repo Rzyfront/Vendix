@@ -36,6 +36,7 @@ imports: [
     ChartComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
+    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent
   ],
@@ -82,6 +83,29 @@ imports: [
         ></app-stats>
       </div>
 
+      <!-- Toggle + Header -->
+      <div class="flex justify-end gap-2">
+        <div class="flex rounded-lg border border-border overflow-hidden">
+          <button
+            (click)="activeView.set('chart')"
+            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+            [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+          >
+            <app-icon name="bar-chart-2" [size]="16"></app-icon>
+            Gráfica
+          </button>
+          <button
+            (click)="activeView.set('table')"
+            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+            [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+          >
+            <app-icon name="table" [size]="16"></app-icon>
+            Tabla
+          </button>
+        </div>
+      </div>
+
+      @if (activeView() === 'chart') {
       <!-- Chart: Stock Alert Distribution -->
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
         <div slot="header" class="flex flex-col">
@@ -97,7 +121,9 @@ imports: [
         ></app-chart>
         }
       </app-card>
+      }
 
+      @if (activeView() === 'table') {
       <!-- Card with search + data -->
       <div class="md:space-y-4">
         <app-card
@@ -169,6 +195,7 @@ imports: [
           }
         </app-card>
       </div>
+      }
     </div>
   `})
 export class LowStockComponent implements OnInit {
@@ -183,6 +210,7 @@ export class LowStockComponent implements OnInit {
   searchTerm = signal('');
   statusFilter = signal<string>('');
   chartOptions = signal<EChartsOption>({});
+  activeView = signal<'chart' | 'table'>('chart');
 
   // Computed: filtered data based on search + status filter
   filteredData = computed(() => {
@@ -387,20 +415,20 @@ export class LowStockComponent implements OnInit {
       series: [
         {
           name: 'Alertas',
-          type: 'line',
+          type: 'bar',
           data: [outOfStock, lowStock, inStock],
-          itemStyle: { color: '#f59e0b' },
-          lineStyle: { color: '#f59e0b', width: 2 },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#f59e0b4D' },
-                { offset: 1, color: '#f59e0b0D' },
+                { offset: 0, color: '#f59e0b' },
+                { offset: 1, color: '#f59e0b80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
     });

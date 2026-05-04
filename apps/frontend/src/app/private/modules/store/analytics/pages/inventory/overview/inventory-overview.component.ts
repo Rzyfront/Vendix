@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject,
+import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
@@ -94,9 +94,9 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   readonly outOfStockPct = toSignal(this.outOfStockPct$, { initialValue: '0' });
 
   // Chart options
-  movementTrendChartOptions: EChartsOption = {};
-  valuationChartOptions: EChartsOption = {};
-  quantityChartOptions: EChartsOption = {};
+  movementTrendChartOptions = signal<EChartsOption>({});
+  valuationChartOptions = signal<EChartsOption>({});
+  quantityChartOptions = signal<EChartsOption>({});
 
   // Filter configs
   filterConfigs: FilterConfig[] = [
@@ -222,7 +222,6 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
     trends: MovementTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const { border, textSecondary } = this.getThemeColors();
     const labels = trends.map((t) =>
@@ -235,7 +234,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       adjustments: '#f59e0b',
       transfers: '#3b82f6' };
 
-    this.movementTrendChartOptions = {
+    this.movementTrendChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -281,7 +280,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
           trends.map((t) => t.transfers),
           colors.transfers,
         ),
-      ] };
+      ] });
   }
 
 private buildLineSeries(name: string, data: number[], color: string): any {
@@ -310,7 +309,6 @@ private buildLineSeries(name: string, data: number[], color: string): any {
   // ─── Valuation by Location Rose Chart ───
 
   private updateValuationChart(valuations: InventoryValuation[]): void {
-    if (!valuations.length) return;
 
     const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
@@ -330,7 +328,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       '#e11d48',
     ];
 
-    this.valuationChartOptions = {
+    this.valuationChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -378,13 +376,12 @@ private buildLineSeries(name: string, data: number[], color: string): any {
           },
         },
       ],
-    };
+    });
   }
 
   // ─── Quantity by Location Bar Chart ───
 
   private updateQuantityChart(valuations: InventoryValuation[]): void {
-    if (!valuations.length) return;
 
     const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
@@ -404,7 +401,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       '#e11d48',
     ];
 
-    this.quantityChartOptions = {
+    this.quantityChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -452,7 +449,6 @@ private buildLineSeries(name: string, data: number[], color: string): any {
           },
         },
       ],
-    };
+    });
   }
-
 }

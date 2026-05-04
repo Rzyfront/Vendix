@@ -113,7 +113,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="marginDistributionChartOptions"
+              [options]="marginDistributionChartOptions()"
               size="large"
               [showLegend]="true"
             ></app-chart>
@@ -158,7 +158,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="topProfitChartOptions"
+              [options]="topProfitChartOptions()"
               size="large"
               [showLegend]="false"
             ></app-chart>
@@ -197,7 +197,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="comparativeChartOptions"
+              [options]="comparativeChartOptions()"
               size="large"
               [showLegend]="true"
             ></app-chart>

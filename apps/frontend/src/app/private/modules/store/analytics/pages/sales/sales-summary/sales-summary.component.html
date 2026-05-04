@@ -118,7 +118,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="revenueChartOptions"
+              [options]="revenueChartOptions()"
               size="large"
               [showLegend]="false"
             ></app-chart>

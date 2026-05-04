@@ -611,8 +611,9 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       series: [
         {
-          type: 'line',
+          type: 'bar',
           data: summary.map((s, i) => ({ value: s.count, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+          barMaxWidth: 24,
         },
       ]});
   }

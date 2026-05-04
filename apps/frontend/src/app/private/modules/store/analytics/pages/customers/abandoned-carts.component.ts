@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
@@ -7,6 +7,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
@@ -45,6 +46,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
     CurrencyPipe,
@@ -88,9 +90,9 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
-  trendsChartOptions: EChartsOption = {};
-  byReasonChartOptions: EChartsOption = {};
-  recoveryRateChartOptions: EChartsOption = {};
+  trendsChartOptions= signal<EChartsOption>({});
+  byReasonChartOptions= signal<EChartsOption>({});
+  recoveryRateChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -224,7 +226,6 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   }
 
   private updateTrendsChart(trends: AbandonedCartTrend[], granularity: string): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#ef4444';
@@ -236,7 +237,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const abandonedCarts = trends.map((t) => t.abandoned_carts);
     const recoveredCarts = trends.map((t) => t.recovered_carts);
 
-    this.trendsChartOptions = {
+    this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -301,48 +302,43 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Abandonados',
-          type: 'line',
+          type: 'bar',
           data: abandonedCarts,
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}40` },
-                { offset: 1, color: `${primaryColor}05` },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
         {
           name: 'Recuperados',
-          type: 'line',
+          type: 'bar',
           data: recoveredCarts,
-          itemStyle: { color: secondaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${secondaryColor}40` },
-                { offset: 1, color: `${secondaryColor}05` },
+                { offset: 0, color: secondaryColor },
+                { offset: 1, color: secondaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 
   private updateByReasonChart(byReason: AbandonedCartByReason[]): void {
-    if (!byReason.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
@@ -352,7 +348,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const reasons = byReason.map((r) => r.reason);
     const counts = byReason.map((r) => r.count);
 
-    this.byReasonChartOptions = {
+    this.byReasonChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -411,7 +407,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Cantidad',
-          type: 'line',
+          type: 'bar',
           data: counts,
           itemStyle: {
             color: {
@@ -428,11 +424,10 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           },
         },
       ],
-    };
+    });
   }
 
   private updateRecoveryRateChart(trends: AbandonedCartTrend[], granularity: string): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#22c55e';
@@ -442,7 +437,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const labels = trends.map((t) => formatChartPeriod(t.period, granularity));
     const recoveryRates = trends.map((t) => t.recovery_rate);
 
-    this.recoveryRateChartOptions = {
+    this.recoveryRateChartOptions.set({
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -495,24 +490,22 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Tasa Recuperación',
-          type: 'line',
+          type: 'bar',
           data: recoveryRates,
-          itemStyle: { color: primaryColor },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}40` },
-                { offset: 1, color: `${primaryColor}05` },
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: primaryColor + '80' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
-    };
+    });
   }
 }

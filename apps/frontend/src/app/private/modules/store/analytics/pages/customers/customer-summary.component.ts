@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, inject,
+import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
@@ -8,6 +8,7 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
@@ -39,6 +40,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
     CurrencyPipe,
@@ -82,8 +84,8 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
   // Chart options
-  trendsChartOptions: EChartsOption = {};
-  topCustomersChartOptions: EChartsOption = {};
+  trendsChartOptions= signal<EChartsOption>({});
+  topCustomersChartOptions= signal<EChartsOption>({});
 
   // Options dropdown config
   filterConfigs: FilterConfig[] = [
@@ -207,7 +209,6 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
     trends: CustomerTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#8b5cf6';
@@ -221,7 +222,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
     );
     const newCustomers = trends.map((t) => t.new_customers);
 
-    this.trendsChartOptions = {
+    this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -262,18 +263,21 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
               ] } },
           lineStyle: { color: primaryColor, width: 2 },
           itemStyle: { color: primaryColor } },
-      ] };
+      ] });
   }
 
   private updateTopCustomersChart(topCustomers: TopCustomer[]): void {
-    if (!topCustomers.length) return;
-
     const style = getComputedStyle(document.documentElement);
     const borderColor =
       style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary =
       style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
     const primaryColor = '#3b82f6';
+
+    if (!topCustomers.length) {
+      this.topCustomersChartOptions.set({ series: [] });
+      return;
+    }
 
     const sorted = [...topCustomers].reverse();
     const names = sorted.map((c) => {
@@ -283,7 +287,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
     });
     const values = sorted.map((c) => c.total_spent);
 
-    this.topCustomersChartOptions = {
+    this.topCustomersChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -329,7 +333,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
               ] },
             borderRadius: [0, 4, 4, 0] },
           barMaxWidth: 32 },
-      ] };
+      ] });
   }
 
 }

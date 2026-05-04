@@ -366,7 +366,6 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(data: StockMovementReport[]): void {
-    if (!data.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
@@ -438,23 +437,20 @@ onDateRangeChange(range: DateRangeFilter): void {
       series: [
         {
           name: 'Movimientos',
-          type: 'line',
+          type: 'bar',
           data: values,
-          itemStyle: { color: '#3b82f6' },
-          lineStyle: { color: '#3b82f6', width: 2 },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
+              x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#3b82f64D' },
-                { offset: 1, color: '#3b82f60D' },
+                { offset: 0, color: '#3b82f6' },
+                { offset: 1, color: '#3b82f680' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
     });

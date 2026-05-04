@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
@@ -7,6 +7,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
@@ -34,6 +35,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
@@ -87,8 +89,8 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly loadingChannels = toSignal(this.loadingChannels$, { initialValue: false });
 
-  trendsChartOptions: EChartsOption = {};
-  channelsChartOptions: EChartsOption = {};
+  trendsChartOptions= signal<EChartsOption>({});
+  channelsChartOptions= signal<EChartsOption>({});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -194,7 +196,6 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     trends: CustomerTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#8b5cf6';
@@ -208,7 +209,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     );
     const newCustomers = trends.map((t) => t.new_customers);
 
-    this.trendsChartOptions = {
+    this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -271,24 +272,27 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             },
           },
         },
-      ] };
+      ] });
   }
 
   private updateChannelsChart(channels: any[]): void {
-    if (!channels.length) return;
-
     const style = getComputedStyle(document.documentElement);
     const borderColor =
       style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary =
       style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
+    if (!channels.length) {
+      this.channelsChartOptions.set({ series: [] });
+      return;
+    }
+
     const channelColors = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
     const labels = channels.map((c) => c.display_name || c.channel);
     const values = channels.map((c) => c.new_customers);
 
-    this.channelsChartOptions = {
+    this.channelsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -370,6 +374,6 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             },
           },
         },
-      ] };
+      ] });
   }
 }

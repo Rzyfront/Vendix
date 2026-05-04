@@ -120,7 +120,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="unitsTrendChartOptions"
+              [options]="unitsTrendChartOptions()"
               size="large"
               [showLegend]="false"
             ></app-chart>
@@ -165,7 +165,7 @@
         } @else {
           @defer (on viewport) {
             <app-chart
-              [options]="topSellersChartOptions"
+              [options]="topSellersChartOptions()"
               size="large"
               [showLegend]="false"
             ></app-chart>

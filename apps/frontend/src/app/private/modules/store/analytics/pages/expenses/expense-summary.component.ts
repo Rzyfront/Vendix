@@ -57,20 +57,20 @@ export class ExpenseSummaryComponent {
       series: [
         {
           name: 'Gastos',
-          type: 'line',
+          type: 'bar',
           data: [0, 0, 0, 0, 0, 0],
-          itemStyle: { color: '#ef4444' },
-          lineStyle: { color: '#ef4444', width: 2 },
-          areaStyle: {
+          itemStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: '#ef44444D' },
-                { offset: 1, color: '#ef44440D' },
+                { offset: 0, color: '#ef4444' },
+                { offset: 1, color: '#ef444480' },
               ],
             },
+            borderRadius: [4, 4, 0, 0],
           },
+          barMaxWidth: 40,
         },
       ],
     });

@@ -2,16 +2,18 @@ import { Component, OnInit, inject, signal, viewChild, effect, TemplateRef } fro
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TableComponent, TableColumn } from '../../../../../../shared/components/table/table.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.service';
+import { EChartsOption } from 'echarts';
 
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
@@ -62,17 +64,45 @@ import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
-      } @else if (data().length > 0) {
+      } @else {
+        <div class="flex justify-end gap-2">
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráfica
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
+        </div>
+
+        @if (activeView() === 'chart') {
+        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Gasto por Proveedor</span>
+          </div>
+          <div class="p-4">
+            <app-chart [options]="chartOptions()" size="large"></app-chart>
+          </div>
+        </app-card>
+        }
+
+        @if (activeView() === 'table') {
         <app-card shadow="none" [responsivePadding]="true">
           <app-table [data]="data()" [columns]="tableColumns" [loading]="loading()">
           </app-table>
         </app-card>
-      } @else {
-        <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
-          <app-icon name="truck" [size]="48" class="text-text-tertiary mx-auto mb-4"></app-icon>
-          <span class="text-sm font-bold text-[var(--color-text-text-primary)]">No hay datos</span>
-          <span class="text-xs text-[var(--color-text-secondary)] block mt-1">No hay órdenes de compra en el período seleccionado.</span>
-        </app-card>
+        }
       }
     </div>
 
@@ -119,6 +149,8 @@ export class PurchasesBySupplierComponent implements OnInit {
 
   loading = signal(true);
   data = signal<PurchasesBySupplier[]>([]);
+  chartOptions = signal<EChartsOption>({});
+  activeView = signal<'chart' | 'table'>('chart');
   tableColumns: TableColumn[] = [
     { key: 'supplier_name', label: 'Proveedor' },
     { key: 'order_count', label: 'Órdenes' },
@@ -162,14 +194,72 @@ export class PurchasesBySupplierComponent implements OnInit {
         const responseData = response?.data;
         if (Array.isArray(responseData)) {
           this.data.set(responseData);
+          this.updateChart(responseData);
         } else if (responseData && (responseData as any).data) {
           this.data.set((responseData as any).data);
+          this.updateChart((responseData as any).data);
+        } else {
+          this.data.set([]);
+          this.updateChart([]);
         }
         this.loading.set(false);
       },
       error: () => {
+        this.data.set([]);
+        this.updateChart([]);
         this.loading.set(false);
       }
+    });
+  }
+
+  private updateChart(data: PurchasesBySupplier[]): void {
+    const sorted = [...data].sort((a, b) => b.total_spent - a.total_spent);
+    const suppliers = sorted.map(s => s.supplier_name);
+    const values = sorted.map(s => s.total_spent);
+
+    this.chartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>$${p.value.toLocaleString('es-CO')}</b><br/>`;
+          }
+          return html;
+        },
+      },
+      legend: { data: ['Total Gastado'], bottom: 30, textStyle: { color: '#6b7280' } },
+      grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: suppliers,
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: '#6b7280', fontSize: 11, rotate: 30 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: '#6b7280', formatter: (v: number) => '$' + v.toLocaleString('es-CO', { maximumFractionDigits: 0 }) },
+        splitLine: { lineStyle: { color: '#f3f4f6' } },
+      },
+      series: [{
+        name: 'Total Gastado',
+        type: 'bar',
+        data: values,
+        itemStyle: {
+          color: {
+            type: 'linear',
+            x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: '#8b5cf6' },
+              { offset: 1, color: '#8b5cf680' },
+            ],
+          },
+          borderRadius: [4, 4, 0, 0],
+        },
+        barMaxWidth: 40,
+      }],
     });
   }
 
