@@ -8,6 +8,7 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
@@ -39,6 +40,7 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
     CurrencyPipe,

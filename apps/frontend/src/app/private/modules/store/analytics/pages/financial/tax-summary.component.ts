@@ -83,35 +83,39 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 
       <!-- Filter Bar -->
       <div
-        class="sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1"
       >
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div
+            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+          >
+            <app-icon name="percent" class="text-[var(--color-primary)]"></app-icon>
+          </div>
           <div class="min-w-0">
-            <h2 class="text-sm font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+            <h2 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
               Resumen de Impuestos
             </h2>
-            <p class="text-xs text-gray-400 md:text-xs md:text-text-secondary truncate">
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
               Desglose de impuestos recaudados y pagados
             </p>
           </div>
+        </div>
 
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <vendix-export-button
-              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              [loading]="exporting()"
-              (export)="exportReport()"
-            ></vendix-export-button>
+        <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+          <vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
 
-            <app-options-dropdown
-              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-              [filters]="filterConfigs"
-              [filterValues]="filterValues"
-              title="Filtros"
-              triggerLabel="Filtros"
-              (filterChange)="onFilterChange($event)"
-              (clearAllFilters)="onClearAllFilters()"
-            ></app-options-dropdown>
-          </div>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            title="Filtros"
+            triggerLabel="Filtros"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearAllFilters()"
+          ></app-options-dropdown>
         </div>
       </div>
 

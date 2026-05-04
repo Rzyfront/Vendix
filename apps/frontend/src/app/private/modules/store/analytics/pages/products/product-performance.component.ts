@@ -42,6 +42,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     CardComponent,
     StatsComponent,
     ChartComponent,
+    IconComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
     ExportButtonComponent,

@@ -132,24 +132,21 @@ imports: [
           customClasses="md:min-h-[600px]"
         >
           <!-- Search Section: sticky below stats on mobile, normal on desktop -->
-          <div
-            class="sticky top-[99px] z-10 bg-[#ffffff] px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-          >
-            <div
-              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-            >
-              <h2
-                class="text-sm font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal"
-              >
+          <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+                <app-icon name="alert-triangle" class="text-[var(--color-primary)]"></app-icon>
+              </div>
+              <h2 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
                 Productos
-                <span
-                  class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary"
-                >
+                <span class="font-normal text-text-secondary">
                   ({{ filteredData().length }})
                 </span>
               </h2>
-              <div class="flex items-center gap-2 w-full md:w-auto">
-                <app-inputsearch
+            </div>
+
+            <div class="flex items-center gap-2 md:gap-3 w-full md:w-auto">
+              <app-inputsearch
                   class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   size="sm"
                   placeholder="Buscar producto o SKU..."
@@ -166,7 +163,6 @@ imports: [
                   (clearAllFilters)="clearFilters()"
                   (actionClick)="onActionClick($event)"
                 ></app-options-dropdown>
-              </div>
             </div>
           </div>
 

@@ -74,57 +74,55 @@ import { EChartsOption } from 'echarts';
 
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1"
       >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/analytics" class="hover:text-primary"
-              >Analíticas</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/analytics/inventory" class="hover:text-primary"
-              >Inventario</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Valoración</span>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div
+            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+          >
+            <app-icon name="dollar-sign" class="text-[var(--color-primary)]"></app-icon>
           </div>
-          <h1 class="text-xl font-bold text-text-primary">
-            Valoración de Inventario
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Valor del inventario por ubicación y categoría
-          </p>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Valoración de Inventario
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Valor del inventario por ubicación y categoría
+            </p>
+          </div>
         </div>
-        <vendix-export-button
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
-        <!-- Toggle Chart/Table -->
-        <div class="flex rounded-lg border border-border overflow-hidden">
-          <button
-            (click)="activeView.set('chart')"
-            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-            [class]="
-              activeView() === 'chart'
-                ? 'bg-black text-white'
-                : 'bg-surface text-text-secondary hover:bg-background'
-            "
-          >
-            <app-icon name="bar-chart-2" [size]="16"></app-icon>
-            Gráficas
-          </button>
-          <button
-            (click)="activeView.set('table')"
-            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-            [class]="
-              activeView() === 'table'
-                ? 'bg-black text-white'
-                : 'bg-surface text-text-secondary hover:bg-background'
-            "
-          >
-            <app-icon name="table" [size]="16"></app-icon>
-            Tabla
-          </button>
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
+<vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
         </div>
       </div>
 

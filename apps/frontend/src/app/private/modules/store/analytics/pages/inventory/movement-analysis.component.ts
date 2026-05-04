@@ -50,32 +50,30 @@ import {
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
-      <!-- Header -->
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sticky top-[99px] z-10 bg-[#ffffff] px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
-      >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/analytics" class="hover:text-primary"
-              >Analíticas</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/analytics/inventory" class="hover:text-primary"
-              >Inventario</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Análisis de Movimientos</span>
+<!-- Header -->
+      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+            <app-icon name="trending-up" class="text-[var(--color-primary)]"></app-icon>
           </div>
-          <h1 class="text-xl font-bold text-text-primary">
-            Análisis de Movimientos
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Tendencias, distribución y detalle de movimientos de inventario
-          </p>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
+              <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
+              <app-icon name="chevron-right" [size]="14"></app-icon>
+              <a routerLink="/admin/analytics/inventory" class="hover:text-primary">Inventario</a>
+              <app-icon name="chevron-right" [size]="14"></app-icon>
+              <span>Análisis de Movimientos</span>
+            </div>
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Análisis de Movimientos
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Tendencias, distribución y detalle de movimientos de inventario
+            </p>
+          </div>
         </div>
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
-        >
+
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -96,7 +94,7 @@ import {
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'chart'
-                  ? 'bg-primary text-white'
+                  ? 'bg-black text-white'
                   : 'bg-surface text-text-secondary hover:bg-background'
               "
             >
@@ -108,7 +106,7 @@ import {
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'table'
-                  ? 'bg-primary text-white'
+                  ? 'bg-black text-white'
                   : 'bg-surface text-text-secondary hover:bg-background'
               "
             >
@@ -120,10 +118,10 @@ import {
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
-        </div>
-      </div>
+    </div>
+  </div>
 
-      <!-- Stats Cards -->
+  <!-- Stats Cards -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <app-stats
           title="Total Movimientos"

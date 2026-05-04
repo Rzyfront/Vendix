@@ -52,12 +52,46 @@ import { EChartsOption } from 'echarts';
         ></app-stats>
       </div>
 
-      <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-        <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
-        <app-icon name="chevron-right" [size]="14"></app-icon>
-        <span>Compras</span>
+      <!-- Header -->
+      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+            <app-icon name="truck" class="text-[var(--color-primary)]"></app-icon>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
+              <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
+              <app-icon name="chevron-right" [size]="14"></app-icon>
+              <span>Compras</span>
+            </div>
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">Compras por Proveedor</h1>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <!-- Toggle Chart/Table -->
+          @if (!loading()) {
+            <div class="flex rounded-lg border border-border overflow-hidden">
+              <button
+                (click)="activeView.set('chart')"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+                [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+              >
+                <app-icon name="bar-chart-2" [size]="16"></app-icon>
+                Gráfica
+              </button>
+              <button
+                (click)="activeView.set('table')"
+                class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+                [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+              >
+                <app-icon name="table" [size]="16"></app-icon>
+                Tabla
+              </button>
+            </div>
+          }
+        </div>
       </div>
-      <h1 class="text-xl font-bold text-text-primary">Compras por Proveedor</h1>
 
       @if (loading()) {
         <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
@@ -65,26 +99,6 @@ import { EChartsOption } from 'echarts';
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
       } @else {
-        <div class="flex justify-end gap-2">
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="activeView.set('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráfica
-            </button>
-            <button
-              (click)="activeView.set('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
-        </div>
 
         @if (activeView() === 'chart') {
         <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
