@@ -451,29 +451,17 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 10 },
       },
-      yAxis: [
-        {
-          type: 'value',
-          name: 'Ingresos',
-          position: 'left',
-          axisLine: { show: false },
-          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
-          splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
-        },
-        {
-          type: 'value',
-          position: 'right',
-          axisLine: { show: false },
-          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
-          splitLine: { show: false },
-        },
-      ],
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
+      },
       series: [
         {
           name: 'Ingresos',
           type: 'bar',
           data: revenues,
-          yAxisIndex: 0,
           itemStyle: {
             color: {
               type: 'linear',
@@ -491,7 +479,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           name: 'Costo',
           type: 'bar',
           data: costs,
-          yAxisIndex: 1,
           itemStyle: {
             color: {
               type: 'linear',
@@ -509,7 +496,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           name: 'Ganancia',
           type: 'bar',
           data: profits,
-          yAxisIndex: 1,
           itemStyle: {
             color: {
               type: 'linear',
