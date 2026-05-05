@@ -129,6 +129,8 @@ import {
         </div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <!-- Chart View -->
       @if (activeView() === 'chart') {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -191,6 +193,7 @@ import {
           </div>
         </app-card>
       }
+      </div>
     </div>
   `})
 export class MovementAnalysisComponent implements OnInit {

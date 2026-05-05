@@ -141,6 +141,8 @@ import { EChartsOption } from 'echarts';
         </div>
       }
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <!-- Chart View -->
       @if (activeView() === 'chart') {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -198,6 +200,7 @@ import { EChartsOption } from 'echarts';
         </div>
       </app-card>
       }
+      </div>
     </div>
   `})
 export class InventoryValuationComponent implements OnInit {

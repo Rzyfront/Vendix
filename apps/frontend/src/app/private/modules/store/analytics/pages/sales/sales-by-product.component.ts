@@ -128,6 +128,8 @@ import { EChartsOption } from 'echarts';
         </div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <!-- Chart View -->
       @if (activeView() === 'chart') {
       <app-card
@@ -184,6 +186,7 @@ import { EChartsOption } from 'echarts';
         </div>
       </app-card>
       }
+      </div>
     </div>
   `})
 export class SalesByProductComponent implements OnInit {

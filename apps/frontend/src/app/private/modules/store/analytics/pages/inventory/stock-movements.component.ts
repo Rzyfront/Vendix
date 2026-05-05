@@ -121,9 +121,11 @@ import { EChartsOption } from 'echarts';
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
-        </div>
+</div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <!-- Main Content Table -->
       @if (activeView() === 'table') {
       <app-card
@@ -136,7 +138,7 @@ import { EChartsOption } from 'echarts';
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Movimientos de Inventario
             <span
-              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+              class="text-xs text-text-secondary font-normal ml-2"
             >
               ({{ data().length }} registros)
             </span>
@@ -173,6 +175,7 @@ import { EChartsOption } from 'echarts';
         }
       </app-card>
       }
+      </div>
     </div>
   `})
 export class StockMovementsComponent implements OnInit {
