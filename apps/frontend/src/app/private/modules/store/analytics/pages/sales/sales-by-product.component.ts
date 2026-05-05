@@ -13,7 +13,6 @@ import {
   ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -34,8 +33,7 @@ import { EChartsOption } from 'echarts';
     StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
-    DateRangeFilterComponent,
-    ExportButtonComponent
+    DateRangeFilterComponent
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">

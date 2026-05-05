@@ -11,9 +11,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
-import {
-  SelectorComponent,
-  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -41,7 +39,6 @@ import {
     FormsModule,
     CardComponent,
     ResponsiveDataViewComponent,
-    SelectorComponent,
     IconComponent,
     StatsComponent,
     ChartComponent,
@@ -57,13 +54,6 @@ import {
             <app-icon name="trending-up" class="text-[var(--color-primary)]"></app-icon>
           </div>
           <div class="min-w-0">
-            <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-              <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
-              <app-icon name="chevron-right" [size]="14"></app-icon>
-              <a routerLink="/admin/analytics/inventory" class="hover:text-primary">Inventario</a>
-              <app-icon name="chevron-right" [size]="14"></app-icon>
-              <span>Análisis de Movimientos</span>
-            </div>
             <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
               Análisis de Movimientos
             </h1>
@@ -78,25 +68,11 @@ import {
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <div class="w-full sm:w-36">
-            <app-selector
-              [options]="granularityOptions"
-              [ngModel]="granularity()"
-              (ngModelChange)="onGranularityChange($event)"
-              size="sm"
-              placeholder="Granularidad"
-            ></app-selector>
-          </div>
-          <!-- Toggle Chart/Table -->
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
               (click)="activeView.set('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'chart'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
+              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
               <app-icon name="bar-chart-2" [size]="16"></app-icon>
               Gráficas
@@ -104,11 +80,7 @@ import {
             <button
               (click)="activeView.set('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'table'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
+              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
               <app-icon name="table" [size]="16"></app-icon>
               Tabla
@@ -118,10 +90,10 @@ import {
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
-    </div>
-  </div>
+        </div>
+      </div>
 
-  <!-- Stats Cards -->
+      <!-- Stats Cards -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <app-stats
           title="Total Movimientos"

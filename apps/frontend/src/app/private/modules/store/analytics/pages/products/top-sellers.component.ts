@@ -13,6 +13,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import { ItemListCardConfig } from '../../../../../../shared/components/item-list/item-list.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
+import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { TopSellingProduct } from '../../interfaces/products-analytics.interface';
@@ -32,6 +33,7 @@ import { EChartsOption } from 'echarts';
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
+    ExportButtonComponent,
   ],
   templateUrl: './top-sellers.component.html',
   styles: [
@@ -62,6 +64,7 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   topSellersChartOptions= signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
+  exporting = signal(false);
 
   tableColumns: TableColumn[] = [
     { key: 'product_name', label: 'Producto' },
@@ -190,5 +193,10 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       ],
     });
+  }
+
+  exportReport(): void {
+    this.exporting.set(true);
+    setTimeout(() => this.exporting.set(false), 1000);
   }
 }

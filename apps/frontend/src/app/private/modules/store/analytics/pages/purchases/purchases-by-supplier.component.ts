@@ -9,11 +9,15 @@ import { TableComponent, TableColumn } from '../../../../../../shared/components
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
+import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe, DateRangeFilterComponent, ExportButtonComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
@@ -59,37 +63,40 @@ import { EChartsOption } from 'echarts';
             <app-icon name="truck" class="text-[var(--color-primary)]"></app-icon>
           </div>
           <div class="min-w-0">
-            <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-              <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
-              <app-icon name="chevron-right" [size]="14"></app-icon>
-              <span>Compras</span>
-            </div>
             <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">Compras por Proveedor</h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Análisis de compras por proveedor
+            </p>
           </div>
         </div>
 
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
-          <!-- Toggle Chart/Table -->
-          @if (!loading()) {
-            <div class="flex rounded-lg border border-border overflow-hidden">
-              <button
-                (click)="activeView.set('chart')"
-                class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-                [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-              >
-                <app-icon name="bar-chart-2" [size]="16"></app-icon>
-                Gráfica
-              </button>
-              <button
-                (click)="activeView.set('table')"
-                class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-                [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-              >
-                <app-icon name="table" [size]="16"></app-icon>
-                Tabla
-              </button>
-            </div>
-          }
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
+          <vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
         </div>
       </div>
 
@@ -165,6 +172,12 @@ export class PurchasesBySupplierComponent implements OnInit {
   data = signal<PurchasesBySupplier[]>([]);
   chartOptions = signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
+  exporting = signal(false);
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'
+  });
   tableColumns: TableColumn[] = [
     { key: 'supplier_name', label: 'Proveedor' },
     { key: 'order_count', label: 'Órdenes' },
@@ -290,5 +303,14 @@ export class PurchasesBySupplierComponent implements OnInit {
     if (!this.data().length) return '-';
     const top = [...this.data()].sort((a, b) => b.total_spent - a.total_spent)[0];
     return top?.supplier_name?.substring(0, 15) || '-';
+  }
+
+  exportReport(): void {
+    this.exporting.set(true);
+    setTimeout(() => this.exporting.set(false), 1000);
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
   }
 }
