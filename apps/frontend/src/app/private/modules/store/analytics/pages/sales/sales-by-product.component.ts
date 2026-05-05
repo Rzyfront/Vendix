@@ -328,7 +328,6 @@ onDateRangeChange(range: DateRangeFilter): void {
       xAxis: {
         type: 'value',
         min: 0,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,

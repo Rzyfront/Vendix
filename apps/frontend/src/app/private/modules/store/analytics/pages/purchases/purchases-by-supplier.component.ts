@@ -270,7 +270,6 @@ export class PurchasesBySupplierComponent implements OnInit {
       yAxis: {
         type: 'value',
         min: 0,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: '#6b7280', formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO', { maximumFractionDigits: 0 }) },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
