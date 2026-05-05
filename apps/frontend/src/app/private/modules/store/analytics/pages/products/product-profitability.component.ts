@@ -353,7 +353,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
@@ -454,7 +454,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [

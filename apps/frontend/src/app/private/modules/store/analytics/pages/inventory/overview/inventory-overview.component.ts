@@ -353,7 +353,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(v) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(Math.round(v), 0) },
         splitLine: { lineStyle: { color: border } },
       },
       series: [

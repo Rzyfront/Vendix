@@ -317,7 +317,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
-          formatter: (v: number) => this.formatCurrency(v),
+          formatter: (v: number) => this.formatCurrency(Math.round(v)),
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },

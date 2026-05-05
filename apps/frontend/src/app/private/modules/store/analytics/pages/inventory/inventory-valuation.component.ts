@@ -324,7 +324,7 @@ loadData(): void {
         min: 0,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => this.formatCurrency(v) },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO') },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
