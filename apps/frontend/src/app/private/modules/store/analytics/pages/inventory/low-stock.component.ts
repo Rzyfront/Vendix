@@ -83,25 +83,41 @@ imports: [
         ></app-stats>
       </div>
 
-      <!-- Toggle + Header -->
-      <div class="flex justify-end gap-2">
-        <div class="flex rounded-lg border border-border overflow-hidden">
-          <button
-            (click)="activeView.set('chart')"
-            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-            [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-          >
-            <app-icon name="bar-chart-2" [size]="16"></app-icon>
-            Gráfica
-          </button>
-          <button
-            (click)="activeView.set('table')"
-            class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-            [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-          >
-            <app-icon name="table" [size]="16"></app-icon>
-            Tabla
-          </button>
+      <!-- Header -->
+      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+            <app-icon name="alert-triangle" class="text-[var(--color-primary)]"></app-icon>
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Stock Bajo y Agotados
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Productos con bajo nivel de inventario
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráfica
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
         </div>
       </div>
 
@@ -131,39 +147,24 @@ imports: [
           [padding]="false"
           customClasses="md:min-h-[600px]"
         >
-          <!-- Search Section: sticky below stats on mobile, normal on desktop -->
-          <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
-            <div class="flex items-center gap-2.5 min-w-0">
-              <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
-                <app-icon name="alert-triangle" class="text-[var(--color-primary)]"></app-icon>
-              </div>
-              <h2 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
-                Productos
-                <span class="font-normal text-text-secondary">
-                  ({{ filteredData().length }})
-                </span>
-              </h2>
-            </div>
-
-            <div class="flex items-center gap-2 md:gap-3 w-full md:w-auto">
-              <app-inputsearch
-                  class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                  size="sm"
-                  placeholder="Buscar producto o SKU..."
-                  [debounceTime]="300"
-                  (searchChange)="onSearch($event)"
-                ></app-inputsearch>
-                <app-options-dropdown
-                  class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-                  [filters]="filterConfigs"
-                  [filterValues]="filterValues"
-                  [actions]="dropdownActions"
-                  [isLoading]="loading()"
-                  (filterChange)="onFilterChange($event)"
-                  (clearAllFilters)="clearFilters()"
-                  (actionClick)="onActionClick($event)"
-                ></app-options-dropdown>
-            </div>
+          <!-- Search + Filter Bar -->
+          <div class="flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border">
+            <app-inputsearch
+                class="flex-1 md:w-64"
+                size="sm"
+                placeholder="Buscar producto o SKU..."
+                [debounceTime]="300"
+                (searchChange)="onSearch($event)"
+              ></app-inputsearch>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
           </div>
 
           <!-- Loading -->

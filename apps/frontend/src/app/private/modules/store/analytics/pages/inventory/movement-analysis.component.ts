@@ -47,7 +47,43 @@ import {
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
-<!-- Header -->
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Total Movimientos"
+          [value]="totalMovements()"
+          iconName="activity"
+          iconBgColor="bg-blue-500/10"
+          iconColor="text-blue-500"
+          [clickable]="false"
+        ></app-stats>
+        <app-stats
+          title="Total Entradas"
+          [value]="totalIn()"
+          iconName="arrow-down-circle"
+          iconBgColor="bg-green-500/10"
+          iconColor="text-green-500"
+          [clickable]="false"
+        ></app-stats>
+        <app-stats
+          title="Total Salidas"
+          [value]="totalOut()"
+          iconName="arrow-up-circle"
+          iconBgColor="bg-red-500/10"
+          iconColor="text-red-500"
+          [clickable]="false"
+        ></app-stats>
+        <app-stats
+          title="Ajustes y Transferencias"
+          [value]="totalOther()"
+          iconName="repeat"
+          iconBgColor="bg-purple-500/10"
+          iconColor="text-purple-500"
+          [clickable]="false"
+        ></app-stats>
+      </div>
+
+      <!-- Header -->
       <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1">
         <div class="flex items-center gap-2.5 min-w-0">
           <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
@@ -91,42 +127,6 @@ import {
             (export)="exportReport()"
           ></vendix-export-button>
         </div>
-      </div>
-
-      <!-- Stats Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <app-stats
-          title="Total Movimientos"
-          [value]="totalMovements()"
-          iconName="activity"
-          iconBgColor="bg-blue-500/10"
-          iconColor="text-blue-500"
-          [clickable]="false"
-        ></app-stats>
-        <app-stats
-          title="Total Entradas"
-          [value]="totalIn()"
-          iconName="arrow-down-circle"
-          iconBgColor="bg-green-500/10"
-          iconColor="text-green-500"
-          [clickable]="false"
-        ></app-stats>
-        <app-stats
-          title="Total Salidas"
-          [value]="totalOut()"
-          iconName="arrow-up-circle"
-          iconBgColor="bg-red-500/10"
-          iconColor="text-red-500"
-          [clickable]="false"
-        ></app-stats>
-        <app-stats
-          title="Ajustes y Transferencias"
-          [value]="totalOther()"
-          iconName="repeat"
-          iconBgColor="bg-purple-500/10"
-          iconColor="text-purple-500"
-          [clickable]="false"
-        ></app-stats>
       </div>
 
       <!-- Chart View -->

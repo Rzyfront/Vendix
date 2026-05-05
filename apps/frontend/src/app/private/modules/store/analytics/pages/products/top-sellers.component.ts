@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal,
+import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
@@ -7,6 +7,7 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
@@ -30,6 +31,7 @@ import { EChartsOption } from 'echarts';
     CommonModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
@@ -65,6 +67,14 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   topSellersChartOptions= signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
+
+  readonly totalProducts = computed(() => this.topSellers().length);
+  readonly totalUnits = computed(() => this.topSellers().reduce((sum, p) => sum + (p.units_sold || 0), 0));
+  readonly totalRevenue = computed(() => this.topSellers().reduce((sum, p) => sum + (p.revenue || 0), 0));
+  readonly topProductName = computed(() => {
+    const sorted = [...this.topSellers()].sort((a, b) => b.units_sold - a.units_sold);
+    return sorted[0]?.product_name?.substring(0, 15) || '-';
+  });
 
   tableColumns: TableColumn[] = [
     { key: 'product_name', label: 'Producto' },
