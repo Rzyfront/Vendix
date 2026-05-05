@@ -321,6 +321,8 @@ loadData(): void {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => this.formatCurrency(v) },
         splitLine: { lineStyle: { color: '#e5e7eb' } },

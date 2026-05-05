@@ -124,6 +124,8 @@ export class ExpensesByCategoryComponent {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
