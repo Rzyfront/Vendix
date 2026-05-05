@@ -72,12 +72,15 @@ import { EChartsOption } from 'echarts';
         </div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
         <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">Tendencia de Gastos</span>
         </div>
         <app-chart [options]="chartOptions()" size="large" [showLegend]="true"></app-chart>
       </app-card>
+      </div>
     </div>
   `,
 })

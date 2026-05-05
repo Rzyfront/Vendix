@@ -100,6 +100,8 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
         </div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       @if (loading()) {
         <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
@@ -125,6 +127,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
         </app-card>
         }
       }
+      </div>
     </div>
 
     <ng-template #supplierCell let-row>
