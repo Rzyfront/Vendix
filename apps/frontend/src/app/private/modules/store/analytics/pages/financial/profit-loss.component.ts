@@ -343,7 +343,7 @@ export class ProfitLossComponent implements OnInit {
         formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b>`,
       },
       grid: { left: '3%', right: '10%', bottom: '3%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
+      xAxis: { type: 'value', axisLabel: { formatter: (v: any) => Math.round(Number(v)).toString() } },
       yAxis: {
         type: 'category',
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],

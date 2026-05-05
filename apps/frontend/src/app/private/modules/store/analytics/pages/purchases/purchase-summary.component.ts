@@ -343,7 +343,7 @@ export class PurchaseSummaryComponent implements OnInit {
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
+      xAxis: { type: 'value', axisLabel: { formatter: (v: any) => Math.round(Number(v)).toString() } },
       yAxis: {
         type: 'category',
         data: ['Pendientes', 'Completadas'],

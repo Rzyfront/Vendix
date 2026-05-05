@@ -179,7 +179,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
+          formatter: (value: number) => this.currencyService.format(Math.round(value), 0),
         },
         splitLine: { lineStyle: { color: borderColor } },
       },

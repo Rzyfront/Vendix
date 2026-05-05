@@ -118,13 +118,13 @@ export class ExpenseSummaryComponent {
         type: 'category',
         data: this.expensesData().map(e => e.month),
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [

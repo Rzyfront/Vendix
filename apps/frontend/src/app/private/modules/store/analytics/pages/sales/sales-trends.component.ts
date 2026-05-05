@@ -294,7 +294,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280' }},
+        axisLabel: { color: '#6b7280', formatter: (v: any) => Math.round(Number(v)).toString() }},
       yAxis: [
         {
           type: 'value',
@@ -311,7 +311,7 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Órdenes',
           position: 'right',
           axisLine: { show: false },
-          axisLabel: { color: '#6b7280' },
+          axisLabel: { color: '#6b7280', formatter: (v: any) => Math.round(Number(v)).toString() },
           splitLine: { show: false }},
       ],
       series: [
@@ -364,7 +364,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280' }},
+        axisLabel: { color: '#6b7280', formatter: (v: any) => Math.round(Number(v)).toString() }},
       yAxis: {
         type: 'value',
         min: 0,

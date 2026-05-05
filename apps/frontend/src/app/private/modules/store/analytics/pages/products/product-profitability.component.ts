@@ -266,7 +266,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [

@@ -120,13 +120,13 @@ export class ExpensesByCategoryComponent {
         type: 'category',
         data: this.categoriesData().map(c => c.name),
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [

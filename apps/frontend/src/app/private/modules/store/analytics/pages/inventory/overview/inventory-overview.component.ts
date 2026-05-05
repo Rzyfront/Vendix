@@ -255,11 +255,11 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary } },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: border } } },
       series: [
         this.buildLineSeries(
@@ -348,7 +348,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         type: 'category',
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
       },
       yAxis: {
         type: 'value',
@@ -421,12 +421,12 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         type: 'category',
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: border } },
       },
       series: [

@@ -296,7 +296,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
@@ -401,7 +401,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [

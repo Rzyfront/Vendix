@@ -401,13 +401,13 @@ export class LowStockComponent implements OnInit {
         type: 'category',
         data: ['Agotados', 'Stock Bajo', 'En Stock'],
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [

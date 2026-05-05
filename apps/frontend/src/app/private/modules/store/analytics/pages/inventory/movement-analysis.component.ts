@@ -474,7 +474,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: any) => Math.round(Number(v)).toString() },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [
