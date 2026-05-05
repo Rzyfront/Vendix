@@ -145,7 +145,6 @@ import { EChartsOption } from 'echarts';
       <div class="grid grid-cols-1 gap-6">
       <!-- Chart View -->
       @if (activeView() === 'chart') {
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-card
           shadow="none"
           [padding]="false"
@@ -159,11 +158,11 @@ import { EChartsOption } from 'echarts';
           </div>
           <div class="p-4">
             @if (loading()) {
-              <div class="h-64 flex items-center justify-center">
+              <div class="h-80 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else if (data().length === 0) {
-              <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+              <div class="h-80 flex flex-col items-center justify-center text-text-secondary">
                 <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
                 <p>No hay datos para el período seleccionado</p>
               </div>
@@ -172,7 +171,6 @@ import { EChartsOption } from 'echarts';
             }
           </div>
         </app-card>
-      </div>
       }
 
       <!-- Table View -->
