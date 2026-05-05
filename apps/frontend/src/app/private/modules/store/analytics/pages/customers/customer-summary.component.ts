@@ -242,7 +242,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, formatter: (v: any) => Math.round(Number(v)).toString() },
+        axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
