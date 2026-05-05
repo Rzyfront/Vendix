@@ -462,15 +462,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         },
         {
           type: 'value',
-          name: 'Costo',
-          position: 'right',
-          axisLine: { show: false },
-          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
-          splitLine: { show: false },
-        },
-        {
-          type: 'value',
-          name: 'Ganancia',
           position: 'right',
           axisLine: { show: false },
           axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
@@ -518,7 +509,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           name: 'Ganancia',
           type: 'bar',
           data: profits,
-          yAxisIndex: 2,
+          yAxisIndex: 1,
           itemStyle: {
             color: {
               type: 'linear',
