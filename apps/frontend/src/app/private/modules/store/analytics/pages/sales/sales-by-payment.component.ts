@@ -314,6 +314,9 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 1000000,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',

@@ -258,6 +258,9 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 100,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: border } } },
@@ -352,6 +355,9 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 1000000,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(Math.round(v), 0) },
         splitLine: { lineStyle: { color: border } },
@@ -425,6 +431,9 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 100,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: border } },
