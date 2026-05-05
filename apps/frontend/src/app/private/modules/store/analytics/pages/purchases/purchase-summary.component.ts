@@ -307,7 +307,7 @@ export class PurchaseSummaryComponent implements OnInit {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (v: number) => this.currencyService.format(v, 0),
+          formatter: (v: number) => this.currencyService.format(Math.round(v), 0),
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
