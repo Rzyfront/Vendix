@@ -9,14 +9,11 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../../components/date-range-filter/date-range-filter.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
@@ -40,8 +37,8 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -84,48 +81,10 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
   // Chart options (updated when trends change)
   revenueChartOptions= signal<EChartsOption>({});
-
-  // Options dropdown config
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'hour', label: 'Por Hora' },
-        { value: 'day', label: 'Por Día' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Año' },
-      ],
-      placeholder: 'Seleccionar',
-      defaultValue: 'day' },
-    {
-      key: 'channel',
-      label: 'Canal',
-      type: 'select',
-      options: [
-        { value: '', label: 'Todos los Canales' },
-        { value: 'pos', label: 'Punto de Venta' },
-        { value: 'ecommerce', label: 'Tienda Online' },
-        { value: 'agent', label: 'Agente IA' },
-        { value: 'whatsapp', label: 'WhatsApp' },
-        { value: 'marketplace', label: 'Marketplace' },
-      ],
-      placeholder: 'Todos los Canales' },
-  ];
-
-  filterValues: FilterValues = {};
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
   readonly salesViews: AnalyticsView[] = getViewsByCategory('sales');
 
@@ -135,17 +94,6 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
     // Dispatch initial loads
     this.store.dispatch(SalesActions.loadSalesSummary());
     this.store.dispatch(SalesActions.loadSalesTrends());
-
-    // Sync store state → filterValues for the options dropdown
-    combineLatest([this.dateRange$, this.granularity$, this.channel$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity, channel]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day',
-          channel: channel || null };
-      });
 
     // Subscribe to trends to build chart options
     combineLatest([this.trends$, this.granularity$])
@@ -160,54 +108,13 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 this.store.dispatch(SalesActions.clearSalesSummaryState());
   }
 
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-    const channel = values['channel'] as string;
-
-    // Update date range if changed
-    const currentRange = this.filterValues;
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        SalesActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    // Update granularity if changed
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        SalesActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
-
-    // Update channel if changed
-    if (channel !== currentRange['channel']) {
-      this.store.dispatch(SalesActions.setChannel({ channel: channel || '' }));
-    }
-  }
-
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      SalesActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(SalesActions.setGranularity({ granularity: 'day' }));
-    this.store.dispatch(SalesActions.setChannel({ channel: '' }));
-  }
-
   exportReport(): void {
     this.store.dispatch(SalesActions.exportSalesReport());
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.store.dispatch(SalesActions.setDateRange({ dateRange: range }));
   }
 
   getGrowthText(growth?: number): string {

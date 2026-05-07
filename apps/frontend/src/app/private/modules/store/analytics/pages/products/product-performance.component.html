@@ -72,108 +72,105 @@
     </div>
 
     <div class="flex items-center gap-2 md:gap-3 shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
       <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [loading]="exporting()"
           (export)="exportReport()"
         ></vendix-export-button>
-
-        <app-options-dropdown
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [filters]="filterConfigs"
-          [filterValues]="filterValues"
-          title="Filtros"
-          triggerLabel="Filtros"
-          (filterChange)="onFilterChange($event)"
-          (clearAllFilters)="onClearAllFilters()"
-        ></app-options-dropdown>
     </div>
   </div>
 
-  <!-- Charts Grid -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:mt-4">
-    <!-- Units Trend Chart -->
-    <app-card
-      shadow="none"
-      [padding]="false"
-      overflow="hidden"
-      [showHeader]="true"
-    >
-      <div slot="header" class="flex flex-col">
-        <span class="text-sm font-bold text-[var(--color-text-primary)]"
-          >Tendencia de Unidades Vendidas</span
-        >
-        <span class="text-xs text-[var(--color-text-secondary)]"
-          >Evolución de unidades en el período</span
-        >
-      </div>
-      <div class="p-4">
-        @if (loadingTrends()) {
-          <div class="h-64 flex items-center justify-center">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-          </div>
-        } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="unitsTrendChartOptions()"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
-        }
-      </div>
-    </app-card>
-
-    <!-- Top 5 by Units Chart -->
-    <app-card
-      shadow="none"
-      [padding]="false"
-      overflow="hidden"
-      [showHeader]="true"
-    >
-      <div slot="header" class="flex items-center justify-between">
-        <div class="flex flex-col">
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Units Trend Chart -->
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]"
-            >Top 5 por Unidades Vendidas</span
+            >Tendencia de Unidades Vendidas</span
           >
           <span class="text-xs text-[var(--color-text-secondary)]"
-            >Productos más vendidos en el período</span
+            >Evolución de unidades en el período</span
           >
         </div>
-        <a
-          routerLink="../top-sellers"
-          class="text-sm text-primary hover:underline"
-          >Ver detalle</a
-        >
-      </div>
-      <div class="p-4">
-        @if (loadingTopSellers()) {
-          <div class="h-64 flex items-center justify-center">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-          </div>
-        } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="topSellersChartOptions()"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
+        <div class="p-4">
+          @if (loadingTrends()) {
+            <div class="h-64 flex items-center justify-center">
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+            </div>
+          } @else {
+            @defer (on viewport) {
+              <app-chart
+                [options]="unitsTrendChartOptions()"
+                size="large"
+                [showLegend]="false"
+              ></app-chart>
+            } @placeholder {
+              <div
+                class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
           }
-        }
-      </div>
-    </app-card>
+        </div>
+      </app-card>
+
+      <!-- Top 5 by Units Chart -->
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex items-center justify-between">
+          <div class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Top 5 por Unidades Vendidas</span
+            >
+            <span class="text-xs text-[var(--color-text-secondary)]"
+              >Productos más vendidos en el período</span
+            >
+          </div>
+          <a
+            routerLink="../top-sellers"
+            class="text-sm text-primary hover:underline"
+            >Ver detalle</a
+          >
+        </div>
+        <div class="p-4">
+          @if (loadingTopSellers()) {
+            <div class="h-64 flex items-center justify-center">
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+            </div>
+          } @else {
+            @defer (on viewport) {
+              <app-chart
+                [options]="topSellersChartOptions()"
+                size="large"
+                [showLegend]="false"
+              ></app-chart>
+            } @placeholder {
+              <div
+                class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
+          }
+        </div>
+      </app-card>
+    </div>
   </div>
 
   <!-- Quick Links -->

@@ -70,20 +70,20 @@
     </div>
 
     <div class="flex items-center gap-2 md:gap-3 shrink-0">
-      <app-options-dropdown
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [filters]="filterConfigs"
-          [filterValues]="filterValues"
-          title="Filtros"
-          triggerLabel="Filtros"
-          (filterChange)="onFilterChange($event)"
-          (clearAllFilters)="onClearAllFilters()"
-        ></app-options-dropdown>
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
+      <vendix-export-button
+        [loading]="exporting()"
+        (export)="exportReport()"
+      ></vendix-export-button>
     </div>
   </div>
 
-  <!-- Charts -->
-  <div class="grid grid-cols-1 gap-6 md:mt-4">
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts -->
     <!-- New Acquisitions Trend Chart -->
     <app-card
       shadow="none"

@@ -9,15 +9,10 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
-
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   InventorySummary,
@@ -41,7 +36,6 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     ExportButtonComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
@@ -100,34 +94,6 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   valuationChartOptions = signal<EChartsOption>({});
   quantityChartOptions = signal<EChartsOption>({});
 
-  // Filter configs
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'day', label: 'Por Día' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Año' },
-      ],
-      placeholder: 'Seleccionar',
-      defaultValue: 'day' },
-  ];
-
-  filterValues: FilterValues = {};
-
   readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory');
 
   ngOnInit(): void {
@@ -137,16 +103,6 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     this.store.dispatch(InventoryActions.loadInventorySummary());
     this.store.dispatch(InventoryActions.loadMovementTrends());
     this.store.dispatch(InventoryActions.loadValuations());
-
-    // Sync store state → filterValues
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
-      });
 
     // Subscribe to movement trends to build trend chart
     combineLatest([this.movementTrends$, this.granularity$])
@@ -165,45 +121,6 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
 
 this.store.dispatch(InventoryActions.clearInventoryOverviewState());
-  }
-
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-
-    const currentRange = this.filterValues;
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        InventoryActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        InventoryActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
-  }
-
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      InventoryActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(
-      InventoryActions.setGranularity({ granularity: 'day' }),
-    );
   }
 
   exportReport(): void {

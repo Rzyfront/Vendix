@@ -14,12 +14,10 @@ import {
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
-import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
-import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues,
-  DropdownAction} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
+import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import {
@@ -30,15 +28,15 @@ import { EChartsOption } from 'echarts';
 @Component({
   selector: 'vendix-low-stock',
   standalone: true,
-imports: [
+  imports: [
     RouterModule,
     CardComponent,
     ChartComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
     IconComponent,
-    InputsearchComponent,
-    OptionsDropdownComponent
+    DateRangeFilterComponent,
+    ExportButtonComponent
   ],
   template: `
     <div class="w-full">
@@ -100,6 +98,10 @@ imports: [
         </div>
 
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
               (click)="activeView.set('chart')"
@@ -118,9 +120,15 @@ imports: [
               Tabla
             </button>
           </div>
+          <vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
         </div>
       </div>
 
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       @if (activeView() === 'chart') {
       <!-- Chart: Stock Alert Distribution -->
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
@@ -140,59 +148,40 @@ imports: [
       }
 
       @if (activeView() === 'table') {
-      <!-- Card with search + data -->
-      <div class="md:space-y-4">
-        <app-card
-          [responsive]="true"
-          [padding]="false"
-          customClasses="md:min-h-[600px]"
-        >
-          <!-- Search + Filter Bar -->
-          <div class="flex items-center gap-2 md:gap-3 px-4 py-3 border-b border-border">
-            <app-inputsearch
-                class="flex-1 md:w-64"
-                size="sm"
-                placeholder="Buscar producto o SKU..."
-                [debounceTime]="300"
-                (searchChange)="onSearch($event)"
-              ></app-inputsearch>
-              <app-options-dropdown
-                [filters]="filterConfigs"
-                [filterValues]="filterValues"
-                [actions]="dropdownActions"
-                [isLoading]="loading()"
-                (filterChange)="onFilterChange($event)"
-                (clearAllFilters)="clearFilters()"
-                (actionClick)="onActionClick($event)"
-              ></app-options-dropdown>
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
+            Detalle de Stock Bajo
+            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
+              ({{ data().length }} productos)
+            </span>
+          </span>
+        </div>
+        @if (loading()) {
+          <div class="p-4 md:p-6 text-center">
+            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            <p class="mt-2 text-text-secondary">Cargando alertas...</p>
           </div>
-
-          <!-- Loading -->
-          @if (loading()) {
-            <div class="p-4 md:p-6 text-center">
-              <div
-                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
-              <p class="mt-2 text-text-secondary">Cargando alertas...</p>
-            </div>
-          }
-
-          <!-- Data View -->
-          @if (!loading()) {
-            <div class="px-2 pb-2 pt-3 md:p-4">
-              <app-responsive-data-view
-                [data]="filteredData()"
-                [columns]="columns"
-                [cardConfig]="cardConfig"
-                [loading]="loading()"
-                emptyMessage="No hay productos con stock bajo"
-                emptyIcon="check-circle"
-              ></app-responsive-data-view>
-            </div>
-          }
-        </app-card>
-      </div>
+        } @else {
+          <div class="p-4">
+            <app-responsive-data-view
+              [data]="data()"
+              [columns]="columns"
+              [cardConfig]="cardConfig"
+              [loading]="loading()"
+              emptyMessage="No hay productos con stock bajo"
+              emptyIcon="check-circle"
+            ></app-responsive-data-view>
+          </div>
+        }
+      </app-card>
       }
+      </div>
     </div>
   `})
 export class LowStockComponent implements OnInit {
@@ -204,31 +193,12 @@ export class LowStockComponent implements OnInit {
   exporting = signal(false);
   data = signal<StockLevelReport[]>([]);
   summary = signal<InventorySummary | null>(null);
-  searchTerm = signal('');
-  statusFilter = signal<string>('');
   chartOptions = signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
-
-  // Computed: filtered data based on search + status filter
-  filteredData = computed(() => {
-    let items = this.data();
-    const term = this.searchTerm().toLowerCase().trim();
-    const status = this.statusFilter();
-
-    if (term) {
-      items = items.filter(
-        (item) =>
-          item.product_name.toLowerCase().includes(term) ||
-          item.sku.toLowerCase().includes(term),
-      );
-    }
-
-    if (status) {
-      items = items.filter((item) => item.status === status);
-    }
-
-    return items;
-  });
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
   // Computed: total alerts
   totalAlerts = computed(() => {
@@ -236,33 +206,6 @@ export class LowStockComponent implements OnInit {
     if (!s) return this.data().length;
     return s.low_stock_count + s.out_of_stock_count;
   });
-
-  // Filter configs for OptionsDropdown
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'status',
-      label: 'Estado',
-      type: 'select',
-      options: [
-        { value: '', label: 'Todos' },
-        { value: 'out_of_stock', label: 'Agotado' },
-        { value: 'low_stock', label: 'Stock Bajo' },
-      ]},
-  ];
-
-  filterValues: FilterValues = {};
-
-  dropdownActions: DropdownAction[] = [
-    {
-      label: 'Crear Orden de Compra',
-      icon: 'shopping-cart',
-      action: 'create-pop',
-      variant: 'primary'},
-    {
-      label: 'Exportar',
-      icon: 'download',
-      action: 'export'},
-  ];
 
   // Columns with SPANISH badges
   columns: TableColumn[] = [
@@ -434,28 +377,9 @@ export class LowStockComponent implements OnInit {
     });
   }
 
-  onSearch(term: string): void {
-    this.searchTerm.set(term);
-  }
-
-  onFilterChange(values: FilterValues): void {
-    const status = values['status'] as string;
-    this.statusFilter.set(status || '');
-    this.filterValues = values;
-  }
-
-  clearFilters(): void {
-    this.searchTerm.set('');
-    this.statusFilter.set('');
-    this.filterValues = {};
-  }
-
-  onActionClick(action: string): void {
-    if (action === 'export') {
-      this.exportReport();
-    } else if (action === 'create-pop') {
-      window.location.href = '/admin/inventory/pop';
-    }
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.loadData();
   }
 
   exportReport(): void {

@@ -8,15 +8,12 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   CustomerTrend } from '../../interfaces/customers-analytics.interface';
 
@@ -26,6 +23,7 @@ import * as AcquisitionSelectors from './state/customer-acquisition.selectors';
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 @Component({
   selector: 'vendix-customer-acquisition',
@@ -36,8 +34,9 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     CurrencyPipe,
+    ExportButtonComponent,
+    DateRangeFilterComponent,
     AnalyticsCardComponent,
   ],
   templateUrl: './customer-acquisition.component.html',
@@ -91,34 +90,11 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
 
   trendsChartOptions= signal<EChartsOption>({});
   channelsChartOptions= signal<EChartsOption>({});
-
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'hour', label: 'Por Hora' },
-        { value: 'day', label: 'Por Día' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Año' },
-      ],
-      placeholder: 'Seleccionar',
-      defaultValue: 'day' },
-  ];
-
-  filterValues: FilterValues = {};
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
+  exporting = signal(false);
 
   readonly customersViews: AnalyticsView[] = getViewsByCategory('customers');
 
@@ -126,15 +102,6 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
     this.store.dispatch(AcquisitionActions.loadAcquisitionTrends());
     this.store.dispatch(AcquisitionActions.loadAcquisitionChannels());
-
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
-      });
 
     combineLatest([this.trends$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -153,43 +120,13 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     this.store.dispatch(AcquisitionActions.clearCustomerAcquisitionState());
   }
 
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-
-    const currentRange = this.filterValues;
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        AcquisitionActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        AcquisitionActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.store.dispatch(AcquisitionActions.setDateRange({ dateRange: range }));
   }
 
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      AcquisitionActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(
-      AcquisitionActions.setGranularity({ granularity: 'day' }),
-    );
+  exportReport(): void {
+    this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
   }
 
   private updateTrendsChart(

@@ -4,15 +4,14 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ReviewsSummary, AnalyticsService } from '../../services/analytics.service';
-import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { EChartsOption } from 'echarts';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-review-summary',
@@ -23,8 +22,8 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
     AnalyticsCardComponent,
   ],
   template: `
@@ -100,25 +99,21 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
         </div>
 
         <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
-
-          <app-options-dropdown
-            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            [filters]="filterConfigs"
-            [filterValues]="filterValues"
-            title="Filtros"
-            triggerLabel="Filtros"
-            (filterChange)="onFilterChange($event)"
-            (clearAllFilters)="onClearAllFilters()"
-          ></app-options-dropdown>
         </div>
       </div>
 
-      <!-- Charts Row -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:mt-4">
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
+        <!-- Charts Row -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Rating Distribution Chart -->
         <app-card
           shadow="none"
@@ -163,6 +158,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
           </div>
         </app-card>
       </div>
+      </div>
 
       <!-- Quick Links -->
       <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
@@ -185,23 +181,10 @@ export class ReviewSummaryComponent implements OnInit {
 
   ratingDistributionChartOptions= signal<EChartsOption>({});
   reviewsStatusChartOptions= signal<EChartsOption>({});
-
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate(),
-    },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate(),
-    },
-  ];
-
-  filterValues: FilterValues = {};
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
   readonly reviewsViews: AnalyticsView[] = getViewsByCategory('reviews');
 
@@ -212,7 +195,7 @@ export class ReviewSummaryComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService.getReviewsSummary({}).subscribe({
+    this.analyticsService.getReviewsSummary({ date_range: this.dateRange() }).subscribe({
       next: (response) => {
         if (response?.data) {
           this.summary.set(response.data);
@@ -226,19 +209,9 @@ export class ReviewSummaryComponent implements OnInit {
     });
   }
 
-  onFilterChange(values: FilterValues): void {
-    this.filterValues = values;
-    this.loadData();
-  }
-
-  onClearAllFilters(): void {
-    this.filterValues = {};
-    this.loadData();
-  }
-
   exportReport(): void {
     this.exporting.set(true);
-    this.analyticsService.exportReviewsAnalytics({}).subscribe({
+    this.analyticsService.exportReviewsAnalytics({ date_range: this.dateRange() }).subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -252,6 +225,11 @@ export class ReviewSummaryComponent implements OnInit {
         this.exporting.set(false);
       },
     });
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.loadData();
   }
 
   private updateCharts(): void {
@@ -296,6 +274,9 @@ export class ReviewSummaryComponent implements OnInit {
       },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 100,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: '#e5e7eb' } },

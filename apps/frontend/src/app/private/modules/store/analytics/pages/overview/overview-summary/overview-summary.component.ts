@@ -10,10 +10,6 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -29,6 +25,12 @@ import {
   AnalyticsCategoryChipsComponent
 } from '../../../components/analytics-category-chips/analytics-category-chips.component';
 import {
+  ExportButtonComponent
+} from '../../../components/export-button/export-button.component';
+import {
+  DateRangeFilterComponent
+} from '../../../components/date-range-filter/date-range-filter.component';
+import {
   ANALYTICS_CATEGORIES,
   ANALYTICS_VIEWS,
   AnalyticsCategoryId,
@@ -39,7 +41,7 @@ import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
 
 import { EChartsOption } from 'echarts';
-import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
+import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-overview-summary',
@@ -51,10 +53,11 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
     AnalyticsCategoryChipsComponent,
+    ExportButtonComponent,
+    DateRangeFilterComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -131,38 +134,16 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     return grouped;
   });
 
-  // Chart options
+// Chart options
   gaugeChartOptions= signal<EChartsOption>({});
   comparativeChartOptions= signal<EChartsOption>({});
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
-  // Cached summary for template helper methods
+  // Cached summary for template helpers
   private currentSummary: OverviewSummary | null = null;
-
-  // Filter config (no channel — overview is cross-channel)
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date' },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date' },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'hour', label: 'Por Hora' },
-        { value: 'day', label: 'Por Dia' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Ano' },
-      ],
-      placeholder: 'Seleccionar' },
-  ];
-
-  filterValues = signal<FilterValues>({});
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -170,16 +151,6 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     // Dispatch initial loads
     this.store.dispatch(OverviewActions.loadOverviewSummary());
     this.store.dispatch(OverviewActions.loadOverviewTrends());
-
-    // Sync store state → filterValues
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues.set({
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' });
-      });
 
     // Cache summary for template helpers
     this.summary$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((summary) => {
@@ -202,49 +173,20 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-
-    const currentRange = this.filterValues();
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        OverviewActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        OverviewActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
-  }
-
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      OverviewActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(OverviewActions.setGranularity({ granularity: 'day' }));
-  }
-
   onCategoryChange(categoryId: AnalyticsCategoryId | null): void {
     this.selectedCategory.set(categoryId);
   }
 
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.store.dispatch(OverviewActions.setDateRange({ dateRange: range }));
+  }
+
   onSearchChange(term: string): void {
     this.searchTerm.set(term);
+  }
+
+  exportReport(): void {
   }
 
   getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {

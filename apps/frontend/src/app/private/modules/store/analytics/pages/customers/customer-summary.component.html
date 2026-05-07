@@ -78,24 +78,20 @@
     </div>
 
     <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
       <vendix-export-button
         [loading]="exporting()"
         (export)="exportReport()"
       ></vendix-export-button>
-
-      <app-options-dropdown
-        [filters]="filterConfigs"
-        [filterValues]="filterValues"
-        title="Filtros"
-        triggerLabel="Filtros"
-        (filterChange)="onFilterChange($event)"
-        (clearAllFilters)="onClearAllFilters()"
-      ></app-options-dropdown>
     </div>
   </div>
 
-  <!-- Charts -->
-  <div class="grid grid-cols-1 gap-6 md:mt-4">
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts -->
     <!-- New Customers Trend Chart -->
     <app-card
       shadow="none"

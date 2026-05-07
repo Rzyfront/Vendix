@@ -14,13 +14,16 @@ import {
   ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { InventoryValuation } from '../../interfaces/inventory-analytics.interface';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 import { EChartsOption } from 'echarts';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-inventory-valuation',
@@ -33,6 +36,7 @@ import { EChartsOption } from 'echarts';
     ResponsiveDataViewComponent,
     IconComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
@@ -92,6 +96,10 @@ import { EChartsOption } from 'echarts';
           </div>
         </div>
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
           <!-- Toggle Chart/Table -->
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
@@ -119,7 +127,7 @@ import { EChartsOption } from 'echarts';
               Tabla
             </button>
           </div>
-<vendix-export-button
+          <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
           ></vendix-export-button>
@@ -213,6 +221,10 @@ loading = signal(true);
   chartOptions = signal<EChartsOption>({});
   totalValue = signal(0);
   totalQuantity = signal(0);
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
   columns: TableColumn[] = [
     { key: 'location_name', label: 'Ubicación', sortable: true, priority: 1 },
@@ -270,7 +282,7 @@ loadData(): void {
     this.loading.set(true);
 
     this.analyticsService
-      .getInventoryValuation()
+      .getInventoryValuation({ date_range: this.dateRange() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -353,7 +365,7 @@ loadData(): void {
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
-      .exportInventoryAnalytics({})
+      .exportInventoryAnalytics({ date_range: this.dateRange() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
@@ -369,6 +381,11 @@ loadData(): void {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
         }});
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.loadData();
   }
 
   formatCurrency(value: number): string {

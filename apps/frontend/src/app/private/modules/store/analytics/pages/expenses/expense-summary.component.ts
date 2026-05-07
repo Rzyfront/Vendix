@@ -5,12 +5,15 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { EChartsOption } from 'echarts';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-expense-summary',
   standalone: true,
-  imports: [RouterModule, IconComponent, CardComponent, ChartComponent, StatsComponent, ExportButtonComponent],
+  imports: [RouterModule, IconComponent, CardComponent, ChartComponent, StatsComponent, ExportButtonComponent, DateRangeFilterComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
@@ -65,6 +68,10 @@ import { EChartsOption } from 'echarts';
           </div>
         </div>
         <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -87,6 +94,10 @@ import { EChartsOption } from 'echarts';
 export class ExpenseSummaryComponent {
   chartOptions = signal<EChartsOption>({});
   exporting = signal(false);
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
 
   readonly expensesData = signal([
     { month: 'Ene', value: 0 },
@@ -154,5 +165,9 @@ export class ExpenseSummaryComponent {
   exportReport(): void {
     this.exporting.set(true);
     setTimeout(() => this.exporting.set(false), 1000);
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
   }
 }
