@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { syncRolePermissions } from './shared/sync-role-permissions';
 
 export interface SeedPermissionsResult {
   permissionsCreated: number;
@@ -1411,6 +1412,152 @@ export async function seedPermissionsAndRoles(
       path: '/organization/settings/inventory/mode',
       method: 'PATCH',
     },
+    // Sección `inventory` de organization_settings (Plan Unificado P3.2)
+    // — `costing_method` con precedencia ORG > STORE > default. LIFO rechazado a
+    // nivel DTO. ORG_ADMIN/owner heredan ambos por el filtro `organization:*`.
+    {
+      name: 'organization:settings:inventory:read',
+      description:
+        'Leer la sección inventory de organization_settings (costing_method, mode, alerts)',
+      path: '/organization/settings/inventory',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:inventory:write',
+      description:
+        'Actualizar la sección inventory de organization_settings (sólo costing_method por ahora; LIFO rechazado)',
+      path: '/organization/settings/inventory',
+      method: 'PUT',
+    },
+    // Inventario org-native (Plan P2 — write parity)
+    // Locaciones de inventario a nivel organización (incluye central warehouses).
+    {
+      name: 'organization:inventory:locations:create',
+      description: 'Crear ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:locations:update',
+      description: 'Actualizar ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:locations:delete',
+      description: 'Eliminar ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations/:id',
+      method: 'DELETE',
+    },
+    // Proveedores a nivel organización (CRUD canónico — store mantiene sólo lectura).
+    {
+      name: 'organization:inventory:suppliers:create',
+      description: 'Crear proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:suppliers:update',
+      description: 'Actualizar proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:suppliers:delete',
+      description: 'Soft-delete de proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers/:id',
+      method: 'DELETE',
+    },
+    // Ajustes de inventario a nivel organización (delegan a la lógica de store).
+    {
+      name: 'organization:inventory:adjustments:read',
+      description: 'Leer ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments',
+      method: 'GET',
+    },
+    {
+      name: 'organization:inventory:adjustments:create',
+      description: 'Crear ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:adjustments:approve',
+      description: 'Aprobar ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:adjustments:delete',
+      description: 'Cancelar/eliminar ajustes de inventario pendientes',
+      path: '/api/organization/inventory/adjustments/:id',
+      method: 'DELETE',
+    },
+    // Ledger de transacciones de inventario consolidado por organización.
+    {
+      name: 'organization:inventory:transactions:read',
+      description:
+        'Leer el ledger de transacciones de inventario a nivel organización',
+      path: '/api/organization/inventory/transactions',
+      method: 'GET',
+    },
+    // Transferencias de inventario org-native — ciclo completo (TWO-STEP §13#1).
+    {
+      name: 'organization:inventory:transfers:create',
+      description:
+        'Crear transferencias de inventario cross-store / cross-warehouse',
+      path: '/api/organization/inventory/transfers',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:transfers:read',
+      description: 'Leer transferencias de inventario a nivel organización',
+      path: '/api/organization/inventory/transfers',
+      method: 'GET',
+    },
+    {
+      name: 'organization:inventory:transfers:approve',
+      description:
+        'Aprobar una transferencia (no mueve stock — sólo marca aprobada)',
+      path: '/api/organization/inventory/transfers/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:dispatch',
+      description:
+        'Despachar una transferencia (decrementa stock de la ubicación origen)',
+      path: '/api/organization/inventory/transfers/:id/dispatch',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:complete',
+      description:
+        'Completar una transferencia (incrementa stock de la ubicación destino)',
+      path: '/api/organization/inventory/transfers/:id/complete',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:cancel',
+      description:
+        'Cancelar una transferencia en cualquier estado previo a completed',
+      path: '/api/organization/inventory/transfers/:id/cancel',
+      method: 'PATCH',
+    },
+    // Operating Scope wizard (Phase 4)
+    {
+      name: 'organization:settings:operating_scope:read',
+      description:
+        'Leer el operating_scope vigente, partner flag y audit log reciente',
+      path: '/organization/settings/operating-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:operating_scope:write',
+      description:
+        'Migrar operating_scope (STORE ↔ ORGANIZATION) vía wizard con audit log',
+      path: '/organization/settings/operating-scope/apply',
+      method: 'POST',
+    },
 
     // Notificaciones (Tienda)
     {
@@ -2703,19 +2850,13 @@ export async function seedPermissionsAndRoles(
   let assignmentsCreated = 0;
 
   // Assign all permissions to super_admin
-  for (const permission of allPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: superAdminRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: superAdminRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const superAdminSync = await syncRolePermissions(
+    client,
+    superAdminRole.id,
+    allPermissions.map((p) => p.id),
+    'super_admin',
+  );
+  assignmentsCreated += superAdminSync.added;
 
   // Assign permissions to owner (full control of their organization)
   const ownerPermissions = allPermissions.filter(
@@ -2725,19 +2866,13 @@ export async function seedPermissionsAndRoles(
       !p.name.includes('users.impersonate'),
   );
 
-  for (const permission of ownerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: ownerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: ownerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const ownerSync = await syncRolePermissions(
+    client,
+    ownerRole.id,
+    ownerPermissions.map((p) => p.id),
+    'owner',
+  );
+  assignmentsCreated += ownerSync.added;
 
   // Assign permissions to admin (operational management)
   const adminPermissions = allPermissions.filter(
@@ -2761,63 +2896,70 @@ export async function seedPermissionsAndRoles(
       !p.name.includes('users.impersonate'),
   );
 
-  for (const permission of adminPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: adminRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: adminRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const adminSync = await syncRolePermissions(
+    client,
+    adminRole.id,
+    adminPermissions.map((p) => p.id),
+    'admin (ORG_ADMIN)',
+  );
+  assignmentsCreated += adminSync.added;
 
   // Assign permissions to manager (full store management)
+  //
+  // STORE_ADMIN owns the per-store inventory write surface, but org-native
+  // inventory writes (locations / suppliers / adjustments / transfers full
+  // lifecycle / transactions ledger) belong exclusively to ORG_ADMIN — see
+  // Plan P2 ROUND 2 §6.3.2. Suppliers in particular are migrating: STORE
+  // keeps READ access and loses create/update/delete on the
+  // `store:inventory:suppliers:*` surface (the canonical write API now
+  // lives at /api/organization/inventory/suppliers).
   const managerPermissions = allPermissions.filter(
     (p) =>
-      p.name.startsWith('store:') ||
-      p.name.startsWith('exogenous:') ||
-      p.name.startsWith('payroll:') ||
-      p.name.startsWith('taxes:') ||
-      p.name.startsWith('withholding:') ||
-      p.name.includes('organization:users:read') ||
-      p.name.includes('organization:users:search') ||
-      p.name.includes('organization:stores:read') ||
-      p.name.includes('organization:stores:settings') ||
-      p.name.includes('organization:addresses:read') ||
-      p.name.includes('audit.logs') ||
-      p.name.includes('email.read') ||
-      p.name.includes('email.send') ||
-      p.name.includes('auth.login') ||
-      p.name.includes('auth.logout') ||
-      p.name.includes('auth.profile') ||
-      p.name.includes('health.check') ||
-      (!p.name.includes('super_admin') &&
-        !p.name.includes('organization:roles:') &&
-        !p.name.includes('organization:permissions:') &&
-        !p.name.includes('organization:organizations:') &&
-        !p.name.includes('organization:domains:') &&
-        !p.name.includes('organization:inventory:set-mode') &&
-        !p.name.includes('security.') &&
-        !p.name.includes('rate.limiting.')),
+      // Manager loses store-side supplier writes — those move to ORG_ADMIN.
+      !(
+        p.name === 'store:inventory:suppliers:create' ||
+        p.name === 'store:inventory:suppliers:update' ||
+        p.name === 'store:inventory:suppliers:delete'
+      ) &&
+      (p.name.startsWith('store:') ||
+        p.name.startsWith('exogenous:') ||
+        p.name.startsWith('payroll:') ||
+        p.name.startsWith('taxes:') ||
+        p.name.startsWith('withholding:') ||
+        p.name.includes('organization:users:read') ||
+        p.name.includes('organization:users:search') ||
+        p.name.includes('organization:stores:read') ||
+        p.name.includes('organization:stores:settings') ||
+        p.name.includes('organization:addresses:read') ||
+        p.name.includes('audit.logs') ||
+        p.name.includes('email.read') ||
+        p.name.includes('email.send') ||
+        p.name.includes('auth.login') ||
+        p.name.includes('auth.logout') ||
+        p.name.includes('auth.profile') ||
+        p.name.includes('health.check') ||
+        (!p.name.includes('super_admin') &&
+          !p.name.includes('organization:roles:') &&
+          !p.name.includes('organization:permissions:') &&
+          !p.name.includes('organization:organizations:') &&
+          !p.name.includes('organization:domains:') &&
+          // org-native inventory writes belong to ORG_ADMIN only.
+          !p.name.startsWith('organization:inventory:') &&
+          !p.name.includes('security.') &&
+          !p.name.includes('rate.limiting.'))),
   );
 
-  for (const permission of managerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: managerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: managerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  // Sync STORE_ADMIN (manager) using the canonical helper. This both inserts
+  // the missing assignments and revokes obsolete ones in a single idempotent
+  // pass — for example, supplier writes that moved to ORG_ADMIN, or any new
+  // `organization:inventory:*` rows we never want manager to inherit.
+  const managerSync = await syncRolePermissions(
+    client,
+    managerRole.id,
+    managerPermissions.map((p) => p.id),
+    'STORE_ADMIN (manager)',
+  );
+  assignmentsCreated += managerSync.added;
 
   // Assign basic permissions to supervisor
   const supervisorPermissions = allPermissions.filter(
@@ -2871,19 +3013,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:settings:write'),
   );
 
-  for (const permission of supervisorPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: supervisorRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: supervisorRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const supervisorSync = await syncRolePermissions(
+    client,
+    supervisorRole.id,
+    supervisorPermissions.map((p) => p.id),
+    'supervisor',
+  );
+  assignmentsCreated += supervisorSync.added;
 
   // Assign minimum permissions to employee
   const employeePermissions = allPermissions.filter(
@@ -2915,19 +3051,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reservations:write'),
   );
 
-  for (const permission of employeePermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: employeeRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: employeeRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const employeeSync = await syncRolePermissions(
+    client,
+    employeeRole.id,
+    employeePermissions.map((p) => p.id),
+    'employee',
+  );
+  assignmentsCreated += employeeSync.added;
 
   // Assign permissions to customer
   const customerPermissions = allPermissions.filter(
@@ -2963,19 +3093,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('system.health'),
   );
 
-  for (const permission of customerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: customerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: customerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const customerSync = await syncRolePermissions(
+    client,
+    customerRole.id,
+    customerPermissions.map((p) => p.id),
+    'customer',
+  );
+  assignmentsCreated += customerSync.added;
 
   // Assign permissions to cashier (lectura amplia, escritura limitada)
   const cashierPermissions = allPermissions.filter(
@@ -3070,19 +3194,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('system.health'),
   );
 
-  for (const permission of cashierPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: cashierRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: cashierRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const cashierSync = await syncRolePermissions(
+    client,
+    cashierRole.id,
+    cashierPermissions.map((p) => p.id),
+    'cashier',
+  );
+  assignmentsCreated += cashierSync.added;
 
   return {
     permissionsCreated,

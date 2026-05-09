@@ -11,7 +11,6 @@ import {
   ProductImageDto,
   ProductQueryDto,
   ProductState,
-  CreateProductWithVariantsDto,
   StockByLocationDto,
 } from './dto';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';

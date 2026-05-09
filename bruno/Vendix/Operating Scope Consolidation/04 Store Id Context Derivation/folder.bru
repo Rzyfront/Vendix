@@ -1,0 +1,24 @@
+meta {
+  name: 04 Store Id Context Derivation
+  seq: 5
+}
+
+docs {
+  Phase 3 refactor: CreateOrderDto and CreatePosPaymentDto now derive
+  store_id from RequestContext. The body field is optional and, when
+  present, must match the contextual store_id. Any mismatch raises
+  STORE_CONTEXT_001 (400).
+
+  Required env vars:
+  - storeAdminToken      (set by 00 Setup/02)
+  - storeAdminStoreId    (auto-set by 00 Setup/02)
+  - testCustomerId       (e.g. 1) — must belong to storeAdminStoreId
+  - testProductId        (e.g. 1) — must belong to storeAdminStoreId
+  - testStorePaymentMethodId — store_payment_methods row of storeAdminStoreId
+  - testCashRegisterSessionId (optional, for POS test C/D)
+
+  Notes:
+  - Tests share the same minimal item payload; tax/totals are dummy but
+    coherent (subtotal == total_amount, no taxes/discounts/shipping).
+  - Tests do NOT clean up created orders. Run against a dev DB.
+}

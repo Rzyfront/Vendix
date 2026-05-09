@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { UpdateSettingsDto } from './dto';
+import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   OrganizationSettings,
@@ -140,12 +140,13 @@ export class SettingsService {
     // (organizational -> independent).
     if (currentMode === 'organizational' && newMode === 'independent') {
       // Validación 1: transferencias cross-store abiertas.
-      // `transfer_status_enum` = draft | in_transit | completed | cancelled.
-      // "abiertas" = draft | in_transit (no terminales).
+      // `transfer_status_enum` (M3) = pending | approved | in_transit | received | cancelled,
+      // con legacy `draft` (= alias pre-M3 de pending) y `completed` (= alias pre-M3 de received).
+      // "abiertas" = no-terminales: pending | approved | in_transit | draft.
       // NOTA sobre scoping: OrganizationPrismaService inyecta automáticamente
       // `organization_id` en el WHERE, por lo que no se duplica aquí.
       const openTransfers = await this.prisma.stock_transfers.findMany({
-        where: { status: { in: ['draft', 'in_transit'] } },
+        where: { status: { in: ['pending', 'approved', 'in_transit', 'draft'] } },
         select: {
           id: true,
           transfer_number: true,
@@ -240,5 +241,111 @@ export class SettingsService {
     );
 
     return { mode: newMode, changed: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inventory section helpers (Plan Unificado P3.2 — costing_method)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Devuelve la sección `inventory` mergeada con defaults para la organización
+   * vigente del request. Idempotente — no persiste nada si no existe la fila.
+   *
+   * Comportamiento:
+   * - Si no existe `organization_settings` → retorna defaults sin
+   *   `costing_method` (undefined → resolver cae al store/default).
+   * - Si existe pero `inventory` no está poblado → retorna defaults.
+   * - Si existe `inventory` → mergea sobre defaults para garantizar que los
+   *   campos requeridos (`mode`, `low_stock_alerts_scope`, etc.) siempre estén
+   *   definidos al lector.
+   */
+  async getInventory(): Promise<OrganizationInventorySettings> {
+    const existing = await this.prisma.organization_settings.findFirst();
+    const settings = existing?.settings as OrganizationSettings | null;
+    const defaults = getDefaultOrganizationInventorySettings();
+    return {
+      ...defaults,
+      ...(settings?.inventory ?? {}),
+    };
+  }
+
+  /**
+   * Actualiza únicamente la sub-sección `inventory.costing_method` preservando
+   * el resto (`mode`, `low_stock_alerts_scope`, `fallback_on_stockout`).
+   *
+   * Restricciones de validación adicionales a las del DTO:
+   * - `lifo` → rechazado por DTO (`@IsEnum`).
+   * - `cpp` → rechazado por DTO (no es valor válido a nivel ORG).
+   *
+   * NOTA: el merge se hace in-place sobre `organization_settings.settings`
+   * para no pisar otras secciones (branding, fonts, panel_ui, payroll).
+   */
+  async updateInventory(
+    dto: UpdateOrgInventorySettingsDto,
+  ): Promise<OrganizationInventorySettings> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const existing = await this.prisma.organization_settings.findFirst();
+    const currentSettings =
+      (existing?.settings as OrganizationSettings | null) ?? null;
+    const defaults = getDefaultOrganizationInventorySettings();
+    const currentInventory: OrganizationInventorySettings = {
+      ...defaults,
+      ...(currentSettings?.inventory ?? {}),
+    };
+
+    const nextInventory: OrganizationInventorySettings = {
+      ...currentInventory,
+      ...(dto.costing_method !== undefined
+        ? { costing_method: dto.costing_method }
+        : {}),
+    };
+
+    const nextSettings: OrganizationSettings = {
+      ...((currentSettings as OrganizationSettings | null) ??
+        ({} as OrganizationSettings)),
+      inventory: nextInventory,
+    } as OrganizationSettings;
+
+    if (existing) {
+      await this.prisma.organization_settings.update({
+        where: { id: existing.id },
+        data: { settings: nextSettings as any, updated_at: new Date() },
+      });
+    } else {
+      await this.prisma.organization_settings.create({
+        data: {
+          organization_id: context.organization_id,
+          settings: nextSettings as any,
+        },
+      });
+    }
+
+    if (dto.costing_method !== undefined && context.user_id) {
+      try {
+        await this.auditService.logUpdate(
+          context.user_id,
+          AuditResource.SETTINGS,
+          existing?.id ?? 0,
+          { costing_method: currentInventory.costing_method ?? null },
+          { costing_method: dto.costing_method },
+          {
+            action: 'update_inventory_costing_method',
+            organization_id: context.organization_id,
+            from: currentInventory.costing_method ?? null,
+            to: dto.costing_method,
+          },
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Audit log for inventory costing_method update failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return nextInventory;
   }
 }

@@ -1,0 +1,27 @@
+meta {
+  name: 14 GET settings operating-scope
+  type: http
+  seq: 14
+}
+
+get {
+  url: http://{{url}}/organization/settings/operating-scope
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("payload exposes scope wizard fields", function () {
+    expect(res.body).to.have.property("current");
+    expect(res.body).to.have.property("is_partner");
+    expect(res.body).to.have.property("editable");
+    expect(res.body).to.have.property("audit_log_recent");
+  });
+}

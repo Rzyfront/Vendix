@@ -1,0 +1,21 @@
+meta {
+  name: 07 GET inventory suppliers
+  type: http
+  seq: 7
+}
+
+get {
+  url: http://{{url}}/organization/inventory/suppliers
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

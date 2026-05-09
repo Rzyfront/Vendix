@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { UsersService } from './users.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { AuditService } from '../audit/audit.service';
+import { AuditService } from '../../../common/audit/audit.service';
 import { EmailService } from '../../../email/email.service';
 import {
   ConflictException,

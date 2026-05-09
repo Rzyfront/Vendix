@@ -200,6 +200,11 @@ export class ChangePlanModalComponent {
 
   readonly isOpen = model<boolean>(false);
   readonly currentPlanId = input<number | null>(null);
+  /**
+   * Store the plan change targets. ORG_ADMIN tokens carry no implicit
+   * `store_id`, so the org-level checkout endpoints require it explicitly.
+   */
+  readonly storeId = input.required<number>();
   readonly planChanged = output<void>();
 
   readonly plans = signal<PlanOption[]>([]);
@@ -231,7 +236,7 @@ export class ChangePlanModalComponent {
 
   private loadPlans(): void {
     this.loadingPlans.set(true);
-    this.orgSubsService.getPlans()
+    this.orgSubsService.getPlans(this.storeId())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -266,7 +271,7 @@ export class ChangePlanModalComponent {
     this.loadingPreview.set(true);
     this.error.set(null);
 
-    this.orgSubsService.previewPlanChange(planId)
+    this.orgSubsService.previewPlanChange(this.storeId(), planId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -291,7 +296,7 @@ export class ChangePlanModalComponent {
     this.submitting.set(true);
     this.error.set(null);
 
-    this.orgSubsService.commitPlanChange(planId)
+    this.orgSubsService.commitPlanChange(this.storeId(), planId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

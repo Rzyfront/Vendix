@@ -46,6 +46,20 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    // Backward-compat: if the client sent store_id in body, it must match context.
+    // If absent, derive it from context (authoritative source).
+    if (
+      createOrderDto.store_id !== undefined &&
+      createOrderDto.store_id !== null &&
+      createOrderDto.store_id !== store_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'store_id in body does not match the authenticated context',
+      );
+    }
+    createOrderDto.store_id = store_id;
+
     // Validar horario de atención antes de crear la orden
     if (!createOrderDto.skip_schedule_validation) {
       await this.scheduleValidationService.validateOrThrow(store_id, true);
@@ -204,7 +218,7 @@ export class OrdersService {
       search,
       status,
       customer_id,
-      store_id,
+      // store_id removed: StorePrismaService auto-scopes /store/* queries.
       sort_by,
       sort_order,
       date_from,

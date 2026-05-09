@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { RolesService } from './roles.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { AuditService } from '../audit/audit.service';
+import { AuditService } from '../../../common/audit/audit.service';
 
 // Mock the problematic import
 jest.mock('../../../prisma/services/organization-prisma.service', () => ({

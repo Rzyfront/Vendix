@@ -176,6 +176,13 @@ export class OrderFlowService {
       // Note: POS direct delivery handles its own inventory via PaymentsService.updateInventoryFromOrder()
       // and sets state to 'finished' directly (bypasses updateOrderState), so this block only runs
       // for non-POS flows (e-commerce, admin, delivery confirmation, auto-finish).
+      //
+      // P3.4: ORG-scope ecommerce orders are decremented earlier when the
+      // order moves to `'shipped'` (auto-fulfillment listener moves stock
+      // from central to fulfilling store and consumes the original
+      // reservation). Detect that path by checking whether the order still
+      // has any active reservation rows — if not, skip the legacy decrement
+      // to avoid double-counting.
       try {
         const orderWithItems = await this.prisma.orders.findUnique({
           where: { id: orderId },
@@ -196,42 +203,70 @@ export class OrderFlowService {
           },
         });
 
-        let totalCost = 0;
-        for (const item of orderWithItems?.order_items || []) {
-          if (
-            !item.products?.track_inventory ||
-            item.products?.product_type === 'service'
-          )
-            continue;
-
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
-            );
-
-          const stockUpdate = await this.stockLevelManager.updateStock({
-            product_id: item.product_id,
-            variant_id: item.product_variant_id || undefined,
-            location_id,
-            quantity_change: -item.quantity,
-            movement_type: 'sale',
-            reason: `Order ${previous_order?.order_number || orderId} completed`,
-            user_id: RequestContextService.getUserId(),
-            order_item_id: item.id,
-            create_movement: true,
+        const activeReservations = await this.prisma
+          .withoutScope()
+          .stock_reservations.count({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: orderId,
+              status: 'active',
+            },
           });
-          totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
-        }
 
-        // Release all reservations by reference (fixes mismatched location bug)
-        await this.stockLevelManager.releaseReservationsByReference(
-          'order',
-          orderId,
-          'consumed',
-          undefined,
-          { decrementOnHand: false },
-        );
+        let totalCost = 0;
+
+        if (activeReservations > 0) {
+          // Legacy path: reservations still active means inventory has not
+          // been moved yet. Decrement here as before.
+          for (const item of orderWithItems?.order_items || []) {
+            if (
+              !item.products?.track_inventory ||
+              item.products?.product_type === 'service'
+            )
+              continue;
+
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+
+            const stockUpdate = await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id || undefined,
+              location_id,
+              quantity_change: -item.quantity,
+              movement_type: 'sale',
+              reason: `Order ${previous_order?.order_number || orderId} completed`,
+              user_id: RequestContextService.getUserId(),
+              order_item_id: item.id,
+              create_movement: true,
+            });
+            totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
+          }
+
+          // Release all reservations by reference (fixes mismatched location bug)
+          await this.stockLevelManager.releaseReservationsByReference(
+            'order',
+            orderId,
+            'consumed',
+            undefined,
+            { decrementOnHand: false },
+          );
+        } else {
+          // P3.4: ORG-scope auto-fulfillment already moved stock and marked
+          // reservations as 'consumed' during 'shipped'. No-op here so we
+          // do not double-decrement. We still need an accounting cost for
+          // the `order.completed` event — derive it from order item cost.
+          for (const item of orderWithItems?.order_items || []) {
+            if (
+              !item.products?.track_inventory ||
+              item.products?.product_type === 'service'
+            )
+              continue;
+            totalCost += Number(item.cost_price || 0) * item.quantity;
+          }
+        }
 
         if (totalCost > 0) {
           this.eventEmitter.emit('order.completed', {
@@ -659,6 +694,27 @@ export class OrderFlowService {
       carrier: dto.carrier,
       shipping_notes: dto.notes,
     });
+
+    // P3.4: dedicated `order.shipped` event picked up by the
+    // OrderAutoFulfillmentListener. For ORG-scope orders it auto-creates
+    // and dispatches a transfer (central → fulfilling store) and consumes
+    // the original reservation. For STORE-scope orders the listener no-ops.
+    const orderForEvent = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: {
+        id: true,
+        store_id: true,
+        stores: { select: { organization_id: true } },
+      },
+    });
+    if (orderForEvent?.stores?.organization_id) {
+      this.eventEmitter.emit('order.shipped', {
+        order_id: orderId,
+        store_id: orderForEvent.store_id,
+        organization_id: orderForEvent.stores.organization_id,
+        user_id: RequestContextService.getUserId() ?? null,
+      });
+    }
 
     this.logger.log(`Order #${orderId} shipped`);
     return updatedOrder;

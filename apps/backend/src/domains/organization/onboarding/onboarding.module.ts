@@ -10,9 +10,10 @@ import { BrandingGeneratorHelper } from '../../../common/helpers/branding-genera
 import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.helper';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { OrgInventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, EmailModule],
+  imports: [PrismaModule, ResponseModule, EmailModule, OrgInventoryModule],
   controllers: [OnboardingController, OnboardingWizardController],
   providers: [
     OnboardingService,

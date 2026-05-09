@@ -43,6 +43,7 @@ export class RequestContextInterceptor implements NestInterceptor {
       contextObj.user_id = user.id || user.user_id;
       contextObj.organization_id = user.organization_id;
       contextObj.store_id = user.store_id;
+      contextObj.app_type = user.app_type; // ✅ Del JWT — DomainScopeGuard
       contextObj.roles = effectiveRoles;
       contextObj.permissions = user.permissions || [];
       contextObj.is_super_admin =

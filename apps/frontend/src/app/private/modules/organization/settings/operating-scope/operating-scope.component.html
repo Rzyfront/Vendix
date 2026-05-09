@@ -1,0 +1,185 @@
+<div class="w-full space-y-6">
+  <app-sticky-header
+    title="Modo operativo"
+    subtitle="Define si la organización opera por tienda o de forma consolidada"
+    icon="settings"
+    [showBackButton]="true"
+    backRoute="/admin/config/operations"
+  ></app-sticky-header>
+
+  @if (loading()) {
+    <div class="flex justify-center py-12">
+      <app-spinner size="lg" text="Cargando modo operativo..."></app-spinner>
+    </div>
+  } @else {
+    @if (error()) {
+      <app-alert-banner variant="danger" icon="alert-circle">
+        {{ error() }}
+        <button class="ml-3 font-semibold underline" (click)="loadCurrent()">
+          Reintentar
+        </button>
+      </app-alert-banner>
+    }
+
+    @if (state()) {
+      <!-- Current scope card -->
+      <app-card [responsivePadding]="true">
+        <div class="space-y-4">
+          <div
+            class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+          >
+            <div>
+              <p
+                class="text-xs font-bold uppercase tracking-wider text-gray-400"
+              >
+                Modo operativo actual
+              </p>
+              <h2
+                class="mt-1 text-xl font-semibold text-[var(--color-text-primary)]"
+              >
+                {{ currentLabel() }}
+              </h2>
+              <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
+                Aplica a inventario, contabilidad, compras, valoración y
+                reportes de la organización.
+              </p>
+            </div>
+
+            @if (isPartner()) {
+              <app-badge variant="warning" size="md">
+                Partner — bloqueado
+              </app-badge>
+            }
+          </div>
+
+          @if (isPartner()) {
+            <app-alert-banner variant="warning" icon="lock">
+              Esta organización es partner de Vendix. El modo operativo está
+              fijado en <strong>Por tienda</strong> y no puede modificarse desde
+              esta pantalla.
+            </app-alert-banner>
+          }
+
+          <!-- Scope toggle (segmented) -->
+          <div>
+            <p
+              class="mb-3 text-xs font-bold uppercase tracking-wider text-gray-400"
+            >
+              Selecciona el modo operativo
+            </p>
+
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <button
+                type="button"
+                [class]="scopeCardClasses('STORE')"
+                [disabled]="!editable()"
+                (click)="selectScope('STORE')"
+              >
+                <div class="flex items-start gap-4">
+                  <div class="mt-1 rounded-xl bg-blue-50 p-3 text-blue-600">
+                    <app-icon name="store" [size]="22"></app-icon>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-2">
+                      <h3
+                        class="font-semibold text-[var(--color-text-primary)]"
+                      >
+                        Por tienda
+                      </h3>
+                      @if (current() === "STORE") {
+                        <span
+                          class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700"
+                        >
+                          Activo
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+                      Cada tienda maneja sus propios proveedores, ubicaciones,
+                      inventario, compras, contabilidad y reportes operativos.
+                    </p>
+                  </div>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                [class]="scopeCardClasses('ORGANIZATION')"
+                [disabled]="!editable()"
+                (click)="selectScope('ORGANIZATION')"
+              >
+                <div class="flex items-start gap-4">
+                  <div class="mt-1 rounded-xl bg-purple-50 p-3 text-purple-600">
+                    <app-icon name="building" [size]="22"></app-icon>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <h3
+                        class="font-semibold text-[var(--color-text-primary)]"
+                      >
+                        Organización (consolidado)
+                      </h3>
+                      @if (current() === "ORGANIZATION") {
+                        <span
+                          class="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700"
+                        >
+                          Activo
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+                      La organización consolida operación, valoración,
+                      contabilidad y reportes entre tiendas.
+                    </p>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <app-button
+              variant="primary"
+              [disabled]="!editable()"
+              (click)="openWizardForToggle()"
+            >
+              Cambiar modo operativo
+            </app-button>
+          </div>
+        </div>
+      </app-card>
+
+      <!-- Audit log -->
+      <app-card [responsivePadding]="true">
+        <div class="space-y-3">
+          <div class="flex items-center gap-2">
+            <app-icon name="history" [size]="18" class="text-primary"></app-icon>
+            <h3 class="font-semibold text-[var(--color-text-primary)]">
+              Historial reciente
+            </h3>
+          </div>
+
+          <app-responsive-data-view
+            [data]="auditLog()"
+            [columns]="auditColumns"
+            [cardConfig]="auditCardConfig"
+            [loading]="loading()"
+            [sortable]="true"
+            emptyMessage="Sin cambios registrados"
+            emptyIcon="history"
+          ></app-responsive-data-view>
+        </div>
+      </app-card>
+    }
+  }
+
+  <!-- Wizard modal -->
+  @if (state()) {
+    <app-change-scope-wizard
+      [(isOpen)]="wizardOpen"
+      [currentScope]="current()"
+      [targetScope]="pendingTarget()"
+      (applied)="onApplied($event)"
+    ></app-change-scope-wizard>
+  }
+</div>

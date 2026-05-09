@@ -1,0 +1,23 @@
+meta {
+  name: 11 GET reports financial trial-balance
+  type: http
+  seq: 11
+}
+
+# /organization/reports/financial does not have a root GET; using trial-balance.
+
+get {
+  url: http://{{url}}/organization/reports/financial/trial-balance
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

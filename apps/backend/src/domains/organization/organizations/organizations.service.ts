@@ -19,6 +19,7 @@ import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 
 @Injectable()
 export class OrganizationsService {
@@ -27,6 +28,7 @@ export class OrganizationsService {
     private globalPrisma: GlobalPrismaService,
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
+    private orgLocationsService: OrgLocationsService,
   ) {}
 
   async getProfile() {
@@ -320,6 +322,21 @@ export class OrganizationsService {
         operating_scope: true,
       },
     });
+
+    // Auto-provision the central warehouse when the org becomes
+    // ORGANIZATION-scoped through this lightweight scope-update path.
+    // Idempotent — does not duplicate if one already exists.
+    if (nextScope === OrganizationOperatingScope.ORGANIZATION) {
+      try {
+        await this.orgLocationsService.ensureCentralWarehouse(organization.id);
+      } catch (err: any) {
+        // Non-blocking: scope was updated, the central warehouse can be
+        // provisioned manually if this fails. Logged for ops follow-up.
+        console.warn(
+          `updateOperatingScope: ensureCentralWarehouse failed for org=${organization.id}: ${err?.message ?? err}`,
+        );
+      }
+    }
 
     return {
       organization: updated,
@@ -698,6 +715,21 @@ export class OrganizationsService {
         updated_at: new Date(),
       },
     });
+
+    // Auto-provision the organizational central warehouse on the
+    // single→multi upgrade path. Idempotent: reactivates if previously
+    // deactivated, no-op if already provisioned.
+    try {
+      await this.orgLocationsService.ensureCentralWarehouse(
+        context.organization_id,
+      );
+    } catch (err: any) {
+      // Non-blocking: log and continue so the upgrade succeeds even if
+      // the warehouse provisioning fails (admin can create it manually).
+      console.warn(
+        `upgradeAccountType: ensureCentralWarehouse failed for org=${context.organization_id}: ${err?.message ?? err}`,
+      );
+    }
 
     // Get current user_settings
     const userSettings = await this.globalPrisma.user_settings.findUnique({

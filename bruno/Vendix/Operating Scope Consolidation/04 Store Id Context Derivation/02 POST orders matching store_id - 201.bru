@@ -1,0 +1,42 @@
+meta {
+  name: 02 POST orders matching store_id - 201
+  type: http
+  seq: 2
+}
+
+# Body sends the same store_id that RequestContext carries → must succeed.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "store_id": {{storeAdminStoreId}},
+    "customer_id": {{testCustomerId}},
+    "subtotal": 100.00,
+    "total_amount": 100.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{testProductId}},
+        "product_name": "Bruno smoke item match",
+        "quantity": 1,
+        "unit_price": 100.00,
+        "total_price": 100.00
+      }
+    ]
+  }
+}
+
+tests {
+  test("201 Created", function () {
+    expect(res.status).to.equal(201);
+  });
+}

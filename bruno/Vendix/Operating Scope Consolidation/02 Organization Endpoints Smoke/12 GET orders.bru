@@ -1,0 +1,21 @@
+meta {
+  name: 12 GET orders
+  type: http
+  seq: 12
+}
+
+get {
+  url: http://{{url}}/organization/orders
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

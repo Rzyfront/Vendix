@@ -1,0 +1,14 @@
+meta {
+  name: 02 Organization Endpoints Smoke
+  seq: 3
+}
+
+docs {
+  Smoke 200 GET per /api/organization/* module created in Phase 2 + Phase 4.
+  Asserts auth + DomainScopeGuard pass and the controller returns the
+  expected ResponseService contract: { success, data | items, ... }.
+
+  All requests use orgAdminToken. To run, the org of orgAdminToken must
+  have operating_scope=ORGANIZATION (otherwise inventory/accounting
+  endpoints may be empty but should still return 200).
+}

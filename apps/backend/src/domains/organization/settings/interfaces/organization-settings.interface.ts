@@ -66,10 +66,29 @@ export type LowStockAlertsScope = 'location' | 'store' | 'org';
  */
 export type FallbackOnStockout = 'reject' | 'ask_user' | 'auto_next_available';
 
+/**
+ * Método de costeo de inventario aplicado al runtime para CPP/COGS.
+ * - `weighted_average`: promedio ponderado, default seguro.
+ * - `fifo`: first-in/first-out (requiere `inventory_cost_layers` poblado;
+ *   la valuación cae a WA con `partial_data: true` cuando no hay layers —
+ *   ver decisión §13#6 del Plan Unificado).
+ *
+ * NOTA: `lifo` está prohibido por el plan (§6.4.2). Se rechaza a nivel DTO.
+ * Cualquier valor `cpp` legacy persistido a nivel store se mapea a
+ * `weighted_average` en el resolver (`CostingMethodResolverService`).
+ */
+export type OrgCostingMethod = 'weighted_average' | 'fifo';
+
 export interface OrganizationInventorySettings {
   mode: InventoryMode;
   low_stock_alerts_scope: LowStockAlertsScope;
   fallback_on_stockout: FallbackOnStockout;
+  /**
+   * Método de costeo a nivel organización. Cuando es `undefined`, el resolver
+   * cae al setting de la store y, en última instancia, a `weighted_average`.
+   * El owner debe optar explícitamente por `fifo` desde el wizard.
+   */
+  costing_method?: OrgCostingMethod;
 }
 
 // ============================================================================

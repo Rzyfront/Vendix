@@ -57,9 +57,7 @@ export class MovementsService {
       where.OR = [
         { reason: { contains: query.search } },
         { notes: { contains: query.search } },
-        { reference_number: { contains: query.search } },
-        { batch_number: { contains: query.search } },
-        { serial_number: { contains: query.search } },
+        { products: { name: { contains: query.search } } },
       ];
     }
 

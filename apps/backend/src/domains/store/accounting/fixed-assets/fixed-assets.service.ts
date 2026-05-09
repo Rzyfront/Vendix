@@ -34,7 +34,6 @@ export class FixedAssetsService {
       search,
       status,
       category_id,
-      store_id,
       page = 1,
       limit = 20,
     } = query;
@@ -50,7 +49,7 @@ export class FixedAssetsService {
       }),
       ...(status && { status: status as any }),
       ...(category_id && { category_id }),
-      ...(store_id && { store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
     };
 
     const [data, total] = await Promise.all([

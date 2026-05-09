@@ -55,6 +55,10 @@ export class QueryJournalEntryDto {
   @IsDateString()
   date_to?: string;
 
+  // store_id is deprecated for /store/* endpoints (StorePrismaService auto-scopes
+  // by the request context). However, /organization/accounting/journal-entries
+  // reuses this DTO and accepts store_id as a per-store breakdown filter
+  // (validated against the org via OrgAccountingScopeService). Keep optional.
   @IsOptional()
   @Type(() => Number)
   @IsNumber()

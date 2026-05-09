@@ -249,6 +249,9 @@ import {
   // Subscription module icons
   AlertOctagon,
   PauseCircle,
+  // Inventory redesign icons
+  Boxes,
+  ArrowUpDown,
 } from 'lucide-angular';
 
 /**
@@ -574,6 +577,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   'alert-octagon': AlertOctagon,
   'pause-circle': PauseCircle,
+
+  // Inventory redesign icons
+  boxes: Boxes,
+  'arrow-up-down': ArrowUpDown,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

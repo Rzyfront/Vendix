@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, computed, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { take } from 'rxjs/operators';
@@ -8,6 +8,7 @@ import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
 import { extractApiErrorMessage } from '../../utils/api-error-handler';
 import { SessionService } from '../../services/session.service';
+import type { OrganizationOperatingScope } from '../../models/organization.model';
 
 @Injectable({
   providedIn: 'root',
@@ -157,6 +158,15 @@ export class AuthFacade {
   readonly userOrganization = toSignal(this.userOrganization$, { initialValue: null as any });
   readonly userOrganizationName = toSignal(this.userOrganizationName$, { initialValue: null as string | null });
   readonly userOrganizationSlug = toSignal(this.userOrganizationSlug$, { initialValue: null as string | null });
+
+  /**
+   * Operating scope of the current user's organization.
+   * Defaults to 'STORE' when the org payload is missing or has no scope set.
+   * Drives org-level UI reactivity (menu filtering, scope-aware components).
+   */
+  readonly operatingScope = computed<OrganizationOperatingScope>(
+    () => (this.userOrganization()?.operating_scope as OrganizationOperatingScope | undefined) ?? 'STORE',
+  );
   readonly organizationOnboarding = toSignal(this.organizationOnboarding$, { initialValue: null as any });
   readonly organizationOnboardingNeeded = toSignal(this.needsOrganizationOnboarding$, { initialValue: false });
   readonly userStore = toSignal(this.userStore$, { initialValue: null as any });

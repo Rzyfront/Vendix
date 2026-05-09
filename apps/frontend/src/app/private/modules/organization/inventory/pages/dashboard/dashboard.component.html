@@ -1,0 +1,241 @@
+<div class="w-full">
+  <!-- Stats sticky: 4 KPIs over the org-level inventory module. -->
+  <div
+    class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Stock total"
+      [value]="stats().total_skus"
+      smallText="SKUs con stock seguidos"
+      iconName="boxes"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-500"
+      [loading]="stats_loading()"
+    />
+    <app-stats
+      title="Ubicaciones activas"
+      [value]="stats().active_locations"
+      smallText="Bodegas, sucursales, virtuales"
+      iconName="map-pin"
+      iconBgColor="bg-emerald-100"
+      iconColor="text-emerald-500"
+      [loading]="stats_loading()"
+    />
+    <app-stats
+      title="Transfers in-transit"
+      [value]="stats().transfers_in_transit"
+      smallText="Cross-store en tránsito"
+      iconName="repeat"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-500"
+      [loading]="stats_loading()"
+    />
+    <app-stats
+      title="Ajustes pendientes"
+      [value]="stats().adjustments_pending"
+      smallText="Esperan aprobación"
+      iconName="clipboard-list"
+      [iconBgColor]="
+        stats().adjustments_pending > 0 ? 'bg-red-100' : 'bg-gray-100'
+      "
+      [iconColor]="
+        stats().adjustments_pending > 0 ? 'text-red-500' : 'text-gray-500'
+      "
+      [loading]="stats_loading()"
+    />
+  </div>
+
+  <div class="px-2 md:px-4 mt-3 md:mt-4 space-y-4 md:space-y-6">
+    <!-- Banner contextual when the org operates in STORE mode. -->
+    @if (!is_org_scope()) {
+      <app-alert-banner variant="info" icon="info">
+        <span>
+          Modo STORE activo. Cambia a ORGANIZATION para acceder a operaciones
+          cross-store.
+        </span>
+        <a
+          routerLink="/admin/settings/operating-scope"
+          class="ml-2 underline font-semibold whitespace-nowrap"
+        >
+          Cambiar modo →
+        </a>
+      </app-alert-banner>
+    }
+
+    <!-- Inline error banner (separate from per-stat skeleton). -->
+    @if (stats_error()) {
+      <app-alert-banner variant="warning" icon="triangle-alert">
+        <span>{{ stats_error() }}</span>
+      </app-alert-banner>
+    }
+
+    <!-- 6 shortcut cards: deep-links into each inventory section. -->
+    <section aria-labelledby="inventory-shortcuts-heading">
+      <h2
+        id="inventory-shortcuts-heading"
+        class="text-sm md:text-base font-semibold text-text-secondary mb-2 md:mb-3"
+      >
+        Operaciones de inventario
+      </h2>
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-2 md:gap-4">
+        <vendix-inventory-shortcut-card
+          title="Stock"
+          icon="boxes"
+          [count]="stats().total_skus"
+          description="Niveles por tienda y ubicación"
+          routerLink="/admin/inventory/stock-levels"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          badgeColor="gray"
+        />
+        <vendix-inventory-shortcut-card
+          title="Ubicaciones"
+          icon="map-pin"
+          [count]="stats().active_locations"
+          description="Bodegas, sucursales, virtuales"
+          routerLink="/admin/inventory/locations"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          badgeColor="gray"
+        />
+        <vendix-inventory-shortcut-card
+          title="Proveedores"
+          icon="truck"
+          [count]="stats().active_suppliers"
+          description="Cross-store y por tienda"
+          routerLink="/admin/inventory/suppliers"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          badgeColor="gray"
+        />
+        <vendix-inventory-shortcut-card
+          title="Movimientos"
+          icon="arrow-up-down"
+          [count]="stats().recent_movements"
+          description="Audit log de cambios"
+          routerLink="/admin/inventory/movements"
+          iconBgColor="bg-gray-100"
+          iconColor="text-gray-600"
+          badgeColor="gray"
+        />
+        <vendix-inventory-shortcut-card
+          title="Ajustes"
+          icon="clipboard-list"
+          [count]="stats().adjustments_pending"
+          description="Conteos físicos y mermas"
+          routerLink="/admin/inventory/adjustments"
+          [iconBgColor]="
+            stats().adjustments_pending > 0 ? 'bg-red-100' : 'bg-gray-100'
+          "
+          [iconColor]="
+            stats().adjustments_pending > 0 ? 'text-red-500' : 'text-gray-600'
+          "
+          [badgeColor]="adjustments_badge_color()"
+        />
+        <vendix-inventory-shortcut-card
+          title="Transferencias"
+          icon="repeat"
+          [count]="stats().transfers_in_transit"
+          description="Cross-store stock transfers"
+          routerLink="/admin/inventory/transfers"
+          [iconBgColor]="
+            stats().transfers_in_transit > 0 ? 'bg-amber-100' : 'bg-gray-100'
+          "
+          [iconColor]="
+            stats().transfers_in_transit > 0 ? 'text-amber-500' : 'text-gray-600'
+          "
+          [badgeColor]="transfers_badge_color()"
+        />
+      </div>
+    </section>
+
+    <!-- Tareas pendientes: shown only when at least one queue has work. -->
+    @if (has_pending_tasks()) {
+      <section aria-labelledby="inventory-pending-heading">
+        <h2
+          id="inventory-pending-heading"
+          class="text-sm md:text-base font-semibold text-text-secondary mb-2 md:mb-3"
+        >
+          Tareas pendientes
+        </h2>
+        <app-card [responsive]="true" [padding]="false">
+          <ul class="divide-y divide-[var(--color-border)]">
+            @if (stats().adjustments_pending > 0) {
+              <li>
+                <a
+                  routerLink="/admin/inventory/adjustments"
+                  [queryParams]="{ status: 'pending' }"
+                  class="flex items-center gap-3 px-4 py-3 md:px-6 md:py-4 hover:bg-background focus:outline-none focus-visible:bg-background min-h-[56px]"
+                  aria-label="Ir a ajustes pendientes"
+                >
+                  <div
+                    class="flex-shrink-0 w-9 h-9 rounded-lg bg-red-100 flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="clipboard-list"
+                      [size]="18"
+                      class="text-red-500"
+                    ></app-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p
+                      class="text-sm font-semibold text-text-primary truncate"
+                    >
+                      {{ stats().adjustments_pending }} ajuste(s) pendiente(s)
+                      de aprobación
+                    </p>
+                    <p class="text-xs text-text-secondary mt-0.5 truncate">
+                      Revisa conteos físicos y mermas pendientes
+                    </p>
+                  </div>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="18"
+                    class="text-text-secondary flex-shrink-0"
+                  ></app-icon>
+                </a>
+              </li>
+            }
+
+            @if (stats().transfers_in_transit > 0) {
+              <li>
+                <a
+                  routerLink="/admin/inventory/transfers"
+                  [queryParams]="{ status: 'in_transit' }"
+                  class="flex items-center gap-3 px-4 py-3 md:px-6 md:py-4 hover:bg-background focus:outline-none focus-visible:bg-background min-h-[56px]"
+                  aria-label="Ir a transferencias en tránsito"
+                >
+                  <div
+                    class="flex-shrink-0 w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="repeat"
+                      [size]="18"
+                      class="text-amber-500"
+                    ></app-icon>
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <p
+                      class="text-sm font-semibold text-text-primary truncate"
+                    >
+                      {{ stats().transfers_in_transit }} transferencia(s) en
+                      tránsito
+                    </p>
+                    <p class="text-xs text-text-secondary mt-0.5 truncate">
+                      Recibe en destino para liberar stock reservado
+                    </p>
+                  </div>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="18"
+                    class="text-text-secondary flex-shrink-0"
+                  ></app-icon>
+                </a>
+              </li>
+            }
+          </ul>
+        </app-card>
+      </section>
+    }
+  </div>
+</div>

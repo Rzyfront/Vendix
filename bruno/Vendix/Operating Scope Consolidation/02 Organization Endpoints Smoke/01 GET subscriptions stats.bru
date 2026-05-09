@@ -1,0 +1,28 @@
+meta {
+  name: 01 GET subscriptions stats
+  type: http
+  seq: 1
+}
+
+# Note: /organization/subscriptions has no `current` endpoint; the closest
+# already-existing GET is `stats`. Validates contract: { success: true, data: {...} }.
+
+get {
+  url: http://{{url}}/organization/subscriptions/stats
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("envelope has success+data", function () {
+    expect(res.body).to.have.property("success");
+    expect(res.body).to.have.property("data");
+  });
+}

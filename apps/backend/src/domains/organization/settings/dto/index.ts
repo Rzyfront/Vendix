@@ -11,3 +11,6 @@ export class UpdateSettingsDto {
   @IsObject()
   settings?: Record<string, any>;
 }
+
+export * from './operating-scope.dto';
+export * from './update-org-inventory-settings.dto';

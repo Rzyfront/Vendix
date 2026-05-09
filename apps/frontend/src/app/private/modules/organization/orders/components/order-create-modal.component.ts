@@ -1019,14 +1019,23 @@ export class OrderCreateModalComponent implements OnInit {
         };
       }
 
-      // Make API call based on order type
-      let apiUrl = `${environment.apiUrl}/store/orders`;
+      // Make API call based on order type.
+      // Rule Zero: ORG_ADMIN tokens never call /store/*.
+      // PURCHASE has an org-scoped write endpoint. SALE/RETURN do NOT — only
+      // /organization/orders read-only consolidation exists. Until a write
+      // contract is added (Phase 2 follow-up), creating SALE/RETURN from the
+      // org panel is unsupported and will return 403 via DomainScopeGuard.
+      // TODO(operating-scope Phase 5): backend write endpoints for SALE/RETURN
+      // under /organization/orders/* (sales-orders, return-orders).
+      let apiUrl = `${environment.apiUrl}/organization/orders`;
       if (orderType === 'SALE') {
-        apiUrl = `${environment.apiUrl}/store/orders/sales-orders`;
+        // TODO: replace once /organization/orders/sales-orders POST exists.
+        apiUrl = `${environment.apiUrl}/organization/orders/sales-orders`;
       } else if (orderType === 'PURCHASE') {
-        apiUrl = `${environment.apiUrl}/store/orders/purchase-orders`;
+        apiUrl = `${environment.apiUrl}/organization/purchase-orders`;
       } else if (orderType === 'RETURN') {
-        apiUrl = `${environment.apiUrl}/store/orders/return-orders`;
+        // TODO: replace once /organization/orders/return-orders POST exists.
+        apiUrl = `${environment.apiUrl}/organization/orders/return-orders`;
       }
 
       this.http.post(apiUrl, orderData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({

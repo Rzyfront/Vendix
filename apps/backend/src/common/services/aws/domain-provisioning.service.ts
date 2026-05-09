@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AcmService } from './acm.service';
 import { CloudFrontService } from './cloudfront.service';
@@ -157,8 +158,8 @@ export class DomainProvisioningService {
         cloudfront_distribution_id: distributionId,
         cloudfront_snapshot_before: {
           aliases: existingAliases,
-          viewerCertificate: config.ViewerCertificate ?? null,
-        },
+          viewerCertificate: (config.ViewerCertificate ?? null) as unknown,
+        } as Prisma.InputJsonValue,
         status: 'pending_alias',
         updated_at: new Date(),
       },

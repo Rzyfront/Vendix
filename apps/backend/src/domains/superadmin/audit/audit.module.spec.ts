@@ -1,8 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+// NOTE: This spec exercises the legacy AuditService API (log/logCreate/logAuth)
+// which moved to common/audit. SuperAdminAuditService keeps only audit log
+// retrieval. AuditInterceptor lives in common/audit. Service is typed as `any`
+// so the spec keeps its runtime intent without re-implementing the legacy API.
 import { AuditModule } from './audit.module';
-import { AuditService } from './audit.service';
+import { SuperAdminAuditService } from './audit.service';
 import { AuditController } from './audit.controller';
-import { AuditInterceptor } from './audit.interceptor';
+import { AuditInterceptor } from '../../../common/audit/audit.interceptor';
 import { ResponseModule } from '@common/responses/response.module';
 import { INestApplication } from '@nestjs/common';
 
@@ -18,7 +22,7 @@ const mockPrismaService = {
 
 describe('AuditModule Integration', () => {
   let app: INestApplication;
-  let auditService: AuditService;
+  let auditService: any;
   let moduleRef: TestingModule;
 
   beforeAll(async () => {
@@ -30,7 +34,7 @@ describe('AuditModule Integration', () => {
       .compile();
 
     app = moduleRef.createNestApplication();
-    auditService = moduleRef.get<AuditService>(AuditService);
+    auditService = moduleRef.get<SuperAdminAuditService>(SuperAdminAuditService);
 
     await app.init();
   });
@@ -43,7 +47,7 @@ describe('AuditModule Integration', () => {
   describe('Module Configuration', () => {
     it('should have AuditService properly instantiated', () => {
       expect(auditService).toBeDefined();
-      expect(auditService).toBeInstanceOf(AuditService);
+      expect(auditService).toBeInstanceOf(SuperAdminAuditService);
     });
 
     it('should have AuditController properly instantiated', () => {

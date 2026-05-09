@@ -459,7 +459,22 @@ export class StockLevelManager {
   }
 
   /**
-   * Reserva stock para una orden
+   * Reserva stock para una orden.
+   *
+   * @param skip_reservation Cuando es `true`, el método se vuelve no-op:
+   *   - NO crea fila en `stock_reservations`.
+   *   - NO muta `stock_levels` (qty_reserved / qty_available no cambian).
+   *   - NO sincroniza `products.stock_quantity`.
+   *
+   *   Caso de uso (P3.4 — ecommerce auto-fulfillment): cuando una orden de
+   *   ecommerce ya tiene una reserva activa en la bodega central y se genera
+   *   un transfer automático para despacharla, el `dispatch` del transfer
+   *   debe consumir la reserva existente y decrementar `quantity_on_hand`
+   *   exactamente UNA vez. Si el transfer creara su propia reserva (default)
+   *   se produciría doble decremento sobre `quantity_available`.
+   *
+   *   El caller que pase `true` es responsable de garantizar que existe una
+   *   reserva upstream que cubre la misma cantidad.
    */
   async reserveStock(
     product_id: number,
@@ -472,7 +487,14 @@ export class StockLevelManager {
     validate_availability = true,
     tx?: any,
     expires_at?: Date | null,
+    skip_reservation = false,
   ): Promise<void> {
+    // P3.4: cuando una reserva upstream ya cubre el stock, evitar doble
+    // decremento manteniendo este método como no-op.
+    if (skip_reservation) {
+      return;
+    }
+
     const execute = async (prisma: any) => {
       // Validar contexto
       const context = RequestContextService.getContext();
@@ -618,6 +640,21 @@ export class StockLevelManager {
   /**
    * Libera reservas por referencia (order/transfer/adjustment ID).
    * No requiere location_id — busca directamente en stock_reservations.
+   *
+   * Reglas según `status`:
+   * - `consumed` (default): el stock reservado se considera entregado físicamente.
+   *   - `decrementOnHand` no especificado o `true` (default): decrementa
+   *     `quantity_on_hand` por el total reservado (caso normal: la entrega
+   *     sale de esta ubicación).
+   *   - `decrementOnHand: false`: NO toca `quantity_on_hand`. Solo libera
+   *     el `quantity_reserved` y recalcula `quantity_available`. Caso de uso
+   *     P3.4 (ecommerce auto-fulfillment): cuando un dispatch o transfer
+   *     ya decrementó `quantity_on_hand` upstream a través de `updateStock`,
+   *     consumir la reserva original sin volver a decrementar evita doble
+   *     conteo sobre la bodega central.
+   * - `cancelled`: la reserva se aborta sin entrega física. Restaura
+   *   `quantity_available` y NO toca `quantity_on_hand`. La opción
+   *   `decrementOnHand` se ignora en este branch.
    */
   async releaseReservationsByReference(
     reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',

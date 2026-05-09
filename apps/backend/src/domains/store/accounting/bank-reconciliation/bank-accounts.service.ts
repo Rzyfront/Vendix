@@ -20,7 +20,7 @@ export class BankAccountsService {
   }
 
   async findAll(query: QueryBankAccountDto) {
-    const { search, status, store_id } = query;
+    const { search, status } = query;
 
     const where: Prisma.bank_accountsWhereInput = {
       ...(search && {
@@ -33,7 +33,7 @@ export class BankAccountsService {
         ],
       }),
       ...(status && { status: status as any }),
-      ...(store_id && { store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
     };
 
     const accounts = await this.prisma.bank_accounts.findMany({

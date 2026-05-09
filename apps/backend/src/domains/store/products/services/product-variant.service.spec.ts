@@ -5,7 +5,7 @@ import { NotFoundException } from '@nestjs/common';
 
 describe('ProductVariantService', () => {
   let service: ProductVariantService;
-  let prismaService: PrismaService;
+  let prismaService: StorePrismaService;
 
   const mockPrismaService = {
     product_variants: {
@@ -18,14 +18,14 @@ describe('ProductVariantService', () => {
       providers: [
         ProductVariantService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
     }).compile();
 
     service = module.get<ProductVariantService>(ProductVariantService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<StorePrismaService>(StorePrismaService);
   });
 
   afterEach(() => {

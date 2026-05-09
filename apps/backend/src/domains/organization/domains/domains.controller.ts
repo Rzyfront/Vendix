@@ -368,8 +368,13 @@ export class DomainsController {
     const result = await this.domainsService.startCertificateProvisioning(
       domainId,
     );
+    // domain_settings row from Prisma update() carries Date|null fields and a
+    // nullable organization_id; the API response shape (DomainSettingResponse)
+    // declares stringified timestamps. The runtime payload is compatible — the
+    // response interceptor serializes Date instances. Cast to satisfy the
+    // declared response type without changing behavior.
     return this.responseService.success(
-      result,
+      result as unknown as DomainSettingResponse,
       'Certificate provisioning started successfully',
     );
   }
@@ -386,7 +391,7 @@ export class DomainsController {
     }
     const result = await this.domainsService.refreshCertificateStatus(domainId);
     return this.responseService.success(
-      result,
+      result as unknown as DomainSettingResponse,
       'Certificate status refreshed successfully',
     );
   }
@@ -403,7 +408,7 @@ export class DomainsController {
     }
     const result = await this.domainsService.attachCloudFrontAlias(domainId);
     return this.responseService.success(
-      result,
+      result as unknown as DomainSettingResponse,
       'CloudFront alias attached successfully',
     );
   }
@@ -420,7 +425,7 @@ export class DomainsController {
     }
     const result = await this.domainsService.refreshCloudFrontStatus(domainId);
     return this.responseService.success(
-      result,
+      result as unknown as DomainSettingResponse,
       'CloudFront status refreshed successfully',
     );
   }
@@ -437,7 +442,7 @@ export class DomainsController {
     }
     const result = await this.domainsService.provisionNext(domainId);
     return this.responseService.success(
-      result,
+      result as unknown as DomainSettingResponse,
       'Domain provisioning advanced successfully',
     );
   }

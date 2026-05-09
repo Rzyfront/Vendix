@@ -8,12 +8,19 @@ import {
   ApiResponse,
 } from '../interfaces/org-subscription.interface';
 
+/**
+ * Org-level subscriptions service. After Phase 2 of the operating-scope
+ * consolidation every endpoint lives under `/organization/subscriptions/`
+ * (Rule Zero: ORG_ADMIN tokens never call store routes). The DomainScopeGuard
+ * on the backend rejects cross-domain calls with 403, so any leftover
+ * legacy URL would break ORG_ADMIN flows after deploy.
+ */
 @Injectable({ providedIn: 'root' })
 export class OrgSubscriptionsService {
   private http = inject(HttpClient);
 
   private getApiUrl(endpoint: string): string {
-    return `${environment.apiUrl}/organization/reseller/subscriptions${endpoint ? '/' + endpoint : ''}`;
+    return `${environment.apiUrl}/organization/subscriptions${endpoint ? '/' + endpoint : ''}`;
   }
 
   getOverviewStats(): Observable<ApiResponse<SubscriptionOverviewStats>> {
@@ -29,33 +36,60 @@ export class OrgSubscriptionsService {
   }
 
   getInvoices(params?: Record<string, any>): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/current/invoices`, { params });
+    return this.http.get<ApiResponse<any>>(this.getApiUrl('invoices'), { params });
   }
 
   getInvoice(invoiceId: number): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/current/invoices/${invoiceId}`);
+    return this.http.get<ApiResponse<any>>(this.getApiUrl(`invoices/${invoiceId}`));
   }
 
   /**
-   * S3.1 — PDF download wrapper for org-level UIs (re-uses the
-   * store-scoped endpoint; the request context is resolved by domain).
+   * Streams the invoice PDF. The endpoint validates that the invoice belongs
+   * to a store of the organization in context before rendering.
    */
   downloadInvoicePdf(invoiceId: number): Observable<HttpResponse<Blob>> {
-    return this.http.get(
-      `${environment.apiUrl}/store/subscriptions/current/invoices/${invoiceId}/pdf`,
-      { responseType: 'blob', observe: 'response' },
-    );
+    return this.http.get(this.getApiUrl(`invoices/${invoiceId}/pdf`), {
+      responseType: 'blob',
+      observe: 'response',
+    });
   }
 
-  getPlans(): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/plans`);
+  /**
+   * Plan catalogue applies the org's partner overrides (if any). When
+   * `storeId` is provided, plans are flagged with `is_current` against that
+   * store's subscription.
+   */
+  getPlans(storeId?: number): Observable<ApiResponse<any>> {
+    const params: Record<string, any> = {};
+    if (storeId != null) params['store_id'] = storeId;
+    return this.http.get<ApiResponse<any>>(this.getApiUrl('plans'), { params });
   }
 
-  previewPlanChange(planId: number): Observable<ApiResponse<any>> {
-    return this.http.post<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/checkout/preview`, { planId });
+  previewPlanChange(storeId: number, planId: number): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.getApiUrl('checkout/preview'), {
+      storeId,
+      planId,
+    });
   }
 
-  commitPlanChange(planId: number): Observable<ApiResponse<any>> {
-    return this.http.post<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/checkout/commit`, { planId });
+  commitPlanChange(
+    storeId: number,
+    planId: number,
+    options?: {
+      no_refund_acknowledged?: boolean;
+      no_refund_acknowledged_at?: string;
+      coupon_code?: string;
+      returnUrl?: string;
+    },
+  ): Observable<ApiResponse<any>> {
+    return this.http.post<ApiResponse<any>>(this.getApiUrl('checkout/commit'), {
+      storeId,
+      planId,
+      no_refund_acknowledged: options?.no_refund_acknowledged ?? true,
+      no_refund_acknowledged_at:
+        options?.no_refund_acknowledged_at ?? new Date().toISOString(),
+      coupon_code: options?.coupon_code,
+      returnUrl: options?.returnUrl,
+    });
   }
 }

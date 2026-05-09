@@ -868,6 +868,16 @@ export class UpdateProductVariantDto {
   @IsInt()
   @Min(0)
   preparation_time_minutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export class UpdateProductWithVariantsDto {

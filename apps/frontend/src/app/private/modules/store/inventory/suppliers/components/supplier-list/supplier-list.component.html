@@ -26,21 +26,23 @@
             (ngModelChange)="onSearchChange($event)"
           ></app-inputsearch>
 
-          <app-button
-            variant="outline"
-            size="md"
-            customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-            (clicked)="create.emit()"
-            title="Agregar Proveedor"
-          >
-            <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-          </app-button>
+          @if (canMutate()) {
+            <app-button
+              variant="outline"
+              size="md"
+              customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+              (clicked)="create.emit()"
+              title="Agregar Proveedor"
+            >
+              <app-icon slot="icon" name="plus" [size]="18"></app-icon>
+            </app-button>
+          }
 
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs"
             [filterValues]="filterValues"
-            [actions]="dropdownActions"
+            [actions]="dropdownActions()"
             [isLoading]="isLoading()"
             (filterChange)="onFilterChange($event)"
             (clearAllFilters)="clearFilters()"
@@ -67,7 +69,7 @@
         [title]="getEmptyStateTitle()"
         [description]="getEmptyStateDescription()"
         actionButtonText="Agregar Proveedor"
-        [showActionButton]="!hasFilters"
+        [showActionButton]="!hasFilters && canMutate()"
         [showRefreshButton]="true"
         [showClearFilters]="hasFilters"
         (actionClick)="create.emit()"
@@ -83,13 +85,13 @@
           [data]="suppliers()"
           [columns]="tableColumns"
           [cardConfig]="cardConfig"
-          [actions]="tableActions"
+          [actions]="tableActions()"
           [loading]="isLoading()"
           [sortable]="true"
           emptyMessage="No hay proveedores registrados"
           emptyIcon="users"
           (sort)="sort.emit($event)"
-          (rowClick)="edit.emit($event)"
+          (rowClick)="onRowClick($event)"
         ></app-responsive-data-view>
         <div class="mt-4 flex justify-center">
           <app-pagination

@@ -66,7 +66,7 @@ export class ReturnOrdersService {
       partner_id: query.partner_id,
       type: query.type,
       status: query.status,
-      store_id: query.store_id,
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
     };
 
     // Add date range filter

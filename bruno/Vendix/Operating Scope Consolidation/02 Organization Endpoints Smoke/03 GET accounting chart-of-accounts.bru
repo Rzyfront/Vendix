@@ -1,0 +1,21 @@
+meta {
+  name: 03 GET accounting chart-of-accounts
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/organization/accounting/chart-of-accounts
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

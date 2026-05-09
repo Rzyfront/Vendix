@@ -153,10 +153,16 @@ export class CreatePosPaymentDto {
   customer_phone?: string;
 
   // Datos de la venta
+  /**
+   * Optional. If provided, must match the store_id derived from RequestContext.
+   * If omitted, the value is taken from the authenticated context.
+   * Kept optional for backward compatibility with clients that still send it in the body.
+   */
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  store_id: number;
+  store_id?: number;
 
   /**
    * ID de la sesión de caja abierta bajo la cual se procesa esta venta POS.

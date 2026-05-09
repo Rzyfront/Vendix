@@ -384,7 +384,7 @@ export class AccountMappingsComponent {
       case AppType.STORE_ADMIN:
         return '/store/settings';
       case AppType.ORG_ADMIN:
-        return '/organization/settings';
+        return '/organization/settings'; // domain-isolation-ok: AppType branch routes ORG_ADMIN context to /organization/* explicitly
       default:
         return null;
     }

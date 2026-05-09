@@ -40,10 +40,22 @@ export interface PaymentMethodStats {
   total_revenue: number;
 }
 
+/**
+ * KNOWLEDGE GAP (operating-scope Phase 5):
+ * This service lives under organization/config/* but consumes /store/payment-methods.
+ * No /organization/payment-methods backend endpoint exists yet. The page is
+ * conceptually misplaced — payment methods are per-store, so it should either:
+ *  (a) move under store/settings/payments (already exists there), or
+ *  (b) gain an org-scoped breakdown endpoint with `store_id` filter.
+ * Until backend Phase 2 ships such an endpoint, ORG_ADMIN tokens calling
+ * /store/payment-methods will be rejected by DomainScopeGuard (403).
+ * TODO(operating-scope Phase 5b): introduce /organization/payment-methods/*.
+ */
 @Injectable({ providedIn: 'root' })
 export class PaymentMethodsService {
   private http = inject(HttpClient);
-  private baseUrl = `${environment.apiUrl}/store/payment-methods`;
+  // TODO: migrate to /organization/payment-methods once backend exists.
+  private baseUrl = `${environment.apiUrl}/store/payment-methods`; // domain-isolation-ok: knowledge-gap, no /organization/payment-methods endpoint yet (Phase 5b)
 
   readonly loading = signal(false);
   readonly saving = signal(false);

@@ -248,6 +248,12 @@ export async function seedSubscriptionPlansProduction(
       is_popular: plan.is_popular,
       sort_order: plan.sort_order,
       is_default: false,
+      // Canonical base plans MUST never carry a redemption_code. The CHECK
+      // constraint `subscription_plans_redemption_code_only_promo` requires
+      // redemption_code IS NULL OR plan_type='promotional' OR is_promotional=true.
+      // Force NULL on every write so legacy rows that were once promotional are
+      // normalized back to canonical state on re-seed.
+      redemption_code: null,
     };
 
     if (existing) {

@@ -15,6 +15,7 @@ import { InventorySerialNumbersService } from './serial-numbers/inventory-serial
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CostingService } from './shared/services/costing.service';
+import { CostingMethodResolverService } from './shared/services/costing-method-resolver.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
@@ -35,6 +36,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     StockLevelManager,
     StockValidatorService,
     CostingService,
+    CostingMethodResolverService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,
@@ -50,6 +52,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
     StockLevelManager,
     StockValidatorService,
     CostingService,
+    CostingMethodResolverService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,

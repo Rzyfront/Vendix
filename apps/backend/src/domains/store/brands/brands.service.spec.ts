@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { BrandsService } from './brands.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import {
   NotFoundException,

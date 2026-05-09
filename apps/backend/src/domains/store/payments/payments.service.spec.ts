@@ -6,14 +6,14 @@ import { PaymentGatewayService, PaymentValidatorService } from './services';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { PaymentError, PaymentErrorCodes } from './utils';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { payments_state_enum } from '@prisma/client';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
   let paymentGateway: PaymentGatewayService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   const mockUser = {
     id: 1,
@@ -70,7 +70,7 @@ describe('PaymentsService', () => {
           useValue: mockPaymentGateway,
         },
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -92,7 +92,7 @@ describe('PaymentsService', () => {
 
     service = module.get<PaymentsService>(PaymentsService);
     paymentGateway = module.get<PaymentGatewayService>(PaymentGatewayService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {

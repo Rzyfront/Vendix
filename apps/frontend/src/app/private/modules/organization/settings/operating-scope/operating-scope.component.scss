@@ -1,0 +1,5 @@
+// Operating scope page-specific styles. Most layout uses Tailwind utilities
+// + design tokens. Keep this file slim.
+:host {
+  display: block;
+}

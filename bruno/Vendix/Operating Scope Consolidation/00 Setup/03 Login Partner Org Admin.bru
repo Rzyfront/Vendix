@@ -1,0 +1,38 @@
+meta {
+  name: 03 Login Partner Org Admin
+  type: http
+  seq: 3
+}
+
+# Optional. Required only by tests under `03 Operating Scope Wizard`.
+# If your seed/dev DB has no partner organization (organizations.is_partner=true),
+# create one via DB or seed extension before running this. See README.
+
+post {
+  url: http://{{url}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{partnerAdminEmail}}",
+    "password": "{{partnerAdminPassword}}",
+    "organization_slug": "{{partnerAdminOrgSlug}}"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body && res.body.data && res.body.data.access_token) {
+    bru.setEnvVar("partnerOrgAdminToken", res.body.data.access_token);
+    if (res.body.data.user && res.body.data.user.organization_id) {
+      bru.setEnvVar("partnerOrganizationId", String(res.body.data.user.organization_id));
+    }
+  }
+}
+
+tests {
+  test("login 200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

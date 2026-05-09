@@ -15,6 +15,11 @@ import { PaymentPoliciesModule } from './payment-policies/payment-policies.modul
 import { AuditModule } from './audit/audit.module';
 import { ResellerModule } from './reseller/reseller.module';
 import { OrganizationOrdersModule } from './orders/organization-orders.module';
+import { OrgSubscriptionsModule } from './subscriptions/subscriptions.module';
+import { OrgAccountingModule } from './accounting/accounting.module';
+import { OrgInventoryModule } from './inventory/inventory.module';
+import { OrgReportsModule } from './reports/reports.module';
+import { OrgPurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 
 @Module({
   imports: [
@@ -32,6 +37,11 @@ import { OrganizationOrdersModule } from './orders/organization-orders.module';
     AuditModule,
     ResellerModule,
     OrganizationOrdersModule,
+    OrgSubscriptionsModule,
+    OrgAccountingModule,
+    OrgInventoryModule,
+    OrgReportsModule,
+    OrgPurchaseOrdersModule,
   ],
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],

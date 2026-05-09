@@ -55,6 +55,8 @@ model users {
   stock_reservations         stock_reservations[]
   stock_transfers1           stock_transfers[]            @relation("stock_transfers_approved_by")
   stock_transfers            stock_transfers[]            @relation("stock_transfers_created_by")
+  stock_transfers_dispatched stock_transfers[]            @relation("stock_transfers_dispatched_by")
+  stock_transfers_cancelled  stock_transfers[]            @relation("stock_transfers_cancelled_by")
   store_users                store_users[]
   user_roles                 user_roles[]
   user_sessions              user_sessions[]
@@ -151,6 +153,9 @@ model users {
   metadata_snapshots             booking_metadata_snapshots[]  @relation("metadata_snapshot_customer")
   consultation_notes_as_customer customer_consultation_notes[] @relation("consultation_notes_customer")
   consultation_notes_created     customer_consultation_notes[] @relation("consultation_notes_created_by")
+
+  // Operating scope audit trail (Phase 4 wizard)
+  operating_scope_audit_changes operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
 
   @@index([email_verified])
   @@index([state])
@@ -361,6 +366,7 @@ model organizations {
   inventory_adjustments         inventory_adjustments[]
   inventory_locations           inventory_locations[]
   inventory_movements           inventory_movements[]
+  inventory_transactions        inventory_transactions[]
   organization_settings         organization_settings?
   organization_payment_policies organization_payment_policies?
   purchase_orders               purchase_orders[]
@@ -428,11 +434,30 @@ model organizations {
   // Onboarding State
   onboarding_state organization_onboarding_state?
 
+  // Operating scope audit trail (configurability — Phase 4 wizard)
+  operating_scope_audit_log operating_scope_audit_log[]
+
   @@index([onboarding])
   @@index([account_type])
   @@index([operating_scope])
   @@index([mode])
   @@index([is_partner])
+}
+
+model operating_scope_audit_log {
+  id                 Int                               @id @default(autoincrement())
+  organization_id    Int
+  previous_value     organization_operating_scope_enum
+  new_value          organization_operating_scope_enum
+  changed_by_user_id Int
+  changed_at         DateTime                          @default(now()) @db.Timestamp(6)
+  reason             String?                           @db.Text
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users         @relation("operating_scope_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@map("operating_scope_audit_log")
 }
 
 model organization_onboarding_state {
@@ -776,6 +801,7 @@ model currencies {
 
 model inventory_transactions {
   id                 Int                             @id @default(autoincrement())
+  organization_id    Int
   product_id         Int
   product_variant_id Int?
   user_id            Int?
@@ -786,9 +812,12 @@ model inventory_transactions {
   quantity_change    Int
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   order_items        order_items?                    @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   products           products                        @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   product_variants   product_variants?               @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users              users?                          @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, created_at(sort: Desc)])
 }
 
 model order_item_taxes {
@@ -1318,6 +1347,7 @@ model inventory_locations {
   type                          location_type_enum              @default(warehouse)
   is_active                     Boolean                         @default(true)
   is_default                    Boolean                         @default(false)
+  is_central_warehouse          Boolean                         @default(false)
   address_id                    Int?
   created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
@@ -1345,6 +1375,8 @@ model inventory_locations {
   @@unique([store_id, code])
   @@index([organization_id, store_id])
   @@index([organization_id, type])
+  // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
+  // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 }
 
 model stock_levels {
@@ -1770,28 +1802,40 @@ model sales_order_items {
 }
 
 model stock_transfers {
-  id                   Int                    @id @default(autoincrement())
-  transfer_number      String                 @db.VarChar(50)
-  organization_id      Int
-  from_location_id     Int
-  to_location_id       Int
-  status               transfer_status_enum   @default(draft)
-  transfer_date        DateTime?              @default(now()) @db.Timestamp(6)
-  expected_date        DateTime?              @db.Timestamp(6)
-  completed_date       DateTime?              @db.Timestamp(6)
-  notes                String?
-  created_by_user_id   Int?
-  approved_by_user_id  Int?
-  created_at           DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?              @default(now()) @db.Timestamp(6)
-  stock_transfer_items stock_transfer_items[]
-  users                users?                 @relation("stock_transfers_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users1               users?                 @relation("stock_transfers_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  from_location        inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
-  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  to_location          inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
+  id                    Int                    @id @default(autoincrement())
+  transfer_number       String                 @db.VarChar(50)
+  organization_id       Int
+  from_location_id      Int
+  to_location_id        Int
+  status                transfer_status_enum   @default(pending)
+  transfer_date         DateTime?              @default(now()) @db.Timestamp(6)
+  expected_date         DateTime?              @db.Timestamp(6)
+  completed_date        DateTime?              @db.Timestamp(6)
+  notes                 String?
+  created_by_user_id    Int?
+  approved_by_user_id   Int?
+  approved_at           DateTime?              @db.Timestamp(6)
+  dispatched_by_user_id Int?
+  dispatched_at         DateTime?              @db.Timestamp(6)
+  cancelled_by_user_id  Int?
+  cancelled_at          DateTime?              @db.Timestamp(6)
+  cancellation_reason   String?
+  source_order_id       Int?
+  source_order_type     String?                @db.VarChar(50)
+  created_at            DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?              @default(now()) @db.Timestamp(6)
+  stock_transfer_items  stock_transfer_items[]
+  users                 users?                 @relation("stock_transfers_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users1                users?                 @relation("stock_transfers_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatcher            users?                 @relation("stock_transfers_dispatched_by", fields: [dispatched_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  canceller             users?                 @relation("stock_transfers_cancelled_by", fields: [cancelled_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  from_location         inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
+  organizations         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  to_location           inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
 
   @@unique([organization_id, transfer_number])
+  @@index([source_order_type, source_order_id], map: "stock_transfers_source_order_idx")
+  @@index([status], map: "stock_transfers_status_idx")
 }
 
 model stock_transfer_items {
@@ -2610,9 +2654,12 @@ enum sales_order_status_enum {
 }
 
 enum transfer_status_enum {
-  draft
+  draft // legacy, deferred drop per Plan §13#2
+  pending
+  approved
   in_transit
-  completed
+  received
+  completed // legacy, deferred drop per Plan §13#2
   cancelled
 }
 
@@ -3601,6 +3648,7 @@ model accounting_entries {
   posted_at            DateTime?                    @db.Timestamp(6)
   created_at           DateTime?                    @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                    @default(now()) @db.Timestamp(6)
+  is_historical_consolidated Boolean                @default(false)
 
   organization                organizations                 @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                       stores?                       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -3622,6 +3670,7 @@ model accounting_entries {
   @@index([accounting_entity_id, entry_number])
   @@index([accounting_entity_id])
   @@index([source_type, source_id])
+  @@index([organization_id, is_historical_consolidated])
 }
 
 model accounting_entry_lines {

@@ -35,6 +35,7 @@ import { WompiClientFactory } from './processors/wompi/wompi.factory';
 import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WompiEnvironment } from './processors/wompi/wompi.types';
 import { WebhookHandlerService } from './services/webhook-handler.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class PaymentsService {
@@ -589,6 +590,27 @@ export class PaymentsService {
     user: any,
   ): Promise<PosPaymentResponseDto> {
     try {
+      // Resolve store_id from RequestContext (authoritative). Backward-compat:
+      // if the client sent store_id in body, validate it matches the context.
+      const context = RequestContextService.getContext();
+      const ctxStoreId = context?.store_id;
+
+      if (!ctxStoreId) {
+        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      }
+
+      if (
+        createPosPaymentDto.store_id !== undefined &&
+        createPosPaymentDto.store_id !== null &&
+        createPosPaymentDto.store_id !== ctxStoreId
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.STORE_CONTEXT_001,
+          'store_id in body does not match the authenticated context',
+        );
+      }
+      createPosPaymentDto.store_id = ctxStoreId;
+
       await this.validateUserAccess(user, createPosPaymentDto.store_id);
 
       // Resolve store currency once if not provided in DTO
@@ -634,12 +656,19 @@ export class PaymentsService {
           if (!product?.track_inventory) continue;
 
           // Get actual available stock from stock_levels table (source of truth)
-          // Aggregate across ALL locations — a product may have stock spread across
-          // multiple inventory_locations and findFirst would only return one row.
+          // Aggregate across store-local, sellable locations only.
+          // POS canal MUST exclude central warehouse and non-sellable types
+          // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
           const stockAggregate = await tx.stock_levels.aggregate({
             where: {
               product_id: item.product_id,
               product_variant_id: item.product_variant_id ?? null,
+              inventory_locations: {
+                store_id: order.store_id,
+                is_central_warehouse: false,
+                is_active: true,
+                type: { notIn: ['quarantine', 'damaged_goods'] },
+              },
             },
             _sum: {
               quantity_available: true,
@@ -660,8 +689,15 @@ export class PaymentsService {
         }
 
         // Resolve default location inside tx to avoid scoping mismatch with getDefaultLocationForProduct()
+        // POS canal MUST exclude central warehouse and non-sellable types
+        // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
         const defaultLocation = await tx.inventory_locations.findFirst({
-          where: { store_id: order.store_id, is_active: true },
+          where: {
+            store_id: order.store_id,
+            is_active: true,
+            is_central_warehouse: false,
+            type: { notIn: ['quarantine', 'damaged_goods'] },
+          },
           orderBy: { id: 'asc' },
           select: { id: true },
         });
@@ -678,12 +714,20 @@ export class PaymentsService {
             // catch and rollback just the failed operation while keeping the transaction alive.
             await tx.$executeRawUnsafe('SAVEPOINT stock_reserve_sp');
 
-            // Use stock_level with highest available for this product, falling back to store default location
+            // Use stock_level with highest available for this product, falling back to store default location.
+            // POS canal MUST exclude central warehouse and non-sellable types
+            // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
             const stockLevel = await tx.stock_levels.findFirst({
               where: {
                 product_id: item.product_id,
                 product_variant_id: item.product_variant_id || null,
                 quantity_available: { gt: 0 },
+                inventory_locations: {
+                  store_id: order.store_id,
+                  is_central_warehouse: false,
+                  is_active: true,
+                  type: { notIn: ['quarantine', 'damaged_goods'] },
+                },
               },
               orderBy: { quantity_available: 'desc' },
               select: { location_id: true },
@@ -1163,10 +1207,18 @@ export class PaymentsService {
     let retries = 3;
     let orderNumber: string;
 
+    // store_id is guaranteed by processPosPayment (line ~612) which copies it
+    // from RequestContext. Re-assert here so downstream typing is non-null and
+    // we fail fast with a domain error if the invariant ever breaks.
+    if (dto.store_id == null) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const dtoStoreId: number = dto.store_id;
+
     while (retries > 0) {
       try {
         // Generate order number for this store
-        orderNumber = await this.generateOrderNumber(tx, dto.store_id);
+        orderNumber = await this.generateOrderNumber(tx, dtoStoreId);
 
         // Create order items
         const orderItems = await Promise.all(
@@ -1313,6 +1365,13 @@ export class PaymentsService {
     order: any,
     dto: CreatePosPaymentDto,
   ) {
+    // store_id is guaranteed by processPosPayment (resolved from RequestContext).
+    // Re-assert here so PaymentGateway gets a non-null storeId.
+    if (dto.store_id == null) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const dtoStoreId: number = dto.store_id;
+
     // Get payment method details
     if (!dto.store_payment_method_id) {
       throw new Error('Payment method is required when payment is enabled');
@@ -1347,7 +1406,7 @@ export class PaymentsService {
         amount: dto.total_amount,
         currency: dto.currency || 'COP',
         storePaymentMethodId: dto.store_payment_method_id,
-        storeId: dto.store_id,
+        storeId: dtoStoreId,
         // Back-compat: POS does not yet expose an idempotency key on the DTO.
         // Initialize a fresh UUID per attempt; if the operator retries the
         // POS action the system creates a NEW order anyway (different orderId),
@@ -1529,9 +1588,16 @@ export class PaymentsService {
         );
         totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
       } else {
-        // Fallback: reservation failed silently in Phase 1, use default location
+        // Fallback: reservation failed silently in Phase 1, use default location.
+        // POS canal MUST exclude central warehouse and non-sellable types
+        // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
         const defaultLocation = await tx.inventory_locations.findFirst({
-          where: { store_id: order.store_id, is_active: true },
+          where: {
+            store_id: order.store_id,
+            is_active: true,
+            is_central_warehouse: false,
+            type: { notIn: ['quarantine', 'damaged_goods'] },
+          },
           orderBy: { id: 'asc' },
         });
 
@@ -1654,6 +1720,14 @@ export class PaymentsService {
     user: any,
   ) {
     try {
+      // store_id is guaranteed by processPosPayment which copies it from
+      // RequestContext before any downstream call. Re-assert here so the
+      // cash-register movement is never recorded against a null store.
+      if (dto.store_id == null) {
+        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      }
+      const dtoStoreId: number = dto.store_id;
+
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
       this.logger.debug(
@@ -1700,7 +1774,7 @@ export class PaymentsService {
       }
 
       await this.movementsService.recordSaleMovement(session.id, {
-        store_id: dto.store_id,
+        store_id: dtoStoreId,
         user_id: user.id,
         amount,
         payment_method,

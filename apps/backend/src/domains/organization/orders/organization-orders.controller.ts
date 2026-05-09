@@ -15,6 +15,16 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 
+/**
+ * `/api/organization/orders/*` — read-only consolidated orders for ORG_ADMIN.
+ *
+ * IMPORTANTE: la creación/mutación de órdenes vive en `/api/store/orders/*`.
+ * Este controller solo expone lecturas consolidadas org-wide (con breakdown
+ * opcional por `?store_id=X`).
+ *
+ * Permisos: reutiliza la clave `store:orders:read` (paridad con
+ * `/api/store/orders/*`) — en ORG_ADMIN cubre la lectura agregada.
+ */
 @Controller('organization/orders')
 @UseGuards(PermissionsGuard)
 export class OrganizationOrdersController {
@@ -24,7 +34,7 @@ export class OrganizationOrdersController {
   ) {}
 
   @Get()
-  @Permissions('organization:orders:read')
+  @Permissions('store:orders:read')
   async findAll(@Query() query: OrganizationOrderQueryDto) {
     try {
       const result = await this.organizationOrdersService.findAll(query);
@@ -44,8 +54,33 @@ export class OrganizationOrdersController {
     }
   }
 
+  @Get('recent')
+  @Permissions('store:orders:read')
+  async getRecent(
+    @Query('limit') limit?: string,
+    @Query('store_id') storeId?: string,
+  ) {
+    try {
+      const parsedLimit = limit ? +limit : 5;
+      const result = await this.organizationOrdersService.findRecent(
+        parsedLimit,
+        storeId,
+      );
+      return this.responseService.success(
+        result,
+        'Órdenes recientes obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener órdenes recientes',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Get('stats')
-  @Permissions('organization:orders:read')
+  @Permissions('store:orders:read')
   async getStats(
     @Query('store_id') storeId?: string,
     @Query('date_from') dateFrom?: string,
@@ -71,7 +106,7 @@ export class OrganizationOrdersController {
   }
 
   @Get(':id')
-  @Permissions('organization:orders:read')
+  @Permissions('store:orders:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.organizationOrdersService.findOne(id);
@@ -96,7 +131,7 @@ export class OrganizationOrdersController {
   }
 
   @Get(':id/invoice')
-  @Permissions('organization:orders:read')
+  @Permissions('store:orders:read')
   async getInvoice(
     @Param('id', ParseIntPipe) id: number,
     @Res() res: Response,

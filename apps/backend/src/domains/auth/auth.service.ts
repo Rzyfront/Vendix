@@ -556,14 +556,53 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
 
+      // Phase 4 onboarding fix — `operating_scope` derives from the chosen
+      // `account_type` instead of being hardcoded:
+      //   - SINGLE_STORE  → STORE  (each store isolated)
+      //   - MULTI_STORE_ORG → ORGANIZATION (consolidated)
+      // The DTO does not yet expose `account_type` / `operating_scope`
+      // overrides, so we honor optional fields if the caller passes them
+      // (forward-compatible). Final scope is locked later by the onboarding
+      // wizard. Partners (`is_partner=true`) are forced to STORE — but a
+      // partner organization cannot be created from this owner-registration
+      // flow (the `is_partner` flag is set later by super-admin), so the
+      // partner override is a defensive guard not expected to trigger here.
+      const incomingAccountType = (registerOwnerDto as any).account_type;
+      const accountType =
+        incomingAccountType === 'SINGLE_STORE' ||
+        incomingAccountType === 'MULTI_STORE_ORG'
+          ? incomingAccountType
+          : 'MULTI_STORE_ORG';
+
+      const requestedScope = (registerOwnerDto as any).operating_scope as
+        | 'STORE'
+        | 'ORGANIZATION'
+        | undefined;
+      const defaultScope: 'STORE' | 'ORGANIZATION' =
+        accountType === 'SINGLE_STORE' ? 'STORE' : 'ORGANIZATION';
+      let resolvedScope: 'STORE' | 'ORGANIZATION' =
+        requestedScope === 'STORE' || requestedScope === 'ORGANIZATION'
+          ? requestedScope
+          : defaultScope;
+
+      const isPartnerCreation = (registerOwnerDto as any).is_partner === true;
+      if (isPartnerCreation && resolvedScope !== 'STORE') {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[registerOwner] Partner organization requested operating_scope=${resolvedScope}; forcing STORE.`,
+        );
+        resolvedScope = 'STORE';
+      }
+
       const organization = await tx.organizations.create({
         data: {
           name: formatted_organization_name,
           slug: organization_slug,
           email: email,
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
-          account_type: 'MULTI_STORE_ORG', // Por defecto Multi-Store para nuevos owners
-          operating_scope: 'ORGANIZATION' as any,
+          account_type: accountType, // Default Multi-Store; respeta override si llega
+          operating_scope: resolvedScope as any,
+          ...(isPartnerCreation ? { is_partner: true } : {}),
         },
       });
 
@@ -710,10 +749,11 @@ export class AuthService {
       },
     );
 
-    // Generar tokens
+    // Generar tokens — registro de owner es ORG_ADMIN (consistente con user_settings.app_type)
     const tokens = await this.generateTokens(userWithRoles, {
       organization_id: result.organization.id,
       store_id: null,
+      app_type: 'ORG_ADMIN',
     });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ip_address: client_info?.ip_address || '127.0.0.1',
@@ -791,6 +831,7 @@ export class AuthService {
     return {
       user: userWithRolesAndPassword,
       user_settings: userSettingsForResponse,
+      permissions: this.getPermissionsFromRoles(userWithRoles.user_roles ?? []),
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -923,10 +964,11 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
-    // Generar tokens
+    // Generar tokens — registro de customer es STORE_ECOMMERCE
     const tokens = await this.generateTokens(userWithRoles, {
       organization_id: store.organization_id,
       store_id: null,
+      app_type: 'STORE_ECOMMERCE',
     });
     await this.createUserSession(userWithRoles.id, tokens.refresh_token, {
       ip_address: client_info?.ip_address || '127.0.0.1',
@@ -1047,9 +1089,27 @@ export class AuthService {
       config: userSettings.config || {},
     };
 
+    // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
+    // El include de registerCustomer no trae role_permissions, por eso refetcheamos.
+    const userRolesWithPermissions =
+      await this.prismaService.user_roles.findMany({
+        where: { user_id: userWithRoles.id },
+        include: {
+          roles: {
+            include: {
+              role_permissions: {
+                include: { permissions: true },
+              },
+            },
+          },
+        },
+      });
+    const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
+
     return {
       user: userWithRolesAndPassword,
       user_settings: userSettingsForResponse,
+      permissions,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -1301,6 +1361,9 @@ export class AuthService {
     return {
       message: `Usuario ${role} creado exitosamente`,
       user: userWithoutPassword,
+      permissions: this.getPermissionsFromRoles(
+        userWithoutPassword?.user_roles ?? [],
+      ),
     };
   }
 
@@ -1711,9 +1774,12 @@ export class AuthService {
     }
 
     // Generar tokens (con usuario sin permisos para payload optimizado)
+    // app_type sale de user_settings (fuente única de verdad léxica) si existe;
+    // si no, generateTokens hace fallback por scope (store_id ⇒ STORE_ADMIN).
     const tokens = await this.generateTokens(user, {
       organization_id: target_organization_id!,
       store_id: target_store_id,
+      app_type: (userSettings?.app_type as any) || undefined,
     });
 
     // Crear refresh token en la base de datos con información del dispositivo
@@ -1784,11 +1850,29 @@ export class AuthService {
     // Obtener defaults para detectar módulos nuevos en el frontend
     const defaults = await this.defaultPanelUIService.generatePanelUI('');
 
+    // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
+    // findUserAccountsByEmail no incluye role_permissions.permissions, por eso refetcheamos.
+    const userRolesWithPermissions =
+      await this.prismaService.user_roles.findMany({
+        where: { user_id: user.id },
+        include: {
+          roles: {
+            include: {
+              role_permissions: {
+                include: { permissions: true },
+              },
+            },
+          },
+        },
+      });
+    const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
+
     return {
       user: userWithRolesAndPassword, // Usar usuario con roles array simple y store activo
       user_settings: userSettingsForResponse,
       store_settings: active_store_settings,
       default_panel_ui: defaults.panel_ui,
+      permissions,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: tokens.token_type,
@@ -1804,6 +1888,7 @@ export class AuthService {
     },
   ): Promise<{
     user: any;
+    permissions: string[];
     access_token: string;
     refresh_token: string;
     token_type: string;
@@ -1883,10 +1968,12 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
       }
 
-      // Generar nuevos tokens
+      // Generar nuevos tokens — preservar app_type del refresh token original
+      // para no perder el dominio durante el refresh.
       const tokens = await this.generateTokens(user, {
         organization_id: payload.organization_id,
         store_id: payload.store_id,
+        app_type: payload.app_type,
       });
 
       // El password no está incluido en esta consulta por seguridad
@@ -1918,6 +2005,9 @@ export class AuthService {
 
       return {
         user: userWithoutPassword,
+        permissions: this.getPermissionsFromRoles(
+          (userWithoutPassword as any).user_roles ?? [],
+        ),
         ...tokens,
       };
     } catch (error) {
@@ -2594,17 +2684,38 @@ export class AuthService {
 
   private async generateTokens(
     user: any,
-    scope: { organization_id: number; store_id?: number | null },
+    scope: {
+      organization_id: number;
+      store_id?: number | null;
+      app_type?:
+        | 'VENDIX_LANDING'
+        | 'VENDIX_ADMIN'
+        | 'ORG_LANDING'
+        | 'ORG_ADMIN'
+        | 'STORE_LANDING'
+        | 'STORE_ADMIN'
+        | 'STORE_ECOMMERCE';
+    },
   ): Promise<{
     access_token: string;
     refresh_token: string;
     token_type: string;
     expires_in: number;
   }> {
+    // ✅ Resolver app_type para el claim del JWT.
+    // Prioridad: scope.app_type explícito → user.user_settings.app_type → default por scope.
+    // Default: si hay store_id → STORE_ADMIN; si no → ORG_ADMIN.
+    // Esto es CRÍTICO para DomainScopeGuard. Sin este claim, el guard rechaza la request.
+    const resolvedAppType =
+      scope.app_type ||
+      user?.user_settings?.app_type ||
+      (scope.store_id ? 'STORE_ADMIN' : 'ORG_ADMIN');
+
     const payload = {
       sub: user.id,
       organization_id: scope.organization_id,
       store_id: scope.store_id,
+      app_type: resolvedAppType,
     };
 
     const accessTokenExpiry =
@@ -3399,10 +3510,11 @@ export class AuthService {
       throw new UnauthorizedException('No tienes acceso a esta tienda');
     }
 
-    // Generar tokens
+    // Generar tokens — customer login siempre es STORE_ECOMMERCE
     const tokens = await this.generateTokens(user, {
       organization_id: store.organization_id,
       store_id: store.id,
+      app_type: 'STORE_ECOMMERCE',
     });
 
     await this.createUserSession(user.id, tokens.refresh_token, {
@@ -3412,9 +3524,27 @@ export class AuthService {
 
     await this.logLoginAttempt(user.id, true);
 
+    // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
+    // El include de loginCustomer no trae role_permissions, por eso refetcheamos.
+    const userRolesWithPermissions =
+      await this.prismaService.user_roles.findMany({
+        where: { user_id: user.id },
+        include: {
+          roles: {
+            include: {
+              role_permissions: {
+                include: { permissions: true },
+              },
+            },
+          },
+        },
+      });
+    const permissions = this.getPermissionsFromRoles(userRolesWithPermissions);
+
     return {
       user: user,
       user_settings: user.user_settings,
+      permissions,
       access_token: tokens.access_token,
       refresh_token: tokens.refresh_token,
       token_type: 'Bearer',

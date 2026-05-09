@@ -94,6 +94,11 @@ export async function seedSubscriptionPlans(
     is_promotional: false,
     promo_priority: 0,
     is_default: true,
+    // Canonical trial plan MUST never carry a redemption_code. The CHECK
+    // constraint `subscription_plans_redemption_code_only_promo` requires
+    // redemption_code IS NULL OR plan_type='promotional' OR is_promotional=true.
+    // Force NULL on every write so legacy rows are normalized on re-seed.
+    redemption_code: null as string | null,
   };
 
   let plansCreated = 0;
@@ -144,6 +149,9 @@ export async function seedSubscriptionPlans(
           is_promotional: planData.is_promotional,
           promo_priority: planData.promo_priority,
           is_default: planData.is_default,
+          // Force NULL: canonical trial plan can never carry a redemption_code
+          // and any legacy non-null value would violate the CHECK constraint.
+          redemption_code: planData.redemption_code,
           updated_at: new Date(),
         },
       });

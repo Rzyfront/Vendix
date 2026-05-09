@@ -1,7 +1,7 @@
 import { Component, input, inject, signal, OnInit, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
 import {
   IconComponent,
@@ -113,7 +113,8 @@ export class UsageTrackerComponent implements OnInit {
     this.loading.set(true);
     this.error.set(null);
 
-    this.http.get<UsageResponse>(`${environment.apiUrl}/store/subscriptions/usage`)
+    const params = new HttpParams().set('store_id', String(storeId));
+    this.http.get<UsageResponse>(`${environment.apiUrl}/organization/subscriptions/usage`, { params })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {

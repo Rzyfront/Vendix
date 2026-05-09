@@ -20,6 +20,7 @@ import { JobsModule } from './jobs/jobs.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
+import { DomainScopeGuard } from './common/guards/domain-scope.guard';
 import { StoreOperationsGuard } from './domains/store/subscriptions/guards/store-operations.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import { RequestContextInterceptor } from '@common/interceptors/request-context.interceptor';
@@ -94,6 +95,16 @@ import { RateLimitModule } from './common/services/rate-limit/rate-limit.module'
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Domain scope guard — runs AFTER JwtAuthGuard so req.user.app_type is
+    // populated. Garantiza el aislamiento de dominio (REGLA CERO):
+    // - app_type=STORE_ADMIN solo /api/store/*
+    // - app_type=ORG_ADMIN   solo /api/organization/*
+    // - super_admin bypass.
+    // - @Public() y rutas fuera de /store|/organization pasan sin tocar.
+    {
+      provide: APP_GUARD,
+      useClass: DomainScopeGuard,
     },
     // Subscription gate — runs AFTER JwtAuthGuard so req.user.store_id is
     // populated. Blocks writes under /api/store/** when the store has no

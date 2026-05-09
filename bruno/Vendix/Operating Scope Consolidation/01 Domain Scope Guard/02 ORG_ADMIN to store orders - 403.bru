@@ -1,0 +1,25 @@
+meta {
+  name: 02 ORG_ADMIN to store orders - 403
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/store/orders
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("ORG_ADMIN cannot reach /api/store/* → 403", function () {
+    expect(res.status).to.equal(403);
+  });
+  test("error message references domain isolation", function () {
+    const msg = JSON.stringify(res.body || {}).toLowerCase();
+    expect(msg.includes("store") || msg.includes("forbidden")).to.equal(true);
+  });
+}

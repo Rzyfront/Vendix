@@ -1,0 +1,50 @@
+meta {
+  name: 03 POST orders mismatched store_id - 400
+  type: http
+  seq: 3
+}
+
+# Body sends store_id different from RequestContext.store_id → STORE_CONTEXT_001.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "store_id": 999999,
+    "customer_id": {{testCustomerId}},
+    "subtotal": 100.00,
+    "total_amount": 100.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{testProductId}},
+        "product_name": "Bruno mismatch item",
+        "quantity": 1,
+        "unit_price": 100.00,
+        "total_price": 100.00
+      }
+    ]
+  }
+}
+
+tests {
+  test("400 Bad Request", function () {
+    expect(res.status).to.equal(400);
+  });
+  test("error code is STORE_CONTEXT_001", function () {
+    const body = res.body || {};
+    const code =
+      body.code ||
+      (body.error && body.error.code) ||
+      (body.errors && body.errors[0] && body.errors[0].code);
+    expect(String(code || "")).to.equal("STORE_CONTEXT_001");
+  });
+}

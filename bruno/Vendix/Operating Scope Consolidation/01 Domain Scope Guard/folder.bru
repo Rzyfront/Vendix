@@ -1,0 +1,14 @@
+meta {
+  name: 01 Domain Scope Guard
+  seq: 2
+}
+
+docs {
+  REGLA CERO — backend domain isolation.
+
+  STORE_ADMIN tokens hitting /api/organization/* must 403.
+  ORG_ADMIN   tokens hitting /api/store/*       must 403.
+  Same-domain access must 200.
+
+  Source: apps/backend/src/common/guards/domain-scope.guard.ts
+}

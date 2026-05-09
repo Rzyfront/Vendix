@@ -25,6 +25,7 @@ import { order_channel_enum } from '@prisma/client';
 import { deriveDeliveryType } from '../../store/shipping/shipping-derivation.util';
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class CheckoutService {
@@ -47,6 +48,7 @@ export class CheckoutService {
     private readonly webhookHandler: WebhookHandlerService,
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
     private readonly invoicingService: InvoicingService,
+    private readonly operatingScopeService: OperatingScopeService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -665,11 +667,12 @@ export class CheckoutService {
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item)) continue;
       try {
-        const location_id =
-          await this.stockLevelManager.getDefaultLocationForProduct(
-            item.product_id,
-            item.product_variant_id || undefined,
-          );
+        // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
+        // otherwise falls back to the legacy per-product default location.
+        const location_id = await this.resolveReservationLocationId({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+        });
         await this.stockLevelManager.reserveStock(
           item.product_id,
           item.product_variant_id || undefined,
@@ -1116,11 +1119,12 @@ export class CheckoutService {
     for (const item of cart_items) {
       if (!this.shouldReserveStock(item)) continue;
       try {
-        const location_id =
-          await this.stockLevelManager.getDefaultLocationForProduct(
-            item.product_id,
-            item.product_variant_id || undefined,
-          );
+        // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
+        // otherwise falls back to the legacy per-product default location.
+        const location_id = await this.resolveReservationLocationId({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+        });
         await this.stockLevelManager.reserveStock(
           item.product_id,
           item.product_variant_id || undefined,
@@ -1651,6 +1655,51 @@ export class CheckoutService {
     return this.stockValidatorService.resolveEffectiveTracking(
       item.product,
       item.product_variant ?? undefined,
+    );
+  }
+
+  /**
+   * Resolve the inventory location where the ecommerce reservation must be
+   * placed (Plan P3.4 — auto-fulfillment for ORGANIZATION scope).
+   *
+   * - operating_scope = STORE → fall back to the existing per-product
+   *   default location resolver. Behavior unchanged.
+   * - operating_scope = ORGANIZATION → reserve at the org's central
+   *   warehouse so that the eventual dispatch can move stock from central
+   *   to the fulfilling store via an auto-generated transfer (single
+   *   decrement at central, single increment at the store).
+   *
+   * Throws `CENTRAL_WAREHOUSE_NOT_CONFIGURED` (BadRequestException) when an
+   * ORG-scope organization has no active central warehouse — the operator
+   * MUST configure one before ecommerce orders can be reserved.
+   */
+  private async resolveReservationLocationId(
+    item: { product_id: number; product_variant_id: number | null },
+  ): Promise<number> {
+    const organization_id = RequestContextService.getOrganizationId();
+
+    if (organization_id) {
+      const scope =
+        await this.operatingScopeService.getOperatingScope(organization_id);
+
+      if (scope === 'ORGANIZATION') {
+        const central =
+          await this.operatingScopeService.findCentralWarehouse(organization_id);
+        if (!central) {
+          throw new BadRequestException({
+            code: 'CENTRAL_WAREHOUSE_NOT_CONFIGURED',
+            message:
+              'Organization operating in ORGANIZATION scope requires a central warehouse to reserve ecommerce stock',
+          });
+        }
+        return central.id;
+      }
+    }
+
+    // STORE scope (or no org context): keep legacy per-product default.
+    return this.stockLevelManager.getDefaultLocationForProduct(
+      item.product_id,
+      item.product_variant_id ?? undefined,
     );
   }
 }

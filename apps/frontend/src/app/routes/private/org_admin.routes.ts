@@ -90,12 +90,38 @@ export const orgAdminRoutes: Routes = [
             (c) => c.RolesComponent,
           ),
       },
-      // Accounting Routes (adaptive module — visible at org level)
+      // Accounting Routes — ORG_ADMIN consolidated read-only views
+      // (Phase 5 operating_scope consolidation). Consumes
+      // /api/organization/accounting/* endpoints.
       {
         path: 'accounting',
         loadChildren: () =>
-          import('../../private/modules/store/accounting/accounting.routes').then(
-            (m) => m.accountingRoutes,
+          import('../../private/modules/organization/accounting/accounting.routes').then(
+            (m) => m.orgAccountingRoutes,
+          ),
+      },
+      // Inventory Routes — ORG_ADMIN consolidated read-only views
+      {
+        path: 'inventory',
+        loadChildren: () =>
+          import('../../private/modules/organization/inventory/inventory.routes').then(
+            (m) => m.orgInventoryRoutes,
+          ),
+      },
+      // Reports Routes — ORG_ADMIN consolidated reports
+      {
+        path: 'reports',
+        loadChildren: () =>
+          import('../../private/modules/organization/reports/reports.routes').then(
+            (m) => m.orgReportsRoutes,
+          ),
+      },
+      // Purchase Orders — ORG_ADMIN CRUD
+      {
+        path: 'purchase-orders',
+        loadChildren: () =>
+          import('../../private/modules/organization/purchase-orders/purchase-orders.routes').then(
+            (m) => m.orgPurchaseOrdersRoutes,
           ),
       },
       // Payroll Routes (adaptive module — visible at org level)
@@ -113,6 +139,15 @@ export const orgAdminRoutes: Routes = [
           import('../../private/modules/organization/subscriptions/subscriptions.routes').then(
             (m) => m.default,
           ),
+      },
+      // Operating-scope wizard (settings → modo operativo).
+      // Phase 4 — operating_scope consolidation. ORG_ADMIN only.
+      {
+        path: 'settings/operating-scope',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/settings/operating-scope/operating-scope.component'
+          ).then((c) => c.OperatingScopeComponent),
       },
     ],
   },

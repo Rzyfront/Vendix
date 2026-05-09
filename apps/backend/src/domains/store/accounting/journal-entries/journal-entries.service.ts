@@ -66,7 +66,6 @@ export class JournalEntriesService {
       status,
       date_from,
       date_to,
-      store_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -81,7 +80,7 @@ export class JournalEntriesService {
       ...(fiscal_period_id && { fiscal_period_id }),
       ...(entry_type && { entry_type: entry_type as any }),
       ...(status && { status: status as any }),
-      ...(store_id && { store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(date_from && {
         entry_date: {
           gte: new Date(date_from),

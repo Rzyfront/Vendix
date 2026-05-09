@@ -23,6 +23,7 @@ import { BrandingGeneratorHelper } from '../../../common/helpers/branding-genera
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
+import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 
 interface WizardValidation {
   isValid: boolean;
@@ -42,6 +43,7 @@ export class OnboardingWizardService {
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
     private readonly storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
+    private readonly orgLocationsService: OrgLocationsService,
   ) {}
 
   /**
@@ -179,6 +181,21 @@ export class OnboardingWizardService {
           updated_at: new Date(),
         },
       });
+
+      // Auto-provision central warehouse when the org becomes ORGANIZATION-scoped.
+      // Idempotent: safe to call repeatedly; reactivates a previously
+      // deactivated central if one exists.
+      if (operatingScope === 'ORGANIZATION') {
+        try {
+          await this.orgLocationsService.ensureCentralWarehouse(
+            user.organization_id,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `selectAppType: ensureCentralWarehouse failed for org=${user.organization_id}: ${err?.message ?? err}`,
+          );
+        }
+      }
     }
 
     // Update or create user_settings with selected app type
@@ -379,6 +396,19 @@ export class OnboardingWizardService {
           updated_at: new Date(),
         },
       });
+
+      // Auto-provision central warehouse for the ORGANIZATION-scoped org.
+      // Idempotent: a previous wizard step (selectAppType) may already have
+      // created/reactivated it.
+      try {
+        await this.orgLocationsService.ensureCentralWarehouse(
+          user.organization_id,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `setupOrganization: ensureCentralWarehouse failed for org=${user.organization_id}: ${err?.message ?? err}`,
+        );
+      }
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         // Handle unique constraint violations

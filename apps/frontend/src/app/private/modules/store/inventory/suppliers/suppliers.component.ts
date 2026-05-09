@@ -12,6 +12,7 @@ import {
 
 // Services
 import { SuppliersService } from '../services';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 
 // Interfaces
 import { Supplier, CreateSupplierDto, UpdateSupplierDto } from '../interfaces';
@@ -67,6 +68,18 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         ></app-stats>
       </div>
 
+      <!-- Read-only banner when org is in ORGANIZATION scope -->
+      @if (!canMutate()) {
+        <div
+          class="bg-blue-50 rounded-xl border border-blue-200 p-4 shadow-sm mb-4 mx-2 md:mx-0"
+        >
+          <p class="text-sm text-blue-800">
+            Los proveedores se gestionan a nivel organización en este modo.
+            Esta vista es de solo lectura.
+          </p>
+        </div>
+      }
+
       <!-- Supplier List -->
       <app-supplier-list
         [suppliers]="suppliers()"
@@ -75,6 +88,7 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         [currentPage]="filters().page"
         [totalPages]="totalPages()"
         [limit]="filters().limit"
+        [canMutate]="canMutate()"
         (refresh)="loadSuppliers()"
         (search)="onSearch($event)"
         (filter)="onFilterChange($event)"
@@ -85,14 +99,16 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
         (pageChange)="onPageChange($event)"
       ></app-supplier-list>
 
-      <!-- Create/Edit Modal -->
-      <app-supplier-form-modal
-        [isOpen]="is_modal_open()"
-        [supplier]="selected_supplier()"
-        [isSubmitting]="is_submitting()"
-        (cancel)="closeModal()"
-        (save)="onSaveSupplier($event)"
-      ></app-supplier-form-modal>
+      <!-- Create/Edit Modal (only mounted when mutations are allowed) -->
+      @if (canMutate()) {
+        <app-supplier-form-modal
+          [isOpen]="is_modal_open()"
+          [supplier]="selected_supplier()"
+          [isSubmitting]="is_submitting()"
+          (cancel)="closeModal()"
+          (save)="onSaveSupplier($event)"
+        ></app-supplier-form-modal>
+      }
     </div>
   `,
 })
@@ -122,6 +138,16 @@ export class SuppliersComponent implements OnInit {
   });
 
   private destroyRef = inject(DestroyRef);
+  private authFacade = inject(AuthFacade);
+
+  /**
+   * Suppliers are managed at the organization level when the org operates in
+   * ORGANIZATION scope. In that case the store-side UI must be read-only.
+   * STORE_ADMIN can still see suppliers but cannot mutate them via UI.
+   */
+  readonly canMutate = computed(
+    () => this.authFacade.operatingScope() === 'STORE',
+  );
 
   constructor(
     private suppliersService: SuppliersService,
@@ -224,11 +250,13 @@ export class SuppliersComponent implements OnInit {
   }
 
   openCreateModal(): void {
+    if (!this.canMutate()) return;
     this.selected_supplier.set(null);
     this.is_modal_open.set(true);
   }
 
   openEditModal(supplier: Supplier): void {
+    if (!this.canMutate()) return;
     this.selected_supplier.set(supplier);
     this.is_modal_open.set(true);
   }
@@ -278,6 +306,7 @@ export class SuppliersComponent implements OnInit {
   }
 
   confirmDelete(supplier: Supplier): void {
+    if (!this.canMutate()) return;
     this.dialogService
       .confirm({
         title: 'Eliminar Proveedor',

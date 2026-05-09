@@ -19,7 +19,7 @@ export class AccountingReportsService {
     const entry_where: Prisma.accounting_entriesWhereInput = {
       fiscal_period_id: query.fiscal_period_id,
       status: 'posted',
-      ...(query.store_id && { store_id: query.store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
         entry_date: {
           gte: new Date(query.date_from),
@@ -212,7 +212,7 @@ export class AccountingReportsService {
     const entry_where: Prisma.accounting_entriesWhereInput = {
       fiscal_period_id: query.fiscal_period_id,
       status: 'posted',
-      ...(query.store_id && { store_id: query.store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
         entry_date: {
           gte: new Date(query.date_from),

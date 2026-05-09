@@ -14,10 +14,8 @@ export class LocationQueryDto {
   @Type(() => Number)
   organization_id?: number;
 
-  @IsOptional()
-  @IsInt()
-  @Type(() => Number)
-  store_id?: number;
+  // store_id deprecated (phase3-round2): scope is derived from RequestContextService
+  // for /store/* endpoints.
 
   @IsOptional()
   @IsEnum(location_type_enum)

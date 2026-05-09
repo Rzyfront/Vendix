@@ -60,7 +60,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'Test Store',
           slug: 'test-store',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -120,9 +119,9 @@ describe('Contextual Login Flow - Integration Tests', () => {
       // Assign roles
       await prismaService.user_roles.createMany({
         data: [
-          { user_id: ownerUser.id, role_id: ownerRole.id },
-          { user_id: staffUser.id, role_id: staffRole.id },
-          { user_id: customerUser.id, role_id: customerRole.id },
+          { user_id: ownerUser.id, role_id: ownerRole!.id },
+          { user_id: staffUser.id, role_id: staffRole!.id },
+          { user_id: customerUser.id, role_id: customerRole!.id },
         ],
       });
 
@@ -265,7 +264,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'Store 1',
           slug: 'store-1',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -274,7 +272,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'Store 2',
           slug: 'store-2',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -316,8 +313,8 @@ describe('Contextual Login Flow - Integration Tests', () => {
       // Assign roles
       await prismaService.user_roles.createMany({
         data: [
-          { user_id: ownerUser.id, role_id: ownerRole.id },
-          { user_id: staffUser.id, role_id: staffRole.id },
+          { user_id: ownerUser.id, role_id: ownerRole!.id },
+          { user_id: staffUser.id, role_id: staffRole!.id },
         ],
       });
 
@@ -435,7 +432,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'Security Store',
           slug: 'security-store',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -488,9 +484,9 @@ describe('Contextual Login Flow - Integration Tests', () => {
       // Assign roles
       await prismaService.user_roles.createMany({
         data: [
-          { user_id: activeUser.id, role_id: ownerRole.id },
-          { user_id: suspendedUser.id, role_id: ownerRole.id },
-          { user_id: unverifiedUser.id, role_id: ownerRole.id },
+          { user_id: activeUser.id, role_id: ownerRole!.id },
+          { user_id: suspendedUser.id, role_id: ownerRole!.id },
+          { user_id: unverifiedUser.id, role_id: ownerRole!.id },
         ],
       });
 
@@ -557,7 +553,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
 
       // Verify login attempt was recorded
       const loginAttempts = await prismaService.login_attempts.findMany({
-        where: { user_id: activeUser.id },
+        where: { email: activeUser.email },
       });
       expect(loginAttempts.length).toBe(1);
       expect(loginAttempts[0].success).toBe(false);
@@ -584,7 +580,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       const updatedUser = await prismaService.users.findUnique({
         where: { id: activeUser.id },
       });
-      expect(updatedUser.failed_login_attempts).toBe(0);
+      expect(updatedUser!.failed_login_attempts).toBe(0);
     });
   });
 
@@ -608,7 +604,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'App Switch Store',
           slug: 'app-switch-store',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -631,7 +626,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       });
 
       await prismaService.user_roles.create({
-        data: { user_id: ownerUser.id, role_id: ownerRole.id },
+        data: { user_id: ownerUser.id, role_id: ownerRole!.id },
       });
 
       await prismaService.user_settings.create({
@@ -705,7 +700,6 @@ describe('Contextual Login Flow - Integration Tests', () => {
           name: 'Edge Case Store',
           slug: 'edge-case-store',
           organization_id: organization.id,
-          state: 'active',
         },
       });
 
@@ -727,7 +721,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       });
 
       await prismaService.user_roles.create({
-        data: { user_id: user.id, role_id: ownerRole.id },
+        data: { user_id: user.id, role_id: ownerRole!.id },
       });
 
       await prismaService.user_settings.create({
@@ -812,7 +806,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       const updatedUser = await prismaService.users.findUnique({
         where: { id: user.id },
       });
-      expect(updatedUser.failed_login_attempts).toBeGreaterThan(0);
+      expect(updatedUser!.failed_login_attempts).toBeGreaterThan(0);
     });
   });
 });

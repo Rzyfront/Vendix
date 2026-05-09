@@ -1,12 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditController } from './audit.controller';
-import { AuditService, AuditAction, AuditResource } from './audit.service';
+import { SuperAdminAuditService } from './audit.service';
+import {
+  AuditAction,
+  AuditResource,
+} from '../../../common/audit/audit.service';
 import { ResponseService } from '@common/responses/response.service';
 import { UserRole } from '../../auth/enums/user-role.enum';
 
 describe('AuditController', () => {
   let controller: AuditController;
-  let auditService: AuditService;
+  let auditService: SuperAdminAuditService;
   let responseService: ResponseService;
 
   const mockAuditService = {
@@ -23,7 +27,7 @@ describe('AuditController', () => {
       controllers: [AuditController],
       providers: [
         {
-          provide: AuditService,
+          provide: SuperAdminAuditService,
           useValue: mockAuditService,
         },
         {
@@ -34,7 +38,7 @@ describe('AuditController', () => {
     }).compile();
 
     controller = module.get<AuditController>(AuditController);
-    auditService = module.get<AuditService>(AuditService);
+    auditService = module.get<SuperAdminAuditService>(SuperAdminAuditService);
     responseService = module.get<ResponseService>(ResponseService);
   });
 

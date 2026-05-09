@@ -1,0 +1,46 @@
+meta {
+  name: 02 Login Store Admin
+  type: http
+  seq: 2
+}
+
+# Two-step: login as ORG_ADMIN-capable owner, then switch-environment to STORE_ADMIN.
+# Bruno cannot chain two requests in one .bru, so this request relies on
+# env var `orgAdminToken` already set by `01 Login Org Admin.bru`. It then
+# performs the switch and persists `storeAdminToken`.
+
+post {
+  url: http://{{url}}/auth/switch-environment
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+body:json {
+  {
+    "target_environment": "STORE_ADMIN",
+    "store_slug": "{{storeAdminStoreSlug}}"
+  }
+}
+
+script:post-response {
+  if (res.status === 200 && res.body && res.body.data && res.body.data.access_token) {
+    bru.setEnvVar("storeAdminToken", res.body.data.access_token);
+    if (res.body.data.user && res.body.data.user.store_id) {
+      bru.setEnvVar("storeAdminStoreId", String(res.body.data.user.store_id));
+    }
+  }
+}
+
+tests {
+  test("switch 200", function () {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.equal(true);
+  });
+  test("environment is STORE_ADMIN", function () {
+    expect(res.body.data.updatedEnvironment).to.equal("STORE_ADMIN");
+  });
+}
