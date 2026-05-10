@@ -29,7 +29,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 
 /**
  * RNC-24 — Reusable modal that lets a customer in dunning request human
- * support. Pure signals + reactive form, no BehaviorSubject. Calls
+ * support. Pure signals + reactive form. Calls
  * `POST /store/subscriptions/support-request` via the service.
  *
  * Skills: vendix-frontend-modal, vendix-zoneless-signals,

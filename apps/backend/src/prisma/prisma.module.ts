@@ -7,6 +7,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Module({
   providers: [
@@ -18,6 +19,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
     AccessValidationService,
     StoreContextRunner,
     OperatingScopeService,
+    FiscalScopeService,
   ],
   exports: [
     GlobalPrismaService,
@@ -28,6 +30,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
     AccessValidationService,
     StoreContextRunner,
     OperatingScopeService,
+    FiscalScopeService,
   ],
 })
 export class PrismaModule {}

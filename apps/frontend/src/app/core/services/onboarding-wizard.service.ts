@@ -27,12 +27,14 @@ export interface EmailVerificationStatus {
 
 export interface SelectAppTypeData {
   app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  fiscal_scope?: 'STORE' | 'ORGANIZATION';
   notes?: string;
 }
 
 export interface SelectAppTypeResponse {
   success: boolean;
   app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  fiscal_scope?: 'STORE' | 'ORGANIZATION';
   message: string;
 }
 
@@ -189,6 +191,7 @@ export class OnboardingWizardService {
             this._app_type = response.app_type;
             this.updateWizardData('app_type', {
               selected_app_type: response.app_type,
+              selected_fiscal_scope: response.fiscal_scope,
               selected_at: new Date().toISOString(),
             });
           }

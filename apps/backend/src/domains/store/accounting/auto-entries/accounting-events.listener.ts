@@ -763,21 +763,27 @@ export class AccountingEventsListener {
     transfer_number: string;
     organization_id: number;
     store_id?: number;
+    from_store_id?: number;
+    to_store_id?: number;
     from_location_id: number;
     to_location_id: number;
     total_cost: number;
     user_id?: number;
   }) {
     try {
-      if (
-        !(await this.isFlowEnabled(event.store_id, 'stock_transfers'))
-      )
+      if (!(await this.isFlowEnabled(event.store_id, 'stock_transfers'))) {
+        this.logger.debug(
+          `Skipping stock_transfer.completed auto-entry #${event.transfer_id}: stock_transfers accounting flow disabled for store=${event.store_id ?? 'n/a'}`,
+        );
         return;
+      }
       await this.auto_entry_service.onStockTransferCompleted({
         transfer_id: event.transfer_id,
         transfer_number: event.transfer_number,
         organization_id: event.organization_id,
         store_id: event.store_id,
+        from_store_id: event.from_store_id,
+        to_store_id: event.to_store_id,
         from_location_id: event.from_location_id,
         to_location_id: event.to_location_id,
         total_cost: Number(event.total_cost),

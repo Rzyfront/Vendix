@@ -1,4 +1,10 @@
-export { ErrorCodes, ErrorCodeEntry, ErrorCodeKey } from './error-codes';
+export {
+  ErrorCodes,
+  ErrorCodeEntry,
+  ErrorCodeKey,
+  FiscalScopeBlockerCode,
+  FiscalScopeBlockerCodes,
+} from './error-codes';
 export {
   VendixHttpException,
   VendixHttpExceptionDetails,

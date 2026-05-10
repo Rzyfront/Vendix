@@ -51,6 +51,7 @@ export class DefaultPanelUIService {
         settings_operations: true,
         settings_application: true,
         settings_payment_methods: true,
+        settings_fiscal_scope: true,
         accounting: true,
         payroll: true,
       },

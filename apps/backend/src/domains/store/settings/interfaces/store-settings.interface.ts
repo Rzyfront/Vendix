@@ -219,6 +219,12 @@ export interface ModuleFlowsSettings {
 }
 
 export interface StoreSettings {
+  /**
+   * Internal schema version for migrations. See `SettingsMigratorService`.
+   * Stamped on every persist. Optional on read for legacy rows.
+   */
+  _schema_version?: number;
+
   // NUEVAS SECCIONES - Única fuente de verdad
   branding: BrandingSettings;
   fonts: FontsSettings;

@@ -251,16 +251,12 @@ export class StoreAdminLayoutComponent {
 
     if (sub.paid_plan_id == null && sub.plan_id == null) return null;
 
-    const cycleRaw =
-      sub.billing_cycle ?? sub.plan?.billing_cycle ?? sub.paid_plan?.billing_cycle;
-    const cycle = cycleRaw === 'annual' ? 'yearly' : cycleRaw;
-    const totalDays = cycle === 'yearly' ? 365 : cycle === 'monthly' ? 30 : null;
+    const start = sub.current_period_start;
     const end = sub.current_period_end;
-    if (!totalDays || !end) return null;
-
-    const totalMs = totalDays * DAY_MS;
-    const remainingMs = new Date(end).getTime() - Date.now();
-    const elapsedMs = totalMs - remainingMs;
+    if (!start || !end) return null;
+    const totalMs = new Date(end).getTime() - new Date(start).getTime();
+    if (totalMs <= 0) return 0;
+    const elapsedMs = Date.now() - new Date(start).getTime();
     return Math.round(Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100)));
   });
 

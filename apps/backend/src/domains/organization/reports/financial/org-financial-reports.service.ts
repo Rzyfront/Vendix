@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -48,6 +49,7 @@ export class OrgFinancialReportsService {
   private async buildEntryWhere(
     fiscal_period_id: number,
     store_id_filter: number | null | undefined,
+    accounting_entity_id_filter?: number | null,
     date_from?: string,
     date_to?: string,
   ): Promise<{
@@ -71,6 +73,42 @@ export class OrgFinancialReportsService {
       fiscal_period_id,
       status: 'posted',
     };
+
+    if (accounting_entity_id_filter != null) {
+      const accounting_entity =
+        await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: { id: accounting_entity_id_filter, organization_id },
+          select: { id: true, store_id: true },
+        });
+      if (!accounting_entity) {
+        throw new VendixHttpException(
+          ErrorCodes.FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND,
+          'La entidad contable no pertenece a esta organización.',
+          { accounting_entity_id: accounting_entity_id_filter },
+        );
+      }
+
+      if (
+        fiscal_period.accounting_entity_id != null &&
+        fiscal_period.accounting_entity_id !== accounting_entity.id
+      ) {
+        throw new BadRequestException(
+          'El periodo fiscal no pertenece a la entidad contable solicitada.',
+        );
+      }
+
+      if (
+        store_id_filter != null &&
+        accounting_entity.store_id != null &&
+        accounting_entity.store_id !== store_id_filter
+      ) {
+        throw new BadRequestException(
+          'store_id no coincide con la entidad contable solicitada.',
+        );
+      }
+
+      where.accounting_entity_id = accounting_entity.id;
+    }
 
     if (store_id_filter != null) {
       // Validar pertenencia.
@@ -104,6 +142,7 @@ export class OrgFinancialReportsService {
     const { where } = await this.buildEntryWhere(
       query.fiscal_period_id,
       query.store_id ?? null,
+      query.accounting_entity_id ?? null,
       query.date_from,
       query.date_to,
     );
@@ -245,6 +284,7 @@ export class OrgFinancialReportsService {
     const { organization_id, where } = await this.buildEntryWhere(
       query.fiscal_period_id,
       query.store_id ?? null,
+      query.accounting_entity_id ?? null,
       query.date_from,
       query.date_to,
     );

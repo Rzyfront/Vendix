@@ -6,6 +6,7 @@ import {
   effect,
   DestroyRef,
   signal,
+  computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -18,7 +19,6 @@ import {
 } from '@angular/forms';
 import { Subscription, debounceTime, firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
-import { Store } from '@ngrx/store';
 
 import {
   ModalComponent,
@@ -50,7 +50,7 @@ import {
 } from '../../../../../shared/services/wompi.service';
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
-import * as fromAuth from '../../../../../core/store/auth';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
 
 interface PaymentState {
   selectedMethod: PaymentMethod | null;
@@ -1465,17 +1465,36 @@ export class PosPaymentInterfaceComponent {
   pseFinancialInstitutions = signal<PseFinancialInstitution[]>([]);
   pseBankOptions = signal<{ value: string; label: string }[]>([]);
 
-  // Store settings
-  storeSettingsSubscription: any;
-  allowAnonymousSales = signal(false);
-  anonymousSalesAsDefault = signal(false);
-  requireCashDrawerOpen = signal(false);
-  enableScheduleValidation = signal(false);
-  showOnscreenKeypad = signal(true);
+  // Store settings (reactive via StoreSettingsFacade)
+  private settingsFacade = inject(StoreSettingsFacade);
+
+  readonly allowAnonymousSales = computed(
+    () => this.settingsFacade.pos()?.allow_anonymous_sales ?? false,
+  );
+  readonly anonymousSalesAsDefault = computed(
+    () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
+  );
+  readonly requireCashDrawerOpen = computed(
+    () => this.settingsFacade.pos()?.require_cash_drawer_open ?? false,
+  );
+  readonly enableScheduleValidation = computed(
+    () => this.settingsFacade.pos()?.enable_schedule_validation ?? false,
+  );
+  readonly showOnscreenKeypad = computed(
+    () => this.settingsFacade.pos()?.show_onscreen_keypad !== false,
+  );
+  readonly businessHours = computed<Record<string, { open: string; close: string }>>(
+    () => (this.settingsFacade.pos()?.business_hours as any) ?? {},
+  );
+  readonly defaultPaymentForm = computed<'contado' | 'credito'>(
+    () => ((this.settingsFacade.pos() as any)?.default_payment_form as 'contado' | 'credito') ?? 'contado',
+  );
+
+  // User-session preserved selection (overrides anonymousSalesAsDefault when user toggles)
+  readonly userOverrideAnonymous = signal<boolean | null>(null);
+
   paymentFormCollapsed = signal(false);
   paymentMethodCollapsed = signal(false);
-  businessHours = signal<Record<string, { open: string; close: string }>>({});
-  defaultPaymentForm = signal<'contado' | 'credito'>('contado');
 
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
@@ -1579,7 +1598,6 @@ export class PosPaymentInterfaceComponent {
   private customerService = inject(PosCustomerService);
   private toastService = inject(ToastService);
   private router = inject(Router);
-  private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private walletService = inject(PosWalletService);
 
@@ -1596,10 +1614,35 @@ export class PosPaymentInterfaceComponent {
 
     this.loadPaymentMethods();
     this.setupFormListeners();
-    this.loadStoreSettings();
     // Asegurar que la moneda esté cargada para la interfaz de pago
     this.currencyService.loadCurrency();
     this.setDefaultCreditFirstDate();
+
+    // Reactive sync: when settings change in NgRx, propagate to paymentState.
+    // Anonymous flag derives from facade unless user explicitly overrode it.
+    effect(() => {
+      const allow = this.allowAnonymousSales();
+      const asDefault = this.anonymousSalesAsDefault();
+      const override = this.userOverrideAnonymous();
+      const effective = !allow ? false : (override ?? asDefault);
+      this.paymentState.update((s) =>
+        s.isAnonymousSale === effective ? s : { ...s, isAnonymousSale: effective },
+      );
+    });
+
+    // Apply default payment form once when settings load (do not clobber user choice)
+    effect(() => {
+      const settings = this.settingsFacade.pos();
+      if (!settings || this.settingsLoaded) return;
+      const form = (settings as any).default_payment_form as
+        | 'contado'
+        | 'credito'
+        | undefined;
+      if (form) {
+        this.paymentState.update((s) => ({ ...s, paymentForm: form }));
+      }
+      this.settingsLoaded = true;
+    });
 
     effect(() => {
       // When modal opens, sync anonymous sale state with current settings
@@ -1612,15 +1655,14 @@ export class PosPaymentInterfaceComponent {
   private syncAnonymousSaleState(): void {
     if (!this.allowAnonymousSales()) {
       this.paymentState.update((s) => ({ ...s, isAnonymousSale: false }));
-    } else {
-      this.paymentState.update((s) => ({
-        ...s,
-        isAnonymousSale: this.anonymousSalesAsDefault(),
-      }));
+      return;
     }
+    const override = this.userOverrideAnonymous();
+    const next = override ?? this.anonymousSalesAsDefault();
+    this.paymentState.update((s) => ({ ...s, isAnonymousSale: next }));
   }
 
-  // Track if settings have been loaded at least once
+  // Track if default_payment_form has been seeded into paymentState already
   private settingsLoaded = false;
 
   private createPaymentForm(): FormGroup {
@@ -1707,45 +1749,6 @@ export class PosPaymentInterfaceComponent {
     const closeTime = closeHour * 60 + closeMinute;
 
     return currentTime >= openTime && currentTime <= closeTime;
-  }
-
-  private loadStoreSettings(): void {
-    this.storeSettingsSubscription = this.store
-      .select(fromAuth.selectStoreSettings)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((storeSettings: any) => {
-        // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
-        const settings = storeSettings;
-        if (settings?.pos) {
-          const prevAllowAnonymous = this.allowAnonymousSales();
-
-          this.allowAnonymousSales.set(settings.pos.allow_anonymous_sales || false);
-          this.anonymousSalesAsDefault.set(settings.pos.anonymous_sales_as_default || false);
-          this.requireCashDrawerOpen.set(settings.pos.require_cash_drawer_open || false);
-          this.enableScheduleValidation.set(settings.pos.enable_schedule_validation || false);
-          this.businessHours = settings.pos.business_hours || {};
-          if (settings.pos.default_payment_form) {
-            this.defaultPaymentForm.set(settings.pos.default_payment_form);
-            if (!this.settingsLoaded) {
-              this.paymentState.update(s => ({ ...s, paymentForm: this.defaultPaymentForm() }));
-            }
-          }
-          this.settingsLoaded = true;
-          this.showOnscreenKeypad.set(settings.pos.show_onscreen_keypad !== false);
-
-          // If anonymous sales are not allowed, always disable the toggle
-          if (!this.allowAnonymousSales()) {
-            this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
-          } else {
-            // Only update if this is first load (prevAllowAnonymous is falsy)
-            // or if we want to respect the default setting
-            if (!prevAllowAnonymous || this.anonymousSalesAsDefault()) {
-              this.paymentState.update(s => ({ ...s, isAnonymousSale: this.anonymousSalesAsDefault() }));
-            }
-            // Otherwise, preserve current user selection
-          }
-        }
-      });
   }
 
   private setDefaultCreditFirstDate(): void {
@@ -2308,6 +2311,9 @@ export class PosPaymentInterfaceComponent {
 
   // Anonymous Sale Toggle
   toggleAnonymousSale(enabled: boolean): void {
+    // Capture the user's deliberate choice so reactive sync from settings
+    // does not overwrite it during the same session.
+    this.userOverrideAnonymous.set(enabled);
     this.paymentState.update(s => ({ ...s, isAnonymousSale: enabled }));
     if (enabled) {
       // When switching to anonymous, clear customer selector

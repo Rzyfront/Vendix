@@ -19,6 +19,7 @@ import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
+import { SettingsService } from '../settings/settings.service';
 import { SubscriptionTrialService } from '../subscriptions/services/subscription-trial.service';
 
 @Injectable()
@@ -27,6 +28,7 @@ export class StoresService {
     private prisma: StorePrismaService,
     private s3Service: S3Service,
     private subscriptionTrialService: SubscriptionTrialService,
+    private settingsService: SettingsService,
   ) {}
 
   async create(createStoreDto: CreateStoreDto) {
@@ -82,6 +84,11 @@ export class StoresService {
         settings: settingsToCreate,
       },
     });
+
+    // Idempotent safety net — guarantees a settings row exists for the new
+    // store even if any custom `settings` payload above failed to populate
+    // the row, and stamps current schema version via defaults.
+    await this.settingsService.ensureDefaults(store.id);
 
     // Refetch to include settings
     const refetched = await this.prisma.stores.findUnique({

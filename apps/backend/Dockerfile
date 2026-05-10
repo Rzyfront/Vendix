@@ -7,6 +7,7 @@ COPY prisma ./prisma
 COPY . .
 # Generate Prisma Client sin necesidad de base de datos
 RUN npx prisma generate
+RUN node -e "const {Prisma}=require('@prisma/client'); const models=Prisma.dmmf.datamodel.models; const has=(model,field)=>models.find(m=>m.name===model)?.fields.some(f=>f.name===field); const hasModel=(model)=>models.some(m=>m.name===model); const missing=[]; if(!has('organizations','fiscal_scope')) missing.push('organizations.fiscal_scope'); if(!has('accounting_entities','fiscal_scope')) missing.push('accounting_entities.fiscal_scope'); if(!has('dian_configurations','accounting_entity_id')) missing.push('dian_configurations.accounting_entity_id'); if(!hasModel('fiscal_scope_audit_log')) missing.push('fiscal_scope_audit_log'); if(missing.length){throw new Error('Generated Prisma Client is missing fiscal-scope schema: '+missing.join(', '));}"
 RUN npm run build
 RUN npm prune --production
 

@@ -8,7 +8,10 @@ import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
 import { extractApiErrorMessage } from '../../utils/api-error-handler';
 import { SessionService } from '../../services/session.service';
-import type { OrganizationOperatingScope } from '../../models/organization.model';
+import type {
+  OrganizationFiscalScope,
+  OrganizationOperatingScope,
+} from '../../models/organization.model';
 
 @Injectable({
   providedIn: 'root',
@@ -166,6 +169,12 @@ export class AuthFacade {
    */
   readonly operatingScope = computed<OrganizationOperatingScope>(
     () => (this.userOrganization()?.operating_scope as OrganizationOperatingScope | undefined) ?? 'STORE',
+  );
+  readonly fiscalScope = computed<OrganizationFiscalScope>(
+    () =>
+      (this.userOrganization()?.fiscal_scope as
+        | OrganizationFiscalScope
+        | undefined) ?? this.operatingScope(),
   );
   readonly organizationOnboarding = toSignal(this.organizationOnboarding$, { initialValue: null as any });
   readonly organizationOnboardingNeeded = toSignal(this.needsOrganizationOnboarding$, { initialValue: false });

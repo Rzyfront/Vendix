@@ -1,6 +1,7 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CardComponent,
   EmptyStateComponent,
@@ -187,6 +188,7 @@ export class SubscriptionTimelineComponent implements OnInit {
   private service = inject(StoreSubscriptionService);
   private toast = inject(ToastService);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
 
   readonly events = signal<SubscriptionTimelineEvent[]>([]);
   readonly nextCursor = signal<string | null>(null);
@@ -253,20 +255,23 @@ export class SubscriptionTimelineComponent implements OnInit {
   private fetch(cursor: string | undefined): void {
     this.loading.set(true);
     const type = this.typeFilter() || undefined;
-    this.service.getEventsTimeline({ limit: 50, cursor, type }).subscribe({
-      next: (resp) => {
-        const payload = resp?.data;
-        if (payload) {
-          this.events.update((curr) => [...curr, ...payload.data]);
-          this.nextCursor.set(payload.next_cursor ?? null);
-        }
-        this.loading.set(false);
-      },
-      error: () => {
-        this.toast.error('No se pudo cargar el historial');
-        this.loading.set(false);
-      },
-    });
+    this.service
+      .getEventsTimeline({ limit: 50, cursor, type })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (resp) => {
+          const payload = resp?.data;
+          if (payload) {
+            this.events.update((curr) => [...curr, ...payload.data]);
+            this.nextCursor.set(payload.next_cursor ?? null);
+          }
+          this.loading.set(false);
+        },
+        error: () => {
+          this.toast.error('No se pudo cargar el historial');
+          this.loading.set(false);
+        },
+      });
   }
 
   onTypeFilterChange(value: string): void {

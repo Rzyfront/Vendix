@@ -1,65 +1,21 @@
 import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
-import { ConfigComponent } from './config.component';
 
 const routes: Routes = [
+  { path: '', pathMatch: 'full', redirectTo: 'application' },
   {
-    path: '',
-    component: ConfigComponent,
-    children: [
-      {
-        path: 'application',
-        loadComponent: () =>
-          import('./application/application.component').then(
-            (m) => m.ApplicationComponent,
-          ),
-      },
-      {
-        path: 'policies',
-        loadComponent: () =>
-          import('./policies/policies.component').then(
-            (m) => m.PoliciesComponent,
-          ),
-      },
-      {
-        path: 'integrations',
-        loadComponent: () =>
-          import('./integrations/integrations.component').then(
-            (m) => m.IntegrationsComponent,
-          ),
-      },
-      {
-        path: 'taxes',
-        loadComponent: () =>
-          import('./taxes/taxes.component').then((m) => m.TaxesComponent),
-      },
-      {
-        path: 'domains',
-        loadComponent: () =>
-          import('./domains/domains.component').then((m) => m.DomainsComponent),
-      },
-      {
-        path: 'inventory',
-        loadComponent: () =>
-          import('./inventory/inventory.component').then(
-            (m) => m.InventoryComponent,
-          ),
-      },
-      {
-        path: 'payment-methods',
-        loadComponent: () =>
-          import('./payment-methods/payment-methods.component').then(
-            (m) => m.PaymentMethodsComponent,
-          ),
-      },
-      {
-        path: 'orphan-settings',
-        loadComponent: () =>
-          import('./orphan-settings/orphan-settings.component').then(
-            (m) => m.OrphanSettingsComponent,
-          ),
-      },
-    ],
+    path: 'application',
+    loadComponent: () =>
+      import('./application/application.component').then(
+        (m) => m.ApplicationComponent,
+      ),
+  },
+  {
+    path: 'payment-methods',
+    loadComponent: () =>
+      import('./payment-methods/payment-methods.component').then(
+        (m) => m.PaymentMethodsComponent,
+      ),
   },
 ];
 

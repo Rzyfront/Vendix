@@ -150,6 +150,7 @@ export class SuperAdminLayoutComponent {
     '/super-admin/system/templates': 'Plantillas',
     '/super-admin/system/backups': 'Copias de Seguridad',
     '/super-admin/system/payroll-defaults': 'Parámetros de Nómina',
+    '/super-admin/system/settings-sync': 'Sincronización de Settings',
   };
 
   user = {
@@ -300,6 +301,11 @@ export class SuperAdminLayoutComponent {
             label: 'Parámetros de Nómina',
             icon: 'circle',
             route: '/super-admin/system/payroll-defaults',
+          },
+          {
+            label: 'Sincronización de Settings',
+            icon: 'circle',
+            route: '/super-admin/system/settings-sync',
           },
         ],
       },

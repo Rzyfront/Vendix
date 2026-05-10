@@ -594,6 +594,21 @@ export class AuthService {
         resolvedScope = 'STORE';
       }
 
+      const requestedFiscalScope = (registerOwnerDto as any).fiscal_scope as
+        | 'STORE'
+        | 'ORGANIZATION'
+        | undefined;
+      const resolvedFiscalScope: 'STORE' | 'ORGANIZATION' =
+        requestedFiscalScope === 'STORE' ||
+        requestedFiscalScope === 'ORGANIZATION'
+          ? requestedFiscalScope
+          : resolvedScope;
+      if (resolvedScope === 'STORE' && resolvedFiscalScope === 'ORGANIZATION') {
+        throw new BadRequestException(
+          'Invalid scope combination: STORE operation cannot use consolidated fiscal scope.',
+        );
+      }
+
       const organization = await tx.organizations.create({
         data: {
           name: formatted_organization_name,
@@ -602,6 +617,7 @@ export class AuthService {
           state: 'draft', // Organización creada en estado draft hasta completar onboarding
           account_type: accountType, // Default Multi-Store; respeta override si llega
           operating_scope: resolvedScope as any,
+          fiscal_scope: resolvedFiscalScope as any,
           ...(isPartnerCreation ? { is_partner: true } : {}),
         },
       });

@@ -13,4 +13,5 @@ export class UpdateSettingsDto {
 }
 
 export * from './operating-scope.dto';
+export * from './fiscal-scope.dto';
 export * from './update-org-inventory-settings.dto';

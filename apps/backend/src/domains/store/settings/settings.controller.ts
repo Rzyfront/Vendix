@@ -5,17 +5,14 @@ import {
   Post,
   Body,
   UseGuards,
-  UsePipes,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { ScheduleValidationService } from './schedule-validation.service';
 import { ResponseService } from '@common/responses/response.service';
-import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { IsString } from 'class-validator';
-import { ValidationPipe } from '@nestjs/common';
 import { RequestContextService } from '@common/context/request-context.service';
 
 export class ApplyTemplateDto {
@@ -82,18 +79,12 @@ export class SettingsController {
     status: 200,
     description: 'Settings updated successfully',
   })
-  @UsePipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: true,
-      forbidNonWhitelisted: false,
-      transformOptions: {
-        enableImplicitConversion: true,
-      },
-    }),
-  )
-  async updateSettings(@Body() dto: UpdateSettingsDto) {
-    await this.settingsService.updateSettings(dto);
+  // Body intentionally typed as a plain record so deprecated keys are not
+  // rejected by the global ValidationPipe before reaching the service.
+  // The service runs `sanitizeAndValidate(raw)` to drop unknown keys and
+  // validate retained sections against `UpdateSettingsDto`.
+  async updateSettings(@Body() raw: Record<string, unknown>) {
+    await this.settingsService.updateSettings(raw);
     // Re-read via getSettings() to return the full projection (including app from branding)
     const settings = await this.settingsService.getSettings();
     return this.responseService.success(

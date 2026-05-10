@@ -161,6 +161,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.PayrollDefaultsComponent),
       },
       {
+        path: 'system/settings-sync',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/settings-sync/settings-sync.component'
+          ).then((c) => c.SuperAdminSettingsSyncComponent),
+      },
+      {
         path: 'subscriptions',
         loadChildren: () =>
           import(

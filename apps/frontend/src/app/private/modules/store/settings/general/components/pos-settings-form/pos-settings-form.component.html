@@ -1,4 +1,19 @@
 <div class="pos-settings-form">
+  @if (!settingsLoaded()) {
+    <div class="space-y-6" aria-hidden="true">
+      @for (block of [1, 2, 3, 4]; track block) {
+        <div>
+          <div class="h-3 w-32 bg-gray-200 rounded animate-pulse mb-4"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div class="h-12 bg-gray-200 rounded animate-pulse"></div>
+            <div class="h-12 bg-gray-200 rounded animate-pulse"></div>
+            <div class="h-12 bg-gray-200 rounded animate-pulse"></div>
+            <div class="h-12 bg-gray-200 rounded animate-pulse"></div>
+          </div>
+        </div>
+      }
+    </div>
+  } @else {
   <div class="space-y-6">
     <!-- Sales & Configuration -->
     <div>
@@ -312,4 +327,5 @@
       </div>
     </div>
   </div>
+  }
 </div>

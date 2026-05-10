@@ -1,7 +1,11 @@
 import { StoreSettings } from '../interfaces/store-settings.interface';
+import { CURRENT_SCHEMA_VERSION } from '../migrations/settings-migrator.service';
 
 export function getDefaultStoreSettings(): StoreSettings {
   return {
+    // Schema version stamp — used by SettingsMigratorService for lazy migrations.
+    _schema_version: CURRENT_SCHEMA_VERSION,
+
     // ============================================================================
     // NUEVAS SECCIONES - Única fuente de verdad
     // ============================================================================

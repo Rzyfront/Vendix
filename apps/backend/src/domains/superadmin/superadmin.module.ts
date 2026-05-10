@@ -20,6 +20,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { BackupModule } from './backups/backups.module';
 import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.module';
 import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.module';
+import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.mod
     BackupModule,
     PayrollDefaultsModule,
     SuperadminSubscriptionsModule,
+    SuperadminSettingsSyncModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

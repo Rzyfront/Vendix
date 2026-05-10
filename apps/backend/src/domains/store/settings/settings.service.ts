@@ -19,9 +19,35 @@ import {
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppSettingsDto } from './dto/settings-schemas.dto';
+import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { getDefaultStoreSettings } from './defaults/default-store-settings';
+import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+
+/**
+ * Top-level keys retained when sanitizing an incoming settings payload.
+ * Anything else is dropped and logged. Order does not matter.
+ */
+const KNOWN_SECTIONS = [
+  'general',
+  'inventory',
+  'checkout',
+  'notifications',
+  'pos',
+  'receipts',
+  'branding',
+  'fonts',
+  'publication',
+  'operations',
+  'panel_ui',
+  'ecommerce',
+  'module_flows',
+  // `app` is intentionally accepted here because the service maps it to
+  // branding via updateStoreBranding(); the migrator strips persisted `app`
+  // afterwards. The legacy alias should not break update calls.
+  'app',
+] as const;
 
 @Injectable()
 export class SettingsService {
@@ -33,7 +59,79 @@ export class SettingsService {
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
     private auditService: AuditService,
+    private migrator: SettingsMigratorService,
   ) {}
+
+  /**
+   * Idempotently ensures a `store_settings` row exists for the given store
+   * with current default settings. Never overwrites an existing row.
+   * Safe to call from store-creation flows or as auto-heal on first read.
+   */
+  async ensureDefaults(storeId: number): Promise<void> {
+    if (!storeId) return;
+    await this.prisma.store_settings.upsert({
+      where: { store_id: storeId },
+      create: {
+        store_id: storeId,
+        settings: getDefaultStoreSettings() as any,
+      },
+      update: {},
+    });
+  }
+
+  /**
+   * Filter unknown top-level keys, validate retained sections against
+   * `UpdateSettingsDto` (with whitelist + skipMissingProperties), and return
+   * the sanitized DTO. Known-section validation errors are surfaced via
+   * SYS_VALIDATION_001; deprecated keys are dropped and logged.
+   */
+  private sanitizeAndValidate(
+    raw: Record<string, unknown>,
+    storeId: number,
+  ): UpdateSettingsDto {
+    const filtered: Record<string, unknown> = {};
+    const droppedKeys: string[] = [];
+
+    const knownSet = new Set<string>(KNOWN_SECTIONS as readonly string[]);
+    for (const [key, value] of Object.entries(raw ?? {})) {
+      if (knownSet.has(key)) {
+        filtered[key] = value;
+      } else {
+        droppedKeys.push(key);
+      }
+    }
+
+    if (droppedKeys.length > 0) {
+      this.logger.warn(
+        `[Settings] dropped deprecated keys storeId=${storeId} keys=${droppedKeys.join(
+          ',',
+        )}`,
+      );
+    }
+
+    const dto = plainToInstance(UpdateSettingsDto, filtered, {
+      enableImplicitConversion: true,
+    });
+
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      skipMissingProperties: true,
+      stopAtFirstError: false,
+    });
+
+    if (errors.length > 0) {
+      throw new VendixHttpException(ErrorCodes.SYS_VALIDATION_001, undefined, {
+        validation: errors.map((e) => ({
+          property: e.property,
+          constraints: e.constraints ?? {},
+          children: e.children?.length ? e.children.map((c) => c.property) : [],
+        })),
+      });
+    }
+
+    return dto;
+  }
 
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
@@ -42,6 +140,10 @@ export class SettingsService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Auto-heal: legacy stores without a settings row get one with current
+    // defaults before we read. Idempotent — never overwrites existing data.
+    await this.ensureDefaults(store_id);
 
     // Obtener datos de la tienda desde la tabla stores
     const store = await this.prisma.stores.findUnique({
@@ -60,8 +162,31 @@ export class SettingsService {
       where: { store_id },
     });
 
+    // Run lazy schema migrations against the persisted JSON. If any migration
+    // applied, persist the migrated value so subsequent reads are idempotent.
+    let rawSettings = (storeSettings?.settings || {}) as any;
+    if (storeSettings?.settings) {
+      const result = this.migrator.migrate(rawSettings);
+      if (result.changed) {
+        try {
+          await this.prisma.store_settings.update({
+            where: { store_id },
+            data: { settings: result.migrated, updated_at: new Date() },
+          });
+          this.logger.log(
+            `[Settings] migrated store ${store_id}: v${result.fromVersion}->v${result.toVersion}`,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[Settings] failed to persist migration for store ${store_id}: ${err?.message ?? err}`,
+          );
+        }
+      }
+      rawSettings = result.migrated;
+    }
+
     // Read branding from store_settings.settings.branding (source of truth)
-    const settings = (storeSettings?.settings || {}) as StoreSettings;
+    const settings = (rawSettings || {}) as StoreSettings;
     const branding = settings.branding || getDefaultStoreSettings().branding;
 
     // Map branding to legacy app structure for compatibility
@@ -124,7 +249,9 @@ export class SettingsService {
     };
   }
 
-  async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
+  async updateSettings(
+    raw: Record<string, unknown> | UpdateSettingsDto,
+  ): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     const user_id = context?.user_id;
@@ -132,6 +259,13 @@ export class SettingsService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Sanitize unknown top-level keys and validate retained sections.
+    // This replaces the previous, ineffective controller-side ValidationPipe.
+    const dto: UpdateSettingsDto = this.sanitizeAndValidate(
+      raw as Record<string, unknown>,
+      store_id,
+    );
 
     // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
     const storeSettings = await this.prisma.store_settings.findUnique({
@@ -142,9 +276,6 @@ export class SettingsService {
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
-
-    // Solo validar las secciones que se están actualizando
-    await this.validatePartialSettings(dto);
 
     // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
@@ -613,30 +744,6 @@ export class SettingsService {
       } catch (error) {
         this.logger.warn(`Failed to sync organization name: ${error.message}`);
       }
-    }
-  }
-
-  private async validatePartialSettings(dto: UpdateSettingsDto): Promise<void> {
-    // Validar solo las secciones que se están enviando (no son undefined)
-    const partialDto = new UpdateSettingsDto();
-
-    for (const key of Object.keys(dto)) {
-      const value = dto[key as keyof UpdateSettingsDto];
-      if (value !== undefined) {
-        (partialDto as any)[key] = value;
-      }
-    }
-
-    const errors = validateSync(partialDto, {
-      whitelist: true,
-      forbidNonWhitelisted: false,
-      stopAtFirstError: false,
-    });
-
-    if (errors.length > 0) {
-      throw new BadRequestException(
-        `Invalid settings structure: ${errors.map((e) => e.toString()).join(', ')}`,
-      );
     }
   }
 

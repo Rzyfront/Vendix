@@ -51,6 +51,7 @@ export class GeneralSettingsComponent implements OnInit {
 
   settings = signal<StoreSettings>({} as StoreSettings);
   isLoading = signal(true);
+  settingsLoaded = signal(false);
   isSaving = signal(false);
   hasUnsavedChanges = signal(false);
   lastSaved = signal<Date | null>(null);
@@ -127,6 +128,7 @@ export class GeneralSettingsComponent implements OnInit {
         this.settings.set(data);
         this.isLoading.set(false);
         this.hasUnsavedChanges.set(false);
+        this.settingsLoaded.set(true);
       },
       error: (error) => {
         console.error('Error loading settings:', error);

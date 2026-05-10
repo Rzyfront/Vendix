@@ -1,5 +1,14 @@
-import { Component, model, input, output, signal, inject } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  model,
+  input,
+  output,
+  signal,
+  inject,
+} from '@angular/core';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
   ModalComponent,
@@ -82,6 +91,7 @@ export class ResetPasswordModalComponent {
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
@@ -108,12 +118,15 @@ export class ResetPasswordModalComponent {
       confirm_password: ['', [Validators.required]],
     });
 
-    this.passwordForm.valueChanges.subscribe(() => {
-      const val = this.passwordForm.value;
-      this.passwordMismatch.set(
-        val.new_password !== val.confirm_password && val.confirm_password.length > 0
-      );
-    });
+    this.passwordForm.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        const val = this.passwordForm.value;
+        this.passwordMismatch.set(
+          val.new_password !== val.confirm_password &&
+            val.confirm_password.length > 0,
+        );
+      });
   }
 
   onClose(): void {
@@ -128,21 +141,24 @@ export class ResetPasswordModalComponent {
 
     this.isResetting.set(true);
 
-    this.usersService.resetPassword(user.id, {
-      new_password: this.passwordForm.value.new_password,
-      confirm_password: this.passwordForm.value.confirm_password,
-    }).subscribe({
-      next: () => {
-        this.isResetting.set(false);
-        this.toastService.success('Contraseña restablecida exitosamente');
-        this.onReset.emit();
-        this.onClose();
-      },
-      error: (err: unknown) => {
-        this.isResetting.set(false);
-        const message = extractApiErrorMessage(err);
-        this.toastService.error(message);
-      },
-    });
+    this.usersService
+      .resetPassword(user.id, {
+        new_password: this.passwordForm.value.new_password,
+        confirm_password: this.passwordForm.value.confirm_password,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isResetting.set(false);
+          this.toastService.success('Contraseña restablecida exitosamente');
+          this.onReset.emit();
+          this.onClose();
+        },
+        error: (err: unknown) => {
+          this.isResetting.set(false);
+          const message = extractApiErrorMessage(err);
+          this.toastService.error(message);
+        },
+      });
   }
 }

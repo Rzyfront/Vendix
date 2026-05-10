@@ -713,6 +713,8 @@ export class OrgTransfersService {
           result.from_location?.store_id === result.to_location?.store_id
             ? result.from_location?.store_id
             : undefined,
+        from_store_id: result.from_location?.store_id ?? undefined,
+        to_store_id: result.to_location?.store_id ?? undefined,
         from_location_id: result.from_location_id,
         to_location_id: result.to_location_id,
         total_cost,

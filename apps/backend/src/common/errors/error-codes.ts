@@ -2070,6 +2070,47 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'No payable invoice available for retry',
   },
+
+  // Fiscal scope
+  FISCAL_SCOPE_INVALID_VALUE: {
+    code: 'FISCAL_SCOPE_INVALID_VALUE',
+    httpStatus: 400,
+    devMessage: 'Invalid fiscal scope value',
+  },
+  FISCAL_SCOPE_INVALID_COMBINATION: {
+    code: 'FISCAL_SCOPE_INVALID_COMBINATION',
+    httpStatus: 409,
+    devMessage: 'Invalid operating/fiscal scope combination',
+  },
+  FISCAL_SCOPE_CHANGE_BLOCKED: {
+    code: 'FISCAL_SCOPE_CHANGE_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal scope change blocked by pre-conditions',
+  },
+  FISCAL_SCOPE_FORCE_REASON_REQUIRED: {
+    code: 'FISCAL_SCOPE_FORCE_REASON_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'Force fiscal scope change requires a reason',
+  },
+  FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND: {
+    code: 'FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Accounting entity does not belong to this organization',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
+
+export const FiscalScopeBlockerCodes = {
+  INVALID_COMBINATION: 'FISCAL_SCOPE_INVALID_COMBINATION',
+  PENDING_INVOICES: 'FISCAL_SCOPE_PENDING_INVOICES',
+  PENDING_DIAN_RESPONSE: 'FISCAL_SCOPE_PENDING_DIAN_RESPONSE',
+  OPEN_PERIODS: 'FISCAL_SCOPE_OPEN_PERIODS',
+  NO_ACTIVE_STORES: 'FISCAL_SCOPE_NO_ACTIVE_STORES',
+  MISSING_DIAN_CONFIG: 'FISCAL_SCOPE_MISSING_DIAN_CONFIG',
+  MISSING_TAX_ID: 'FISCAL_SCOPE_MISSING_TAX_ID',
+  OPEN_INTERCOMPANY: 'FISCAL_SCOPE_OPEN_INTERCOMPANY',
+} as const;
+
+export type FiscalScopeBlockerCode =
+  (typeof FiscalScopeBlockerCodes)[keyof typeof FiscalScopeBlockerCodes];
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

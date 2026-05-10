@@ -80,6 +80,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
+| Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
@@ -234,6 +235,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with AccountingEventsListener or AutoEntryService | `vendix-auto-entries` |
 | Working with BullMQ for AI | `vendix-ai-queue` |
 | Working with CurrencyPipe or CurrencyFormatService | `vendix-currency-formatting` |
+| Working with DIAN NIT ownership | `vendix-fiscal-scope` |
 | Working with EventSource for AI | `vendix-ai-streaming` |
 | Working with MCP server | `vendix-ai-engine` |
 | Working with MCP server | `vendix-mcp-server` |
@@ -249,11 +251,16 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with date.util.ts utilities | `vendix-date-timezone` |
 | Working with default_templates | `vendix-settings-system` |
 | Working with embeddings or pgvector | `vendix-ai-embeddings-rag` |
+| Working with fiscal accounting entities | `vendix-fiscal-scope` |
+| Working with fiscal reports by NIT | `vendix-fiscal-scope` |
+| Working with fiscal scope migrations | `vendix-fiscal-scope` |
+| Working with intercompany stock-transfer entries | `vendix-fiscal-scope` |
 | Working with inventory transactions or movements | `vendix-inventory-stock` |
 | Working with inventory valuation | `vendix-inventory-valuation` |
 | Working with journal entries, mapping keys, PUC accounts, payroll provisions, parafiscales, or debit/credit logic | `vendix-accounting-rules` |
 | Working with notifications SSE or Web Push | `vendix-notifications-system` |
 | Working with organization operating scope STORE vs ORGANIZATION | `vendix-operating-scope` |
+| Working with organizations.fiscal_scope | `vendix-fiscal-scope` |
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |

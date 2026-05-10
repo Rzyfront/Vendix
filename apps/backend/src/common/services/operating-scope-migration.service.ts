@@ -13,6 +13,7 @@ import {
   OperatingScopeService,
   OrganizationOperatingScope,
 } from './operating-scope.service';
+import { FiscalScopeService } from './fiscal-scope.service';
 import { OrgLocationsService } from '../../domains/organization/inventory/locations/org-locations.service';
 
 /**
@@ -73,6 +74,7 @@ export class OperatingScopeMigrationService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScope: FiscalScopeService,
     private readonly audit: AuditService,
     private readonly orgLocationsService: OrgLocationsService,
   ) {}
@@ -482,6 +484,22 @@ export class OperatingScopeMigrationService {
     client: any,
     preview: OperatingScopeMigrationPreview,
   ) {
+    const fiscalScope = await this.fiscalScope.getFiscalScope(
+      organization_id,
+      client,
+    );
+    if (fiscalScope === 'ORGANIZATION') {
+      preview.blockers.push({
+        code: 'OPERATING_SCOPE_FISCAL_COMBINATION_INVALID',
+        message:
+          'No se puede bajar operating_scope a STORE mientras fiscal_scope sea ORGANIZATION. Cambia primero el modo fiscal a STORE.',
+        details: {
+          fiscal_scope: fiscalScope,
+          remediation_link: '/admin/settings/fiscal-scope',
+        },
+      });
+    }
+
     // 1. Partners cannot downgrade away from STORE — already handled above
     //    when target≠STORE; here partner→STORE is fine, no extra check.
 

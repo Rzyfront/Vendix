@@ -149,6 +149,13 @@ export const orgAdminRoutes: Routes = [
             '../../private/modules/organization/settings/operating-scope/operating-scope.component'
           ).then((c) => c.OperatingScopeComponent),
       },
+      {
+        path: 'settings/fiscal-scope',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/settings/fiscal-scope/fiscal-scope.component'
+          ).then((c) => c.FiscalScopeComponent),
+      },
     ],
   },
 ];

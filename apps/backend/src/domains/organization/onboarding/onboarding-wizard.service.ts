@@ -24,6 +24,7 @@ import { getDefaultStoreSettings } from '../../store/settings/defaults/default-s
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
+import { SettingsService } from '../../store/settings/settings.service';
 
 interface WizardValidation {
   isValid: boolean;
@@ -44,6 +45,7 @@ export class OnboardingWizardService {
     private readonly storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
     private readonly orgLocationsService: OrgLocationsService,
+    private readonly settingsService: SettingsService,
   ) {}
 
   /**
@@ -141,15 +143,29 @@ export class OnboardingWizardService {
         : 'SINGLE_STORE';
     const operatingScope =
       selectAppTypeDto.app_type === 'ORG_ADMIN' ? 'ORGANIZATION' : 'STORE';
+    const fiscalScope =
+      selectAppTypeDto.app_type === 'ORG_ADMIN'
+        ? (selectAppTypeDto.fiscal_scope ?? 'ORGANIZATION')
+        : 'STORE';
+
+    if (operatingScope === 'STORE' && fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Invalid scope combination: STORE operation cannot use consolidated fiscal scope.',
+      );
+    }
 
     // Check if already selected the same type
     const userConfig = user.user_settings?.config;
-    if (userConfig?.selected_app_type === selectAppTypeDto.app_type) {
+    if (
+      userConfig?.selected_app_type === selectAppTypeDto.app_type &&
+      (userConfig?.selected_fiscal_scope ?? fiscalScope) === fiscalScope
+    ) {
       return {
         success: true,
         app_type: selectAppTypeDto.app_type,
         account_type: accountType,
         operating_scope: operatingScope,
+        fiscal_scope: fiscalScope,
         message: 'Application type already selected',
         already_completed: true,
       };
@@ -159,7 +175,7 @@ export class OnboardingWizardService {
     if (user.organization_id) {
       const organization = await this.prismaService.organizations.findUnique({
         where: { id: user.organization_id },
-        select: { account_type: true, operating_scope: true },
+        select: { account_type: true, operating_scope: true, fiscal_scope: true },
       });
 
       if (
@@ -178,6 +194,7 @@ export class OnboardingWizardService {
         data: {
           account_type: accountType,
           operating_scope: operatingScope as any,
+          fiscal_scope: fiscalScope as any,
           updated_at: new Date(),
         },
       });
@@ -201,6 +218,13 @@ export class OnboardingWizardService {
     // Update or create user_settings with selected app type
     const config = {
       selected_app_type: selectAppTypeDto.app_type,
+      selected_fiscal_scope: fiscalScope,
+      selected_business_model:
+        selectAppTypeDto.app_type === 'STORE_ADMIN'
+          ? 'SINGLE_STORE'
+          : fiscalScope === 'ORGANIZATION'
+            ? 'ORG_CONSOLIDATED'
+            : 'ORG_FISCAL_SEPARATED',
       selection_notes: selectAppTypeDto.notes || '',
       selected_at: new Date().toISOString(),
     };
@@ -234,6 +258,7 @@ export class OnboardingWizardService {
       app_type: selectAppTypeDto.app_type,
       account_type: accountType,
       operating_scope: operatingScope,
+      fiscal_scope: fiscalScope,
       message: 'Application type selected successfully',
     };
   }
@@ -684,6 +709,16 @@ export class OnboardingWizardService {
         return store.id;
       },
     );
+
+    // Idempotent safety net: guarantees a store_settings row exists with the
+    // current default schema version stamped. Cheap upsert with `update: {}`.
+    try {
+      await this.settingsService.ensureDefaults(storeId);
+    } catch (err: any) {
+      this.logger.warn(
+        `setupStore: ensureDefaults failed for store=${storeId}: ${err?.message ?? err}`,
+      );
+    }
 
     // Final fetch AFTER the transaction so the response reflects all
     // committed side-effects (default_location_id, address, settings).

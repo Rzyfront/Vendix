@@ -459,7 +459,10 @@ export class OnboardingModalComponent {
     this.subscribeToWizardData();
   }
 
-  onBusinessTypeSelected(event: { type: 'STORE' | 'ORGANIZATION' }): void {
+  onBusinessTypeSelected(event: {
+    type: 'STORE' | 'ORGANIZATION';
+    fiscal_scope?: 'STORE' | 'ORGANIZATION';
+  }): void {
     if (this.isProcessing()) return;
     this.isProcessing.set(true);
 
@@ -468,9 +471,13 @@ export class OnboardingModalComponent {
     // Smart Check: Skip if already selected same type
     const currentAppType =
       this.wizardStatus()?.user_settings?.config?.selected_app_type;
+    const currentFiscalScope =
+      this.wizardStatus()?.user_settings?.config?.selected_fiscal_scope;
     const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
+    const fiscalScope =
+      event.fiscal_scope ?? (event.type === 'STORE' ? 'STORE' : 'ORGANIZATION');
 
-    if (currentAppType === newAppType) {
+    if (currentAppType === newAppType && currentFiscalScope === fiscalScope) {
       this.steps.set(
         event.type === 'STORE' ? this.storeSteps : this.organizationSteps,
       );
@@ -485,6 +492,7 @@ export class OnboardingModalComponent {
     this.wizardService
       .selectAppType({
         app_type: event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN',
+        fiscal_scope: fiscalScope,
         notes: `User selected ${event.type} approach`,
       })
       .subscribe({

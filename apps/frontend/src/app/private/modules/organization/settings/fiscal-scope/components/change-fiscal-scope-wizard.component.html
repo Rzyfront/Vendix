@@ -1,0 +1,310 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  title="Cambiar modo fiscal"
+  [subtitle]="directionLabel()"
+  size="md"
+  [closeOnBackdrop]="false"
+  (cancel)="closeWizard()"
+>
+  <div class="mb-4 flex items-center gap-2 text-xs">
+    @for (s of stepDots; track s) {
+      <div class="flex items-center gap-2">
+        <span
+          class="flex h-6 w-6 items-center justify-center rounded-full font-semibold"
+          [class.bg-primary]="step() >= s"
+          [class.text-white]="step() >= s"
+          [class.bg-gray-200]="step() < s"
+          [class.text-gray-500]="step() < s"
+          [style.background-color]="step() >= s ? 'var(--color-primary)' : ''"
+        >
+          {{ s }}
+        </span>
+        @if (s < 4) {
+          <span
+            class="h-0.5 w-8"
+            [style.background-color]="step() > s ? 'var(--color-primary)' : 'var(--color-border)'"
+          ></span>
+        }
+      </div>
+    }
+  </div>
+
+  @if (step() === 1) {
+    <div class="space-y-4">
+      <p class="text-sm text-[var(--color-text-secondary)]">
+        Vas a cambiar cómo se resuelven las entidades fiscales, configuraciones
+        DIAN, facturas y asientos contables de la organización.
+      </p>
+
+      <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+        <div class="grid grid-cols-1 gap-4 text-sm md:grid-cols-3">
+          <div>
+            <p class="text-xs uppercase tracking-wider text-gray-400">Actual</p>
+            <p class="mt-1 font-semibold">{{ scopeLabel(currentScope()) }}</p>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-gray-400">Destino</p>
+            <p class="mt-1 font-semibold text-primary">
+              {{ scopeLabel(targetScope()) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs uppercase tracking-wider text-gray-400">Operativo</p>
+            <p class="mt-1 font-semibold">
+              {{ operatingLabel(operatingScope()) }}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <app-textarea
+        label="Razón del cambio (opcional)"
+        placeholder="Ej: cada tienda facturará con su propio NIT desde el siguiente periodo."
+        [rows]="3"
+        (valueChange)="onReasonChange($event)"
+      ></app-textarea>
+
+      @if (previewError()) {
+        <app-alert-banner variant="danger" icon="alert-circle">
+          {{ previewError() }}
+        </app-alert-banner>
+      }
+    </div>
+  }
+
+  @if (step() === 2) {
+    @if (previewLoading()) {
+      <div class="flex justify-center py-12">
+        <app-spinner size="lg" text="Validando..."></app-spinner>
+      </div>
+    } @else if (preview(); as p) {
+      <div class="space-y-4">
+        <p class="text-sm text-[var(--color-text-secondary)]">
+          Resultado de la validación fiscal para
+          <span class="font-semibold">{{ directionLabel() }}</span>.
+        </p>
+
+        @if (p.blockers.length > 0) {
+          <div class="space-y-2">
+            <h4 class="text-sm font-semibold text-red-700">
+              Bloqueadores ({{ p.blockers.length }})
+            </h4>
+            @for (b of p.blockers; track b.code) {
+              <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                <div class="flex items-start gap-2">
+                  <app-icon name="alert-circle" [size]="16" class="mt-0.5"></app-icon>
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <p class="font-semibold">{{ blockerTitle(b) }}</p>
+                      @if (blockerCount(b); as count) {
+                        <span class="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">
+                          {{ count }}
+                        </span>
+                      }
+                    </div>
+                    <p class="mt-0.5">{{ b.message }}</p>
+                    @if (blockerRemediationLink(b); as link) {
+                      <a
+                        [routerLink]="link"
+                        (click)="closeWizard()"
+                        class="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-red-700 underline hover:text-red-900"
+                      >
+                        Resolver
+                        <app-icon name="arrow-right" [size]="12"></app-icon>
+                      </a>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+          </div>
+        }
+
+        @if (p.warnings.length > 0) {
+          <div class="space-y-2">
+            <h4 class="text-sm font-semibold text-yellow-700">
+              Advertencias ({{ p.warnings.length }})
+            </h4>
+            @for (w of p.warnings; track w) {
+              <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+                <div class="flex items-start gap-2">
+                  <app-icon name="alert-triangle" [size]="16" class="mt-0.5"></app-icon>
+                  <p>{{ w }}</p>
+                </div>
+              </div>
+            }
+          </div>
+        }
+
+        @if (p.blockers.length === 0 && p.warnings.length === 0) {
+          <app-alert-banner variant="success" icon="check-circle">
+            La organización está lista para aplicar el cambio fiscal.
+          </app-alert-banner>
+        }
+
+        @if (canShowForceOption()) {
+          <app-alert-banner variant="warning" icon="alert-triangle">
+            Puedes forzar la separación fiscal si decides asumir los
+            bloqueadores. La acción queda auditada con razón obligatoria.
+          </app-alert-banner>
+        }
+
+        @if (applyError()) {
+          <app-alert-banner variant="danger" icon="alert-circle">
+            {{ applyError() }}
+          </app-alert-banner>
+        }
+      </div>
+    }
+  }
+
+  @if (step() === 3) {
+    @if (preview(); as p) {
+      <div class="space-y-4">
+        <app-alert-banner variant="danger" icon="alert-triangle">
+          Vas a forzar un cambio fiscal con bloqueadores activos. Esta acción
+          queda registrada con el snapshot de bloqueadores.
+        </app-alert-banner>
+
+        @for (b of p.blockers; track b.code) {
+          <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <p class="font-semibold">{{ blockerTitle(b) }}</p>
+            <p class="mt-0.5">{{ b.message }}</p>
+          </div>
+        }
+
+        <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-sm">
+          <input
+            type="checkbox"
+            class="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--color-primary)]"
+            [checked]="understandsConsequences()"
+            (change)="toggleUnderstandsConsequences($event)"
+          />
+          <span>
+            <span class="font-semibold">Entiendo las consecuencias.</span>
+            <span class="ml-1 text-[var(--color-text-secondary)]">
+              Revisaré facturas, periodos, DIAN e intercompany después del cambio.
+            </span>
+          </span>
+        </label>
+
+        <app-textarea
+          label="Razón del force (obligatorio, mínimo 10 caracteres)"
+          placeholder="Ej: cierre fiscal revisado por contabilidad."
+          [rows]="3"
+          [required]="true"
+          (valueChange)="onForceReasonChange($event)"
+        ></app-textarea>
+
+        @if (forceReasonRemaining() > 0) {
+          <p class="text-xs text-[var(--color-text-secondary)]">
+            Faltan {{ forceReasonRemaining() }} caracteres.
+          </p>
+        }
+
+        @if (applyError()) {
+          <app-alert-banner variant="danger" icon="alert-circle">
+            {{ applyError() }}
+          </app-alert-banner>
+        }
+      </div>
+    }
+  }
+
+  @if (step() === 4) {
+    @if (applyResult(); as r) {
+      <div class="space-y-4 py-4">
+        <div class="flex flex-col items-center gap-3 text-center">
+          <div
+            class="rounded-full p-3"
+            [class.bg-green-100]="!r.forced"
+            [class.text-green-600]="!r.forced"
+            [class.bg-yellow-100]="r.forced"
+            [class.text-yellow-600]="r.forced"
+          >
+            <app-icon
+              [name]="r.forced ? 'alert-triangle' : 'check-circle'"
+              [size]="32"
+            ></app-icon>
+          </div>
+          <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
+            Modo fiscal actualizado
+          </h3>
+          <p class="text-sm text-[var(--color-text-secondary)]">
+            La organización ahora usa
+            <span class="font-semibold">{{ scopeLabel(r.new_fiscal_scope) }}</span>.
+          </p>
+        </div>
+
+        <div class="rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-secondary)]">
+          <p>Anterior: <strong>{{ scopeLabel(r.previous_fiscal_scope) }}</strong></p>
+          <p>Audit log ID: <strong>#{{ r.audit_log_id }}</strong></p>
+          @if (r.forced) {
+            <p class="mt-1 text-yellow-700">
+              <strong>Forzado:</strong> sí
+            </p>
+          }
+        </div>
+      </div>
+    }
+  }
+
+  <div slot="footer" class="flex flex-wrap justify-end gap-2">
+    @if (step() === 1) {
+      <app-button variant="ghost" (click)="closeWizard()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [loading]="previewLoading()"
+        (click)="goToPreview()"
+      >
+        Continuar
+      </app-button>
+    }
+    @if (step() === 2) {
+      <app-button
+        variant="ghost"
+        [disabled]="applyLoading()"
+        (click)="goBackToStep1()"
+      >
+        Atrás
+      </app-button>
+      @if (canShowForceOption()) {
+        <app-button
+          variant="outline-warning"
+          [disabled]="applyLoading()"
+          (click)="goToForceConfirm()"
+        >
+          Forzar cambio
+        </app-button>
+      }
+      <app-button
+        variant="primary"
+        [disabled]="!canApply()"
+        [loading]="applyLoading()"
+        (click)="applyChange()"
+      >
+        Aplicar cambio
+      </app-button>
+    }
+    @if (step() === 3) {
+      <app-button
+        variant="ghost"
+        [disabled]="applyLoading()"
+        (click)="goBackToPreview()"
+      >
+        Cancelar
+      </app-button>
+      <app-button
+        variant="danger"
+        [disabled]="!canForceApply()"
+        [loading]="applyLoading()"
+        (click)="forceApplyChange()"
+      >
+        Forzar cambio
+      </app-button>
+    }
+    @if (step() === 4) {
+      <app-button variant="primary" (click)="closeWizard()">Cerrar</app-button>
+    }
+  </div>
+</app-modal>

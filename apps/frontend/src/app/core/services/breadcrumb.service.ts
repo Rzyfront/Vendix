@@ -571,40 +571,16 @@ export class BreadcrumbService {
 
     // Configuration
     {
-      path: '/admin/config',
-      title: 'Configuración',
-      parent: 'Panel Administrativo',
-      icon: 'settings',
-    },
-    {
       path: '/admin/config/application',
       title: 'General',
       parent: 'Configuration',
       icon: 'sliders',
     },
     {
-      path: '/admin/config/policies',
-      title: 'Políticas',
-      parent: 'Configuration',
-      icon: 'file-text',
-    },
-    {
-      path: '/admin/config/integrations',
-      title: 'Integraciones',
-      parent: 'Configuration',
-      icon: 'link-2',
-    },
-    {
-      path: '/admin/config/taxes',
-      title: 'Impuestos',
+      path: '/admin/config/payment-methods',
+      title: 'Métodos de Pago',
       parent: 'Configuration',
       icon: 'credit-card',
-    },
-    {
-      path: '/admin/config/domains',
-      title: 'Dominios',
-      parent: 'Configuration',
-      icon: 'globe-2',
     },
 
     // STORE_ADMIN Routes

@@ -1573,6 +1573,20 @@ export async function seedPermissionsAndRoles(
       path: '/organization/settings/operating-scope/apply',
       method: 'POST',
     },
+    {
+      name: 'organization:settings:fiscal_scope:read',
+      description:
+        'Leer el fiscal_scope vigente, operating_scope y audit log reciente',
+      path: '/organization/settings/fiscal-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_scope:write',
+      description:
+        'Migrar fiscal_scope (STORE ↔ ORGANIZATION) vía wizard con audit log',
+      path: '/organization/settings/fiscal-scope/apply',
+      method: 'POST',
+    },
 
     // Notificaciones (Tienda)
     {
@@ -2681,6 +2695,13 @@ export async function seedPermissionsAndRoles(
       name: 'superadmin:subscriptions:gateway:test',
       description: 'Probar conexión con la pasarela SaaS',
       path: '/api/superadmin/subscriptions/gateway/:processor/test',
+      method: 'POST',
+    },
+    {
+      name: 'super_admin.settings.sync_all',
+      description:
+        'Sincronizar (migrar) settings de todas las tiendas desde super-admin',
+      path: '/api/superadmin/settings/sync-all-stores',
       method: 'POST',
     },
   ];

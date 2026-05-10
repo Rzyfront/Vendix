@@ -8,6 +8,7 @@ export interface Organization {
   settings: OrganizationSettings;
   account_type?: OrganizationAccountType;
   operating_scope?: OrganizationOperatingScope;
+  fiscal_scope?: OrganizationFiscalScope;
   branding: OrganizationBranding;
   contact: OrganizationContact;
   limits: OrganizationLimits;
@@ -21,6 +22,7 @@ export enum OrganizationAccountType {
 }
 
 export type OrganizationOperatingScope = 'STORE' | 'ORGANIZATION';
+export type OrganizationFiscalScope = 'STORE' | 'ORGANIZATION';
 
 export interface OrganizationInventorySettings {
   mode: 'organizational' | 'independent';

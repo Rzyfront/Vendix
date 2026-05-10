@@ -46,6 +46,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           description: 'Alcance operativo y modelo multi-tienda',
         },
         {
+          key: 'settings_fiscal_scope',
+          label: 'Modo fiscal',
+          description: 'Alcance fiscal y modelo DIAN por tienda u organizaci\u00f3n',
+        },
+        {
           key: 'settings_application',
           label: 'General',
           description: 'Configuraci\u00f3n general de la aplicaci\u00f3n',

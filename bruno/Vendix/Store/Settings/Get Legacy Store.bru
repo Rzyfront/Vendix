@@ -1,0 +1,39 @@
+meta {
+  name: Get Legacy Store
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/store/settings
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Get settings successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Lazy migrator stamps _schema_version on read", function() {
+    expect(res.body.data).to.have.property('_schema_version', 1);
+  });
+
+  test("Legacy accounting_flows key is migrated away on read", function() {
+    expect(res.body.data).to.not.have.property('accounting_flows');
+  });
+
+  test("module_flows is the canonical container post-migration", function() {
+    // After lazy migration any accounting_flows must live under module_flows.accounting
+    if (res.body.data.module_flows) {
+      expect(res.body.data.module_flows).to.be.an('object');
+    }
+  });
+}

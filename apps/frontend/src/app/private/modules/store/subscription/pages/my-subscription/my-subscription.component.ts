@@ -1,6 +1,7 @@
 import { Component, DestroyRef, OnInit, inject, computed, effect, signal, untracked } from '@angular/core';
 import { DatePipe, CurrencyPipe, DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CardComponent,
   IconComponent,
@@ -969,43 +970,46 @@ export class MySubscriptionComponent implements OnInit {
     return Math.min(100, Math.max(0, (elapsed / total) * 100));
   });
 
-  // Cycle consumption — `billing_cycle` is the canonical source of truth for
-  // the total length (monthly=30, yearly=365). Days consumed are derived from
-  // `current_period_end - now` so the calc stays correct even if
-  // `current_period_start` drifts (e.g. proration sets it forward, or test
-  // data manipulation leaves it at an old value).
+  // Cycle consumption — derivado de la ventana real (current_period_start →
+  // current_period_end). Antes se hardcodeaba 30/365 según billing_cycle, lo
+  // que rompía el cálculo cuando proration o swaps trial→free dejaban
+  // current_period_end fuera del rango contractual. Fallback al ciclo
+  // contractual solo si faltan los timestamps.
   private readonly DAY_MS = 1000 * 60 * 60 * 24;
 
   readonly cycleTotalDays = computed(() => {
+    const start = this.current()?.current_period_start;
+    const end = this.current()?.current_period_end;
+    if (start && end) {
+      const ms = new Date(end).getTime() - new Date(start).getTime();
+      const days = Math.round(ms / this.DAY_MS);
+      if (days > 0) return days;
+    }
     const cycle = this.billingCycle();
     if (cycle === 'yearly') return 365;
     if (cycle === 'monthly') return 30;
-    const start = this.current()?.current_period_start;
-    const end = this.current()?.current_period_end;
-    if (!start || !end) return 0;
-    const ms = new Date(end).getTime() - new Date(start).getTime();
-    return Math.max(0, Math.round(ms / this.DAY_MS));
+    return 0;
   });
 
   readonly cycleDaysConsumed = computed(() => {
     const total = this.cycleTotalDays();
-    const end = this.current()?.current_period_end;
-    if (!end || !total) return 0;
-    const remainingMs = new Date(end).getTime() - Date.now();
-    const remaining = Math.max(0, Math.ceil(remainingMs / this.DAY_MS));
-    return Math.min(total, Math.max(0, total - remaining));
+    const start = this.current()?.current_period_start;
+    if (!total || !start) return 0;
+    const elapsedMs = Date.now() - new Date(start).getTime();
+    const elapsed = Math.floor(elapsedMs / this.DAY_MS);
+    return Math.min(total, Math.max(0, elapsed));
   });
 
-  // Continuous percentage in ms. Total period is derived from `billing_cycle`
-  // (monthly/yearly) so the bar reflects the contractual cycle, not the raw
-  // `end - start` window which can be skewed by proration or test data.
+  // Continuous percentage in ms over la ventana real del periodo
+  // (current_period_start → current_period_end). Esto evita que proration o
+  // estados inconsistentes empujen current_period_end fuera del rango
+  // contractual y dejen la barra en 0%.
   readonly cycleProgress = computed(() => {
-    const totalDays = this.cycleTotalDays();
-    const end = this.current()?.current_period_end;
-    if (!end || !totalDays) return 0;
-    const totalMs = totalDays * this.DAY_MS;
-    const remainingMs = new Date(end).getTime() - Date.now();
-    const elapsedMs = totalMs - remainingMs;
+    const total = this.cycleTotalDays();
+    const start = this.current()?.current_period_start;
+    if (!total || !start) return 0;
+    const totalMs = total * this.DAY_MS;
+    const elapsedMs = Date.now() - new Date(start).getTime();
     return Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100));
   });
 
@@ -1233,6 +1237,7 @@ export class MySubscriptionComponent implements OnInit {
     const returnUrl = `${window.location.origin}/admin/subscription`;
     this.subscriptionService
       .retryPayment({ returnUrl })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.retryingPayment.set(false);
@@ -1268,18 +1273,21 @@ export class MySubscriptionComponent implements OnInit {
                 this.facade.loadCurrent();
                 return;
               }
-              this.subscriptionService.cancelPendingChange().subscribe({
-                next: () => {
-                  this.facade.loadCurrent();
-                  this.toastService.info('Cambio cancelado');
-                },
-                error: () => {
-                  this.facade.loadCurrent();
-                  this.toastService.warning(
-                    'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
-                  );
-                },
-              });
+              this.subscriptionService
+                .cancelPendingChange()
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe({
+                  next: () => {
+                    this.facade.loadCurrent();
+                    this.toastService.info('Cambio cancelado');
+                  },
+                  error: () => {
+                    this.facade.loadCurrent();
+                    this.toastService.warning(
+                      'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
+                    );
+                  },
+                });
             },
             onError: () => {
               this.facade.loadCurrent();
@@ -1311,6 +1319,7 @@ export class MySubscriptionComponent implements OnInit {
     const returnUrl = `${window.location.origin}/admin/subscription`;
     this.subscriptionService
       .retryPayment({ returnUrl })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.retryingPendingChange.set(false);
@@ -1343,18 +1352,21 @@ export class MySubscriptionComponent implements OnInit {
                 this.facade.loadCurrent();
                 return;
               }
-              this.subscriptionService.cancelPendingChange().subscribe({
-                next: () => {
-                  this.facade.loadCurrent();
-                  this.toastService.info('Cambio cancelado');
-                },
-                error: () => {
-                  this.facade.loadCurrent();
-                  this.toastService.warning(
-                    'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
-                  );
-                },
-              });
+              this.subscriptionService
+                .cancelPendingChange()
+                .pipe(takeUntilDestroyed(this.destroyRef))
+                .subscribe({
+                  next: () => {
+                    this.facade.loadCurrent();
+                    this.toastService.info('Cambio cancelado');
+                  },
+                  error: () => {
+                    this.facade.loadCurrent();
+                    this.toastService.warning(
+                      'No pudimos limpiar el cambio. Se eliminará automáticamente en unos minutos.',
+                    );
+                  },
+                });
             },
             onError: () => {
               this.facade.loadCurrent();
@@ -1381,6 +1393,7 @@ export class MySubscriptionComponent implements OnInit {
     this.cancellingPendingChange.set(true);
     this.subscriptionService
       .cancelPendingChange()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.cancellingPendingChange.set(false);

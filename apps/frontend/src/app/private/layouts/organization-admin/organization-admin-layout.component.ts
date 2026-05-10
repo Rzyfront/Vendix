@@ -355,6 +355,11 @@ export class OrganizationAdminLayoutComponent {
           route: '/admin/settings/operating-scope',
         },
         {
+          label: 'Modo fiscal',
+          icon: 'receipt',
+          route: '/admin/settings/fiscal-scope',
+        },
+        {
           label: 'Métodos de Pago',
           icon: 'credit-card',
           route: '/admin/config/payment-methods',

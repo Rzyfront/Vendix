@@ -44,7 +44,7 @@ export interface OrgLocationStoreOption {
  *   - `is_central_warehouse` switch with inline warning + auto store_id clear
  *
  * Follows zoneless patterns: signal inputs/outputs, computed warning state,
- * `effect()` to react to row changes, no take(1)/BehaviorSubject usage.
+ * and `effect()` to react to row changes.
  */
 @Component({
   selector: 'app-org-location-form-modal',

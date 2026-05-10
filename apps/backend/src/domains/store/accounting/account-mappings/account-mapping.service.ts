@@ -300,6 +300,22 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '1435',
     description: 'Inventario (tienda destino)',
   },
+  'intercompany_transfer.shipped.receivable': {
+    code: '1365',
+    description: 'Cuentas por cobrar a vinculados',
+  },
+  'intercompany_transfer.shipped.inventory': {
+    code: '1435',
+    description: 'Inventario transferido a vinculada',
+  },
+  'intercompany_transfer.received.inventory': {
+    code: '1435',
+    description: 'Inventario recibido de vinculada',
+  },
+  'intercompany_transfer.received.payable': {
+    code: '2355',
+    description: 'Cuentas por pagar a vinculados',
+  },
   // Comisiones (Pasarelas de Pago)
   'commission.calculated.commission_expense': {
     code: '5295',

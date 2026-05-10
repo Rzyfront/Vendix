@@ -222,6 +222,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             settings_application: true,
             settings_payment_methods: true,
             settings_operating_scope: true,
+            settings_fiscal_scope: true,
             accounting: true,
             accounting_chart_of_accounts: true,
             accounting_journal_entries: true,

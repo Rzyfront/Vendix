@@ -11,9 +11,16 @@ import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
 import { OrgInventoryModule } from '../inventory/inventory.module';
+import { SettingsModule } from '../../store/settings/settings.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, EmailModule, OrgInventoryModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    EmailModule,
+    OrgInventoryModule,
+    SettingsModule,
+  ],
   controllers: [OnboardingController, OnboardingWizardController],
   providers: [
     OnboardingService,

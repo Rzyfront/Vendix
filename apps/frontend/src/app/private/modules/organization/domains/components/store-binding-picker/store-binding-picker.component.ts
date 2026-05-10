@@ -1,6 +1,7 @@
 import {
   Component,
   ChangeDetectionStrategy,
+  DestroyRef,
   input,
   output,
   signal,
@@ -9,6 +10,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SelectorComponent, IconComponent, SpinnerComponent } from '../../../../../../shared/components/index';
 import { OrganizationStoresService } from '../../../stores/services/organization-stores.service';
 
@@ -70,6 +72,7 @@ export interface StoreOption {
 })
 export class StoreBindingPickerComponent implements OnInit {
   private storesService = inject(OrganizationStoresService);
+  private destroyRef = inject(DestroyRef);
 
   readonly selectedStoreId = input<number | null>(null);
   readonly disabled = input<boolean>(false);
@@ -89,32 +92,37 @@ export class StoreBindingPickerComponent implements OnInit {
 
   private loadStores(): void {
     this.isLoading.set(true);
-    this.storesService.getStores({ limit: 100 }).subscribe({
-      next: (response) => {
-        const rawData = response.data;
-        let storeList: any[] = [];
-        if (Array.isArray(rawData) && rawData.length > 0) {
-          if (Array.isArray(rawData[0])) {
-            storeList = rawData[0] as any[];
-          } else {
-            storeList = rawData as any[];
+    this.storesService
+      .getStores({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const rawData = response.data;
+          let storeList: any[] = [];
+          if (Array.isArray(rawData) && rawData.length > 0) {
+            if (Array.isArray(rawData[0])) {
+              storeList = rawData[0] as any[];
+            } else {
+              storeList = rawData as any[];
+            }
           }
-        }
-        this.stores.set(storeList);
-        this.storeOptions.set([
-          { value: '', label: 'Sin tienda asignada' },
-          ...storeList.map((s: { id: number; name: string }) => ({
-            value: s.id.toString(),
-            label: s.name,
-          })),
-        ]);
-        this.isLoading.set(false);
-      },
-      error: () => {
-        this.isLoading.set(false);
-        this.storeOptions.set([{ value: '', label: 'Error cargando tiendas' }]);
-      },
-    });
+          this.stores.set(storeList);
+          this.storeOptions.set([
+            { value: '', label: 'Sin tienda asignada' },
+            ...storeList.map((s: { id: number; name: string }) => ({
+              value: s.id.toString(),
+              label: s.name,
+            })),
+          ]);
+          this.isLoading.set(false);
+        },
+        error: () => {
+          this.isLoading.set(false);
+          this.storeOptions.set([
+            { value: '', label: 'Error cargando tiendas' },
+          ]);
+        },
+      });
   }
 
   onStoreChange(storeId: string): void {

@@ -1,9 +1,9 @@
-import { Component, model, input, output, signal, inject } from '@angular/core';
+import { Component, DestroyRef, model, input, output, signal, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
   ModalComponent,
-  InputComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
@@ -13,7 +13,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 @Component({
   selector: 'app-verify-email-modal',
   standalone: true,
-  imports: [FormsModule, ButtonComponent, ModalComponent, InputComponent],
+  imports: [FormsModule, ButtonComponent, ModalComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -70,6 +70,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 export class VerifyEmailModalComponent {
   private usersService = inject(UsersService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
@@ -89,18 +90,23 @@ export class VerifyEmailModalComponent {
 
     this.isSending.set(true);
 
-    this.usersService.verifyEmail(user.id).subscribe({
-      next: () => {
-        this.isSending.set(false);
-        this.toastService.success('Enlace de verificación enviado exitosamente');
-        this.onVerified.emit();
-        this.onClose();
-      },
-      error: (err: unknown) => {
-        this.isSending.set(false);
-        const message = extractApiErrorMessage(err);
-        this.toastService.error(message);
-      },
-    });
+    this.usersService
+      .verifyEmail(user.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isSending.set(false);
+          this.toastService.success(
+            'Enlace de verificación enviado exitosamente',
+          );
+          this.onVerified.emit();
+          this.onClose();
+        },
+        error: (err: unknown) => {
+          this.isSending.set(false);
+          const message = extractApiErrorMessage(err);
+          this.toastService.error(message);
+        },
+      });
   }
 }

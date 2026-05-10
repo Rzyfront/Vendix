@@ -97,6 +97,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Stock Transfers
   'stock_transfer.completed.inventory_origin': '1435',
   'stock_transfer.completed.inventory_destination': '1435',
+  'intercompany_transfer.shipped.receivable': '1365',
+  'intercompany_transfer.shipped.inventory': '1435',
+  'intercompany_transfer.received.inventory': '1435',
+  'intercompany_transfer.received.payable': '2355',
   'commission.calculated.expense': '5295',
   'commission.calculated.payable': '2335',
   // Nómina individual — gastos de nómina (débitos)

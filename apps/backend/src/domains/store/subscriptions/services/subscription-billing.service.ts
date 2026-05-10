@@ -245,17 +245,35 @@ export class SubscriptionBillingService {
         // Determine period window. On prorated upgrades we keep the current
         // period window (the upgrade applies immediately to the existing
         // cycle). On regular renewals we advance forward from current end.
+        //
+        // BUGFIX (Loki — re-subscribe / trial → free plan): when issueInvoice
+        // runs as part of a fresh re-subscribe (changeKind ∈ initial |
+        // resubscribe | trial_conversion), applyResubscribe/createFresh has
+        // ALREADY reset the period to [now, now + cycle]. Advancing forward
+        // from `current_period_end` here would push the new period a full
+        // cycle into the future and leave the UI showing "active but starts
+        // on <future date>" (Loki: state=active, current_period_start = old
+        // trial_ends_at + cycle). For these change kinds we anchor to the
+        // freshly-reset window starting at `current_period_start`.
         const now = new Date();
+        const isFreshChange =
+          opts.changeKind === 'initial' ||
+          opts.changeKind === 'resubscribe' ||
+          opts.changeKind === 'trial_conversion';
         const basePeriodStart = opts.invoicePreview
           ? new Date(opts.invoicePreview.period_start)
           : opts.prorated
             ? (sub.current_period_start ?? now)
-            : (sub.current_period_end ?? now);
+            : isFreshChange
+              ? (sub.current_period_start ?? now)
+              : (sub.current_period_end ?? now);
         const basePeriodEnd = opts.invoicePreview
           ? new Date(opts.invoicePreview.period_end)
           : opts.prorated
             ? (sub.current_period_end ?? new Date(now.getTime() + cycleMs))
-            : new Date((sub.current_period_end ?? now).getTime() + cycleMs);
+            : isFreshChange
+              ? (sub.current_period_end ?? new Date(now.getTime() + cycleMs))
+              : new Date((sub.current_period_end ?? now).getTime() + cycleMs);
 
         const quantity = 1;
         const unitPrice =

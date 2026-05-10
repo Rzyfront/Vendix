@@ -156,6 +156,7 @@ model users {
 
   // Operating scope audit trail (Phase 4 wizard)
   operating_scope_audit_changes operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
+  fiscal_scope_audit_changes    fiscal_scope_audit_log[]    @relation("fiscal_scope_audit_changed_by")
 
   @@index([email_verified])
   @@index([state])
@@ -345,6 +346,7 @@ model organizations {
   state                         organization_state_enum           @default(draft)
   account_type                  organization_account_type_enum    @default(SINGLE_STORE)
   operating_scope               organization_operating_scope_enum @default(STORE)
+  fiscal_scope                  fiscal_scope_enum                 @default(STORE)
   created_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   onboarding                    Boolean                           @default(false)
@@ -436,10 +438,12 @@ model organizations {
 
   // Operating scope audit trail (configurability — Phase 4 wizard)
   operating_scope_audit_log operating_scope_audit_log[]
+  fiscal_scope_audit_log    fiscal_scope_audit_log[]
 
   @@index([onboarding])
   @@index([account_type])
   @@index([operating_scope])
+  @@index([fiscal_scope])
   @@index([mode])
   @@index([is_partner])
 }
@@ -458,6 +462,23 @@ model operating_scope_audit_log {
 
   @@index([organization_id, changed_at(sort: Desc)])
   @@map("operating_scope_audit_log")
+}
+
+model fiscal_scope_audit_log {
+  id                 Int               @id @default(autoincrement())
+  organization_id    Int
+  previous_value     fiscal_scope_enum
+  new_value          fiscal_scope_enum
+  changed_by_user_id Int
+  changed_at         DateTime          @default(now()) @db.Timestamp(6)
+  reason             String?           @db.Text
+  blocker_snapshot   Json?
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users         @relation("fiscal_scope_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@map("fiscal_scope_audit_log")
 }
 
 model organization_onboarding_state {
@@ -2488,6 +2509,11 @@ enum organization_operating_scope_enum {
   ORGANIZATION
 }
 
+enum fiscal_scope_enum {
+  STORE
+  ORGANIZATION
+}
+
 enum organization_mode_enum {
   production
   demo
@@ -3529,6 +3555,7 @@ model accounting_entities {
   organization_id Int
   store_id        Int?
   scope           organization_operating_scope_enum
+  fiscal_scope    fiscal_scope_enum                 @default(STORE)
   name            String                            @db.VarChar(255)
   legal_name      String?                           @db.VarChar(255)
   tax_id          String?                           @db.VarChar(50)
@@ -3540,12 +3567,14 @@ model accounting_entities {
   store                         stores?                         @relation(fields: [store_id], references: [id], onDelete: Restrict)
   chart_of_accounts             chart_of_accounts[]
   accounting_account_mappings   accounting_account_mappings[]
+  dian_configurations           dian_configurations[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
 
-  @@unique([organization_id, store_id, scope], map: "accounting_entities_organization_store_scope_key")
+  @@unique([organization_id, store_id, scope, fiscal_scope], map: "accounting_entities_org_store_scope_fiscal_scope_key")
   @@index([organization_id, scope], map: "accounting_entities_organization_scope_idx")
+  @@index([organization_id, fiscal_scope], map: "accounting_entities_organization_fiscal_scope_idx")
   @@index([store_id], map: "accounting_entities_store_id_idx")
   @@index([organization_id, is_active], map: "accounting_entities_organization_active_idx")
 }
@@ -3836,6 +3865,7 @@ model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
   store_id                       Int
+  accounting_entity_id           Int?
   name                           String                       @db.VarChar(100)
   nit                            String                       @db.VarChar(20)
   nit_type                       dian_nit_type_enum           @default(NIT)
@@ -3856,11 +3886,13 @@ model dian_configurations {
 
   organization    organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dian_audit_logs dian_audit_logs[]
 
   @@unique([store_id, nit])
   @@index([store_id])
   @@index([organization_id])
+  @@index([accounting_entity_id])
 }
 
 model dian_audit_logs {
@@ -4646,7 +4678,11 @@ model consolidation_sessions {
 model intercompany_transactions {
   id                   Int       @id @default(autoincrement())
   organization_id      Int
-  session_id           Int
+  session_id           Int?
+  origin               String    @default("consolidation") @db.VarChar(50)
+  source_type          String?   @db.VarChar(50)
+  source_id            Int?
+  status               String    @default("open") @db.VarChar(30)
   from_store_id        Int
   to_store_id          Int
   entry_id             Int
@@ -4658,7 +4694,7 @@ model intercompany_transactions {
   created_at           DateTime? @default(now()) @db.Timestamp(6)
 
   organization organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  session      consolidation_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  session      consolidation_sessions? @relation(fields: [session_id], references: [id], onDelete: Cascade)
   from_store   stores                 @relation("ic_from_store", fields: [from_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   to_store     stores                 @relation("ic_to_store", fields: [to_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   entry        accounting_entries     @relation("ic_entry", fields: [entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -4667,6 +4703,8 @@ model intercompany_transactions {
 
   @@index([session_id])
   @@index([organization_id, from_store_id, to_store_id])
+  @@index([organization_id, source_type, source_id])
+  @@index([organization_id, status])
 }
 
 model consolidation_adjustments {

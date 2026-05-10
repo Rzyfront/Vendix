@@ -3,11 +3,11 @@ import {
   OnInit,
   inject,
   signal,
+  computed,
   model,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   Role,
   RoleQueryDto,
@@ -16,26 +16,17 @@ import {
 } from './interfaces/role.interface';
 import { OrgRolesService } from './services/org-roles.service';
 import {
+  OrgRolesListComponent,
   RoleCreateModalComponent,
   RoleEditModalComponent,
   PermissionTreeSelectorComponent,
 } from './components/index';
 
 import {
-  TableColumn,
-  TableAction,
-  InputsearchComponent,
-  ButtonComponent,
   DialogService,
   ToastService,
   StatsComponent,
-  ResponsiveDataViewComponent,
-  ItemListCardConfig,
-  EmptyStateComponent,
-  IconComponent,
 } from '../../../../shared/components/index';
-
-import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup } from '@angular/forms';
 
 interface StatItem {
   title: string;
@@ -50,17 +41,11 @@ interface StatItem {
   selector: 'app-roles',
   standalone: true,
   imports: [
-    FormsModule,
-    ReactiveFormsModule,
     RoleCreateModalComponent,
     RoleEditModalComponent,
     PermissionTreeSelectorComponent,
-    EmptyStateComponent,
-    ResponsiveDataViewComponent,
-    InputsearchComponent,
-    ButtonComponent,
     StatsComponent,
-    IconComponent,
+    OrgRolesListComponent,
   ],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],
@@ -68,11 +53,26 @@ interface StatItem {
 export class RolesComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private rolesService = inject(OrgRolesService);
-  private fb = inject(FormBuilder);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
 
   readonly roles = signal<Role[]>([]);
+  readonly searchTerm = signal('');
+  readonly typeFilter = signal('');
+  readonly filteredRoles = computed(() => {
+    const type = this.typeFilter();
+    const roles = this.roles();
+
+    if (type === 'system') {
+      return roles.filter((role) => role.system_role);
+    }
+
+    if (type === 'custom') {
+      return roles.filter((role) => !role.system_role);
+    }
+
+    return roles;
+  });
   readonly roleStats = signal<RoleStats | null>(null);
   readonly statsItems = signal<StatItem[]>([]);
   readonly isLoading = signal(false);
@@ -82,131 +82,6 @@ export class RolesComponent implements OnInit {
   readonly showPermissionsModal = model<boolean>(false);
   readonly isSubmitting = signal(false);
 
-  filterForm: FormGroup;
-  private searchSubject = new Subject<string>();
-
-  tableColumns: TableColumn[] = [
-    {
-      key: 'name',
-      label: 'Nombre',
-      sortable: true,
-      priority: 1,
-    },
-    {
-      key: 'description',
-      label: 'Descripción',
-      sortable: true,
-      priority: 2,
-    },
-    {
-      key: 'system_role',
-      label: 'Tipo',
-      sortable: true,
-      badge: true,
-      priority: 1,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          true: '#3b82f6',
-          false: '#10b981',
-        },
-      },
-      transform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
-    },
-    {
-      key: '_count.user_roles',
-      label: 'Usuarios',
-      sortable: true,
-      defaultValue: '0',
-      priority: 3,
-    },
-    {
-      key: 'permissions',
-      label: 'Permisos',
-      sortable: false,
-      priority: 3,
-      transform: (permissions: string[]) => {
-        if (!permissions || permissions.length === 0) {
-          return 'Sin permisos';
-        }
-        return permissions.length === 1
-          ? permissions[0]
-          : `${permissions.length} permisos`;
-      },
-    },
-    {
-      key: 'created_at',
-      label: 'Fecha Creación',
-      sortable: true,
-      priority: 3,
-      transform: (value: string) => this.formatDate(value),
-    },
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'name',
-    subtitleKey: 'description',
-    badgeKey: 'system_role',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: {
-        true: '#3b82f6',
-        false: '#10b981',
-      },
-    },
-    badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
-    detailKeys: [
-      { key: '_count.user_roles', label: 'Usuarios', icon: 'users' },
-      {
-        key: 'created_at',
-        label: 'Fecha',
-        transform: (v) => this.formatDate(v),
-      },
-    ],
-  };
-
-  tableActions: TableAction[] = [
-    {
-      label: 'Editar',
-      icon: 'edit',
-      action: (role: Role) => this.editRole(role),
-      variant: 'info',
-    },
-    {
-      label: 'Permisos',
-      icon: 'shield',
-      action: (role: Role) => this.openPermissionsModal(role),
-      variant: 'ghost',
-    },
-    {
-      label: 'Eliminar',
-      icon: 'trash-2',
-      action: (role: Role) => this.confirmDelete(role),
-      variant: 'danger',
-      disabled: (role: Role) =>
-        role.system_role || (role._count?.user_roles ?? 0) > 0,
-    },
-  ];
-
-  constructor() {
-    this.filterForm = this.fb.group({
-      search: [''],
-    });
-
-    this.searchSubject
-      .pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((searchTerm: string) => {
-        this.filterForm.patchValue({ search: searchTerm }, { emitEvent: false });
-        this.loadRoles();
-      });
-  }
-
   ngOnInit(): void {
     this.loadRoles();
     this.loadRoleStats();
@@ -214,9 +89,8 @@ export class RolesComponent implements OnInit {
 
   loadRoles(): void {
     this.isLoading.set(true);
-    const filters = this.filterForm.value;
     const query: RoleQueryDto = {
-      search: filters.search || undefined,
+      search: this.searchTerm() || undefined,
     };
 
     this.rolesService
@@ -298,7 +172,12 @@ export class RolesComponent implements OnInit {
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchSubject.next(searchTerm);
+    this.searchTerm.set(searchTerm);
+    this.loadRoles();
+  }
+
+  onFilterChange(filters: Record<string, string>): void {
+    this.typeFilter.set(filters['type'] || '');
   }
 
   refreshRoles(): void {
@@ -360,6 +239,24 @@ export class RolesComponent implements OnInit {
         this.toastService.error('Error al eliminar el rol');
       },
     });
+  }
+
+  onSortChange(event: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
+    if (!event.direction) return;
+
+    const sorted = [...this.roles()].sort((a, b) => {
+      const valueA = this.getSortValue(a, event.column);
+      const valueB = this.getSortValue(b, event.column);
+
+      if (valueA < valueB) return event.direction === 'asc' ? -1 : 1;
+      if (valueA > valueB) return event.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    this.roles.set(sorted);
   }
 
   onRoleCreated(roleData: { name: string; description?: string }): void {
@@ -476,31 +373,22 @@ export class RolesComponent implements OnInit {
     });
   }
 
-  getEmptyStateTitle(): string {
-    const filters = this.filterForm.value;
-    if (filters.search) {
-      return 'No hay roles que coincidan';
-    }
-    return 'No hay roles';
-  }
+  private getSortValue(role: Role, path: string): string | number {
+    const value = path
+      .split('.')
+      .reduce<unknown>(
+        (current, key) =>
+          current && typeof current === 'object'
+            ? (current as Record<string, unknown>)[key]
+            : undefined,
+        role,
+      );
 
-  getEmptyStateDescription(): string {
-    const filters = this.filterForm.value;
-    if (filters.search) {
-      return 'Intenta ajustar los filtros de búsqueda';
-    }
-    return 'Comienza creando tu primer rol personalizado.';
-  }
+    if (Array.isArray(value)) return value.length;
+    if (typeof value === 'string') return value.toLowerCase();
+    if (typeof value === 'number') return value;
+    if (typeof value === 'boolean') return value ? 1 : 0;
 
-  formatDate(dateString: string): string {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('es-ES', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    return '';
   }
 }

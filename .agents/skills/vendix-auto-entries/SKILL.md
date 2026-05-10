@@ -78,6 +78,7 @@ Mapping key convention: `{event}.{account_role}`. Cost-center variants use `{eve
 - `expense.refunded`
 - `expense.cancelled`
 - `accounting.saas_subscription_payment.succeeded`
+- `intercompany_transfer.shipped` and `intercompany_transfer.received` are generated internally from `stock_transfer.completed` when fiscal scope is STORE and source/destination stores differ.
 
 ## createAutoEntry Rules
 
@@ -100,6 +101,24 @@ Mapping key convention: `{event}.{account_role}`. Cost-center variants use `{eve
 7. Add an `@OnEvent()` listener with try/catch and numeric normalization.
 8. Emit the event after the main transaction succeeds.
 9. Run the seed in the target environment so org mappings exist.
+
+## Intercompany Stock Transfer Entries
+
+When `operating_scope=ORGANIZATION` and `fiscal_scope=STORE`, a cross-store stock transfer is operationally allowed but fiscally intercompany. The `stock_transfer.completed` listener calls `AutoEntryService.onStockTransferCompleted()`, which branches to intercompany handling through `FiscalScopeService.isIntercompanyTransfer()`.
+
+Required mapping keys:
+
+- `intercompany_transfer.shipped.receivable` — debit CxC vinculados, default PUC `1365`.
+- `intercompany_transfer.shipped.inventory` — credit inventory from source store, default PUC `1435`.
+- `intercompany_transfer.received.inventory` — debit inventory in destination store, default PUC `1435`.
+- `intercompany_transfer.received.payable` — credit CxP vinculados, default PUC `2355`.
+
+Rules:
+
+- Create two posted accounting entries, one for the source store entity and one for the destination store entity.
+- Link them through `intercompany_transactions` with `origin='stock_transfer'`, `source_type='stock_transfer'`, and `source_id=transfer_id`.
+- If fiscal scope is ORGANIZATION or source/destination stores are the same/missing, fall back to the normal stock-transfer entry.
+- Log when stock-transfer auto-entry flow is disabled or when a transfer is not intercompany; silent skips make accounting diagnosis difficult.
 
 ## Current Risk To Know
 

@@ -141,53 +141,136 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 
         <!-- Notifications + User Dropdown -->
         <div class="flex-shrink-0 flex items-center gap-2">
-          <!-- Operating Scope Chip (ORG_ADMIN only, when authenticated) -->
+          <!-- Scope Chips (ORG_ADMIN only, when authenticated) -->
           @if (show_scope_chip()) {
-            <!-- Mobile: icon-only -->
-            <button
-              type="button"
-              (click)="onScopeChipClick()"
-              class="md:hidden inline-flex items-center justify-center h-11 w-11 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
-              [attr.aria-label]="
-                'Modo operativo: ' +
-                scope_label() +
-                '. Cambiar configuración.'
-              "
-              [title]="'Modo: ' + scope_label()"
-            >
-              <app-icon
-                [name]="is_org_scope() ? 'building' : 'store'"
-                [size]="20"
-                [class]="
-                  is_org_scope() ? 'text-blue-600' : 'text-slate-600'
+            @if (scopes_match()) {
+              <!-- Combined chip when operating === fiscal -->
+              <!-- Mobile: icon-only -->
+              <button
+                type="button"
+                (click)="onScopeChipClick()"
+                class="md:hidden inline-flex items-center justify-center h-11 w-11 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo operativo y fiscal: ' +
+                  scope_label() +
+                  '. Cambiar configuración.'
                 "
-              ></app-icon>
-            </button>
-            <!-- Desktop: icon + text via app-badge -->
-            <button
-              type="button"
-              (click)="onScopeChipClick()"
-              class="hidden md:inline-flex items-center justify-center min-h-[44px] px-1 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
-              [attr.aria-label]="
-                'Modo operativo: ' +
-                scope_label() +
-                '. Cambiar configuración.'
-              "
-              [title]="'Cambiar modo operativo'"
-            >
-              <app-badge
-                [variant]="is_org_scope() ? 'info' : 'neutral'"
-                size="sm"
+                [title]="'Modo: ' + scope_label()"
               >
-                <span class="inline-flex items-center gap-1.5">
-                  <app-icon
-                    [name]="is_org_scope() ? 'building' : 'store'"
-                    [size]="14"
-                  ></app-icon>
-                  <span>Modo: {{ scope_label() }}</span>
-                </span>
-              </app-badge>
-            </button>
+                <app-icon
+                  [name]="is_org_scope() ? 'building' : 'store'"
+                  [size]="20"
+                  [class]="
+                    is_org_scope() ? 'text-blue-600' : 'text-slate-600'
+                  "
+                ></app-icon>
+              </button>
+              <!-- Desktop: icon + text via app-badge -->
+              <button
+                type="button"
+                (click)="onScopeChipClick()"
+                class="hidden md:inline-flex items-center justify-center min-h-[44px] px-1 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo operativo y fiscal: ' +
+                  scope_label() +
+                  '. Cambiar configuración.'
+                "
+                [title]="'Modo operativo y fiscal coinciden'"
+              >
+                <app-badge
+                  [variant]="is_org_scope() ? 'info' : 'neutral'"
+                  size="sm"
+                >
+                  <span class="inline-flex items-center gap-1.5">
+                    <app-icon
+                      [name]="is_org_scope() ? 'building' : 'store'"
+                      [size]="14"
+                    ></app-icon>
+                    <span>Modo: {{ scope_label() }}</span>
+                  </span>
+                </app-badge>
+              </button>
+            } @else {
+              <!-- Two chips when operating and fiscal differ -->
+              <!-- Operating: Mobile -->
+              <button
+                type="button"
+                (click)="onScopeChipClick()"
+                class="md:hidden inline-flex items-center justify-center h-11 w-11 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo operativo: ' + scope_label() + '. Cambiar configuración.'
+                "
+                [title]="'Op: ' + scope_label()"
+              >
+                <app-icon
+                  [name]="is_org_scope() ? 'building' : 'store'"
+                  [size]="20"
+                  [class]="is_org_scope() ? 'text-blue-600' : 'text-slate-600'"
+                ></app-icon>
+              </button>
+              <!-- Operating: Desktop -->
+              <button
+                type="button"
+                (click)="onScopeChipClick()"
+                class="hidden md:inline-flex items-center justify-center min-h-[44px] px-1 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo operativo: ' + scope_label() + '. Cambiar configuración.'
+                "
+                [title]="'Cambiar modo operativo'"
+              >
+                <app-badge
+                  [variant]="is_org_scope() ? 'info' : 'neutral'"
+                  size="sm"
+                >
+                  <span class="inline-flex items-center gap-1.5">
+                    <app-icon
+                      [name]="is_org_scope() ? 'building' : 'store'"
+                      [size]="14"
+                    ></app-icon>
+                    <span>Op: {{ scope_label() }}</span>
+                  </span>
+                </app-badge>
+              </button>
+              <!-- Fiscal: Mobile -->
+              <button
+                type="button"
+                (click)="onFiscalChipClick()"
+                class="md:hidden inline-flex items-center justify-center h-11 w-11 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo fiscal: ' + fiscal_label() + '. Cambiar configuración.'
+                "
+                [title]="'Fis: ' + fiscal_label()"
+              >
+                <app-icon
+                  [name]="is_org_fiscal() ? 'landmark' : 'receipt'"
+                  [size]="20"
+                  [class]="is_org_fiscal() ? 'text-emerald-600' : 'text-slate-600'"
+                ></app-icon>
+              </button>
+              <!-- Fiscal: Desktop -->
+              <button
+                type="button"
+                (click)="onFiscalChipClick()"
+                class="hidden md:inline-flex items-center justify-center min-h-[44px] px-1 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
+                [attr.aria-label]="
+                  'Modo fiscal: ' + fiscal_label() + '. Cambiar configuración.'
+                "
+                [title]="'Cambiar modo fiscal'"
+              >
+                <app-badge
+                  [variant]="is_org_fiscal() ? 'success' : 'neutral'"
+                  size="sm"
+                >
+                  <span class="inline-flex items-center gap-1.5">
+                    <app-icon
+                      [name]="is_org_fiscal() ? 'landmark' : 'receipt'"
+                      [size]="14"
+                    ></app-icon>
+                    <span>Fis: {{ fiscal_label() }}</span>
+                  </span>
+                </app-badge>
+              </button>
+            }
           }
           <app-help-search-overlay></app-help-search-overlay>
           <app-notifications-dropdown></app-notifications-dropdown>
@@ -278,6 +361,21 @@ export class HeaderComponent {
   readonly scope_label = computed(() =>
     this.is_org_scope() ? 'ORG' : 'STORE',
   );
+  /** True when current fiscal_scope === 'ORGANIZATION' (else STORE). */
+  readonly is_org_fiscal = computed(
+    () => this.authFacade.fiscalScope() === 'ORGANIZATION',
+  );
+  /** Short label shown in the fiscal desktop badge: 'ORG' or 'STORE'. */
+  readonly fiscal_label = computed(() =>
+    this.is_org_fiscal() ? 'ORG' : 'STORE',
+  );
+  /**
+   * True when operating_scope === fiscal_scope. Drives the smart-collapse:
+   * a single chip when modes match, two chips when they diverge.
+   */
+  readonly scopes_match = computed(
+    () => this.authFacade.operatingScope() === this.authFacade.fiscalScope(),
+  );
   /**
    * Show chip only when authenticated and inside ORG_ADMIN. Avoids leaking
    * the org scope chip into STORE_ADMIN, SUPER_ADMIN, or public/auth screens.
@@ -321,5 +419,13 @@ export class HeaderComponent {
    */
   onScopeChipClick(): void {
     this.router.navigate(['/admin/settings/operating-scope']);
+  }
+
+  /**
+   * Navigate to the fiscal-scope settings page. Only callable from
+   * ORG_ADMIN since the chip is gated by `show_scope_chip()`.
+   */
+  onFiscalChipClick(): void {
+    this.router.navigate(['/admin/settings/fiscal-scope']);
   }
 }

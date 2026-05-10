@@ -21,6 +21,11 @@ export class OrgFinancialReportQueryDto {
   store_id?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  accounting_entity_id?: number;
+
+  @IsOptional()
   @IsDateString()
   date_from?: string;
 

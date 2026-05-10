@@ -1,6 +1,13 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  OnInit,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { FormBuilder, FormGroup } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../environments/environment';
 
 import {
@@ -41,10 +48,11 @@ import './orders-list.component.css';
   ],
   templateUrl: './orders-list.component.html',
 })
-export class OrdersListComponent implements OnInit, OnDestroy {
+export class OrdersListComponent implements OnInit {
   private ordersService = inject(OrganizationOrdersService);
   private currencyService = inject(CurrencyFormatService);
   private fb = inject(FormBuilder);
+  private destroyRef = inject(DestroyRef);
 
   readonly orders = signal<OrderListItem[]>([]);
   readonly isLoading = signal(false);
@@ -176,8 +184,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   filterForm!: FormGroup;
 
-  private subscriptions: Subscription[] = [];
-
   constructor() {
     this.initializeFilterForm();
     this.initializeTableConfig();
@@ -234,10 +240,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.loadAvailableStores();
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
   private initializeFilterForm(): void {
     this.filterForm = this.fb.group({
       search: [''],
@@ -283,23 +285,24 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     if (this.selectedDateFrom) queryParams.date_from = this.selectedDateFrom;
     if (this.selectedDateTo) queryParams.date_to = this.selectedDateTo;
 
-    const sub = this.ordersService.getOrders(queryParams).subscribe({
-      next: (response) => {
-        if (response.success && response.data) {
-          this.orders.set(response.data);
-        } else {
+    this.ordersService
+      .getOrders(queryParams)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data) {
+            this.orders.set(response.data);
+          } else {
+            this.orders.set([]);
+          }
+          this.isLoading.set(false);
+        },
+        error: (error) => {
+          console.error('Error loading orders:', error);
           this.orders.set([]);
-        }
-        this.isLoading.set(false);
-      },
-      error: (error) => {
-        console.error('Error loading orders:', error);
-        this.orders.set([]);
-        this.isLoading.set(false);
-      },
-    });
-
-    this.subscriptions.push(sub);
+          this.isLoading.set(false);
+        },
+      });
   }
 
   loadStats(): void {
@@ -308,26 +311,23 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     if (this.selectedDateFrom) params.date_from = this.selectedDateFrom;
     if (this.selectedDateTo) params.date_to = this.selectedDateTo;
 
-    const sub = this.ordersService.getOrderStats(
-      params.date_from,
-      params.date_to,
-      params.store_id
-    ).subscribe({
-      next: (response) => {
-        if (response.success && response.data) {
-          this.stats.set({
-            ...response.data,
-            orders_by_store: response.data.orders_by_store || [],
-            recent_orders: [],
-          });
-        }
-      },
-      error: (error) => {
-        console.error('Error loading stats:', error);
-      },
-    });
-
-    this.subscriptions.push(sub);
+    this.ordersService
+      .getOrderStats(params.date_from, params.date_to, params.store_id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data) {
+            this.stats.set({
+              ...response.data,
+              orders_by_store: response.data.orders_by_store || [],
+              recent_orders: [],
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error loading stats:', error);
+        },
+      });
   }
 
   refreshOrders(): void {
@@ -387,21 +387,22 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   printInvoice(order: OrderListItem): void {
-    const sub = this.ordersService.printInvoice(order.id).subscribe({
-      next: (blob) => {
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `invoice-${order.order_number}.pdf`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-      },
-      error: (error) => {
-        console.error('Error printing invoice:', error);
-      },
-    });
-
-    this.subscriptions.push(sub);
+    this.ordersService
+      .printInvoice(order.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `invoice-${order.order_number}.pdf`;
+          link.click();
+          window.URL.revokeObjectURL(url);
+        },
+        error: (error) => {
+          console.error('Error printing invoice:', error);
+        },
+      });
   }
 
   exportOrders(): void {
