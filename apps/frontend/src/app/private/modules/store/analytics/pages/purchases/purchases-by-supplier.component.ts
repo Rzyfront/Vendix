@@ -246,6 +246,7 @@ export class PurchasesBySupplierComponent implements OnInit {
     const sorted = [...data].sort((a, b) => b.total_spent - a.total_spent);
     const suppliers = sorted.map(s => s.supplier_name);
     const values = sorted.map(s => s.total_spent);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     this.chartOptions.set({
       tooltip: {
@@ -259,7 +260,11 @@ export class PurchasesBySupplierComponent implements OnInit {
           return html;
         },
       },
-      legend: { data: suppliers, bottom: 30, textStyle: { color: '#6b7280' } },
+      legend: {
+        data: suppliers,
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
+      },
       grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
@@ -270,17 +275,20 @@ export class PurchasesBySupplierComponent implements OnInit {
       yAxis: {
         type: 'value',
         min: 0,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: '#6b7280', formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO', { maximumFractionDigits: 0 }) },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: suppliers.map((supplier, i) => ({
-          name: supplier,
-          type: 'bar' as const,
-          data: [values[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
+      series: [{
+        name: 'Gasto por Proveedor',
+        type: 'bar' as const,
+        data: values.map((v, i) => ({
+          value: v,
+          itemStyle: { color: colors[i % colors.length] }
         })),
+        barMaxWidth: 50,
+      }],
     });
   }
 
