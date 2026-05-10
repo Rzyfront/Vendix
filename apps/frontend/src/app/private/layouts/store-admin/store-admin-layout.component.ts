@@ -24,6 +24,7 @@ import { TourService } from '../../../shared/components/tour/services/tour.servi
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
@@ -40,6 +41,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     OnboardingModalComponent,
     TourModalComponent,
     SubscriptionBannerComponent,
+    FiscalObligationBannerComponent,
     PaywallOutletComponent,
   ],
   template: `
@@ -127,6 +129,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
         </app-header>
 
         <app-subscription-banner />
+        <app-fiscal-obligation-banner />
 
         <!-- Page Content -->
         <main
@@ -621,6 +624,11 @@ export class StoreAdminLayoutComponent {
           label: 'Seguridad',
           icon: 'circle',
           route: '/admin/settings/security',
+        },
+        {
+          label: 'Manejo fiscal',
+          icon: 'circle',
+          route: '/admin/settings/fiscal',
         },
         {
           label: 'Dominios',

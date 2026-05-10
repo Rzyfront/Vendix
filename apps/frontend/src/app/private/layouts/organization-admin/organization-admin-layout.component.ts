@@ -19,6 +19,7 @@ import { OnboardingModalComponent } from '../../../shared/components/onboarding-
 // store-scoped only; org-level renders would either flash stale data or show
 // the wrong tienda's status.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 import { map } from 'rxjs/operators';
@@ -45,6 +46,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     HeaderComponent,
     OnboardingModalComponent,
     PaywallOutletComponent,
+    FiscalObligationBannerComponent,
   ],
   template: `
     <div class="flex">
@@ -77,6 +79,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         </app-header>
 
         <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
+        <app-fiscal-obligation-banner />
 
         <!-- Page Content (Scrollable) -->
         <main
@@ -358,6 +361,11 @@ export class OrganizationAdminLayoutComponent {
           label: 'Modo fiscal',
           icon: 'receipt',
           route: '/admin/settings/fiscal-scope',
+        },
+        {
+          label: 'Manejo fiscal',
+          icon: 'receipt',
+          route: '/admin/settings/fiscal',
         },
         {
           label: 'Métodos de Pago',

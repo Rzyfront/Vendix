@@ -110,4 +110,9 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ModuleFlowsSettingsDto)
   module_flows?: ModuleFlowsSettingsDto;
+
+  @ApiProperty({ required: false, description: 'Semantic fiscal status block' })
+  @IsOptional()
+  @IsObject()
+  fiscal_status?: Record<string, unknown>;
 }

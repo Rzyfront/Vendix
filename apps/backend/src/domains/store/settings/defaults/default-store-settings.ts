@@ -1,5 +1,6 @@
 import { StoreSettings } from '../interfaces/store-settings.interface';
 import { CURRENT_SCHEMA_VERSION } from '../migrations/settings-migrator.service';
+import { createDefaultFiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 
 export function getDefaultStoreSettings(): StoreSettings {
   return {
@@ -221,6 +222,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: true,
+        settings_fiscal_management: true,
 
         // Ayuda
         help: true,
@@ -289,6 +291,8 @@ export function getDefaultStoreSettings(): StoreSettings {
         enabled: false,
       },
     },
+
+    fiscal_status: createDefaultFiscalStatusBlock(),
 
     // Reservations - Booking reminders, confirmation, and check-in
     reservations: {

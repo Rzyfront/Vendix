@@ -139,6 +139,7 @@ export class MenuFilterService {
     Operación: ['settings_operations', 'settings'],
     'Modo operativo': ['settings_operating_scope', 'settings'],
     'Modo fiscal': ['settings_fiscal_scope', 'settings'],
+    'Manejo fiscal': ['settings_fiscal_management', 'settings'],
     'Configuración de Aplicación': ['settings_application', 'settings'],
     General: ['settings_general', 'settings_application'],
     'Métodos de Pago': ['settings_payment_methods', 'settings_payments', 'settings'],

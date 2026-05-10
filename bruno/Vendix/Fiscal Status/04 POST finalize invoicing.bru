@@ -1,0 +1,30 @@
+meta {
+  name: 04 POST finalize invoicing
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/finalize
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "selected_areas": ["invoicing"]
+  }
+}
+
+tests {
+  test("finalizes wizard and sets invoicing ACTIVE", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status.invoicing.state).to.equal('ACTIVE');
+    expect(body.fiscal_status.invoicing.activated_at).to.not.be.null;
+  });
+}

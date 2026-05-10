@@ -837,6 +837,18 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/settings/apply-template',
       method: 'POST',
     },
+    {
+      name: 'store:settings:fiscal_status:read',
+      description: 'Leer estado fiscal de tienda',
+      path: '/api/store/settings/fiscal-status',
+      method: 'GET',
+    },
+    {
+      name: 'store:settings:fiscal_status:write',
+      description: 'Gestionar estado fiscal de tienda',
+      path: '/api/store/settings/fiscal-status',
+      method: 'POST',
+    },
 
     // Metadata y Recolección de Datos
     {
@@ -1585,6 +1597,18 @@ export async function seedPermissionsAndRoles(
       description:
         'Migrar fiscal_scope (STORE ↔ ORGANIZATION) vía wizard con audit log',
       path: '/organization/settings/fiscal-scope/apply',
+      method: 'POST',
+    },
+    {
+      name: 'organization:settings:fiscal_status:read',
+      description: 'Leer estado fiscal de organización',
+      path: '/organization/settings/fiscal-status',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_status:write',
+      description: 'Gestionar estado fiscal de organización',
+      path: '/organization/settings/fiscal-status',
       method: 'POST',
     },
 

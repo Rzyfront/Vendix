@@ -1,5 +1,11 @@
 import { createSelector, createFeatureSelector } from '@ngrx/store';
 import { AuthState } from './auth.reducer';
+import {
+  FiscalArea,
+  FiscalStatusBlock,
+  fiscalAreaHasPendingSignal,
+  FISCAL_AREAS,
+} from '../../models/fiscal-status.model';
 
 export const selectAuthState = createFeatureSelector<AuthState>('auth');
 
@@ -16,6 +22,14 @@ export const selectUserSettings = createSelector(
 export const selectStoreSettings = createSelector(
   selectAuthState,
   (state: AuthState) => state.store_settings,
+);
+
+export const selectOrganizationSettings = createSelector(
+  selectUser,
+  (user: any) =>
+    user?.organizations?.organization_settings?.settings ||
+    user?.store?.organizations?.organization_settings?.settings ||
+    null,
 );
 
 export const selectPermissions = createSelector(
@@ -254,6 +268,39 @@ const MODULE_FLOW_PANEL_UI_MAP: Record<string, string[]> = {
   invoicing: ['invoicing'],
 };
 
+export const FISCAL_AREA_PANEL_UI_MAP: Record<FiscalArea, string[]> = {
+  accounting: [
+    'accounting',
+    'accounting_journal_entries',
+    'accounting_fiscal_periods',
+    'accounting_chart_of_accounts',
+    'accounting_reports',
+    'accounting_account_mappings',
+    'accounting_flows_dashboard',
+    'cartera_dashboard',
+    'cartera_receivables',
+    'cartera_payables',
+    'cartera_aging',
+    'accounting_withholding_tax',
+    'accounting_exogenous',
+    'taxes_ica',
+  ],
+  payroll: [
+    'payroll',
+    'payroll_employees',
+    'payroll_runs',
+    'payroll_settlements',
+    'payroll_advances',
+    'payroll_settings',
+  ],
+  invoicing: [
+    'invoicing',
+    'invoicing_invoices',
+    'invoicing_resolutions',
+    'invoicing_dian_config',
+  ],
+};
+
 /** Collects panel_ui keys that should be hidden based on module_flows */
 function getDisabledKeysByModuleFlows(storeSettings: any): Set<string> {
   const disabled = new Set<string>();
@@ -267,26 +314,86 @@ function getDisabledKeysByModuleFlows(storeSettings: any): Set<string> {
   return disabled;
 }
 
+function getDisabledKeysByFiscalStatus(
+  fiscalStatus: FiscalStatusBlock | null,
+): Set<string> {
+  const disabled = new Set<string>();
+  if (!fiscalStatus) return disabled;
+  for (const area of FISCAL_AREAS) {
+    const state = fiscalStatus[area]?.state;
+    if (state !== 'ACTIVE' && state !== 'LOCKED') {
+      FISCAL_AREA_PANEL_UI_MAP[area].forEach((key) => disabled.add(key));
+    }
+  }
+  return disabled;
+}
+
+export function resolveModuleEnabled(
+  settings: any,
+  moduleKey: 'accounting' | 'payroll' | 'invoicing',
+  organizationSettings?: any,
+): boolean {
+  const fiscalStatus =
+    organizationSettings?.fiscal_status || settings?.fiscal_status || null;
+  if (fiscalStatus?.[moduleKey]) {
+    const state = fiscalStatus[moduleKey].state;
+    return state === 'ACTIVE' || state === 'LOCKED';
+  }
+
+  if (settings?.module_flows?.[moduleKey]) {
+    return settings.module_flows[moduleKey].enabled !== false;
+  }
+  if (!settings?.module_flows && moduleKey === 'accounting' && settings?.accounting_flows) {
+    return true;
+  }
+  return !settings?.module_flows;
+}
+
 // Module flows selectors
 export const selectModuleFlows = createSelector(
   selectStoreSettings,
   (storeSettings: any) => storeSettings?.module_flows || null,
 );
 
+export const selectFiscalStatus = createSelector(
+  selectStoreSettings,
+  selectOrganizationSettings,
+  selectUserOrganization,
+  (storeSettings: any, organizationSettings: any, organization: any) => {
+    const fiscalScope = organization?.fiscal_scope || organization?.operating_scope;
+    if (fiscalScope === 'ORGANIZATION') {
+      return (organizationSettings?.fiscal_status || null) as FiscalStatusBlock | null;
+    }
+    return (storeSettings?.fiscal_status || null) as FiscalStatusBlock | null;
+  },
+);
+
+export const selectFiscalArea = (area: FiscalArea) =>
+  createSelector(selectFiscalStatus, (status) => status?.[area] || null);
+
+export const selectActiveFiscalAreas = createSelector(
+  selectFiscalStatus,
+  (status) =>
+    FISCAL_AREAS.filter((area) => {
+      const state = status?.[area]?.state;
+      return state === 'ACTIVE' || state === 'LOCKED';
+    }),
+);
+
+export const selectPendingObligations = createSelector(
+  selectFiscalStatus,
+  (status) =>
+    FISCAL_AREAS.filter((area) =>
+      fiscalAreaHasPendingSignal(area, status?.[area]),
+    ),
+);
+
 export const selectIsModuleFlowEnabled = (module: 'accounting' | 'payroll' | 'invoicing') =>
   createSelector(
     selectStoreSettings,
-    (storeSettings: any) => {
-      if (storeSettings?.module_flows?.[module]) {
-        return storeSettings.module_flows[module].enabled !== false;
-      }
-      // Legacy fallback: no module_flows but accounting_flows exists = implicitly enabled
-      if (!storeSettings?.module_flows && storeSettings?.accounting_flows) {
-        return true;
-      }
-      // No settings at all = disabled by default for new stores
-      return false;
-    },
+    selectOrganizationSettings,
+    (storeSettings: any, organizationSettings: any) =>
+      resolveModuleEnabled(storeSettings, module, organizationSettings),
   );
 
 // Panel UI selectors
@@ -317,18 +424,25 @@ export const selectIsModuleVisible = (moduleKey: string) =>
   createSelector(
     selectCurrentAppPanelUi,
     selectStoreSettings,
-    (panelUi: any, storeSettings: any) => {
+    selectFiscalStatus,
+    (panelUi: any, storeSettings: any, fiscalStatus: FiscalStatusBlock | null) => {
       if (panelUi?.[moduleKey] !== true) return false;
-      return !getDisabledKeysByModuleFlows(storeSettings).has(moduleKey);
+      const disabledKeys = fiscalStatus
+        ? getDisabledKeysByFiscalStatus(fiscalStatus)
+        : getDisabledKeysByModuleFlows(storeSettings);
+      return !disabledKeys.has(moduleKey);
     },
   );
 
 export const selectVisibleModules = createSelector(
   selectCurrentAppPanelUi,
   selectStoreSettings,
-  (panelUi: any, storeSettings: any) => {
+  selectFiscalStatus,
+  (panelUi: any, storeSettings: any, fiscalStatus: FiscalStatusBlock | null) => {
     if (!panelUi || typeof panelUi !== 'object') return [];
-    const disabledKeys = getDisabledKeysByModuleFlows(storeSettings);
+    const disabledKeys = fiscalStatus
+      ? getDisabledKeysByFiscalStatus(fiscalStatus)
+      : getDisabledKeysByModuleFlows(storeSettings);
     return Object.entries(panelUi)
       .filter(([key, visible]) => visible === true && !disabledKeys.has(key))
       .map(([key]) => key);

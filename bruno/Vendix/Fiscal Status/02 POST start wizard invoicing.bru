@@ -1,0 +1,30 @@
+meta {
+  name: 02 POST start wizard invoicing
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/start-wizard
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "selected_areas": ["invoicing"]
+  }
+}
+
+tests {
+  test("starts wizard and moves invoicing to WIP", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status.invoicing.state).to.equal('WIP');
+    expect(body.fiscal_status.invoicing.wizard.step_sequence).to.be.an('array').that.is.not.empty;
+  });
+}

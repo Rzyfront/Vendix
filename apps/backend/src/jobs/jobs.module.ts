@@ -29,6 +29,9 @@ import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
 import { CommissionAccrualJob } from './commission-accrual.job';
 import { SubscriptionDraftCleanupJob } from './subscription-draft-cleanup.job';
 import { SaasMetricsSnapshotJob } from './saas-metrics-snapshot.job';
+import { FiscalObligationDetectorJob } from './fiscal-obligation-detector.job';
+import { FiscalStatusListener } from './fiscal-status.listener';
+import { FiscalStatusService } from '../common/services/fiscal-status.service';
 // PaymentConfirmedEmailJob is intentionally NOT imported here. Its handler
 // logic (job name `payment.confirmed.email`) was consolidated into
 // `EmailNotificationsProcessor` (G10). Registering both as
@@ -93,6 +96,9 @@ import { ResponseModule } from '../common/responses/response.module';
     CommissionAccrualJob,
     SubscriptionDraftCleanupJob,
     SaasMetricsSnapshotJob,
+    FiscalStatusService,
+    FiscalObligationDetectorJob,
+    FiscalStatusListener,
     EmailNotificationsProcessor,
   ],
 })

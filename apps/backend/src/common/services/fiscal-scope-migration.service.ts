@@ -4,7 +4,9 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -18,6 +20,7 @@ import {
   FiscalScopeService,
   OrganizationFiscalScope,
 } from './fiscal-scope.service';
+import { FiscalStatusResolverService } from './fiscal-status-resolver.service';
 import type { OrganizationOperatingScope } from './operating-scope.service';
 
 export interface FiscalScopeMigrationPreview {
@@ -51,6 +54,10 @@ export class FiscalScopeMigrationService {
     private readonly globalPrisma: GlobalPrismaService,
     private readonly fiscalScope: FiscalScopeService,
     private readonly audit: AuditService,
+    @Optional()
+    private readonly eventEmitter?: EventEmitter2,
+    @Optional()
+    private readonly fiscalStatusResolver?: FiscalStatusResolverService,
   ) {}
 
   async proposeChange(
@@ -236,8 +243,16 @@ export class FiscalScopeMigrationService {
 
       if (inTxPreview.direction === 'UP') {
         await this.applyUpMutations(organization_id, tx);
+        await this.fiscalStatusResolver?.consolidateFiscalStatusToOrganization(
+          organization_id,
+          tx,
+        );
       } else {
         await this.applyDownMutations(organization_id, tx);
+        await this.fiscalStatusResolver?.splitFiscalStatusToStores(
+          organization_id,
+          tx,
+        );
       }
 
       await tx.organizations.update({
@@ -272,6 +287,13 @@ export class FiscalScopeMigrationService {
     this.fiscalScope.invalidateFiscalScopeCache(organization_id);
 
     if (!result.noop) {
+      this.eventEmitter?.emit('organization.fiscal_scope_changed', {
+        organization_id,
+        previous_fiscal_scope: result.previous_fiscal_scope,
+        new_fiscal_scope: result.new_fiscal_scope,
+        changed_by_user_id: userId,
+      });
+
       try {
         await this.audit.log({
           userId,

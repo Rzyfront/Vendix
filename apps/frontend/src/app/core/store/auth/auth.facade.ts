@@ -12,6 +12,7 @@ import type {
   OrganizationFiscalScope,
   OrganizationOperatingScope,
 } from '../../models/organization.model';
+import type { FiscalArea } from '../../models/fiscal-status.model';
 
 @Injectable({
   providedIn: 'root',
@@ -97,6 +98,13 @@ export class AuthFacade {
 
   // Store settings observables
   readonly storeSettings$ = this.store.select(AuthSelectors.selectStoreSettings);
+  readonly fiscalStatus$ = this.store.select(AuthSelectors.selectFiscalStatus);
+  readonly activeFiscalAreas$ = this.store.select(
+    AuthSelectors.selectActiveFiscalAreas,
+  );
+  readonly pendingFiscalObligations$ = this.store.select(
+    AuthSelectors.selectPendingObligations,
+  );
 
   // Panel UI observables
   readonly panelUiConfig$ = this.store.select(
@@ -183,6 +191,9 @@ export class AuthFacade {
   readonly userStoreSlug = toSignal(this.userStoreSlug$, { initialValue: null as string | null });
   readonly userStoreType = toSignal(this.userStoreType$, { initialValue: null as any });
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
+  readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
+  readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });
+  readonly pendingFiscalObligations = toSignal(this.pendingFiscalObligations$, { initialValue: [] as FiscalArea[] });
   readonly panelUiConfig = toSignal(this.panelUiConfig$, { initialValue: null as any });
   readonly selectedAppType = toSignal(this.selectedAppType$, { initialValue: null as any });
   readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$, { initialValue: null as any });
@@ -420,6 +431,68 @@ export class AuthFacade {
     this.store.dispatch(
       AuthActions.updateStoreSettingsSuccess({ store_settings: storeSettings }),
     );
+  }
+
+  patchFiscalStatus(fiscalStatus: any): void {
+    const user = this.user();
+    if (
+      this.fiscalScope() === 'ORGANIZATION' &&
+      user?.organizations?.organization_settings?.settings
+    ) {
+      this.store.dispatch(
+        AuthActions.updateUser({
+          user: {
+            ...user,
+            organizations: {
+              ...user.organizations,
+              organization_settings: {
+                ...user.organizations.organization_settings,
+                settings: {
+                  ...user.organizations.organization_settings.settings,
+                  fiscal_status: fiscalStatus,
+                },
+              },
+            },
+          },
+        }),
+      );
+      return;
+    }
+
+    if (
+      this.fiscalScope() === 'ORGANIZATION' &&
+      user?.store?.organizations?.organization_settings?.settings
+    ) {
+      this.store.dispatch(
+        AuthActions.updateUser({
+          user: {
+            ...user,
+            store: {
+              ...user.store,
+              organizations: {
+                ...user.store.organizations,
+                organization_settings: {
+                  ...user.store.organizations.organization_settings,
+                  settings: {
+                    ...user.store.organizations.organization_settings.settings,
+                    fiscal_status: fiscalStatus,
+                  },
+                },
+              },
+            },
+          },
+        }),
+      );
+      return;
+    }
+
+    const storeSettings = this.storeSettings();
+    if (storeSettings) {
+      this.updateStoreSettings({
+        ...storeSettings,
+        fiscal_status: fiscalStatus,
+      });
+    }
   }
 
   getStoreSettings(): any {

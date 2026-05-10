@@ -3,6 +3,7 @@
 // ============================================================================
 
 import { PayrollSettingsSection } from '../../../store/payroll/calculation/interfaces/payroll-rules.interface';
+import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 
 // ============================================================================
 // BRANDING - Colores, logo y theming a nivel de organización
@@ -100,4 +101,5 @@ export interface OrganizationSettings {
   panel_ui?: OrganizationPanelUISettings;
   payroll?: PayrollSettingsSection;
   inventory?: OrganizationInventorySettings;
+  fiscal_status?: FiscalStatusBlock;
 }

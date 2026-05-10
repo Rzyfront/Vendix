@@ -416,6 +416,26 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.invoices;
   }
 
+  get accounting_entries() {
+    return this.baseClient.accounting_entries;
+  }
+
+  get employees() {
+    return this.baseClient.employees;
+  }
+
+  get payroll_runs() {
+    return this.baseClient.payroll_runs;
+  }
+
+  get uvt_values() {
+    return this.baseClient.uvt_values;
+  }
+
+  get fiscal_status_audit_log() {
+    return (this.baseClient as any).fiscal_status_audit_log;
+  }
+
   get invoice_items() {
     return this.baseClient.invoice_items;
   }

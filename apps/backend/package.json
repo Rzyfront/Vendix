@@ -29,6 +29,8 @@
     "db:seed": "ts-node prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "db:clean": "ts-node prisma/seeds/shared/database-scripts/clean.ts",
+    "migrate:fiscal-status": "ts-node -r tsconfig-paths/register scripts/migrate-fiscal-status.ts",
+    "verify:fiscal-status": "ts-node -r tsconfig-paths/register scripts/verify-fiscal-status-migration.ts",
     "// ----- DOCKER -----": "",
     "docker:build": "npm run build",
     "docker:start": "npm run start:prod",

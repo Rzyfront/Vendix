@@ -2097,6 +2097,38 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Accounting entity does not belong to this organization',
   },
+
+  // Fiscal status
+  FISCAL_STATUS_LOCKED: {
+    code: 'FISCAL_STATUS_LOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal status is locked by existing fiscal records',
+  },
+  FISCAL_STATUS_INVALID_TRANSITION: {
+    code: 'FISCAL_STATUS_INVALID_TRANSITION',
+    httpStatus: 409,
+    devMessage: 'Invalid fiscal status transition',
+  },
+  FISCAL_STATUS_WIZARD_STEP_INVALID: {
+    code: 'FISCAL_STATUS_WIZARD_STEP_INVALID',
+    httpStatus: 400,
+    devMessage: 'Invalid fiscal status wizard step',
+  },
+  FISCAL_STATUS_DEACTIVATION_BLOCKED: {
+    code: 'FISCAL_STATUS_DEACTIVATION_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal status deactivation is blocked',
+  },
+  FISCAL_STATUS_CONCURRENT_UPDATE: {
+    code: 'FISCAL_STATUS_CONCURRENT_UPDATE',
+    httpStatus: 409,
+    devMessage: 'Fiscal status was updated concurrently',
+  },
+  FISCAL_STATUS_PERMISSION_DENIED: {
+    code: 'FISCAL_STATUS_PERMISSION_DENIED',
+    httpStatus: 403,
+    devMessage: 'Fiscal status permission denied',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

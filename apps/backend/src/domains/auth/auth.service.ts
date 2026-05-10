@@ -220,6 +220,7 @@ export class AuthService {
         },
         organizations: {
           include: {
+            organization_settings: true,
             domain_settings: {
               where: {
                 is_primary: true,
@@ -1675,6 +1676,7 @@ export class AuthService {
               store_settings: true,
               organizations: {
                 include: {
+                  organization_settings: true,
                   domain_settings: {
                     where: {
                       is_primary: true,
@@ -1707,6 +1709,7 @@ export class AuthService {
             store_settings: true,
             organizations: {
               include: {
+                organization_settings: true,
                 domain_settings: {
                   where: {
                     is_primary: true,
@@ -2938,11 +2941,12 @@ export class AuthService {
             },
           },
         },
-        organizations: {
-          include: {
-            domain_settings: {
-              where: {
-                is_primary: true,
+            organizations: {
+              include: {
+                organization_settings: true,
+                domain_settings: {
+                  where: {
+                    is_primary: true,
                 status: 'active',
               },
             },

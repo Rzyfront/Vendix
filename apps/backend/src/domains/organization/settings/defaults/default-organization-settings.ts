@@ -7,6 +7,7 @@ import {
   OrganizationSettings,
   OrganizationInventorySettings,
 } from '../interfaces/organization-settings.interface';
+import { createDefaultFiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 
 /**
  * Defaults seguros para la sección `inventory` a nivel de organización.
@@ -43,9 +44,10 @@ export function getDefaultOrganizationInventorySettings(): OrganizationInventory
  */
 export function getDefaultOrganizationSettings(): Pick<
   OrganizationSettings,
-  'inventory'
+  'inventory' | 'fiscal_status'
 > {
   return {
     inventory: getDefaultOrganizationInventorySettings(),
+    fiscal_status: createDefaultFiscalStatusBlock(),
   };
 }

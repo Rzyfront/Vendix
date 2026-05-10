@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
+import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -454,6 +455,21 @@ export const storeAdminRoutes: Routes = [
             loadComponent: () =>
               import('../../private/modules/store/settings/roles/store-roles-settings.component').then(
                 (c) => c.StoreRolesSettingsComponent,
+              ),
+          },
+          {
+            path: 'fiscal/wizard',
+            canActivate: [fiscalManagementGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/settings/fiscal/wizard/fiscal-activation-wizard.component').then(
+                (c) => c.StoreFiscalActivationWizardComponent,
+              ),
+          },
+          {
+            path: 'fiscal',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/fiscal-management/fiscal-management.component').then(
+                (c) => c.StoreFiscalManagementComponent,
               ),
           },
           {

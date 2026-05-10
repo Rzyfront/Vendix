@@ -8,6 +8,8 @@ import { AccessValidationService } from '@common/services/access-validation.serv
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalStatusResolverService } from '@common/services/fiscal-status-resolver.service';
+import { FiscalStatusMigrationService } from '@common/services/fiscal-status-migration.service';
 
 @Module({
   providers: [
@@ -20,6 +22,8 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
     StoreContextRunner,
     OperatingScopeService,
     FiscalScopeService,
+    FiscalStatusResolverService,
+    FiscalStatusMigrationService,
   ],
   exports: [
     GlobalPrismaService,
@@ -31,6 +35,8 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
     StoreContextRunner,
     OperatingScopeService,
     FiscalScopeService,
+    FiscalStatusResolverService,
+    FiscalStatusMigrationService,
   ],
 })
 export class PrismaModule {}

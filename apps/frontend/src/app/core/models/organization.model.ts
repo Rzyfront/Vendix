@@ -1,3 +1,5 @@
+import type { FiscalStatusBlock } from './fiscal-status.model';
+
 export interface Organization {
   id: number;
   name: string;
@@ -127,6 +129,7 @@ export interface StoreSettings {
   taxEnabled: boolean;
   shippingEnabled: boolean;
   inventoryManagement: boolean;
+  fiscal_status?: FiscalStatusBlock;
 }
 
 export interface StoreContact {

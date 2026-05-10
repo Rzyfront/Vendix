@@ -43,6 +43,7 @@ const KNOWN_SECTIONS = [
   'panel_ui',
   'ecommerce',
   'module_flows',
+  'fiscal_status',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.

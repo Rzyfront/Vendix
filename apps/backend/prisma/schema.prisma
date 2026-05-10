@@ -157,6 +157,7 @@ model users {
   // Operating scope audit trail (Phase 4 wizard)
   operating_scope_audit_changes operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
   fiscal_scope_audit_changes    fiscal_scope_audit_log[]    @relation("fiscal_scope_audit_changed_by")
+  fiscal_status_audit_changes   fiscal_status_audit_log[]   @relation("fiscal_status_audit_changed_by")
 
   @@index([email_verified])
   @@index([state])
@@ -439,6 +440,7 @@ model organizations {
   // Operating scope audit trail (configurability — Phase 4 wizard)
   operating_scope_audit_log operating_scope_audit_log[]
   fiscal_scope_audit_log    fiscal_scope_audit_log[]
+  fiscal_status_audit_log   fiscal_status_audit_log[]
 
   @@index([onboarding])
   @@index([account_type])
@@ -479,6 +481,29 @@ model fiscal_scope_audit_log {
 
   @@index([organization_id, changed_at(sort: Desc)])
   @@map("fiscal_scope_audit_log")
+}
+
+model fiscal_status_audit_log {
+  id                 Int                       @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int?
+  feature            fiscal_status_feature_enum
+  from_state         fiscal_status_state_enum?
+  to_state           fiscal_status_state_enum
+  source             fiscal_status_source_enum @default(manual)
+  before_json        Json?
+  after_json         Json?
+  changed_by_user_id Int?
+  changed_at         DateTime                  @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users?        @relation("fiscal_status_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@index([organization_id, feature, changed_at(sort: Desc)])
+  @@index([store_id, changed_at(sort: Desc)])
+  @@map("fiscal_status_audit_log")
 }
 
 model organization_onboarding_state {
@@ -674,6 +699,7 @@ model stores {
   subscription                  store_subscriptions?
   subscription_payment_methods  subscription_payment_methods[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
+  fiscal_status_audit_log       fiscal_status_audit_log[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -2512,6 +2538,26 @@ enum organization_operating_scope_enum {
 enum fiscal_scope_enum {
   STORE
   ORGANIZATION
+}
+
+enum fiscal_status_feature_enum {
+  invoicing
+  accounting
+  payroll
+}
+
+enum fiscal_status_state_enum {
+  INACTIVE
+  WIP
+  ACTIVE
+  LOCKED
+}
+
+enum fiscal_status_source_enum {
+  manual
+  migration_v1
+  detector
+  event
 }
 
 enum organization_mode_enum {

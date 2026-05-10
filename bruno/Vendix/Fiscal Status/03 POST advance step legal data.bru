@@ -1,0 +1,33 @@
+meta {
+  name: 03 POST advance step legal data
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/advance-step
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "step": "legal_data",
+    "data": {
+      "nit": "900123456",
+      "legal_name": "Tienda Demo SAS"
+    }
+  }
+}
+
+tests {
+  test("advances wizard with legal_data step recorded", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status.invoicing.wizard.completed_steps).to.include('legal_data');
+  });
+}

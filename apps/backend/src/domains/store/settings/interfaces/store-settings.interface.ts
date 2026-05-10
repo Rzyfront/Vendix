@@ -1,3 +1,5 @@
+import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
+
 // ============================================================================
 // BRANDING - Única fuente de verdad para colores, logo y theming
 // ============================================================================
@@ -239,6 +241,9 @@ export interface StoreSettings {
 
   // Module flows - Master toggles + per-module flow settings
   module_flows?: ModuleFlowsSettings;
+
+  // Fiscal status - semantic fiscal responsibility switches
+  fiscal_status?: FiscalStatusBlock;
 
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;

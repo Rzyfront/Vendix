@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
+import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
 
 export const orgAdminRoutes: Routes = [
   {
@@ -155,6 +156,21 @@ export const orgAdminRoutes: Routes = [
           import(
             '../../private/modules/organization/settings/fiscal-scope/fiscal-scope.component'
           ).then((c) => c.FiscalScopeComponent),
+      },
+      {
+        path: 'settings/fiscal/wizard',
+        canActivate: [fiscalManagementGuard],
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/settings/fiscal/wizard/fiscal-activation-wizard.component'
+          ).then((c) => c.OrganizationFiscalActivationWizardComponent),
+      },
+      {
+        path: 'settings/fiscal',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/settings/fiscal-management/fiscal-management.component'
+          ).then((c) => c.OrganizationFiscalManagementComponent),
       },
     ],
   },
