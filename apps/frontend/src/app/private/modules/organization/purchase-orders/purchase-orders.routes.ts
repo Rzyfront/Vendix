@@ -1,8 +1,15 @@
 import { Routes } from '@angular/router';
+import { operatingScopeGuard } from '../../../../core/guards/operating-scope.guard';
 
 export const orgPurchaseOrdersRoutes: Routes = [
   {
     path: '',
+    canActivate: [operatingScopeGuard],
+    data: {
+      requiredOperatingScope: 'ORGANIZATION',
+      lockedTooltip:
+        'Selecciona una tienda para administrar inventario en modo STORE.',
+    },
     loadComponent: () =>
       import('./purchase-orders.component').then(
         (c) => c.OrgPurchaseOrdersComponent,

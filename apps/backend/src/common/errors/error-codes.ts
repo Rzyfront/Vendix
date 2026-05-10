@@ -37,6 +37,48 @@ export const ErrorCodes = {
     devMessage: 'Resource conflict',
   },
 
+  // Uploads
+  UPLOAD_FILE_001: {
+    code: 'UPLOAD_FILE_001',
+    httpStatus: 400,
+    devMessage: 'Upload file is required',
+  },
+  UPLOAD_CONTEXT_001: {
+    code: 'UPLOAD_CONTEXT_001',
+    httpStatus: 400,
+    devMessage: 'Organization context required for upload',
+  },
+  UPLOAD_STORE_CONTEXT_001: {
+    code: 'UPLOAD_STORE_CONTEXT_001',
+    httpStatus: 400,
+    devMessage: 'Store context required for upload',
+  },
+  UPLOAD_ORG_001: {
+    code: 'UPLOAD_ORG_001',
+    httpStatus: 404,
+    devMessage: 'Upload organization not found',
+  },
+  UPLOAD_STORE_001: {
+    code: 'UPLOAD_STORE_001',
+    httpStatus: 404,
+    devMessage: 'Upload store not found',
+  },
+  UPLOAD_TYPE_001: {
+    code: 'UPLOAD_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'Unsupported upload entity type',
+  },
+  UPLOAD_FORBIDDEN_001: {
+    code: 'UPLOAD_FORBIDDEN_001',
+    httpStatus: 403,
+    devMessage: 'Upload file access denied',
+  },
+  UPLOAD_FAILED_001: {
+    code: 'UPLOAD_FAILED_001',
+    httpStatus: 502,
+    devMessage: 'File upload failed',
+  },
+
   // Payments
   PAY_INVALID_ORDER_001: {
     code: 'PAY_INVALID_ORDER_001',

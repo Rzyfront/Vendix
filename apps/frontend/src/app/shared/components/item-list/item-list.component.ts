@@ -7,6 +7,8 @@ import {
   TableAction,
 } from './item-list.interfaces';
 
+export type ItemListActionsDisplay = 'buttons' | 'dropdown';
+
 @Component({
   selector: 'app-item-list',
   standalone: true,
@@ -24,6 +26,7 @@ export class ItemListComponent {
   readonly emptyMessage = input('No hay datos disponibles');
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
+  readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
 
   readonly itemClick = output<any>();
   readonly actionClick = output<{
@@ -296,6 +299,13 @@ export class ItemListComponent {
     const acts = this.actions();
     if (!acts) return [];
     return acts.filter((action) => this.isActionVisible(action, item));
+  }
+
+  getMenuActions(item: any): TableAction[] {
+    const visibleActions = this.getVisibleActions(item);
+    return this.actionsDisplay() === 'dropdown'
+      ? visibleActions
+      : visibleActions.slice(2);
   }
 
   getSizeClasses(): string {

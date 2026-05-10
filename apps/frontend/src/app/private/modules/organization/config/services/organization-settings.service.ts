@@ -6,6 +6,7 @@ import {
   OrganizationSettings,
   OrganizationBranding,
 } from '../../../../../core/models/organization.model';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 const DEFAULT_ORG_SETTINGS: OrganizationSettings = {
   branding: {
@@ -53,10 +54,11 @@ export class OrganizationSettingsService {
         this.settings.set(settings);
         this.loading.set(false);
       }),
-      catchError(() => {
+      catchError((err) => {
+        const message = extractApiErrorMessage(err);
         const fallback = this.mergeWithDefaults({});
         this.loading.set(false);
-        this.error.set('Error al cargar la configuración de la organización.');
+        this.error.set(message);
         this.settings.set(fallback);
         return of(fallback);
       }),
@@ -76,8 +78,9 @@ export class OrganizationSettingsService {
       tap((updated) => this.settings.set(updated)),
       tap(() => this.saving.set(false)),
       catchError((err) => {
+        const message = extractApiErrorMessage(err);
         this.saving.set(false);
-        this.error.set('Error al guardar la configuración.');
+        this.error.set(message);
         return throwError(() => err);
       }),
     );
@@ -116,7 +119,7 @@ export class OrganizationSettingsService {
       .pipe(
         map((response) => this.extractUploadResult(response)),
         catchError((err) => {
-          this.error.set('Error al subir el recurso de marca.');
+          this.error.set(extractApiErrorMessage(err));
           return throwError(() => err);
         }),
       );

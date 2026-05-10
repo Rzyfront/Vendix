@@ -78,6 +78,7 @@ export type {
   TableAction,
   TableSize,
   SortDirection,
+  TableActionsDisplay,
 } from './table/table.component';
 export type {
   TooltipSize,

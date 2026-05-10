@@ -18,7 +18,7 @@ import {
   PurchaseOrderItemDto,
 } from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import * as sharp from 'sharp';
+import sharp from 'sharp';
 
 @Injectable()
 export class InvoiceScannerService {

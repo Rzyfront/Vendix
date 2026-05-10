@@ -140,28 +140,68 @@
                     <ng-container [ngTemplateOutlet]="actionsTemplate"
                       [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
                   } @else {
-                    <!-- Default actions -->
-                    <div class="table-actions">
-                      @for (action of actions()!; track $index) {
-                        @if (isActionVisible(action, item)) {
-                          <button [class]="getActionClasses(action, item)"
-                            [disabled]="isActionDisabled(action, item)" (click)="
-                              executeAction(action, item); $event.stopPropagation()
-                            " [attr.title]="getActionTooltip(action, item)">
-                            <!-- Icon if provided -->
-                            @if (getActionIcon(action, item)) {
-                              <app-icon [name]="getActionIcon(action, item)"
-                                [size]="12"></app-icon>
-                            }
+                    @if (actionsDisplay() === 'dropdown') {
+                      <div class="table-actions">
+                        @if (getVisibleActions(item).length > 0) {
+                          <app-dropdown
+                            class="table-action-dropdown"
+                            #rowActionsDropdown
+                          >
+                            <span dropdown-trigger class="table-action-dropdown-trigger">
+                              <app-icon name="more-horizontal" [size]="16"></app-icon>
+                              <span class="sr-only">Acciones</span>
+                            </span>
 
-                            <!-- Label (only show if no icon or on larger sizes) -->
-                            @if (!getActionIcon(action, item) || size() === 'lg') {
-                              <span>{{ getActionLabel(action, item) }}</span>
+                            @for (action of getVisibleActions(item); track $index) {
+                              <button
+                                dropdown-item
+                                type="button"
+                                [class]="getActionMenuItemClasses(action, item)"
+                                [disabled]="isActionDisabled(action, item)"
+                                (click)="
+                                  executeAction(action, item);
+                                  rowActionsDropdown.close();
+                                  $event.stopPropagation()
+                                "
+                              >
+                                @if (getActionIcon(action, item)) {
+                                  <app-icon
+                                    [name]="getActionIcon(action, item)"
+                                    [size]="14"
+                                  ></app-icon>
+                                }
+                                <span>{{ getActionLabel(action, item) }}</span>
+                              </button>
                             }
-                          </button>
+                          </app-dropdown>
+                        } @else {
+                          <span class="table-action-empty">-</span>
                         }
-                      }
-                    </div>
+                      </div>
+                    } @else {
+                      <!-- Default actions -->
+                      <div class="table-actions">
+                        @for (action of actions()!; track $index) {
+                          @if (isActionVisible(action, item)) {
+                            <button [class]="getActionClasses(action, item)"
+                              [disabled]="isActionDisabled(action, item)" (click)="
+                                executeAction(action, item); $event.stopPropagation()
+                              " [attr.title]="getActionTooltip(action, item)">
+                              <!-- Icon if provided -->
+                              @if (getActionIcon(action, item)) {
+                                <app-icon [name]="getActionIcon(action, item)"
+                                  [size]="12"></app-icon>
+                              }
+
+                              <!-- Label (only show if no icon or on larger sizes) -->
+                              @if (!getActionIcon(action, item) || size() === 'lg') {
+                                <span>{{ getActionLabel(action, item) }}</span>
+                              }
+                            </button>
+                          }
+                        }
+                      </div>
+                    }
                   }
                 </td>
               }

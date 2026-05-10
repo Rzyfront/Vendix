@@ -1,395 +1,228 @@
-<div
-  class="space-y-4"
-  style="background-color: var(--color-background); min-height: 100vh"
->
-  <!-- Stats Cards -->
+<div class="w-full space-y-4 pb-6">
   <div class="stats-container">
-    <app-stats
-      title="Total de Tiendas"
-      [value]="dashboardStats()?.stats?.total_stores?.value || 0"
-      [smallText]="
-        (dashboardStats()?.stats?.total_stores?.sub_value || 0) +
-        ' nuevas este mes'
-      "
-      iconName="store"
-      iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"
-    ></app-stats>
-
-    <app-stats
-      title="Usuarios Activos"
-      [value]="dashboardStats()?.stats?.active_users?.value || 0"
-      [smallText]="
-        (dashboardStats()?.stats?.active_users?.sub_value || 0) +
-        ' en línea ahora'
-      "
-      iconName="users"
-      iconBgColor="bg-cyan-100"
-      iconColor="text-cyan-600"
-    ></app-stats>
-
-    <app-stats
-      title="Pedidos Mensuales"
-      [value]="dashboardStats()?.stats?.monthly_orders?.value || 0"
-      [smallText]="
-        (dashboardStats()?.stats?.monthly_orders?.sub_value || 0) +
-        ' pedidos hoy'
-      "
-      iconName="shopping-cart"
-      iconBgColor="bg-orange-100"
-      iconColor="text-orange-600"
-    ></app-stats>
-
-    <app-stats
-      title="Ganancia"
-      [value]="getRevenueValue()"
-      [smallText]="getRevenueTrendText()"
-      iconName="dollar-sign"
-      [iconBgColor]="getRevenueIconBg()"
-      [iconColor]="getRevenueIconColor()"
-    ></app-stats>
+    @for (stat of statsData(); track stat.title) {
+      <app-stats
+        [title]="stat.title"
+        [value]="stat.value"
+        [smallText]="stat.smallText"
+        [iconName]="stat.icon"
+        [iconBgColor]="stat.iconBgColor"
+        [iconColor]="stat.iconColor"
+        [loading]="isLoading()"
+      />
+    }
   </div>
 
-  <!-- Charts Section -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Revenue Chart -->
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
     <div
-      class="lg:col-span-2 rounded-xl shadow-sm border border-border"
-      style="background-color: var(--color-surface)"
+      class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col"
     >
-      <div class="p-6 border-b border-border">
-        <div class="flex items-center justify-between">
-          <div>
-            <h2 class="text-lg font-semibold" style="color: var(--text)">
-              Resumen de ganancias
-            </h2>
-            <p class="text-sm" style="color: var(--muted-foreground)">
-              Tendencias de ganancias mensuales
-            </p>
-          </div>
-          <div class="flex gap-2">
+      <div
+        class="p-4 border-b border-border flex items-center justify-between gap-3"
+      >
+        <div class="min-w-0">
+          <h3 class="font-semibold text-text-primary text-sm">
+            Resumen de ganancias
+          </h3>
+          <p class="text-xs text-text-secondary">
+            Ingresos, costos y ganancia neta por período
+          </p>
+        </div>
+
+        <div
+          class="flex shrink-0 items-center gap-1 rounded-lg bg-muted/40 p-1"
+        >
+          @for (period of periodOptions; track period.value) {
             <button
-              class="px-3 py-1 text-sm rounded-lg transition-colors"
-              [style.background-color]="
-                selectedPeriod() === '6m' ? 'var(--primary)' : 'var(--muted)'
-              "
-              [style.color]="
-                selectedPeriod() === '6m' ? 'white' : 'var(--muted-foreground)'
-              "
-              (click)="onPeriodChange('6m')"
+              type="button"
+              [class]="getPeriodButtonClass(period.value)"
+              [attr.aria-pressed]="selectedPeriod() === period.value"
+              (click)="onPeriodChange(period.value)"
             >
-              6M
+              {{ period.label }}
             </button>
-            <button
-              class="px-3 py-1 text-sm rounded-lg transition-colors"
-              [style.background-color]="
-                selectedPeriod() === '1y' ? 'var(--primary)' : 'var(--muted)'
-              "
-              [style.color]="
-                selectedPeriod() === '1y' ? 'white' : 'var(--muted-foreground)'
-              "
-              (click)="onPeriodChange('1y')"
-            >
-              1Y
-            </button>
-            <button
-              class="px-3 py-1 text-sm rounded-lg transition-colors"
-              [style.background-color]="
-                selectedPeriod() === 'all' ? 'var(--primary)' : 'var(--muted)'
-              "
-              [style.color]="
-                selectedPeriod() === 'all' ? 'white' : 'var(--muted-foreground)'
-              "
-              (click)="onPeriodChange('all')"
-            >
-              All
-            </button>
-          </div>
+          }
         </div>
       </div>
-      <div class="p-6">
-        @defer (on immediate) {
-          <app-chart
-            [options]="revenueChartData()"
-            size="medium"
-            [theme]="CHART_THEMES['corporate']"
-            [animated]="true"
-          >
-          </app-chart>
-        } @placeholder {
-          <div class="h-56 bg-surface-secondary animate-pulse rounded-xl"></div>
+
+      <div class="p-4 flex-1">
+        @if (isLoading()) {
+          <div class="h-56 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else if (!hasRevenueTrend()) {
+          <app-empty-state
+            icon="bar-chart-2"
+            title="No hay tendencia de ganancias"
+            description="Cuando existan ventas finalizadas se mostrará la evolución mensual."
+            [showActionButton]="false"
+            size="sm"
+          />
+        } @else {
+          <app-chart [options]="revenueChartOptions()" size="large" />
         }
       </div>
     </div>
 
-    <!-- Store Distribution Pie Chart -->
     <div
-      class="rounded-xl shadow-sm border border-border"
-      style="background-color: var(--color-surface)"
+      class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col"
     >
-      <div class="p-6 border-b border-border">
-        <h2 class="text-lg font-semibold" style="color: var(--text)">
+      <div class="p-4 border-b border-border">
+        <h3 class="font-semibold text-text-primary text-sm">
           Distribución de ventas
-        </h2>
-        <p class="text-sm" style="color: var(--muted-foreground)">
-          Por tipo de venta (Físico vs En línea)
+        </h3>
+        <p class="text-xs text-text-secondary">
+          {{ distributionMetricLabel() }} por tipo de tienda
         </p>
       </div>
-      <div class="p-6">
-        <div class="relative h-64">
-          @defer (on immediate) {
-            <app-chart
-              [options]="storeDistributionData()"
-              size="small"
-              [theme]="CHART_THEMES['vibrant']"
-              [animated]="true"
-            >
-            </app-chart>
-          } @placeholder {
-            <div
-              class="h-full bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
-          <!-- Center Text Overlay -->
-          <div
-            class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
-          >
-            <span class="text-3xl font-bold" style="color: var(--text)">
-              {{ storeDistributionLegend().length }}
-            </span>
-            <span class="text-sm" style="color: var(--muted-foreground)">
-              Types
-            </span>
-          </div>
-        </div>
 
-        <div class="mt-6 space-y-3">
-          @for (item of storeDistributionLegend(); track item; let i = $index) {
+      <div class="p-4 flex-1">
+        @if (isLoading()) {
+          <div class="h-56 flex items-center justify-center">
             <div
-              class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <div class="flex items-center gap-3">
-                <div
-                  class="w-4 h-4 rounded-full shadow-sm"
-                  [style.background-color]="
-                    storeDistributionColors[i % storeDistributionColors.length]
-                  "
-                  [style.box-shadow]="
-                    '0 2px 4px ' +
-                    storeDistributionColors[
-                      i % storeDistributionColors.length
-                    ] +
-                    '4d'
-                  "
-                ></div>
-                <div>
-                  <span class="font-medium text-gray-700">{{ item.type }}</span>
-                  <div class="text-xs text-gray-500">
-                    {{ item.percentage }}%
-                  </div>
-                </div>
-              </div>
-              <div class="text-right">
-                <span class="font-bold text-gray-900">{{ item.value }}</span>
-              </div>
-            </div>
-          }
-        </div>
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else if (distributionRows().length === 0) {
+          <app-empty-state
+            icon="pie-chart"
+            title="Sin distribución"
+            description="Aún no hay ventas suficientes para comparar tipos de tienda."
+            [showActionButton]="false"
+            size="sm"
+          />
+        } @else {
+          <app-chart [options]="storeDistributionChartOptions()" size="large" />
+        }
       </div>
     </div>
   </div>
 
-  <!-- Recent Activity & Top Performers -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Recent Activity -->
+  <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
     <div
-      class="rounded-xl shadow-sm border border-border"
-      style="background-color: var(--color-surface)"
+      class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden"
     >
-      <div class="p-6 border-b border-border">
-        <h2 class="text-lg font-semibold" style="color: var(--text)">
+      <div class="px-4 py-3 border-b border-border">
+        <h3 class="font-semibold text-text-primary text-sm">
           Actividad reciente
-        </h2>
-        <p class="text-sm" style="color: var(--muted-foreground)">
-          Últimas actualizaciones en toda su organización
-        </p>
+        </h3>
       </div>
-      <div class="p-6">
-        <div class="space-y-4">
-          <div
-            class="flex items-start gap-4 p-3 rounded-lg"
-            style="background-color: var(--muted)"
-          >
-            <div
-              class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-              style="background-color: var(--primary-light)"
-            >
-              <app-icon
-                name="store"
-                [size]="16"
-                style="color: var(--primary)"
-              ></app-icon>
-            </div>
-            <div class="flex-1">
-              <p class="text-sm font-medium" style="color: var(--text)">
-                Lanzamiento de nueva tienda
-              </p>
-              <p class="text-sm" style="color: var(--muted-foreground)">
-                La ubicación del centro ya está activa
-              </p>
-              <p class="text-xs mt-1" style="color: var(--muted-foreground)">
-                hace 2 horas
-              </p>
-            </div>
-          </div>
 
-          <div
-            class="flex items-start gap-4 p-3 rounded-lg"
-            style="background-color: var(--muted)"
-          >
+      <div class="p-3">
+        @if (isLoading()) {
+          <div class="py-4 flex items-center justify-center">
             <div
-              class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-              style="background-color: var(--success-light)"
-            >
-              <app-icon
-                name="user-plus"
-                [size]="16"
-                style="color: var(--success)"
-              ></app-icon>
-            </div>
-            <div class="flex-1">
-              <p class="text-sm font-medium" style="color: var(--text)">
-                Nuevo miembro del equipo
-              </p>
-              <p class="text-sm" style="color: var(--muted-foreground)">
-                Sarah Johnson se unió como gerente de tienda
-              </p>
-              <p class="text-xs mt-1" style="color: var(--muted-foreground)">
-                hace 5 horas
-              </p>
-            </div>
+              class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+            ></div>
           </div>
-
-          <div
-            class="flex items-start gap-4 p-3 rounded-lg"
-            style="background-color: var(--muted)"
-          >
-            <div
-              class="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
-              style="background-color: var(--accent-light)"
-            >
-              <app-icon
-                name="trending-up"
-                [size]="16"
-                style="color: var(--accent)"
-              ></app-icon>
-            </div>
-            <div class="flex-1">
-              <p class="text-sm font-medium" style="color: var(--text)">
-                Hito de ingresos
-              </p>
-              <p class="text-sm" style="color: var(--muted-foreground)">
-                Superó el objetivo mensual de $100.000
-              </p>
-              <p class="text-xs mt-1" style="color: var(--muted-foreground)">
-                Hace 1 día
-              </p>
-            </div>
+        } @else if (activityItems().length === 0) {
+          <app-empty-state
+            icon="activity"
+            title="Sin actividad reciente"
+            description="Las actualizaciones de tiendas y auditoría aparecerán aquí."
+            [showActionButton]="false"
+            size="sm"
+          />
+        } @else {
+          <div class="space-y-0">
+            @for (activity of activityItems(); track activity.id) {
+              <div
+                class="flex gap-3 py-2.5 border-b border-border last:border-b-0 transition-colors rounded-lg"
+              >
+                <div [class]="getActivityIconContainerClass(activity.tone)">
+                  <app-icon
+                    [name]="activity.icon"
+                    [size]="14"
+                    [class]="getActivityIconClass(activity.tone)"
+                  />
+                </div>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate text-text-primary">
+                    {{ activity.title }}
+                  </p>
+                  <p class="text-xs truncate text-text-secondary">
+                    {{ activity.description }}
+                  </p>
+                </div>
+                <p
+                  class="text-[11px] whitespace-nowrap flex-shrink-0 mt-0.5 text-text-secondary"
+                >
+                  {{ activity.timestamp }}
+                </p>
+              </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
 
-    <!-- Top Performing Stores -->
     <div
-      class="rounded-xl shadow-sm border border-border"
-      style="background-color: var(--color-surface)"
+      class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden"
     >
-      <div class="p-6 border-b border-border">
-        <h2 class="text-lg font-semibold" style="color: var(--text)">
-          Tiendas con mejor rendimiento
-        </h2>
-        <p class="text-sm" style="color: var(--muted-foreground)">
-          Las líderes de este mes
+      <div class="px-4 py-3 border-b border-border">
+        <h3 class="font-semibold text-text-primary text-sm">
+          Rendimiento por tipo de tienda
+        </h3>
+        <p class="text-xs text-text-secondary">
+          Total: {{ distributionTotalLabel() }}
         </p>
       </div>
-      <div class="p-6">
-        <div class="space-y-4">
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-                style="background-color: var(--warning)"
-              >
-                1
-              </div>
-              <div>
-                <p class="text-sm font-medium" style="color: var(--text)">
-                  Tienda del centro
-                </p>
-                <p class="text-xs" style="color: var(--muted-foreground)">
-                  Minorista
-                </p>
-              </div>
-            </div>
-            <div class="text-right">
-              <p class="text-sm font-bold" style="color: var(--text)">
-                $42,180
-              </p>
-              <p class="text-xs" style="color: var(--success)">+18%</p>
-            </div>
-          </div>
 
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-                style="background-color: var(--muted)"
-              >
-                2
-              </div>
-              <div>
-                <p class="text-sm font-medium" style="color: var(--text)">
-                  Ubicación del centro comercial
-                </p>
-                <p class="text-xs" style="color: var(--muted-foreground)">
-                  Alimentos y bebidas
-                </p>
-              </div>
-            </div>
-            <div class="text-right">
-              <p class="text-sm font-bold" style="color: var(--text)">
-                $38,420
-              </p>
-              <p class="text-xs" style="color: var(--success)">+12%</p>
-            </div>
+      <div class="p-3">
+        @if (isLoading()) {
+          <div class="py-4 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+            ></div>
           </div>
-
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold text-white"
-                style="background-color: var(--muted)"
-              >
-                3
+        } @else if (distributionRows().length === 0) {
+          <app-empty-state
+            icon="store"
+            title="Sin rendimiento disponible"
+            description="Cuando haya ventas, se mostrará el peso de cada tipo de tienda."
+            [showActionButton]="false"
+            size="sm"
+          />
+        } @else {
+          <div class="space-y-3">
+            @for (row of distributionRows(); track row.label) {
+              <div class="rounded-lg p-3 hover:bg-primary/5 transition-colors">
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <span
+                      class="h-2.5 w-2.5 rounded-full flex-shrink-0"
+                      [style.background-color]="row.color"
+                    ></span>
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-text-primary truncate">
+                        {{ row.label }}
+                      </p>
+                      <p class="text-xs text-text-secondary">
+                        {{ row.percentageLabel }} del total
+                      </p>
+                    </div>
+                  </div>
+                  <p
+                    class="text-sm font-bold text-text-primary whitespace-nowrap"
+                  >
+                    {{ row.valueLabel }}
+                  </p>
+                </div>
+                <div
+                  class="mt-3 h-1.5 rounded-full bg-muted/40 overflow-hidden"
+                >
+                  <div
+                    class="h-full rounded-full"
+                    [style.background-color]="row.color"
+                    [style.width.%]="row.percent"
+                  ></div>
+                </div>
               </div>
-              <div>
-                <p class="text-sm font-medium" style="color: var(--text)">
-                  Sucursal del aeropuerto
-                </p>
-                <p class="text-xs" style="color: var(--muted-foreground)">
-                  Servicios
-                </p>
-              </div>
-            </div>
-            <div class="text-right">
-              <p class="text-sm font-bold" style="color: var(--text)">
-                $31,980
-              </p>
-              <p class="text-xs" style="color: var(--error)">-5%</p>
-            </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
   </div>

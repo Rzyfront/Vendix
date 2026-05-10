@@ -405,6 +405,10 @@ export class AuthService {
     return this.http.get(`${this.API_URL}/profile`);
   }
 
+  getCurrentUser(): Observable<any> {
+    return this.http.get(`${this.API_URL}/me`);
+  }
+
   updateProfile(data: any): Observable<any> {
     return this.http.put(`${this.API_URL}/profile`, data);
   }

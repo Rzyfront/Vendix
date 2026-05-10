@@ -518,7 +518,9 @@ export class DomainsService implements OnModuleInit {
     // remaining caller filters as plain AND conditions.
     const where: any = {};
 
-    if (filters.store_id) {
+    if (filters.store_id === '__organization__') {
+      where.store_id = null;
+    } else if (filters.store_id) {
       where.store_id = filters.store_id;
     }
 

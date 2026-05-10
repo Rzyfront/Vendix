@@ -27,6 +27,8 @@ import {
   OrganizationSettings,
 } from '../../../../../core/models/organization.model';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 type BrandingControlName =
   | 'name'
@@ -55,6 +57,13 @@ type BrandingAssetControlName = 'logo_url' | 'favicon_url';
 interface PendingBrandAssetUpload {
   file: File;
   preview: string;
+}
+
+class BrandingAssetUploadError {
+  constructor(
+    readonly label: string,
+    readonly cause: unknown,
+  ) {}
 }
 
 @Component({
@@ -810,6 +819,7 @@ interface PendingBrandAssetUpload {
 export class ApplicationComponent {
   private readonly settingsService = inject(OrganizationSettingsService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly fallbackBranding: OrganizationBranding = {
@@ -962,15 +972,19 @@ export class ApplicationComponent {
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      this.error.set('Solo se permiten archivos de imagen.');
+      this.notifyWarning(
+        'Solo se permiten archivos de imagen.',
+        'Archivo inválido',
+      );
       return;
     }
 
     const maxSize = controlName === 'logo_url' ? 2 * 1024 * 1024 : 1024 * 1024;
     const label = controlName === 'logo_url' ? 'logo' : 'favicon';
     if (file.size > maxSize) {
-      this.error.set(
+      this.notifyWarning(
         `El ${label} excede el tamaño máximo de ${maxSize / 1024 / 1024}MB.`,
+        'Archivo demasiado grande',
       );
       return;
     }
@@ -990,9 +1004,13 @@ export class ApplicationComponent {
     this.error.set(null);
     this.form.markAsDirty();
     this.hasUnsavedChanges.set(true);
+    this.toastService.info(
+      `${label.charAt(0).toUpperCase()}${label.slice(1)} listo para guardar.`,
+    );
   }
 
   removeBrandAsset(controlName: BrandingAssetControlName): void {
+    const label = controlName === 'logo_url' ? 'logo' : 'favicon';
     this.revokeBrandAssetPreview(controlName);
     if (controlName === 'logo_url') {
       this.logoPreview.set(null);
@@ -1003,6 +1021,7 @@ export class ApplicationComponent {
     this.control(controlName).markAsDirty();
     this.form.markAsDirty();
     this.hasUnsavedChanges.set(true);
+    this.toastService.info(`${label.charAt(0).toUpperCase()} removido.`);
   }
 
   async onSave(): Promise<void> {
@@ -1010,7 +1029,10 @@ export class ApplicationComponent {
 
     if (this.form.invalid) {
       this.form.markAllAsTouched();
-      this.error.set('Revisa los campos obligatorios antes de guardar.');
+      this.notifyWarning(
+        'Revisa los campos obligatorios antes de guardar.',
+        'Formulario incompleto',
+      );
       return;
     }
 
@@ -1019,6 +1041,7 @@ export class ApplicationComponent {
     try {
       this.uploadingAssets.set(true);
       const branding = await this.buildBrandingForSave();
+      this.uploadingAssets.set(false);
       const settings = await firstValueFrom(
         this.settingsService
           .saveSettings({ branding })
@@ -1028,8 +1051,19 @@ export class ApplicationComponent {
       this.settings.set(settings);
       this.applyBranding(settings.branding);
       this.lastSaved.set(new Date());
-    } catch {
-      this.error.set('Error al guardar la configuración de la aplicación.');
+      this.toastService.success('Configuración guardada correctamente.');
+    } catch (error) {
+      const uploadError =
+        error instanceof BrandingAssetUploadError ? error : null;
+      const source = uploadError?.cause ?? error;
+      const fallback = uploadError
+        ? `No se pudo subir el ${uploadError.label}.`
+        : 'Error al guardar la configuración de la aplicación.';
+      const title = uploadError
+        ? `Error al subir ${uploadError.label}`
+        : 'Error al guardar';
+
+      this.notifyError(source, fallback, title);
     } finally {
       this.uploadingAssets.set(false);
     }
@@ -1046,20 +1080,34 @@ export class ApplicationComponent {
     const pendingFavicon = this.pendingFaviconUpload();
 
     if (pendingLogo) {
-      const result = await firstValueFrom(
-        this.settingsService.uploadOrganizationLogo(pendingLogo.file),
-      );
+      const result = await this.uploadBrandAsset('logo', pendingLogo.file);
       branding.logo_url = result.key;
     }
 
     if (pendingFavicon) {
-      const result = await firstValueFrom(
-        this.settingsService.uploadOrganizationFavicon(pendingFavicon.file),
+      const result = await this.uploadBrandAsset(
+        'favicon',
+        pendingFavicon.file,
       );
       branding.favicon_url = result.key;
     }
 
     return branding;
+  }
+
+  private async uploadBrandAsset(
+    label: 'logo' | 'favicon',
+    file: File,
+  ): Promise<{ key: string }> {
+    try {
+      return await firstValueFrom(
+        label === 'logo'
+          ? this.settingsService.uploadOrganizationLogo(file)
+          : this.settingsService.uploadOrganizationFavicon(file),
+      );
+    } catch (error) {
+      throw new BrandingAssetUploadError(label, error);
+    }
   }
 
   private revokeBrandAssetPreview(controlName: BrandingAssetControlName): void {
@@ -1103,11 +1151,16 @@ export class ApplicationComponent {
           const serviceError = this.settingsService.error();
           if (serviceError) {
             this.error.set(serviceError);
+            this.toastService.error(serviceError, 'Error al cargar');
           }
         },
-        error: () => {
+        error: (error) => {
           this.loading.set(false);
-          this.error.set('Error al cargar la configuración de la aplicación.');
+          this.notifyError(
+            error,
+            'Error al cargar la configuración de la aplicación.',
+            'Error al cargar',
+          );
         },
       });
   }
@@ -1140,6 +1193,7 @@ export class ApplicationComponent {
     if (!current) return;
     this.applyBranding(current.branding);
     this.error.set(null);
+    this.toastService.info('Cambios descartados.');
   }
 
   private normalizeBranding(
@@ -1169,5 +1223,21 @@ export class ApplicationComponent {
         Validators.pattern(/^#[0-9A-Fa-f]{6}$/),
       ],
     });
+  }
+
+  private notifyWarning(message: string, title?: string): void {
+    this.error.set(message);
+    this.toastService.warning(message, title);
+  }
+
+  private notifyError(error: unknown, fallback: string, title: string): void {
+    const message = this.resolveErrorMessage(error, fallback);
+    this.error.set(message);
+    this.toastService.error(message, title);
+  }
+
+  private resolveErrorMessage(error: unknown, fallback: string): string {
+    const message = extractApiErrorMessage(error);
+    return message && message !== 'Error desconocido' ? message : fallback;
   }
 }

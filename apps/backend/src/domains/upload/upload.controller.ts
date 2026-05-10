@@ -6,15 +6,14 @@ import {
   Body,
   Get,
   Query,
-  Param,
-  BadRequestException,
-  ForbiddenException,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
+import { ErrorCodes, VendixHttpException } from '@common/errors';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import {
   ApiTags,
@@ -29,6 +28,8 @@ import { UploadFileDto, UploadEntityType, GetPresignedUrlDto } from './dto';
 @ApiBearerAuth()
 @Controller('upload')
 export class UploadController {
+  private readonly logger = new Logger(UploadController.name);
+
   private readonly ENTITY_TO_CONTEXT: Record<UploadEntityType, ImageContext> = {
     products: ImageContext.PRODUCT,
     avatars: ImageContext.AVATAR,
@@ -81,10 +82,12 @@ export class UploadController {
     const orgId = context?.organization_id;
     const storeId = context?.store_id;
 
+    if (!file?.buffer) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FILE_001);
+    }
+
     if (!orgId) {
-      throw new BadRequestException(
-        'Organization context is required for uploads',
-      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_CONTEXT_001);
     }
 
     // Obtener organización con slug
@@ -94,7 +97,7 @@ export class UploadController {
     });
 
     if (!org) {
-      throw new BadRequestException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.UPLOAD_ORG_001);
     }
 
     // Construir path según el tipo de entidad
@@ -103,54 +106,41 @@ export class UploadController {
     switch (entityType) {
       case UploadEntityType.PRODUCTS: {
         if (!storeId)
-          throw new BadRequestException(
-            'Store context required for product uploads',
-          );
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildProductPath(org, store);
         break;
       }
       case UploadEntityType.CATEGORIES: {
         if (!storeId)
-          throw new BadRequestException(
-            'Store context required for category uploads',
-          );
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildCategoryPath(org, store);
         break;
       }
       case UploadEntityType.STORE_LOGOS: {
         if (!storeId)
-          throw new BadRequestException(
-            'Store context required for store logo uploads',
-          );
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildStoreLogoPath(org, store);
         break;
       }
       case UploadEntityType.STORE_FAVICONS: {
         if (!storeId)
-          throw new BadRequestException(
-            'Store context required for favicon uploads',
-          );
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildFaviconPath(org, store);
         break;
       }
       case UploadEntityType.AVATARS: {
         const userId = context?.user_id;
-        if (!userId)
-          throw new BadRequestException(
-            'User context required for avatar uploads',
-          );
+        if (!userId) throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
         path = this.s3PathHelper.buildAvatarPath(org, userId);
         break;
       }
       case UploadEntityType.RECEIPTS: {
         if (!storeId)
-          throw new BadRequestException(
-            'Store context required for receipt uploads',
-          );
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildReceiptPath(org, store);
         break;
@@ -160,7 +150,9 @@ export class UploadController {
         path = this.s3PathHelper.buildOrgEntityPath(org, entityType);
         break;
       default:
-        throw new BadRequestException(`Unsupported entity type: ${entityType}`);
+        throw new VendixHttpException(ErrorCodes.UPLOAD_TYPE_001, undefined, {
+          entityType,
+        });
     }
 
     if (entityId) {
@@ -181,33 +173,43 @@ export class UploadController {
         UploadEntityType.STORE_FAVICONS,
       ].includes(entityType);
 
-    if (file.mimetype.startsWith('image/')) {
-      const context =
-        this.ENTITY_TO_CONTEXT[entityType] ?? ImageContext.DEFAULT;
-      const { key: uploadedKey, thumbKey } = await this.s3Service.uploadImage(
+    try {
+      if (file.mimetype.startsWith('image/')) {
+        const context =
+          this.ENTITY_TO_CONTEXT[entityType] ?? ImageContext.DEFAULT;
+        const { key: uploadedKey, thumbKey } = await this.s3Service.uploadImage(
+          file.buffer,
+          key,
+          { generateThumbnail: isMain, context },
+        );
+
+        return {
+          key: uploadedKey,
+          thumbKey,
+          url: await this.s3Service.signUrl(uploadedKey),
+          thumbUrl: await this.s3Service.signUrl(thumbKey, true),
+        };
+      }
+
+      const uploadedKey = await this.s3Service.uploadFile(
         file.buffer,
         key,
-        { generateThumbnail: isMain, context },
+        file.mimetype,
       );
 
       return {
         key: uploadedKey,
-        thumbKey,
         url: await this.s3Service.signUrl(uploadedKey),
-        thumbUrl: await this.s3Service.signUrl(thumbKey, true),
       };
+    } catch (error) {
+      this.logger.error(
+        `Upload failed for entityType=${entityType}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FAILED_001, undefined, {
+        entityType,
+      });
     }
-
-    const uploadedKey = await this.s3Service.uploadFile(
-      file.buffer,
-      key,
-      file.mimetype,
-    );
-
-    return {
-      key: uploadedKey,
-      url: await this.s3Service.signUrl(uploadedKey),
-    };
   }
 
   @Get('presigned-url')
@@ -219,9 +221,7 @@ export class UploadController {
     const orgId = context?.organization_id;
 
     if (!orgId) {
-      throw new BadRequestException(
-        'Organization context is required to access files',
-      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_CONTEXT_001);
     }
 
     const org = await this.prisma.organizations.findUnique({
@@ -230,7 +230,7 @@ export class UploadController {
     });
 
     if (!org) {
-      throw new BadRequestException('Organization not found');
+      throw new VendixHttpException(ErrorCodes.UPLOAD_ORG_001);
     }
 
     const expectedOrgPrefix = this.s3PathHelper.buildOrgPath(org);
@@ -241,9 +241,7 @@ export class UploadController {
       .filter((s) => s && s !== '.')
       .join('/');
     if (!normalizedKey.startsWith(expectedOrgPrefix)) {
-      throw new ForbiddenException(
-        'You do not have permission to access this file',
-      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FORBIDDEN_001);
     }
 
     const url = await this.s3Service.getPresignedUrl(normalizedKey);
@@ -262,7 +260,7 @@ export class UploadController {
     });
 
     if (!store) {
-      throw new BadRequestException('Store not found');
+      throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_001);
     }
 
     return store;

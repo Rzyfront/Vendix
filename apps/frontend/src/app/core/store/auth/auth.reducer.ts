@@ -160,6 +160,31 @@ export const authReducer = createReducer(
     user,
   })),
 
+  on(AuthActions.refreshUserSuccess, (state, { user }) => {
+    const newRoles =
+      Array.isArray(user?.roles) && user.roles.length > 0
+        ? user.roles
+        : state.roles;
+    const newState = {
+      ...state,
+      user,
+      roles: newRoles,
+      loading: false,
+      error: null,
+    };
+    saveAuthState(newState);
+    return newState;
+  }),
+
+  on(AuthActions.refreshUserFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
   on(AuthActions.clearAuthState, (state) => ({
     ...initialAuthState,
     loading: false,

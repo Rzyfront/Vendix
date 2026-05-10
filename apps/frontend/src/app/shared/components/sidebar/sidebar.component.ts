@@ -14,10 +14,13 @@ import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
 import { BadgeComponent } from '../badge/badge.component';
+import { ToastService } from '../toast/toast.service';
 
 const DEFAULT_LOCKED_BADGE = 'ORG';
 const DEFAULT_LOCKED_TOOLTIP = 'Disponible en modo ORGANIZATION';
-const OPERATING_SCOPE_ROUTE = '/admin/settings/operating-scope';
+const LOCKED_REDIRECT_ROUTE = '/admin/stores';
+const DEFAULT_LOCKED_TOAST_MESSAGE =
+  'Selecciona una tienda para administrar inventario en modo STORE.';
 
 export interface MenuItem {
   label: string;
@@ -151,7 +154,7 @@ export interface MenuItem {
                   type="button"
                   class="menu-item menu-item-locked opacity-60 cursor-not-allowed"
                   [title]="item.lockedTooltip || defaultLockedTooltip"
-                  (click)="onLockedItemClick()"
+                  (click)="onLockedItemClick(item)"
                 >
                   <app-icon
                     [name]="item.icon"
@@ -209,7 +212,7 @@ export interface MenuItem {
                           type="button"
                           class="submenu-item-button menu-item-locked opacity-60 cursor-not-allowed"
                           [title]="child.lockedTooltip || defaultLockedTooltip"
-                          (click)="onLockedItemClick()"
+                          (click)="onLockedItemClick(child)"
                         >
                           <span>{{ child.label }}</span>
                           <app-badge variant="info" size="xs" badgeStyle="outline">
@@ -281,6 +284,7 @@ export class SidebarComponent implements AfterViewInit {
   private readonly elementRef = inject(ElementRef);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly toastService = inject(ToastService);
 
   // --- State signals ---
   readonly isMobile = signal(false);
@@ -550,13 +554,10 @@ export class SidebarComponent implements AfterViewInit {
     }
   }
 
-  /**
-   * Handles clicks on locked menu items: navigates the user to the operating
-   * scope settings page so they can upgrade/change scope, instead of taking
-   * the original route. Mobile sidebar is closed alongside.
-   */
-  onLockedItemClick(): void {
-    this.router.navigateByUrl(OPERATING_SCOPE_ROUTE);
+  onLockedItemClick(item?: MenuItem): void {
+    const message = item?.lockedTooltip || DEFAULT_LOCKED_TOAST_MESSAGE;
+    this.toastService.info(message);
+    this.router.navigateByUrl(LOCKED_REDIRECT_ROUTE);
     this.onMenuItemClick();
   }
 

@@ -22,6 +22,7 @@ import {
 } from '../../../../../shared/components';
 import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 import { ChangeScopeWizardComponent } from './components/change-scope-wizard.component';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import {
   OperatingScopeApplyResult,
   OperatingScopeAuditLogEntry,
@@ -29,6 +30,12 @@ import {
   OperatingScopeValue,
   OperatingScopeWizardService,
 } from './services/operating-scope.service';
+
+type OperatingScopeAuditLogRow = OperatingScopeAuditLogEntry & {
+  changeLabel: string;
+  reasonLabel: string;
+  userLabel: string;
+};
 
 @Component({
   selector: 'app-operating-scope',
@@ -50,6 +57,7 @@ import {
 export class OperatingScopeComponent {
   private readonly service = inject(OperatingScopeWizardService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
 
   // ---------- state ----------
   readonly loading = signal(true);
@@ -66,8 +74,14 @@ export class OperatingScopeComponent {
   readonly editable = computed(
     () => this.state()?.editable === true && !this.loading(),
   );
-  readonly auditLog = computed<OperatingScopeAuditLogEntry[]>(
-    () => this.state()?.audit_log_recent ?? [],
+  readonly auditLog = computed<OperatingScopeAuditLogRow[]>(
+    () =>
+      (this.state()?.audit_log_recent ?? []).map((entry) => ({
+        ...entry,
+        changeLabel: this.changeLabel(entry),
+        reasonLabel: this.reasonLabel(entry.reason),
+        userLabel: this.userLabel(entry.changed_by_user_id),
+      })),
   );
 
   readonly currentLabel = computed(() =>
@@ -86,43 +100,34 @@ export class OperatingScopeComponent {
       transform: (value: string) => this.formatTimestamp(value),
     },
     {
-      key: 'changes',
+      key: 'changeLabel',
       label: 'Cambio',
       priority: 1,
-      transform: (_value: any, item: OperatingScopeAuditLogEntry) =>
-        `${this.scopeLabel(item.previous_value)} → ${this.scopeLabel(item.new_value)}`,
     },
     {
-      key: 'changed_by_user_id',
+      key: 'userLabel',
       label: 'Usuario',
       priority: 2,
-      transform: (value: number | null) =>
-        value ? `#${value}` : 'Sistema',
     },
     {
-      key: 'reason',
+      key: 'reasonLabel',
       label: 'Razón',
       priority: 3,
-      defaultValue: '—',
-      transform: (value: string | null) => value?.trim() || '—',
+      defaultValue: 'Sin razón registrada',
     },
   ];
 
   readonly auditCardConfig: ItemListCardConfig = {
     titleKey: 'changed_at',
-    titleTransform: (item: OperatingScopeAuditLogEntry) =>
+    titleTransform: (item: OperatingScopeAuditLogRow) =>
       this.formatTimestamp(item.changed_at),
-    subtitleKey: 'new_value',
-    subtitleTransform: (item: OperatingScopeAuditLogEntry) =>
-      `${this.scopeLabel(item.previous_value)} → ${this.scopeLabel(item.new_value)}`,
+    subtitleKey: 'changeLabel',
     avatarFallbackIcon: 'history',
     avatarShape: 'circle',
-    footerKey: 'changed_by_user_id',
+    footerKey: 'userLabel',
     footerLabel: 'Usuario',
-    footerTransform: (value: number | null) =>
-      value ? `#${value}` : 'Sistema',
     detailKeys: [
-      { key: 'reason', label: 'Razón', icon: 'message-square' },
+      { key: 'reasonLabel', label: 'Razón', icon: 'message-square' },
     ],
   };
 
@@ -167,6 +172,8 @@ export class OperatingScopeComponent {
   onApplied(_result: OperatingScopeApplyResult): void {
     // Refresh state so the audit log + current scope reflect reality.
     this.loadCurrent();
+    // Refresh the authenticated user so menu/guards see the new operating_scope.
+    this.authFacade.refreshUser();
   }
 
   // ---------- formatting helpers ----------
@@ -190,6 +197,18 @@ export class OperatingScopeComponent {
   scopeLabel(value: OperatingScopeValue | null | undefined): string {
     if (!value) return '—';
     return value === 'ORGANIZATION' ? 'Organización' : 'Por tienda';
+  }
+
+  private changeLabel(entry: OperatingScopeAuditLogEntry): string {
+    return `${this.scopeLabel(entry.previous_value)} → ${this.scopeLabel(entry.new_value)}`;
+  }
+
+  private reasonLabel(value: string | null | undefined): string {
+    return value?.trim() || 'Sin razón registrada';
+  }
+
+  private userLabel(value: number | null | undefined): string {
+    return value ? `#${value}` : 'Sistema';
   }
 
   private humanError(err: HttpErrorResponse): string {

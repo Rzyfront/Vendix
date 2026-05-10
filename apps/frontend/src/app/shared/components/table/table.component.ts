@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { DropdownComponent } from '../dropdown/dropdown.component';
 
 export interface TableColumn {
   key: string;
@@ -53,12 +54,13 @@ export interface TableAction {
 
 export type TableSize = 'sm' | 'md' | 'lg';
 export type SortDirection = 'asc' | 'desc' | null;
+export type TableActionsDisplay = 'buttons' | 'dropdown';
 
 @Component({
   selector: 'app-table',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, DropdownComponent],
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss',
 })
@@ -76,6 +78,7 @@ export class TableComponent {
   readonly bordered = input<boolean>(false);
   readonly compact = input<boolean>(false);
   readonly sortable = input<boolean>(false);
+  readonly actionsDisplay = input<TableActionsDisplay>('buttons');
   readonly customClasses = input<string>('');
 
   // --- Outputs ---
@@ -306,6 +309,21 @@ export class TableComponent {
     const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
     const disabled = this.isActionDisabled(action, item);
     return `action-${variant}${disabled ? ' action-disabled' : ''}`;
+  }
+
+  getVisibleActions(item: any): TableAction[] {
+    const actions = this.actions();
+    if (!actions) return [];
+    return actions.filter((action) => this.isActionVisible(action, item));
+  }
+
+  getActionMenuItemClasses(action: TableAction, item: any): string {
+    const variant =
+      typeof action.variant === 'function'
+        ? action.variant(item)
+        : action.variant || 'ghost';
+    const disabled = this.isActionDisabled(action, item);
+    return `table-action-menu-item table-action-menu-item-${variant}${disabled ? ' table-action-menu-item-disabled' : ''}`;
   }
 
   /**

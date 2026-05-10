@@ -331,8 +331,16 @@ export class AuthController {
   @Get('me')
   async getCurrentUser(@Req() req: AuthenticatedRequest) {
     try {
+      const user = await this.authService.getCurrentUser(req.user.id);
+      if (!user) {
+        return this.responseService.error(
+          'Usuario no encontrado',
+          'User not found',
+          404,
+        );
+      }
       return this.responseService.success(
-        req.user,
+        user,
         'Usuario actual obtenido exitosamente',
       );
     } catch (error) {

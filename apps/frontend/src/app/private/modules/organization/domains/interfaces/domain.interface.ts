@@ -217,7 +217,7 @@ export interface DomainQueryDto {
   search?: string;
   status?: DomainStatus;
   ownership?: DomainOwnership;
-  store_id?: number;
+  store_id?: number | '__organization__';
 }
 
 export interface VerifyDomainResult {

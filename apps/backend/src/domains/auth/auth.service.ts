@@ -2905,6 +2905,50 @@ export class AuthService {
     return userWithoutPassword;
   }
 
+  async getCurrentUser(user_id: number) {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: user_id },
+      include: {
+        user_roles: {
+          include: {
+            roles: {
+              include: {
+                role_permissions: {
+                  include: {
+                    permissions: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        organizations: {
+          include: {
+            domain_settings: {
+              where: {
+                is_primary: true,
+                status: 'active',
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    const { password, user_roles, ...userWithoutPassword } = user as any;
+    const roles =
+      user_roles?.map((ur: any) => ur.roles?.name).filter(Boolean) || [];
+
+    return {
+      ...userWithoutPassword,
+      roles,
+    };
+  }
+
   async getUserSessions(user_id: number) {
     const sessions = await this.prismaService.refresh_tokens.findMany({
       where: {

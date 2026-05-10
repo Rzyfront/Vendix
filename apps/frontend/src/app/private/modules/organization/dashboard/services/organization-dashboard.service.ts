@@ -10,6 +10,40 @@ export interface DashboardStatItem {
   sub_label: string;
 }
 
+export interface ProfitTrendPoint {
+  month: string;
+  year: number;
+  amount: number;
+  revenue: number;
+  costs: number;
+}
+
+export interface StoreDistributionPoint {
+  type: string;
+  count: number;
+  revenue: number;
+}
+
+export interface OrganizationActivityRecord {
+  id?: string | number;
+  type?: string;
+  action?: string;
+  title?: string;
+  description?: string;
+  entity_name?: string;
+  entityName?: string;
+  store_name?: string;
+  storeName?: string;
+  user_name?: string;
+  userName?: string;
+  timestamp?: string | Date;
+  created_at?: string | Date;
+  createdAt?: string | Date;
+  updated_at?: string | Date;
+  updatedAt?: string | Date;
+  [key: string]: unknown;
+}
+
 export interface OrganizationDashboardStats {
   organization_id: number;
   stats: {
@@ -18,17 +52,17 @@ export interface OrganizationDashboardStats {
     monthly_orders: DashboardStatItem;
     revenue: DashboardStatItem;
   };
-  metrics: {
+  metrics?: {
     active_users: number;
     active_stores: number;
     recent_orders: number;
     total_revenue: number;
-    growth_trends: any[];
+    growth_trends: unknown[];
   };
-  store_activity: any[]; // keeping as any for now or define strict type if known
-  recent_audit: any[];
-  profit_trend: { month: string; year: number; amount: number; revenue: number; costs: number }[];
-  store_distribution: { type: string; count: number; revenue: number }[];
+  store_activity?: OrganizationActivityRecord[];
+  recent_audit?: OrganizationActivityRecord[];
+  profit_trend: ProfitTrendPoint[];
+  store_distribution: StoreDistributionPoint[];
   // Keep existing fields if they are still needed by other parts or mark as optional
   revenueBreakdown?: RevenueBreakdown[];
   storeDistribution?: StoreDistribution[];
@@ -82,7 +116,10 @@ interface CacheEntry<T> {
 }
 
 // Map para caché por organizationId + period
-const dashboardCache = new Map<string, CacheEntry<Observable<OrganizationDashboardStats>>>();
+const dashboardCache = new Map<
+  string,
+  CacheEntry<Observable<OrganizationDashboardStats>>
+>();
 
 @Injectable({
   providedIn: 'root',
@@ -103,7 +140,7 @@ export class OrganizationDashboardService {
     const cached = dashboardCache.get(cacheKey);
 
     // Check if cache is valid
-    if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
+    if (cached && now - cached.lastFetch < this.CACHE_TTL) {
       return cached.observable;
     }
 
@@ -114,7 +151,9 @@ export class OrganizationDashboardService {
 
     const params = period ? `?period=${period}` : '';
     const observable$ = this.http
-      .get<any>(`${this.apiUrl}/organization/organizations/${organizationId}/stats${params}`)
+      .get<any>(
+        `${this.apiUrl}/organization/organizations/${organizationId}/stats${params}`,
+      )
       .pipe(
         shareReplay({ bufferSize: 1, refCount: false }),
         map((response) => response.data || response),

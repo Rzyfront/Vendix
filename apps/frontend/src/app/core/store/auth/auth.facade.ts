@@ -234,6 +234,10 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.loadUser());
   }
 
+  refreshUser(): void {
+    this.store.dispatch(AuthActions.refreshUser());
+  }
+
   checkAuthStatus(): void {
     this.store.dispatch(AuthActions.checkAuthStatus());
   }

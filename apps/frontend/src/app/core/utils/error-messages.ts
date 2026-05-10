@@ -12,6 +12,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
 
+  // Uploads
+  UPLOAD_FILE_001: 'Seleccione un archivo para subir.',
+  UPLOAD_CONTEXT_001: 'Debe seleccionar una organizacion para subir archivos.',
+  UPLOAD_STORE_CONTEXT_001:
+    'Debe seleccionar una tienda para subir este archivo.',
+  UPLOAD_ORG_001: 'No se encontro la organizacion para subir el archivo.',
+  UPLOAD_STORE_001: 'No se encontro la tienda para subir el archivo.',
+  UPLOAD_TYPE_001: 'El tipo de archivo no esta soportado en esta seccion.',
+  UPLOAD_FORBIDDEN_001: 'No tiene permisos para acceder a este archivo.',
+  UPLOAD_FAILED_001: 'No se pudo subir el archivo. Intente de nuevo.',
+
   // Payments
   PAY_INVALID_ORDER_001: 'La orden no es valida o no existe.',
   PAY_INVALID_AMOUNT_001: 'El monto del pago no es valido.',
