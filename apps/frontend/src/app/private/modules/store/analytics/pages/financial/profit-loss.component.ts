@@ -155,7 +155,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="profitSummaryChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="profitSummaryChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -320,38 +320,54 @@ export class ProfitLossComponent implements OnInit {
         trigger: 'item',
         formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b>`,
       },
-      grid: { left: '3%', right: '10%', bottom: '3%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
-      yAxis: {
+      legend: {
+        data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '10%', bottom: '15%', top: '3%', containLabel: true },
+      xAxis: {
         type: 'category',
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
         {
-          name: 'Ganancias',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: [
-            { value: Math.max(0, grossProfit), itemStyle: { color: '#22c55e' } },
-            { value: Math.max(0, refunds), itemStyle: { color: '#f59e0b' } },
-            { value: Math.max(0, expenses), itemStyle: { color: '#8b5cf6' } },
-            { value: Math.max(0, netProfit), itemStyle: { color: '#3b82f6' } },
-          ],
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f640' },
-                { offset: 1, color: '#3b82f605' },
-              ],
-            },
-          },
+          name: 'Ganancia Bruta',
+          type: 'bar' as const,
+          data: [grossProfit],
+          itemStyle: { color: '#22c55e' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Reembolsos',
+          type: 'bar' as const,
+          data: [refunds],
+          itemStyle: { color: '#f59e0b' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Gastos',
+          type: 'bar' as const,
+          data: [expenses],
+          itemStyle: { color: '#8b5cf6' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Ganancia Neta',
+          type: 'bar' as const,
+          data: [netProfit],
+          itemStyle: { color: '#3b82f6' },
+          barMaxWidth: 40,
         },
       ],
     });
