@@ -22,15 +22,49 @@ import { purchase_order_status_enum } from '@prisma/client';
  * inherit the header-level `destination_location_id`.
  */
 export class CreateOrgPurchaseOrderItemDto {
-  @ApiProperty({ description: 'Product ID' })
+  @ApiProperty({
+    description:
+      'Product ID. Use 0 (or omit) when sending a prebulk temporary product — backend will autocreate it on submit using product_name + sku.',
+  })
   @IsInt()
-  @IsNotEmpty()
-  product_id!: number;
+  @IsOptional()
+  product_id?: number;
 
   @ApiProperty({ description: 'Product variant ID (optional)' })
   @IsInt()
   @IsOptional()
   product_variant_id?: number;
+
+  // ────────────────────────────────────────────────────────────────
+  // Prebulk fields (temporary product not in catalog).
+  // When product_id is 0/missing AND product_name is present, the
+  // store-domain service auto-creates the catalog row before linking.
+  // Mirrors the subset emitted by `pop-prebulk-modal.component.ts`.
+  // ────────────────────────────────────────────────────────────────
+
+  @ApiProperty({ description: 'Product Name (for new prebulk products)' })
+  @IsString()
+  @IsOptional()
+  product_name?: string;
+
+  @ApiProperty({ description: 'Product SKU/Code (for new prebulk products)' })
+  @IsString()
+  @IsOptional()
+  sku?: string;
+
+  @ApiProperty({
+    description: 'Product Description (for new prebulk products)',
+  })
+  @IsString()
+  @IsOptional()
+  product_description?: string;
+
+  @ApiProperty({
+    description: 'Base sale price reference (for new prebulk products)',
+  })
+  @IsNumber()
+  @IsOptional()
+  base_price?: number;
 
   @ApiProperty({ description: 'Quantity ordered (>0)' })
   @IsNumber()

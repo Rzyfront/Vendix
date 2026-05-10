@@ -30,6 +30,12 @@ import { OrgAdjustmentsService } from './adjustments/org-adjustments.service';
 import { OrgTransfersController } from './transfers/org-transfers.controller';
 import { OrgTransfersService } from './transfers/org-transfers.service';
 
+import { OrgSerialNumbersController } from './serial-numbers/org-serial-numbers.controller';
+import { OrgSerialNumbersService } from './serial-numbers/org-serial-numbers.service';
+
+import { OrgBatchesController } from './batches/org-batches.controller';
+import { OrgBatchesService } from './batches/org-batches.service';
+
 /**
  * `/api/organization/inventory/*` — org-native inventory module.
  *
@@ -69,6 +75,8 @@ import { OrgTransfersService } from './transfers/org-transfers.service';
     OrgTransactionsController,
     OrgAdjustmentsController,
     OrgTransfersController,
+    OrgSerialNumbersController,
+    OrgBatchesController,
   ],
   providers: [
     OrgStockLevelsService,
@@ -78,6 +86,8 @@ import { OrgTransfersService } from './transfers/org-transfers.service';
     OrgTransactionsService,
     OrgAdjustmentsService,
     OrgTransfersService,
+    OrgSerialNumbersService,
+    OrgBatchesService,
     // Shared inventory infrastructure used by OrgTransfersService.
     StockLevelManager,
     InventoryTransactionsService,
@@ -90,6 +100,8 @@ import { OrgTransfersService } from './transfers/org-transfers.service';
     OrgTransactionsService,
     OrgAdjustmentsService,
     OrgTransfersService,
+    OrgSerialNumbersService,
+    OrgBatchesService,
   ],
 })
 export class OrgInventoryModule {}

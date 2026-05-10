@@ -315,9 +315,22 @@ export class PurchaseOrdersService {
         }
       }
 
+      // Coerce ISO-string dates to Date before Prisma. `@IsDateString` only
+      // validates the wire format; Prisma DateTime columns require Date or a
+      // full ISO-8601 DateTime, so `YYYY-MM-DD` from <input type="date">
+      // would otherwise blow up here.
+      const toDate = (v: unknown): Date | undefined => {
+        if (v == null || v === '') return undefined;
+        if (v instanceof Date) return v;
+        const d = new Date(String(v));
+        return Number.isNaN(d.getTime()) ? undefined : d;
+      };
+      const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
+
       const purchaseOrder = await tx.purchase_orders.create({
         data: {
-          ...orderData,
+          ...orderDataRest,
+          expected_date: toDate(rawExpectedDate),
           created_by_user_id: user_id,
           organization_id,
           order_number,
@@ -332,8 +345,8 @@ export class PurchaseOrdersService {
               unit_cost: item.unit_price,
               notes: item.notes,
               batch_number: item.batch_number,
-              manufacturing_date: item.manufacturing_date,
-              expiration_date: item.expiration_date,
+              manufacturing_date: toDate(item.manufacturing_date),
+              expiration_date: toDate(item.expiration_date),
             })),
           },
         },
@@ -528,11 +541,14 @@ export class PurchaseOrdersService {
   }
 
   async approve(id: number) {
+    // Schema only carries `approved_by_user_id` (FK) — there is no
+    // `approved_date` column. Audit timestamp is recorded via auditService.
+    const approver_id = RequestContextService.getUserId() ?? null;
     const result = await this.prisma.purchase_orders.update({
       where: { id },
       data: {
         status: purchase_order_status_enum.approved,
-        approved_date: new Date(),
+        approved_by_user_id: approver_id,
       },
       include: {
         suppliers: true,
@@ -566,11 +582,12 @@ export class PurchaseOrdersService {
   }
 
   async cancel(id: number) {
+    // Schema has no `cancelled_date` column — cancellation timestamp is
+    // captured by the audit log entry below.
     const result = await this.prisma.purchase_orders.update({
       where: { id },
       data: {
         status: purchase_order_status_enum.cancelled,
-        cancelled_date: new Date(),
       },
       include: {
         suppliers: true,

@@ -551,7 +551,10 @@ export class OrgLocationsComponent implements OnInit {
             totalPages,
           }));
 
-          this.calculateStats(rows, total);
+          const centralCount =
+            (response?.meta as any)?.central_count ??
+            rows.filter((r) => r.is_central_warehouse).length;
+          this.calculateStats(rows, total, centralCount);
 
           // Auto-recover from out-of-range page (e.g., after delete)
           if (rows.length === 0 && this.pagination().page > 1) {
@@ -590,10 +593,16 @@ export class OrgLocationsComponent implements OnInit {
       });
   }
 
-  private calculateStats(rows: OrgLocationRow[], totalFromServer: number): void {
+  private calculateStats(
+    rows: OrgLocationRow[],
+    totalFromServer: number,
+    centralCountFromServer?: number,
+  ): void {
     this.stats.set({
       total: totalFromServer || rows.length,
-      central: rows.filter((r) => r.is_central_warehouse).length,
+      central:
+        centralCountFromServer ??
+        rows.filter((r) => r.is_central_warehouse).length,
       warehouses: rows.filter((r) => r.type === 'warehouse').length,
       active: rows.filter((r) => r.is_active).length,
     });

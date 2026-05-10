@@ -10,7 +10,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   AlertBannerComponent,
   CardComponent,
-  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -18,7 +17,6 @@ import {
   ResponsiveDataViewComponent,
   StatsComponent,
   TableColumn,
-  ToggleComponent,
 } from '../../../../../../shared/components/index';
 import {
   FilterConfig,
@@ -48,13 +46,11 @@ import { ApiErrorService } from '../../../../../../core/services/api-error.servi
   imports: [
     AlertBannerComponent,
     CardComponent,
-    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
-    ToggleComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -139,28 +135,6 @@ import { ApiErrorService } from '../../../../../../core/services/api-error.servi
             </div>
           </div>
 
-          <!-- "Solo sin stock" toggle: visible on both mobile and desktop -->
-          <div
-            class="flex items-center gap-2 mt-2 md:mt-3"
-            role="group"
-            aria-label="Filtros rápidos"
-          >
-            <app-toggle
-              ariaLabel="Mostrar solo SKUs sin stock"
-              [checked]="onlyOutOfStock()"
-              (toggled)="onToggleOutOfStock($event)"
-            />
-            <span class="text-xs md:text-sm text-text-secondary select-none">
-              Solo sin stock
-            </span>
-            @if (onlyOutOfStock()) {
-              <app-icon
-                name="alert-triangle"
-                [size]="14"
-                class="text-red-500"
-              />
-            }
-          </div>
         </div>
 
         <!-- Loading State -->
@@ -272,6 +246,15 @@ export class OrgStockLevelsComponent {
             value: String(id),
             label: name,
           })),
+        ],
+      },
+      {
+        key: 'only_out_of_stock',
+        label: 'Disponibilidad',
+        type: 'select',
+        options: [
+          { value: '', label: 'Todos' },
+          { value: 'true', label: 'Solo sin stock' },
         ],
       },
     ];
@@ -404,11 +387,10 @@ export class OrgStockLevelsComponent {
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: { ok: 'success', empty: 'error' },
+        colorFn: (value) =>
+          this.asNumber(value) <= 0 ? '#ef4444' : '#22c55e',
       },
       badgeTransform: (value) => String(this.asNumber(value)),
-      cellClass: (value) =>
-        this.asNumber(value) <= 0 ? 'text-red-600 font-semibold' : '',
     },
   ];
 
@@ -428,7 +410,7 @@ export class OrgStockLevelsComponent {
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { ok: 'success', empty: 'error' },
+      colorFn: (value) => (this.asNumber(value) <= 0 ? '#ef4444' : '#22c55e'),
     },
     badgeTransform: (value) => String(this.asNumber(value)),
     footerKey: 'store_name',
@@ -492,14 +474,11 @@ export class OrgStockLevelsComponent {
 
     const storeRaw = values['store_id'];
     const locationRaw = values['location_id'];
+    const oosRaw = values['only_out_of_stock'];
 
     this.storeFilter.set(this.parseIdValue(storeRaw));
     this.locationFilter.set(this.parseIdValue(locationRaw));
-    this.page.set(1);
-  }
-
-  onToggleOutOfStock(value: boolean): void {
-    this.onlyOutOfStock.set(value);
+    this.onlyOutOfStock.set(oosRaw === 'true');
     this.page.set(1);
   }
 

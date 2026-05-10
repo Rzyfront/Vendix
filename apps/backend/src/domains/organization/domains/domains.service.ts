@@ -513,59 +513,28 @@ export class DomainsService implements OnModuleInit {
     const { page = 1, limit = 10 } = filters;
     const skip = (page - 1) * limit;
 
+    // Org isolation (direct org domains + store-linked domains) is handled by
+    // OrganizationPrismaService SCOPE_OVERRIDES. Service only applies the
+    // remaining caller filters as plain AND conditions.
     const where: any = {};
 
-    // Filter by organization_id - includes org domains AND store domains
-    if (filters.organization_id) {
-      where.OR = [
-        // Direct organization domains
-        { organization_id: filters.organization_id },
-        // Store domains where the store belongs to this organization
-        {
-          store: {
-            organization_id: filters.organization_id,
-          },
-        },
-      ];
-    }
-
-    // Filter by specific store (can be combined with organization filter)
     if (filters.store_id) {
-      if (where.OR) {
-        // If we already have organization filter, add store filter as AND condition
-        where.AND = [{ store_id: filters.store_id }];
-      } else {
-        where.store_id = filters.store_id;
-      }
+      where.store_id = filters.store_id;
     }
 
     if (filters.search) {
-      const searchCondition = {
-        hostname: { contains: filters.search, mode: 'insensitive' as const },
+      where.hostname = {
+        contains: filters.search,
+        mode: 'insensitive' as const,
       };
-      if (where.OR || where.AND) {
-        where.AND = [...(where.AND || []), searchCondition];
-      } else {
-        where.hostname = searchCondition.hostname;
-      }
     }
 
     if (filters.status) {
-      const statusCondition = { status: filters.status };
-      if (where.OR || where.AND) {
-        where.AND = [...(where.AND || []), statusCondition];
-      } else {
-        where.status = filters.status;
-      }
+      where.status = filters.status;
     }
 
     if (filters.ownership) {
-      const ownershipCondition = { ownership: filters.ownership };
-      if (where.OR || where.AND) {
-        where.AND = [...(where.AND || []), ownershipCondition];
-      } else {
-        where.ownership = filters.ownership;
-      }
+      where.ownership = filters.ownership;
     }
 
     const [domain_settings, total] = await Promise.all([

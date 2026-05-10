@@ -42,13 +42,20 @@ export class OrgLocationsController {
   @Permissions('store:inventory:locations:read')
   async findAll(@Query() query: OrgLocationQueryDto) {
     const result = await this.locations.findAll(query);
-    return this.responseService.paginated(
+    const response = this.responseService.paginated(
       result.data,
       result.meta.total,
       result.meta.page,
       result.meta.limit,
       'Ubicaciones obtenidas exitosamente',
     );
+    // Augment meta with org-wide central warehouse count so the frontend
+    // banner reflects the whole org, not the visible (paginated/filtered) page.
+    (response as any).meta = {
+      ...response.meta,
+      central_count: result.meta.central_count,
+    };
+    return response;
   }
 
   @Post('central-warehouse/ensure')

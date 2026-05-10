@@ -132,7 +132,10 @@ export class AuthService {
               user,
               user_settings,
               store_settings,
-              permissions: decodedToken?.permissions || [],
+              permissions:
+                (response.data as any).permissions ??
+                decodedToken?.permissions ??
+                [],
             },
             updatedEnvironment: (userAppType || '').toUpperCase(),
           };
@@ -174,7 +177,10 @@ export class AuthService {
               ...response.data,
               user,
               user_settings,
-              permissions: decodedToken?.permissions || [],
+              permissions:
+                (response.data as any).permissions ??
+                decodedToken?.permissions ??
+                [],
             },
             updatedEnvironment: 'STORE_ECOMMERCE',
           };
@@ -263,7 +269,10 @@ export class AuthService {
               user,
               user_settings,
               store_settings,
-              permissions: decodedToken?.permissions || [],
+              permissions:
+                (response.data as any).permissions ??
+                decodedToken?.permissions ??
+                [],
             },
             updatedEnvironment: (userAppType || '').toUpperCase(),
           };
@@ -354,7 +363,10 @@ export class AuthService {
               user,
               user_settings,
               store_settings,
-              permissions: decodedToken?.permissions || [],
+              permissions:
+                (response.data as any).permissions ??
+                decodedToken?.permissions ??
+                [],
             },
             updatedEnvironment: (userAppType || '').toUpperCase(),
           };

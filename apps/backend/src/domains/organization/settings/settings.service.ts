@@ -7,6 +7,8 @@ import {
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
+import { S3Service } from '@common/services/s3.service';
+import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import {
   OrganizationSettings,
   OrganizationBranding,
@@ -24,6 +26,7 @@ export class SettingsService {
   constructor(
     private prisma: OrganizationPrismaService,
     private auditService: AuditService,
+    private s3Service: S3Service,
   ) {}
 
   async findOne() {
@@ -31,15 +34,23 @@ export class SettingsService {
     if (!settings) {
       throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
-    return settings;
+    return {
+      ...settings,
+      settings: await this.signSettingsAssets(settings.settings),
+    };
   }
 
   async update(updateDto: UpdateSettingsDto) {
     const existing = await this.prisma.organization_settings.findFirst();
+    const settingsForStorage = this.sanitizeSettingsAssets(
+      updateDto.settings ?? ((existing?.settings as Record<string, any>) || {}),
+    );
+    let result: any;
+
     if (existing) {
-      return this.prisma.organization_settings.update({
+      result = await this.prisma.organization_settings.update({
         where: { id: existing.id },
-        data: { settings: updateDto.settings, updated_at: new Date() },
+        data: { settings: settingsForStorage, updated_at: new Date() },
       });
     } else {
       const context = RequestContextService.getContext();
@@ -47,13 +58,18 @@ export class SettingsService {
         throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
       }
 
-      return this.prisma.organization_settings.create({
+      result = await this.prisma.organization_settings.create({
         data: {
-          settings: updateDto.settings,
+          settings: settingsForStorage,
           organization_id: context.organization_id,
         },
       });
     }
+
+    return {
+      ...result,
+      settings: await this.signSettingsAssets(result.settings),
+    };
   }
 
   /**
@@ -89,6 +105,60 @@ export class SettingsService {
     } catch {
       return null;
     }
+  }
+
+  private sanitizeSettingsAssets(
+    settings: Record<string, any>,
+  ): Record<string, any> {
+    const sanitized = { ...settings };
+    const branding = sanitized['branding'];
+
+    if (branding && typeof branding === 'object') {
+      sanitized['branding'] = {
+        ...branding,
+        ...(Object.prototype.hasOwnProperty.call(branding, 'logo_url') && {
+          logo_url: this.sanitizeAssetUrl(branding['logo_url']),
+        }),
+        ...(Object.prototype.hasOwnProperty.call(branding, 'favicon_url') && {
+          favicon_url: this.sanitizeAssetUrl(branding['favicon_url']),
+        }),
+      };
+    }
+
+    return sanitized;
+  }
+
+  private sanitizeAssetUrl(value: unknown): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string') return undefined;
+    if (value.trim() === '') return '';
+    return extractS3KeyFromUrl(value) ?? '';
+  }
+
+  private async signSettingsAssets(settings: unknown): Promise<unknown> {
+    if (!settings || typeof settings !== 'object') return settings;
+
+    const signed = { ...(settings as Record<string, any>) };
+    const branding = signed['branding'];
+
+    if (branding && typeof branding === 'object') {
+      const signedBranding = { ...branding };
+      const signedLogo = await this.s3Service.signUrl(
+        signedBranding['logo_url'],
+      );
+      const signedFavicon = await this.s3Service.signUrl(
+        signedBranding['favicon_url'],
+      );
+
+      if (signedLogo !== undefined) signedBranding['logo_url'] = signedLogo;
+      if (signedFavicon !== undefined) {
+        signedBranding['favicon_url'] = signedFavicon;
+      }
+
+      signed['branding'] = signedBranding;
+    }
+
+    return signed;
   }
 
   /**
@@ -146,7 +216,9 @@ export class SettingsService {
       // NOTA sobre scoping: OrganizationPrismaService inyecta automáticamente
       // `organization_id` en el WHERE, por lo que no se duplica aquí.
       const openTransfers = await this.prisma.stock_transfers.findMany({
-        where: { status: { in: ['pending', 'approved', 'in_transit', 'draft'] } },
+        where: {
+          status: { in: ['pending', 'approved', 'in_transit', 'draft'] },
+        },
         select: {
           id: true,
           transfer_number: true,

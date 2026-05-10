@@ -49,27 +49,25 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
       [(isOpen)]="isOpen"
       (cancel)="onCancel()"
       [size]="'md'"
-      title="Agregar Producto Temporal"
-      subtitle="Solo para esta orden de compra"
+      title="Agregar Producto Nuevo"
+      subtitle="Se creará en tu catálogo al confirmar la orden"
     >
       <div class="p-2 md:p-4">
         <form [formGroup]="form" class="space-y-4">
-          <!-- Warning banner -->
+          <!-- Info banner -->
           <div
-            class="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3"
+            class="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3"
           >
             <app-icon
-              name="alert-circle"
+              name="info"
               [size]="20"
-              class="mt-0.5 flex-shrink-0 text-amber-600"
+              class="mt-0.5 flex-shrink-0 text-blue-600"
             ></app-icon>
             <div class="text-sm">
-              <p class="mb-0.5 font-semibold text-amber-800">
-                Producto temporal
-              </p>
-              <p class="text-amber-900">
-                Este producto <strong>no se guardará</strong> en el catálogo.
-                Solo aparecerá en esta orden.
+              <p class="mb-0.5 font-semibold text-blue-800">Producto nuevo</p>
+              <p class="text-blue-900">
+                Se creará automáticamente en tu catálogo al confirmar la orden.
+                Podrás editarlo luego desde Productos.
               </p>
             </div>
           </div>

@@ -8,13 +8,6 @@ const routes: Routes = [
     component: ConfigComponent,
     children: [
       {
-        path: 'operations',
-        loadComponent: () =>
-          import('./operations/operations.component').then(
-            (m) => m.OperationsComponent,
-          ),
-      },
-      {
         path: 'application',
         loadComponent: () =>
           import('./application/application.component').then(

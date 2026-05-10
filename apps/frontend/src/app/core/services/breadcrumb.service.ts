@@ -578,7 +578,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/config/application',
-      title: 'Configuración de Aplicación',
+      title: 'General',
       parent: 'Configuration',
       icon: 'sliders',
     },

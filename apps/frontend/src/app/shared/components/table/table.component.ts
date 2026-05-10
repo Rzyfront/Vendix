@@ -27,6 +27,12 @@ export interface TableColumn {
     type?: 'status' | 'custom';
     colorKey?: string; // For status type, maps to predefined colors
     colorMap?: Record<string, string>; // For custom mapping of values to colors
+    /**
+     * Custom resolver that returns a color string (named CSS color, hex, or
+     * rgb) for the given value. Takes precedence over `colorMap` when present.
+     * Used for threshold-style coloring (e.g. "0 → red, >0 → green").
+     */
+    colorFn?: (value: any, item?: any) => string | null | undefined;
     size?: 'sm' | 'md' | 'lg';
   };
   priority?: number; // Priority for responsiveness: 0 (high) to infinite (low). Default logic applies if not set.
@@ -375,7 +381,7 @@ export class TableComponent {
       return `${baseClass} ${colorClass} ${sizeClass}`;
     } else if (
       column.badgeConfig.type === 'custom' &&
-      column.badgeConfig.colorMap
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
     ) {
       // For custom type, we'll use inline styles instead of CSS classes
       return `${baseClass} ${sizeClass} status-badge-custom`;
@@ -388,7 +394,10 @@ export class TableComponent {
    * Get background color for custom badges
    */
   getBadgeBackgroundColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       const color = this.getBadgeColorFromMap(column, value);
       if (color) {
         // Convert the color to a soft/transparent version for background
@@ -402,7 +411,10 @@ export class TableComponent {
    * Get text color for custom badges
    */
   getBadgeTextColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       return this.getBadgeColorFromMap(column, value);
     }
     return null;
@@ -412,7 +424,10 @@ export class TableComponent {
    * Get border color for custom badges
    */
   getBadgeBorderColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       const color = this.getBadgeColorFromMap(column, value);
       if (color) {
         // Make border slightly more transparent than text
@@ -427,6 +442,11 @@ export class TableComponent {
    * This method applies the column transform function if it exists before looking up the color
    */
   private getBadgeColorFromMap(column: TableColumn, value: any): string | null {
+    // colorFn wins over colorMap when both are provided
+    if (column.badgeConfig?.colorFn) {
+      const fnColor = column.badgeConfig.colorFn(value, undefined);
+      if (fnColor) return fnColor;
+    }
     if (column.badgeConfig?.colorMap) {
       // Apply transform function to get display value if exists
       const displayValue = column.transform

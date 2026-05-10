@@ -28,15 +28,27 @@ import {
   OrgTransfer,
 } from '../../../interfaces/org-transfer.interface';
 
+/**
+ * Shape returned by `GET /api/organization/inventory/stock-levels` —
+ * fields are FLAT (not nested under `products` / `product_variants`).
+ * See `OrgStockLevelsService.toFlatRow` in
+ * `apps/backend/.../organization/inventory/stock-levels/org-stock-levels.service.ts`.
+ */
 interface StockRow {
   id: number;
   product_id: number;
-  product_variant_id?: number | null;
+  product_name: string | null;
+  product_sku: string | null;
+  variant_id: number | null;
+  variant_name: string | null;
+  variant_sku: string | null;
+  location_id: number;
+  location_name: string | null;
+  store_id: number | null;
+  store_name: string | null;
   quantity: number;
-  reserved_quantity?: number;
-  available_quantity?: number;
-  products?: { id: number; name: string; sku?: string | null } | null;
-  product_variants?: { id: number; name?: string | null; sku?: string | null } | null;
+  reserved_quantity: number;
+  available_quantity: number;
 }
 
 interface TransferItemUI {
@@ -146,6 +158,14 @@ interface TransferItemUI {
             />
           </div>
 
+          @if (stockError(); as err) {
+            <p
+              class="p-2 bg-error/10 rounded-lg text-error text-xs flex items-center gap-2"
+            >
+              <app-icon name="alert-circle" [size]="14" />
+              {{ err }}
+            </p>
+          }
           @if (loadingStock()) {
             <div class="p-4 text-center">
               <div
@@ -155,33 +175,58 @@ interface TransferItemUI {
             </div>
           } @else if (filteredStock().length > 0) {
             <div
-              class="max-h-48 overflow-y-auto border border-border rounded-xl divide-y divide-border"
+              class="max-h-60 overflow-y-auto border border-border rounded-xl divide-y divide-border"
             >
               @for (row of filteredStock(); track row.id) {
+                @let available = row.available_quantity ?? row.quantity ?? 0;
+                @let outOfStock = available <= 0;
+                @let alreadyAdded = isAlreadyAdded(row);
                 <button
                   type="button"
-                  class="w-full p-3 text-left hover:bg-primary/5 transition-colors"
-                  [class.opacity-50]="(row.available_quantity ?? row.quantity) <= 0"
+                  class="w-full p-3 text-left hover:bg-primary/5 transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent"
+                  [class.opacity-50]="outOfStock || alreadyAdded"
+                  [disabled]="outOfStock || alreadyAdded"
+                  [attr.title]="
+                    outOfStock
+                      ? 'Sin stock disponible en el origen'
+                      : alreadyAdded
+                        ? 'Ya agregado a la transferencia'
+                        : null
+                  "
                   (click)="addRow(row)"
                 >
-                  <div class="flex items-center justify-between">
-                    <div>
-                      <p class="text-sm font-medium text-text-primary">
-                        {{ row.products?.name || 'Producto' }}
-                        @if (row.product_variants?.name) {
+                  <div class="flex items-center justify-between gap-3">
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-medium text-text-primary truncate">
+                        {{ row.product_name || ('Producto #' + row.product_id) }}
+                        @if (row.variant_name) {
                           <span class="text-text-secondary">
-                            ({{ row.product_variants?.name }})
+                            ({{ row.variant_name }})
                           </span>
                         }
                       </p>
-                      <p class="text-xs text-text-secondary">
-                        SKU: {{ row.products?.sku || row.product_variants?.sku || '-' }}
+                      <p class="text-xs text-text-secondary truncate">
+                        SKU: {{ row.variant_sku || row.product_sku || '-' }}
+                        @if (row.location_name) {
+                          <span class="text-text-tertiary">
+                            · {{ row.location_name }}
+                          </span>
+                        }
+                      </p>
+                      <p class="text-[10px] text-text-tertiary">
+                        En mano: {{ row.quantity ?? 0 }} · Reservado:
+                        {{ row.reserved_quantity ?? 0 }}
                       </p>
                     </div>
-                    <div class="text-right">
-                      <p class="text-xs text-text-primary font-semibold">
-                        Disp.: {{ row.available_quantity ?? row.quantity }}
+                    <div class="text-right shrink-0">
+                      <p
+                        class="text-sm font-semibold"
+                        [class.text-error]="outOfStock"
+                        [class.text-success]="!outOfStock"
+                      >
+                        {{ available }}
                       </p>
+                      <p class="text-[10px] text-text-tertiary">disp.</p>
                     </div>
                   </div>
                 </button>
@@ -189,7 +234,14 @@ interface TransferItemUI {
             </div>
           } @else if (productSearch()) {
             <p class="text-xs text-text-secondary">
-              Sin resultados para "{{ productSearch() }}".
+              Sin resultados para "{{ productSearch() }}" en esta ubicación.
+            </p>
+          } @else if (stock().length === 0) {
+            <p
+              class="text-xs text-text-secondary p-3 bg-warning/10 rounded-lg flex items-center gap-2"
+            >
+              <app-icon name="alert-circle" [size]="14" />
+              Esta ubicación no tiene productos con stock registrado.
             </p>
           }
 
@@ -317,6 +369,7 @@ export class OrgTransferCreateModalComponent {
   readonly toLocationId = signal<number | null>(null);
   readonly stock = signal<StockRow[]>([]);
   readonly loadingStock = signal(false);
+  readonly stockError = signal<string | null>(null);
   readonly productSearch = signal('');
   readonly items = signal<TransferItemUI[]>([]);
 
@@ -338,18 +391,49 @@ export class OrgTransferCreateModalComponent {
   readonly filteredStock = computed(() => {
     const term = this.productSearch().trim().toLowerCase();
     const list = this.stock();
-    if (!term) return list.slice(0, 10);
-    return list
+    // Sort: in-stock first, then alphabetical by product name. Keeps the
+    // useful rows on top regardless of the backend `id` ordering.
+    const sorted = [...list].sort((a, b) => {
+      const av = Number(a.available_quantity ?? a.quantity ?? 0);
+      const bv = Number(b.available_quantity ?? b.quantity ?? 0);
+      const ao = av > 0 ? 0 : 1;
+      const bo = bv > 0 ? 0 : 1;
+      if (ao !== bo) return ao - bo;
+      return (a.product_name ?? '').localeCompare(b.product_name ?? '');
+    });
+    if (!term) return sorted.slice(0, 15);
+    return sorted
       .filter((row) => {
-        const name = (row.products?.name ?? '').toLowerCase();
-        const sku =
-          (row.products?.sku ?? '').toLowerCase() +
-          ' ' +
-          (row.product_variants?.sku ?? '').toLowerCase();
-        return name.includes(term) || sku.includes(term);
+        const haystack = [
+          row.product_name,
+          row.product_sku,
+          row.variant_name,
+          row.variant_sku,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
       })
-      .slice(0, 15);
+      .slice(0, 25);
   });
+
+  /**
+   * Returns true if the (product, variant) pair is already part of the
+   * transfer items list. Used to disable duplicate selection in the list.
+   */
+  isAlreadyAdded(row: StockRow): boolean {
+    const key = this.rowKey(row);
+    return this.items().some((i) => i.key === key);
+  }
+
+  private rowKey(row: StockRow | { product_id: number; variant_id?: number | null }): string {
+    const variantId =
+      'variant_id' in row
+        ? row.variant_id
+        : (row as StockRow).variant_id ?? null;
+    return `${row.product_id}-${variantId ?? 'base'}`;
+  }
 
   readonly canSubmit = computed(
     () =>
@@ -387,7 +471,7 @@ export class OrgTransferCreateModalComponent {
   }
 
   addRow(row: StockRow): void {
-    const key = `${row.product_id}-${row.product_variant_id ?? 'base'}`;
+    const key = this.rowKey(row);
     if (this.items().some((i) => i.key === key)) return;
     const available = Number(row.available_quantity ?? row.quantity ?? 0);
     if (available <= 0) return;
@@ -397,10 +481,10 @@ export class OrgTransferCreateModalComponent {
       {
         key,
         product_id: row.product_id,
-        product_name: row.products?.name ?? `Producto #${row.product_id}`,
-        product_variant_id: row.product_variant_id ?? undefined,
-        variant_name: row.product_variants?.name ?? null,
-        sku: row.products?.sku ?? row.product_variants?.sku ?? null,
+        product_name: row.product_name ?? `Producto #${row.product_id}`,
+        product_variant_id: row.variant_id ?? undefined,
+        variant_name: row.variant_name ?? null,
+        sku: row.variant_sku ?? row.product_sku ?? null,
         available_at_origin: available,
         quantity: 1,
       },
@@ -446,6 +530,7 @@ export class OrgTransferCreateModalComponent {
     this.fromLocationId.set(null);
     this.toLocationId.set(null);
     this.stock.set([]);
+    this.stockError.set(null);
     this.productSearch.set('');
     this.items.set([]);
     this.expectedDate = '';
@@ -454,19 +539,36 @@ export class OrgTransferCreateModalComponent {
 
   private loadStockForLocation(locationId: number): void {
     this.loadingStock.set(true);
+    this.stockError.set(null);
     this.http
       .get<any>(
-        `${environment.apiUrl}/organization/inventory/stock-levels?location_id=${locationId}&limit=200`,
+        `${environment.apiUrl}/organization/inventory/stock-levels?location_id=${locationId}&limit=500`,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          const data: StockRow[] = Array.isArray(res?.data) ? res.data : [];
+          const raw: StockRow[] = Array.isArray(res?.data) ? res.data : [];
+          // Defense in depth: backend already scopes by org and location, but
+          // we re-assert client-side that every row belongs to the requested
+          // origin location before showing it for transfer.
+          const data = raw.filter((r) => r.location_id === locationId);
+          if (data.length !== raw.length) {
+            console.warn(
+              '[OrgTransferCreate] discarded',
+              raw.length - data.length,
+              'stock rows whose location_id !=',
+              locationId,
+            );
+          }
           this.stock.set(data);
           this.loadingStock.set(false);
         },
-        error: () => {
+        error: (err) => {
+          console.error('[OrgTransferCreate] stock load failed', err);
           this.stock.set([]);
+          this.stockError.set(
+            'No se pudo cargar el stock de la ubicación origen. Reintenta.',
+          );
           this.loadingStock.set(false);
         },
       });

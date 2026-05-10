@@ -297,10 +297,12 @@ export class OrgInventoryReportsService {
           method: 'fifo' as ResolvedCostingMethod,
           requested_method: 'fifo' as ResolvedCostingMethod,
           partial_data: false,
+          is_authoritative: true,
+          source: 'inventory_cost_layers' as const,
           total_value: fifoResult.total_value,
           by_store: fifoResult.by_store,
           items_count: fifoResult.items_count,
-          note: 'Valuación FIFO sobre inventory_cost_layers (quantity_remaining * unit_cost).',
+          note: 'Valuación FIFO autoritativa sobre inventory_cost_layers (quantity_remaining * unit_cost).',
         };
       }
 
@@ -314,23 +316,27 @@ export class OrgInventoryReportsService {
         method: 'weighted_average' as ResolvedCostingMethod,
         requested_method: 'fifo' as ResolvedCostingMethod,
         partial_data: true,
+        is_authoritative: false,
+        source: 'stock_levels.cost_per_unit' as const,
         total_value: waResult.total_value,
         by_store: waResult.by_store,
         items_count: waResult.items_count,
-        note: 'FIFO solicitado pero no hay cost layers con stock — usando weighted_average como aproximación.',
+        note: 'FIFO solicitado pero no hay cost layers con stock — usando weighted_average como aproximación (no autoritativa).',
       };
     }
 
-    // Weighted average path.
+    // Weighted average path: autoritativa bajo método CPP configurado.
     const waResult = await this.computeWeightedAverageValuation(location_where);
     return {
       method: 'weighted_average' as ResolvedCostingMethod,
       requested_method: 'weighted_average' as ResolvedCostingMethod,
       partial_data: false,
+      is_authoritative: true,
+      source: 'stock_levels.cost_per_unit' as const,
       total_value: waResult.total_value,
       by_store: waResult.by_store,
       items_count: waResult.items_count,
-      note: 'Valuación CPP basada en stock_levels.cost_per_unit * quantity_on_hand.',
+      note: 'Valuación CPP autoritativa sobre stock_levels.cost_per_unit * quantity_on_hand.',
     };
   }
 

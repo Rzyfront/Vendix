@@ -47,7 +47,7 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
         },
         {
           key: 'settings_application',
-          label: 'Configuraci\u00f3n de Aplicaci\u00f3n',
+          label: 'General',
           description: 'Configuraci\u00f3n general de la aplicaci\u00f3n',
         },
         {

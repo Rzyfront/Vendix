@@ -8,10 +8,8 @@ export const orgInventoryRoutes: Routes = [
     children: [
       {
         path: '',
-        loadComponent: () =>
-          import('./pages/dashboard/dashboard.component').then(
-            (c) => c.OrgInventoryDashboardComponent,
-          ),
+        redirectTo: 'stock-levels',
+        pathMatch: 'full',
       },
       {
         path: 'stock-levels',
@@ -53,6 +51,20 @@ export const orgInventoryRoutes: Routes = [
         loadComponent: () =>
           import('./pages/adjustments/adjustments.component').then(
             (c) => c.OrgAdjustmentsComponent,
+          ),
+      },
+      {
+        path: 'serial-numbers',
+        loadComponent: () =>
+          import('./pages/serial-numbers/serial-numbers.component').then(
+            (c) => c.OrgSerialNumbersComponent,
+          ),
+      },
+      {
+        path: 'batches',
+        loadComponent: () =>
+          import('./pages/batches/batches.component').then(
+            (c) => c.OrgBatchesComponent,
           ),
       },
     ],

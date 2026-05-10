@@ -1501,6 +1501,14 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/inventory/transactions',
       method: 'GET',
     },
+    // Listado consolidado de números de serie a nivel organización (read-only).
+    {
+      name: 'organization:inventory:serial-numbers:read',
+      description:
+        'Leer números de serie de inventario consolidados a nivel organización',
+      path: '/api/organization/inventory/serial-numbers',
+      method: 'GET',
+    },
     // Transferencias de inventario org-native — ciclo completo (TWO-STEP §13#1).
     {
       name: 'organization:inventory:transfers:create',
@@ -1542,6 +1550,13 @@ export async function seedPermissionsAndRoles(
         'Cancelar una transferencia en cualquier estado previo a completed',
       path: '/api/organization/inventory/transfers/:id/cancel',
       method: 'PATCH',
+    },
+    // Lotes de inventario consolidados a nivel organización (read-only, foco en caducidad).
+    {
+      name: 'organization:inventory:batches:read',
+      description: 'Leer lotes de inventario a nivel organización',
+      path: '/api/organization/inventory/batches',
+      method: 'GET',
     },
     // Operating Scope wizard (Phase 4)
     {

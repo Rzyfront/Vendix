@@ -175,54 +175,13 @@ export class OrganizationAdminLayoutComponent {
       route: '/admin/users',
     },
     {
-      label: 'Dominios',
-      icon: 'globe',
-      route: '/admin/domains',
-    },
-    {
-      label: 'Roles',
-      icon: 'shield',
-      route: '/admin/roles',
-    },
-    {
-      label: 'Auditoría y Cumplimiento',
-      icon: 'shield',
-      route: '/admin/audit/logs',
-    },
-    {
-      label: 'Contabilidad',
-      icon: 'book-open',
-      children: [
-        {
-          label: 'Plan de Cuentas',
-          icon: '',
-          route: '/admin/accounting/chart-of-accounts',
-        },
-        {
-          label: 'Asientos Contables',
-          icon: '',
-          route: '/admin/accounting/journal-entries',
-        },
-        {
-          label: 'Periodos Fiscales',
-          icon: '',
-          route: '/admin/accounting/fiscal-periods',
-        },
-        {
-          label: 'Mapeo de Cuentas',
-          icon: '',
-          route: '/admin/accounting/account-mappings',
-        },
-      ],
-    },
-    {
       label: 'Inventario',
       icon: 'warehouse',
       children: [
         {
-          label: 'Panel principal',
-          icon: 'layout-dashboard',
-          route: '/admin/inventory',
+          label: 'Compras',
+          icon: 'shopping-bag',
+          route: '/admin/purchase-orders',
           alwaysVisible: true,
         },
         {
@@ -281,7 +240,42 @@ export class OrganizationAdminLayoutComponent {
           lockedBadge: 'ORG',
           lockedTooltip: 'Disponible en modo ORGANIZATION',
         },
+        {
+          label: 'Números de Serie',
+          icon: '',
+          route: '/admin/inventory/serial-numbers',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Lotes',
+          icon: 'layers',
+          route: '/admin/inventory/batches',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
       ],
+    },
+    {
+      label: 'Dominios',
+      icon: 'globe',
+      route: '/admin/domains',
+    },
+    {
+      label: 'Roles',
+      icon: 'shield',
+      route: '/admin/roles',
+    },
+    {
+      label: 'Auditoría y Cumplimiento',
+      icon: 'eye',
+      route: '/admin/audit/logs',
     },
     {
       label: 'Reportes',
@@ -308,9 +302,30 @@ export class OrganizationAdminLayoutComponent {
       ],
     },
     {
-      label: 'Compras',
-      icon: 'shopping-bag',
-      route: '/admin/purchase-orders',
+      label: 'Contabilidad',
+      icon: 'book-open',
+      children: [
+        {
+          label: 'Plan de Cuentas',
+          icon: '',
+          route: '/admin/accounting/chart-of-accounts',
+        },
+        {
+          label: 'Asientos Contables',
+          icon: '',
+          route: '/admin/accounting/journal-entries',
+        },
+        {
+          label: 'Periodos Fiscales',
+          icon: '',
+          route: '/admin/accounting/fiscal-periods',
+        },
+        {
+          label: 'Mapeo de Cuentas',
+          icon: '',
+          route: '/admin/accounting/account-mappings',
+        },
+      ],
     },
     {
       label: 'Nómina',
@@ -322,19 +337,14 @@ export class OrganizationAdminLayoutComponent {
       icon: 'settings',
       children: [
         {
-          label: 'Operación',
-          icon: 'settings',
-          route: '/admin/config/operations',
+          label: 'General',
+          icon: 'sliders',
+          route: '/admin/config/application',
         },
         {
           label: 'Modo operativo',
           icon: 'building',
           route: '/admin/settings/operating-scope',
-        },
-        {
-          label: 'Configuración de Aplicación',
-          icon: 'sliders',
-          route: '/admin/config/application',
         },
         {
           label: 'Métodos de Pago',

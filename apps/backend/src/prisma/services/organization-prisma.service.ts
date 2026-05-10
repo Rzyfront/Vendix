@@ -81,6 +81,16 @@ export class OrganizationPrismaService extends BasePrismaService {
     payroll_items: (orgId) => ({
       payroll_run: { is: { organization_id: orgId } },
     }),
+    // domain_settings: org isolation is dual — direct org domains have
+    // organization_id set, store domains have store_id set and inherit org via
+    // the related store. OR is required because direct AND on organization_id
+    // would filter out store-linked domains where organization_id is null.
+    domain_settings: (orgId) => ({
+      OR: [
+        { organization_id: orgId },
+        { store: { is: { organization_id: orgId } } },
+      ],
+    }),
   };
 
   constructor(
@@ -310,6 +320,12 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get products() {
     return this.baseClient.products;
+  }
+
+  // inventory_batches has no direct organization_id column. Manual relation
+  // filter via `products.organization_id` is required at the call site.
+  get inventory_batches() {
+    return this.baseClient.inventory_batches;
   }
 
   get order_items() {

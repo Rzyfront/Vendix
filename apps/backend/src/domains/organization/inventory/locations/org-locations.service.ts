@@ -77,7 +77,7 @@ export class OrgLocationsService {
     const limit = query.limit && query.limit > 0 ? query.limit : 25;
     const skip = (page - 1) * limit;
 
-    const [data, total] = await Promise.all([
+    const [data, total, central_count] = await Promise.all([
       this.orgPrisma.inventory_locations.findMany({
         where,
         include: {
@@ -88,6 +88,15 @@ export class OrgLocationsService {
         take: limit,
       }),
       this.orgPrisma.inventory_locations.count({ where }),
+      // Org-wide central warehouse existence — independent of current filters
+      // so the "no central warehouse" banner reflects the whole org, not the
+      // visible page slice.
+      this.orgPrisma.inventory_locations.count({
+        where: {
+          organization_id: scoped.organization_id,
+          is_central_warehouse: true,
+        },
+      }),
     ]);
 
     return {
@@ -97,6 +106,7 @@ export class OrgLocationsService {
         page,
         limit,
         total_pages: Math.ceil(total / Math.max(limit, 1)),
+        central_count,
       },
     };
   }

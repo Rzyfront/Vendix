@@ -229,13 +229,23 @@ export class OrgMovementsService {
       store_id: number | null;
       stores: { id: number; name: string | null } | null;
     } | null;
+    users?: {
+      id: number;
+      first_name: string | null;
+      last_name: string | null;
+    } | null;
   }) {
     const type = row.movement_type;
-    const operative = OrgMovementsService.INBOUND_TYPES.has(type)
+    const preferred = OrgMovementsService.INBOUND_TYPES.has(type)
       ? row.to_location
       : OrgMovementsService.OUTBOUND_TYPES.has(type)
         ? row.from_location
-        : (row.from_location ?? row.to_location);
+        : null;
+    // Fallback: legacy/dirty rows may carry the location on the opposite side
+    // (e.g. POS sales emitted with to_location_id instead of from_location_id).
+    // Pick whichever side is populated so the UI always shows a location.
+    const operative =
+      preferred ?? row.from_location ?? row.to_location ?? null;
     return {
       id: row.id,
       created_at: row.created_at ? row.created_at.toISOString() : null,
@@ -250,6 +260,12 @@ export class OrgMovementsService {
       reference: row.reason ?? null,
       notes: row.notes ?? null,
       user_id: row.user_id ?? null,
+      user_name: row.users
+        ? [row.users.first_name, row.users.last_name]
+            .filter(Boolean)
+            .join(' ')
+            .trim() || null
+        : null,
     };
   }
 }

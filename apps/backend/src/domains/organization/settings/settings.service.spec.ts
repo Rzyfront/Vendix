@@ -3,6 +3,8 @@ import { SettingsService } from './settings.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { NotFoundException } from '@nestjs/common';
+import { AuditService } from '@common/audit/audit.service';
+import { S3Service } from '@common/services/s3.service';
 
 describe('SettingsService', () => {
   let service: SettingsService;
@@ -15,6 +17,12 @@ describe('SettingsService', () => {
       create: jest.fn(),
     },
   };
+  const mockAuditService = {
+    logUpdate: jest.fn(),
+  };
+  const mockS3Service = {
+    signUrl: jest.fn(async (value: string | undefined) => value),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -23,6 +31,14 @@ describe('SettingsService', () => {
         {
           provide: OrganizationPrismaService,
           useValue: mockPrismaService,
+        },
+        {
+          provide: AuditService,
+          useValue: mockAuditService,
+        },
+        {
+          provide: S3Service,
+          useValue: mockS3Service,
         },
       ],
     }).compile();

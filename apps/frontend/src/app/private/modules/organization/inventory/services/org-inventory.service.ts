@@ -79,6 +79,7 @@ export interface OrgMovementRow {
   reference?: string | null;
   notes?: string | null;
   user_id?: number | null;
+  user_name?: string | null;
 }
 
 export interface OrgSupplierRow {
@@ -124,6 +125,40 @@ export interface CreateOrgSupplierRequest {
 
 export type UpdateOrgSupplierRequest = Partial<CreateOrgSupplierRequest>;
 
+export type OrgSerialNumberStatus =
+  | 'in_stock'
+  | 'reserved'
+  | 'sold'
+  | 'returned'
+  | 'damaged'
+  | 'expired'
+  | 'in_transit';
+
+export interface OrgSerialNumberRow {
+  id: number;
+  serial_number: string;
+  status?: OrgSerialNumberStatus | string;
+  product_id?: number;
+  product_name?: string | null;
+  product_sku?: string | null;
+  variant_id?: number | null;
+  variant_name?: string | null;
+  variant_sku?: string | null;
+  location_id?: number | null;
+  location_name?: string | null;
+  store_id?: number | null;
+  store_name?: string | null;
+  batch_id?: number | null;
+  batch_number?: string | null;
+  batch_expiration_date?: string | null;
+  /** Decimal monetary value serialised as string (use Vendix CurrencyPipe). */
+  cost?: string | null;
+  sold_date?: string | null;
+  warranty_expiry?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+}
+
 export interface OrgTransferRow {
   id: number;
   transfer_number?: string;
@@ -157,7 +192,13 @@ export class OrgInventoryService {
   private readonly apiUrl = environment.apiUrl;
 
   // ─── Stock levels ────────────────────────────────────────────────────────
-  getStockLevels(query?: { store_id?: number | string; search?: string }): Observable<ApiResponse<OrgStockLevelRow[]>> {
+  getStockLevels(query?: {
+    store_id?: number | string;
+    location_id?: number | string;
+    search?: string;
+    limit?: number;
+    page?: number;
+  }): Observable<ApiResponse<OrgStockLevelRow[]>> {
     return this.http.get<ApiResponse<OrgStockLevelRow[]>>(
       `${this.apiUrl}/organization/inventory/stock-levels`,
       { params: this.toParams(query) },

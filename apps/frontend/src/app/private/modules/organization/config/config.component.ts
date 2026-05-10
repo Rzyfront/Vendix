@@ -22,21 +22,6 @@ import { IconComponent } from '../../../../shared/components';
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           <a
-            routerLink="operations"
-            class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
-          >
-            <div class="flex items-center gap-3 mb-2">
-              <app-icon
-                name="settings"
-                size="20"
-                class="text-primary"
-              ></app-icon>
-              <h3 class="text-lg font-semibold">Operación</h3>
-            </div>
-            <p class="text-gray-600">Alcance operativo y modelo multi-tienda</p>
-          </a>
-
-          <a
             routerLink="application"
             class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
           >

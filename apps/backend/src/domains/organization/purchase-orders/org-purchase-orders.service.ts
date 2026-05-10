@@ -223,7 +223,13 @@ export class OrgPurchaseOrdersService {
         include: {
           suppliers: { select: { id: true, name: true } },
           location: {
-            select: { id: true, name: true, code: true, store_id: true },
+            select: {
+              id: true,
+              name: true,
+              code: true,
+              store_id: true,
+              stores: { select: { id: true, name: true } },
+            },
           },
           purchase_order_items: {
             include: {
@@ -259,7 +265,13 @@ export class OrgPurchaseOrdersService {
       include: {
         suppliers: true,
         location: {
-          select: { id: true, name: true, code: true, store_id: true },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            store_id: true,
+            stores: { select: { id: true, name: true } },
+          },
         },
         purchase_order_items: {
           include: {
@@ -282,14 +294,24 @@ export class OrgPurchaseOrdersService {
    */
   async getStats() {
     this.requireOrgId();
-    const [total, draft, approved, received, cancelled] = await Promise.all([
-      this.orgPrisma.purchase_orders.count(),
-      this.orgPrisma.purchase_orders.count({ where: { status: 'draft' } }),
-      this.orgPrisma.purchase_orders.count({ where: { status: 'approved' } }),
-      this.orgPrisma.purchase_orders.count({ where: { status: 'received' } }),
-      this.orgPrisma.purchase_orders.count({ where: { status: 'cancelled' } }),
-    ]);
-    return { total, draft, approved, received, cancelled };
+    const [total, draft, pending, approved, received, cancelled] =
+      await Promise.all([
+        this.orgPrisma.purchase_orders.count(),
+        this.orgPrisma.purchase_orders.count({ where: { status: 'draft' } }),
+        this.orgPrisma.purchase_orders.count({
+          where: { status: 'pending' },
+        }),
+        this.orgPrisma.purchase_orders.count({
+          where: { status: 'approved' },
+        }),
+        this.orgPrisma.purchase_orders.count({
+          where: { status: 'received' },
+        }),
+        this.orgPrisma.purchase_orders.count({
+          where: { status: 'cancelled' },
+        }),
+      ]);
+    return { total, draft, pending, approved, received, cancelled };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -399,7 +421,9 @@ export class OrgPurchaseOrdersService {
       notes: dto.notes,
       internal_notes: dto.internal_notes,
       items: dto.items.map((item) => ({
-        product_id: item.product_id,
+        // product_id may be 0 / missing when prebulk → store service
+        // autocreates the catalog row from product_name + sku.
+        product_id: item.product_id ?? 0,
         product_variant_id: item.product_variant_id,
         quantity: item.quantity,
         unit_price: item.unit_price,
@@ -409,6 +433,11 @@ export class OrgPurchaseOrdersService {
         batch_number: item.batch_number,
         manufacturing_date: item.manufacturing_date,
         expiration_date: item.expiration_date,
+        // Prebulk passthrough — store service consumes when product_id falsy.
+        product_name: item.product_name,
+        sku: item.sku,
+        product_description: item.product_description,
+        base_price: item.base_price,
       })),
     };
 
