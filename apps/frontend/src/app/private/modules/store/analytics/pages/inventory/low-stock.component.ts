@@ -346,7 +346,7 @@ export class LowStockComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Alertas'],
+        data: ['Agotados', 'Stock Bajo', 'En Stock'],
         bottom: 30,
         textStyle: { color: textSecondary },
       },
@@ -373,21 +373,25 @@ export class LowStockComponent implements OnInit {
       },
       series: [
         {
-          name: 'Alertas',
+          name: 'Agotados',
           type: 'bar',
-          data: [outOfStock, lowStock, inStock],
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#f59e0b' },
-                { offset: 1, color: '#f59e0b80' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
+          data: [outOfStock],
+          itemStyle: { color: '#ef4444' },
+          barMaxWidth: 32,
+        },
+        {
+          name: 'Stock Bajo',
+          type: 'bar',
+          data: [lowStock],
+          itemStyle: { color: '#f59e0b' },
+          barMaxWidth: 32,
+        },
+        {
+          name: 'En Stock',
+          type: 'bar',
+          data: [inStock],
+          itemStyle: { color: '#22c55e' },
+          barMaxWidth: 32,
         },
       ],
     });

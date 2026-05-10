@@ -372,7 +372,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: ['Top Clientes'],
+        data: top10.length > 0 ? top10.map((c) => c.customer_name) : ['Sin datos'],
         bottom: 30,
         textStyle: { color: textSecondary },
       },
@@ -403,28 +403,19 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 11 },
       },
-      series: [
-        {
-          name: 'Top Clientes',
-          type: 'bar',
-          data: top10.length > 0 ? top10.map((p) => p.total_spent) : [0],
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 1,
-              y2: 0,
-              colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: primaryColor + '99' },
-              ],
-            },
-            borderRadius: [0, 4, 4, 0],
-          },
+      series: top10.length > 0 ? top10.map((c, i) => ({
+          name: c.customer_name,
+          type: 'bar' as const,
+          data: [c.total_spent],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 32,
-        },
-      ],
+        })) : [{
+          name: 'Sin datos',
+          type: 'bar' as const,
+          data: [0],
+          itemStyle: { color: '#9ca3af' },
+          barMaxWidth: 32,
+        }],
     });
   }
 

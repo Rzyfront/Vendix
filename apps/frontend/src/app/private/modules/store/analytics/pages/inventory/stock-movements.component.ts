@@ -405,7 +405,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: ['Movimientos'],
+        data: labels,
         bottom: 30,
         textStyle: { color: textSecondary },
       },
@@ -430,25 +430,13 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: [
-        {
-          name: 'Movimientos',
-          type: 'bar',
-          data: values,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f6' },
-                { offset: 1, color: '#3b82f680' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
+      series: labels.map((label, i) => ({
+          name: label,
+          type: 'bar' as const,
+          data: [values[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 40,
-        },
-      ],
+        })),
     });
   }
 

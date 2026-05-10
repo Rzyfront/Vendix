@@ -209,6 +209,8 @@ private buildLineSeries(name: string, data: number[], color: string): any {
     return {
       name,
       type: 'line',
+      smooth: true,
+      symbol: 'circle',
       data,
       areaStyle: {
         color: {

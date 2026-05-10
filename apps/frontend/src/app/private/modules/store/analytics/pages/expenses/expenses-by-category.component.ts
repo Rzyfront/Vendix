@@ -125,7 +125,7 @@ export class ExpensesByCategoryComponent {
 
     this.chartOptions.set({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['Gastos'], bottom: 30, textStyle: { color: textSecondary } },
+      legend: { data: this.categoriesData().map(c => c.name), bottom: 30, textStyle: { color: textSecondary } },
       grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',
@@ -142,25 +142,12 @@ export class ExpensesByCategoryComponent {
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: [
-        {
-          name: 'Gastos',
-          type: 'bar',
-          data: this.categoriesData().map(c => c.value),
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#f59e0b' },
-                { offset: 1, color: '#f59e0b80' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
-        },
-      ],
+      series: this.categoriesData().map((c, i) => ({
+          name: c.name,
+          type: 'bar' as const,
+          data: [c.value],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+        })),
     });
   }
 

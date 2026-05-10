@@ -285,6 +285,8 @@ export class ReviewSummaryComponent implements OnInit {
         {
           name: 'Distribución',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: counts,
           itemStyle: {
             color: '#f59e0b',
@@ -332,6 +334,8 @@ export class ReviewSummaryComponent implements OnInit {
         {
           name: 'Estado Reviews',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: [
             { value: data.pending_reviews || 0, itemStyle: { color: '#f59e0b' } },
             { value: data.approved_reviews || 0, itemStyle: { color: '#22c55e' } },

@@ -171,6 +171,8 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
         {
           name: 'Ingresos',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: revenues,
           areaStyle: {
             color: {

@@ -193,6 +193,8 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         {
           name: 'Nuevos Clientes',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: newCustomers,
           itemStyle: { color: primaryColor },
           areaStyle: {
@@ -293,6 +295,8 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         {
           name: 'Canales',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: values,
           itemStyle: {
             color: (params: any) => channelColors[params.dataIndex % channelColors.length],

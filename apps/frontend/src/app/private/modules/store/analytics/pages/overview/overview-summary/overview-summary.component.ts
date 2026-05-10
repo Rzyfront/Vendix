@@ -340,9 +340,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Ventas',
           type: 'line',
-          
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.sales),
-          
+
           itemStyle: { color: '#22c55e' },
           areaStyle: {
             color: {
@@ -358,9 +359,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Gastos',
           type: 'line',
-          
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.expenses),
-          
+
           itemStyle: { color: '#ef4444' },
           areaStyle: {
             color: {
@@ -376,9 +378,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Impuestos',
           type: 'line',
-          
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.taxes),
-          
+
           itemStyle: { color: '#f59e0b' },
           areaStyle: {
             color: {
@@ -394,9 +397,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Rend. Bruto',
           type: 'line',
-          
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.gross_profit),
-          
+
           itemStyle: { color: '#3b82f6' },
           areaStyle: {
             color: {
@@ -412,9 +416,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Rend. Neto',
           type: 'line',
-          
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.net_profit),
-          
+
           itemStyle: { color: '#8b5cf6' },
           areaStyle: {
             color: {

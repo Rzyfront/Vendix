@@ -366,25 +366,13 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 11 },
       },
-      series: [
-        {
-          name: 'Top Productos',
-          type: 'bar',
-          data: top10.map((p) => p.revenue),
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 1, y2: 0,
-              colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: primaryColor + '99' },
-              ],
-            },
-            borderRadius: [0, 4, 4, 0],
-          },
+      series: top10.map((p, i) => ({
+          name: p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name,
+          type: 'bar' as const,
+          data: [p.revenue],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 32,
-        },
-      ],
+        })),
     });
   }
 

@@ -295,14 +295,12 @@ export class PurchaseSummaryComponent implements OnInit {
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary, fontSize: 11 },
       },
-      series: [
-        {
-          name: 'Proveedores',
-          type: 'bar',
-          data: suppliersData.map((s) => s.total_spent).reverse(),
-          itemStyle: { color: '#3b82f6' },
-        },
-      ],
+      series: suppliersData.map((s, i) => ({
+          name: s.supplier_name.length > 20 ? s.supplier_name.substring(0, 20) + '...' : s.supplier_name,
+          type: 'bar' as const,
+          data: [s.total_spent],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+        })),
     });
 
     // Orders Status Line

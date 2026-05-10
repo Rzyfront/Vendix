@@ -164,7 +164,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: ['Ingresos'],
+        data: names,
         bottom: 30,
         textStyle: { color: textSecondary },
       },
@@ -193,25 +193,13 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: [
-        {
-          name: 'Ingresos',
-          type: 'bar',
-          data: revenues,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: primaryColor + '80' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
+      series: names.map((name, i) => ({
+          name,
+          type: 'bar' as const,
+          data: [revenues[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 40,
-        },
-      ],
+        })),
     });
   }
 

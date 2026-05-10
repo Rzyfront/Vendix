@@ -325,7 +325,7 @@ onDateRangeChange(range: DateRangeFilter): void {
           return html;
         }},
       legend: {
-        data: ['Ventas'],
+        data: categories,
         bottom: 30,
         textStyle: { color: '#6b7280' },
       },
@@ -353,23 +353,13 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: [{
-          name: 'Ventas',
-          type: 'bar',
-          data: values,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#8b5cf6' },
-                { offset: 1, color: '#8b5cf680' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
+      series: categories.map((cat, i) => ({
+          name: cat,
+          type: 'bar' as const,
+          data: [values[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 40,
-        }],
+        })),
     });
   }
 

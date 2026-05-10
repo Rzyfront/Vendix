@@ -336,7 +336,7 @@ loadData(): void {
         },
       },
       legend: {
-        data: ['Valor'],
+        data: chartData.map((d: any) => d.name),
         bottom: 30,
         left: 'center',
         textStyle: { color: '#6b7280' },
@@ -357,25 +357,13 @@ loadData(): void {
         axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO') },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: [
-        {
-          name: 'Valor',
-          type: 'bar',
-          data: chartData.map((d: any) => d.value),
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f6' },
-                { offset: 1, color: '#3b82f680' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
+      series: chartData.map((d: any, i: number) => ({
+          name: d.name,
+          type: 'bar' as const,
+          data: [d.value],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 40,
-        },
-      ],
+        })),
     });
   }
 

@@ -341,6 +341,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Ingresos',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: revenues,
           yAxisIndex: 0,
           itemStyle: { color: '#22c55e' },
@@ -359,6 +361,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Órdenes',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: orders,
           yAxisIndex: 1,
           itemStyle: { color: '#3b82f6' },

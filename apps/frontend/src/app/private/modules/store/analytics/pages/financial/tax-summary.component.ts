@@ -288,7 +288,9 @@ export class TaxSummaryComponent implements OnInit {
       },
       series: taxCategories.map((cat, i) => ({
         name: cat,
-        type: 'line',
+        type: 'bar',
+        smooth: true,
+        symbol: 'circle',
         data: taxCategories.map((_, j) => j === i ? taxValues[i] : null),
         itemStyle: { color: taxColors[i] },
         barMaxWidth: 60,

@@ -284,25 +284,25 @@ export class ProfitLossComponent implements OnInit {
       series: [
         {
           name: 'Ingresos',
-          type: 'line',
+          type: 'bar',
           data: [d.revenue?.gross_revenue || 0],
           itemStyle: { color: '#22c55e' },
         },
         {
           name: 'COGS',
-          type: 'line',
+          type: 'bar',
           data: [-(d.costs?.cost_of_goods_sold || 0)],
           itemStyle: { color: '#ef4444' },
         },
         {
           name: 'Reembolsos',
-          type: 'line',
+          type: 'bar',
           data: [-(d.refunds?.total_refunds || 0)],
           itemStyle: { color: '#f59e0b' },
         },
         {
           name: 'Gastos Operativos',
-          type: 'line',
+          type: 'bar',
           data: [-(d.operating_expenses || 0)],
           itemStyle: { color: '#8b5cf6' },
         },
@@ -331,6 +331,8 @@ export class ProfitLossComponent implements OnInit {
         {
           name: 'Ganancias',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: [
             { value: Math.max(0, grossProfit), itemStyle: { color: '#22c55e' } },
             { value: Math.max(0, refunds), itemStyle: { color: '#f59e0b' } },

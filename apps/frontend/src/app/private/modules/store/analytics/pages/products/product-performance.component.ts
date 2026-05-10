@@ -183,25 +183,14 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } } },
-      series: [
-        {
-          name: 'Unidades',
-          type: 'bar',
-          data: units,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: purpleColor },
-                { offset: 1, color: purpleColor + '80' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
+      series: labels.map((label, i) => ({
+          name: label,
+          type: 'bar' as const,
+          data: [units[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
           barMaxWidth: 40,
-        },
-      ] });
+        })),
+    });
   }
 
   private updateTopSellersChart(topSellers: TopSellingProduct[]): void {

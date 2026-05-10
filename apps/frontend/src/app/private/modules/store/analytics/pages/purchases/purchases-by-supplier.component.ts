@@ -259,7 +259,7 @@ export class PurchasesBySupplierComponent implements OnInit {
           return html;
         },
       },
-      legend: { data: ['Total Gastado'], bottom: 30, textStyle: { color: '#6b7280' } },
+      legend: { data: suppliers, bottom: 30, textStyle: { color: '#6b7280' } },
       grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
@@ -274,23 +274,13 @@ export class PurchasesBySupplierComponent implements OnInit {
         axisLabel: { color: '#6b7280', formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO', { maximumFractionDigits: 0 }) },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: [{
-        name: 'Total Gastado',
-        type: 'bar',
-        data: values,
-        itemStyle: {
-          color: {
-            type: 'linear',
-            x: 0, y: 0, x2: 0, y2: 1,
-            colorStops: [
-              { offset: 0, color: '#8b5cf6' },
-              { offset: 1, color: '#8b5cf680' },
-            ],
-          },
-          borderRadius: [4, 4, 0, 0],
-        },
-        barMaxWidth: 40,
-      }],
+      series: suppliers.map((supplier, i) => ({
+          name: supplier,
+          type: 'bar' as const,
+          data: [values[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+          barMaxWidth: 40,
+        })),
     });
   }
 

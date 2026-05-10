@@ -235,6 +235,17 @@ export class MovementAnalysisComponent implements OnInit {
   trendsChartOptions = signal<EChartsOption>({});
   distributionChartOptions = signal<EChartsOption>({});
 
+  readonly typeLabels: Record<string, string> = {
+    stock_in: 'Entrada',
+    stock_out: 'Salida',
+    sale: 'Venta',
+    return: 'Devolución',
+    transfer: 'Transferencia',
+    adjustment: 'Ajuste',
+    damage: 'Daño',
+    expiration: 'Expiración',
+  };
+
   // Filters
   granularity = signal<string>('day');
   dateRange = signal<DateRangeFilter>({
@@ -501,6 +512,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Entradas',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.stock_in),
           itemStyle: { color: successColor },
           areaStyle: {
@@ -520,6 +533,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Salidas',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.stock_out),
           itemStyle: { color: dangerColor },
           areaStyle: {
@@ -539,6 +554,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Ajustes',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.adjustments),
           itemStyle: { color: primaryColor },
           areaStyle: {
@@ -558,6 +575,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Transferencias',
           type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.transfers),
           itemStyle: { color: warnColor },
           areaStyle: {
@@ -579,15 +598,15 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateDistributionChart(summary: MovementSummaryItem[]): void {
-    const typeLabels: Record<string, string> = {
-      stock_in: 'Entrada',
-      stock_out: 'Salida',
-      sale: 'Venta',
-      return: 'Devolución',
-      transfer: 'Transferencia',
-      adjustment: 'Ajuste',
-      damage: 'Daño',
-      expiration: 'Expiración'};
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    const labels = summary.map((s) => this.typeLabels[s.movement_type] || s.movement_type);
+    const series = summary.map((s, i) => ({
+      name: this.typeLabels[s.movement_type] || s.movement_type,
+      type: 'bar' as const,
+      data: [s.count],
+      itemStyle: { color: colors[i % 6] },
+      barMaxWidth: 32,
+    }));
 
     this.distributionChartOptions.set({
       tooltip: {
@@ -597,19 +616,18 @@ onDateRangeChange(range: DateRangeFilter): void {
           const p = params[0];
           return `${p.name}: <b>${p.value}</b>`;
         }},
-      grid: { left: '3%', right: '10%', bottom: '3%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
-      yAxis: {
-        type: 'category',
-        data: summary.map((s) => typeLabels[s.movement_type] || s.movement_type),
+      legend: {
+        data: labels,
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
       },
-      series: [
-        {
-          type: 'bar',
-          data: summary.map((s, i) => ({ value: s.count, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
-          barMaxWidth: 24,
-        },
-      ]});
+      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: { type: 'category', data: ['Tipo'] },
+      yAxis: {
+        type: 'value',
+      },
+      series,
+    });
   }
 
   exportReport(): void {
