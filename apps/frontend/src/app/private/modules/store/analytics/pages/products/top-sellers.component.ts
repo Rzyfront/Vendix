@@ -23,6 +23,8 @@ import * as ProductsActions from './state/products-analytics.actions';
 import * as ProductsSelectors from './state/products-analytics.selectors';
 
 import { EChartsOption } from 'echarts';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-top-sellers',
@@ -36,6 +38,7 @@ import { EChartsOption } from 'echarts';
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   templateUrl: './top-sellers.component.html',
   styles: [
@@ -67,6 +70,10 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   topSellersChartOptions= signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
+
+  readonly productsViews: AnalyticsView[] = getViewsByCategory('products').filter(
+    (v) => v.key !== 'products_top_sellers'
+  );
 
   readonly totalProducts = computed(() => this.topSellers().length);
   readonly totalUnits = computed(() => this.topSellers().reduce((sum, p) => sum + (p.units_sold || 0), 0));

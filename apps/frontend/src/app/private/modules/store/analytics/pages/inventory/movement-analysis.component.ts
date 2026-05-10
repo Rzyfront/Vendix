@@ -11,7 +11,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
-import { SelectorOption} from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption, SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -30,6 +30,8 @@ import {
   MovementSummaryItem,
   MovementTrend,
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-movement-analysis',
@@ -44,6 +46,8 @@ import {
     ChartComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    SelectorComponent,
+    AnalyticsCardComponent,
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
@@ -194,7 +198,17 @@ import {
         </app-card>
       }
       </div>
-    </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Inventario</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of inventoryViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
+  </div>
   `})
 export class MovementAnalysisComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
@@ -233,6 +247,10 @@ export class MovementAnalysisComponent implements OnInit {
     { value: 'week', label: 'Semanal' },
     { value: 'month', label: 'Mensual' },
   ];
+
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
+    (v) => v.key !== 'inventory_movement_analysis'
+  );
 
   columns: TableColumn[] = [
     {

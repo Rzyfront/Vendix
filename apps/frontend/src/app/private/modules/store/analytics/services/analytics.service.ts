@@ -169,13 +169,10 @@ export class AnalyticsService {
       if (value !== undefined && value !== null) {
         if (typeof value === 'object' && key === 'date_range') {
           const dateRange = value as DateRangeFilter;
-          if (dateRange.start_date) {
+          if (dateRange.start_date && dateRange.end_date) {
             params = params.set('date_from', dateRange.start_date);
-          }
-          if (dateRange.end_date) {
             params = params.set('date_to', dateRange.end_date);
-          }
-          if (dateRange.preset) {
+          } else if (dateRange.preset) {
             params = params.set('date_preset', dateRange.preset);
           }
         } else {

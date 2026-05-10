@@ -28,6 +28,8 @@ import {
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-sales-by-payment',
@@ -41,6 +43,7 @@ import { EChartsOption } from 'echarts';
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
@@ -198,6 +201,16 @@ import { EChartsOption } from 'echarts';
         </app-card>
         }
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of salesViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class SalesByPaymentComponent implements OnInit {
@@ -214,6 +227,10 @@ loading = signal(true);
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
+
+  readonly salesViews: AnalyticsView[] = getViewsByCategory('sales').filter(
+    (v) => v.key !== 'sales_by_payment'
+  );
 
   columns: TableColumn[] = [
     { key: 'display_name', label: 'Método', sortable: true, priority: 1 },

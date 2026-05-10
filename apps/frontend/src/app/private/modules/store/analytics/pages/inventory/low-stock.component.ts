@@ -24,6 +24,7 @@ import {
   StockLevelReport,
   InventorySummary} from '../../interfaces/inventory-analytics.interface';
 import { EChartsOption } from 'echarts';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-low-stock',
@@ -36,7 +37,8 @@ import { EChartsOption } from 'echarts';
     StatsComponent,
     IconComponent,
     DateRangeFilterComponent,
-    ExportButtonComponent
+    ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   template: `
     <div class="w-full">
@@ -182,6 +184,16 @@ import { EChartsOption } from 'echarts';
       </app-card>
       }
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Inventario</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of inventoryViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class LowStockComponent implements OnInit {
@@ -199,6 +211,10 @@ export class LowStockComponent implements OnInit {
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
+
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
+    (v) => v.key !== 'inventory_low_stock'
+  );
 
   // Computed: total alerts
   totalAlerts = computed(() => {

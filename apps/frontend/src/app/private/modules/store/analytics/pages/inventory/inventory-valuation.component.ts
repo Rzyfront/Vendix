@@ -24,6 +24,8 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-inventory-valuation',
@@ -37,6 +39,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
     IconComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
+    AnalyticsCardComponent,
   ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
@@ -207,6 +210,16 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
       </app-card>
       }
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Inventario</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of inventoryViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class InventoryValuationComponent implements OnInit {
@@ -225,6 +238,10 @@ loading = signal(true);
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
+
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
+    (v) => v.key !== 'inventory_valuation'
+  );
 
   columns: TableColumn[] = [
     { key: 'location_name', label: 'Ubicación', sortable: true, priority: 1 },
