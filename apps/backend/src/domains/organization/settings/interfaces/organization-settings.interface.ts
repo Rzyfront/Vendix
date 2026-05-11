@@ -98,6 +98,9 @@ export interface OrganizationInventorySettings {
 export interface OrganizationFiscalData {
   nit?: string;
   nit_dv?: string;
+  tax_id?: string;
+  tax_id_dv?: string;
+  nit_type?: 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
   legal_name?: string;
   person_type?: 'NATURAL' | 'JURIDICA';
   tax_regime?: 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';

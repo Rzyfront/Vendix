@@ -292,6 +292,9 @@ export class FiscalScopeMigrationService {
         previous_fiscal_scope: result.previous_fiscal_scope,
         new_fiscal_scope: result.new_fiscal_scope,
         changed_by_user_id: userId,
+        audit_log_id: result.audit_log_id,
+        forced: result.forced,
+        applied_at: result.applied_at,
       });
 
       try {
@@ -384,6 +387,9 @@ export class FiscalScopeMigrationService {
         `${dianConfigCount} configuraciones DIAN de facturación existen en la organización; al consolidar fiscalmente se usará la entidad fiscal consolidada.`,
       );
     }
+
+    await this.collectPendingPayrollBlockers(organization_id, client, preview);
+    await this.collectPendingWithholdingBlockers(organization_id, client, preview);
   }
 
   private async collectDownBlockers(
@@ -443,7 +449,7 @@ export class FiscalScopeMigrationService {
 
     const activeStores = await client.stores.findMany({
       where: { organization_id, is_active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, tax_id: true },
     });
 
     if (activeStores.length === 0) {
@@ -478,29 +484,17 @@ export class FiscalScopeMigrationService {
       });
     }
 
-    const entities = await client.accounting_entities.findMany({
-      where: {
-        organization_id,
-        scope: 'STORE',
-        fiscal_scope: 'STORE',
-        store_id: { in: activeStores.map((s: any) => s.id) },
-        is_active: true,
-      },
-      select: { store_id: true, tax_id: true },
-    });
-    const taxByStore = new Map(
-      entities.map((entity: any) => [entity.store_id, entity.tax_id]),
-    );
     const missingTaxStores = activeStores.filter(
-      (store: any) => !String(taxByStore.get(store.id) ?? '').trim(),
+      (store: any) => !String(store.tax_id ?? '').trim(),
     );
     if (missingTaxStores.length > 0) {
       preview.blockers.push({
         code: FiscalScopeBlockerCodes.MISSING_TAX_ID,
-        message: `${missingTaxStores.length} tiendas no tienen tax_id/NIT en su entidad contable fiscal.`,
+        message: `${missingTaxStores.length} tiendas activas no tienen tax_id/NIT propio.`,
         details: {
           count: missingTaxStores.length,
           store_ids: missingTaxStores.map((s: any) => s.id),
+          remediation_link: '/admin/settings/fiscal-activation',
         },
       });
     }
@@ -529,25 +523,22 @@ export class FiscalScopeMigrationService {
         },
       });
     }
+
+    await this.collectPendingPayrollBlockers(organization_id, client, preview);
+    await this.collectPendingWithholdingBlockers(organization_id, client, preview);
   }
 
   private async applyUpMutations(organization_id: number, tx: any) {
-    const entity =
-      await this.fiscalScope.ensureOrganizationFiscalAccountingEntity(
-        organization_id,
-        tx,
-      );
-
-    await tx.dian_configurations.updateMany({
-      where: { organization_id, configuration_type: 'invoicing' },
-      data: { accounting_entity_id: entity.id },
-    });
+    await this.fiscalScope.ensureOrganizationFiscalAccountingEntity(
+      organization_id,
+      tx,
+    );
   }
 
   private async applyDownMutations(organization_id: number, tx: any) {
     const stores = await tx.stores.findMany({
       where: { organization_id, is_active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, legal_name: true, tax_id: true },
     });
     const storeIds = stores.map((store: any) => store.id);
 
@@ -571,11 +562,6 @@ export class FiscalScopeMigrationService {
     );
 
     if (missingStores.length > 0) {
-      const organization = await tx.organizations.findUnique({
-        where: { id: organization_id },
-        select: { legal_name: true, tax_id: true },
-      });
-
       await tx.accounting_entities.createMany({
         data: missingStores.map((store: any) => ({
           organization_id,
@@ -583,53 +569,90 @@ export class FiscalScopeMigrationService {
           scope: 'STORE',
           fiscal_scope: 'STORE',
           name: store.name,
-          legal_name: organization?.legal_name || store.name,
-          tax_id: organization?.tax_id || null,
+          legal_name: store.legal_name || store.name,
+          tax_id: store.tax_id || null,
         })),
         skipDuplicates: true,
       });
     }
+  }
 
-    const entities = await tx.accounting_entities.findMany({
+  private async collectPendingPayrollBlockers(
+    organization_id: number,
+    client: any,
+    preview: FiscalScopeMigrationPreview,
+  ) {
+    const pendingPayrollRuns = await client.payroll_runs.count({
       where: {
         organization_id,
-        scope: 'STORE',
-        fiscal_scope: 'STORE',
-        store_id: { in: storeIds },
-        is_active: true,
+        status: { notIn: ['paid', 'cancelled'] },
       },
-      select: { id: true, store_id: true },
     });
-    const entityByStoreId = new Map(
-      entities.map((entity: any) => [entity.store_id, entity.id]),
-    );
-
-    for (const store of stores) {
-      const entityId = entityByStoreId.get(store.id);
-      if (!entityId) {
-        throw new BadRequestException(
-          `Missing fiscal accounting entity for store ${store.id}`,
-        );
-      }
-
-      await tx.dian_configurations.updateMany({
-        where: {
-          organization_id,
-          store_id: store.id,
-          configuration_type: 'invoicing',
+    if (pendingPayrollRuns > 0) {
+      preview.blockers.push({
+        code: FiscalScopeBlockerCodes.PENDING_PAYROLL_RUNS,
+        message: `${pendingPayrollRuns} corridas de nómina están pendientes de cierre o pago.`,
+        details: {
+          count: pendingPayrollRuns,
+          remediation_link: '/admin/payroll/runs',
         },
-        data: { accounting_entity_id: entityId },
       });
     }
 
-    await tx.accounting_entries.updateMany({
+    const pendingPayrollSettlements = await client.payroll_settlements.count({
       where: {
         organization_id,
-        store_id: null,
-        is_historical_consolidated: false,
+        status: { notIn: ['paid', 'cancelled'] },
       },
-      data: { is_historical_consolidated: true },
     });
+    if (pendingPayrollSettlements > 0) {
+      preview.blockers.push({
+        code: FiscalScopeBlockerCodes.PENDING_PAYROLL_SETTLEMENTS,
+        message: `${pendingPayrollSettlements} liquidaciones de nómina están pendientes de cierre o pago.`,
+        details: {
+          count: pendingPayrollSettlements,
+          remediation_link: '/admin/payroll/settlements',
+        },
+      });
+    }
+  }
+
+  private async collectPendingWithholdingBlockers(
+    organization_id: number,
+    client: any,
+    preview: FiscalScopeMigrationPreview,
+  ) {
+    const rows = await client.$queryRawUnsafe(
+      `
+        SELECT COUNT(*)::int AS count
+        FROM withholding_calculations wc
+        WHERE wc.organization_id = $1
+          AND (
+            wc.accounting_entity_id IS NULL
+            OR wc.invoice_id IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM accounting_entries ae
+              WHERE ae.organization_id = wc.organization_id
+                AND ae.source_type = 'withholding.applied'
+                AND ae.source_id = wc.invoice_id
+            )
+          )
+      `,
+      organization_id,
+    );
+    const pendingWithholdings = Number(rows?.[0]?.count ?? 0);
+
+    if (pendingWithholdings > 0) {
+      preview.blockers.push({
+        code: FiscalScopeBlockerCodes.PENDING_WITHHOLDINGS,
+        message: `${pendingWithholdings} cálculos de retención están pendientes de aplicar contablemente.`,
+        details: {
+          count: pendingWithholdings,
+          remediation_link: '/admin/accounting/withholding-tax',
+        },
+      });
+    }
   }
 
   private assertScopeValue(scope: OrganizationFiscalScope) {

@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
 import {
   CreateWithholdingConceptDto,
@@ -17,6 +18,7 @@ export class WithholdingTaxService {
     private readonly prisma: StorePrismaService,
     private readonly calculator: WithholdingCalculatorService,
     private readonly event_emitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   // ===== Withholding Concepts CRUD =====
@@ -41,10 +43,16 @@ export class WithholdingTaxService {
 
   async createConcept(dto: CreateWithholdingConceptDto) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Check for duplicate code
     const existing = await this.prisma.withholding_concepts.findFirst({
       where: {
+        accounting_entity_id: accounting_entity.id,
         code: dto.code,
       },
     });
@@ -56,6 +64,7 @@ export class WithholdingTaxService {
     return this.prisma.withholding_concepts.create({
       data: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         code: dto.code,
         name: dto.name,
         rate: new Prisma.Decimal(dto.rate),
@@ -108,11 +117,17 @@ export class WithholdingTaxService {
 
   async createUvt(data: { year: number; value_cop: number }) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Upsert: if the year already exists, update; otherwise create
     const existing = await this.prisma.uvt_values.findFirst({
       where: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year: data.year,
       },
     });
@@ -127,6 +142,7 @@ export class WithholdingTaxService {
     return this.prisma.uvt_values.create({
       data: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year: data.year,
         value_cop: new Prisma.Decimal(data.value_cop),
       },
@@ -158,6 +174,11 @@ export class WithholdingTaxService {
     supplier_type?: string,
   ) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Get the invoice to determine the base amount
     const invoice = await this.prisma.invoices.findFirst({
@@ -191,6 +212,7 @@ export class WithholdingTaxService {
     // Get the concept for the ID
     const concept = await this.prisma.withholding_concepts.findFirst({
       where: {
+        accounting_entity_id: accounting_entity.id,
         code: concept_code,
         is_active: true,
       },
@@ -205,6 +227,7 @@ export class WithholdingTaxService {
     const uvt = await this.prisma.uvt_values.findFirst({
       where: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year,
       },
     });
@@ -214,6 +237,7 @@ export class WithholdingTaxService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id || null,
+        accounting_entity_id: accounting_entity.id,
         invoice_id,
         supplier_id: invoice.supplier_id || null,
         concept_id: concept.id,
@@ -230,6 +254,7 @@ export class WithholdingTaxService {
     this.event_emitter.emit('withholding.applied', {
       organization_id: context.organization_id,
       store_id: context.store_id,
+      accounting_entity_id: accounting_entity.id,
       invoice_id,
       base_amount,
       withholding_amount: result.withholding_amount,
@@ -254,6 +279,11 @@ export class WithholdingTaxService {
     year: number,
   ): Promise<WithholdingCertificateData> {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Get supplier info
     const supplier = await this.prisma.suppliers.findFirst({
@@ -270,6 +300,8 @@ export class WithholdingTaxService {
     // Get all calculations for this supplier in the given year
     const calculations = await this.prisma.withholding_calculations.findMany({
       where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         supplier_id,
         year,
       },

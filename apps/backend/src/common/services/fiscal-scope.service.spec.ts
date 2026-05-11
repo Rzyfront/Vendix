@@ -57,6 +57,105 @@ describe('FiscalScopeService', () => {
     ).resolves.toEqual({ id: 501, store_id: 77 });
   });
 
+  it('creates STORE fiscal entity from store-owned legal data', async () => {
+    const client = {
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: 501,
+          store_id: 77,
+          legal_name: 'Tienda Legal S.A.S.',
+          tax_id: '901123456',
+        }),
+      },
+      stores: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 77,
+          name: 'Tienda Norte',
+          legal_name: 'Tienda Legal S.A.S.',
+          tax_id: '901123456',
+        }),
+      },
+    };
+    const service = createService(client);
+
+    await expect(
+      service.ensureStoreFiscalAccountingEntity(1, 77, client),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        legal_name: 'Tienda Legal S.A.S.',
+        tax_id: '901123456',
+      }),
+    );
+
+    expect(client.accounting_entities.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        legal_name: 'Tienda Legal S.A.S.',
+        tax_id: '901123456',
+      }),
+    });
+  });
+
+  it('blocks STORE fiscal entity creation when the store has no tax_id', async () => {
+    const client = {
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      stores: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 77,
+          name: 'Tienda Norte',
+          legal_name: 'Tienda Legal S.A.S.',
+          tax_id: null,
+        }),
+      },
+    };
+    const service = createService(client);
+
+    await expect(
+      service.ensureStoreFiscalAccountingEntity(1, 77, client),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it('uses the consolidated entity when fiscal scope is ORGANIZATION even if a store_id is provided', async () => {
+    const client = {
+      organizations: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValueOnce({
+            fiscal_scope: 'ORGANIZATION',
+            operating_scope: 'ORGANIZATION',
+            account_type: 'MULTI_STORE_ORG',
+          })
+          .mockResolvedValueOnce({
+            name: 'Org',
+            legal_name: 'Org Legal S.A.S.',
+            tax_id: '900123456',
+          }),
+      },
+      accounting_entities: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({
+          id: 900,
+          store_id: null,
+          tax_id: '900123456',
+        }),
+      },
+      stores: {
+        findFirst: jest.fn(),
+      },
+    };
+    const service = createService(client);
+
+    await expect(
+      service.resolveAccountingEntityForFiscal({
+        organization_id: 1,
+        store_id: 77,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ id: 900, store_id: null }));
+    expect(client.stores.findFirst).not.toHaveBeenCalled();
+  });
+
   it('requires an explicit store when fiscal STORE scope has multiple active stores', async () => {
     const client = {
       organizations: {

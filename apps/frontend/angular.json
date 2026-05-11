@@ -42,7 +42,12 @@
                 "output": "assets"
               }
             ],
-            "styles": ["src/styles.scss"]
+            "styles": ["src/styles.scss"],
+            "allowedCommonJsDependencies": [
+              "dijkstrajs",
+              "pngjs",
+              "qrcode"
+            ]
           },
           "configurations": {
             "production": {
@@ -65,7 +70,7 @@
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "2MB",
+                  "maximumWarning": "2.25MB",
                   "maximumError": "4MB"
                 },
                 {

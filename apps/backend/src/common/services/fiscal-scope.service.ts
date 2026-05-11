@@ -232,11 +232,25 @@ export class FiscalScopeService {
       select: {
         id: true,
         name: true,
-        organizations: { select: { legal_name: true, tax_id: true } },
+        legal_name: true,
+        tax_id: true,
       },
     });
     if (!store) {
       throw new BadRequestException('Store not found for accounting entity');
+    }
+
+    if (!String(store.tax_id ?? '').trim()) {
+      throw new BadRequestException({
+        code: 'FISCAL_SCOPE_MISSING_TAX_ID',
+        message:
+          'Store tax_id is required to create a STORE fiscal accounting entity',
+        details: {
+          organization_id: params.organization_id,
+          store_id: store.id,
+          remediation_link: '/admin/settings/fiscal-activation',
+        },
+      });
     }
 
     return params.client.accounting_entities.create({
@@ -246,8 +260,8 @@ export class FiscalScopeService {
         scope: 'STORE',
         fiscal_scope: 'STORE',
         name: store.name,
-        legal_name: store.organizations?.legal_name || store.name,
-        tax_id: store.organizations?.tax_id || null,
+        legal_name: store.legal_name || store.name,
+        tax_id: store.tax_id,
       },
     });
   }

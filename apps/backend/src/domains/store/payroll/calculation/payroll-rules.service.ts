@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
+import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { OrganizationSettings } from '../../../organization/settings/interfaces/organization-settings.interface';
 import {
   PayrollRules,
@@ -13,13 +14,24 @@ export class PayrollRulesService {
   constructor(
     private readonly org_prisma: OrganizationPrismaService,
     private readonly global_prisma: GlobalPrismaService,
+    private readonly store_prisma: StorePrismaService,
   ) {}
 
   /**
    * Resolves the effective PayrollRules for a given year.
-   * Resolution chain: org override → system defaults → hardcoded
+   * Resolution chain: store override → org override → system defaults → hardcoded
    */
-  async getRulesForYear(year: number): Promise<PayrollRules> {
+  async getRulesForYear(year: number, store_id?: number | null): Promise<PayrollRules> {
+    const store_settings = store_id
+      ? await this.store_prisma.withoutScope().store_settings.findUnique({
+          where: { store_id },
+          select: { settings: true },
+        })
+      : null;
+    const store_rules = (store_settings?.settings as any)?.payroll?.rules?.[
+      String(year)
+    ] as Partial<PayrollRules> | undefined;
+
     const org_settings =
       await this.org_prisma.organization_settings.findFirst();
     const settings = org_settings?.settings as OrganizationSettings | null;
@@ -35,12 +47,19 @@ export class PayrollRulesService {
     // Base = system defaults si existen, sino hardcoded
     const base = system_rules ?? getDefaultPayrollRules(year);
 
-    if (!db_rules) return base;
+    return this.mergeRules(this.mergeRules(base, db_rules), store_rules);
+  }
+
+  private mergeRules(
+    base: PayrollRules,
+    override?: Partial<PayrollRules>,
+  ): PayrollRules {
+    if (!override) return base;
 
     return {
       ...base,
-      ...db_rules,
-      arl_rates: { ...base.arl_rates, ...(db_rules.arl_rates || {}) },
+      ...override,
+      arl_rates: { ...base.arl_rates, ...(override.arl_rates || {}) },
     };
   }
 

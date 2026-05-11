@@ -178,7 +178,7 @@ interface TransferItemUI {
               class="max-h-60 overflow-y-auto border border-border rounded-xl divide-y divide-border"
             >
               @for (row of filteredStock(); track row.id) {
-                @let available = row.available_quantity ?? row.quantity ?? 0;
+                @let available = row.available_quantity;
                 @let outOfStock = available <= 0;
                 @let alreadyAdded = isAlreadyAdded(row);
                 <button
@@ -214,8 +214,8 @@ interface TransferItemUI {
                         }
                       </p>
                       <p class="text-[10px] text-text-tertiary">
-                        En mano: {{ row.quantity ?? 0 }} · Reservado:
-                        {{ row.reserved_quantity ?? 0 }}
+                        En mano: {{ row.quantity }} · Reservado:
+                        {{ row.reserved_quantity }}
                       </p>
                     </div>
                     <div class="text-right shrink-0">

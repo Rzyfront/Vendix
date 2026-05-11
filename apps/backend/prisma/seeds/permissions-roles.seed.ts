@@ -2800,6 +2800,54 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/invoicing',
       method: 'GET',
     },
+    {
+      name: 'organization:invoicing:write',
+      description: 'Escribir configuración de facturación a nivel organización',
+      path: '/api/organization/invoicing',
+      method: 'POST',
+    },
+    {
+      name: 'organization:invoicing:resolutions:read',
+      description: 'Leer resoluciones de facturación a nivel organización',
+      path: '/api/organization/invoicing/resolutions',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:resolutions:write',
+      description: 'Crear/actualizar/eliminar resoluciones a nivel organización',
+      path: '/api/organization/invoicing/resolutions',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:migrate',
+      description: 'Aplicar cambios de fiscal_scope de la organización',
+      path: '/api/organization/fiscal-scope',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:supervise',
+      description: 'Supervisar estado y auditoría fiscal de la organización',
+      path: '/api/organization/fiscal-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:withholding:read',
+      description: 'Leer retenciones a nivel organización',
+      path: '/api/organization/withholding-tax',
+      method: 'GET',
+    },
+    {
+      name: 'organization:withholding:write',
+      description: 'Gestionar retenciones a nivel organización',
+      path: '/api/organization/withholding-tax',
+      method: 'POST',
+    },
+    {
+      name: 'organization:payroll:read',
+      description: 'Leer nómina a nivel organización',
+      path: '/api/organization/payroll',
+      method: 'GET',
+    },
 
     // ──── Organization Invoicing (DIAN) — fiscal wizard twin ────
     {
@@ -3069,6 +3117,16 @@ export async function seedPermissionsAndRoles(
     },
   });
 
+  const fiscalSupervisorRole = await client.roles.upsert({
+    where: { name: 'fiscal_supervisor' },
+    update: {},
+    create: {
+      name: 'fiscal_supervisor',
+      description: 'Supervisor fiscal de la organización',
+      is_system_role: true,
+    },
+  });
+
   const managerRole = await client.roles.upsert({
     where: { name: 'manager' },
     update: {},
@@ -3125,7 +3183,7 @@ export async function seedPermissionsAndRoles(
     data: { organization_id: null } as any,
   });
 
-  const rolesCreated = 7;
+  const rolesCreated = 8;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
@@ -3185,6 +3243,25 @@ export async function seedPermissionsAndRoles(
     'admin (ORG_ADMIN)',
   );
   assignmentsCreated += adminSync.added;
+
+  const fiscalSupervisorPermissions = allPermissions.filter(
+    (p) =>
+      p.name === 'organization:invoicing:read' ||
+      p.name === 'organization:invoicing:resolutions:read' ||
+      p.name === 'organization:fiscal:supervise' ||
+      p.name === 'organization:withholding:read' ||
+      p.name === 'organization:payroll:read' ||
+      p.name === 'organization:payroll:settings:read' ||
+      p.name === 'organization:payroll:reports:read',
+  );
+
+  const fiscalSupervisorSync = await syncRolePermissions(
+    client,
+    fiscalSupervisorRole.id,
+    fiscalSupervisorPermissions.map((p) => p.id),
+    'fiscal_supervisor',
+  );
+  assignmentsCreated += fiscalSupervisorSync.added;
 
   // Assign permissions to manager (full store management)
   //

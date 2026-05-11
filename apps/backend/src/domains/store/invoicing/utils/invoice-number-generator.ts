@@ -2,12 +2,16 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class InvoiceNumberGenerator {
   private readonly logger = new Logger(InvoiceNumberGenerator.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   /**
    * Atomically generates the next invoice number within the active resolution.
@@ -21,12 +25,18 @@ export class InvoiceNumberGenerator {
     if (!context) {
       throw new Error('No request context found');
     }
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Find the active resolution for the current store
     const resolution = resolution_id
       ? await this.prisma.invoice_resolutions.findFirst({
           where: {
             id: resolution_id,
+            accounting_entity_id: accounting_entity.id,
             is_active: true,
             valid_from: { lte: new Date() },
             valid_to: { gte: new Date() },
@@ -34,6 +44,7 @@ export class InvoiceNumberGenerator {
         })
       : await this.prisma.invoice_resolutions.findFirst({
           where: {
+            accounting_entity_id: accounting_entity.id,
             is_active: true,
             valid_from: { lte: new Date() },
             valid_to: { gte: new Date() },

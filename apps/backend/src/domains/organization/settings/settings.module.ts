@@ -11,6 +11,9 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { AuditModule } from '@common/audit/audit.module';
 import { OrgInventoryModule } from '../inventory/inventory.module';
+import { NotificationsModule } from '../../store/notifications/notifications.module';
+import { EmailModule } from '../../../email/email.module';
+import { FiscalScopeEventsListener } from './fiscal-scope-events.listener';
 
 /**
  * Organization Settings module.
@@ -25,7 +28,14 @@ import { OrgInventoryModule } from '../inventory/inventory.module';
  *    on STORE↔ORGANIZATION migrations.
  */
 @Module({
-  imports: [ResponseModule, AuditModule, PrismaModule, OrgInventoryModule],
+  imports: [
+    ResponseModule,
+    AuditModule,
+    PrismaModule,
+    OrgInventoryModule,
+    NotificationsModule,
+    EmailModule,
+  ],
   controllers: [
     SettingsController,
     OperatingScopeController,
@@ -37,6 +47,7 @@ import { OrgInventoryModule } from '../inventory/inventory.module';
     OperatingScopeMigrationService,
     FiscalScopeMigrationService,
     FiscalStatusService,
+    FiscalScopeEventsListener,
   ],
   exports: [
     SettingsService,

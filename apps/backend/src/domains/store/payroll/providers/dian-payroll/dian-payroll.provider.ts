@@ -9,6 +9,7 @@ import { EncryptionService } from '../../../../../common/services/encryption.ser
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import {
   DianSoapClient,
   WsSecurityCredentials,
@@ -60,6 +61,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     private readonly s3_service: S3Service,
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async sendPayroll(payroll_data: {
@@ -509,25 +511,27 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
    */
   private async loadPayrollConfig(): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
-      throw new Error('Store context required for DIAN payroll operations');
+    if (!context?.organization_id) {
+      throw new Error('Organization context required for DIAN payroll operations');
     }
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id,
+        store_id: context.store_id ?? null,
+      });
 
-    // DIAN payroll config may be store-scoped or org-scoped depending on
-    // organizations.fiscal_scope. The store-prisma scope already restricts to
-    // the current organization; we include the org-wide fallback (store_id IS NULL).
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        OR: [{ store_id: context.store_id }, { store_id: null }],
+        accounting_entity_id: accounting_entity.id,
         configuration_type: 'payroll',
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
+      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
 
     if (!config) {
       throw new Error(
-        `No active DIAN payroll configuration for store ${context.store_id}`,
+        `No active DIAN payroll configuration for fiscal entity ${accounting_entity.id}`,
       );
     }
 

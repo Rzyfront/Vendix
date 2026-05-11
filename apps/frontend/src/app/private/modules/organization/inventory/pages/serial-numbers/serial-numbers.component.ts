@@ -90,7 +90,6 @@ const PAGE_LIMIT_DEFAULT = 25;
     OptionsDropdownComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,
-    CurrencyPipe,
   ],
   template: `
     <div class="w-full">

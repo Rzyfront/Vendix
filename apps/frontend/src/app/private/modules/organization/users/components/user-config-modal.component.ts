@@ -11,7 +11,6 @@ import {
 import {
   ButtonComponent,
   ModalComponent,
-  InputComponent,
   TextareaComponent,
   MultiSelectorComponent,
   MultiSelectorOption,
@@ -34,7 +33,6 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
     FormsModule,
     ButtonComponent,
     ModalComponent,
-    InputComponent,
     TextareaComponent,
     MultiSelectorComponent,
   ],

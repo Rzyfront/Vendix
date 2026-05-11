@@ -94,6 +94,14 @@ export class PayrollCalculationService {
 
     const worked_days = this.calculateWorkedDays(period_start, period_end);
     const calculations: PayrollItemCalculation[] = [];
+    const payroll_run = await this.prisma.payroll_runs.findFirst({
+      where: { id: payroll_run_id },
+      select: { id: true, accounting_entity_id: true },
+    });
+
+    if (!payroll_run) {
+      throw new VendixHttpException(ErrorCodes.PAYROLL_FIND_002);
+    }
 
     // Pre-fetch advance deductions for all employees
     const advance_deductions_map = new Map<number, number>();
@@ -133,6 +141,7 @@ export class PayrollCalculationService {
           data: {
             payroll_run_id,
             employee_id: calc.employee_id,
+            accounting_entity_id: payroll_run.accounting_entity_id,
             base_salary: new Prisma.Decimal(calc.base_salary),
             worked_days: calc.worked_days,
             earnings: calc.earnings as any,

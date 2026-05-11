@@ -11,7 +11,6 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  SelectorComponent,
   FileUploadDropzoneComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
@@ -27,7 +26,6 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     InputComponent,
     ButtonComponent,
     ModalComponent,
-    SelectorComponent,
     FileUploadDropzoneComponent,
   ],
   template: `

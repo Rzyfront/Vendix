@@ -837,12 +837,32 @@ export class SettingsService {
     }
 
     await this.ensureDefaults(store_id);
-    const existing = await this.prisma.store_settings.findUnique({
-      where: { store_id },
-      select: { settings: true },
-    });
-    return ((existing?.settings as any)?.fiscal_data ??
-      {}) as StoreSettings['fiscal_data'];
+    const [existing, store] = await Promise.all([
+      this.prisma.store_settings.findUnique({
+        where: { store_id },
+        select: { settings: true },
+      }),
+      this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: {
+          legal_name: true,
+          tax_id: true,
+          tax_id_dv: true,
+          nit_type: true,
+        },
+      }),
+    ]);
+    const fiscalData = ((existing?.settings as any)?.fiscal_data ??
+      {}) as Record<string, unknown>;
+    return {
+      ...fiscalData,
+      legal_name: store?.legal_name ?? fiscalData.legal_name,
+      nit: store?.tax_id ?? fiscalData.nit,
+      nit_dv: store?.tax_id_dv ?? fiscalData.nit_dv,
+      tax_id: store?.tax_id ?? fiscalData.tax_id,
+      tax_id_dv: store?.tax_id_dv ?? fiscalData.tax_id_dv,
+      nit_type: store?.nit_type ?? fiscalData.nit_type,
+    } as StoreSettings['fiscal_data'];
   }
 
   async updateFiscalData(
@@ -891,22 +911,51 @@ export class SettingsService {
       ...previousFiscalData,
       ...dto,
     };
+    const legal_name =
+      typeof dto.legal_name === 'string' ? dto.legal_name.trim() : undefined;
+    const tax_id =
+      typeof dto.tax_id === 'string'
+        ? dto.tax_id.trim()
+        : typeof dto.nit === 'string'
+          ? dto.nit.trim()
+          : undefined;
+    const tax_id_dv =
+      typeof dto.tax_id_dv === 'string'
+        ? dto.tax_id_dv.trim()
+        : typeof dto.nit_dv === 'string'
+          ? dto.nit_dv.trim()
+          : undefined;
+    const nit_type =
+      typeof dto.nit_type === 'string' ? dto.nit_type.trim() : undefined;
 
     const updatedSettings: StoreSettings = {
       ...currentSettings,
       fiscal_data: nextFiscalData as StoreSettings['fiscal_data'],
     };
 
-    await this.prisma.store_settings.upsert({
-      where: { store_id },
-      update: {
-        settings: updatedSettings as any,
-        updated_at: new Date(),
-      },
-      create: {
-        store_id,
-        settings: updatedSettings as any,
-      },
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.store_settings.upsert({
+        where: { store_id },
+        update: {
+          settings: updatedSettings as any,
+          updated_at: new Date(),
+        },
+        create: {
+          store_id,
+          settings: updatedSettings as any,
+        },
+      });
+
+      await tx.stores.update({
+        where: { id: store_id },
+        data: {
+          ...(legal_name !== undefined && { legal_name: legal_name || null }),
+          ...(tax_id !== undefined && { tax_id: tax_id || null }),
+          ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
+          ...(nit_type !== undefined && { nit_type: nit_type || null }),
+          updated_at: new Date(),
+        },
+      });
     });
 
     try {

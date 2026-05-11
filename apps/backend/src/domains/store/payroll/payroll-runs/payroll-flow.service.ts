@@ -125,7 +125,10 @@ export class PayrollFlowService {
 
     // Resolve rules for the period year from DB (with defaults fallback)
     const year = run.period_start.getFullYear();
-    const rules = await this.payroll_rules_service.getRulesForYear(year);
+    const rules = await this.payroll_rules_service.getRulesForYear(
+      year,
+      run.store_id,
+    );
 
     const calculations = await this.calculation_service.calculateForRun(
       id,

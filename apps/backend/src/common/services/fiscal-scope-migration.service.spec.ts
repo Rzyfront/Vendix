@@ -19,6 +19,9 @@ describe('FiscalScopeMigrationService', () => {
         }),
       },
       dian_configurations: { count: jest.fn().mockResolvedValue(0) },
+      payroll_runs: { count: jest.fn().mockResolvedValue(0) },
+      payroll_settlements: { count: jest.fn().mockResolvedValue(0) },
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 0 }]),
     };
     const service = createService(client);
 
@@ -52,20 +55,18 @@ describe('FiscalScopeMigrationService', () => {
       fiscal_periods: { count: jest.fn().mockResolvedValue(1) },
       stores: {
         findMany: jest.fn().mockResolvedValue([
-          { id: 10, name: 'A' },
-          { id: 20, name: 'B' },
+          { id: 10, name: 'A', tax_id: '900123456' },
+          { id: 20, name: 'B', tax_id: null },
         ]),
       },
       dian_configurations: {
         findMany: jest.fn().mockResolvedValue([{ store_id: 10 }]),
       },
-      accounting_entities: {
-        findMany: jest
-          .fn()
-          .mockResolvedValue([{ store_id: 10, tax_id: '900123456' }]),
-      },
       consolidation_sessions: { count: jest.fn().mockResolvedValue(0) },
       intercompany_transactions: { count: jest.fn().mockResolvedValue(0) },
+      payroll_runs: { count: jest.fn().mockResolvedValue(0) },
+      payroll_settlements: { count: jest.fn().mockResolvedValue(0) },
+      $queryRawUnsafe: jest.fn().mockResolvedValue([{ count: 0 }]),
     };
     const service = createService(client);
 

@@ -27,7 +27,6 @@ export class StorePrismaService extends BasePrismaService {
     'notification_subscriptions',
     'push_subscriptions',
     'invoices',
-    'invoice_resolutions',
     // dian_configurations is intentionally NOT here. Since
     // organizations.fiscal_scope can be ORGANIZATION (store_id IS NULL on the
     // row) or STORE (store_id NOT NULL), we apply a relational OR-scope below
@@ -69,6 +68,50 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_payments',
     'subscription_events',
   ];
+
+  private readonly fiscal_entity_scoped_models = [
+    'invoice_resolutions',
+    'chart_of_accounts',
+    'fiscal_periods',
+    'accounting_entries',
+    'accounting_account_mappings',
+    'payroll_runs',
+    'payroll_settlements',
+    'withholding_concepts',
+    'withholding_calculations',
+    'uvt_values',
+  ];
+
+  private readonly fiscal_entity_models_with_store_id = [
+    'invoice_resolutions',
+    'accounting_entries',
+    'accounting_account_mappings',
+    'payroll_runs',
+    'payroll_settlements',
+    'withholding_calculations',
+  ];
+
+  private readonly fiscal_entity_relational_models: Record<
+    string,
+    { relation: string; target_model: string }
+  > = {
+    accounting_entry_lines: {
+      relation: 'entry',
+      target_model: 'accounting_entries',
+    },
+    payroll_items: {
+      relation: 'payroll_run',
+      target_model: 'payroll_runs',
+    },
+    consolidation_sessions: {
+      relation: 'fiscal_period',
+      target_model: 'fiscal_periods',
+    },
+    intercompany_transactions: {
+      relation: 'entry',
+      target_model: 'accounting_entries',
+    },
+  };
 
   constructor() {
     super();
@@ -140,6 +183,7 @@ export class StorePrismaService extends BasePrismaService {
       'shipping_rates', // Relational
       'expense_categories', // Org scoped
       'product_tax_assignments', // Relational
+      'invoice_resolutions', // Fiscal entity scoped
       'invoice_items', // Relational
       'invoice_taxes', // Relational
       'dian_audit_logs', // Relational
@@ -159,6 +203,7 @@ export class StorePrismaService extends BasePrismaService {
       'employees', // Org scoped (multi-store via employee_stores junction)
       'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
+      'payroll_settlements', // Fiscal entity scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
       'layaway_payments', // Relational
@@ -200,7 +245,7 @@ export class StorePrismaService extends BasePrismaService {
     for (const model of all_scoped_models) {
       extensions[model] = {};
       for (const operation of operations) {
-        extensions[model][operation] = ({ args, query }: any) => {
+        extensions[model][operation] = async ({ args, query }: any) => {
           return this.applyStoreScoping(model, operation, args, query);
         };
       }
@@ -209,7 +254,7 @@ export class StorePrismaService extends BasePrismaService {
     return extensions;
   }
 
-  private applyStoreScoping(
+  private async applyStoreScoping(
     model: string,
     operation: string,
     args: any,
@@ -411,14 +456,11 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries',
       'employees',
       'payroll_runs',
-      'payroll_settlements',
       'employee_advances',
       'bank_accounts',
       'fixed_asset_categories',
       'fixed_assets',
       'budgets',
-      'consolidation_sessions',
-      'intercompany_transactions',
       'withholding_concepts',
       'withholding_calculations',
       'uvt_values',
@@ -426,7 +468,40 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entities',
     ];
 
-    if (this.store_scoped_models.includes(model)) {
+    if (this.fiscal_entity_scoped_models.includes(model)) {
+      if (!context.organization_id) {
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
+      }
+      const fiscal_entity = await this.resolveFiscalEntityForContext(context);
+      Object.assign(
+        security_filter,
+        this.buildFiscalEntityDirectScope(
+          model,
+          context.organization_id,
+          fiscal_entity.id,
+          fiscal_entity.fiscal_scope,
+          context.store_id,
+        ),
+      );
+    } else if (this.fiscal_entity_relational_models[model]) {
+      if (!context.organization_id) {
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
+      }
+      const fiscal_entity = await this.resolveFiscalEntityForContext(context);
+      const relation_scope = this.fiscal_entity_relational_models[model];
+      security_filter[relation_scope.relation] =
+        this.buildFiscalEntityDirectScope(
+          relation_scope.target_model,
+          context.organization_id,
+          fiscal_entity.id,
+          fiscal_entity.fiscal_scope,
+          context.store_id,
+        );
+    } else if (this.store_scoped_models.includes(model)) {
       if (!context.store_id) {
         throw new ForbiddenException('Access denied - store context required');
       }
@@ -446,13 +521,123 @@ export class StorePrismaService extends BasePrismaService {
     }
 
     if (Object.keys(security_filter).length > 0) {
-      scoped_args.where = {
-        ...scoped_args.where,
-        ...security_filter,
-      };
+      scoped_args.where = this.mergeScopedWhere(
+        scoped_args.where,
+        security_filter,
+      );
     }
 
     return query(scoped_args);
+  }
+
+  private async resolveFiscalEntityForContext(
+    context: {
+      organization_id?: number | null;
+      store_id?: number | null;
+    },
+  ): Promise<{
+    id: number | null;
+    fiscal_scope: 'STORE' | 'ORGANIZATION';
+  }> {
+    if (!context.organization_id) {
+      return { id: null, fiscal_scope: 'STORE' };
+    }
+
+    const organization = await this.baseClient.organizations.findUnique({
+      where: { id: context.organization_id },
+      select: {
+        fiscal_scope: true,
+        operating_scope: true,
+        account_type: true,
+      },
+    });
+
+    if (!organization) return { id: null, fiscal_scope: 'STORE' };
+
+    const fiscal_scope =
+      organization.fiscal_scope ||
+      organization.operating_scope ||
+      (organization.account_type === 'MULTI_STORE_ORG'
+        ? 'ORGANIZATION'
+        : 'STORE');
+
+    if (fiscal_scope === 'ORGANIZATION') {
+      const entity = await this.baseClient.accounting_entities.findFirst({
+        where: {
+          organization_id: context.organization_id,
+          store_id: null,
+          scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
+          is_active: true,
+        },
+        select: { id: true },
+      });
+      return { id: entity?.id ?? null, fiscal_scope: 'ORGANIZATION' };
+    }
+
+    if (!context.store_id) {
+      throw new ForbiddenException(
+        'Access denied - store context required for STORE fiscal scope',
+      );
+    }
+
+    const entity = await this.baseClient.accounting_entities.findFirst({
+      where: {
+        organization_id: context.organization_id,
+        store_id: context.store_id,
+        scope: 'STORE',
+        fiscal_scope: 'STORE',
+        is_active: true,
+      },
+      select: { id: true },
+    });
+
+    return { id: entity?.id ?? null, fiscal_scope: 'STORE' };
+  }
+
+  private buildFiscalEntityDirectScope(
+    model: string,
+    organization_id: number,
+    fiscal_entity_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
+    store_id?: number | null,
+  ) {
+    const legacyScope: Record<string, any> = {
+      accounting_entity_id: null,
+    };
+
+    if (this.fiscal_entity_models_with_store_id.includes(model)) {
+      if (fiscal_scope === 'STORE' && store_id) {
+        legacyScope.OR = [{ store_id }, { store_id: null }];
+      } else {
+        legacyScope.store_id = null;
+      }
+    }
+
+    if (!fiscal_entity_id) {
+      return {
+        organization_id,
+        ...legacyScope,
+      };
+    }
+
+    return {
+      organization_id,
+      OR: [
+        { accounting_entity_id: fiscal_entity_id },
+        legacyScope,
+      ],
+    };
+  }
+
+  private mergeScopedWhere(existingWhere: any, securityFilter: any) {
+    if (!existingWhere || Object.keys(existingWhere).length === 0) {
+      return securityFilter;
+    }
+
+    return {
+      AND: [existingWhere, securityFilter],
+    };
   }
 
   private scoped_client: any;

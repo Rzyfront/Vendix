@@ -26,10 +26,12 @@ import { computeNitDv, nitDvValidator } from '../../../utils/nit.util';
 
 export type PersonType = 'NATURAL' | 'JURIDICA';
 export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+export type NitType = 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
 
 export interface LegalDataValue {
   nit: string;
   nit_dv: string;
+  nit_type: NitType;
   legal_name: string;
   person_type: PersonType;
   tax_regime: TaxRegime;
@@ -44,6 +46,7 @@ export interface LegalDataValue {
 interface LegalDataControls {
   nit: FormControl<string>;
   nit_dv: FormControl<string>;
+  nit_type: FormControl<NitType>;
   legal_name: FormControl<string>;
   person_type: FormControl<PersonType>;
   tax_regime: FormControl<TaxRegime>;
@@ -96,12 +99,23 @@ const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
         </p>
       }
 
-      <app-input
-        label="Razón social"
-        formControlName="legal_name"
-        [required]="true"
-        placeholder="Ej: Comercializadora ABC S.A.S."
-      ></app-input>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="md:col-span-2">
+          <app-input
+            label="Razón social"
+            formControlName="legal_name"
+            [required]="true"
+            placeholder="Ej: Comercializadora ABC S.A.S."
+          ></app-input>
+        </div>
+        <app-selector
+          label="Tipo documento"
+          formControlName="nit_type"
+          [options]="nitTypeOptions"
+          [required]="true"
+          placeholder="Seleccione tipo"
+        ></app-selector>
+      </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-selector
@@ -214,6 +228,7 @@ export class LegalDataFormComponent {
         nonNullable: true,
         validators: [Validators.required, Validators.pattern(/^\d$/)],
       }),
+      nit_type: new FormControl<NitType>('NIT', { nonNullable: true }),
       legal_name: new FormControl('', {
         nonNullable: true,
         validators: [Validators.required, Validators.minLength(2)],
@@ -247,6 +262,15 @@ export class LegalDataFormComponent {
   readonly personTypeOptions: SelectorOption[] = [
     { value: 'NATURAL', label: 'Persona Natural' },
     { value: 'JURIDICA', label: 'Persona Jurídica' },
+  ];
+
+  readonly nitTypeOptions: SelectorOption[] = [
+    { value: 'NIT', label: 'NIT' },
+    { value: 'CC', label: 'Cédula de ciudadanía' },
+    { value: 'CE', label: 'Cédula de extranjería' },
+    { value: 'TI', label: 'Tarjeta de identidad' },
+    { value: 'PP', label: 'Pasaporte' },
+    { value: 'NIT_EXTRANJERIA', label: 'NIT extranjería' },
   ];
 
   readonly taxRegimeOptions: SelectorOption[] = [

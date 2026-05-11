@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { PayrollRulesService } from '../calculation/payroll-rules.service';
 import { SettlementCalculationService } from './settlement-calculation.service';
 import { SettlementsService } from './settlements.service';
@@ -57,6 +58,7 @@ export class SettlementFlowService {
     private readonly settlements_service: SettlementsService,
     private readonly payroll_rules_service: PayrollRulesService,
     private readonly event_emitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -136,7 +138,10 @@ export class SettlementFlowService {
     // Get rules for the termination year
     const termination_date = new Date(dto.termination_date);
     const year = termination_date.getFullYear();
-    const rules = await this.payroll_rules_service.getRulesForYear(year);
+    const rules = await this.payroll_rules_service.getRulesForYear(
+      year,
+      context.store_id,
+    );
 
     // Calculate settlement
     const calculation = this.calculation_service.calculateSettlement({
@@ -148,16 +153,24 @@ export class SettlementFlowService {
       rules,
       pending_salary_days: dto.pending_salary_days || 0,
     });
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Generate settlement number
     const settlement_number =
-      await this.settlements_service.generateSettlementNumber();
+      await this.settlements_service.generateSettlementNumber(
+        accounting_entity.id,
+      );
 
     // Create the settlement record
     const settlement = await this.prisma.payroll_settlements.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id || null,
+        accounting_entity_id: accounting_entity.id,
         employee_id: dto.employee_id,
         settlement_number,
         status: 'calculated',
@@ -230,6 +243,7 @@ export class SettlementFlowService {
       settlement_id: id,
       organization_id: settlement.organization_id,
       store_id: settlement.store_id,
+      accounting_entity_id: settlement.accounting_entity_id,
       employee_id: settlement.employee_id,
       net_settlement: Number(settlement.net_settlement),
       approved_by: context.user_id,
@@ -279,6 +293,7 @@ export class SettlementFlowService {
       settlement_number: settlement.settlement_number,
       organization_id: settlement.organization_id,
       store_id: settlement.store_id,
+      accounting_entity_id: settlement.accounting_entity_id,
       employee_id: settlement.employee_id,
       employee_name:
         `${settlement.employee?.first_name || ''} ${settlement.employee?.last_name || ''}`.trim(),
@@ -324,7 +339,10 @@ export class SettlementFlowService {
     }
 
     const year = settlement.termination_date.getFullYear();
-    const rules = await this.payroll_rules_service.getRulesForYear(year);
+    const rules = await this.payroll_rules_service.getRulesForYear(
+      year,
+      settlement.store_id,
+    );
 
     const pending_salary_days =
       settlement.calculation_detail?.pending_salary_days || 0;

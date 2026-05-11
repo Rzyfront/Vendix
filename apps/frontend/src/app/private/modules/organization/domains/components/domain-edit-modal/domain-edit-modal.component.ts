@@ -52,7 +52,6 @@ import {
   SpinnerComponent,
   SelectorOption,
 } from '../../../../../../shared/components/index';
-import { StoreBindingPickerComponent } from '../store-binding-picker/store-binding-picker.component';
 import { DnsInstructionsComponent } from '../dns-instructions/dns-instructions.component';
 
 type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'integrations' | 'security' | 'performance';
@@ -80,7 +79,6 @@ interface TabConfig {
     TextareaComponent,
     ScrollableTabsComponent,
     SpinnerComponent,
-    StoreBindingPickerComponent,
     DnsInstructionsComponent,
   ],
   template: `

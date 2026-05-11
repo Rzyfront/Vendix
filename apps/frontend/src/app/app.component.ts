@@ -1,4 +1,5 @@
-import {Component, effect, inject, signal} from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import {Component, PLATFORM_ID, effect, inject, signal} from '@angular/core';
 import {toSignal} from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
@@ -34,8 +35,10 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
       <main>
         <router-outlet></router-outlet>
       </main>
-      <app-toast-container></app-toast-container>
-      <app-global-user-modals></app-global-user-modals>
+      @if (isBrowser) {
+        <app-toast-container></app-toast-container>
+        <app-global-user-modals></app-global-user-modals>
+      }
     }
   `,
   styles: `
@@ -48,8 +51,10 @@ export class AppComponent {
   private routeManager = inject(RouteManagerService);
   private configFacade = inject(ConfigFacade);
   private toastService = inject(ToastService);
+  private platformId = inject(PLATFORM_ID);
 
   is_loading = signal(true);
+  readonly isBrowser = isPlatformBrowser(this.platformId);
   config_error = toSignal(this.configFacade.error$, {
     initialValue: null as any,
   });

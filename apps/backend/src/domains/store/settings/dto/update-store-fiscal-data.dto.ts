@@ -3,6 +3,7 @@ import {
   IsEnum,
   IsOptional,
   IsString,
+  IsIn,
   MaxLength,
 } from 'class-validator';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
@@ -42,11 +43,31 @@ export class UpdateStoreFiscalDataDto {
   @MaxLength(32)
   nit?: string;
 
+  @ApiPropertyOptional({ example: '900123456', maxLength: 50 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  tax_id?: string;
+
   @ApiPropertyOptional({ example: '7', maxLength: 2 })
   @IsOptional()
   @IsString()
   @MaxLength(2)
   nit_dv?: string;
+
+  @ApiPropertyOptional({ example: '7', maxLength: 2 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2)
+  tax_id_dv?: string;
+
+  @ApiPropertyOptional({
+    enum: ['NIT', 'CC', 'CE', 'TI', 'PP', 'NIT_EXTRANJERIA'],
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['NIT', 'CC', 'CE', 'TI', 'PP', 'NIT_EXTRANJERIA'])
+  nit_type?: 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
 
   @ApiPropertyOptional({ example: 'Comercializadora ABC S.A.S.', maxLength: 255 })
   @IsOptional()

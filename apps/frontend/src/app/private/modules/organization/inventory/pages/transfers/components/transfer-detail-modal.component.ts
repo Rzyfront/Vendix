@@ -236,16 +236,16 @@ const STATUS_ICONS: Record<
                     />
                   } @else {
                     <span class="text-sm text-text-primary">
-                      {{ item.quantity_received ?? 0 }}
+                      {{ item.quantity_received }}
                     </span>
                   }
                 </div>
                 <div class="col-span-2 text-right">
-                  @if ((item.quantity_received ?? 0) >= item.quantity) {
+                  @if (item.quantity_received >= item.quantity) {
                     <span class="text-xs text-success font-medium">
                       Completo
                     </span>
-                  } @else if ((item.quantity_received ?? 0) > 0) {
+                  } @else if (item.quantity_received > 0) {
                     <span class="text-xs text-warning font-medium">
                       Parcial
                     </span>

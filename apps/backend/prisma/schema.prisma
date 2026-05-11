@@ -487,17 +487,17 @@ model fiscal_scope_audit_log {
 }
 
 model fiscal_status_audit_log {
-  id                 Int                       @id @default(autoincrement())
+  id                 Int                        @id @default(autoincrement())
   organization_id    Int
   store_id           Int?
   feature            fiscal_status_feature_enum
   from_state         fiscal_status_state_enum?
   to_state           fiscal_status_state_enum
-  source             fiscal_status_source_enum @default(manual)
+  source             fiscal_status_source_enum  @default(manual)
   before_json        Json?
   after_json         Json?
   changed_by_user_id Int?
-  changed_at         DateTime                  @default(now()) @db.Timestamp(6)
+  changed_at         DateTime                   @default(now()) @db.Timestamp(6)
 
   organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   store        stores?       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -582,6 +582,10 @@ model stores {
   id                          Int                           @id @default(autoincrement())
   name                        String                        @db.VarChar(255)
   slug                        String                        @db.VarChar(255)
+  legal_name                  String?                       @db.VarChar(255)
+  tax_id                      String?                       @db.VarChar(50)
+  tax_id_dv                   String?                       @db.VarChar(2)
+  nit_type                    dian_nit_type_enum?
   created_at                  DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                  DateTime?                     @default(now()) @db.Timestamp(6)
   is_active                   Boolean                       @default(true)
@@ -1423,12 +1427,12 @@ model inventory_locations {
   layaway_items                 layaway_items[]
   dispatch_notes                dispatch_notes[]                @relation("dispatch_notes_location")
   dispatch_note_items           dispatch_note_items[]           @relation("dispatch_note_items_location")
+  // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
+  // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 
   @@unique([store_id, code])
   @@index([organization_id, store_id])
   @@index([organization_id, type])
-  // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
-  // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 }
 
 model stock_levels {
@@ -2261,6 +2265,7 @@ enum notification_type_enum {
   subscription_suspended
   subscription_blocked
   subscription_reactivated
+  fiscal_scope_changed
   subscription_promo_applied
   subscription_renewal_upcoming
   partner_commission_available
@@ -3576,28 +3581,31 @@ model invoice_taxes {
 }
 
 model invoice_resolutions {
-  id                Int       @id @default(autoincrement())
-  organization_id   Int
-  store_id          Int
-  resolution_number String    @db.VarChar(100)
-  resolution_date   DateTime  @db.Timestamp(6)
-  prefix            String    @db.VarChar(10)
-  range_from        Int
-  range_to          Int
-  current_number    Int       @default(0)
-  valid_from        DateTime  @db.Timestamp(6)
-  valid_to          DateTime  @db.Timestamp(6)
-  is_active         Boolean   @default(true)
-  technical_key     String?   @db.VarChar(255)
-  created_at        DateTime? @default(now()) @db.Timestamp(6)
-  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  resolution_number    String    @db.VarChar(100)
+  resolution_date      DateTime  @db.Timestamp(6)
+  prefix               String    @db.VarChar(10)
+  range_from           Int
+  range_to             Int
+  current_number       Int       @default(0)
+  valid_from           DateTime  @db.Timestamp(6)
+  valid_to             DateTime  @db.Timestamp(6)
+  is_active            Boolean   @default(true)
+  technical_key        String?   @db.VarChar(255)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  invoices     invoices[]
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  invoices          invoices[]
 
-  @@unique([organization_id, store_id, prefix])
   @@index([store_id, is_active])
+  @@index([accounting_entity_id, is_active])
+  @@index([organization_id, accounting_entity_id])
 }
 
 // ===== ACCOUNTING DOMAIN =====
@@ -3620,8 +3628,15 @@ model accounting_entities {
   chart_of_accounts             chart_of_accounts[]
   accounting_account_mappings   accounting_account_mappings[]
   dian_configurations           dian_configurations[]
+  invoice_resolutions           invoice_resolutions[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
+  payroll_runs                  payroll_runs[]
+  payroll_items                 payroll_items[]
+  payroll_settlements           payroll_settlements[]
+  uvt_values                    uvt_values[]
+  withholding_concepts          withholding_concepts[]
+  withholding_calculations      withholding_calculations[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
 
   @@unique([organization_id, store_id, scope, fiscal_scope], map: "accounting_entities_org_store_scope_fiscal_scope_key")
@@ -3711,26 +3726,26 @@ model fiscal_periods {
 }
 
 model accounting_entries {
-  id                   Int                          @id @default(autoincrement())
-  organization_id      Int
-  store_id             Int?
-  accounting_entity_id Int?
-  entry_number         String                       @db.VarChar(50)
-  entry_type           accounting_entry_type_enum   @default(manual)
-  status               accounting_entry_status_enum @default(draft)
-  fiscal_period_id     Int
-  entry_date           DateTime                     @db.Timestamp(6)
-  description          String?                      @db.VarChar(500)
-  source_type          String?                      @db.VarChar(50)
-  source_id            Int?
-  total_debit          Decimal                      @default(0) @db.Decimal(12, 2)
-  total_credit         Decimal                      @default(0) @db.Decimal(12, 2)
-  created_by_user_id   Int?
-  posted_by_user_id    Int?
-  posted_at            DateTime?                    @db.Timestamp(6)
-  created_at           DateTime?                    @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?                    @default(now()) @db.Timestamp(6)
-  is_historical_consolidated Boolean                @default(false)
+  id                         Int                          @id @default(autoincrement())
+  organization_id            Int
+  store_id                   Int?
+  accounting_entity_id       Int?
+  entry_number               String                       @db.VarChar(50)
+  entry_type                 accounting_entry_type_enum   @default(manual)
+  status                     accounting_entry_status_enum @default(draft)
+  fiscal_period_id           Int
+  entry_date                 DateTime                     @db.Timestamp(6)
+  description                String?                      @db.VarChar(500)
+  source_type                String?                      @db.VarChar(50)
+  source_id                  Int?
+  total_debit                Decimal                      @default(0) @db.Decimal(12, 2)
+  total_credit               Decimal                      @default(0) @db.Decimal(12, 2)
+  created_by_user_id         Int?
+  posted_by_user_id          Int?
+  posted_at                  DateTime?                    @db.Timestamp(6)
+  created_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  is_historical_consolidated Boolean                      @default(false)
 
   organization                organizations                 @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                       stores?                       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -3837,6 +3852,7 @@ model payroll_runs {
   id                   Int                       @id @default(autoincrement())
   organization_id      Int
   store_id             Int?
+  accounting_entity_id Int?
   payroll_number       String                    @db.VarChar(50)
   status               payroll_status_enum       @default(draft)
   frequency            payroll_frequency_enum
@@ -3860,15 +3876,17 @@ model payroll_runs {
   created_at           DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
-  organization     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store            stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entry accounting_entries? @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user users?              @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user  users?              @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  payroll_items    payroll_items[]
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entry  accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user  users?               @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?               @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payroll_items     payroll_items[]
 
   @@unique([organization_id, payroll_number])
   @@index([organization_id, status])
+  @@index([accounting_entity_id])
   @@index([store_id])
 }
 
@@ -3876,6 +3894,7 @@ model payroll_items {
   id                   Int       @id @default(autoincrement())
   payroll_run_id       Int
   employee_id          Int
+  accounting_entity_id Int?
   base_salary          Decimal   @db.Decimal(12, 2)
   worked_days          Int
   earnings             Json?
@@ -3891,11 +3910,13 @@ model payroll_items {
 
   payroll_run          payroll_runs                    @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
   employee             employees                       @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity    accounting_entities?            @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   advance_payments     employee_advance_payments[]
   advance_installments employee_advance_installments[]
 
   @@index([payroll_run_id])
   @@index([employee_id])
+  @@index([accounting_entity_id])
 }
 
 // ===== DIAN ELECTRONIC INVOICING =====
@@ -3947,10 +3968,10 @@ model dian_configurations {
   created_at                     DateTime?                    @default(now()) @db.Timestamp(6)
   updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
 
-  organization    organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store           stores?           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  dian_audit_logs dian_audit_logs[]
+  dian_audit_logs   dian_audit_logs[]
 
   @@index([store_id])
   @@index([organization_id])
@@ -4755,13 +4776,13 @@ model intercompany_transactions {
   eliminated_at        DateTime? @db.Timestamp(6)
   created_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  organization organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   session      consolidation_sessions? @relation(fields: [session_id], references: [id], onDelete: Cascade)
-  from_store   stores                 @relation("ic_from_store", fields: [from_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  to_store     stores                 @relation("ic_to_store", fields: [to_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  entry        accounting_entries     @relation("ic_entry", fields: [entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  counterpart  accounting_entries?    @relation("ic_counterpart", fields: [counterpart_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  account      chart_of_accounts      @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  from_store   stores                  @relation("ic_from_store", fields: [from_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  to_store     stores                  @relation("ic_to_store", fields: [to_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  entry        accounting_entries      @relation("ic_entry", fields: [entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  counterpart  accounting_entries?     @relation("ic_counterpart", fields: [counterpart_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  account      chart_of_accounts       @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([session_id])
   @@index([organization_id, from_store_id, to_store_id])
@@ -4792,18 +4813,19 @@ model consolidation_adjustments {
 // ===== PAYROLL SETTLEMENTS =====
 
 model payroll_settlements {
-  id                 Int                     @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  employee_id        Int
-  settlement_number  String                  @db.VarChar(50)
-  status             settlement_status_enum  @default(draft)
-  termination_date   DateTime                @db.Timestamp(6)
-  termination_reason termination_reason_enum
-  hire_date          DateTime                @db.Timestamp(6)
-  days_worked        Int
-  base_salary        Decimal                 @db.Decimal(12, 2)
-  contract_type      contract_type_enum
+  id                   Int                     @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  employee_id          Int
+  settlement_number    String                  @db.VarChar(50)
+  status               settlement_status_enum  @default(draft)
+  termination_date     DateTime                @db.Timestamp(6)
+  termination_reason   termination_reason_enum
+  hire_date            DateTime                @db.Timestamp(6)
+  days_worked          Int
+  base_salary          Decimal                 @db.Decimal(12, 2)
+  contract_type        contract_type_enum
 
   // Prestaciones sociales
   severance          Decimal @default(0) @db.Decimal(12, 2)
@@ -4834,15 +4856,17 @@ model payroll_settlements {
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
-  organization     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store            stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  employee         employees           @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entry accounting_entries? @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user users?              @relation("settlements_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user  users?              @relation("settlements_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  employee          employees            @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entry  accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user  users?               @relation("settlements_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?               @relation("settlements_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organization_id, settlement_number])
   @@index([organization_id, status])
+  @@index([accounting_entity_id])
   @@index([employee_id])
   @@index([store_id])
 }
@@ -4929,22 +4953,26 @@ model employee_advance_installments {
 // ── Retención en Fuente ───────────────────────────────────
 
 model uvt_values {
-  id              Int       @id @default(autoincrement())
-  organization_id Int
-  year            Int
-  value_cop       Decimal   @db.Decimal(12, 2)
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int?
+  year                 Int
+  value_cop            Decimal   @db.Decimal(12, 2)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
 
-  @@unique([organization_id, year])
+  @@unique([organization_id, accounting_entity_id, year])
   @@index([organization_id])
+  @@index([accounting_entity_id])
 }
 
 model withholding_concepts {
   id                   Int                            @id @default(autoincrement())
   organization_id      Int
+  accounting_entity_id Int?
   code                 String                         @db.VarChar(30)
   name                 String                         @db.VarChar(150)
   rate                 Decimal                        @db.Decimal(7, 4)
@@ -4956,34 +4984,39 @@ model withholding_concepts {
   updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity        accounting_entities?       @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   withholding_calculations withholding_calculations[]
 
-  @@unique([organization_id, code])
+  @@unique([organization_id, accounting_entity_id, code])
   @@index([organization_id, is_active])
+  @@index([accounting_entity_id])
 }
 
 model withholding_calculations {
-  id                 Int       @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  invoice_id         Int?
-  supplier_id        Int?
-  concept_id         Int
-  base_amount        Decimal   @db.Decimal(12, 2)
-  withholding_rate   Decimal   @db.Decimal(7, 4)
-  withholding_amount Decimal   @db.Decimal(12, 2)
-  uvt_value_used     Decimal   @db.Decimal(12, 2)
-  year               Int
-  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  invoice_id           Int?
+  supplier_id          Int?
+  concept_id           Int
+  base_amount          Decimal   @db.Decimal(12, 2)
+  withholding_rate     Decimal   @db.Decimal(7, 4)
+  withholding_amount   Decimal   @db.Decimal(12, 2)
+  uvt_value_used       Decimal   @db.Decimal(12, 2)
+  year                 Int
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  invoice      invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  supplier     suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  concept      withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  invoice           invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier          suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  concept           withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([organization_id, invoice_id])
   @@index([organization_id, supplier_id, year])
+  @@index([accounting_entity_id])
   @@index([store_id])
 }
 

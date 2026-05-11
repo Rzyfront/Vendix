@@ -1,13 +1,8 @@
 import { Component, input, output, inject, signal, model, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import {
   ModalComponent,
   ButtonComponent,
-  InputComponent,
-  IconComponent,
-  CardComponent,
-  SelectorComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -54,13 +49,8 @@ interface ProrationPreview {
   selector: 'app-change-plan-modal',
   standalone: true,
   imports: [
-    ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-    IconComponent,
-    CardComponent,
-    SelectorComponent,
   ],
   template: `
     <app-modal
@@ -193,7 +183,6 @@ interface ProrationPreview {
 })
 export class ChangePlanModalComponent {
   private destroyRef = inject(DestroyRef);
-  private fb = inject(FormBuilder);
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
   private orgSubsService = inject(OrgSubscriptionsService);

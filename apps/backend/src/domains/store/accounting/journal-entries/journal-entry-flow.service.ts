@@ -150,6 +150,7 @@ export class JournalEntryFlowService {
       const latest = await tx.accounting_entries.findFirst({
         where: {
           organization_id: context.organization_id,
+          accounting_entity_id: entry.accounting_entity_id,
           entry_number: { startsWith: prefix },
         },
         orderBy: { entry_number: 'desc' },
@@ -172,6 +173,7 @@ export class JournalEntryFlowService {
         data: {
           organization_id: context.organization_id,
           store_id: entry.store_id,
+          accounting_entity_id: entry.accounting_entity_id,
           entry_number: reversal_number,
           entry_type: entry.entry_type,
           status: 'posted',

@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
@@ -44,7 +45,10 @@ const ENTRY_INCLUDE = {
 
 @Injectable()
 export class JournalEntriesService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -126,6 +130,12 @@ export class JournalEntriesService {
 
   async create(create_dto: CreateJournalEntryDto) {
     const context = this.getContext();
+    const store_id = create_dto.store_id || context.store_id || null;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id,
+      });
 
     // Validate fiscal period exists and is open
     const fiscal_period = await this.prisma.fiscal_periods.findFirst({
@@ -139,6 +149,16 @@ export class JournalEntriesService {
     if (fiscal_period.status !== 'open') {
       throw new ConflictException(
         `Cannot create entries in fiscal period '${fiscal_period.name}' — status is '${fiscal_period.status}'`,
+      );
+    }
+
+    if (
+      fiscal_period.accounting_entity_id &&
+      fiscal_period.accounting_entity_id !== accounting_entity.id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ACC_VALIDATE_001,
+        'Fiscal period does not belong to the resolved fiscal accounting entity',
       );
     }
 
@@ -205,10 +225,8 @@ export class JournalEntriesService {
     // Generate entry number
     const entry_number = await this.generateEntryNumber(
       context.organization_id!,
+      accounting_entity.id,
     );
-
-    // Determine store_id: use DTO value, or context store_id if available
-    const store_id = create_dto.store_id || context.store_id || null;
 
     // Create entry with lines in a transaction
     const entry = await this.prisma.$transaction(async (tx: any) => {
@@ -216,6 +234,7 @@ export class JournalEntriesService {
         data: {
           organization_id: context.organization_id,
           store_id,
+          accounting_entity_id: accounting_entity.id,
           entry_number,
           entry_type: (create_dto.entry_type as any) || 'manual',
           status: 'draft',
@@ -274,6 +293,16 @@ export class JournalEntriesService {
       if (fiscal_period.status !== 'open') {
         throw new ConflictException(
           `Cannot move entry to fiscal period '${fiscal_period.name}' — status is '${fiscal_period.status}'`,
+        );
+      }
+
+      if (
+        fiscal_period.accounting_entity_id &&
+        fiscal_period.accounting_entity_id !== entry.accounting_entity_id
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ACC_VALIDATE_001,
+          'Fiscal period does not belong to this journal entry fiscal entity',
         );
       }
     }
@@ -386,13 +415,18 @@ export class JournalEntriesService {
     });
   }
 
-  private async generateEntryNumber(organization_id: number): Promise<string> {
+  private async generateEntryNumber(
+    organization_id: number,
+    accounting_entity_id: number,
+  ): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `AE-${year}-`;
 
     // Find the latest entry number for this organization and year
     const latest = await this.prisma.accounting_entries.findFirst({
       where: {
+        organization_id,
+        accounting_entity_id,
         entry_number: { startsWith: prefix },
       },
       orderBy: { entry_number: 'desc' },

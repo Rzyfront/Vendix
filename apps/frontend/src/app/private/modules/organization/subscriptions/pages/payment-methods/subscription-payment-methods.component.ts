@@ -92,11 +92,11 @@ import { StorePaymentMethod } from '../../../../store/settings/payments/interfac
                 <div class="flex items-start justify-between">
                   <div class="flex items-center gap-3">
                     <div class="p-2 bg-primary/10 rounded-lg">
-                      <app-icon [name]="getMethodIcon(method.system_payment_method?.type || 'card')" [size]="20" class="text-primary"></app-icon>
+                      <app-icon [name]="getMethodIcon(method.system_payment_method.type || 'card')" [size]="20" class="text-primary"></app-icon>
                     </div>
                     <div>
                       <p class="font-semibold text-text-primary">{{ method.display_name || 'Método de Pago' }}</p>
-                      <p class="text-sm text-text-secondary">{{ method.system_payment_method?.provider || 'Sistema' }}</p>
+                      <p class="text-sm text-text-secondary">{{ method.system_payment_method.provider || 'Sistema' }}</p>
                     </div>
                   </div>
                   <span

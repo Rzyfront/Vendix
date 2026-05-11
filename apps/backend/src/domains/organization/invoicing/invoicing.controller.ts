@@ -45,11 +45,4 @@ export class OrgInvoicingController {
     return this.responseService.success(data, 'Factura obtenida');
   }
 
-  @Get('resolutions')
-  @Permissions('organization:invoicing:read')
-  async getResolutions(@Query('store_id') storeIdRaw?: string) {
-    const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
-    const data = await this.invoicingService.getResolutions(storeId);
-    return this.responseService.success(data, 'Resoluciones obtenidas');
-  }
 }

@@ -11,6 +11,7 @@ import {
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
+  PaginationComponent,
   ResponsiveDataViewComponent,
   StatsComponent,
   TableColumn,
@@ -29,6 +30,7 @@ import {
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
+    PaginationComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
   ],
@@ -118,7 +120,7 @@ import {
 
         <div class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
-            [data]="filteredRows()"
+            [data]="paginatedRows()"
             [columns]="tableColumns"
             [cardConfig]="cardConfig"
             [loading]="loading()"
@@ -131,6 +133,19 @@ import {
             [showEmptyClearFilters]="hasActiveFilters()"
             (emptyClearFiltersClick)="clearFilters()"
           />
+
+          @if (totalPages() > 1) {
+            <div class="mt-4 flex justify-center border-t border-border pt-3">
+              <app-pagination
+                [currentPage]="displayPage()"
+                [totalPages]="totalPages()"
+                [total]="filteredRows().length"
+                [limit]="pageSize"
+                infoStyle="none"
+                (pageChange)="changePage($event)"
+              />
+            </div>
+          }
         </div>
       </app-card>
     </div>
@@ -147,6 +162,8 @@ export class OrgChartOfAccountsComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly searchTerm = signal('');
   readonly filterValues = signal<FilterValues>({});
+  readonly currentPage = signal(1);
+  readonly pageSize = 15;
 
   readonly activeCount = computed(() => this.rows().filter((row) => row.is_active !== false).length);
   readonly acceptsEntriesCount = computed(() => this.rows().filter((row) => row.accepts_entries).length);
@@ -189,6 +206,16 @@ export class OrgChartOfAccountsComponent {
       ],
     },
   ]);
+
+  readonly totalPages = computed(() => Math.ceil(this.filteredRows().length / this.pageSize));
+  readonly displayPage = computed(() => {
+    const totalPages = this.totalPages();
+    return totalPages > 0 ? Math.min(this.currentPage(), totalPages) : 1;
+  });
+  readonly paginatedRows = computed(() => {
+    const start = (this.displayPage() - 1) * this.pageSize;
+    return this.filteredRows().slice(start, start + this.pageSize);
+  });
 
   readonly tableColumns: TableColumn[] = [
     {
@@ -274,6 +301,7 @@ export class OrgChartOfAccountsComponent {
       .subscribe({
         next: (res) => {
           this.rows.set(res?.data ?? []);
+          this.currentPage.set(1);
           this.loading.set(false);
         },
         error: (err) => {
@@ -288,15 +316,22 @@ export class OrgChartOfAccountsComponent {
 
   onSearch(search: string): void {
     this.searchTerm.set(search);
+    this.currentPage.set(1);
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues.set({ ...values });
+    this.currentPage.set(1);
   }
 
   clearFilters(): void {
     this.searchTerm.set('');
     this.filterValues.set({});
+    this.currentPage.set(1);
+  }
+
+  changePage(page: number): void {
+    this.currentPage.set(page);
   }
 
   hasActiveFilters(): boolean {

@@ -22,6 +22,7 @@ import { getDefaultStoreSettings } from '../../store/settings/defaults/default-s
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import type { dian_nit_type_enum } from '@prisma/client';
 
 @Injectable()
 export class SettingsService {
@@ -403,6 +404,45 @@ export class SettingsService {
           updated_at: new Date(),
         },
       });
+
+      const legal_name =
+        typeof cleanDto.legal_name === 'string'
+          ? cleanDto.legal_name.trim()
+          : undefined;
+      const tax_id =
+        typeof cleanDto.tax_id === 'string'
+          ? cleanDto.tax_id.trim()
+          : typeof cleanDto.nit === 'string'
+            ? cleanDto.nit.trim()
+            : undefined;
+      const tax_id_dv =
+        typeof cleanDto.tax_id_dv === 'string'
+          ? cleanDto.tax_id_dv.trim()
+          : typeof cleanDto.nit_dv === 'string'
+            ? cleanDto.nit_dv.trim()
+            : undefined;
+      const nit_type: dian_nit_type_enum | undefined =
+        typeof cleanDto.nit_type === 'string'
+          ? (cleanDto.nit_type.trim() as dian_nit_type_enum)
+          : undefined;
+
+      if (
+        legal_name !== undefined ||
+        tax_id !== undefined ||
+        tax_id_dv !== undefined ||
+        nit_type !== undefined
+      ) {
+        await this.prisma.withoutScope().stores.update({
+          where: { id: target.store_id },
+          data: {
+            ...(legal_name !== undefined && { legal_name: legal_name || null }),
+            ...(tax_id !== undefined && { tax_id: tax_id || null }),
+            ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
+            ...(nit_type !== undefined && { nit_type: nit_type || null }),
+            updated_at: new Date(),
+          },
+        });
+      }
 
       if (context.user_id) {
         try {

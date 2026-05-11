@@ -106,7 +106,7 @@ import { IconComponent } from '../../../../../../shared/components/index';
                   class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0"
                 >
                   <span class="text-xs font-bold">
-                    {{ (user.username?.charAt(0) || '?').toUpperCase() }}
+                    {{ (user.username.charAt(0) || '?').toUpperCase() }}
                   </span>
                 </div>
                 <div class="min-w-0 flex-1">

@@ -11,6 +11,7 @@ import { EncryptionService } from '../../../../../common/services/encryption.ser
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -48,6 +49,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
     private readonly response_parser: DianResponseParserService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async sendInvoice(
@@ -441,26 +443,27 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    */
   private async loadConfig(): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
-      throw new Error('Store context required for DIAN operations');
+    if (!context?.organization_id) {
+      throw new Error('Organization context required for DIAN operations');
     }
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id,
+        store_id: context.store_id ?? null,
+      });
 
-    // DIAN config may be store-scoped (store_id = current store) or
-    // organization-scoped (store_id IS NULL) depending on
-    // organizations.fiscal_scope. The store-prisma scope already restricts
-    // results to the current organization with an OR for store_id NULL.
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        OR: [{ store_id: context.store_id }, { store_id: null }],
+        accounting_entity_id: accounting_entity.id,
+        configuration_type: 'invoicing',
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      // Prefer per-store config when present; org-wide config acts as fallback.
-      orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
+      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
 
     if (!config) {
       throw new Error(
-        `No active DIAN configuration for store ${context.store_id}`,
+        `No active DIAN configuration for fiscal entity ${accounting_entity.id}`,
       );
     }
 

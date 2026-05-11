@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CreatePayrollRunDto } from './dto/create-payroll-run.dto';
 import { UpdatePayrollRunDto } from './dto/update-payroll-run.dto';
 import { QueryPayrollRunDto } from './dto/query-payroll-run.dto';
@@ -41,7 +42,10 @@ const PAYROLL_RUN_DETAIL_INCLUDE = {
 
 @Injectable()
 export class PayrollRunsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -54,12 +58,15 @@ export class PayrollRunsService {
   /**
    * Generate a unique payroll number for the organization.
    */
-  private async generatePayrollNumber(): Promise<string> {
+  private async generatePayrollNumber(
+    accounting_entity_id: number,
+  ): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `NOM-${year}`;
 
     const latest = await this.prisma.payroll_runs.findFirst({
       where: {
+        accounting_entity_id,
         payroll_number: { startsWith: prefix },
       },
       orderBy: { payroll_number: 'desc' },
@@ -144,13 +151,39 @@ export class PayrollRunsService {
 
   async create(dto: CreatePayrollRunDto) {
     const context = this.getContext();
+    const store_id = dto.store_id || context.store_id || null;
+
+    if (store_id) {
+      const store = await this.prisma.stores.findFirst({
+        where: {
+          id: store_id,
+          organization_id: context.organization_id!,
+          is_active: true,
+        },
+        select: { id: true },
+      });
+
+      if (!store) {
+        throw new VendixHttpException(
+          ErrorCodes.PAYROLL_VALIDATE_001,
+          'store_id does not belong to the current organization',
+        );
+      }
+    }
+
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id,
+      });
 
     const payroll_number =
-      dto.payroll_number || (await this.generatePayrollNumber());
+      dto.payroll_number ||
+      (await this.generatePayrollNumber(accounting_entity.id));
 
     // Check for duplicate payroll number
     const existing = await this.prisma.payroll_runs.findFirst({
-      where: { payroll_number },
+      where: { accounting_entity_id: accounting_entity.id, payroll_number },
     });
 
     if (existing) {
@@ -160,7 +193,8 @@ export class PayrollRunsService {
     const run = await this.prisma.payroll_runs.create({
       data: {
         organization_id: context.organization_id,
-        store_id: dto.store_id || context.store_id || null,
+        store_id,
+        accounting_entity_id: accounting_entity.id,
         payroll_number,
         status: 'draft',
         frequency: dto.frequency as any,

@@ -54,6 +54,7 @@ export interface OrgInvoiceRow {
 export interface OrgResolutionRow {
   id: number;
   resolution_number: string;
+  resolution_date?: string;
   prefix: string;
   range_from: number;
   range_to: number;
@@ -61,8 +62,23 @@ export interface OrgResolutionRow {
   valid_from: string;
   valid_to: string;
   is_active: boolean;
+  technical_key?: string | null;
+  store_id?: number | null;
   store?: { id: number; name: string; slug: string } | null;
   _count?: { invoices: number };
+}
+
+export interface OrgResolutionPayload {
+  store_id?: number | null;
+  resolution_number: string;
+  resolution_date: string;
+  prefix: string;
+  range_from: number;
+  range_to: number;
+  valid_from: string;
+  valid_to: string;
+  is_active?: boolean;
+  technical_key?: string | null;
 }
 
 export interface OrgDianConfigRow {
@@ -109,6 +125,29 @@ export class OrgInvoicingService {
     return this.http.get<ApiResponse<OrgResolutionRow[]>>(
       `${this.apiUrl}/organization/invoicing/resolutions`,
       { params: this.toParams(query) },
+    );
+  }
+
+  createResolution(payload: OrgResolutionPayload): Observable<ApiResponse<OrgResolutionRow>> {
+    return this.http.post<ApiResponse<OrgResolutionRow>>(
+      `${this.apiUrl}/organization/invoicing/resolutions`,
+      payload,
+    );
+  }
+
+  updateResolution(
+    id: number,
+    payload: Partial<OrgResolutionPayload>,
+  ): Observable<ApiResponse<OrgResolutionRow>> {
+    return this.http.patch<ApiResponse<OrgResolutionRow>>(
+      `${this.apiUrl}/organization/invoicing/resolutions/${id}`,
+      payload,
+    );
+  }
+
+  deleteResolution(id: number): Observable<ApiResponse<null>> {
+    return this.http.delete<ApiResponse<null>>(
+      `${this.apiUrl}/organization/invoicing/resolutions/${id}`,
     );
   }
 
