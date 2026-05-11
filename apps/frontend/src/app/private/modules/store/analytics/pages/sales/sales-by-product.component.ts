@@ -352,7 +352,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: top10.map((p) => p.product_name),
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisLabel: { color: textSecondary, fontSize: 11 },
       },
       yAxis: {
         type: 'value',

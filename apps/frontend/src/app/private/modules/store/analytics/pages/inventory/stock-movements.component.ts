@@ -419,7 +419,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisLabel: { color: textSecondary, fontSize: 11 },
       },
       yAxis: {
         type: 'value',

@@ -331,7 +331,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         axisLabel: {
           color: textSecondary,
           fontSize: 11,
-          rotate: 30,
+          rotate: 0,
           interval: 0,
         },
       },

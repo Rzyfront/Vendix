@@ -346,7 +346,7 @@ loadData(): void {
         type: 'category',
         data: chartData.map((d: any) => d.name),
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11, rotate: 30 },
+        axisLabel: { color: '#6b7280', fontSize: 11 },
       },
       yAxis: {
         type: 'value',

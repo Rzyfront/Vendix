@@ -246,7 +246,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10, rotate: 30, width: 100, overflow: 'truncate' } },
+        axisLabel: { color: textSecondary, fontSize: 10, width: 100, overflow: 'truncate' } },
       yAxis: {
         type: 'value',
         min: 0,

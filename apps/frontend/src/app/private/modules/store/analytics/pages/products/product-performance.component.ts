@@ -177,7 +177,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, rotate: 30 },
+        axisLabel: { color: textSecondary },
         axisTick: { show: false },
       },
       yAxis: {

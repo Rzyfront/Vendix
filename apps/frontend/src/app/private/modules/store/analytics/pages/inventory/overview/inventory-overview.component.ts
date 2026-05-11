@@ -13,6 +13,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../../components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   InventorySummary,
@@ -37,6 +38,7 @@ import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-reg
     ChartComponent,
     IconComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -88,6 +90,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
   readonly lowStockPct = toSignal(this.lowStockPct$, { initialValue: '0' });
   readonly outOfStockPct = toSignal(this.outOfStockPct$, { initialValue: '0' });
+  readonly dateRange = toSignal(this.dateRange$);
 
   // Chart options
   movementTrendChartOptions = signal<EChartsOption>({});
@@ -125,6 +128,10 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
 
   exportReport(): void {
     this.store.dispatch(InventoryActions.exportInventoryReport());
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.store.dispatch(InventoryActions.setDateRange({ dateRange: range }));
   }
 
   private getThemeColors() {
@@ -263,6 +270,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       legend: {
         data: ['Valor'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
@@ -271,38 +279,24 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
         axisLabel: { color: textSecondary, fontSize: 11 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 1000000,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(Math.round(v), 0) },
         splitLine: { lineStyle: { color: border } },
       },
-      series: [
-        {
-          name: 'Valor',
-          type: 'line',
-          data: sorted.map((v) => v.total_value),
-          itemStyle: { color: '#3b82f6' },
-          lineStyle: { color: '#3b82f6', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f64D' },
-                { offset: 1, color: '#3b82f60D' },
-              ],
-            },
-          },
-        },
-      ],
+      series: [{
+        name: 'Valor',
+        type: 'bar',
+        data: sorted.map((v, i) => ({
+          value: v.total_value,
+          itemStyle: { color: locationColors[i % locationColors.length] }
+        })),
+        barMaxWidth: 50,
+      }],
     });
   }
 
@@ -339,6 +333,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       legend: {
         data: ['Cantidad'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
@@ -347,38 +342,24 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
         axisLabel: { color: textSecondary, fontSize: 11 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: border } },
       },
-      series: [
-        {
-          name: 'Cantidad',
-          type: 'line',
-          data: sorted.map((v) => v.total_quantity),
-          itemStyle: { color: '#8b5cf6' },
-          lineStyle: { color: '#8b5cf6', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#8b5cf64D' },
-                { offset: 1, color: '#8b5cf60D' },
-              ],
-            },
-          },
-        },
-      ],
+      series: [{
+        name: 'Cantidad',
+        type: 'bar',
+        data: sorted.map((v, i) => ({
+          value: v.total_quantity,
+          itemStyle: { color: locationColors[i % locationColors.length] }
+        })),
+        barMaxWidth: 50,
+      }],
     });
   }
 }

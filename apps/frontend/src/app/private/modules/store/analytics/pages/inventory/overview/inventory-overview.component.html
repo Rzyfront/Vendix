@@ -70,6 +70,10 @@
     </div>
 
     <div class="flex items-center gap-2 md:gap-3 shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
       <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [loading]="exporting()"

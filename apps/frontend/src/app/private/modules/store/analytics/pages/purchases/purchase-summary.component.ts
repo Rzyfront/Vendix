@@ -290,7 +290,7 @@ export class PurchaseSummaryComponent implements OnInit {
         type: 'category',
         data: supplierNames,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         axisTick: { show: false },
       },
       yAxis: {
