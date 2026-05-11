@@ -25,7 +25,7 @@ export class StartFiscalWizardDto {
   store_id?: number;
 }
 
-export class AdvanceFiscalWizardStepDto {
+export class MarkFiscalWizardStepDto {
   @IsIn([
     'area_selection',
     'legal_data',
@@ -42,7 +42,7 @@ export class AdvanceFiscalWizardStepDto {
 
   @IsOptional()
   @IsObject()
-  data?: Record<string, unknown>;
+  ref?: Record<string, unknown>;
 
   @IsOptional()
   @Type(() => Number)

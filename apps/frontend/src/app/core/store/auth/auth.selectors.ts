@@ -252,22 +252,6 @@ export const selectNeedsOnboarding = createSelector(
   (onboardingCompleted: boolean) => !onboardingCompleted,
 );
 
-// Module flows → panel_ui key mapping
-// When a module_flow is disabled, ALL related panel_ui keys are forcibly hidden
-const MODULE_FLOW_PANEL_UI_MAP: Record<string, string[]> = {
-  accounting: [
-    'accounting', 'accounting_journal_entries', 'accounting_fiscal_periods',
-    'accounting_chart_of_accounts', 'accounting_reports', 'accounting_account_mappings',
-    'accounting_flows_dashboard', 'cartera_dashboard', 'cartera_receivables',
-    'cartera_payables', 'cartera_aging',
-  ],
-  payroll: [
-    'payroll', 'payroll_employees', 'payroll_runs',
-    'payroll_settlements', 'payroll_advances', 'payroll_settings',
-  ],
-  invoicing: ['invoicing'],
-};
-
 export const FISCAL_AREA_PANEL_UI_MAP: Record<FiscalArea, string[]> = {
   accounting: [
     'accounting',
@@ -301,26 +285,12 @@ export const FISCAL_AREA_PANEL_UI_MAP: Record<FiscalArea, string[]> = {
   ],
 };
 
-/** Collects panel_ui keys that should be hidden based on module_flows */
-function getDisabledKeysByModuleFlows(storeSettings: any): Set<string> {
-  const disabled = new Set<string>();
-  const moduleFlows = storeSettings?.module_flows;
-  if (!moduleFlows) return disabled;
-  for (const [mod, keys] of Object.entries(MODULE_FLOW_PANEL_UI_MAP)) {
-    if ((moduleFlows as any)[mod]?.enabled === false) {
-      (keys as string[]).forEach(k => disabled.add(k));
-    }
-  }
-  return disabled;
-}
-
 function getDisabledKeysByFiscalStatus(
   fiscalStatus: FiscalStatusBlock | null,
 ): Set<string> {
   const disabled = new Set<string>();
-  if (!fiscalStatus) return disabled;
   for (const area of FISCAL_AREAS) {
-    const state = fiscalStatus[area]?.state;
+    const state = fiscalStatus?.[area]?.state;
     if (state !== 'ACTIVE' && state !== 'LOCKED') {
       FISCAL_AREA_PANEL_UI_MAP[area].forEach((key) => disabled.add(key));
     }
@@ -335,18 +305,8 @@ export function resolveModuleEnabled(
 ): boolean {
   const fiscalStatus =
     organizationSettings?.fiscal_status || settings?.fiscal_status || null;
-  if (fiscalStatus?.[moduleKey]) {
-    const state = fiscalStatus[moduleKey].state;
-    return state === 'ACTIVE' || state === 'LOCKED';
-  }
-
-  if (settings?.module_flows?.[moduleKey]) {
-    return settings.module_flows[moduleKey].enabled !== false;
-  }
-  if (!settings?.module_flows && moduleKey === 'accounting' && settings?.accounting_flows) {
-    return true;
-  }
-  return !settings?.module_flows;
+  const state = fiscalStatus?.[moduleKey]?.state;
+  return state === 'ACTIVE' || state === 'LOCKED';
 }
 
 // Module flows selectors
@@ -427,9 +387,7 @@ export const selectIsModuleVisible = (moduleKey: string) =>
     selectFiscalStatus,
     (panelUi: any, storeSettings: any, fiscalStatus: FiscalStatusBlock | null) => {
       if (panelUi?.[moduleKey] !== true) return false;
-      const disabledKeys = fiscalStatus
-        ? getDisabledKeysByFiscalStatus(fiscalStatus)
-        : getDisabledKeysByModuleFlows(storeSettings);
+      const disabledKeys = getDisabledKeysByFiscalStatus(fiscalStatus);
       return !disabledKeys.has(moduleKey);
     },
   );
@@ -440,9 +398,7 @@ export const selectVisibleModules = createSelector(
   selectFiscalStatus,
   (panelUi: any, storeSettings: any, fiscalStatus: FiscalStatusBlock | null) => {
     if (!panelUi || typeof panelUi !== 'object') return [];
-    const disabledKeys = fiscalStatus
-      ? getDisabledKeysByFiscalStatus(fiscalStatus)
-      : getDisabledKeysByModuleFlows(storeSettings);
+    const disabledKeys = getDisabledKeysByFiscalStatus(fiscalStatus);
     return Object.entries(panelUi)
       .filter(([key, visible]) => visible === true && !disabledKeys.has(key))
       .map(([key]) => key);

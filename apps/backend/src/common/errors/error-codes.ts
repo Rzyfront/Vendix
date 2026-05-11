@@ -1145,6 +1145,24 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Access denied to accounting resource',
   },
+  CHART_ALREADY_SEEDED: {
+    code: 'CHART_ALREADY_SEEDED',
+    httpStatus: 409,
+    devMessage:
+      'Chart of accounts already exists for this tenant. Use force=true to reseed.',
+  },
+  MISSING_ACCOUNTING_ENTITY: {
+    code: 'MISSING_ACCOUNTING_ENTITY',
+    httpStatus: 409,
+    devMessage:
+      'Crea primero las entidades fiscales por tienda antes de sembrar el plan de cuentas.',
+  },
+  TAXES_ALREADY_SEEDED: {
+    code: 'TAXES_ALREADY_SEEDED',
+    httpStatus: 409,
+    devMessage:
+      'Default taxes already exist for this tenant. Use force=true to reseed.',
+  },
   // DIAN Electronic Invoicing
   DIAN_CONFIG_001: {
     code: 'DIAN_CONFIG_001',

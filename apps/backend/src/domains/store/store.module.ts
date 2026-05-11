@@ -25,6 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InvoicingModule } from './invoicing/invoicing.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { StorePayrollSettingsModule } from './payroll/payroll-settings.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -77,6 +78,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     InvoicingModule,
     AccountingModule,
     PayrollModule,
+    StorePayrollSettingsModule,
     ReportsModule,
     StoreRolesModule,
     PromotionsModule,

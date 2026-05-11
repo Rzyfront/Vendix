@@ -19,6 +19,7 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   ModuleFlowGuard,
   RequireModuleFlow,
+  SkipModuleFlowGuard,
 } from '../../../../common/guards/module-flow.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
 
@@ -41,6 +42,7 @@ export class OrgFiscalPeriodsController {
   ) {}
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard loadInitial() lists fiscal periods while module still WIP
   @Permissions('organization:accounting:fiscal_periods:read')
   async findAll(@Query('store_id') storeIdRaw?: string) {
     const store_id = storeIdRaw ? +storeIdRaw : undefined;
@@ -60,6 +62,7 @@ export class OrgFiscalPeriodsController {
   }
 
   @Post()
+  @SkipModuleFlowGuard() // bootstrap: wizard creates the initial fiscal period to satisfy ACTIVE requirements
   @Permissions('organization:accounting:fiscal_periods:create')
   @HttpCode(HttpStatus.CREATED)
   async create(

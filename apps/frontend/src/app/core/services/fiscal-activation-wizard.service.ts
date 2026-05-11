@@ -21,12 +21,25 @@ export class FiscalActivationWizardService {
 
   readonly selectedAreas = signal<FiscalArea[]>([]);
   readonly currentStepIndex = signal(0);
-  readonly stepData = signal<Record<string, Record<string, unknown>>>({});
   readonly lastStatus = signal<FiscalStatusReadResult | null>(null);
   readonly targetStoreId = signal<number | null>(null);
   readonly loading = signal(false);
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
+
+  /**
+   * Scope of the **logged-in user**, used to decide which API surface to hit
+   * (`/store/*` vs `/organization/*`). This is intentionally distinct from
+   * `lastStatus()?.fiscal_scope`, which describes where the *organization*
+   * keeps its fiscal data (STORE vs ORGANIZATION) — that value must NOT be
+   * used to route HTTP calls, otherwise a STORE_ADMIN can end up hitting
+   * `/organization/*` and being rejected by the DomainScopeGuard with 403.
+   *
+   * Lowercase to plug directly into URL segments.
+   */
+  readonly userScope = computed<'store' | 'organization'>(() =>
+    this.authFacade.selectedAppType() === 'ORG_ADMIN' ? 'organization' : 'store',
+  );
 
   readonly stepSequence = computed(() =>
     buildFiscalWizardSequence(this.selectedAreas()),
@@ -38,7 +51,8 @@ export class FiscalActivationWizardService {
     const last = this.lastStatus();
     const storeStatuses = last?.store_statuses || [];
     if (storeStatuses.length > 0) {
-      const targetId = this.targetStoreId() ?? storeStatuses[0]?.store_id ?? null;
+      const targetId =
+        this.targetStoreId() ?? storeStatuses[0]?.store_id ?? null;
       return (
         storeStatuses.find((store) => store.store_id === targetId)
           ?.fiscal_status || null
@@ -46,17 +60,37 @@ export class FiscalActivationWizardService {
     }
     return this.authFacade.fiscalStatus();
   });
+  readonly activeWizard = computed(() => {
+    const status = this.effectiveFiscalStatus();
+    if (!status) return null;
+
+    const selected = this.selectedAreas();
+    const activeArea =
+      selected.find((area) => status[area]?.state === 'WIP') ??
+      selected[0] ??
+      (Object.keys(status) as FiscalArea[]).find(
+        (area) => status[area]?.state === 'WIP',
+      ) ??
+      null;
+
+    return activeArea ? (status[activeArea]?.wizard ?? null) : null;
+  });
+  readonly completedSteps = computed(
+    () => this.activeWizard()?.completed_steps ?? [],
+  );
+  readonly stepRefs = computed<Record<string, unknown>>(
+    () => this.activeWizard()?.step_refs ?? {},
+  );
   readonly progressLabel = computed(
-    () => `${Math.min(this.currentStepIndex() + 1, this.stepSequence().length)}/${this.stepSequence().length}`,
+    () =>
+      `${Math.min(this.currentStepIndex() + 1, this.stepSequence().length)}/${this.stepSequence().length}`,
   );
 
   async loadStatus(): Promise<FiscalStatusReadResult> {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const result = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}`),
-      );
+      const result = await firstValueFrom(this.http.get(`${this.baseUrl()}`));
       const data = this.unwrap<FiscalStatusReadResult>(result);
       this.lastStatus.set(data);
       if (data.store_statuses?.length && this.targetStoreId() === null) {
@@ -76,7 +110,6 @@ export class FiscalActivationWizardService {
     const selected = Array.from(new Set(areas));
     this.selectedAreas.set(selected);
     this.currentStepIndex.set(1);
-    this.stepData.set({});
     this.submitting.set(true);
     this.error.set(null);
     try {
@@ -84,7 +117,7 @@ export class FiscalActivationWizardService {
       const result = await firstValueFrom(
         this.http.post(`${this.baseUrl()}/${area}/start-wizard`, {
           selected_areas: selected,
-          ...this.storeContextBody(),
+          ...this.storeContext(),
         }),
       );
       const data = this.unwrap<FiscalStatusReadResult>(result);
@@ -99,25 +132,24 @@ export class FiscalActivationWizardService {
     }
   }
 
-  async advanceStep(data: Record<string, unknown> = {}): Promise<void> {
-    const step = this.currentStep();
-    if (!step) return;
-
+  async commitStep(
+    step: FiscalWizardStepId,
+    ref: Record<string, unknown> = {},
+  ): Promise<void> {
     this.submitting.set(true);
     this.error.set(null);
     try {
       const area = this.selectedAreas()[0] ?? 'invoicing';
       const result = await firstValueFrom(
-        this.http.post(`${this.baseUrl()}/${area}/advance-step`, {
+        this.http.post(`${this.baseUrl()}/${area}/mark-step-completed`, {
           step,
-          data,
-          ...this.storeContextBody(),
+          ref,
+          ...this.storeContext(),
         }),
       );
       const response = this.unwrap<FiscalStatusReadResult>(result);
       this.lastStatus.set(response);
       this.authFacade.patchFiscalStatus(response.fiscal_status);
-      this.stepData.update((current) => ({ ...current, [step]: data }));
       this.currentStepIndex.update((index) =>
         Math.min(index + 1, this.stepSequence().length - 1),
       );
@@ -137,7 +169,7 @@ export class FiscalActivationWizardService {
       const result = await firstValueFrom(
         this.http.post(`${this.baseUrl()}/${area}/finalize`, {
           selected_areas: this.selectedAreas(),
-          ...this.storeContextBody(),
+          ...this.storeContext(),
         }),
       );
       const data = this.unwrap<FiscalStatusReadResult>(result);
@@ -155,7 +187,7 @@ export class FiscalActivationWizardService {
   async deactivate(area: FiscalArea): Promise<FiscalStatusReadResult> {
     const result = await firstValueFrom(
       this.http.post(`${this.baseUrl()}/${area}/deactivate`, {
-        ...this.storeContextBody(),
+        ...this.storeContext(),
       }),
     );
     const data = this.unwrap<FiscalStatusReadResult>(result);
@@ -187,7 +219,15 @@ export class FiscalActivationWizardService {
     return `${environment.apiUrl}/${scope}/settings/fiscal-status`;
   }
 
-  private storeContextBody(): { store_id?: number } {
+  /**
+   * Returns `{ store_id }` when the logged-in user is ORG_ADMIN and a target
+   * store has been selected. Generic name (no "Body" suffix) because step
+   * components also spread this into POST/PATCH bodies for canonical
+   * endpoints (e.g. dian-config, account-mappings) where the backend
+   * requires `store_id` to resolve a concrete row on tables anchored to a
+   * store.
+   */
+  storeContext(): { store_id?: number } {
     return this.authFacade.selectedAppType() === 'ORG_ADMIN' &&
       this.targetStoreId() !== null
       ? { store_id: this.targetStoreId()! }
@@ -200,11 +240,24 @@ export class FiscalActivationWizardService {
   }
 
   private messageFromError(error: any): string {
-    return (
-      error?.error?.message ||
-      error?.error?.error?.message ||
-      error?.message ||
-      'No fue posible actualizar el manejo fiscal.'
-    );
+    const fallback = 'No fue posible actualizar el manejo fiscal.';
+    const candidates = [
+      error?.error?.error?.message,
+      error?.error?.message,
+      error?.message,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim().length > 0) {
+        return candidate;
+      }
+      if (
+        candidate &&
+        typeof candidate === 'object' &&
+        typeof (candidate as any).message === 'string'
+      ) {
+        return (candidate as any).message;
+      }
+    }
+    return fallback;
   }
 }

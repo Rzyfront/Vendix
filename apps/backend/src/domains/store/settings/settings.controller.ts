@@ -14,6 +14,7 @@ import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { IsString } from 'class-validator';
 import { RequestContextService } from '@common/context/request-context.service';
+import { UpdateStoreFiscalDataDto } from './dto/update-store-fiscal-data.dto';
 
 export class ApplyTemplateDto {
   @IsString()
@@ -90,6 +91,26 @@ export class SettingsController {
     return this.responseService.success(
       settings,
       'Settings updated successfully',
+    );
+  }
+
+  @Patch('fiscal-data')
+  @Permissions('store:settings:fiscal_data:write')
+  @ApiOperation({
+    summary:
+      'Patch the legal/tax identity (fiscal_data) section of store settings',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Fiscal data section updated successfully',
+  })
+  async updateFiscalData(@Body() dto: UpdateStoreFiscalDataDto) {
+    const fiscalData = await this.settingsService.updateFiscalData(
+      dto as unknown as Record<string, unknown>,
+    );
+    return this.responseService.success(
+      { fiscal_data: fiscalData },
+      'Fiscal data updated successfully',
     );
   }
 

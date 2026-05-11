@@ -72,9 +72,14 @@ export class OrgChartOfAccountsService {
       return this.getTree(store_id_filter);
     }
 
+    const take = query.limit ?? 100;
+    const skip = query.offset ?? 0;
+
     return this.orgPrisma.chart_of_accounts.findMany({
       where,
       orderBy: { code: 'asc' },
+      take,
+      skip,
       include: {
         parent: { select: { id: true, code: true, name: true } },
         children: {

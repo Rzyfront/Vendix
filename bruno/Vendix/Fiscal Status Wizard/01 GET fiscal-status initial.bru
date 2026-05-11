@@ -1,0 +1,28 @@
+meta {
+  name: 01 GET fiscal-status initial
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/store/settings/fiscal-status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("returns fiscal_status block with 3 areas in INACTIVE", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status).to.have.property('invoicing');
+    expect(body.fiscal_status).to.have.property('accounting');
+    expect(body.fiscal_status).to.have.property('payroll');
+    expect(["INACTIVE","WIP"]).to.include(body.fiscal_status.invoicing.state);
+    expect(["INACTIVE","WIP"]).to.include(body.fiscal_status.accounting.state);
+    expect(["INACTIVE","WIP"]).to.include(body.fiscal_status.payroll.state);
+  });
+}

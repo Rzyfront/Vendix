@@ -23,6 +23,9 @@ import { OrgAccountMappingsService } from './account-mappings/account-mappings.s
 import { OrgFiscalPeriodsController } from './fiscal-periods/fiscal-periods.controller';
 import { OrgFiscalPeriodsService } from './fiscal-periods/fiscal-periods.service';
 
+// DefaultChartOfAccountsSeederService is provided & exported by StoreAccountingModule
+// (imported above) — no additional registration needed for the org gemelo endpoint.
+
 /**
  * Org-native accounting module. Exposes `/api/organization/accounting/*` for
  * ORG_ADMIN tokens (DomainScopeGuard rejects everyone else).

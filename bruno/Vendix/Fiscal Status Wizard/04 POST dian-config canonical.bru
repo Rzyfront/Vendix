@@ -1,0 +1,49 @@
+meta {
+  name: 04 POST dian-config canonical
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/store/invoicing/dian-config
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "name": "Wizard DIAN Config",
+    "nit": "900123456",
+    "nit_type": "NIT",
+    "nit_dv": "7",
+    "is_default": true,
+    "software_id": "wizard-software-id-001",
+    "software_pin": "12345",
+    "environment": "test",
+    "test_set_id": "wizard-test-set-001"
+  }
+}
+
+tests {
+  test("creates DIAN config or returns conflict if already exists", function () {
+    expect(res.status).to.be.oneOf([200, 201, 409]);
+    if (res.status === 200 || res.status === 201) {
+      const body = res.body.data || res.body;
+      expect(body).to.have.property('id');
+      bru.setVar("dian_config_id", body.id);
+    }
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    const body = res.body.data || res.body;
+    if (body && body.id) {
+      bru.setVar("dian_config_id", body.id);
+    }
+  }
+}

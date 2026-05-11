@@ -25,6 +25,7 @@ export class CertificateExpiryAlertJob {
         select: {
           id: true,
           store_id: true,
+          organization_id: true,
           name: true,
           nit: true,
           certificate_expiry: true,
@@ -64,26 +65,47 @@ export class CertificateExpiryAlertJob {
         }
 
         if (title && body) {
-          try {
-            await this.prisma.notifications.create({
-              data: {
-                store_id: config.store_id,
-                type: 'low_stock' as any, // Reusing existing enum — no migration needed
-                title,
-                body,
-                data: {
-                  dian_configuration_id: config.id,
-                  days_remaining,
-                  certificate_expiry: expiry.toISOString(),
-                  alert_type: 'certificate_expiry',
-                },
+          // Store-scoped DIAN configs notify the owning store directly.
+          // For org-scoped configs (store_id IS NULL, fiscal_scope=ORGANIZATION),
+          // notify every active store in the organization so admins can act on
+          // the alert regardless of which store panel they are using. The
+          // notifications table requires store_id, so we fan out per store.
+          let target_store_ids: number[] = [];
+          if (config.store_id !== null) {
+            target_store_ids = [config.store_id];
+          } else {
+            const stores = await this.prisma.stores.findMany({
+              where: {
+                organization_id: config.organization_id,
+                is_active: true,
               },
+              select: { id: true },
             });
-            alerts_sent++;
-          } catch (err) {
-            this.logger.error(
-              `Failed to create notification for config ${config.id}: ${err.message}`,
-            );
+            target_store_ids = stores.map((s) => s.id);
+          }
+
+          for (const target_store_id of target_store_ids) {
+            try {
+              await this.prisma.notifications.create({
+                data: {
+                  store_id: target_store_id,
+                  type: 'low_stock' as any, // Reusing existing enum — no migration needed
+                  title,
+                  body,
+                  data: {
+                    dian_configuration_id: config.id,
+                    days_remaining,
+                    certificate_expiry: expiry.toISOString(),
+                    alert_type: 'certificate_expiry',
+                  },
+                },
+              });
+              alerts_sent++;
+            } catch (err) {
+              this.logger.error(
+                `Failed to create notification for config ${config.id} on store ${target_store_id}: ${err.message}`,
+              );
+            }
           }
         }
       }

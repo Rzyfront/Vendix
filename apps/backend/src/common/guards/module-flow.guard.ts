@@ -18,6 +18,23 @@ export const RequireModuleFlow = (
   module: 'accounting' | 'payroll' | 'invoicing',
 ) => SetMetadata(MODULE_FLOW_KEY, module);
 
+/**
+ * Skip the ModuleFlowGuard for a specific handler/controller.
+ *
+ * Use this for "bootstrap" endpoints that the fiscal-status wizard needs
+ * to call BEFORE the module is fully ACTIVE (i.e. while it is in WIP).
+ * Without this, the guard would 403 the very endpoints required to
+ * populate the data that transitions the module from WIP to ACTIVE,
+ * creating a deadlock.
+ *
+ * Do NOT apply to day-to-day operations (creating journal entries,
+ * emitting invoices, running payroll, etc.). Those must keep the
+ * `@RequireModuleFlow(...)` gate.
+ */
+export const SKIP_MODULE_FLOW_KEY = 'skip_module_flow';
+export const SkipModuleFlowGuard = () =>
+  SetMetadata(SKIP_MODULE_FLOW_KEY, true);
+
 @Injectable()
 export class ModuleFlowGuard implements CanActivate {
   private readonly logger = new Logger(ModuleFlowGuard.name);
@@ -35,6 +52,15 @@ export class ModuleFlowGuard implements CanActivate {
       context.getClass(),
     ]);
     if (!module) return true;
+
+    // Bootstrap bypass: endpoints used by the fiscal-status wizard to
+    // transition a module from WIP -> ACTIVE must not be blocked by the
+    // very gate they are trying to satisfy.
+    const skip = this.reflector.getAllAndOverride<boolean>(
+      SKIP_MODULE_FLOW_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (skip) return true;
 
     const request = context.switchToHttp().getRequest();
     const store_id =

@@ -28,7 +28,11 @@ export class StorePrismaService extends BasePrismaService {
     'push_subscriptions',
     'invoices',
     'invoice_resolutions',
-    'dian_configurations',
+    // dian_configurations is intentionally NOT here. Since
+    // organizations.fiscal_scope can be ORGANIZATION (store_id IS NULL on the
+    // row) or STORE (store_id NOT NULL), we apply a relational OR-scope below
+    // so store callers can see both the store-scoped config and the
+    // organization-scoped config that applies to their store.
     'promotions',
     'coupons',
     'quotations',
@@ -293,7 +297,20 @@ export class StorePrismaService extends BasePrismaService {
       product_tax_assignments: { products: { store_id: context.store_id } },
       invoice_items: { invoice: { store_id: context.store_id } },
       invoice_taxes: { invoice: { store_id: context.store_id } },
-      dian_audit_logs: { dian_configuration: { store_id: context.store_id } },
+      // DIAN configs may be store-scoped (store_id = current store) or
+      // organization-scoped (store_id IS NULL, anchored only to organization_id).
+      // From a store context, both are visible: per-store rows for this store,
+      // plus org-wide rows for the same organization.
+      dian_configurations: {
+        organization_id: context.organization_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
+      },
+      dian_audit_logs: {
+        dian_configuration: {
+          organization_id: context.organization_id,
+          OR: [{ store_id: context.store_id }, { store_id: null }],
+        },
+      },
       accounting_entry_lines: {
         entry: { organization_id: context.organization_id },
       },

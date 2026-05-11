@@ -513,13 +513,16 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       throw new Error('Store context required for DIAN payroll operations');
     }
 
+    // DIAN payroll config may be store-scoped or org-scoped depending on
+    // organizations.fiscal_scope. The store-prisma scope already restricts to
+    // the current organization; we include the org-wide fallback (store_id IS NULL).
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        store_id: context.store_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
         configuration_type: 'payroll',
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      orderBy: { is_default: 'desc' },
+      orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
     });
 
     if (!config) {

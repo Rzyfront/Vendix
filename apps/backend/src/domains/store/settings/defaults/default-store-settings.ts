@@ -294,6 +294,9 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     fiscal_status: createDefaultFiscalStatusBlock(),
 
+    // Fiscal data - legal/tax identity (empty defaults; populated by wizard)
+    fiscal_data: {},
+
     // Reservations - Booking reminders, confirmation, and check-in
     reservations: {
       reminders: [

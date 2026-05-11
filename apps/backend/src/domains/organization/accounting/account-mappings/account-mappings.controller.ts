@@ -15,6 +15,7 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   ModuleFlowGuard,
   RequireModuleFlow,
+  SkipModuleFlowGuard,
 } from '../../../../common/guards/module-flow.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
 
@@ -43,6 +44,7 @@ export class OrgAccountMappingsController {
   ) {}
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard reads current mapping state during setup
   @Permissions('organization:accounting:account_mappings:read')
   async getMappings(
     @Query('prefix') prefix?: string,
@@ -54,6 +56,7 @@ export class OrgAccountMappingsController {
   }
 
   @Put()
+  @SkipModuleFlowGuard() // bootstrap: wizard bulk-upserts mappings to satisfy ACTIVE requirements
   @Permissions('organization:accounting:account_mappings:update')
   async bulkUpsertMappings(@Body() dto: UpsertAccountMappingDto) {
     const result = await this.mappings.bulkUpsertMappings(
@@ -67,6 +70,7 @@ export class OrgAccountMappingsController {
   }
 
   @Post('reset')
+  @SkipModuleFlowGuard() // bootstrap: wizard may reset mappings to defaults during setup
   @Permissions('organization:accounting:account_mappings:create')
   @HttpCode(HttpStatus.OK)
   async resetToDefaults(@Body() dto: ResetAccountMappingDto) {

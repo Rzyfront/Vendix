@@ -44,6 +44,7 @@ const KNOWN_SECTIONS = [
   'ecommerce',
   'module_flows',
   'fiscal_status',
+  'fiscal_data',
   // `app` is intentionally accepted here because the service maps it to
   // branding via updateStoreBranding(); the migrator strips persisted `app`
   // afterwards. The legacy alias should not break update calls.
@@ -789,6 +790,73 @@ export class SettingsService {
     return this.prisma.store_settings.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Patch-style update for `settings.fiscal_data`. Deep-merges over the
+   * existing section so partial payloads are safe. Other settings sections
+   * (branding, panel_ui, etc.) are never touched.
+   *
+   * Canonical endpoint: `PATCH /store/settings/fiscal-data`.
+   */
+  async updateFiscalData(
+    dto: Record<string, unknown>,
+  ): Promise<StoreSettings['fiscal_data']> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const user_id = context?.user_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    await this.ensureDefaults(store_id);
+
+    const existing = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+    const currentSettings = (existing?.settings ||
+      getDefaultStoreSettings()) as StoreSettings;
+    const previousFiscalData = currentSettings.fiscal_data ?? {};
+
+    const nextFiscalData = {
+      ...previousFiscalData,
+      ...dto,
+    };
+
+    const updatedSettings: StoreSettings = {
+      ...currentSettings,
+      fiscal_data: nextFiscalData as StoreSettings['fiscal_data'],
+    };
+
+    await this.prisma.store_settings.upsert({
+      where: { store_id },
+      update: {
+        settings: updatedSettings as any,
+        updated_at: new Date(),
+      },
+      create: {
+        store_id,
+        settings: updatedSettings as any,
+      },
+    });
+
+    try {
+      await this.auditService.logUpdate(
+        user_id!,
+        AuditResource.SETTINGS,
+        store_id,
+        { fiscal_data: previousFiscalData },
+        { fiscal_data: nextFiscalData },
+        { action: 'update_fiscal_data', store_id },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Audit log for fiscal_data update failed: ${(err as Error).message}`,
+      );
+    }
+
+    return nextFiscalData as StoreSettings['fiscal_data'];
   }
 
   /**

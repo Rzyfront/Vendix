@@ -1,0 +1,35 @@
+meta {
+  name: 06 POST seed-default chart-of-accounts
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/store/accounting/chart-of-accounts/seed-default
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+tests {
+  test("seeds default chart of accounts or reports already seeded (idempotent)", function () {
+    expect(res.status).to.be.oneOf([200, 201, 409]);
+    if (res.status === 409) {
+      const body = res.body;
+      const code = body.error?.code || body.code;
+      expect(code).to.equal('CHART_ALREADY_SEEDED');
+    } else {
+      const body = res.body.data || res.body;
+      expect(body).to.be.an('object');
+    }
+  });
+}

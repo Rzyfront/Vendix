@@ -32,6 +32,8 @@ export class ChartOfAccountsService {
       accepts_entries,
       is_active,
       tree,
+      limit,
+      offset,
     } = query;
     const context = this.getContext();
     const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
@@ -58,9 +60,14 @@ export class ChartOfAccountsService {
       return this.getTree();
     }
 
+    const take = limit ?? 100;
+    const skip = offset ?? 0;
+
     const accounts = await this.prisma.chart_of_accounts.findMany({
       where,
       orderBy: { code: 'asc' },
+      take,
+      skip,
       include: {
         parent: {
           select: { id: true, code: true, name: true },

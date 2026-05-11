@@ -93,6 +93,23 @@ export interface OrganizationInventorySettings {
 }
 
 // ============================================================================
+// FISCAL DATA - Legal/tax identity at organization level
+// ============================================================================
+export interface OrganizationFiscalData {
+  nit?: string;
+  nit_dv?: string;
+  legal_name?: string;
+  person_type?: 'NATURAL' | 'JURIDICA';
+  tax_regime?: 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+  ciiu?: string;
+  fiscal_address?: string;
+  country?: string;
+  department?: string;
+  city?: string;
+  tax_responsibilities?: string[];
+}
+
+// ============================================================================
 // ORGANIZATION SETTINGS - Interfaz principal
 // ============================================================================
 export interface OrganizationSettings {
@@ -102,4 +119,5 @@ export interface OrganizationSettings {
   payroll?: PayrollSettingsSection;
   inventory?: OrganizationInventorySettings;
   fiscal_status?: FiscalStatusBlock;
+  fiscal_data?: OrganizationFiscalData;
 }

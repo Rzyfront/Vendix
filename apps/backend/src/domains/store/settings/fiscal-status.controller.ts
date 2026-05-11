@@ -1,17 +1,10 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 import { RequestContextService } from '@common/context/request-context.service';
 import {
-  AdvanceFiscalWizardStepDto,
   FinalizeFiscalWizardDto,
+  MarkFiscalWizardStepDto,
   StartFiscalWizardDto,
 } from '@common/dto/fiscal-status.dto';
 import { FiscalArea } from '@common/interfaces/fiscal-status.interface';
@@ -43,7 +36,9 @@ export class FiscalStatusController {
 
   @Post(':area/start-wizard')
   @Permissions('store:settings:fiscal_status:write')
-  @ApiOperation({ summary: 'Start fiscal activation wizard for one or more areas' })
+  @ApiOperation({
+    summary: 'Start fiscal activation wizard for one or more areas',
+  })
   async startWizard(
     @Param('area') area: FiscalArea,
     @Body() body: StartFiscalWizardDto,
@@ -60,21 +55,23 @@ export class FiscalStatusController {
     return this.response.success(data, 'Fiscal wizard started');
   }
 
-  @Post(':area/advance-step')
+  @Post(':area/mark-step-completed')
   @Permissions('store:settings:fiscal_status:write')
-  @ApiOperation({ summary: 'Persist a fiscal activation wizard step' })
-  async advanceStep(
+  @ApiOperation({
+    summary: 'Mark a fiscal activation wizard step as completed',
+  })
+  async markStepCompleted(
     @Param('area') _area: FiscalArea,
-    @Body() body: AdvanceFiscalWizardStepDto,
+    @Body() body: MarkFiscalWizardStepDto,
   ) {
-    const data = await this.fiscalStatus.advanceStep({
+    const data = await this.fiscalStatus.markStepCompleted({
       organization_id: this.requireOrganizationId(),
       store_id: this.requireStoreId(),
       step: body.step,
-      data: body.data,
+      ref: body.ref,
       changed_by_user_id: this.requireUserId(),
     });
-    return this.response.success(data, 'Fiscal wizard step saved');
+    return this.response.success(data, 'Fiscal wizard step completed');
   }
 
   @Post(':area/finalize')
@@ -87,7 +84,9 @@ export class FiscalStatusController {
     const data = await this.fiscalStatus.finalizeActivation({
       organization_id: this.requireOrganizationId(),
       store_id: this.requireStoreId(),
-      selected_areas: body.selected_areas?.length ? body.selected_areas : [area],
+      selected_areas: body.selected_areas?.length
+        ? body.selected_areas
+        : [area],
       changed_by_user_id: this.requireUserId(),
     });
     return this.response.success(data, 'Fiscal status activated');

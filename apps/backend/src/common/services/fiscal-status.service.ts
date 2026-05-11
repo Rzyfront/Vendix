@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
-import {
-  ErrorCodes,
-  VendixHttpException,
-} from '../errors';
+import { ErrorCodes, VendixHttpException } from '../errors';
 import {
   FiscalArea,
   FiscalDetectorSignals,
@@ -117,6 +114,12 @@ export class FiscalStatusService {
               step_sequence: sequence,
               current_step: sequence[1] ?? sequence[0] ?? null,
               completed_steps: ['area_selection'],
+              step_refs: {
+                area_selection: {
+                  selected_areas: selectedAreas,
+                  completed_at: now,
+                },
+              },
               step_data: {},
               started_at: block[area].wizard.started_at ?? now,
               updated_at: now,
@@ -129,11 +132,11 @@ export class FiscalStatusService {
     );
   }
 
-  async advanceStep(params: {
+  async markStepCompleted(params: {
     organization_id: number;
     store_id?: number | null;
     step: FiscalWizardStepId;
-    data?: Record<string, unknown>;
+    ref?: Record<string, unknown>;
     changed_by_user_id?: number | null;
   }) {
     if (!isFiscalWizardStep(params.step)) {
@@ -147,7 +150,7 @@ export class FiscalStatusService {
     return this.mutate(
       params.organization_id,
       params.store_id,
-      'manual',
+      'wizard',
       params.changed_by_user_id,
       async (block) => {
         const areas = this.getWizardAreas(block);
@@ -166,6 +169,7 @@ export class FiscalStatusService {
               `Step ${params.step} is not part of this wizard`,
             );
           }
+
           const completed = new Set(wizard.completed_steps);
           completed.add(params.step);
           const completed_steps = wizard.step_sequence.filter((step) =>
@@ -180,9 +184,12 @@ export class FiscalStatusService {
               ...wizard,
               completed_steps,
               current_step,
-              step_data: {
-                ...wizard.step_data,
-                [params.step]: params.data ?? {},
+              step_refs: {
+                ...wizard.step_refs,
+                [params.step]: {
+                  ...(params.ref ?? {}),
+                  completed_at: now,
+                },
               },
               updated_at: now,
             },

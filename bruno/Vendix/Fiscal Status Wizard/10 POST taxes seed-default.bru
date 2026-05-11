@@ -1,0 +1,35 @@
+meta {
+  name: 10 POST taxes seed-default
+  type: http
+  seq: 10
+}
+
+post {
+  url: http://{{url}}/store/taxes/seed-default
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "force": false
+  }
+}
+
+tests {
+  test("seeds default Colombian taxes or reports already seeded (idempotent)", function () {
+    expect(res.status).to.be.oneOf([200, 201, 409]);
+    if (res.status === 409) {
+      const body = res.body;
+      const code = body.error?.code || body.code;
+      expect(code).to.equal('TAXES_ALREADY_SEEDED');
+    } else {
+      const body = res.body.data || res.body;
+      expect(body).to.be.an('object');
+    }
+  });
+}

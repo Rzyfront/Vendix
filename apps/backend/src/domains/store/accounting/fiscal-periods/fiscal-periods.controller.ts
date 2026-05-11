@@ -3,6 +3,7 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   ModuleFlowGuard,
   RequireModuleFlow,
+  SkipModuleFlowGuard,
 } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
@@ -32,6 +33,7 @@ export class FiscalPeriodsController {
   ) {}
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard loadInitial() lists fiscal periods while module still WIP
   @Permissions('store:accounting:fiscal_periods:read')
   async findAll() {
     const result = await this.fiscal_periods_service.findAll();
@@ -46,6 +48,7 @@ export class FiscalPeriodsController {
   }
 
   @Post()
+  @SkipModuleFlowGuard() // bootstrap: wizard creates the initial fiscal period to satisfy ACTIVE requirements
   @Permissions('store:accounting:fiscal_periods:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateFiscalPeriodDto) {

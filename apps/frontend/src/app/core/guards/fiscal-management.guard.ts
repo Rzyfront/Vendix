@@ -9,6 +9,8 @@ const REQUIRED_PERMISSIONS = [
   'organization:settings:fiscal_status:write',
 ];
 
+const TRUSTED_ROLES = ['owner', 'super_admin', 'STORE_OWNER', 'ORG_OWNER'];
+
 const DENIED_MESSAGE =
   'Solicita al propietario activar el manejo fiscal en la organización.';
 
@@ -17,7 +19,10 @@ export const fiscalManagementGuard: CanActivateFn = () => {
   const router = inject(Router);
   const toast = inject(ToastService);
 
-  if (authFacade.hasAnyPermission(REQUIRED_PERMISSIONS)) {
+  if (
+    authFacade.hasAnyRole(TRUSTED_ROLES) ||
+    authFacade.hasAnyPermission(REQUIRED_PERMISSIONS)
+  ) {
     return true;
   }
 

@@ -2,6 +2,7 @@ export type FiscalArea = 'invoicing' | 'accounting' | 'payroll';
 export type FiscalStatusState = 'INACTIVE' | 'WIP' | 'ACTIVE' | 'LOCKED';
 export type FiscalStatusSource =
   | 'manual'
+  | 'wizard'
   | 'migration_v1'
   | 'detector'
   | 'event';
@@ -23,6 +24,7 @@ export interface FiscalStatusWizardState {
   step_sequence: FiscalWizardStepId[];
   current_step: FiscalWizardStepId | null;
   completed_steps: FiscalWizardStepId[];
+  step_refs: Record<string, unknown>;
   step_data: Record<string, unknown>;
   started_at: string | null;
   updated_at: string | null;
@@ -73,6 +75,7 @@ export function createDefaultFiscalStatusBlock(): FiscalStatusBlock {
         step_sequence: [],
         current_step: null,
         completed_steps: [],
+        step_refs: {},
         step_data: {},
         started_at: null,
         updated_at: null,
@@ -87,16 +90,13 @@ export function createDefaultFiscalStatusBlock(): FiscalStatusBlock {
   }, {} as FiscalStatusBlock);
 }
 
-export function normalizeFiscalStatusBlock(
-  value: unknown,
-): FiscalStatusBlock {
+export function normalizeFiscalStatusBlock(value: unknown): FiscalStatusBlock {
   const defaults = createDefaultFiscalStatusBlock();
   const source = value && typeof value === 'object' ? (value as any) : {};
 
   for (const area of AREAS) {
-    const current = source[area] && typeof source[area] === 'object'
-      ? source[area]
-      : {};
+    const current =
+      source[area] && typeof source[area] === 'object' ? source[area] : {};
     defaults[area] = {
       ...defaults[area],
       ...current,
@@ -115,13 +115,20 @@ export function normalizeFiscalStatusBlock(
         completed_steps: Array.isArray(current.wizard?.completed_steps)
           ? current.wizard.completed_steps.filter(isFiscalWizardStep)
           : defaults[area].wizard.completed_steps,
+        step_refs:
+          current.wizard?.step_refs &&
+          typeof current.wizard.step_refs === 'object'
+            ? current.wizard.step_refs
+            : defaults[area].wizard.step_refs,
       },
       detector_signals:
         current.detector_signals && typeof current.detector_signals === 'object'
           ? current.detector_signals
           : {},
       locked_reasons: Array.isArray(current.locked_reasons)
-        ? current.locked_reasons.filter((reason: unknown) => typeof reason === 'string')
+        ? current.locked_reasons.filter(
+            (reason: unknown) => typeof reason === 'string',
+          )
         : [],
     };
   }
@@ -133,7 +140,9 @@ export function isFiscalArea(value: unknown): value is FiscalArea {
   return value === 'invoicing' || value === 'accounting' || value === 'payroll';
 }
 
-export function isFiscalStatusState(value: unknown): value is FiscalStatusState {
+export function isFiscalStatusState(
+  value: unknown,
+): value is FiscalStatusState {
   return (
     value === 'INACTIVE' ||
     value === 'WIP' ||
@@ -142,7 +151,9 @@ export function isFiscalStatusState(value: unknown): value is FiscalStatusState 
   );
 }
 
-export function isFiscalWizardStep(value: unknown): value is FiscalWizardStepId {
+export function isFiscalWizardStep(
+  value: unknown,
+): value is FiscalWizardStepId {
   return (
     value === 'area_selection' ||
     value === 'legal_data' ||

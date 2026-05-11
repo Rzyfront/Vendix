@@ -445,12 +445,17 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       throw new Error('Store context required for DIAN operations');
     }
 
+    // DIAN config may be store-scoped (store_id = current store) or
+    // organization-scoped (store_id IS NULL) depending on
+    // organizations.fiscal_scope. The store-prisma scope already restricts
+    // results to the current organization with an OR for store_id NULL.
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        store_id: context.store_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      orderBy: { is_default: 'desc' },
+      // Prefer per-store config when present; org-wide config acts as fallback.
+      orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
     });
 
     if (!config) {

@@ -849,6 +849,20 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/settings/fiscal-status',
       method: 'POST',
     },
+    {
+      name: 'store:settings:fiscal_data:read',
+      description:
+        'Leer datos legales/fiscales (NIT, régimen, dirección) de tienda',
+      path: '/api/store/settings/fiscal-data',
+      method: 'GET',
+    },
+    {
+      name: 'store:settings:fiscal_data:write',
+      description:
+        'Actualizar datos legales/fiscales (NIT, régimen, dirección) de tienda',
+      path: '/api/store/settings/fiscal-data',
+      method: 'PATCH',
+    },
 
     // Metadata y Recolección de Datos
     {
@@ -1611,6 +1625,20 @@ export async function seedPermissionsAndRoles(
       path: '/organization/settings/fiscal-status',
       method: 'POST',
     },
+    {
+      name: 'organization:settings:fiscal_data:read',
+      description:
+        'Leer datos legales/fiscales (NIT, régimen, dirección) de organización',
+      path: '/organization/settings/fiscal-data',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_data:write',
+      description:
+        'Actualizar datos legales/fiscales (NIT, régimen, dirección) de organización',
+      path: '/organization/settings/fiscal-data',
+      method: 'PATCH',
+    },
 
     // Notificaciones (Tienda)
     {
@@ -2284,6 +2312,35 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/payroll/settlements',
       method: 'PATCH',
     },
+    // Nómina - Configuración mínima (wizard PayrollConfigStep)
+    {
+      name: 'store:payroll:settings:read',
+      description:
+        'Leer configuración mínima de nómina (periodicidad, parafiscales, PILA)',
+      path: '/api/store/payroll/settings',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:settings:write',
+      description:
+        'Actualizar configuración mínima de nómina (periodicidad, parafiscales, PILA)',
+      path: '/api/store/payroll/settings',
+      method: 'PUT',
+    },
+    {
+      name: 'organization:payroll:settings:read',
+      description:
+        'Leer configuración mínima de nómina a nivel organización',
+      path: '/api/organization/payroll/settings',
+      method: 'GET',
+    },
+    {
+      name: 'organization:payroll:settings:write',
+      description:
+        'Actualizar configuración mínima de nómina a nivel organización',
+      path: '/api/organization/payroll/settings',
+      method: 'PUT',
+    },
 
     {
       name: 'superadmin:stores:create',
@@ -2727,6 +2784,156 @@ export async function seedPermissionsAndRoles(
         'Sincronizar (migrar) settings de todas las tiendas desde super-admin',
       path: '/api/superadmin/settings/sync-all-stores',
       method: 'POST',
+    },
+
+    // ──── Organization Invoicing (DIAN) — fiscal wizard twin ────
+    {
+      name: 'organization:invoicing:dian:read',
+      description: 'Leer configuraciones DIAN a nivel organización',
+      path: '/api/organization/invoicing/dian-config',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:dian:write',
+      description: 'Crear/actualizar/eliminar configuraciones DIAN a nivel organización',
+      path: '/api/organization/invoicing/dian-config',
+      method: 'POST',
+    },
+
+    // ──── Organization Taxes — fiscal wizard twin ────
+    {
+      name: 'organization:taxes:create',
+      description: 'Crear categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes',
+      method: 'POST',
+    },
+    {
+      name: 'organization:taxes:read',
+      description: 'Leer categorías de impuestos a nivel organización',
+      path: '/api/organization/taxes',
+      method: 'GET',
+    },
+    {
+      name: 'organization:taxes:update',
+      description: 'Actualizar categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:taxes:delete',
+      description: 'Eliminar categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Chart of Accounts — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:chart_of_accounts:read',
+      description: 'Leer plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:create',
+      description: 'Crear cuentas en el plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:update',
+      description: 'Actualizar cuentas del plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:delete',
+      description: 'Eliminar cuentas del plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Fiscal Periods — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:fiscal_periods:read',
+      description: 'Leer periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:create',
+      description: 'Crear periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:update',
+      description: 'Actualizar/cerrar periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:delete',
+      description: 'Eliminar periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Account Mappings — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:account_mappings:read',
+      description: 'Leer mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:account_mappings:create',
+      description: 'Crear mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:account_mappings:update',
+      description: 'Actualizar mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings/:id',
+      method: 'PATCH',
+    },
+
+    // ──── Organization Accounting: Journal Entries — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:journal_entries:read',
+      description: 'Leer asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:journal_entries:create',
+      description: 'Crear asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:update',
+      description: 'Actualizar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:journal_entries:post',
+      description: 'Contabilizar/postear asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id/post',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:void',
+      description: 'Anular/reversar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id/void',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:delete',
+      description: 'Eliminar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id',
+      method: 'DELETE',
     },
   ];
 

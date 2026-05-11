@@ -207,6 +207,18 @@ export class DianConfigService {
     const organization_id = this.requireOrganizationId(context.organization_id);
     const store_id = this.requireStoreId(context.store_id);
 
+    // Block store-level creation when fiscal_scope=ORGANIZATION: the DIAN
+    // configuration is owned at the organization level in that case and must
+    // be managed via the org wizard (OrgDianConfigService).
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization. Use the organization-level wizard.',
+      );
+    }
+
     // Check if this is the first config for this store
     const existing_count = await this.prisma.dian_configurations.count({
       where: { store_id },

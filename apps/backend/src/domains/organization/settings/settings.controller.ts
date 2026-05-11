@@ -1,7 +1,11 @@
-import { Controller, Get, Put, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
-import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
+import {
+  UpdateSettingsDto,
+  UpdateOrgInventorySettingsDto,
+  UpdateOrgFiscalDataDto,
+} from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
@@ -71,5 +75,32 @@ export class SettingsController {
   })
   async updateInventory(@Body() dto: UpdateOrgInventorySettingsDto) {
     return this.settingsService.updateInventory(dto);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fiscal Data section (legal/tax identity)
+  //
+  // Dedicated endpoint that deep-merges over `settings.fiscal_data` without
+  // touching other sections. Required because the generic `PUT /organization/
+  // settings` overwrites the full `settings` JSON and would wipe branding,
+  // fonts, inventory, etc., when the fiscal wizard step PATCHes just this
+  // sub-section.
+  // ---------------------------------------------------------------------------
+
+  @Patch('fiscal-data')
+  @Permissions('organization:settings:fiscal_data:write')
+  @ApiOperation({
+    summary:
+      'Patch the legal/tax identity (fiscal_data) section of organization settings',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Fiscal data section updated successfully',
+  })
+  async updateFiscalData(@Body() dto: UpdateOrgFiscalDataDto) {
+    const fiscalData = await this.settingsService.updateFiscalData(
+      dto as unknown as Record<string, unknown>,
+    );
+    return { fiscal_data: fiscalData };
   }
 }

@@ -17,12 +17,16 @@ import {
   CreateTaxCategoryDto,
   UpdateTaxCategoryDto,
   TaxCategoryQueryDto,
+  SeedDefaultTaxesDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { DefaultTaxesSeederService } from '@common/services/default-taxes-seeder.service';
+import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 
 @Controller('store/taxes')
 @UseGuards(PermissionsGuard)
@@ -30,7 +34,30 @@ export class TaxesController {
   constructor(
     private readonly taxesService: TaxesService,
     private readonly responseService: ResponseService,
+    private readonly defaultTaxesSeeder: DefaultTaxesSeederService,
   ) {}
+
+  @Post('seed-default')
+  @Permissions('store:taxes:create')
+  @HttpCode(HttpStatus.CREATED)
+  async seedDefault(@Body() body: SeedDefaultTaxesDto) {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'Store context required to seed default taxes.',
+      );
+    }
+    const result = await this.defaultTaxesSeeder.seed({
+      scope: 'STORE',
+      store_id,
+      force: body.force,
+    });
+    return this.responseService.created(
+      result,
+      'Default Colombian taxes seeded successfully',
+    );
+  }
 
   @Post()
   @Permissions('store:taxes:create')

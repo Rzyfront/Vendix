@@ -1,6 +1,23 @@
 import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 
 // ============================================================================
+// FISCAL DATA - Legal/tax identity of the store (NIT, regime, address, etc.)
+// ============================================================================
+export interface FiscalDataSettings {
+  nit?: string;
+  nit_dv?: string;
+  legal_name?: string;
+  person_type?: 'NATURAL' | 'JURIDICA';
+  tax_regime?: 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+  ciiu?: string;
+  fiscal_address?: string;
+  country?: string;
+  department?: string;
+  city?: string;
+  tax_responsibilities?: string[];
+}
+
+// ============================================================================
 // BRANDING - Única fuente de verdad para colores, logo y theming
 // ============================================================================
 export interface BrandingSettings {
@@ -244,6 +261,9 @@ export interface StoreSettings {
 
   // Fiscal status - semantic fiscal responsibility switches
   fiscal_status?: FiscalStatusBlock;
+
+  // Fiscal data - legal/tax identity (NIT, regime, address, responsibilities)
+  fiscal_data?: FiscalDataSettings;
 
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;

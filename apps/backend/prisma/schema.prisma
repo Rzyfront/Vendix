@@ -442,6 +442,9 @@ model organizations {
   fiscal_scope_audit_log    fiscal_scope_audit_log[]
   fiscal_status_audit_log   fiscal_status_audit_log[]
 
+  // Org-scoped tax catalogue
+  tax_categories tax_categories[]
+
   @@index([onboarding])
   @@index([account_type])
   @@index([operating_scope])
@@ -1345,13 +1348,15 @@ model review_reports {
 model tax_categories {
   id                      Int                       @id @default(autoincrement())
   store_id                Int?
+  organization_id         Int?
   name                    String                    @db.VarChar(100)
   description             String?
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
 
-  @@unique([store_id, name], name: "store_id_name")
+  @@index([organization_id])
 }
 
 model tax_rates {
@@ -2555,6 +2560,7 @@ enum fiscal_status_state_enum {
 
 enum fiscal_status_source_enum {
   manual
+  wizard
   migration_v1
   detector
   event
@@ -3625,6 +3631,7 @@ model accounting_entities {
   @@index([organization_id, is_active], map: "accounting_entities_organization_active_idx")
 }
 
+/// @prisma-ignore: per-entity uniqueness via partial unique indexes (see migration 20260511170000_chart_of_accounts_per_entity_uniqueness)
 model chart_of_accounts {
   id                   Int                 @id @default(autoincrement())
   organization_id      Int
@@ -3907,10 +3914,20 @@ enum dian_configuration_type_enum {
   payroll
 }
 
+/// store_id is nullable to support organizations.fiscal_scope=ORGANIZATION,
+/// where the DIAN config is anchored to the organization only (store_id IS NULL).
+/// When fiscal_scope=STORE, store_id is required. The DB enforces:
+///   - CHECK dian_configurations_scope_org_chk (organization_id NOT NULL)
+///   - partial unique idx dian_configurations_store_scope_uq (store_id, nit)
+///     WHERE store_id IS NOT NULL
+///   - partial unique idx dian_configurations_org_scope_uq (organization_id, nit)
+///     WHERE store_id IS NULL
+/// These partial unique indexes cannot be represented as @@unique in Prisma,
+/// so they live in migration 20260511160000_relax_dian_store_id_for_org_scope.
 model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
-  store_id                       Int
+  store_id                       Int?
   accounting_entity_id           Int?
   name                           String                       @db.VarChar(100)
   nit                            String                       @db.VarChar(20)
@@ -3931,11 +3948,10 @@ model dian_configurations {
   updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
 
   organization    organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store           stores?           @relation(fields: [store_id], references: [id], onDelete: Cascade)
   accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   dian_audit_logs dian_audit_logs[]
 
-  @@unique([store_id, nit])
   @@index([store_id])
   @@index([organization_id])
   @@index([accounting_entity_id])

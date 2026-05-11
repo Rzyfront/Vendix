@@ -11,6 +11,7 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   string,
@@ -459,6 +460,7 @@ export class AccountMappingService {
     private readonly prisma: StorePrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly operatingScopeService: OperatingScopeService,
   ) {}
 
   private getContext() {
@@ -659,6 +661,49 @@ export class AccountMappingService {
       (key) => !prefix || key.startsWith(prefix),
     );
 
+    // Resolve account_id for the `default` cascade branch in a single query.
+    // Without this, `default` entries return `account_code` but no `account_id`,
+    // which breaks the frontend mapping selector (it binds by numeric id).
+    //
+    // We scope the lookup to the accounting_entity that the cascade would
+    // target if the user actually persisted a default value. This matches
+    // ORG vs STORE operating_scope behavior in `chart_of_accounts`.
+    let default_account_id_by_code = new Map<string, number>();
+    try {
+      const accountingEntity =
+        await this.operatingScopeService.resolveAccountingEntity({
+          organization_id: org_id,
+          store_id: store_id ?? null,
+        });
+
+      const default_codes = Array.from(
+        new Set(
+          all_keys.map((key) => DEFAULT_ACCOUNT_MAPPINGS[key].code),
+        ),
+      );
+
+      if (default_codes.length > 0) {
+        const default_accounts = await base_client.chart_of_accounts.findMany({
+          where: {
+            accounting_entity_id: accountingEntity.id,
+            code: { in: default_codes },
+          },
+          select: { id: true, code: true },
+        });
+
+        for (const acc of default_accounts) {
+          default_account_id_by_code.set(acc.code, acc.id);
+        }
+      }
+    } catch (err) {
+      // If accounting entity is not yet materialised (e.g. wizard still in
+      // progress before COA seed), fall back to undefined `account_id` on
+      // default entries — the frontend tolerates that.
+      this.logger.debug(
+        `Could not prefetch default chart_of_accounts ids for org=${org_id} store=${store_id ?? 'org'}: ${(err as Error).message}`,
+      );
+    }
+
     const result = all_keys.map((mapping_key) => {
       // Store override takes priority
       if (store_map.has(mapping_key)) {
@@ -684,11 +729,17 @@ export class AccountMappingService {
         };
       }
 
-      // Fallback to default
+      // Fallback to default — resolve account_id from prefetched map when the
+      // PUC code already exists in chart_of_accounts; otherwise leave it
+      // undefined (frontend will handle missing id).
       const default_entry = DEFAULT_ACCOUNT_MAPPINGS[mapping_key];
+      const default_account_id = default_account_id_by_code.get(
+        default_entry.code,
+      );
       return {
         mapping_key,
         account_code: default_entry.code,
+        account_id: default_account_id,
         description: default_entry.description,
         source: 'default' as const,
       };

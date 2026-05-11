@@ -3,6 +3,7 @@ import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import {
   ModuleFlowGuard,
   RequireModuleFlow,
+  SkipModuleFlowGuard,
 } from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
@@ -41,6 +42,7 @@ export class AccountMappingController {
   }
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard reads current mapping state during setup
   @Permissions('store:accounting:account_mappings:read')
   async getMappings(
     @Query('prefix') prefix?: string,
@@ -58,6 +60,7 @@ export class AccountMappingController {
   }
 
   @Put()
+  @SkipModuleFlowGuard() // bootstrap: wizard bulk-upserts mappings to satisfy ACTIVE requirements
   @Permissions('store:accounting:account_mappings:update')
   async bulkUpsertMappings(@Body() dto: UpsertAccountMappingDto) {
     const context = this.getContext();
@@ -74,6 +77,7 @@ export class AccountMappingController {
   }
 
   @Post('reset')
+  @SkipModuleFlowGuard() // bootstrap: wizard may reset mappings to defaults during setup
   @Permissions('store:accounting:account_mappings:create')
   @HttpCode(HttpStatus.OK)
   async resetToDefaults(@Body() dto: ResetAccountMappingDto) {

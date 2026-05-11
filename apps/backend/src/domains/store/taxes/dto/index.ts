@@ -152,6 +152,18 @@ export class TaxCategoryQueryDto {
   include_inactive?: boolean = false;
 }
 
+// Seed Default Taxes DTO
+export class SeedDefaultTaxesDto {
+  /**
+   * When true, default tax templates are upserted even if the store already
+   * has tax_categories rows. Without this flag, an existing catalogue causes
+   * TAXES_ALREADY_SEEDED (409).
+   */
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
+}
+
 // Tax Calculation DTO
 export class TaxCalculationDto {
   @IsNumber({ maxDecimalPlaces: 2 })

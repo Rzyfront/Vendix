@@ -14,6 +14,7 @@ import {
   OrganizationBranding,
   InventoryMode,
   OrganizationInventorySettings,
+  OrganizationFiscalData,
 } from './interfaces/organization-settings.interface';
 import { getDefaultOrganizationInventorySettings } from './defaults/default-organization-settings';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -313,6 +314,82 @@ export class SettingsService {
     );
 
     return { mode: newMode, changed: true };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Fiscal Data section (legal/tax identity)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Patch-style update for `settings.fiscal_data`. Deep-merges over the
+   * existing section and preserves every other key (branding, fonts,
+   * inventory, payroll, panel_ui, fiscal_status).
+   *
+   * Canonical endpoint: `PATCH /organization/settings/fiscal-data`.
+   *
+   * This sidesteps the generic `update()` flow which overwrites the whole
+   * `settings` JSON — see Plan: fiscal_legal_data step persistence.
+   */
+  async updateFiscalData(
+    dto: Record<string, unknown>,
+  ): Promise<OrganizationFiscalData> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const existing = await this.prisma.organization_settings.findFirst();
+    const currentSettings =
+      (existing?.settings as OrganizationSettings | null) ?? null;
+    const previousFiscalData: OrganizationFiscalData =
+      currentSettings?.fiscal_data ?? {};
+
+    const nextFiscalData: OrganizationFiscalData = {
+      ...previousFiscalData,
+      ...dto,
+    } as OrganizationFiscalData;
+
+    const nextSettings: OrganizationSettings = {
+      ...((currentSettings as OrganizationSettings | null) ??
+        ({} as OrganizationSettings)),
+      fiscal_data: nextFiscalData,
+    } as OrganizationSettings;
+
+    if (existing) {
+      await this.prisma.organization_settings.update({
+        where: { id: existing.id },
+        data: { settings: nextSettings as any, updated_at: new Date() },
+      });
+    } else {
+      await this.prisma.organization_settings.create({
+        data: {
+          organization_id: context.organization_id,
+          settings: nextSettings as any,
+        },
+      });
+    }
+
+    if (context.user_id) {
+      try {
+        await this.auditService.logUpdate(
+          context.user_id,
+          AuditResource.SETTINGS,
+          existing?.id ?? 0,
+          { fiscal_data: previousFiscalData },
+          { fiscal_data: nextFiscalData },
+          {
+            action: 'update_fiscal_data',
+            organization_id: context.organization_id,
+          },
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Audit log for fiscal_data update failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    return nextFiscalData;
   }
 
   // ---------------------------------------------------------------------------

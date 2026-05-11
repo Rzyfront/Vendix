@@ -18,6 +18,7 @@ export interface FiscalStatusWizardState {
   step_sequence: FiscalWizardStepId[];
   current_step: FiscalWizardStepId | null;
   completed_steps: FiscalWizardStepId[];
+  step_refs: Record<string, unknown>;
   step_data: Record<string, unknown>;
   started_at: string | null;
   updated_at: string | null;
@@ -82,19 +83,25 @@ export const FISCAL_STEP_LABELS: Record<FiscalWizardStepId, string> = {
   validation: 'Validación',
 };
 
-export const REQUIRED_STEPS_BY_AREA: Record<FiscalArea, FiscalWizardStepId[]> = {
-  invoicing: ['legal_data', 'dian_config', 'default_taxes', 'validation'],
-  accounting: [
-    'legal_data',
-    'puc',
-    'accounting_period',
-    'default_taxes',
-    'accounting_mappings',
-    'initial_inventory',
-    'validation',
-  ],
-  payroll: ['legal_data', 'payroll_config', 'accounting_mappings', 'validation'],
-};
+export const REQUIRED_STEPS_BY_AREA: Record<FiscalArea, FiscalWizardStepId[]> =
+  {
+    invoicing: ['legal_data', 'dian_config', 'default_taxes', 'validation'],
+    accounting: [
+      'legal_data',
+      'puc',
+      'accounting_period',
+      'default_taxes',
+      'accounting_mappings',
+      'initial_inventory',
+      'validation',
+    ],
+    payroll: [
+      'legal_data',
+      'payroll_config',
+      'accounting_mappings',
+      'validation',
+    ],
+  };
 
 export const FISCAL_STEP_ORDER: FiscalWizardStepId[] = [
   'area_selection',

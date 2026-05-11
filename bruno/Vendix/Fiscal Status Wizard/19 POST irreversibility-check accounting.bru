@@ -1,0 +1,25 @@
+meta {
+  name: 19 POST irreversibility-check accounting
+  type: http
+  seq: 19
+}
+
+get {
+  url: http://{{url}}/store/settings/fiscal-status/accounting/irreversibility-check
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("returns locked flag and reasons array for accounting area", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(body).to.have.property('locked');
+    expect(body.locked).to.be.a('boolean');
+    expect(body.reasons).to.be.an('array');
+  });
+}
