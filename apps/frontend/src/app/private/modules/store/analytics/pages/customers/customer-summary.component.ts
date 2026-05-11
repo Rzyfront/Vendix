@@ -158,6 +158,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         } },
       legend: {
         data: ['Nuevos Clientes'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -232,6 +233,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         } },
       legend: {
         data: ['Top Clientes'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

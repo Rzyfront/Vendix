@@ -172,6 +172,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         } },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
+        selectedMode: true,
         bottom: 30,
         textStyle: { color: textSecondary, fontSize: 12 } },
       grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
@@ -269,6 +270,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       },
       legend: {
         data: ['Valor'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -332,6 +334,7 @@ private buildLineSeries(name: string, data: number[], color: string): any {
       },
       legend: {
         data: ['Cantidad'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

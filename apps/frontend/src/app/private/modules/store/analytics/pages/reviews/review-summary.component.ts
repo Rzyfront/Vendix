@@ -256,6 +256,7 @@ export class ReviewSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Ratings'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -321,6 +322,7 @@ export class ReviewSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Pendientes', 'Aprobadas', 'Rechazadas'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

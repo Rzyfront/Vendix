@@ -345,9 +345,11 @@ export class LowStockComponent implements OnInit {
           return `${p.name}: ${p.value} productos`;
         },
       },
-      legend: {
-        data: ['Agotados', 'Stock Bajo', 'En Stock'],
+legend: {
+        data: ['Bajo Stock'],
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {

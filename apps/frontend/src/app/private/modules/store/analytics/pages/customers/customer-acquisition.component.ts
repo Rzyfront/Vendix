@@ -171,6 +171,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         } },
       legend: {
         data: ['Nuevos Clientes'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -270,7 +271,9 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         } },
       legend: {
         data: ['Canales'],
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {

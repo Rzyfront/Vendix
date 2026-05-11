@@ -123,7 +123,7 @@ export class ExpenseSummaryComponent {
 
     this.chartOptions.set({
       tooltip: { trigger: 'axis' },
-      legend: { data: this.expensesData().map(e => e.month), bottom: 30, textStyle: { color: textSecondary } },
+      legend: { data: this.expensesData().map(e => e.month), selectedMode: true, bottom: 30, left: 'center', textStyle: { color: textSecondary } },
       grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',

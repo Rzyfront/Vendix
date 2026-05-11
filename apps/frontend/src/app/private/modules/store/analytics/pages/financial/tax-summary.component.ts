@@ -261,6 +261,7 @@ export class TaxSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Impuestos'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -304,6 +305,7 @@ export class TaxSummaryComponent implements OnInit {
     this.effectiveRateChartOptions.set({
       legend: {
         data: ['Tasa Efectiva'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

@@ -257,6 +257,7 @@ export class ProfitLossComponent implements OnInit {
       },
       legend: {
         data: ['Ingresos', 'COGS', 'Reembolsos', 'Gastos'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -310,7 +311,7 @@ export class ProfitLossComponent implements OnInit {
       ],
     });
 
-    // Profit Summary Pie
+    // Profit Summary Bar Chart
     const grossProfit = d.costs?.gross_profit || 0;
     const netProfit = d.bottom_line?.net_profit || 0;
     const refunds = d.refunds?.total_refunds || 0;
@@ -318,26 +319,34 @@ export class ProfitLossComponent implements OnInit {
 
     this.profitSummaryChartOptions.set({
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b>`,
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          let html = `${params[0].name}<br/>`;
+          for (const p of params) {
+            html += `${p.marker} ${p.seriesName}: <b>${this.currencyService.format(Math.abs(p.value))}</b><br/>`;
+          }
+          return html;
+        },
       },
       legend: {
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
       },
-      grid: { left: '3%', right: '10%', bottom: '15%', top: '3%', containLabel: true },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
@@ -345,31 +354,27 @@ export class ProfitLossComponent implements OnInit {
       series: [
         {
           name: 'Ganancia Bruta',
-          type: 'bar' as const,
-          data: [grossProfit],
-          itemStyle: { color: '#22c55e' },
-          barMaxWidth: 40,
+          type: 'bar',
+          data: [{ value: grossProfit, itemStyle: { color: '#22c55e' } }],
+          barMaxWidth: 50,
         },
         {
           name: 'Reembolsos',
-          type: 'bar' as const,
-          data: [refunds],
-          itemStyle: { color: '#f59e0b' },
-          barMaxWidth: 40,
+          type: 'bar',
+          data: [{ value: refunds, itemStyle: { color: '#f59e0b' } }],
+          barMaxWidth: 50,
         },
         {
           name: 'Gastos',
-          type: 'bar' as const,
-          data: [expenses],
-          itemStyle: { color: '#8b5cf6' },
-          barMaxWidth: 40,
+          type: 'bar',
+          data: [{ value: expenses, itemStyle: { color: '#ef4444' } }],
+          barMaxWidth: 50,
         },
         {
           name: 'Ganancia Neta',
-          type: 'bar' as const,
-          data: [netProfit],
-          itemStyle: { color: '#3b82f6' },
-          barMaxWidth: 40,
+          type: 'bar',
+          data: [{ value: netProfit, itemStyle: { color: '#3b82f6' } }],
+          barMaxWidth: 50,
         },
       ],
     });

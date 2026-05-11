@@ -275,6 +275,7 @@ export class PurchaseSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Gasto por Proveedor'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -325,6 +326,7 @@ export class PurchaseSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Pendientes', 'Completadas'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

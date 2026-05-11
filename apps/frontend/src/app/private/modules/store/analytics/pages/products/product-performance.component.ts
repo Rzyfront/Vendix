@@ -162,6 +162,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       },
       legend: {
         data: ['Unidades'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

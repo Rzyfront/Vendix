@@ -164,6 +164,7 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       legend: {
         data: ['Top Vendedores'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

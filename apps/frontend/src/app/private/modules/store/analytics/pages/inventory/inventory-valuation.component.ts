@@ -335,8 +335,9 @@ loadData(): void {
           return `${p.name}<br/>Valor: ${this.formatCurrency(p.value)}<br/>Porcentaje: ${p.percent}%`;
         },
       },
-      legend: {
-        data: chartData.map((d: any) => d.name),
+legend: {
+        data: ['Valor'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: '#6b7280' },

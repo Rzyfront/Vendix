@@ -404,9 +404,11 @@ onDateRangeChange(range: DateRangeFilter): void {
           return `${p.name}: <b>${p.value}</b> unidades`;
         },
       },
-      legend: {
-        data: labels,
+legend: {
+        data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {

@@ -256,7 +256,9 @@ export class RefundsSummaryComponent implements OnInit {
       },
       legend: {
         data: refundCats,
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -321,6 +323,7 @@ export class RefundsSummaryComponent implements OnInit {
       },
       legend: {
         data: ['Reembolsos'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

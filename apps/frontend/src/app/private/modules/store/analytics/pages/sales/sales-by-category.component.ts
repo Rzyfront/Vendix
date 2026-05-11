@@ -310,8 +310,9 @@ onDateRangeChange(range: DateRangeFilter): void {
   private updateChart(data: SalesByCategory[]): void {
     const sortedData = [...data].sort((a, b) => b.revenue - a.revenue);
     const categories = sortedData.map((item) => item.category_name);
-    const values = sortedData.map((item) => item.revenue);
-    const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+    const revenues = sortedData.map((item) => item.revenue);
+    const units = sortedData.map((item) => item.units_sold);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
     this.chartOptions.set({
       tooltip: {
@@ -325,8 +326,10 @@ onDateRangeChange(range: DateRangeFilter): void {
           return html;
         }},
       legend: {
-        data: ['Ventas'],
+        data: ['Ingresos', 'Unidades'],
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: '#6b7280' },
       },
       grid: {
@@ -340,11 +343,11 @@ onDateRangeChange(range: DateRangeFilter): void {
         data: categories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
@@ -352,12 +355,20 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: [{
-          name: 'Ventas',
+      series: [
+        {
+          name: 'Ingresos',
           type: 'bar',
-          data: categories.map((_, i) => ({ value: values[i], itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+          data: revenues.map((v, i) => ({ value: v, itemStyle: { color: colors[i % colors.length] } })),
           barMaxWidth: 40,
-        }],
+        },
+        {
+          name: 'Unidades',
+          type: 'bar',
+          data: units.map((v, i) => ({ value: v, itemStyle: { color: colors[(i + 3) % colors.length] } })),
+          barMaxWidth: 40,
+        },
+      ],
     });
   }
 

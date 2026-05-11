@@ -198,6 +198,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Abandonados', 'Recuperados'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary, fontSize: 11 },
@@ -313,6 +314,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Por Razón'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -395,6 +397,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Tasa Recuperación'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },

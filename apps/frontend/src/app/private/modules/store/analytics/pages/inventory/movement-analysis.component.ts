@@ -483,6 +483,7 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
+        selectedMode: true,
         bottom: 30,
         textStyle: { color: textSecondary },
       },

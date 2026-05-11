@@ -125,7 +125,7 @@ export class ExpensesByCategoryComponent {
 
     this.chartOptions.set({
       tooltip: { trigger: 'axis' },
-      legend: { data: this.categoriesData().map(c => c.name), bottom: 30, textStyle: { color: textSecondary } },
+      legend: { data: this.categoriesData().map(c => c.name), selectedMode: true, bottom: 30, left: 'center', textStyle: { color: textSecondary } },
       grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',

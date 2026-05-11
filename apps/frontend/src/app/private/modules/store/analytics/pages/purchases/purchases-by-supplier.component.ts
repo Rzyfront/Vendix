@@ -264,8 +264,9 @@ export class PurchasesBySupplierComponent implements OnInit {
           return html;
         },
       },
-      legend: {
+legend: {
         data: ['Gasto por Proveedor'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: '#6b7280' },

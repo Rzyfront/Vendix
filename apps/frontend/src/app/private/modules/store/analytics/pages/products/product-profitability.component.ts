@@ -167,6 +167,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Margen'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
