@@ -139,8 +139,6 @@ onDateRangeChange(range: DateRangeFilter): void {
   private updateChart(topSellers: TopSellingProduct[]): void {
 
     const style = getComputedStyle(document.documentElement);
-    const primaryColor =
-      style.getPropertyValue('--color-primary').trim() || '#3b82f6';
     const borderColor =
       style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary =
@@ -153,6 +151,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         : p.product_name,
     );
     const revenues = reversed.map((p) => p.revenue);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     this.topSellersChartOptions.set({
       tooltip: {
@@ -164,8 +163,9 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: names,
+        data: ['Top Vendedores'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -179,13 +179,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
@@ -193,13 +192,15 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: names.map((name, i) => ({
-          name,
-          type: 'bar' as const,
-          data: [revenues[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
+      series: [{
+        name: 'Top Vendedores',
+        type: 'bar' as const,
+        data: revenues.map((r, i) => ({
+          value: r,
+          itemStyle: { color: colors[i % colors.length] }
         })),
+        barMaxWidth: 50,
+      }],
     });
   }
 

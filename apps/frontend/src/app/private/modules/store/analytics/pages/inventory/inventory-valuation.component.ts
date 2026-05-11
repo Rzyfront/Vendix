@@ -346,12 +346,11 @@ loadData(): void {
         type: 'category',
         data: chartData.map((d: any) => d.name),
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, rotate: 30 },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 1000000,
         splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO') },

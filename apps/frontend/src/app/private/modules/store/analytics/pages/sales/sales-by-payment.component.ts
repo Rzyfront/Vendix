@@ -318,7 +318,7 @@ onDateRangeChange(range: DateRangeFilter): void {
           return html;
         }},
       legend: {
-        data: categories,
+        data: ['Ventas'],
         bottom: 30,
         textStyle: { color: '#6b7280' },
       },
@@ -327,12 +327,11 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: categories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, rotate: 30 },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 1000000,
         splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
@@ -341,13 +340,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: categories.map((cat, i) => ({
-          name: cat,
-          type: 'bar' as const,
-          data: [values[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+      series: [{
+          name: 'Ventas',
+          type: 'bar',
+          data: categories.map((_, i) => ({ value: values[i], itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
           barMaxWidth: 40,
-        })),
+        }],
     });
   }
 

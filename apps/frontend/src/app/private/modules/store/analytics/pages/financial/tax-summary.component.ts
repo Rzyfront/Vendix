@@ -134,7 +134,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="taxComparisonChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="taxComparisonChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -156,7 +156,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="effectiveRateChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="effectiveRateChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -244,7 +244,7 @@ export class TaxSummaryComponent implements OnInit {
     if (!d) return;
 
     const taxCategories = ['Cobrados', 'Devueltos', 'Neto'];
-    const taxValues = [d.tax_collected || 0, -(d.tax_refunded || 0), d.net_tax || 0];
+    const taxValues = [d.tax_collected || 0, d.tax_refunded || 0, d.net_tax || 0];
     const taxColors = ['#22c55e', '#ef4444', '#3b82f6'];
 
     this.taxComparisonChartOptions.set({
@@ -260,13 +260,14 @@ export class TaxSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: taxCategories,
+        data: ['Impuestos'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
-        right: '6%',
+        right: '4%',
         bottom: '20%',
         top: '3%',
         containLabel: true,
@@ -279,6 +280,7 @@ export class TaxSummaryComponent implements OnInit {
       },
       yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
@@ -286,21 +288,26 @@ export class TaxSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: taxCategories.map((cat, i) => ({
-        name: cat,
+      series: [{
+        name: 'Impuestos',
         type: 'bar',
-        smooth: true,
-        symbol: 'circle',
-        data: taxCategories.map((_, j) => j === i ? taxValues[i] : null),
-        itemStyle: { color: taxColors[i] },
-        barMaxWidth: 60,
-        barGap: '-100%',
-      })),
+        data: taxValues.map((v, i) => ({
+          value: v,
+          itemStyle: { color: taxColors[i] }
+        })),
+        barMaxWidth: 50,
+      }],
     });
 
     // Effective Rate Gauge
     const rate = Math.min((d.effective_rate || 0), 30);
     this.effectiveRateChartOptions.set({
+      legend: {
+        data: ['Tasa Efectiva'],
+        bottom: 30,
+        left: 'center',
+        textStyle: { color: textSecondary },
+      },
       series: [
         {
           type: 'gauge',

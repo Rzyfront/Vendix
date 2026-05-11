@@ -248,6 +248,10 @@ export class PurchasesBySupplierComponent implements OnInit {
     const values = sorted.map(s => s.total_spent);
     const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
+    const hasData = suppliers.length > 0;
+    const chartSuppliers = hasData ? suppliers : ['Sin datos'];
+    const chartValues = hasData ? values : [0];
+
     this.chartOptions.set({
       tooltip: {
         trigger: 'axis',
@@ -261,14 +265,15 @@ export class PurchasesBySupplierComponent implements OnInit {
         },
       },
       legend: {
-        data: suppliers,
+        data: ['Gasto por Proveedor'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: '#6b7280' },
       },
       grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
-        data: suppliers,
+        data: chartSuppliers,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: '#6b7280', fontSize: 11, rotate: 30 },
       },
@@ -283,9 +288,9 @@ export class PurchasesBySupplierComponent implements OnInit {
       series: [{
         name: 'Gasto por Proveedor',
         type: 'bar' as const,
-        data: values.map((v, i) => ({
+        data: chartValues.map((v, i) => ({
           value: v,
-          itemStyle: { color: colors[i % colors.length] }
+          itemStyle: { color: hasData ? colors[i % colors.length] : '#d1d5db' }
         })),
         barMaxWidth: 50,
       }],

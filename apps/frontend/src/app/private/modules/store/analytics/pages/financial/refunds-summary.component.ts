@@ -152,7 +152,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="refundsDistributionChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="refundsDistributionChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -320,36 +320,39 @@ export class RefundsSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: distCats,
+        data: ['Reembolsos'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
-      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
-      yAxis: {
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
         type: 'category',
-        data: distCats,
+        data: ['Subtotal', 'Impuesto', 'Envío'],
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
       },
-      series: distCats.map((cat: string, i: number) => ({
-        name: cat,
-        type: 'bar' as const,
-        data: distCats.map((_: string, j: number) => j === i ? distValues[i] : null),
-        itemStyle: { color: distColors[i] },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: distColors[i] + '40' },
-              { offset: 1, color: distColors[i] + '05' },
-            ],
-          },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: {
+          color: textSecondary,
+          formatter: (v: number) => this.currencyService.format(Math.round(v), 0),
         },
-      })),
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
+      },
+      series: [{
+        name: 'Reembolsos',
+        type: 'bar' as const,
+        data: [
+          { value: d?.subtotal_refunds || 0, itemStyle: { color: '#f97316' } },
+          { value: d?.tax_refunds || 0, itemStyle: { color: '#f59e0b' } },
+          { value: d?.shipping_refunds || 0, itemStyle: { color: '#3b82f6' } },
+        ],
+        barMaxWidth: 50,
+      }],
     });
   }
 }

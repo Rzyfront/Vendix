@@ -172,6 +172,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
       legend: {
         data: ['Nuevos Clientes'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {

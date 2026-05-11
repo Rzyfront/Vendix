@@ -131,7 +131,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="ratingDistributionChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="ratingDistributionChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -153,7 +153,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="reviewsStatusChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="reviewsStatusChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -255,8 +255,9 @@ export class ReviewSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Distribución'],
+        data: ['Ratings'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -319,28 +320,47 @@ export class ReviewSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Estado Reviews'],
+        data: ['Pendientes', 'Aprobadas', 'Rechazadas'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
-      yAxis: {
+      xAxis: {
         type: 'category',
         data: ['Pendientes', 'Aprobadas', 'Rechazadas'],
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
         {
-          name: 'Estado Reviews',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: [
-            { value: data.pending_reviews || 0, itemStyle: { color: '#f59e0b' } },
-            { value: data.approved_reviews || 0, itemStyle: { color: '#22c55e' } },
-            { value: data.rejected_reviews || 0, itemStyle: { color: '#ef4444' } },
-          ],
+          name: 'Pendientes',
+          type: 'bar' as const,
+          data: [data.pending_reviews || 0],
+          itemStyle: { color: '#f59e0b' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Aprobadas',
+          type: 'bar' as const,
+          data: [data.approved_reviews || 0],
+          itemStyle: { color: '#22c55e' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Rechazadas',
+          type: 'bar' as const,
+          data: [data.rejected_reviews || 0],
+          itemStyle: { color: '#ef4444' },
+          barMaxWidth: 40,
         },
       ],
     });

@@ -156,10 +156,16 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
           const data = params[0];
           return `${data.name}<br/>Nuevos Clientes: ${data.value}`;
         } },
+      legend: {
+        data: ['Nuevos Clientes'],
+        bottom: 30,
+        left: 'center',
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '20%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -168,6 +174,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } } },
@@ -202,13 +209,14 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
     const primaryColor = '#3b82f6';
 
     if (!topCustomers.length) {
-      this.topCustomersChartOptions.set({ series: [] });
+      this.topCustomersChartOptions.set({
+        graphic: [{ type: 'text', left: 'center', top: 'middle', style: { text: 'Sin datos disponibles', fill: '#9ca3af', fontSize: 14 } }],
+      });
       return;
     }
 
     const sorted = [...topCustomers].reverse();
     const names = sorted.map((c) => {
-      // Prefer customer_name from backend, fallback to first+last or email
       const fullName = c.customer_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
       return fullName || c.email;
     });
@@ -222,44 +230,40 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
           const data = params[0];
           return `${data.name}<br/>Total: ${this.currencyService.format(data.value)}`;
         } },
+      legend: {
+        data: ['Top Clientes'],
+        bottom: 30,
+        left: 'center',
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '3%',
+        right: '4%',
+        bottom: '20%',
+        top: '3%',
         containLabel: true },
       xAxis: {
+        type: 'category',
+        data: names,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 10, rotate: 30, width: 100, overflow: 'truncate' } },
+      yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
           formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor } } },
-      yAxis: {
-        type: 'category',
-        data: names,
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: {
-          color: textSecondary,
-          width: 120,
-          overflow: 'truncate' } },
       series: [
         {
-          name: 'Total Gastado',
+          name: 'Top Clientes',
           type: 'bar',
-          data: values,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 1,
-              y2: 0,
-              colorStops: [
-                { offset: 0, color: `${primaryColor}99` },
-                { offset: 1, color: primaryColor },
-              ] },
-            borderRadius: [0, 4, 4, 0] },
-          barMaxWidth: 32 },
+          data: values.map((v, i) => ({
+            value: v,
+            itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] }
+          })),
+          barMaxWidth: 40 },
       ] });
   }
 

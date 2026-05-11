@@ -149,6 +149,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       formatChartPeriod(t.period, granularity),
     );
     const units = trends.map((t) => t.units_sold);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     this.unitsTrendChartOptions.set({
       tooltip: {
@@ -162,34 +163,39 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
       legend: {
         data: ['Unidades'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '4%',
         bottom: '20%',
+        top: '3%',
         containLabel: true,
       },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary } },
+        axisLabel: { color: textSecondary, rotate: 30 },
+        axisTick: { show: false },
+      },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } } },
-      series: labels.map((label, i) => ({
-          name: label,
-          type: 'bar' as const,
-          data: [units[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
+        splitLine: { lineStyle: { color: borderColor } },
+      },
+      series: [{
+        name: 'Unidades',
+        type: 'bar' as const,
+        data: units.map((u, i) => ({
+          value: u,
+          itemStyle: { color: colors[i % colors.length] }
         })),
+        barMaxWidth: 50,
+      }],
     });
   }
 
@@ -222,8 +228,9 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         },
       },
       legend: {
-        data: ['Unidades'],
+        data: ['Top Ventas'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {

@@ -133,7 +133,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="suppliersChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="suppliersChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -155,7 +155,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
             } @else {
-              <app-chart [options]="ordersStatusChartOptions()" size="large" [showLegend]="false"></app-chart>
+              <app-chart [options]="ordersStatusChartOptions()" size="large" [showLegend]="true"></app-chart>
             }
           </div>
         </app-card>
@@ -257,8 +257,13 @@ export class PurchaseSummaryComponent implements OnInit {
     const suppliersData = this.suppliers().slice(0, 5);
     const pending = this.summary()?.pending_orders || 0;
     const completed = this.summary()?.completed_orders || 0;
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
-    // Top Suppliers Horizontal Bar
+    const hasData = suppliersData.length > 0;
+    const supplierNames = hasData
+      ? suppliersData.map((s) => s.supplier_name.length > 20 ? s.supplier_name.substring(0, 20) + '...' : s.supplier_name)
+      : ['Sin datos'];
+
     this.suppliersChartOptions.set({
       tooltip: {
         trigger: 'axis',
@@ -269,19 +274,28 @@ export class PurchaseSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Proveedores'],
+        data: ['Gasto por Proveedor'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '20%',
+        right: '4%',
+        bottom: '25%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
+        type: 'category',
+        data: supplierNames,
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisTick: { show: false },
+      },
+      yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
@@ -289,18 +303,14 @@ export class PurchaseSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      yAxis: {
-        type: 'category',
-        data: suppliersData.map((s) => s.supplier_name.length > 20 ? s.supplier_name.substring(0, 20) + '...' : s.supplier_name).reverse(),
-        axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
-      },
-      series: suppliersData.map((s, i) => ({
-          name: s.supplier_name.length > 20 ? s.supplier_name.substring(0, 20) + '...' : s.supplier_name,
-          type: 'bar' as const,
-          data: [s.total_spent],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-        })),
+      series: [{
+        name: 'Gasto por Proveedor',
+        type: 'bar' as const,
+        data: hasData
+          ? suppliersData.map((s, i) => ({ value: s.total_spent, itemStyle: { color: colors[i % colors.length] } }))
+          : [{ value: 0, itemStyle: { color: '#d1d5db' } }],
+        barMaxWidth: 50,
+      }],
     });
 
     // Orders Status Line
@@ -314,25 +324,40 @@ export class PurchaseSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Estado de Órdenes'],
+        data: ['Pendientes', 'Completadas'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
-      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
-      xAxis: { type: 'value' },
-      yAxis: {
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
         type: 'category',
         data: ['Pendientes', 'Completadas'],
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
         {
-          name: 'Estado de Órdenes',
-          type: 'bar',
-          data: [
-            { value: pending, itemStyle: { color: '#f59e0b' } },
-            { value: completed, itemStyle: { color: '#22c55e' } },
-          ],
+          name: 'Pendientes',
+          type: 'bar' as const,
+          data: [pending],
+          itemStyle: { color: '#f59e0b' },
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Completadas',
+          type: 'bar' as const,
+          data: [completed],
+          itemStyle: { color: '#22c55e' },
+          barMaxWidth: 40,
         },
       ],
     });

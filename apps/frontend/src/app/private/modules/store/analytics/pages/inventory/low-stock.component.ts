@@ -365,7 +365,6 @@ export class LowStockComponent implements OnInit {
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
         splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },

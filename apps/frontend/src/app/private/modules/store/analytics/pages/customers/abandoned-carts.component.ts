@@ -154,6 +154,12 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const abandonedCarts = trends.map((t) => t.abandoned_carts);
     const recoveredCarts = trends.map((t) => t.recovered_carts);
 
+    if (!trends.length) {
+      this.trendsChartOptions.set({});
+      this.recoveryRateChartOptions.set({});
+      return;
+    }
+
     this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
@@ -193,6 +199,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       legend: {
         data: ['Abandonados', 'Recuperados'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary, fontSize: 11 },
         icon: 'roundRect',
         itemWidth: 14,
@@ -202,6 +209,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         left: '3%',
         right: '4%',
         bottom: '15%',
+        top: '3%',
         containLabel: true,
       },
       xAxis: {
@@ -262,6 +270,11 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
     const primaryColor = '#f59e0b';
 
+    if (!byReason.length) {
+      this.byReasonChartOptions.set({});
+      return;
+    }
+
     const reasons = byReason.map((r) => r.reason);
     const counts = byReason.map((r) => r.count);
 
@@ -298,10 +311,17 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           `;
         },
       },
+      legend: {
+        data: ['Por Razón'],
+        bottom: 30,
+        left: 'center',
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '15%',
+        right: '4%',
+        bottom: '20%',
+        top: '3%',
         containLabel: true,
       },
       xAxis: {
@@ -311,34 +331,26 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         axisLabel: {
           color: textSecondary,
           fontSize: 11,
-          rotate: 0,
+          rotate: 30,
           interval: 0,
         },
       },
       yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
         {
-          name: 'Cantidad',
+          name: 'Por Razón',
           type: 'bar',
-          data: counts,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: `${primaryColor}60` },
-              ],
-            },
-          },
+          data: counts.map((c, i) => ({
+            value: c,
+            itemStyle: { color: ['#f59e0b', '#3b82f6', '#22c55e', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] }
+          })),
+          barMaxWidth: 50,
         },
       ],
     });
@@ -353,6 +365,11 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
 
     const labels = trends.map((t) => formatChartPeriod(t.period, granularity));
     const recoveryRates = trends.map((t) => t.recovery_rate);
+
+    if (!trends.length) {
+      this.recoveryRateChartOptions.set({});
+      return;
+    }
 
     this.recoveryRateChartOptions.set({
       tooltip: {
@@ -379,12 +396,14 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       legend: {
         data: ['Tasa Recuperación'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
+        top: '3%',
         containLabel: true,
       },
       xAxis: {

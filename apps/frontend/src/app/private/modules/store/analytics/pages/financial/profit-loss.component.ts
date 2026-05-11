@@ -258,6 +258,7 @@ export class ProfitLossComponent implements OnInit {
       legend: {
         data: ['Ingresos', 'COGS', 'Reembolsos', 'Gastos'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -323,6 +324,7 @@ export class ProfitLossComponent implements OnInit {
       legend: {
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '10%', bottom: '15%', top: '3%', containLabel: true },

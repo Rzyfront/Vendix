@@ -352,13 +352,17 @@ onDateRangeChange(range: DateRangeFilter): void {
   private updateChart(data: SalesByCustomer[]): void {
 
     const top10 = Array.isArray(data) && data.length > 0
-      ? [...data].sort((a, b) => b.total_spent - a.total_spent).slice(0, 10).reverse()
+      ? [...data].sort((a, b) => b.total_spent - a.total_spent).slice(0, 10)
       : [];
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
-    const primaryColor = '#3b82f6';
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+
+    const hasData = top10.length > 0;
+    const customerNames = hasData ? top10.map((c) => c.customer_name) : ['Sin datos'];
+    const customerValues = hasData ? top10.map((c) => c.total_spent) : [0];
 
     this.topCustomersChartOptions.set({
       tooltip: {
@@ -372,21 +376,28 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: top10.length > 0 ? top10.map((c) => c.customer_name) : ['Sin datos'],
+        data: ['Top Clientes'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
-        right: '6%',
+        right: '4%',
         bottom: '25%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
+        type: 'category',
+        data: customerNames,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 10, rotate: 30 },
+        axisTick: { show: false },
+      },
+      yAxis: {
         type: 'value',
         min: 0,
-        max: 1000000,
         splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
@@ -395,27 +406,15 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      yAxis: {
-        type: 'category',
-        data: top10.length > 0
-          ? top10.map((c) => c.customer_name.length > 20 ? c.customer_name.substring(0, 20) + '...' : c.customer_name)
-          : ['Sin datos'],
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
-      },
-      series: top10.length > 0 ? top10.map((c, i) => ({
-          name: c.customer_name,
-          type: 'bar' as const,
-          data: [c.total_spent],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 32,
-        })) : [{
-          name: 'Sin datos',
-          type: 'bar' as const,
-          data: [0],
-          itemStyle: { color: '#9ca3af' },
-          barMaxWidth: 32,
-        }],
+      series: [{
+        name: 'Top Clientes',
+        type: 'bar' as const,
+        data: customerValues.map((v, i) => ({
+          value: v,
+          itemStyle: { color: hasData ? colors[i % colors.length] : '#d1d5db' }
+        })),
+        barMaxWidth: 50,
+      }],
     });
   }
 

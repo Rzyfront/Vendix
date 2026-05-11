@@ -337,7 +337,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: ['Top Productos'],
+        data: ['Productos'],
         bottom: 30,
         textStyle: { color: textSecondary },
       },
@@ -349,9 +349,14 @@ onDateRangeChange(range: DateRangeFilter): void {
         containLabel: true,
       },
       xAxis: {
+        type: 'category',
+        data: top10.map((p) => p.product_name),
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+      },
+      yAxis: {
         type: 'value',
         min: 0,
-        max: 1000000,
         splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
@@ -360,19 +365,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      yAxis: {
-        type: 'category',
-        data: top10.map((p) => p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name),
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
-      },
-      series: top10.map((p, i) => ({
-          name: p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name,
-          type: 'bar' as const,
-          data: [p.revenue],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 32,
-        })),
+      series: [{
+        name: 'Productos',
+        type: 'bar',
+        data: top10.map((p, i) => ({ value: p.revenue, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+        barMaxWidth: 32,
+      }],
     });
   }
 

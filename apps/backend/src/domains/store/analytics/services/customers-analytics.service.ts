@@ -480,12 +480,26 @@ export class CustomersAnalyticsService {
 
     const previousAbandonedCount = Number(previousAbandoned[0]?.count || 0);
 
-    // Assuming a baseline recovery rate (can be refined when cart-order linking is added)
-    const assumedRecoveryRate = 15; // 15% baseline recovery rate
-    const recoveryRate = assumedRecoveryRate;
+    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(o.id) as count
+      FROM orders o
+      WHERE o.store_id = ${storeId}
+        AND o.placed_at >= ${startDate}
+        AND o.placed_at <= ${endDate}
+        AND o.state IN ('delivered', 'finished')
+    `;
+    const orderCount = Number(completedOrders[0]?.count || 0);
 
-    const abandonmentRate =
-      abandonedCount > 0 ? (abandonedCount > 0 ? 100 - recoveryRate : 0) : 0;
+    let recoveryRate: number;
+    if (abandonedCount > 0) {
+      const calculatedRate = (orderCount / abandonedCount) * 100;
+      recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
+      recoveryRate = recoveryRate > 0 ? recoveryRate : 15;
+    } else {
+      recoveryRate = 15;
+    }
+
+    const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
 
     const abandonmentRateGrowth =
       previousAbandonedCount > 0
@@ -538,25 +552,63 @@ export class CustomersAnalyticsService {
       ORDER BY period ASC
     `;
 
-    // Use baseline recovery rate for all periods
-    const recoveryRate = 15;
+    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        order_count: bigint;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, o.placed_at) AS period,
+        COUNT(o.id) AS order_count
+      FROM orders o
+      WHERE o.store_id = ${storeId}
+        AND o.placed_at >= ${startDate}
+        AND o.placed_at <= ${endDate}
+        AND o.state IN ('delivered', 'finished')
+      GROUP BY DATE_TRUNC(${truncSql}, o.placed_at)
+      ORDER BY period ASC
+    `;
+
+    const ordersMap = new Map<string, number>();
+    completedOrders.forEach(o => {
+      const periodKey = formatPeriodFromDate(new Date(o.period), granularity);
+      ordersMap.set(periodKey, Number(o.order_count));
+    });
+
+    const baselineRecoveryRate = 15;
 
     return fillTimeSeries(
-      results.map((r) => ({
-        period: formatPeriodFromDate(new Date(r.period), granularity),
-        abandoned_carts: Number(r.abandoned_carts),
-        recovered_carts: Math.floor(Number(r.abandoned_carts) * (recoveryRate / 100)),
-        abandonment_rate: 100 - recoveryRate,
-        recovery_rate: recoveryRate,
-      })),
+      results.map((r) => {
+        const periodKey = formatPeriodFromDate(new Date(r.period), granularity);
+        const orderCount = ordersMap.get(periodKey) || 0;
+        const cartCount = Number(r.abandoned_carts);
+        
+        let recoveryRate: number;
+        if (cartCount > 0) {
+          const calculatedRate = (orderCount / cartCount) * 100;
+          recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
+          recoveryRate = recoveryRate > 0 ? recoveryRate : baselineRecoveryRate;
+        } else {
+          recoveryRate = baselineRecoveryRate;
+        }
+
+        return {
+          period: periodKey,
+          abandoned_carts: cartCount,
+          recovered_carts: Math.floor(cartCount * (recoveryRate / 100)),
+          abandonment_rate: 100 - recoveryRate,
+          recovery_rate: recoveryRate,
+        };
+      }),
       startDate,
       endDate,
       granularity,
       {
         abandoned_carts: 0,
         recovered_carts: 0,
-        abandonment_rate: 100 - recoveryRate,
-        recovery_rate: recoveryRate,
+        abandonment_rate: 100 - baselineRecoveryRate,
+        recovery_rate: baselineRecoveryRate,
       },
       formatPeriodFromDate,
     );

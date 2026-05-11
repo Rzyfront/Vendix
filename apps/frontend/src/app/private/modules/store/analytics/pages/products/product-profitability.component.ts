@@ -155,18 +155,20 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const profitable = products.filter((p) => p.margin > 0).length;
     const unprofitable = products.filter((p) => p.margin <= 0).length;
     const zeroMargin = products.filter((p) => p.margin === 0).length;
+    const colors = ['#22c55e', '#ef4444', '#f59e0b'];
 
     this.marginDistributionChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
           const data = params[0];
-          return `${data.name}: ${data.value} productos`;
+          return `${data.name}: <b>${data.value}</b> productos`;
         },
       },
       legend: {
-        data: ['Rentables', 'No Rentables', 'Sin Margen'],
+        data: ['Margen'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -180,39 +182,25 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         data: ['Rentables', 'No Rentables', 'Sin Margen'],
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: [
-        {
-          name: 'Rentables',
-          type: 'bar' as const,
-          data: [profitable],
-          itemStyle: { color: '#22c55e' },
-          barMaxWidth: 40,
-        },
-        {
-          name: 'No Rentables',
-          type: 'bar' as const,
-          data: [unprofitable],
-          itemStyle: { color: '#ef4444' },
-          barMaxWidth: 40,
-        },
-        {
-          name: 'Sin Margen',
-          type: 'bar' as const,
-          data: [zeroMargin],
-          itemStyle: { color: '#f59e0b' },
-          barMaxWidth: 40,
-        },
-      ],
+      series: [{
+        name: 'Margen',
+        type: 'bar',
+        data: [
+          { value: profitable, itemStyle: { color: colors[0] } },
+          { value: unprofitable, itemStyle: { color: colors[1] } },
+          { value: zeroMargin, itemStyle: { color: colors[2] } },
+        ],
+        barMaxWidth: 60,
+      }],
     });
   }
 
@@ -265,8 +253,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         },
       },
       legend: {
-        data: ['Ganancia'],
+        data: ['Top Ganancia'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -280,24 +269,25 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, rotate: 30 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
-      series: names.map((name, i) => ({
-          name,
-          type: 'bar' as const,
-          data: [profits[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
+      series: [{
+        name: 'Top Ganancia',
+        type: 'bar' as const,
+        data: profits.map((p, i) => ({
+          value: p,
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] }
         })),
+        barMaxWidth: 50,
+      }],
     });
   }
 
@@ -316,8 +306,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       p.product_name.length > 15 ? p.product_name.substring(0, 15) + '...' : p.product_name,
     );
     const revenues = top5.map((p) => p.revenue);
-    const profits = top5.map((p) => p.profit);
-    const costs = top5.map((p) => p.total_cost);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
 
     this.comparativeChartOptions.set({
       tooltip: {
@@ -334,15 +323,13 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
             <div style="padding:8px">
               <strong style="font-size:13px">${params[0].name}</strong>
               <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
-                ${params.map((p: any) => `
-                  <div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
-                    <span style="display:flex;align-items:center;gap:6px">
-                      <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color}"></span>
-                      ${p.seriesName}:
-                    </span>
-                    <strong style="font-size:12px">${this.currencyService.format(p.value)}</strong>
-                  </div>
-                `).join('')}
+                <div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
+                  <span style="display:flex;align-items:center;gap:6px">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${params[0].color}"></span>
+                    Ingresos:
+                  </span>
+                  <strong style="font-size:12px">${this.currencyService.format(params[0].value)}</strong>
+                </div>
                 ${product ? `
                   <div style="border-top:1px solid ${borderColor};margin-top:4px;padding-top:6px">
                     <div style="display:flex;justify-content:space-between;gap:16px">
@@ -357,8 +344,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         },
       },
       legend: {
-        data: ['Ingresos', 'Costo', 'Ganancia'],
+        data: ['Comparativa'],
         bottom: 30,
+        left: 'center',
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -372,70 +360,25 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: productNames,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10 },
+        axisLabel: { color: textSecondary, fontSize: 10, rotate: 30 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
-      series: [
-        {
-          name: 'Ingresos',
-          type: 'bar',
-          data: revenues,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f6' },
-                { offset: 1, color: '#3b82f680' },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
-        },
-        {
-          name: 'Costo',
-          type: 'bar',
-          data: costs,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: redColor },
-                { offset: 1, color: `${redColor}80` },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
-        },
-        {
-          name: 'Ganancia',
-          type: 'bar',
-          data: profits,
-          itemStyle: {
-            color: {
-              type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
-              colorStops: [
-                { offset: 0, color: greenColor },
-                { offset: 1, color: `${greenColor}80` },
-              ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
-        },
-      ],
+      series: [{
+        name: 'Ingresos',
+        type: 'bar',
+        data: revenues.map((v, i) => ({
+          value: v,
+          itemStyle: { color: colors[i % colors.length] }
+        })),
+        barMaxWidth: 50,
+      }],
     });
   }
 }
