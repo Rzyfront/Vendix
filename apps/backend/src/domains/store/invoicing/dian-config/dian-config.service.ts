@@ -55,10 +55,17 @@ export class DianConfigService {
    */
   async getDashboard() {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
     // Get all configs for this store
-    const configs = await this.prisma.dian_configurations.findMany({
-      where: { store_id: context.store_id },
+    const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { organization_id, store_id: null }
+          : { store_id: context.store_id },
       select: {
         id: true,
         name: true,
@@ -174,9 +181,16 @@ export class DianConfigService {
    */
   async getConfigs() {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
-    const configs = await this.prisma.dian_configurations.findMany({
-      where: { store_id: context.store_id },
+    const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { organization_id, store_id: null }
+          : { store_id: context.store_id },
       orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
     });
 
@@ -187,8 +201,17 @@ export class DianConfigService {
    * Gets a single DIAN configuration by ID.
    */
   async getConfigById(id: number) {
-    const config = await this.prisma.dian_configurations.findFirst({
-      where: { id },
+    const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    const config = await this.prisma.withoutScope().dian_configurations.findFirst({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { id, organization_id, store_id: null }
+          : { id, store_id: context.store_id },
     });
 
     if (!config) {
@@ -270,6 +293,11 @@ export class DianConfigService {
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
+    }
 
     const update_data: any = {};
 
@@ -341,6 +369,11 @@ export class DianConfigService {
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
+    }
 
     const updated = await this.prisma.dian_configurations.update({
       where: { id },
@@ -398,6 +431,11 @@ export class DianConfigService {
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
+    }
 
     await this.prisma.dian_configurations.update({
       where: { id },
@@ -424,6 +462,11 @@ export class DianConfigService {
 
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
     }
 
     await this.prisma.dian_configurations.delete({
@@ -454,14 +497,21 @@ export class DianConfigService {
    */
   async getAuditLogs(page = 1, limit = 20, config_id?: number) {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
     let where_clause: any;
 
     if (config_id) {
       where_clause = { dian_configuration_id: config_id };
     } else {
-      const configs = await this.prisma.dian_configurations.findMany({
-        where: { store_id: context.store_id },
+      const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+        where:
+          fiscalScope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id },
         select: { id: true },
       });
 

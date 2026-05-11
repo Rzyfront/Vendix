@@ -35,7 +35,7 @@ interface ChartAccountPreview {
       <app-puc-bootstrap-form
         #form
         [initialValue]="initial()"
-        [disabled]="submitting()"
+        [disabled]="submitting() || readOnlyForStore()"
         (validityChange)="onValidity($event)"
       ></app-puc-bootstrap-form>
 
@@ -115,9 +115,14 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
     rows: [],
   });
   readonly preview = signal<ChartAccountPreview[]>([]);
+  readonly readOnlyForStore = computed(
+    () =>
+      this.service.userScope() === 'store' &&
+      this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
 
   private readonly form = viewChild.required<PucBootstrapFormComponent>('form');
-  private loaded = false;
+  private loadedContextKey: string | null = null;
 
   readonly scopeLabel = computed(() =>
     this.service.userScope() === 'organization' ? 'ORGANIZATION' : 'STORE',
@@ -125,17 +130,16 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
 
   constructor() {
     effect(() => {
-      const scope = this.service.userScope();
-      if (scope && !this.loaded) {
-        this.loaded = true;
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
         void this.loadPreview();
       }
     });
   }
 
   private baseUrl(): string {
-    // userScope (logged-in user) routes the request, not org-level fiscal_scope.
-    // TODO: surface read-only banner if STORE_ADMIN hits an org-owned config.
+    // userScope routes the request; backend resolves fiscal ownership.
     return `${environment.apiUrl}/${this.service.userScope()}/accounting/chart-of-accounts`;
   }
 
@@ -144,11 +148,7 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
       // Org chart-of-accounts GET takes `?store_id=` to narrow the listing to
       // a single store when operating_scope=STORE. Otherwise the consolidated
       // org view is returned.
-      const storeParam =
-        this.service.userScope() === 'organization' &&
-        this.service.targetStoreId() !== null
-          ? `&store_id=${this.service.targetStoreId()}`
-          : '';
+      const storeParam = this.service.storeQuery('&');
       const res: any = await firstValueFrom(
         this.http.get(`${this.baseUrl()}?limit=10${storeParam}`),
       );
@@ -183,12 +183,23 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
 
     this.submitting.set(true);
     this.localError.set(null);
+    if (this.readOnlyForStore()) {
+      const ref = {
+        count: this.preview().length,
+        inherited: true,
+        completed_at: new Date().toISOString(),
+      };
+      await this.service.commitStep(this.stepId, ref);
+      this.submitting.set(false);
+      return { ref };
+    }
     // For ORG_ADMIN custom-row POSTs, the backend resolves `store_id` only
     // from `?store_id=` query. Block early if no target store has been
     // chosen and the user is going down the custom path on an
     // operating_scope=STORE org.
     if (
       this.service.userScope() === 'organization' &&
+      this.service.fiscalDataOwner() === 'store' &&
       this.service.targetStoreId() === null
     ) {
       this.localError.set(
@@ -205,23 +216,40 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
       // the org); store_id is intentionally omitted here. Custom-row POSTs
       // need `?store_id=` so the org service can pin per-store accounts when
       // operating_scope=STORE.
-      const storeQuery =
-        this.service.userScope() === 'organization' &&
-        this.service.targetStoreId() !== null
-          ? `?store_id=${this.service.targetStoreId()}`
-          : '';
+      const storeQuery = this.service.storeQuery();
 
       if (value.source === 'default') {
-        const res: any = await firstValueFrom(
-          this.http.post(`${this.baseUrl()}/seed-default`, { force: false }),
-        );
-        const payload = res?.data ?? res;
-        count =
-          typeof payload?.count === 'number'
-            ? payload.count
-            : Array.isArray(payload?.accounts)
-              ? payload.accounts.length
-              : 0;
+        if (this.preview().length > 0) {
+          count = this.preview().length;
+        } else {
+          try {
+            const res: any = await firstValueFrom(
+              this.http.post(`${this.baseUrl()}/seed-default${storeQuery}`, {
+                force: false,
+                ...this.service.storeContext(),
+              }),
+            );
+            const payload = res?.data ?? res;
+            count =
+              typeof payload?.count === 'number'
+                ? payload.count
+                : typeof payload?.accounts_processed === 'number'
+                  ? payload.accounts_processed
+                  : Array.isArray(payload?.accounts)
+                    ? payload.accounts.length
+                    : 0;
+          } catch (error: any) {
+            const parsed = parseApiError(error);
+            if (parsed.errorCode !== 'CHART_ALREADY_SEEDED') {
+              throw error;
+            }
+            await this.loadPreview();
+            count = this.preview().length;
+            if (count === 0) {
+              throw error;
+            }
+          }
+        }
       } else {
         // CSV / custom path: loop POST per row. Append ?store_id when
         // ORG_ADMIN so the org service routes the create correctly.

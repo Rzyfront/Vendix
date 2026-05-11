@@ -114,6 +114,21 @@ export class SettingsController {
     );
   }
 
+  @Get('fiscal-data')
+  @Permissions('store:settings:fiscal_data:read')
+  @ApiOperation({
+    summary:
+      'Get the legal/tax identity (fiscal_data) section for the current fiscal scope',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Fiscal data section returned successfully',
+  })
+  async getFiscalData() {
+    const fiscalData = await this.settingsService.getFiscalData();
+    return this.responseService.success({ fiscal_data: fiscalData });
+  }
+
   @Post('reset')
   @Permissions('store:settings:update')
   @ApiOperation({ summary: 'Reset settings to defaults' })

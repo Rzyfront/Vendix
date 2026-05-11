@@ -7,17 +7,28 @@ export interface ApiResponse<T> {
   success: boolean;
   data: T;
   message?: string;
+  meta?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+    totalPages?: number;
+    total_pages?: number;
+  };
 }
 
 export interface ChartAccountRow {
   id: number;
-  account_code: string;
-  account_name: string;
+  code?: string;
+  name?: string;
+  account_code?: string;
+  account_name?: string;
   account_type?: string;
+  nature?: string;
   is_active?: boolean;
   accepts_entries?: boolean;
   parent_id?: number | null;
   level?: number;
+  children?: Array<{ id: number; code: string; name: string }>;
 }
 
 export interface JournalEntryRow {
@@ -35,10 +46,11 @@ export interface JournalEntryRow {
 export interface FiscalPeriodRow {
   id: number;
   name?: string;
-  period_year?: number;
+  period_year?: number | null;
   start_date?: string;
   end_date?: string;
   status?: string;
+  _count?: { accounting_entries?: number };
 }
 
 export interface AccountMappingRow {
@@ -48,6 +60,7 @@ export interface AccountMappingRow {
   account_code?: string | null;
   account_name?: string | null;
   description?: string | null;
+  source?: 'store' | 'organization' | 'default';
 }
 
 /**
@@ -82,9 +95,10 @@ export class OrgAccountingService {
     );
   }
 
-  getAccountMappings(): Observable<ApiResponse<AccountMappingRow[]>> {
+  getAccountMappings(query?: Record<string, any>): Observable<ApiResponse<AccountMappingRow[]>> {
     return this.http.get<ApiResponse<AccountMappingRow[]>>(
-      `${this.apiUrl}/organization/accounting/account-mappings`,
+      `${this.apiUrl}/organization/accounting/mappings`,
+      { params: this.toParams(query) },
     );
   }
 

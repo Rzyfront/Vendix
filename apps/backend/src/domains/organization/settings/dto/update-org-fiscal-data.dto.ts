@@ -1,10 +1,13 @@
 import {
   IsArray,
   IsEnum,
+  IsInt,
   IsOptional,
   IsString,
+  Min,
   MaxLength,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 
 /**
@@ -36,6 +39,13 @@ export enum OrgFiscalTaxRegime {
  */
 @ApiSchema({ name: 'OrganizationUpdateFiscalDataDto' })
 export class UpdateOrgFiscalDataDto {
+  @ApiPropertyOptional({ example: 12 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_id?: number;
+
   @ApiPropertyOptional({ example: '900123456', maxLength: 32 })
   @IsOptional()
   @IsString()

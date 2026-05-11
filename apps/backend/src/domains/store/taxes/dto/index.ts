@@ -50,9 +50,10 @@ export class CreateTaxCategoryDto {
   @Type(() => Number)
   rate: number;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
-  store_id: number;
+  store_id?: number;
 
   @IsInt()
   @IsOptional()
@@ -162,6 +163,12 @@ export class SeedDefaultTaxesDto {
   @IsOptional()
   @IsBoolean()
   force?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  store_id?: number;
 }
 
 // Tax Calculation DTO

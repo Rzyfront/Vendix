@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   signal,
@@ -28,7 +29,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
       <app-dian-config-form
         #form
         [initialValue]="initial()"
-        [disabled]="submitting()"
+        [disabled]="submitting() || readOnlyForStore()"
         (validityChange)="onValidity($event)"
       ></app-dian-config-form>
 
@@ -62,23 +63,27 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<DianConfigValue> | null>(null);
   readonly existingConfigId = signal<number | null>(null);
+  readonly readOnlyForStore = computed(
+    () =>
+      this.service.userScope() === 'store' &&
+      this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
 
   private readonly form = viewChild.required<DianConfigFormComponent>('form');
-  private loaded = false;
+  private loadedContextKey: string | null = null;
 
   constructor() {
     effect(() => {
-      const scope = this.service.userScope();
-      if (scope && !this.loaded) {
-        this.loaded = true;
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
         void this.loadInitial();
       }
     });
   }
 
   private baseUrl(): string {
-    // userScope (logged-in user) routes the request, not org-level fiscal_scope.
-    // TODO: surface read-only banner if STORE_ADMIN hits an org-owned config.
+    // userScope routes the request; backend resolves fiscal ownership.
     return `${environment.apiUrl}/${this.service.userScope()}/invoicing/dian-config`;
   }
 
@@ -88,13 +93,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
       // store. For fiscal_scope=ORGANIZATION the DIAN config is org-wide
       // (store_id IS NULL on the row), so we omit ?store_id and let the
       // backend return the org-scoped record.
-      const fiscalScope = this.service.lastStatus()?.fiscal_scope;
-      const query =
-        this.service.userScope() === 'organization' &&
-        fiscalScope === 'STORE' &&
-        this.service.targetStoreId() !== null
-          ? `?store_id=${this.service.targetStoreId()}`
-          : '';
+      const query = this.service.storeQuery();
       const res: any = await firstValueFrom(
         this.http.get(`${this.baseUrl()}${query}`),
       );
@@ -136,14 +135,23 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
 
     this.submitting.set(true);
     this.localError.set(null);
-    const fiscalScope = this.service.lastStatus()?.fiscal_scope;
+    if (this.readOnlyForStore()) {
+      const ref = {
+        dian_config_id: this.existingConfigId(),
+        inherited: true,
+        completed_at: new Date().toISOString(),
+      };
+      await this.service.commitStep(this.stepId, ref);
+      this.submitting.set(false);
+      return { ref };
+    }
     // ORG_ADMIN + fiscal_scope=STORE writes need a target store. The org
     // service rejects with "store_id is required when fiscal_scope=STORE".
     // For fiscal_scope=ORGANIZATION the row is anchored to the organization
     // only (store_id IS NULL), so no store selection is required.
     if (
       this.service.userScope() === 'organization' &&
-      fiscalScope === 'STORE' &&
+      this.service.fiscalDataOwner() === 'store' &&
       this.service.targetStoreId() === null
     ) {
       this.localError.set(
@@ -169,10 +177,7 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
         environment: value.environment,
         test_set_id: value.test_set_id || undefined,
         is_default: true,
-        ...(this.service.userScope() === 'organization' &&
-        fiscalScope === 'STORE'
-          ? this.service.storeContext()
-          : {}),
+        ...this.service.storeContext(),
       };
 
       let configId: number | null = this.existingConfigId();

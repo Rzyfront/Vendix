@@ -2341,6 +2341,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/payroll/settings',
       method: 'PUT',
     },
+    {
+      name: 'organization:payroll:reports:read',
+      description: 'Leer reportes de nómina a nivel organización',
+      path: '/api/organization/reports/payroll',
+      method: 'GET',
+    },
 
     {
       name: 'superadmin:stores:create',
@@ -2784,6 +2790,15 @@ export async function seedPermissionsAndRoles(
         'Sincronizar (migrar) settings de todas las tiendas desde super-admin',
       path: '/api/superadmin/settings/sync-all-stores',
       method: 'POST',
+    },
+
+    // ──── Organization Invoicing — read-only fiscal supervision ────
+    {
+      name: 'organization:invoicing:read',
+      description:
+        'Leer facturas, resoluciones y resumen de facturación a nivel organización',
+      path: '/api/organization/invoicing',
+      method: 'GET',
     },
 
     // ──── Organization Invoicing (DIAN) — fiscal wizard twin ────

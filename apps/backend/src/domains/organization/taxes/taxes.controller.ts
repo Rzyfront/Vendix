@@ -40,7 +40,10 @@ export class OrgTaxesController {
   @Post('seed-default')
   @Permissions('organization:taxes:create')
   @HttpCode(HttpStatus.CREATED)
-  async seedDefault(@Body() body: SeedDefaultTaxesDto) {
+  async seedDefault(
+    @Body() body: SeedDefaultTaxesDto,
+    @Query('store_id') storeIdRaw?: string,
+  ) {
     const organization_id = RequestContextService.getOrganizationId();
     if (!organization_id) {
       throw new VendixHttpException(
@@ -48,11 +51,17 @@ export class OrgTaxesController {
         'Organization context required to seed default taxes.',
       );
     }
-    const result = await this.defaultTaxesSeeder.seed({
-      scope: 'ORGANIZATION',
-      organization_id,
-      force: body.force,
-    });
+    const storeId = body.store_id ?? (storeIdRaw ? Number(storeIdRaw) : undefined);
+    const result = await this.defaultTaxesSeeder.seed(
+      storeId
+        ? {
+            scope: 'STORE',
+            store_id: storeId,
+            organization_id,
+            force: body.force,
+          }
+        : { scope: 'ORGANIZATION', organization_id, force: body.force },
+    );
     return this.responseService.created(
       result,
       'Default Colombian taxes seeded for organization successfully',

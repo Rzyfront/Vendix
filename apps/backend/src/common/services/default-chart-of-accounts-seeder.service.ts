@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
+import { FiscalScopeService } from './fiscal-scope.service';
 import {
   getColombiaPucAccounts,
   type PucAccountInput,
@@ -10,6 +11,7 @@ import {
 
 export interface SeedChartOfAccountsParams {
   organization_id: number;
+  store_id?: number;
   /** When true, existing accounts are kept and re-upserted (idempotent re-seed). */
   force?: boolean;
 }
@@ -59,64 +61,24 @@ export class DefaultChartOfAccountsSeederService {
     DefaultChartOfAccountsSeederService.name,
   );
 
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   async seed(
     params: SeedChartOfAccountsParams,
   ): Promise<SeedChartOfAccountsResult> {
-    const { organization_id, force = false } = params;
+    const { organization_id, store_id, force = false } = params;
 
-    let accounting_entities = await this.prisma.withoutScope().accounting_entities.findMany({
-      where: { organization_id, is_active: true },
-      select: { id: true },
-    });
-
-    // Auto-bootstrap an accounting_entity for ORGANIZATION-scoped tenants
-    // when none exist; refuse for STORE-scoped tenants (per-store decision).
-    if (accounting_entities.length === 0) {
-      const org = await this.prisma.withoutScope().organizations.findUnique({
-        where: { id: organization_id },
-        select: {
-          id: true,
-          name: true,
-          legal_name: true,
-          tax_id: true,
-          fiscal_scope: true,
-          operating_scope: true,
-        },
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id,
+        store_id: store_id ?? null,
       });
-
-      if (!org) {
-        throw new VendixHttpException(ErrorCodes.MISSING_ACCOUNTING_ENTITY);
-      }
-
-      if (org.fiscal_scope === 'ORGANIZATION') {
-        const entityName = org.legal_name || org.name || 'Entidad fiscal';
-        this.logger.log(
-          `Auto-creating accounting_entity for organization_id=${organization_id} ` +
-            `(fiscal_scope=ORGANIZATION, name="${entityName}")`,
-        );
-        await this.prisma.withoutScope().accounting_entities.create({
-          data: {
-            organization_id,
-            store_id: null,
-            scope: org.operating_scope,
-            fiscal_scope: 'ORGANIZATION',
-            is_active: true,
-            name: entityName,
-            legal_name: org.legal_name ?? null,
-            tax_id: org.tax_id ?? null,
-          },
-        });
-        accounting_entities = await this.prisma.withoutScope().accounting_entities.findMany({
-          where: { organization_id, is_active: true },
-          select: { id: true },
-        });
-      } else {
-        // STORE-scoped: cannot auto-pick which store(s) to bootstrap.
-        throw new VendixHttpException(ErrorCodes.MISSING_ACCOUNTING_ENTITY);
-      }
-    }
+    const accounting_entities: { id: number }[] = [
+      { id: accounting_entity.id },
+    ];
 
     const accounting_entity_ids: (number | null)[] = accounting_entities.length
       ? accounting_entities.map((entity) => entity.id)

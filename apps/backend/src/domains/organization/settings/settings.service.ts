@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import { UpdateSettingsDto, UpdateOrgInventorySettingsDto } from './dto';
@@ -17,8 +18,10 @@ import {
   OrganizationFiscalData,
 } from './interfaces/organization-settings.interface';
 import { getDefaultOrganizationInventorySettings } from './defaults/default-organization-settings';
+import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { AuditService, AuditResource } from '@common/audit/audit.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class SettingsService {
@@ -28,6 +31,7 @@ export class SettingsService {
     private prisma: OrganizationPrismaService,
     private auditService: AuditService,
     private s3Service: S3Service,
+    private fiscalScope: FiscalScopeService,
   ) {}
 
   async findOne() {
@@ -320,6 +324,29 @@ export class SettingsService {
   // Fiscal Data section (legal/tax identity)
   // ---------------------------------------------------------------------------
 
+  async getFiscalData(store_id?: number): Promise<OrganizationFiscalData> {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const target = await this.resolveFiscalDataTarget(
+      context.organization_id,
+      store_id,
+    );
+
+    if (target.scope === 'store') {
+      const row = await this.prisma.withoutScope().store_settings.findUnique({
+        where: { store_id: target.store_id },
+        select: { settings: true },
+      });
+      return (((row?.settings as any)?.fiscal_data ?? {}) as OrganizationFiscalData);
+    }
+
+    const row = await this.prisma.organization_settings.findFirst();
+    return (((row?.settings as any)?.fiscal_data ?? {}) as OrganizationFiscalData);
+  }
+
   /**
    * Patch-style update for `settings.fiscal_data`. Deep-merges over the
    * existing section and preserves every other key (branding, fonts,
@@ -332,10 +359,73 @@ export class SettingsService {
    */
   async updateFiscalData(
     dto: Record<string, unknown>,
+    store_id?: number,
   ): Promise<OrganizationFiscalData> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const target = await this.resolveFiscalDataTarget(
+      context.organization_id,
+      store_id,
+    );
+    const cleanDto = { ...dto };
+    delete (cleanDto as any).store_id;
+
+    if (target.scope === 'store') {
+      const existing = await this.prisma.withoutScope().store_settings.findUnique({
+        where: { store_id: target.store_id },
+        select: { id: true, settings: true },
+      });
+      const currentSettings =
+        (existing?.settings as Record<string, any> | null) ?? {};
+      const previousFiscalData =
+        (currentSettings.fiscal_data ?? {}) as OrganizationFiscalData;
+      const nextFiscalData = {
+        ...previousFiscalData,
+        ...cleanDto,
+      } as OrganizationFiscalData;
+      const nextSettings = {
+        ...getDefaultStoreSettings(),
+        ...currentSettings,
+        fiscal_data: nextFiscalData,
+      };
+
+      await this.prisma.withoutScope().store_settings.upsert({
+        where: { store_id: target.store_id },
+        create: {
+          store_id: target.store_id,
+          settings: nextSettings as any,
+        },
+        update: {
+          settings: nextSettings as any,
+          updated_at: new Date(),
+        },
+      });
+
+      if (context.user_id) {
+        try {
+          await this.auditService.logUpdate(
+            context.user_id,
+            AuditResource.SETTINGS,
+            existing?.id ?? 0,
+            { fiscal_data: previousFiscalData },
+            { fiscal_data: nextFiscalData },
+            {
+              action: 'update_fiscal_data',
+              organization_id: context.organization_id,
+              store_id: target.store_id,
+            },
+          );
+        } catch (err) {
+          this.logger.warn(
+            `Audit log for store fiscal_data update failed: ${(err as Error).message}`,
+          );
+        }
+      }
+
+      return nextFiscalData;
     }
 
     const existing = await this.prisma.organization_settings.findFirst();
@@ -346,7 +436,7 @@ export class SettingsService {
 
     const nextFiscalData: OrganizationFiscalData = {
       ...previousFiscalData,
-      ...dto,
+      ...cleanDto,
     } as OrganizationFiscalData;
 
     const nextSettings: OrganizationSettings = {
@@ -390,6 +480,48 @@ export class SettingsService {
     }
 
     return nextFiscalData;
+  }
+
+  private async resolveFiscalDataTarget(
+    organization_id: number,
+    store_id?: number,
+  ): Promise<
+    | { scope: 'organization' }
+    | { scope: 'store'; store_id: number }
+  > {
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    if (fiscalScope === 'ORGANIZATION') {
+      return { scope: 'organization' };
+    }
+
+    if (store_id) {
+      const store = await this.prisma.withoutScope().stores.findFirst({
+        where: { id: store_id, organization_id, is_active: true },
+        select: { id: true },
+      });
+      if (!store) {
+        throw new BadRequestException(
+          'Store does not belong to the current organization',
+        );
+      }
+      return { scope: 'store', store_id: store.id };
+    }
+
+    const stores = await this.prisma.withoutScope().stores.findMany({
+      where: { organization_id, is_active: true },
+      select: { id: true },
+      take: 2,
+    });
+    if (stores.length === 1) {
+      return { scope: 'store', store_id: stores[0].id };
+    }
+
+    throw new BadRequestException(
+      'store_id is required when fiscal_scope is STORE',
+    );
   }
 
   // ---------------------------------------------------------------------------

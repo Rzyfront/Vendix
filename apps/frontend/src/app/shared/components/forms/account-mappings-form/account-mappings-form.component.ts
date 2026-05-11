@@ -141,6 +141,7 @@ export class AccountMappingsFormComponent {
           const ctrl = this.form.controls[key];
           if (ctrl) ctrl.setValue(val ?? null, { emitEvent: false });
         });
+        this.emitCurrent();
       }
     });
 
@@ -151,12 +152,7 @@ export class AccountMappingsFormComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        const isValid = this.form.valid;
-        this.valid.set(isValid);
-        this.validityChange.emit(isValid);
-        this.valueChange.emit(this.getValue());
-      });
+      .subscribe(() => this.emitCurrent());
   }
 
   getValue(): AccountMappingsValue {
@@ -172,5 +168,12 @@ export class AccountMappingsFormComponent {
       const ctrl = this.form.controls[key];
       if (ctrl) ctrl.setValue(val ?? null);
     });
+  }
+
+  private emitCurrent(): void {
+    const isValid = this.form.valid;
+    this.valid.set(isValid);
+    this.validityChange.emit(isValid);
+    this.valueChange.emit(this.getValue());
   }
 }

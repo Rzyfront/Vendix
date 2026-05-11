@@ -166,7 +166,10 @@ export class PayrollSettingsFormComponent {
   constructor() {
     effect(() => {
       const v = this.initialValue();
-      if (v) this.form.patchValue(v, { emitEvent: false });
+      if (v) {
+        this.form.patchValue(v, { emitEvent: false });
+        this.emitCurrent();
+      }
     });
 
     effect(() => {
@@ -176,12 +179,7 @@ export class PayrollSettingsFormComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        const isValid = this.form.valid;
-        this.valid.set(isValid);
-        this.validityChange.emit(isValid);
-        this.valueChange.emit(this.form.getRawValue());
-      });
+      .subscribe(() => this.emitCurrent());
   }
 
   getValue(): PayrollSettingsValue {
@@ -190,5 +188,12 @@ export class PayrollSettingsFormComponent {
 
   markAllTouched(): void {
     this.form.markAllAsTouched();
+  }
+
+  private emitCurrent(): void {
+    const isValid = this.form.valid;
+    this.valid.set(isValid);
+    this.validityChange.emit(isValid);
+    this.valueChange.emit(this.form.getRawValue());
   }
 }

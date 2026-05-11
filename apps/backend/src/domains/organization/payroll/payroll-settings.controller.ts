@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Put, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PayrollSettingsService } from '@common/services/payroll-settings.service';
 import { ResponseService } from '@common/responses/response.service';
@@ -25,8 +25,12 @@ export class OrgPayrollSettingsController {
   @ApiOperation({
     summary: 'Get minimal payroll settings for the current organization',
   })
-  async getSettings() {
-    const data = await this.payrollSettings.getSettings('organization');
+  async getSettings(@Query('store_id') storeIdRaw?: string) {
+    const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
+    const data = await this.payrollSettings.getSettings(
+      storeId ? 'store' : 'organization',
+      storeId,
+    );
     return this.response.success(data);
   }
 
@@ -35,8 +39,16 @@ export class OrgPayrollSettingsController {
   @ApiOperation({
     summary: 'Replace minimal payroll settings for the current organization',
   })
-  async updateSettings(@Body() dto: UpdatePayrollSettingsDto) {
-    const data = await this.payrollSettings.updateSettings('organization', dto);
+  async updateSettings(
+    @Body() dto: UpdatePayrollSettingsDto,
+    @Query('store_id') storeIdRaw?: string,
+  ) {
+    const storeId = dto.store_id ?? (storeIdRaw ? Number(storeIdRaw) : undefined);
+    const data = await this.payrollSettings.updateSettings(
+      storeId ? 'store' : 'organization',
+      dto,
+      storeId,
+    );
     return this.response.updated(data, 'Payroll settings updated');
   }
 }

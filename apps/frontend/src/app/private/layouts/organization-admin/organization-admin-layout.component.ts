@@ -315,26 +315,56 @@ export class OrganizationAdminLayoutComponent {
     {
       label: 'Contabilidad',
       icon: 'book-open',
+      alwaysVisible: true,
       children: [
         {
           label: 'Plan de Cuentas',
           icon: '',
           route: '/admin/accounting/chart-of-accounts',
+          alwaysVisible: true,
         },
         {
           label: 'Asientos Contables',
           icon: '',
           route: '/admin/accounting/journal-entries',
+          alwaysVisible: true,
         },
         {
           label: 'Periodos Fiscales',
           icon: '',
           route: '/admin/accounting/fiscal-periods',
+          alwaysVisible: true,
         },
         {
           label: 'Mapeo de Cuentas',
           icon: '',
           route: '/admin/accounting/account-mappings',
+          alwaysVisible: true,
+        },
+      ],
+    },
+    {
+      label: 'Facturación',
+      icon: 'receipt',
+      alwaysVisible: true,
+      children: [
+        {
+          label: 'Facturas',
+          icon: '',
+          route: '/admin/invoicing/invoices',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Resoluciones',
+          icon: '',
+          route: '/admin/invoicing/resolutions',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Configuración DIAN',
+          icon: '',
+          route: '/admin/invoicing/dian-config',
+          alwaysVisible: true,
         },
       ],
     },
@@ -342,6 +372,7 @@ export class OrganizationAdminLayoutComponent {
       label: 'Nómina',
       icon: 'banknote',
       route: '/admin/payroll',
+      alwaysVisible: true,
     },
     {
       label: 'Configuración',

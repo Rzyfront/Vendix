@@ -21,7 +21,7 @@ export class OrgPayrollReportsController {
   ) {}
 
   @Get('summary')
-  @Permissions('reports:payroll:read')
+  @Permissions('organization:payroll:reports:read')
   async getSummary(@Query() query: OrgReportQueryDto) {
     const data = await this.payrollReports.getPayrollSummary({
       date_from: query.date_from,
@@ -32,7 +32,7 @@ export class OrgPayrollReportsController {
   }
 
   @Get('by-employee')
-  @Permissions('reports:payroll:read')
+  @Permissions('organization:payroll:reports:read')
   async getByEmployee(@Query() query: OrgReportQueryDto) {
     const data = await this.payrollReports.getPayrollByEmployee({
       date_from: query.date_from,
@@ -43,7 +43,7 @@ export class OrgPayrollReportsController {
   }
 
   @Get('provisions')
-  @Permissions('reports:payroll:read')
+  @Permissions('organization:payroll:reports:read')
   async getProvisions(@Query() query: OrgReportQueryDto) {
     const data = await this.payrollReports.getPayrollProvisions({
       date_from: query.date_from,

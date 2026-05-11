@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Put, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import {
@@ -87,6 +87,18 @@ export class SettingsController {
   // sub-section.
   // ---------------------------------------------------------------------------
 
+  @Get('fiscal-data')
+  @Permissions('organization:settings:fiscal_data:read')
+  @ApiOperation({
+    summary:
+      'Get the legal/tax identity (fiscal_data) section for the resolved fiscal scope',
+  })
+  async getFiscalData(@Query('store_id') storeIdRaw?: string) {
+    const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
+    const fiscalData = await this.settingsService.getFiscalData(storeId);
+    return { fiscal_data: fiscalData };
+  }
+
   @Patch('fiscal-data')
   @Permissions('organization:settings:fiscal_data:write')
   @ApiOperation({
@@ -97,9 +109,14 @@ export class SettingsController {
     status: 200,
     description: 'Fiscal data section updated successfully',
   })
-  async updateFiscalData(@Body() dto: UpdateOrgFiscalDataDto) {
+  async updateFiscalData(
+    @Body() dto: UpdateOrgFiscalDataDto,
+    @Query('store_id') storeIdRaw?: string,
+  ) {
+    const storeId = dto.store_id ?? (storeIdRaw ? Number(storeIdRaw) : undefined);
     const fiscalData = await this.settingsService.updateFiscalData(
       dto as unknown as Record<string, unknown>,
+      storeId,
     );
     return { fiscal_data: fiscalData };
   }

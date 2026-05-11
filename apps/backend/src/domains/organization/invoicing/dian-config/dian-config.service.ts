@@ -61,6 +61,9 @@ export class OrgDianConfigService {
       .withoutScope()
       .dian_configurations.findMany({
         where,
+        include: {
+          store: { select: { id: true, name: true, slug: true } },
+        },
         orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
       });
 
@@ -76,6 +79,9 @@ export class OrgDianConfigService {
       .withoutScope()
       .dian_configurations.findFirst({
         where: { id, organization_id },
+        include: {
+          store: { select: { id: true, name: true, slug: true } },
+        },
       });
 
     if (!config) {

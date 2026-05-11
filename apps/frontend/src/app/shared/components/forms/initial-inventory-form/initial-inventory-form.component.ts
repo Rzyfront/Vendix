@@ -99,7 +99,10 @@ export class InitialInventoryFormComponent {
   constructor() {
     effect(() => {
       const v = this.initialValue();
-      if (v) this.form.patchValue(v, { emitEvent: false });
+      if (v) {
+        this.form.patchValue(v, { emitEvent: false });
+        this.emitCurrent();
+      }
     });
 
     effect(() => {
@@ -109,12 +112,7 @@ export class InitialInventoryFormComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        const isValid = this.form.valid;
-        this.valid.set(isValid);
-        this.validityChange.emit(isValid);
-        this.valueChange.emit(this.form.getRawValue());
-      });
+      .subscribe(() => this.emitCurrent());
   }
 
   getValue(): InitialInventoryValue {
@@ -128,5 +126,12 @@ export class InitialInventoryFormComponent {
   onCaptureLaterToggle(event: Event): void {
     const checked = (event.target as HTMLInputElement).checked;
     this.form.controls.capture_initial_balance_later.setValue(checked);
+  }
+
+  private emitCurrent(): void {
+    const isValid = this.form.valid;
+    this.valid.set(isValid);
+    this.validityChange.emit(isValid);
+    this.valueChange.emit(this.form.getRawValue());
   }
 }

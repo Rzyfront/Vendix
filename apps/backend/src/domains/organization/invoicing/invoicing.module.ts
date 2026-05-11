@@ -1,8 +1,14 @@
 import { Module } from '@nestjs/common';
 import { OrgDianConfigModule } from './dian-config/dian-config.module';
+import { PrismaModule } from '../../../prisma/prisma.module';
+import { ResponseModule } from '../../../common/responses/response.module';
+import { OrgInvoicingController } from './invoicing.controller';
+import { OrgInvoicingService } from './invoicing.service';
 
 @Module({
-  imports: [OrgDianConfigModule],
-  exports: [OrgDianConfigModule],
+  imports: [PrismaModule, ResponseModule, OrgDianConfigModule],
+  controllers: [OrgInvoicingController],
+  providers: [OrgInvoicingService],
+  exports: [OrgDianConfigModule, OrgInvoicingService],
 })
 export class OrgInvoicingModule {}

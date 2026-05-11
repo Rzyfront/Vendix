@@ -812,8 +812,20 @@ export class BreadcrumbService {
     {
       path: '/admin/invoicing',
       title: 'Facturación',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'file-text',
+    },
+    {
+      path: '/admin/invoicing/invoices',
+      title: 'Facturas',
+      parent: 'Facturación',
+      icon: 'receipt',
+    },
+    {
+      path: '/admin/invoicing/resolutions',
+      title: 'Resoluciones',
+      parent: 'Facturación',
+      icon: 'hash',
     },
     {
       path: '/admin/invoicing/dian-config',
@@ -826,7 +838,7 @@ export class BreadcrumbService {
     {
       path: '/admin/accounting',
       title: 'Contabilidad',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'book-open',
     },
     {
@@ -918,7 +930,7 @@ export class BreadcrumbService {
     {
       path: '/admin/payroll',
       title: 'Nómina',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'banknote',
     },
     {

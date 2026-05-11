@@ -125,12 +125,20 @@ export const orgAdminRoutes: Routes = [
             (m) => m.orgPurchaseOrdersRoutes,
           ),
       },
-      // Payroll Routes (adaptive module — visible at org level)
+      // Invoicing Routes — ORG_ADMIN read-only fiscal supervision
+      {
+        path: 'invoicing',
+        loadChildren: () =>
+          import('../../private/modules/organization/invoicing/invoicing.routes').then(
+            (m) => m.orgInvoicingRoutes,
+          ),
+      },
+      // Payroll Routes — ORG_ADMIN read-only fiscal supervision
       {
         path: 'payroll',
         loadChildren: () =>
-          import('../../private/modules/store/payroll/payroll.routes').then(
-            (m) => m.payrollRoutes,
+          import('../../private/modules/organization/payroll/payroll.routes').then(
+            (m) => m.orgPayrollRoutes,
           ),
       },
       // Subscriptions Routes

@@ -24,6 +24,7 @@ import { validateSync } from 'class-validator';
 import { getDefaultStoreSettings } from './defaults/default-store-settings';
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 /**
  * Top-level keys retained when sanitizing an incoming settings payload.
@@ -62,6 +63,7 @@ export class SettingsService {
     private s3PathHelper: S3PathHelper,
     private auditService: AuditService,
     private migrator: SettingsMigratorService,
+    private fiscalScope: FiscalScopeService,
   ) {}
 
   /**
@@ -799,15 +801,81 @@ export class SettingsService {
    *
    * Canonical endpoint: `PATCH /store/settings/fiscal-data`.
    */
+  async getFiscalData(): Promise<StoreSettings['fiscal_data']> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    let organization_id = context?.organization_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (!organization_id) {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    if (fiscalScope === 'ORGANIZATION') {
+      const orgSettings =
+        await this.organizationPrisma.withoutScope().organization_settings.findFirst({
+          where: { organization_id },
+          select: { settings: true },
+        });
+      return ((orgSettings?.settings as any)?.fiscal_data ??
+        {}) as StoreSettings['fiscal_data'];
+    }
+
+    await this.ensureDefaults(store_id);
+    const existing = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    return ((existing?.settings as any)?.fiscal_data ??
+      {}) as StoreSettings['fiscal_data'];
+  }
+
   async updateFiscalData(
     dto: Record<string, unknown>,
   ): Promise<StoreSettings['fiscal_data']> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     const user_id = context?.user_id;
+    let organization_id = context?.organization_id;
 
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (!organization_id) {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Fiscal data is managed at organization level for this organization.',
+      );
     }
 
     await this.ensureDefaults(store_id);

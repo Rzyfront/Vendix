@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 import { FiscalPeriodsService as StoreFiscalPeriodsService } from '../../../store/accounting/fiscal-periods/fiscal-periods.service';
@@ -13,35 +13,35 @@ import { OrgAccountingScopeService } from '../org-accounting-scope.service';
 /**
  * Org-native fiscal periods.
  *
- * - operating_scope=ORGANIZATION → reads/writes the org-level
+ * - fiscal_scope=ORGANIZATION → reads/writes the org-level
  *   `accounting_entity` directly via `OrganizationPrismaService`.
- * - operating_scope=STORE → delegates to the store service via
+ * - fiscal_scope=STORE → delegates to the store service via
  *   `runWithStoreContext`, which resolves the per-store accounting_entity.
- *   `?store_id` selects the target store; otherwise the org's only active
- *   store is used.
+ *   `?store_id` selects the target store; otherwise the org's only active store
+ *   is used.
  */
 @Injectable()
 export class OrgFiscalPeriodsService {
   constructor(
     private readonly orgPrisma: OrganizationPrismaService,
-    private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScope: FiscalScopeService,
     private readonly orgScope: OrgAccountingScopeService,
     private readonly storeFiscalPeriods: StoreFiscalPeriodsService,
   ) {}
 
   async findAll(store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
-    if (scope.operating_scope === 'STORE' || scope.store_id) {
+    if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
         this.storeFiscalPeriods.findAll(),
       );
     }
 
     const accountingEntity =
-      await this.operatingScope.resolveAccountingEntity({
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: scope.organization_id,
         store_id: null,
       });
@@ -59,18 +59,18 @@ export class OrgFiscalPeriodsService {
   }
 
   async findOne(id: number, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
-    if (scope.operating_scope === 'STORE' || scope.store_id) {
+    if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
         this.storeFiscalPeriods.findOne(id),
       );
     }
 
     const accountingEntity =
-      await this.operatingScope.resolveAccountingEntity({
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: scope.organization_id,
         store_id: null,
       });
@@ -92,7 +92,7 @@ export class OrgFiscalPeriodsService {
   }
 
   async create(dto: CreateFiscalPeriodDto, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
     return this.orgScope.runWithStoreContext(
@@ -106,7 +106,7 @@ export class OrgFiscalPeriodsService {
     dto: UpdateFiscalPeriodDto,
     store_id_filter?: number,
   ) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
     return this.orgScope.runWithStoreContext(
@@ -116,7 +116,7 @@ export class OrgFiscalPeriodsService {
   }
 
   async close(id: number, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
     return this.orgScope.runWithStoreContext(
@@ -126,7 +126,7 @@ export class OrgFiscalPeriodsService {
   }
 
   async remove(id: number, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
     return this.orgScope.runWithStoreContext(

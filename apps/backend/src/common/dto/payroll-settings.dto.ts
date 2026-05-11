@@ -2,7 +2,9 @@ import {
   IsBoolean,
   IsIn,
   IsOptional,
+  IsInt,
   IsString,
+  Min,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -57,6 +59,12 @@ export class UpdatePayrollSettingsDto {
   @IsString()
   @MaxLength(60)
   pila_operator?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  store_id?: number;
 }
 
 /**

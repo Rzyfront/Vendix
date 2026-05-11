@@ -47,6 +47,17 @@ export class FiscalActivationWizardService {
   readonly currentStep = computed<FiscalWizardStepId | null>(
     () => this.stepSequence()[this.currentStepIndex()] ?? null,
   );
+  readonly fiscalDataOwner = computed<'organization' | 'store'>(() =>
+    this.lastStatus()?.fiscal_scope === 'ORGANIZATION'
+      ? 'organization'
+      : 'store',
+  );
+  readonly isInheritedOrganizationConfig = computed(
+    () => this.userScope() === 'store' && this.fiscalDataOwner() === 'organization',
+  );
+  readonly requiresTargetStore = computed(
+    () => this.userScope() === 'organization' && this.fiscalDataOwner() === 'store',
+  );
   readonly effectiveFiscalStatus = computed<FiscalStatusBlock | null>(() => {
     const last = this.lastStatus();
     const storeStatuses = last?.store_statuses || [];
@@ -81,6 +92,10 @@ export class FiscalActivationWizardService {
   readonly stepRefs = computed<Record<string, unknown>>(
     () => this.activeWizard()?.step_refs ?? {},
   );
+  readonly fiscalContextKey = computed(
+    () =>
+      `${this.userScope()}:${this.lastStatus()?.fiscal_scope ?? 'STORE'}:${this.targetStoreId() ?? 'none'}`,
+  );
   readonly progressLabel = computed(
     () =>
       `${Math.min(this.currentStepIndex() + 1, this.stepSequence().length)}/${this.stepSequence().length}`,
@@ -104,6 +119,24 @@ export class FiscalActivationWizardService {
     } finally {
       this.loading.set(false);
     }
+  }
+
+  restoreWizardFromCurrentStatus(): void {
+    const status = this.effectiveFiscalStatus();
+    if (!status) return;
+
+    const wipArea = (Object.keys(status) as FiscalArea[]).find(
+      (area) => status[area]?.state === 'WIP',
+    );
+    if (!wipArea) return;
+
+    const wizard = status[wipArea].wizard;
+    this.selectedAreas.set(
+      wizard.selected_areas?.length ? wizard.selected_areas : [wipArea],
+    );
+    const currentStep = wizard.current_step || wizard.step_sequence[0];
+    const index = this.stepSequence().indexOf(currentStep);
+    this.currentStepIndex.set(index >= 0 ? index : 0);
   }
 
   async startWizard(areas: FiscalArea[]): Promise<FiscalStatusReadResult> {
@@ -200,11 +233,7 @@ export class FiscalActivationWizardService {
     locked: boolean;
     reasons: string[];
   }> {
-    const query =
-      this.authFacade.selectedAppType() === 'ORG_ADMIN' &&
-      this.targetStoreId() !== null
-        ? `?store_id=${this.targetStoreId()}`
-        : '';
+    const query = this.storeQuery();
     const result = await firstValueFrom(
       this.http.get(`${this.baseUrl()}/${area}/irreversibility-check${query}`),
     );
@@ -228,10 +257,14 @@ export class FiscalActivationWizardService {
    * store.
    */
   storeContext(): { store_id?: number } {
-    return this.authFacade.selectedAppType() === 'ORG_ADMIN' &&
-      this.targetStoreId() !== null
+    return this.requiresTargetStore() && this.targetStoreId() !== null
       ? { store_id: this.targetStoreId()! }
       : {};
+  }
+
+  storeQuery(prefix: '?' | '&' = '?'): string {
+    const context = this.storeContext();
+    return context.store_id ? `${prefix}store_id=${context.store_id}` : '';
   }
 
   private unwrap<T>(response: unknown): T {

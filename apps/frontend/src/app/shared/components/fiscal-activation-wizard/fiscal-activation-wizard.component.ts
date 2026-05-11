@@ -573,6 +573,7 @@ export class FiscalActivationWizardComponent implements OnInit {
   readonly showStoreSwitcher = computed(
     () =>
       this.service.userScope() === 'organization' &&
+      this.service.fiscalDataOwner() === 'store' &&
       this.storeStatuses().length > 1,
   );
 
@@ -590,18 +591,8 @@ export class FiscalActivationWizardComponent implements OnInit {
     this.service.selectedAreas.set(areas.length ? areas : ['invoicing']);
     this.service.currentStepIndex.set(0);
 
-    void this.service.loadStatus().then((result) => {
-      const wipArea = FISCAL_AREAS.find(
-        (area) => result.fiscal_status[area]?.state === 'WIP',
-      );
-      if (!wipArea) return;
-      const wizard = result.fiscal_status[wipArea].wizard;
-      this.service.selectedAreas.set(
-        wizard.selected_areas?.length ? wizard.selected_areas : [wipArea],
-      );
-      const currentStep = wizard.current_step || wizard.step_sequence[0];
-      const index = this.service.stepSequence().indexOf(currentStep);
-      this.service.currentStepIndex.set(index >= 0 ? index : 0);
+    void this.service.loadStatus().then(() => {
+      this.service.restoreWizardFromCurrentStatus();
     });
   }
 
@@ -640,6 +631,7 @@ export class FiscalActivationWizardComponent implements OnInit {
 
   selectStore(storeId: number): void {
     this.service.targetStoreId.set(Number(storeId));
+    this.service.restoreWizardFromCurrentStatus();
   }
 
   async onNext(): Promise<void> {

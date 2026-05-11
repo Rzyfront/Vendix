@@ -54,7 +54,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
       />
 
       <div class="fiscal-content">
-        @if (storeStatuses().length) {
+        @if (showStoreSwitcher()) {
           <div class="store-switcher">
             <label class="store-switcher__label" for="fiscal-store-select">Tienda fiscal</label>
             <select
@@ -314,6 +314,12 @@ export class FiscalManagementPanelComponent implements OnInit {
   readonly storeStatuses = computed(
     () => this.service.lastStatus()?.store_statuses ?? [],
   );
+  readonly showStoreSwitcher = computed(
+    () =>
+      this.service.userScope() === 'organization' &&
+      this.service.fiscalDataOwner() === 'store' &&
+      this.storeStatuses().length > 1,
+  );
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -379,6 +385,7 @@ export class FiscalManagementPanelComponent implements OnInit {
 
   selectStore(storeId: number): void {
     this.service.targetStoreId.set(Number(storeId));
+    this.service.restoreWizardFromCurrentStatus();
   }
 
   statusFor(area: FiscalArea): FiscalAreaStatus | null {

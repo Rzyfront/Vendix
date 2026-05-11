@@ -68,8 +68,10 @@ export class ChartOfAccountsController {
         'Organization context required to seed default chart of accounts.',
       );
     }
+    const store_id = RequestContextService.getStoreId();
     const result = await this.default_chart_seeder.seed({
       organization_id,
+      store_id,
       force: body.force,
     });
     return this.response_service.created(

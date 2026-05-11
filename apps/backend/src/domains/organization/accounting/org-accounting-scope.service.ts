@@ -12,6 +12,10 @@ import {
   OperatingScopeService,
   OrganizationOperatingScope,
 } from '@common/services/operating-scope.service';
+import {
+  FiscalScopeService,
+  OrganizationFiscalScope,
+} from '@common/services/fiscal-scope.service';
 
 /**
  * Shared scope helpers for `/api/organization/accounting/*`.
@@ -38,6 +42,7 @@ export class OrgAccountingScopeService {
     private readonly prisma: GlobalPrismaService,
     private readonly orgPrisma: OrganizationPrismaService,
     private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   /**
@@ -160,6 +165,63 @@ export class OrgAccountingScopeService {
 
     throw new BadRequestException(
       'store_id is required when operating_scope is STORE and the organization has multiple stores',
+    );
+  }
+
+  /**
+   * Resolve fiscal ownership for organization accounting endpoints:
+   *  - fiscal_scope=ORGANIZATION and no store filter -> consolidated fiscal
+   *    entity.
+   *  - fiscal_scope=STORE -> caller must target a store; when the org has one
+   *    active store, it is selected automatically.
+   */
+  async resolveEffectiveFiscalScope(params: {
+    store_id_filter?: number | null;
+  }): Promise<{
+    organization_id: number;
+    fiscal_scope: OrganizationFiscalScope;
+    store_id?: number;
+  }> {
+    const orgId = this.requireOrgId();
+    const fiscal_scope = await this.fiscalScope.requireFiscalScope(orgId);
+    const store_id_filter = params.store_id_filter ?? null;
+
+    if (fiscal_scope === 'ORGANIZATION') {
+      if (store_id_filter == null) {
+        return { organization_id: orgId, fiscal_scope };
+      }
+      await this.assertStoreInOrg(store_id_filter);
+      return {
+        organization_id: orgId,
+        fiscal_scope,
+        store_id: store_id_filter,
+      };
+    }
+
+    if (store_id_filter != null) {
+      await this.assertStoreInOrg(store_id_filter);
+      return {
+        organization_id: orgId,
+        fiscal_scope,
+        store_id: store_id_filter,
+      };
+    }
+
+    const stores = await this.prisma.stores.findMany({
+      where: { organization_id: orgId, is_active: true },
+      select: { id: true },
+      take: 2,
+    });
+    if (stores.length === 1) {
+      return {
+        organization_id: orgId,
+        fiscal_scope,
+        store_id: stores[0].id,
+      };
+    }
+
+    throw new BadRequestException(
+      'store_id is required when fiscal_scope is STORE and the organization has multiple stores',
     );
   }
 

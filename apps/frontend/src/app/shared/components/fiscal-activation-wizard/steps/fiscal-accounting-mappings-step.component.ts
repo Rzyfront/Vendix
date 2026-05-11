@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   signal,
@@ -50,7 +51,7 @@ const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
       <app-account-mappings-form
         #form
         [initialValue]="initial()"
-        [disabled]="submitting()"
+        [disabled]="submitting() || readOnlyForStore()"
         [mappingKeys]="mappingKeys()"
         [availableAccounts]="accounts()"
         (validityChange)="onValidity($event)"
@@ -90,16 +91,22 @@ export class FiscalAccountingMappingsStepComponent
   readonly initial = signal<Partial<AccountMappingsValue> | null>(null);
   readonly mappingKeys = signal<MappingKeyDef[]>(DEFAULT_MAPPING_KEYS);
   readonly accounts = signal<AccountOption[]>([]);
+  readonly existingCount = signal(0);
+  readonly readOnlyForStore = computed(
+    () =>
+      this.service.userScope() === 'store' &&
+      this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
 
   private readonly form =
     viewChild.required<AccountMappingsFormComponent>('form');
-  private loaded = false;
+  private loadedContextKey: string | null = null;
 
   constructor() {
     effect(() => {
-      const scope = this.service.userScope();
-      if (scope && !this.loaded) {
-        this.loaded = true;
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
         void this.loadData();
       }
     });
@@ -124,11 +131,9 @@ export class FiscalAccountingMappingsStepComponent
       // specific store is selected (operating_scope=STORE or per-store
       // overrides). For consolidated org reads (no targetStoreId) the query
       // is omitted and the backend returns org-wide rows.
-      const storeQuery =
-        this.service.userScope() === 'organization' &&
-        this.service.targetStoreId() !== null
-          ? `store_id=${this.service.targetStoreId()}`
-          : '';
+      const storeQuery = this.service.storeContext().store_id
+        ? `store_id=${this.service.storeContext().store_id}`
+        : '';
       const mappingsUrl = storeQuery
         ? `${this.mappingsUrl()}?${storeQuery}`
         : this.mappingsUrl();
@@ -149,6 +154,9 @@ export class FiscalAccountingMappingsStepComponent
       mappingItems.forEach((m: any) => {
         if (m?.mapping_key) initialMap[m.mapping_key] = m.account_id ?? null;
       });
+      this.existingCount.set(
+        Object.values(initialMap).filter((value) => value != null).length,
+      );
       this.initial.set({ mappings: initialMap });
 
       const coaPayload = coaRes?.data ?? coaRes;
@@ -176,6 +184,7 @@ export class FiscalAccountingMappingsStepComponent
   }
 
   async onApplyDefaults(): Promise<void> {
+    if (this.readOnlyForStore()) return;
     try {
       // Reset accepts `store_id` in the body via ResetAccountMappingDto.
       const body =
@@ -198,6 +207,23 @@ export class FiscalAccountingMappingsStepComponent
 
     this.submitting.set(true);
     this.localError.set(null);
+    if (this.readOnlyForStore()) {
+      if (this.existingCount() === 0) {
+        this.localError.set(
+          'La configuración fiscal heredada todavía no tiene mapeos contables.',
+        );
+        this.submitting.set(false);
+        return null;
+      }
+      const ref = {
+        count: this.existingCount(),
+        inherited: true,
+        completed_at: new Date().toISOString(),
+      };
+      await this.service.commitStep(this.stepId, ref);
+      this.submitting.set(false);
+      return { ref };
+    }
     try {
       const value = form.getValue();
       const mappings = Object.entries(value.mappings)

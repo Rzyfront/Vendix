@@ -4,13 +4,13 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { CreateFiscalPeriodDto } from './dto/create-fiscal-period.dto';
 import { UpdateFiscalPeriodDto } from './dto/update-fiscal-period.dto';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class FiscalPeriodsService {
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly operatingScopeService: OperatingScopeService,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -23,7 +23,7 @@ export class FiscalPeriodsService {
 
   async findAll() {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -44,7 +44,7 @@ export class FiscalPeriodsService {
 
   async findOne(id: number) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -70,7 +70,7 @@ export class FiscalPeriodsService {
 
   async create(create_dto: CreateFiscalPeriodDto) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -276,7 +276,7 @@ export class FiscalPeriodsService {
    */
   async findOpenPeriodForDate(date: Date) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });

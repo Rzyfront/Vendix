@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   signal,
@@ -28,7 +29,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
       <app-payroll-settings-form
         #form
         [initialValue]="initial()"
-        [disabled]="submitting()"
+        [disabled]="submitting() || readOnlyForStore()"
         (validityChange)="onValidity($event)"
       ></app-payroll-settings-form>
 
@@ -61,31 +62,36 @@ export class FiscalPayrollConfigStepComponent implements FiscalWizardStepHost {
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<PayrollSettingsValue> | null>(null);
+  readonly readOnlyForStore = computed(
+    () =>
+      this.service.userScope() === 'store' &&
+      this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
 
   private readonly form =
     viewChild.required<PayrollSettingsFormComponent>('form');
-  private loaded = false;
+  private loadedContextKey: string | null = null;
 
   constructor() {
     effect(() => {
-      const scope = this.service.userScope();
-      if (scope && !this.loaded) {
-        this.loaded = true;
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
         void this.loadInitial();
       }
     });
   }
 
   private baseUrl(): string {
-    // userScope (logged-in user) routes the request, not org-level fiscal_scope.
-    // Dedicated payroll endpoint with UpdatePayrollSettingsDto — NOT /settings.
-    // TODO: surface read-only banner if STORE_ADMIN hits an org-owned config.
+    // userScope routes the request; backend resolves fiscal ownership.
     return `${environment.apiUrl}/${this.service.userScope()}/payroll/settings`;
   }
 
   private async loadInitial(): Promise<void> {
     try {
-      const res: any = await firstValueFrom(this.http.get(this.baseUrl()));
+      const res: any = await firstValueFrom(
+        this.http.get(`${this.baseUrl()}${this.service.storeQuery()}`),
+      );
       const payload = res?.data ?? res;
       if (payload && typeof payload === 'object') {
         this.initial.set(payload as Partial<PayrollSettingsValue>);
@@ -108,7 +114,21 @@ export class FiscalPayrollConfigStepComponent implements FiscalWizardStepHost {
     this.localError.set(null);
     try {
       const value = form.getValue();
-      await firstValueFrom(this.http.put(this.baseUrl(), value));
+      if (this.readOnlyForStore()) {
+        const ref = {
+          payment_frequency: value.payment_frequency,
+          inherited: true,
+          saved_at: new Date().toISOString(),
+        };
+        await this.service.commitStep(this.stepId, ref);
+        return { ref };
+      }
+      await firstValueFrom(
+        this.http.put(`${this.baseUrl()}${this.service.storeQuery()}`, {
+          ...value,
+          ...this.service.storeContext(),
+        }),
+      );
       const ref = {
         payment_frequency: value.payment_frequency,
         saved_at: new Date().toISOString(),

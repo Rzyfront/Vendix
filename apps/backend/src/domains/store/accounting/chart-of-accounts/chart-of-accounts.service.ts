@@ -6,13 +6,13 @@ import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { QueryAccountDto } from './dto/query-account.dto';
 import { Prisma } from '@prisma/client';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class ChartOfAccountsService {
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly operatingScopeService: OperatingScopeService,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -36,7 +36,7 @@ export class ChartOfAccountsService {
       offset,
     } = query;
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -90,7 +90,7 @@ export class ChartOfAccountsService {
 
   async getTree() {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -124,7 +124,7 @@ export class ChartOfAccountsService {
 
   async findOne(id: number) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -160,7 +160,7 @@ export class ChartOfAccountsService {
 
   async create(create_dto: CreateAccountDto) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });
@@ -326,7 +326,7 @@ export class ChartOfAccountsService {
    */
   async findByCode(code: string) {
     const context = this.getContext();
-    const accountingEntity = await this.operatingScopeService.resolveAccountingEntity({
+    const accountingEntity = await this.fiscalScopeService.resolveAccountingEntityForFiscal({
       organization_id: context.organization_id!,
       store_id: context.store_id,
     });

@@ -83,6 +83,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
+| Choosing between viable architectural approaches | `how-to-plan` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
@@ -129,7 +130,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
+| Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
+| Discovering reusable assets before proposing new code | `how-to-plan` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
 | Displaying or formatting money/currency values | `vendix-currency-formatting` |
@@ -176,6 +179,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the AI chat widget | `vendix-ai-chat` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
+| Picking concrete verification mechanisms (Bruno, curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
 | Printing documents with date fields | `vendix-date-timezone` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
@@ -187,7 +191,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
+| Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
@@ -207,6 +213,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verifying Build | `buildcheck-dev` |
+| Verifying plan completeness before approval | `how-to-plan` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |

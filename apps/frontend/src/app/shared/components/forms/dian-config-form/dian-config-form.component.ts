@@ -275,7 +275,10 @@ export class DianConfigFormComponent {
   constructor() {
     effect(() => {
       const v = this.initialValue();
-      if (v) this.form.patchValue(v, { emitEvent: false });
+      if (v) {
+        this.form.patchValue(v, { emitEvent: false });
+        this.emitCurrent();
+      }
     });
 
     effect(() => {
@@ -285,12 +288,7 @@ export class DianConfigFormComponent {
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        const isValid = this.form.valid;
-        this.valid.set(isValid);
-        this.validityChange.emit(isValid);
-        this.valueChange.emit(this.toValue());
-      });
+      .subscribe(() => this.emitCurrent());
   }
 
   getValue(): DianConfigValue {
@@ -325,7 +323,7 @@ export class DianConfigFormComponent {
   private setFile(file: File | null): void {
     this.selectedFile.set(file);
     this.selectedFileName.set(file?.name ?? '');
-    this.valueChange.emit(this.toValue());
+    this.emitCurrent();
   }
 
   private toValue(): DianConfigValue {
@@ -333,5 +331,12 @@ export class DianConfigFormComponent {
       ...this.form.getRawValue(),
       certificate_file: this.selectedFile(),
     };
+  }
+
+  private emitCurrent(): void {
+    const isValid = this.form.valid;
+    this.valid.set(isValid);
+    this.validityChange.emit(isValid);
+    this.valueChange.emit(this.toValue());
   }
 }

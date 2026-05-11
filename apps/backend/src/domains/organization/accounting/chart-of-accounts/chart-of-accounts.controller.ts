@@ -74,7 +74,10 @@ export class OrgChartOfAccountsController {
   @SkipModuleFlowGuard() // bootstrap: wizard uses this to seed PUC and activate module
   @Permissions('organization:accounting:chart_of_accounts:create')
   @HttpCode(HttpStatus.CREATED)
-  async seedDefault(@Body() body: SeedDefaultChartDto) {
+  async seedDefault(
+    @Body() body: SeedDefaultChartDto,
+    @Query('store_id') storeIdRaw?: string,
+  ) {
     const organization_id = RequestContextService.getOrganizationId();
     if (!organization_id) {
       throw new VendixHttpException(
@@ -84,6 +87,7 @@ export class OrgChartOfAccountsController {
     }
     const result = await this.defaultChartSeeder.seed({
       organization_id,
+      store_id: storeIdRaw ? Number(storeIdRaw) : undefined,
       force: body.force,
     });
     return this.responseService.created(

@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
 import { TaxesService } from './taxes.service';
 import {
@@ -27,6 +28,7 @@ import { ResponseService } from '@common/responses/response.service';
 import { DefaultTaxesSeederService } from '@common/services/default-taxes-seeder.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Controller('store/taxes')
 @UseGuards(PermissionsGuard)
@@ -35,6 +37,7 @@ export class TaxesController {
     private readonly taxesService: TaxesService,
     private readonly responseService: ResponseService,
     private readonly defaultTaxesSeeder: DefaultTaxesSeederService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   @Post('seed-default')
@@ -48,9 +51,20 @@ export class TaxesController {
         'Store context required to seed default taxes.',
       );
     }
+    const organization_id = RequestContextService.getOrganizationId();
+    if (organization_id) {
+      const fiscalScope =
+        await this.fiscalScope.requireFiscalScope(organization_id);
+      if (fiscalScope === 'ORGANIZATION') {
+        throw new BadRequestException(
+          'Taxes are managed at organization level for this organization.',
+        );
+      }
+    }
     const result = await this.defaultTaxesSeeder.seed({
       scope: 'STORE',
       store_id,
+      organization_id,
       force: body.force,
     });
     return this.responseService.created(

@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   effect,
   inject,
   signal,
@@ -29,7 +30,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
       <app-default-taxes-form
         #form
         [initialValue]="initial()"
-        [disabled]="submitting()"
+        [disabled]="submitting() || readOnlyForStore()"
         (validityChange)="onValidity($event)"
       ></app-default-taxes-form>
 
@@ -65,11 +66,67 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
     mode: 'defaults',
     taxes: [],
   });
+  readonly existingCount = signal(0);
+  readonly readOnlyForStore = computed(
+    () =>
+      this.service.userScope() === 'store' &&
+      this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
+  );
 
   private readonly form = viewChild.required<DefaultTaxesFormComponent>('form');
+  private loadedContextKey: string | null = null;
+
+  constructor() {
+    effect(() => {
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
+        void this.loadInitial();
+      }
+    });
+  }
 
   private baseUrl(): string {
     return `${environment.apiUrl}/${this.service.userScope()}/taxes`;
+  }
+
+  private async loadInitial(): Promise<void> {
+    try {
+      const res: any = await firstValueFrom(
+        this.http.get(`${this.baseUrl()}${this.service.storeQuery()}`),
+      );
+      const payload = res?.data ?? res;
+      const items: any[] = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : [];
+      this.existingCount.set(items.length);
+      if (items.length > 0) {
+        this.initial.set({
+          mode: 'custom',
+          taxes: items.map((item) => {
+            const rate = item?.tax_rates?.[0]?.rate ?? item?.rate ?? 0;
+            return {
+              name: item.name ?? '',
+              percentage: Number(rate) * 100,
+              type: this.guessType(item.name ?? ''),
+            };
+          }),
+        });
+      }
+    } catch {
+      // Silent: defaults mode is fine for new configurations.
+    }
+  }
+
+  private guessType(name: string): TaxRow['type'] {
+    const normalized = name.toLowerCase();
+    if (normalized.includes('ica')) return 'ICA';
+    if (normalized.includes('ret')) return 'WITHHOLDING';
+    return 'VAT';
   }
 
   onValidity(v: boolean): void {
@@ -88,13 +145,33 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
 
     this.submitting.set(true);
     this.localError.set(null);
+    if (this.readOnlyForStore()) {
+      if (this.existingCount() === 0) {
+        this.localError.set(
+          'La configuración fiscal heredada todavía no tiene impuestos configurados.',
+        );
+        this.submitting.set(false);
+        return null;
+      }
+      const ref = {
+        count: this.existingCount(),
+        inherited: true,
+        completed_at: new Date().toISOString(),
+      };
+      await this.service.commitStep(this.stepId, ref);
+      this.submitting.set(false);
+      return { ref };
+    }
     try {
       const value = form.getValue();
       let count = 0;
 
       if (value.mode === 'defaults') {
         const res: any = await firstValueFrom(
-          this.http.post(`${this.baseUrl()}/seed-default`, { force: false }),
+          this.http.post(`${this.baseUrl()}/seed-default${this.service.storeQuery()}`, {
+            force: false,
+            ...this.service.storeContext(),
+          }),
         );
         const payload = res?.data ?? res;
         count =
@@ -113,6 +190,7 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
               type: this.mapType(row.type),
               rate: row.percentage,
               is_inclusive: false,
+              ...this.service.storeContext(),
             }),
           );
           count++;

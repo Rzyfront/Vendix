@@ -92,13 +92,13 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
 
   private readonly form = viewChild.required<LegalDataFormComponent>('form');
 
-  private loaded = false;
+  private loadedContextKey: string | null = null;
 
   constructor() {
     effect(() => {
-      const scope = this.service.userScope();
-      if (scope && !this.loaded) {
-        this.loaded = true;
+      const key = this.service.fiscalContextKey();
+      if (key && key !== this.loadedContextKey) {
+        this.loadedContextKey = key;
         void this.loadInitial();
       }
     });
@@ -117,12 +117,12 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
 
   private async loadInitial(): Promise<void> {
     try {
-      // GET /{scope}/settings still returns the full settings object; read
-      // `fiscal_data` from there (supports both `settings.fiscal_data` for the
-      // org wrapper response and flat `fiscal_data` for the store response).
-      const res: any = await firstValueFrom(this.http.get(this.baseUrl()));
+      const res: any = await firstValueFrom(
+        this.http.get(`${this.fiscalDataUrl()}${this.service.storeQuery()}`),
+      );
       const payload = res?.data ?? res;
-      const fiscalData = payload?.settings?.fiscal_data ?? payload?.fiscal_data;
+      const fiscalData =
+        payload?.fiscal_data ?? payload?.settings?.fiscal_data ?? payload;
       if (fiscalData && typeof fiscalData === 'object') {
         this.initial.set(fiscalData as Partial<LegalDataValue>);
       }
@@ -137,10 +137,19 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
 
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     if (this.readOnlyForStore()) {
-      this.localError.set(
-        'Este paso debe completarlo un ORG_ADMIN. La configuración fiscal está centralizada en la organización.',
-      );
-      return null;
+      if (!this.valid()) {
+        this.localError.set(
+          'La configuración fiscal heredada todavía no tiene datos legales completos.',
+        );
+        return null;
+      }
+      const ref = {
+        scope: 'ORGANIZATION',
+        inherited: true,
+        completed_at: new Date().toISOString(),
+      };
+      await this.service.commitStep(this.stepId, ref);
+      return { ref };
     }
 
     const form = this.form();
@@ -157,7 +166,10 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
       // the settings JSON. Payload is the flat form value — no `settings`
       // wrapper, no `fiscal_data` wrapper.
       await firstValueFrom(
-        this.http.patch(this.fiscalDataUrl(), value),
+        this.http.patch(this.fiscalDataUrl(), {
+          ...value,
+          ...this.service.storeContext(),
+        }),
       );
       const ref = {
         scope: scope === 'organization' ? 'ORGANIZATION' : 'STORE',

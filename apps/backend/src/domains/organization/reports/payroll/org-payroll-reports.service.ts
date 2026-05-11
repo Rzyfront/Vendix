@@ -1,19 +1,18 @@
-import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 /**
- * Reportes de nómina para ORG_ADMIN.
+ * Reportes de nómina fiscal para ORG_ADMIN.
  *
  * Réplica funcional de `PayrollReportsService` (store) pero usando
- * `OrganizationPrismaService` y soportando filtro opcional `store_id` en
- * `payroll_runs.store_id` para hacer breakdown por tienda. La lógica original
- * ya era org-aggregated; aquí mantenemos ese contrato y añadimos el filtro
- * que pide la matriz de operating_scope.
+ * `OrganizationPrismaService`. Cuando fiscal_scope=ORGANIZATION permite lectura
+ * consolidada; cuando fiscal_scope=STORE exige `store_id` para no mezclar
+ * obligaciones fiscales de tiendas distintas.
  */
 @Injectable()
 export class OrgPayrollReportsService {
@@ -22,7 +21,7 @@ export class OrgPayrollReportsService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly orgPrisma: OrganizationPrismaService,
-    private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   private requireOrgId(): number {
@@ -37,7 +36,7 @@ export class OrgPayrollReportsService {
     store_id_filter?: number | null,
   ): Promise<{ organization_id: number; store_id: number | null }> {
     const organization_id = this.requireOrgId();
-    const scope = await this.operatingScope.requireOperatingScope(
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
       organization_id,
     );
 
@@ -49,11 +48,10 @@ export class OrgPayrollReportsService {
       return { organization_id, store_id: store_id_filter };
     }
 
-    if (scope === 'STORE') {
-      await this.orgPrisma.getScopedWhere({
-        organization_id,
-        store_id_filter: null,
-      });
+    if (fiscalScope === 'STORE') {
+      throw new BadRequestException(
+        'store_id is required when fiscal_scope is STORE',
+      );
     }
 
     return { organization_id, store_id: null };
@@ -107,7 +105,10 @@ export class OrgPayrollReportsService {
     const runs = await this.orgPrisma.payroll_runs.findMany({
       where,
       orderBy: { period_start: 'desc' },
-      include: { _count: { select: { payroll_items: true } } },
+      include: {
+        store: { select: { id: true, name: true, slug: true } },
+        _count: { select: { payroll_items: true } },
+      },
     });
 
     return runs.map((run) => ({
@@ -115,7 +116,9 @@ export class OrgPayrollReportsService {
       payroll_number: run.payroll_number,
       frequency: run.frequency,
       status: run.status,
+      send_status: run.send_status,
       store_id: run.store_id,
+      store: run.store,
       total_earnings: Number(run.total_earnings),
       total_deductions: Number(run.total_deductions),
       employer_costs: Number(run.total_employer_costs),
@@ -163,6 +166,7 @@ export class OrgPayrollReportsService {
             period_start: true,
             period_end: true,
             store_id: true,
+            store: { select: { id: true, name: true, slug: true } },
           },
         },
       },
@@ -175,6 +179,7 @@ export class OrgPayrollReportsService {
       department: item.employee.department || '—',
       payroll_period: `${item.payroll_run.period_start.toISOString().split('T')[0]} - ${item.payroll_run.period_end.toISOString().split('T')[0]}`,
       store_id: item.payroll_run.store_id,
+      store: item.payroll_run.store,
       base_salary: Number(item.base_salary),
       worked_days: item.worked_days,
       earnings: Number(item.total_earnings),

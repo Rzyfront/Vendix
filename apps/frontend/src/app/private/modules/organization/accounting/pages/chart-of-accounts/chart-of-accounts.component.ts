@@ -1,81 +1,137 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
+import { switchMap } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  CardComponent,
-  AlertBannerComponent,
-  SpinnerComponent,
-  EmptyStateComponent,
-  BadgeComponent,
-} from '../../../../../../shared/components/index';
-import { OrgAccountingService, ChartAccountRow } from '../../services/org-accounting.service';
-import { ApiErrorService } from '../../../../../../core/services/api-error.service';
 
-/**
- * ORG_ADMIN — Plan de Cuentas (consolidado).
- * Read-only listing consuming /api/organization/accounting/chart-of-accounts.
- */
+import {
+  AlertBannerComponent,
+  CardComponent,
+  FilterConfig,
+  FilterValues,
+  InputsearchComponent,
+  ItemListCardConfig,
+  OptionsDropdownComponent,
+  ResponsiveDataViewComponent,
+  StatsComponent,
+  TableColumn,
+} from '../../../../../../shared/components/index';
+import { ApiErrorService } from '../../../../../../core/services/api-error.service';
+import {
+  ChartAccountRow,
+  OrgAccountingService,
+} from '../../services/org-accounting.service';
+
 @Component({
   selector: 'vendix-org-chart-of-accounts',
   standalone: true,
-  imports: [CardComponent, AlertBannerComponent, SpinnerComponent, EmptyStateComponent, BadgeComponent],
+  imports: [
+    AlertBannerComponent,
+    CardComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    StatsComponent,
+  ],
   template: `
-    <div class="w-full p-2 md:p-4">
-      <header class="sticky top-0 z-10 bg-background py-2 md:py-4 mb-2">
-        <h1 class="text-lg md:text-2xl font-semibold text-text-primary">Plan de Cuentas</h1>
-        <p class="text-xs md:text-sm text-text-secondary mt-1">
-          PUC consolidado de la organización
-        </p>
-      </header>
+    <div class="w-full overflow-x-hidden">
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Cuentas"
+          [value]="rows().length"
+          smallText="PUC del alcance fiscal"
+          iconName="book-open"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-500"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Auxiliares"
+          [value]="acceptsEntriesCount()"
+          smallText="Aceptan asientos"
+          iconName="check-circle"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-500"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Activas"
+          [value]="activeCount()"
+          smallText="Disponibles"
+          iconName="activity"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-500"
+          [loading]="loading()"
+        />
+        <app-stats
+          title="Tipos"
+          [value]="accountTypesCount()"
+          smallText="Clases contables"
+          iconName="layers"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-500"
+          [loading]="loading()"
+        />
+      </div>
 
       @if (errorMessage(); as msg) {
-        <app-alert-banner variant="danger" [title]="'No se pudo cargar el plan de cuentas'">
+        <app-alert-banner variant="danger" title="No se pudo cargar el plan de cuentas">
           {{ msg }}
         </app-alert-banner>
       }
 
-      <app-card [padding]="false" customClasses="mt-2">
-        @if (loading()) {
-          <div class="p-8"><app-spinner [center]="true" text="Cargando cuentas..." /></div>
-        } @else if (rows().length === 0 && !errorMessage()) {
-          <app-empty-state
-            icon="book-open"
-            title="Sin cuentas"
-            description="Aún no se ha generado el plan de cuentas para tu organización."
-            [showActionButton]="false"
-          />
-        } @else {
-          <div class="overflow-x-auto">
-            <table class="w-full text-xs md:text-sm">
-              <thead class="bg-background-soft border-b border-border">
-                <tr class="text-left text-text-secondary">
-                  <th class="px-3 py-2 font-medium">Código</th>
-                  <th class="px-3 py-2 font-medium">Nombre</th>
-                  <th class="px-3 py-2 font-medium hidden md:table-cell">Tipo</th>
-                  <th class="px-3 py-2 font-medium hidden md:table-cell">Acepta asientos</th>
-                  <th class="px-3 py-2 font-medium">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of rows(); track row.id) {
-                  <tr class="border-b border-border/40 hover:bg-background-soft/50">
-                    <td class="px-3 py-2 font-mono">{{ row.account_code }}</td>
-                    <td class="px-3 py-2">{{ row.account_name }}</td>
-                    <td class="px-3 py-2 hidden md:table-cell">{{ row.account_type || '—' }}</td>
-                    <td class="px-3 py-2 hidden md:table-cell">
-                      {{ row.accepts_entries ? 'Sí' : 'No' }}
-                    </td>
-                    <td class="px-3 py-2">
-                      <app-badge
-                        [variant]="row.is_active ? 'success' : 'neutral'"
-                        size="sm"
-                      >{{ row.is_active ? 'Activa' : 'Inactiva' }}</app-badge>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+      <app-card [responsive]="true" [padding]="false">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-4">
+            <div>
+              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
+                Plan de cuentas ({{ filteredRows().length }})
+              </h2>
+              <p class="hidden text-sm text-text-secondary md:block">
+                PUC fiscal real, consolidado o por tienda según el alcance seleccionado.
+              </p>
+            </div>
+
+            <div class="flex w-full items-center gap-2 md:w-auto">
+              <app-inputsearch
+                class="flex-1 rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:w-72 md:shadow-none"
+                size="sm"
+                placeholder="Buscar código o nombre..."
+                [debounceTime]="300"
+                (search)="onSearch($event)"
+              />
+
+              <app-options-dropdown
+                class="rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none"
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [isLoading]="loading()"
+                triggerLabel="Filtros"
+                triggerIcon="filter"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+              />
+            </div>
           </div>
-        }
+        </div>
+
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="filteredRows()"
+            [columns]="tableColumns"
+            [cardConfig]="cardConfig"
+            [loading]="loading()"
+            [sortable]="true"
+            emptyTitle="Sin cuentas"
+            emptyMessage="Sin cuentas"
+            emptyDescription="No hay plan de cuentas para el alcance fiscal seleccionado."
+            emptyIcon="book-open"
+            [showEmptyAction]="false"
+            [showEmptyClearFilters]="hasActiveFilters()"
+            (emptyClearFiltersClick)="clearFilters()"
+          />
+        </div>
       </app-card>
     </div>
   `,
@@ -83,27 +139,191 @@ import { ApiErrorService } from '../../../../../../core/services/api-error.servi
 export class OrgChartOfAccountsComponent {
   private readonly service = inject(OrgAccountingService);
   private readonly errors = inject(ApiErrorService);
+  private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly loading = signal(true);
   readonly rows = signal<ChartAccountRow[]>([]);
   readonly errorMessage = signal<string | null>(null);
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({});
+
+  readonly activeCount = computed(() => this.rows().filter((row) => row.is_active !== false).length);
+  readonly acceptsEntriesCount = computed(() => this.rows().filter((row) => row.accepts_entries).length);
+  readonly accountTypesCount = computed(() => new Set(this.rows().map((row) => row.account_type).filter(Boolean)).size);
+
+  readonly filteredRows = computed(() => {
+    const search = this.searchTerm().trim().toLowerCase();
+    const type = this.filterValues()['account_type'] as string | undefined;
+    const accepts = this.filterValues()['accepts_entries'] as string | undefined;
+    return this.rows().filter((row) => {
+      if (type && row.account_type !== type) return false;
+      if (accepts === 'yes' && !row.accepts_entries) return false;
+      if (accepts === 'no' && row.accepts_entries) return false;
+      if (!search) return true;
+      return [this.accountCode(row), this.accountName(row), row.account_type]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(search));
+    });
+  });
+
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'account_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        ...Array.from(new Set(this.rows().map((row) => row.account_type).filter(Boolean)))
+          .map((type) => ({ value: String(type), label: this.typeLabel(String(type)) })),
+      ],
+    },
+    {
+      key: 'accepts_entries',
+      label: 'Acepta asientos',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'yes', label: 'Sí' },
+        { value: 'no', label: 'No' },
+      ],
+    },
+  ]);
+
+  readonly tableColumns: TableColumn[] = [
+    {
+      key: 'code',
+      label: 'Código',
+      sortable: true,
+      priority: 1,
+      transform: (_value, row) => this.accountCode(row),
+    },
+    {
+      key: 'name',
+      label: 'Nombre',
+      sortable: true,
+      priority: 1,
+      transform: (_value, row) => this.accountName(row),
+    },
+    {
+      key: 'account_type',
+      label: 'Tipo',
+      priority: 2,
+      transform: (value) => this.typeLabel(String(value || '')),
+    },
+    {
+      key: 'level',
+      label: 'Nivel',
+      align: 'center',
+      priority: 3,
+      defaultValue: '—',
+    },
+    {
+      key: 'accepts_entries',
+      label: 'Acepta asientos',
+      align: 'center',
+      priority: 2,
+      transform: (value) => (value ? 'Sí' : 'No'),
+    },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      align: 'center',
+      priority: 1,
+      badgeConfig: {
+        type: 'status',
+        colorMap: { true: 'success', false: 'default' },
+      },
+      transform: (value) => (value === false ? 'Inactiva' : 'Activa'),
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'name',
+    titleTransform: (item) => this.accountName(item),
+    subtitleTransform: (item) => this.accountCode(item),
+    avatarFallbackIcon: 'book-open',
+    avatarShape: 'square',
+    badgeKey: 'is_active',
+    badgeConfig: {
+      type: 'status',
+      colorMap: { true: 'success', false: 'default' },
+    },
+    badgeTransform: (value) => (value === false ? 'Inactiva' : 'Activa'),
+    detailKeys: [
+      { key: 'account_type', label: 'Tipo', icon: 'layers', transform: (value) => this.typeLabel(String(value || '')) },
+      { key: 'accepts_entries', label: 'Asientos', icon: 'check-circle', transform: (value) => (value ? 'Sí' : 'No') },
+      { key: 'level', label: 'Nivel', icon: 'git-branch', transform: (value) => String(value || '—') },
+    ],
+  };
 
   constructor() {
-    this.service
-      .getChartOfAccounts()
-      .pipe(takeUntilDestroyed(this.destroyRef))
+    this.route.queryParamMap
+      .pipe(
+        switchMap((params) => {
+          this.loading.set(true);
+          this.errorMessage.set(null);
+          const storeId = params.get('store_id');
+          return this.service.getChartOfAccounts({
+            limit: 1000,
+            ...(storeId ? { store_id: storeId } : {}),
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
         next: (res) => {
           this.rows.set(res?.data ?? []);
           this.loading.set(false);
         },
         error: (err) => {
-          // eslint-disable-next-line no-console
-          console.error('[OrgChartOfAccounts] load failed', err);
-          this.errorMessage.set(this.errors.humanize(err, 'No se pudo cargar el plan de cuentas.'));
+          this.errorMessage.set(
+            this.errors.humanize(err, 'No se pudo cargar el plan de cuentas.'),
+          );
+          this.rows.set([]);
           this.loading.set(false);
         },
       });
+  }
+
+  onSearch(search: string): void {
+    this.searchTerm.set(search);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set({ ...values });
+  }
+
+  clearFilters(): void {
+    this.searchTerm.set('');
+    this.filterValues.set({});
+  }
+
+  hasActiveFilters(): boolean {
+    return !!(
+      this.searchTerm() ||
+      this.filterValues()['account_type'] ||
+      this.filterValues()['accepts_entries']
+    );
+  }
+
+  accountCode(row: ChartAccountRow): string {
+    return row.code || row.account_code || '—';
+  }
+
+  accountName(row: ChartAccountRow): string {
+    return row.name || row.account_name || '—';
+  }
+
+  typeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      asset: 'Activo',
+      liability: 'Pasivo',
+      equity: 'Patrimonio',
+      income: 'Ingreso',
+      expense: 'Gasto',
+      cost: 'Costo',
+    };
+    return labels[type] || type || '—';
   }
 }

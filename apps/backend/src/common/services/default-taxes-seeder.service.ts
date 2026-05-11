@@ -118,6 +118,18 @@ export class DefaultTaxesSeederService {
         );
       }
       store_id = params.store_id;
+      if (params.organization_id) {
+        const store = await this.prisma.withoutScope().stores.findFirst({
+          where: { id: store_id, organization_id: params.organization_id },
+          select: { id: true },
+        });
+        if (!store) {
+          throw new VendixHttpException(
+            ErrorCodes.STORE_CONTEXT_001,
+            'Store does not belong to the current organization.',
+          );
+        }
+      }
       countWhere = { store_id };
     }
 

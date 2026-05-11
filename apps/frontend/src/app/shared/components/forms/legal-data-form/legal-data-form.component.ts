@@ -261,6 +261,7 @@ export class LegalDataFormComponent {
       const v = this.initialValue();
       if (v) {
         this.form.patchValue(v, { emitEvent: false });
+        this.emitCurrent();
       }
     });
 
@@ -273,12 +274,7 @@ export class LegalDataFormComponent {
     // Emit on every form change
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        const isValid = this.form.valid;
-        this.valid.set(isValid);
-        this.validityChange.emit(isValid);
-        this.valueChange.emit(this.form.getRawValue());
-      });
+      .subscribe(() => this.emitCurrent());
   }
 
   // ── Public API for parent ─────────────────────────────────
@@ -307,5 +303,12 @@ export class LegalDataFormComponent {
       ? Array.from(new Set([...current, code]))
       : current.filter((c) => c !== code);
     this.form.controls.tax_responsibilities.setValue(next);
+  }
+
+  private emitCurrent(): void {
+    const isValid = this.form.valid;
+    this.valid.set(isValid);
+    this.validityChange.emit(isValid);
+    this.valueChange.emit(this.form.getRawValue());
   }
 }

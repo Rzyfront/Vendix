@@ -1,8 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
 import { RequestContextService } from '../context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
+import {
+  FiscalScopeService,
+  OrganizationFiscalScope,
+} from './fiscal-scope.service';
 import {
   PayrollMinimalSettings,
   PayrollMinimalSettingsResponse,
@@ -43,12 +47,14 @@ export class PayrollSettingsService {
   constructor(
     private readonly storePrisma: StorePrismaService,
     private readonly orgPrisma: OrganizationPrismaService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async getSettings(
     scope: PayrollSettingsScope,
+    store_id?: number,
   ): Promise<PayrollMinimalSettingsResponse> {
-    const minimal = await this.readMinimal(scope);
+    const minimal = await this.readMinimal(scope, store_id);
     if (!minimal) {
       return { ...DEFAULT_MINIMAL_SETTINGS, is_default: true };
     }
@@ -66,6 +72,7 @@ export class PayrollSettingsService {
   async updateSettings(
     scope: PayrollSettingsScope,
     dto: UpdatePayrollSettingsDto,
+    store_id?: number,
   ): Promise<PayrollMinimalSettingsResponse> {
     const next: PayrollMinimalSettings = {
       payment_frequency: dto.payment_frequency as PayrollMinimalSettings['payment_frequency'],
@@ -81,7 +88,7 @@ export class PayrollSettingsService {
       ...(dto.pila_operator ? { pila_operator: dto.pila_operator } : {}),
     };
 
-    await this.writeMinimal(scope, next);
+    await this.writeMinimal(scope, next, store_id ?? dto.store_id);
     return { ...next, is_default: false };
   }
 
@@ -91,35 +98,41 @@ export class PayrollSettingsService {
 
   private async readMinimal(
     scope: PayrollSettingsScope,
+    store_id?: number,
   ): Promise<PayrollMinimalSettings | null> {
     if (scope === 'store') {
-      const storeId = RequestContextService.getStoreId();
-      if (!storeId) {
-        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      const target = await this.resolveStoreTarget(store_id);
+      if (target.fiscal_scope === 'ORGANIZATION') {
+        return this.readOrgMinimal(target.organization_id);
       }
-      const row = await this.storePrisma.store_settings.findUnique({
-        where: { store_id: storeId },
-      });
-      const settings = (row?.settings ?? {}) as Record<string, any>;
-      return (settings?.payroll?.minimal ?? null) as PayrollMinimalSettings | null;
+      return this.readStoreMinimal(target.store_id);
     }
 
-    const orgRow = await this.orgPrisma.organization_settings.findFirst();
-    const orgSettings = (orgRow?.settings ?? {}) as Record<string, any>;
-    return (orgSettings?.payroll?.minimal ?? null) as PayrollMinimalSettings | null;
+    if (store_id) {
+      return this.readMinimal('store', store_id);
+    }
+
+    const orgId = RequestContextService.getOrganizationId();
+    if (!orgId) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+    return this.readOrgMinimal(orgId);
   }
 
   private async writeMinimal(
     scope: PayrollSettingsScope,
     minimal: PayrollMinimalSettings,
+    store_id?: number,
   ): Promise<void> {
     if (scope === 'store') {
-      const storeId = RequestContextService.getStoreId();
-      if (!storeId) {
-        throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+      const target = await this.resolveStoreTarget(store_id);
+      if (target.fiscal_scope === 'ORGANIZATION') {
+        throw new BadRequestException(
+          'Payroll settings are managed at organization level for this organization.',
+        );
       }
-      const existing = await this.storePrisma.store_settings.findUnique({
-        where: { store_id: storeId },
+      const existing = await this.storePrisma.withoutScope().store_settings.findUnique({
+        where: { store_id: target.store_id },
       });
       const currentSettings = (existing?.settings ?? {}) as Record<string, any>;
       const currentPayroll = (currentSettings.payroll ?? {}) as Record<string, any>;
@@ -130,15 +143,27 @@ export class PayrollSettingsService {
           minimal,
         },
       };
-      await this.storePrisma.store_settings.upsert({
-        where: { store_id: storeId },
-        create: { store_id: storeId, settings: nextSettings as any },
+      await this.storePrisma.withoutScope().store_settings.upsert({
+        where: { store_id: target.store_id },
+        create: { store_id: target.store_id, settings: nextSettings as any },
         update: { settings: nextSettings as any, updated_at: new Date() },
       });
       return;
     }
 
-    const existing = await this.orgPrisma.organization_settings.findFirst();
+    if (store_id) {
+      return this.writeMinimal('store', minimal, store_id);
+    }
+
+    const orgId = RequestContextService.getOrganizationId();
+    if (!orgId) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const existing =
+      await this.orgPrisma.withoutScope().organization_settings.findFirst({
+        where: { organization_id: orgId },
+      });
     const currentSettings = (existing?.settings ?? {}) as Record<string, any>;
     const currentPayroll = (currentSettings.payroll ?? {}) as Record<string, any>;
     const nextSettings = {
@@ -150,22 +175,93 @@ export class PayrollSettingsService {
     };
 
     if (existing) {
-      await this.orgPrisma.organization_settings.update({
+      await this.orgPrisma.withoutScope().organization_settings.update({
         where: { id: existing.id },
         data: { settings: nextSettings as any, updated_at: new Date() },
       });
       return;
     }
 
-    const orgId = RequestContextService.getOrganizationId();
-    if (!orgId) {
-      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
-    }
-    await this.orgPrisma.organization_settings.create({
+    await this.orgPrisma.withoutScope().organization_settings.create({
       data: {
         organization_id: orgId,
         settings: nextSettings as any,
       },
     });
+  }
+
+  private async readStoreMinimal(
+    store_id: number,
+  ): Promise<PayrollMinimalSettings | null> {
+    const row = await this.storePrisma.withoutScope().store_settings.findUnique({
+      where: { store_id },
+    });
+    const settings = (row?.settings ?? {}) as Record<string, any>;
+    return (settings?.payroll?.minimal ?? null) as PayrollMinimalSettings | null;
+  }
+
+  private async readOrgMinimal(
+    organization_id: number,
+  ): Promise<PayrollMinimalSettings | null> {
+    const orgRow =
+      await this.orgPrisma.withoutScope().organization_settings.findFirst({
+        where: { organization_id },
+      });
+    const orgSettings = (orgRow?.settings ?? {}) as Record<string, any>;
+    return (orgSettings?.payroll?.minimal ??
+      null) as PayrollMinimalSettings | null;
+  }
+
+  private async resolveStoreTarget(store_id?: number): Promise<{
+    organization_id: number;
+    store_id: number;
+    fiscal_scope: OrganizationFiscalScope;
+  }> {
+    const context = RequestContextService.getContext();
+    const requestedStoreId = store_id ?? context?.store_id ?? null;
+    let organization_id = context?.organization_id;
+    let resolvedStoreId = requestedStoreId ?? undefined;
+
+    if (resolvedStoreId) {
+      const store = await this.storePrisma.withoutScope().stores.findFirst({
+        where: {
+          id: resolvedStoreId,
+          ...(organization_id ? { organization_id } : {}),
+          is_active: true,
+        },
+        select: { id: true, organization_id: true },
+      });
+      if (!store) {
+        throw new BadRequestException(
+          'Store does not belong to the current organization',
+        );
+      }
+      resolvedStoreId = store.id;
+      organization_id = store.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscal_scope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
+
+    if (!resolvedStoreId) {
+      const stores = await this.storePrisma.withoutScope().stores.findMany({
+        where: { organization_id, is_active: true },
+        select: { id: true },
+        take: 2,
+      });
+      if (stores.length === 1) {
+        resolvedStoreId = stores[0].id;
+      } else {
+        throw new BadRequestException(
+          'store_id is required when fiscal_scope is STORE',
+        );
+      }
+    }
+
+    return { organization_id, store_id: resolvedStoreId, fiscal_scope };
   }
 }

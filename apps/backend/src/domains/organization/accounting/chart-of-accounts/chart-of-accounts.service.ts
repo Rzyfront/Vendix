@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { OrganizationPrismaService } from '../../../../prisma/services/organization-prisma.service';
-import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 import { ChartOfAccountsService as StoreChartOfAccountsService } from '../../../store/accounting/chart-of-accounts/chart-of-accounts.service';
@@ -15,11 +15,11 @@ import { OrgAccountingScopeService } from '../org-accounting-scope.service';
 /**
  * Org-native chart of accounts.
  *
- * - operating_scope=ORGANIZATION → reads/writes the single ORG-scoped
+ * - fiscal_scope=ORGANIZATION → reads/writes the single ORG-scoped
  *   accounting_entity directly via `OrganizationPrismaService` (auto-scopes
  *   by `organization_id`). The accounting entity is materialised on demand
- *   by `OperatingScopeService.resolveAccountingEntity`.
- * - operating_scope=STORE → caller must provide `store_id`. We delegate to
+ *   by `FiscalScopeService.resolveAccountingEntityForFiscal`.
+ * - fiscal_scope=STORE → caller must provide `store_id`. We delegate to
  *   the existing store-side `ChartOfAccountsService` by pinning the store
  *   into RequestContext (no logic duplication).
  */
@@ -27,18 +27,17 @@ import { OrgAccountingScopeService } from '../org-accounting-scope.service';
 export class OrgChartOfAccountsService {
   constructor(
     private readonly orgPrisma: OrganizationPrismaService,
-    private readonly operatingScope: OperatingScopeService,
+    private readonly fiscalScope: FiscalScopeService,
     private readonly orgScope: OrgAccountingScopeService,
     private readonly storeChartOfAccounts: StoreChartOfAccountsService,
   ) {}
 
   async findAll(query: QueryAccountDto, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
-    if (scope.operating_scope === 'STORE' || scope.store_id) {
-      // STORE scope or per-store breakdown — delegate to store service.
+    if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
         this.storeChartOfAccounts.findAll(query),
       );
@@ -46,7 +45,7 @@ export class OrgChartOfAccountsService {
 
     // Consolidated ORG read.
     const accountingEntity =
-      await this.operatingScope.resolveAccountingEntity({
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: scope.organization_id,
         store_id: null,
       });
@@ -97,18 +96,18 @@ export class OrgChartOfAccountsService {
   }
 
   async getTree(store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
-    if (scope.operating_scope === 'STORE' || scope.store_id) {
+    if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
         this.storeChartOfAccounts.getTree(),
       );
     }
 
     const accountingEntity =
-      await this.operatingScope.resolveAccountingEntity({
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: scope.organization_id,
         store_id: null,
       });
@@ -137,18 +136,18 @@ export class OrgChartOfAccountsService {
   }
 
   async findOne(id: number, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
-    if (scope.operating_scope === 'STORE' || scope.store_id) {
+    if (scope.fiscal_scope === 'STORE') {
       return this.orgScope.runWithStoreContext(scope.store_id!, () =>
         this.storeChartOfAccounts.findOne(id),
       );
     }
 
     const accountingEntity =
-      await this.operatingScope.resolveAccountingEntity({
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
         organization_id: scope.organization_id,
         store_id: null,
       });
@@ -186,7 +185,7 @@ export class OrgChartOfAccountsService {
    * correct STORE entity.
    */
   async create(dto: CreateAccountDto, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
@@ -194,7 +193,7 @@ export class OrgChartOfAccountsService {
       scope.store_id ?? (await this.pickPivotStoreId()),
       async () => {
         // For ORG mode the store pivot is irrelevant: the store service
-        // resolves the accounting_entity by `operating_scope`, which returns
+        // resolves the accounting_entity by `fiscal_scope`, which returns
         // the ORG entity regardless of the store context pinned here.
         return this.storeChartOfAccounts.create(dto);
       },
@@ -202,7 +201,7 @@ export class OrgChartOfAccountsService {
   }
 
   async update(id: number, dto: UpdateAccountDto, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
@@ -213,7 +212,7 @@ export class OrgChartOfAccountsService {
   }
 
   async remove(id: number, store_id_filter?: number) {
-    const scope = await this.orgScope.resolveEffectiveScope({
+    const scope = await this.orgScope.resolveEffectiveFiscalScope({
       store_id_filter,
     });
 
