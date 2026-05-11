@@ -255,7 +255,7 @@ export class ReviewSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Ratings'],
+        data: ['5★', '4★', '3★', '2★', '1★'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
@@ -264,7 +264,7 @@ export class ReviewSummaryComponent implements OnInit {
       grid: {
         left: '3%',
         right: '6%',
-        bottom: '20%',
+        bottom: '25%',
         top: '3%',
         containLabel: true,
       },
@@ -273,6 +273,7 @@ export class ReviewSummaryComponent implements OnInit {
         data: stars.map((s) => `${s} ★`),
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
@@ -284,29 +285,11 @@ export class ReviewSummaryComponent implements OnInit {
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [
-        {
-          name: 'Distribución',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: counts,
-          itemStyle: {
-            color: '#f59e0b',
-          },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#f59e0b40' },
-                { offset: 1, color: '#f59e0b05' },
-              ],
-            },
-          },
-        },
+        { name: '5★', type: 'bar' as const, data: [counts[0]], itemStyle: { color: '#22c55e' }, barMaxWidth: 40 },
+        { name: '4★', type: 'bar' as const, data: [counts[1]], itemStyle: { color: '#84cc16' }, barMaxWidth: 40 },
+        { name: '3★', type: 'bar' as const, data: [counts[2]], itemStyle: { color: '#f59e0b' }, barMaxWidth: 40 },
+        { name: '2★', type: 'bar' as const, data: [counts[3]], itemStyle: { color: '#f97316' }, barMaxWidth: 40 },
+        { name: '1★', type: 'bar' as const, data: [counts[4]], itemStyle: { color: '#ef4444' }, barMaxWidth: 40 },
       ],
     });
 

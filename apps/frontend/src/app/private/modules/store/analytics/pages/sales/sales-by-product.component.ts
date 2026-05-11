@@ -319,13 +319,12 @@ onDateRangeChange(range: DateRangeFilter): void {
 
     const top10 = [...data]
       .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 10)
-      .reverse();
+      .slice(0, 10);
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
-    const primaryColor = '#3b82f6';
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316', '#8b5cf6'];
 
     this.topProductsChartOptions.set({
       tooltip: {
@@ -345,8 +344,8 @@ onDateRangeChange(range: DateRangeFilter): void {
       },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '20%',
+        right: '4%',
+        bottom: '25%',
         top: '3%',
         containLabel: true,
       },
@@ -355,11 +354,11 @@ onDateRangeChange(range: DateRangeFilter): void {
         data: top10.map((p) => p.product_name),
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 11 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
@@ -370,8 +369,8 @@ onDateRangeChange(range: DateRangeFilter): void {
       series: [{
         name: 'Productos',
         type: 'bar',
-        data: top10.map((p, i) => ({ value: p.revenue, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
-        barMaxWidth: 32,
+        data: top10.map((p, i) => ({ value: p.revenue, itemStyle: { color: colors[i % colors.length] } })),
+        barMaxWidth: 50,
       }],
     });
   }

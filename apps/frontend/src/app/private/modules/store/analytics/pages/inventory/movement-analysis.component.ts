@@ -618,7 +618,9 @@ onDateRangeChange(range: DateRangeFilter): void {
         }},
       legend: {
         data: labels,
+        selectedMode: true,
         bottom: 30,
+        left: 'center',
         textStyle: { color: '#6b7280' },
       },
       grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },

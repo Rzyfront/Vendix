@@ -346,7 +346,7 @@ export class LowStockComponent implements OnInit {
         },
       },
 legend: {
-        data: ['Bajo Stock'],
+        data: ['Agotados', 'Stock Bajo', 'En Stock'],
         selectedMode: true,
         bottom: 30,
         left: 'center',

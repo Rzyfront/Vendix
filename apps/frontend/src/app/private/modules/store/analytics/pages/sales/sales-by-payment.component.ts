@@ -301,7 +301,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         }});
   }
 
-  private updateChart(data: SalesByPaymentMethod[]): void {
+private updateChart(data: SalesByPaymentMethod[]): void {
     const categories = data.map((item) => item.display_name);
     const values = data.map((item) => item.total_amount);
     const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
@@ -317,8 +317,8 @@ onDateRangeChange(range: DateRangeFilter): void {
           }
           return html;
         }},
-legend: {
-        data: ['Pagos'],
+      legend: {
+        data: categories,
         selectedMode: true,
         bottom: 30,
         left: 'center',
@@ -330,6 +330,7 @@ legend: {
         data: categories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
@@ -342,12 +343,13 @@ legend: {
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: [{
-          name: 'Ventas',
-          type: 'bar',
-          data: categories.map((_, i) => ({ value: values[i], itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+      series: categories.map((cat, i) => ({
+          name: cat,
+          type: 'bar' as const,
+          data: [values[i]],
+          itemStyle: { color: colors[i % colors.length] },
           barMaxWidth: 40,
-        }],
+        })),
     });
   }
 

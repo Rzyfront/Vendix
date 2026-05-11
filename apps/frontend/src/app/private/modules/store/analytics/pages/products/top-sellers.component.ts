@@ -163,7 +163,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: ['Top Vendedores'],
+        data: names,
         selectedMode: true,
         bottom: 30,
         left: 'center',
@@ -193,15 +193,13 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: [{
-        name: 'Top Vendedores',
-        type: 'bar' as const,
-        data: revenues.map((r, i) => ({
-          value: r,
-          itemStyle: { color: colors[i % colors.length] }
+      series: names.map((name, i) => ({
+          name,
+          type: 'bar' as const,
+          data: [revenues[i]],
+          itemStyle: { color: colors[i % colors.length] },
+          barMaxWidth: 40,
         })),
-        barMaxWidth: 50,
-      }],
     });
   }
 

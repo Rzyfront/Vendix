@@ -254,7 +254,8 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         },
       },
       legend: {
-        data: ['Top Ganancia'],
+        data: names,
+        selectedMode: true,
         bottom: 30,
         left: 'center',
         textStyle: { color: textSecondary },
@@ -280,15 +281,13 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
-      series: [{
-        name: 'Top Ganancia',
-        type: 'bar' as const,
-        data: profits.map((p, i) => ({
-          value: p,
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] }
+      series: names.map((name, i) => ({
+          name,
+          type: 'bar' as const,
+          data: [profits[i]],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+          barMaxWidth: 40,
         })),
-        barMaxWidth: 50,
-      }],
     });
   }
 
