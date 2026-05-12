@@ -3000,65 +3000,40 @@ export async function seedPermissionsAndRoles(
     },
   ];
 
-  // Get valid permission names from our list
-  const validPermissionNames = new Set(permissions.map((p) => p.name));
+  // Create-only seed: never delete existing permission rows.
+  // Any conflicting (path, method) on insert raises P2002 and is skipped below.
 
-  // Delete permissions that are not in our list (to avoid conflicts)
-  const deletedCount = await client.permissions.deleteMany({
-    where: {
-      name: {
-        notIn: Array.from(validPermissionNames),
-      },
-    },
-  });
-
-  if (deletedCount.count > 0) {
-    console.log(`   🧹 Cleaned up ${deletedCount.count} old permissions`);
-  }
-
-  const canonicalByPathMethod = new Map<string, string>();
-  for (const p of permissions) {
-    canonicalByPathMethod.set(`${p.path}::${p.method}`, p.name);
-  }
-  const existingRows = await client.permissions.findMany({
-    select: { id: true, name: true, path: true, method: true },
-  });
-  const staleIds: number[] = [];
-  for (const row of existingRows) {
-    const canonical = canonicalByPathMethod.get(`${row.path}::${row.method}`);
-    if (canonical && canonical !== row.name) staleIds.push(row.id);
-  }
-  if (staleIds.length) {
-    const r = await client.permissions.deleteMany({
-      where: { id: { in: staleIds } },
-    });
-    console.log(
-      `   🧹 Removed ${r.count} stale permissions with conflicting (path, method)`,
-    );
-  }
-
-  // Create permissions
+  // Create-only: never overwrite an existing permission's path/method/description.
   let permissionsCreated = 0;
   let permissionsSkipped = 0;
   for (const permission of permissions) {
     try {
-      await client.permissions.upsert({
+      const existing = await client.permissions.findUnique({
         where: { name: permission.name },
-        update: {
-          description: permission.description,
-          path: permission.path,
-          method: permission.method as any,
-        },
-        create: {
+        select: { id: true },
+      });
+      if (existing) {
+        permissionsSkipped++;
+        continue;
+      }
+      const isSystemPermission =
+        permission.name.includes('super_admin') ||
+        permission.name.startsWith('system.') ||
+        permission.name.startsWith('security.') ||
+        permission.name.startsWith('rate.limiting.');
+      await client.permissions.create({
+        data: {
           name: permission.name,
           description: permission.description,
           path: permission.path,
           method: permission.method as any,
-        },
+          is_system_permission: isSystemPermission,
+        } as any,
       });
       permissionsCreated++;
     } catch (e: any) {
-      // Skip unique constraint violations on (path, method)
+      // Skip unique constraint violations on (path, method) — another row
+      // with the same (path, method) already exists under a different name.
       if (e?.code === 'P2002') {
         permissionsSkipped++;
       } else {
@@ -3068,22 +3043,11 @@ export async function seedPermissionsAndRoles(
   }
   if (permissionsSkipped > 0) {
     console.log(
-      `   ⚠️  Skipped ${permissionsSkipped} permissions (duplicate path+method)`,
+      `   ⏭  Skipped ${permissionsSkipped} permissions (already exist — preserved)`,
     );
   }
 
-  // Mark critical permissions as system permissions
-  await client.permissions.updateMany({
-    where: {
-      OR: [
-        { name: { contains: 'super_admin' } },
-        { name: { startsWith: 'system.' } },
-        { name: { startsWith: 'security.' } },
-        { name: { startsWith: 'rate.limiting.' } },
-      ],
-    },
-    data: { is_system_permission: true } as any,
-  });
+  // is_system_permission flag is set at create-time (additive-only seed).
 
   // Create roles
   const superAdminRole = await client.roles.upsert({
@@ -3177,11 +3141,8 @@ export async function seedPermissionsAndRoles(
     },
   });
 
-  // Ensure system roles have organization_id = null
-  await client.roles.updateMany({
-    where: { is_system_role: true },
-    data: { organization_id: null } as any,
-  });
+  // Create-only seed: system roles are inserted with organization_id=null on
+  // their initial upsert; existing roles are never mutated by this seed.
 
   const rolesCreated = 8;
 

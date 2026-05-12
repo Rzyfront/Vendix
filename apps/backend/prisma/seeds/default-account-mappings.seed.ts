@@ -204,27 +204,20 @@ export async function seedDefaultAccountMappings(
       });
 
       if (existing) {
-        // Update existing mapping
-        await client.accounting_account_mappings.update({
-          where: { id: existing.id },
-          data: {
-            account_id,
-            is_active: true,
-          },
-        });
-      } else {
-        // Create new mapping
-        await client.accounting_account_mappings.create({
-          data: {
-            organization_id: org.id,
-            store_id: null,
-            mapping_key,
-            account_id,
-            is_active: true,
-          },
-        });
+        // Preserve user-edited mapping — never overwrite account_id once set.
+        mappings_skipped++;
+        continue;
       }
 
+      await client.accounting_account_mappings.create({
+        data: {
+          organization_id: org.id,
+          store_id: null,
+          mapping_key,
+          account_id,
+          is_active: true,
+        },
+      });
       mappings_created++;
     }
 
@@ -233,7 +226,7 @@ export async function seedDefaultAccountMappings(
 
   console.log(
     `[Account Mappings] Processed ${organizations_processed} organizations: ` +
-      `${mappings_created} mappings created/updated, ${mappings_skipped} skipped`,
+      `${mappings_created} mappings created, ${mappings_skipped} skipped (preserved existing)`,
   );
 
   return { organizations_processed, mappings_created, mappings_skipped };

@@ -3,14 +3,14 @@ import { getPrismaClient } from './shared/client';
 
 export interface SeedAIEngineAppsResult {
   appsCreated: number;
-  appsUpdated: number;
+  appsSkipped: number;
 }
 
 /**
  * AI Engine Applications Seed
  *
- * Seeds the default AI application definitions used by various features.
- * Uses upsert by unique key to be fully idempotent.
+ * Seeds default AI application definitions only when missing — never
+ * overwrites user-edited prompts, temperature, max_tokens, or config_id.
  *
  * No dependencies on other seeds — ai_engine_applications is a global table.
  */
@@ -189,7 +189,7 @@ ESTRUCTURA:
   ];
 
   let appsCreated = 0;
-  let appsUpdated = 0;
+  let appsSkipped = 0;
 
   for (const app of apps) {
     const existing = await client.ai_engine_applications.findUnique({
@@ -197,22 +197,8 @@ ESTRUCTURA:
     });
 
     if (existing) {
-      await client.ai_engine_applications.update({
-        where: { key: app.key },
-        data: {
-          name: app.name,
-          description: app.description,
-          output_format: app.output_format,
-          temperature: app.temperature,
-          max_tokens: app.max_tokens,
-          is_active: app.is_active,
-          system_prompt: app.system_prompt,
-          prompt_template: app.prompt_template,
-          updated_at: new Date(),
-        },
-      });
-      appsUpdated++;
-      console.log(`    Updated: ${app.key}`);
+      appsSkipped++;
+      console.log(`    Skipped (preserved user config): ${app.key}`);
     } else {
       await client.ai_engine_applications.create({
         data: {
@@ -232,21 +218,29 @@ ESTRUCTURA:
     }
   }
 
-  // Link invoice_ocr to MiniMax VL config if available
+  // Link invoice_ocr to MiniMax VL config only when not yet configured.
   try {
-    const minimaxConfig = await client.ai_engine_configs.findFirst({
-      where: { model_id: 'MiniMax-VL-01' },
+    const invoiceOcrApp = await client.ai_engine_applications.findUnique({
+      where: { key: 'invoice_ocr' },
+      select: { config_id: true },
     });
-    if (minimaxConfig) {
-      await client.ai_engine_applications.update({
-        where: { key: 'invoice_ocr' },
-        data: { config_id: minimaxConfig.id },
+    if (invoiceOcrApp && invoiceOcrApp.config_id == null) {
+      const minimaxConfig = await client.ai_engine_configs.findFirst({
+        where: { model_id: 'MiniMax-VL-01' },
       });
-      console.log(`    Linked invoice_ocr → MiniMax VL (config #${minimaxConfig.id})`);
+      if (minimaxConfig) {
+        await client.ai_engine_applications.update({
+          where: { key: 'invoice_ocr' },
+          data: { config_id: minimaxConfig.id },
+        });
+        console.log(`    Linked invoice_ocr → MiniMax VL (config #${minimaxConfig.id})`);
+      }
+    } else if (invoiceOcrApp?.config_id != null) {
+      console.log('    Skipped link invoice_ocr (config_id already set by user)');
     }
   } catch (err) {
     console.log('    Could not link invoice_ocr to MiniMax config (may not exist yet)');
   }
 
-  return { appsCreated, appsUpdated };
+  return { appsCreated, appsSkipped };
 }

@@ -4,8 +4,8 @@ import { Prisma, PrismaClient } from '@prisma/client';
  * Result of {@link syncRolePermissions}.
  *
  * - `added`: new `role_permissions` rows that did not exist before the call.
- * - `revoked`: stale `role_permissions` rows deleted because they were not in
- *   the canonical `allowedPermissionIds` set.
+ * - `revoked`: kept for backward compatibility — always 0 in the additive-only
+ *   variant. The seed never revokes role-permission assignments.
  */
 export interface SyncRolePermissionsResult {
   added: number;
@@ -63,7 +63,7 @@ export async function syncRolePermissions(
 ): Promise<SyncRolePermissionsResult> {
   const allowedIds = Array.from(new Set(allowedPermissionIds));
 
-  // 1. Insert missing assignments. `skipDuplicates` makes this safe on re-runs.
+  // Additive-only: insert missing assignments, never revoke existing ones.
   let added = 0;
   if (allowedIds.length > 0) {
     const createResult = await client.role_permissions.createMany({
@@ -76,22 +76,11 @@ export async function syncRolePermissions(
     added = createResult.count;
   }
 
-  // 2. Revoke stale assignments not present in the canonical set.
-  const revokeResult = await client.role_permissions.deleteMany({
-    where: {
-      role_id: roleId,
-      ...(allowedIds.length > 0
-        ? { permission_id: { notIn: allowedIds } }
-        : {}),
-    },
-  });
-  const revoked = revokeResult.count;
-
-  if (added > 0 || revoked > 0) {
+  if (added > 0) {
     console.log(
-      `   🔄 Synced ${label}: +${added} added, -${revoked} revoked (canonical=${allowedIds.length})`,
+      `   🔄 Synced ${label}: +${added} added (canonical=${allowedIds.length}, additive-only)`,
     );
   }
 
-  return { added, revoked };
+  return { added, revoked: 0 };
 }

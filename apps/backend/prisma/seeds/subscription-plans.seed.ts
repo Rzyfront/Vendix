@@ -3,7 +3,7 @@ import { getPrismaClient } from './shared/client';
 
 export interface SeedSubscriptionPlansResult {
   plansCreated: number;
-  plansUpdated: number;
+  plansSkipped: number;
   defaultPlanCode: string;
 }
 
@@ -102,12 +102,24 @@ export async function seedSubscriptionPlans(
   };
 
   let plansCreated = 0;
-  let plansUpdated = 0;
+  let plansSkipped = 0;
 
-  // Transactional upsert with prior demotion of any other default plan.
-  // Demote-first preserves the partial unique index invariant: at most one
-  // active, non-archived plan with is_default=true.
+  // Only create the trial plan when missing. Never edit existing plans.
+  // Demote of other defaults only runs when we're about to insert a new trial,
+  // to preserve the partial unique index invariant (at most one active default).
   await client.$transaction(async (tx) => {
+    const existing = await tx.subscription_plans.findUnique({
+      where: { code: TRIAL_DEFAULT_CODE },
+    });
+
+    if (existing) {
+      plansSkipped++;
+      console.log(
+        `    Skipped (preserved user config): ${TRIAL_DEFAULT_CODE}`,
+      );
+      return;
+    }
+
     const demoted = await tx.subscription_plans.updateMany({
       where: {
         is_default: true,
@@ -123,52 +135,16 @@ export async function seedSubscriptionPlans(
       );
     }
 
-    const existing = await tx.subscription_plans.findUnique({
-      where: { code: TRIAL_DEFAULT_CODE },
+    await tx.subscription_plans.create({
+      data: planData,
     });
-
-    if (existing) {
-      await tx.subscription_plans.update({
-        where: { code: TRIAL_DEFAULT_CODE },
-        data: {
-          name: planData.name,
-          description: planData.description,
-          plan_type: planData.plan_type,
-          state: planData.state,
-          billing_cycle: planData.billing_cycle,
-          base_price: planData.base_price,
-          currency: planData.currency,
-          grace_period_soft_days: planData.grace_period_soft_days,
-          grace_period_hard_days: planData.grace_period_hard_days,
-          suspension_day: planData.suspension_day,
-          cancellation_day: planData.cancellation_day,
-          feature_matrix: planData.feature_matrix,
-          ai_feature_flags: planData.ai_feature_flags,
-          resellable: planData.resellable,
-          is_free: planData.is_free,
-          is_promotional: planData.is_promotional,
-          promo_priority: planData.promo_priority,
-          is_default: planData.is_default,
-          // Force NULL: canonical trial plan can never carry a redemption_code
-          // and any legacy non-null value would violate the CHECK constraint.
-          redemption_code: planData.redemption_code,
-          updated_at: new Date(),
-        },
-      });
-      plansUpdated++;
-      console.log(`    Updated: ${TRIAL_DEFAULT_CODE} (is_default=true)`);
-    } else {
-      await tx.subscription_plans.create({
-        data: planData,
-      });
-      plansCreated++;
-      console.log(`    Created: ${TRIAL_DEFAULT_CODE} (is_default=true)`);
-    }
+    plansCreated++;
+    console.log(`    Created: ${TRIAL_DEFAULT_CODE} (is_default=true)`);
   });
 
   return {
     plansCreated,
-    plansUpdated,
+    plansSkipped,
     defaultPlanCode: TRIAL_DEFAULT_CODE,
   };
 }

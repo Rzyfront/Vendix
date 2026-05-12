@@ -3,6 +3,7 @@ import { getPrismaClient } from './shared/client';
 
 export interface SeedSystemPaymentMethodsResult {
   methodsCreated: number;
+  methodsSkipped: number;
 }
 
 /**
@@ -236,27 +237,16 @@ export async function seedSystemPaymentMethods(
   ];
 
   let methodsCreated = 0;
+  let methodsSkipped = 0;
 
   for (const method of systemMethods) {
     const existing = await client.system_payment_methods.findUnique({
       where: { name: method.name },
+      select: { id: true },
     });
 
     if (existing) {
-      // Update config_schema and description if changed
-      const updateData: any = {};
-      if ((method as any).config_schema) {
-        updateData.config_schema = (method as any).config_schema;
-      }
-      if ((method as any).description) {
-        updateData.description = (method as any).description;
-      }
-      if (Object.keys(updateData).length > 0) {
-        await client.system_payment_methods.update({
-          where: { name: method.name },
-          data: updateData,
-        });
-      }
+      methodsSkipped++;
       continue;
     }
 
@@ -268,5 +258,6 @@ export async function seedSystemPaymentMethods(
 
   return {
     methodsCreated,
+    methodsSkipped,
   };
 }

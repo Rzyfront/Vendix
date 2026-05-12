@@ -341,22 +341,23 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
     },
   ];
 
-  // Crear o actualizar templates
+  // Create-only: never overwrite an existing template (user edits preserved).
   let created = 0;
-  let updated = 0;
+  let skipped = 0;
 
   for (const template of templates) {
-    const result = await client.default_templates.upsert({
+    const existing = await client.default_templates.findUnique({
       where: { template_name: template.template_name },
-      update: {
-        configuration_type: template.configuration_type as any,
-        template_data: template.template_data as any,
-        description: template.description,
-        is_active: true,
-        is_system: template.is_system,
-        updated_at: new Date(),
-      },
-      create: {
+      select: { id: true },
+    });
+
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await client.default_templates.create({
+      data: {
         template_name: template.template_name,
         configuration_type: template.configuration_type as any,
         template_data: template.template_data as any,
@@ -365,17 +366,12 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
         is_system: template.is_system,
       },
     });
-
-    if (result.created_at === result.updated_at) {
-      created++;
-    } else {
-      updated++;
-    }
+    created++;
   }
 
   console.log(
-    `✅ Default templates seeded: ${created} created, ${updated} updated`,
+    `✅ Default templates seeded: ${created} created, ${skipped} skipped (preserved user config)`,
   );
 
-  return { created, updated };
+  return { created, skipped };
 }
