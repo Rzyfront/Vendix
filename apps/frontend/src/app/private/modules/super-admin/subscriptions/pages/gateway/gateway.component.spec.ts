@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { provideZonelessChangeDetection } from '@angular/core';
+import { ApplicationRef, provideZonelessChangeDetection } from '@angular/core';
 import { Subject, of } from 'rxjs';
 
 import { PlatformGatewayView } from '../../interfaces/platform-gateway.interface';
@@ -59,7 +59,7 @@ describe('GatewayComponent', () => {
 
     fixture = TestBed.createComponent(GatewayComponent);
     component = fixture.componentInstance;
-    fixture.detectChanges();
+    TestBed.inject(ApplicationRef).tick();
   }
 
   it('calls getWompi on init', () => {
