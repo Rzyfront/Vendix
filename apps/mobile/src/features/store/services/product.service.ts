@@ -1,4 +1,5 @@
 import { apiClient, Endpoints } from '@/core/api';
+import { unwrapPaginated } from '@/core/api/pagination';
 import type {
   ApiResponse,
   PaginatedResponse,
@@ -11,6 +12,7 @@ import type {
   ProductImage,
   ProductCategory,
   Brand,
+  TaxCategory,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -47,9 +49,10 @@ export const ProductService = {
       barcode: query?.barcode,
       include_inactive: query?.include_inactive,
       pos_optimized: query?.pos_optimized,
+      include_variants: query?.include_variants,
     };
     const res = await apiClient.get(`${Endpoints.STORE.PRODUCTS.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<Product>>(res);
+    return unwrapPaginated<Product>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async getById(id: number): Promise<Product> {
@@ -87,8 +90,16 @@ export const ProductService = {
   },
 
   async search(query: string, limit = 20): Promise<PaginatedResponse<Product>> {
-    const res = await apiClient.get(`${Endpoints.STORE.PRODUCTS.SEARCH}?search=${encodeURIComponent(query)}&limit=${limit}`);
-    return unwrap<PaginatedResponse<Product>>(res);
+    const res = await apiClient.get(
+      `${Endpoints.STORE.PRODUCTS.SEARCH}${buildQuery({
+        search: query,
+        limit,
+        state: 'active',
+        include_variants: true,
+        pos_optimized: true,
+      })}`,
+    );
+    return unwrapPaginated<Product>(res, { page: 1, limit });
   },
 
   async getVariants(productId: number): Promise<ProductVariant[]> {
@@ -111,5 +122,10 @@ export const ProductService = {
   async getBrands(): Promise<Brand[]> {
     const res = await apiClient.get(Endpoints.STORE.BRANDS.LIST);
     return unwrap<Brand[]>(res);
+  },
+
+  async getTaxes(): Promise<TaxCategory[]> {
+    const res = await apiClient.get(Endpoints.STORE.TAXES.CATEGORIES);
+    return unwrap<TaxCategory[]>(res);
   },
 };

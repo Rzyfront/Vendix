@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
 import type {
   StockAdjustment,
@@ -12,11 +13,12 @@ import {
   ADJUSTMENT_TYPE_LABELS,
   ADJUSTMENT_STATE_LABELS,
 } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
@@ -87,10 +89,7 @@ export default function AdjustmentsScreen() {
         search: search || undefined,
         type: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -127,23 +126,24 @@ export default function AdjustmentsScreen() {
         renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard label="Total" value={adjustments.length} icon={<Icon name="clipboard-list" size={16} color={colorScales.blue[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="Pendientes" value={adjustments.filter((a) => a.state === 'pending').length} icon={<Icon name="clock" size={16} color={colorScales.amber[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="Aplicados" value={adjustments.filter((a) => a.state === 'applied').length} icon={<Icon name="check" size={16} color={colorScales.green[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="Total Qty" value={adjustments.reduce((s, a) => s + a.quantity, 0)} icon={<Icon name="package" size={16} color={colorScales.gray[600]} />} />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Total',
+                  value: adjustments.length,
+                  icon: <Icon name="clipboard-list" size={14} color={colorScales.blue[600]} />,
+                },
+                {
+                  label: 'Pendientes',
+                  value: adjustments.filter((a) => a.state === 'pending').length,
+                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <Input label="Buscar" value={search} onChangeText={setSearch} placeholder="Buscar ajustes..." />
+              <SearchBar value={search} onChangeText={setSearch} onClear={() => setSearch('')} placeholder="Buscar ajustes..." />
             </View>
 
             <View style={styles.filterRow}>
@@ -217,8 +217,7 @@ export default function AdjustmentsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[3], padding: spacing[4] },
-  statsItem: { width: '48%' },
+  statsWrap: { paddingHorizontal: spacing[4] },
   searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
   filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginBottom: spacing[3] },
   chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },

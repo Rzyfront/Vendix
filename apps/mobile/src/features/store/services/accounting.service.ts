@@ -1,4 +1,5 @@
 import { apiClient, Endpoints } from '@/core/api';
+import { unwrapPaginated } from '@/core/api/pagination';
 import type {
   ApiResponse,
   PaginatedResponse,
@@ -117,7 +118,7 @@ export const AccountingService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.ACCOUNTING.JOURNAL_ENTRIES.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<JournalEntry>>(res);
+    return unwrapPaginated<JournalEntry>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async getJournalEntry(id: string): Promise<JournalEntry> {
@@ -149,7 +150,7 @@ export const AccountingService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.ACCOUNTING.RECEIVABLES.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<Receivable>>(res);
+    return unwrapPaginated<Receivable>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async payReceivable(id: string, dto: PayReceivableDto): Promise<Receivable> {
@@ -166,7 +167,7 @@ export const AccountingService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.ACCOUNTING.PAYABLES.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<Payable>>(res);
+    return unwrapPaginated<Payable>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async payPayable(id: string, dto: PayPayableDto): Promise<Payable> {

@@ -2,14 +2,16 @@ import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateTransferDto } from '@/features/store/services/inventory.service';
 import type { StockTransfer, TransferState } from '@/features/store/types';
 import { TRANSFER_STATE_LABELS } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
@@ -75,10 +77,7 @@ export default function TransfersScreen() {
         search: search || undefined,
         state: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -114,23 +113,24 @@ export default function TransfersScreen() {
         renderItem={({ item }) => <TransferCard item={item} />}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard label="Total" value={transfers.length} icon={<Icon name="clipboard-list" size={16} color={colorScales.blue[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="Pendientes" value={transfers.filter((t) => t.state === 'pending').length} icon={<Icon name="clock" size={16} color={colorScales.amber[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="En Tránsito" value={transfers.filter((t) => t.state === 'in_transit').length} icon={<Icon name="truck" size={16} color={colorScales.blue[600]} />} />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard label="Completadas" value={transfers.filter((t) => t.state === 'completed').length} icon={<Icon name="check" size={16} color={colorScales.green[600]} />} />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Pendientes',
+                  value: transfers.filter((t) => t.state === 'pending').length,
+                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                },
+                {
+                  label: 'En Tránsito',
+                  value: transfers.filter((t) => t.state === 'in_transit').length,
+                  icon: <Icon name="truck" size={14} color={colorScales.blue[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <Input label="Buscar" value={search} onChangeText={setSearch} placeholder="Buscar transferencias..." />
+              <SearchBar value={search} onChangeText={setSearch} onClear={() => setSearch('')} placeholder="Buscar transferencias..." />
             </View>
 
             <View style={styles.filterRow}>
@@ -225,8 +225,7 @@ export default function TransfersScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[3], padding: spacing[4] },
-  statsItem: { width: '48%' },
+  statsWrap: { paddingHorizontal: spacing[4] },
   searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
   filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginBottom: spacing[3] },
   chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },

@@ -1,18 +1,50 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CustomerService } from '@/features/store/services/customer.service';
-import type { CustomerState, CreateCustomerDto } from '@/features/store/types';
+import type { CreateCustomerDto } from '@/features/store/types';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
-import { spacing, borderRadius, typography, colorScales, colors } from '@/shared/theme';
+import { spacing, typography, colorScales, colors } from '@/shared/theme';
 
-const STATE_OPTIONS: { label: string; value: CustomerState }[] = [
-  { label: 'Activo', value: 'active' },
-  { label: 'Inactivo', value: 'inactive' },
-];
+const SNAKE_TO_CAMEL: Record<string, string> = {
+  first_name: 'firstName',
+  last_name: 'lastName',
+  document_number: 'documentNumber',
+  email: 'email',
+  phone: 'phone',
+};
+
+function parseApiError(err: unknown): { fieldErrors: Record<string, string>; summary: string } {
+  const fieldErrors: Record<string, string> = {};
+  let summary = 'Error al crear el cliente';
+
+  const anyErr = err as { response?: { data?: { message?: unknown; details?: { validationErrors?: unknown } } }; message?: string };
+  const data = anyErr?.response?.data;
+  if (!data) {
+    summary = anyErr?.message || summary;
+    return { fieldErrors, summary };
+  }
+
+  const validationErrors = data?.details?.validationErrors;
+  if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+    for (const raw of validationErrors) {
+      const msg = String(raw);
+      const snake = msg.match(/^(\w+)\b/)?.[1] ?? '';
+      const camel = SNAKE_TO_CAMEL[snake];
+      if (camel && !fieldErrors[camel]) fieldErrors[camel] = msg;
+    }
+    summary = validationErrors.length === 1 ? String(validationErrors[0]) : 'Revisa los campos marcados';
+    return { fieldErrors, summary };
+  }
+
+  const message = data?.message;
+  if (typeof message === 'string' && message.trim()) summary = message;
+  else if (Array.isArray(message) && message.length > 0) summary = String(message[0]);
+  return { fieldErrors, summary };
+}
 
 export default function CreateCustomerScreen() {
   const router = useRouter();
@@ -23,7 +55,6 @@ export default function CreateCustomerScreen() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [documentNumber, setDocumentNumber] = useState('');
-  const [state, setState] = useState<CustomerState>('active');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const createMutation = useMutation({
@@ -34,7 +65,11 @@ export default function CreateCustomerScreen() {
       toastSuccess('Cliente creado exitosamente');
       router.back();
     },
-    onError: () => toastError('Error al crear el cliente'),
+    onError: (err) => {
+      const { fieldErrors, summary } = parseApiError(err);
+      setErrors((prev) => ({ ...prev, ...fieldErrors }));
+      toastError(summary);
+    },
   });
 
   const validate = (): boolean => {
@@ -46,21 +81,36 @@ export default function CreateCustomerScreen() {
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       newErrors.email = 'Ingresa un email válido';
     }
+    if (!documentNumber.trim()) newErrors.documentNumber = 'El documento es requerido';
+    if (phone.trim() && !/^[\d+#*\s()-]+$/.test(phone.trim())) {
+      newErrors.phone = 'El teléfono solo admite números y + # * ( ) -';
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = () => {
-    if (!validate()) return;
+    setErrors({});
+    if (!validate()) {
+      toastError('Revisa los campos marcados');
+      return;
+    }
     const dto: CreateCustomerDto = {
       first_name: firstName.trim(),
       last_name: lastName.trim(),
       email: email.trim(),
       phone: phone.trim() || undefined,
-      document_number: documentNumber.trim() || undefined,
-      state,
+      document_number: documentNumber.trim(),
     };
     createMutation.mutate(dto);
+  };
+
+  const clearFieldError = (field: string) => {
+    if (errors[field]) setErrors((prev) => {
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
   };
 
   return (
@@ -75,7 +125,7 @@ export default function CreateCustomerScreen() {
               <Input
                 label="Nombre *"
                 value={firstName}
-                onChangeText={setFirstName}
+                onChangeText={(v) => { setFirstName(v); clearFieldError('firstName'); }}
                 error={errors.firstName}
                 placeholder="Nombre"
               />
@@ -84,7 +134,7 @@ export default function CreateCustomerScreen() {
               <Input
                 label="Apellido *"
                 value={lastName}
-                onChangeText={setLastName}
+                onChangeText={(v) => { setLastName(v); clearFieldError('lastName'); }}
                 error={errors.lastName}
                 placeholder="Apellido"
               />
@@ -94,7 +144,7 @@ export default function CreateCustomerScreen() {
           <Input
             label="Email *"
             value={email}
-            onChangeText={setEmail}
+            onChangeText={(v) => { setEmail(v); clearFieldError('email'); }}
             error={errors.email}
             placeholder="email@ejemplo.com"
             keyboardType="email-address"
@@ -104,46 +154,28 @@ export default function CreateCustomerScreen() {
           <Input
             label="Teléfono"
             value={phone}
-            onChangeText={setPhone}
+            onChangeText={(v) => { setPhone(v); clearFieldError('phone'); }}
+            error={errors.phone}
             placeholder="+57 300 123 4567"
             keyboardType="phone-pad"
           />
 
           <Input
-            label="Número de documento"
+            label="Número de documento *"
             value={documentNumber}
-            onChangeText={setDocumentNumber}
+            onChangeText={(v) => { setDocumentNumber(v); clearFieldError('documentNumber'); }}
+            error={errors.documentNumber}
             placeholder="12345678"
           />
 
-          <View style={styles.sectionGap}>
-            <Text style={styles.sectionLabel}>Estado</Text>
-            <View style={styles.rowGap2}>
-              {STATE_OPTIONS.map((opt) => (
-                <Pressable
-                  key={opt.value}
-                  onPress={() => setState(opt.value)}
-                  style={[
-                    styles.stateButton,
-                    state === opt.value
-                      ? styles.stateButtonActive
-                      : styles.stateButtonInactive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.stateButtonText,
-                      state === opt.value
-                        ? styles.stateTextActive
-                        : styles.stateTextInactive,
-                    ]}
-                  >
-                    {opt.label}
-                  </Text>
-                </Pressable>
+          {Object.keys(errors).length > 0 && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerTitle}>Revisa los siguientes campos:</Text>
+              {Object.values(errors).map((msg, i) => (
+                <Text key={i} style={styles.errorBannerItem}>• {msg}</Text>
               ))}
             </View>
-          </View>
+          )}
         </View>
       </ScrollView>
 
@@ -175,42 +207,23 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
-  sectionGap: {
-    gap: spacing[2],
+  errorBanner: {
+    backgroundColor: colorScales.red[50],
+    borderWidth: 1,
+    borderColor: colors.error,
+    borderRadius: 8,
+    padding: spacing[3],
+    gap: spacing[1],
   },
-  sectionLabel: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[500],
-    textTransform: 'uppercase',
-    letterSpacing: 1.2,
-  },
-  rowGap2: {
-    flexDirection: 'row',
-    gap: spacing[2],
-  },
-  stateButton: {
-    flex: 1,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.lg,
-    alignItems: 'center',
-  },
-  stateButtonActive: {
-    backgroundColor: colors.primary,
-  },
-  stateButtonInactive: {
-    backgroundColor: colorScales.gray[100],
-  },
-  stateButtonText: {
+  errorBannerTitle: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.error,
+    marginBottom: spacing[1],
   },
-  stateTextActive: {
-    color: colors.background,
-  },
-  stateTextInactive: {
-    color: colorScales.gray[700],
+  errorBannerItem: {
+    fontSize: typography.fontSize.xs,
+    color: colors.error,
   },
   footer: {
     padding: spacing[4],

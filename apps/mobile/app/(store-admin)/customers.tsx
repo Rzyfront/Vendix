@@ -1,20 +1,20 @@
-import { useState, useCallback } from 'react';
-import { View, FlatList, Pressable, RefreshControl, Text, StyleSheet } from 'react-native';
+import { useCallback, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { CustomerService } from '@/features/store/services/customer.service';
+import { getNextPageParam } from '@/core/api/pagination';
+import { useTenantStore } from '@/core/store/tenant.store';
 import type { Customer, CustomerState, CustomerStats } from '@/features/store/types';
+import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { Icon } from '@/shared/components/icon/icon';
+import { RecordCard } from '@/shared/components/record-card/record-card';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
+import { Spinner } from '@/shared/components/spinner/spinner';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative } from '@/shared/utils/date';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
-import { Card } from '@/shared/components/card/card';
-import { Avatar } from '@/shared/components/avatar/avatar';
-import { Icon } from '@/shared/components/icon/icon';
-import { Badge } from '@/shared/components/badge/badge';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
-import { EmptyState } from '@/shared/components/empty-state/empty-state';
-import { Spinner } from '@/shared/components/spinner/spinner';
-import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 const STATE_FILTERS: { label: string; value?: CustomerState }[] = [
   { label: 'Todos' },
@@ -22,202 +22,54 @@ const STATE_FILTERS: { label: string; value?: CustomerState }[] = [
   { label: 'Inactivos', value: 'inactive' },
 ];
 
-const customerCardStyles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    maxWidth: '50%',
-  },
-  cardInner: {
-    margin: spacing[1],
-    overflow: 'hidden',
-  },
-  avatarArea: {
-    padding: spacing[4],
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorScales.gray[50],
-  },
-  content: {
-    padding: spacing[3],
-    gap: spacing[1],
-  },
-  name: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[900],
-  },
-  email: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    gap: spacing[1],
-    marginTop: spacing[1],
-  },
-  footer: {
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[100],
-    paddingTop: spacing[2],
-    marginTop: spacing[2],
-  },
-  spentLabel: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-  },
-  spentValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.green[600],
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-    marginTop: spacing[1],
-  },
-  detailText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-  },
-});
-
-const statsGridStyles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  item: {
-    width: '48%',
-  },
-});
-
-const filterStyles = StyleSheet.create({
-  list: {
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-  },
-  chipActive: {
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
-    marginRight: spacing[2],
-    backgroundColor: colorScales.green[600],
-  },
-  chipInactive: {
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
-    marginRight: spacing[2],
-    backgroundColor: colorScales.gray[200],
-  },
-  chipTextActive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.background,
-  },
-  chipTextInactive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[700],
-  },
-});
-
-const screenStyles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loader: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fab: {
-    position: 'absolute',
-    bottom: spacing[6],
-    right: spacing[6],
-    width: 56,
-    height: 56,
-    borderRadius: borderRadius.full,
-    backgroundColor: colorScales.green[600],
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...{ shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 5 },
-  },
-});
+function customerName(customer: Customer): string {
+  return `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Cliente sin nombre';
+}
 
 const CustomerCard = ({ customer, onPress }: { customer: Customer; onPress: () => void }) => {
-  const fullName = `${customer.first_name} ${customer.last_name}`;
-  const stateVariant = customer.state === 'active' ? 'success' : 'warning';
+  const fullName = customerName(customer);
+  const orders = Number(customer.total_orders ?? 0);
 
   return (
-    <Pressable onPress={onPress} style={customerCardStyles.wrapper}>
-      <Card style={customerCardStyles.cardInner}>
-        <View style={customerCardStyles.avatarArea}>
-          <Avatar name={fullName} size="lg" />
-        </View>
-        <View style={customerCardStyles.content}>
-          <Text style={customerCardStyles.name} numberOfLines={1}>
-            {fullName}
-          </Text>
-          <Text style={customerCardStyles.email} numberOfLines={1}>
-            {customer.email}
-          </Text>
-          <View style={customerCardStyles.badgeRow}>
-            <Badge
-              label={customer.state === 'active' ? 'Activo' : 'Inactivo'}
-              variant={stateVariant}
-              size="sm"
-            />
-          </View>
-          <View style={customerCardStyles.footer}>
-            <Text style={customerCardStyles.spentLabel}>Total gastado</Text>
-            <Text style={customerCardStyles.spentValue}>
-              {formatCurrency(customer.total_spent ?? 0)}
-            </Text>
-          </View>
-          <View style={customerCardStyles.detailRow}>
-            <Icon name="phone" size={12} color={colorScales.gray[400]} />
-            <Text style={customerCardStyles.detailText}>
-              {customer.phone || 'Sin teléfono'}
-            </Text>
-          </View>
-          {customer.total_orders !== undefined && (
-            <View style={customerCardStyles.detailRow}>
-              <Icon name="shopping-bag" size={12} color={colorScales.gray[400]} />
-              <Text style={customerCardStyles.detailText}>
-                {customer.total_orders} órdenes
-              </Text>
-            </View>
-          )}
-        </View>
-      </Card>
-    </Pressable>
+    <RecordCard
+      title={fullName}
+      subtitle={customer.email || customer.document_number || 'Sin correo registrado'}
+      media={{ avatarName: fullName }}
+      badges={[
+        {
+          label: customer.state === 'active' ? 'Activo' : 'Inactivo',
+          variant: customer.state === 'active' ? 'success' : 'warning',
+        },
+      ]}
+      details={[
+        { label: 'Teléfono', value: customer.phone || 'Sin teléfono', icon: 'phone' },
+        { label: 'Órdenes', value: orders, icon: 'shopping-bag' },
+        {
+          label: 'Última compra',
+          value: customer.last_purchase_at ? formatRelative(customer.last_purchase_at) : 'Sin compras',
+          icon: 'calendar',
+        },
+        {
+          label: 'Documento',
+          value: customer.document_number || 'No registrado',
+          icon: 'file-text',
+        },
+      ]}
+      footerLabel="Total gastado"
+      footerValue={formatCurrency(customer.total_spent ?? 0)}
+      footerTone="success"
+      onPress={onPress}
+    />
   );
 };
 
-const StatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
-  <View style={statsGridStyles.container}>
-    <View style={statsGridStyles.item}>
-      <StatsCard label="Total Clientes" value={String(stats?.total ?? 0)} icon="users" />
-    </View>
-    <View style={statsGridStyles.item}>
-      <StatsCard label="Activos" value={String(stats?.active ?? 0)} icon="user-check" />
-    </View>
-    <View style={statsGridStyles.item}>
-      <StatsCard label="Nuevos Este Mes" value={String(stats?.newThisMonth ?? 0)} icon="user-plus" />
-    </View>
-    <View style={statsGridStyles.item}>
-      <StatsCard
-        label="Ingresos Totales"
-        value={formatCurrency(stats?.totalRevenue ?? 0)}
-        icon="dollar-sign"
-      />
-    </View>
-  </View>
+const CustomerStatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
+  <StatsGrid
+    items={[
+      { label: 'Total Clientes', value: String(stats?.total ?? 0), icon: 'users' },
+      { label: 'Ingresos', value: formatCurrency(stats?.totalRevenue ?? 0), icon: 'dollar-sign' },
+    ]}
+  />
 );
 
 const FilterChips = ({
@@ -232,20 +84,20 @@ const FilterChips = ({
     showsHorizontalScrollIndicator={false}
     data={STATE_FILTERS}
     keyExtractor={(item) => item.label}
+    contentContainerStyle={styles.filterList}
     renderItem={({ item }) => {
       const isActive = item.value === activeFilter;
       return (
         <Pressable
           onPress={() => onSelect(item.value)}
-          style={isActive ? filterStyles.chipActive : filterStyles.chipInactive}
+          style={[styles.filterChip, isActive ? styles.filterChipActive : styles.filterChipInactive]}
         >
-          <Text style={isActive ? filterStyles.chipTextActive : filterStyles.chipTextInactive}>
+          <Text style={isActive ? styles.filterTextActive : styles.filterTextInactive}>
             {item.label}
           </Text>
         </Pressable>
       );
     }}
-    style={filterStyles.list}
   />
 );
 
@@ -253,10 +105,12 @@ export default function CustomersScreen() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<CustomerState | undefined>();
+  const storeId = useTenantStore((s) => s.storeId);
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
-    queryKey: ['customer-stats'],
-    queryFn: () => CustomerService.stats(),
+  const { data: stats } = useQuery({
+    queryKey: ['customer-stats', storeId],
+    queryFn: () => CustomerService.stats(Number(storeId)),
+    enabled: !!storeId,
   });
 
   const {
@@ -265,6 +119,7 @@ export default function CustomersScreen() {
     hasNextPage,
     isFetchingNextPage,
     isLoading: customersLoading,
+    isError,
     refetch,
     isRefetching,
   } = useInfiniteQuery({
@@ -276,14 +131,11 @@ export default function CustomersScreen() {
         search: search || undefined,
         state: stateFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
-  const customers = data?.pages.flatMap((p) => p.data) ?? [];
+  const customers = data?.pages.flatMap((page) => page.data) ?? [];
 
   const handleSearch = useCallback((text: string) => {
     setSearch(text);
@@ -297,7 +149,10 @@ export default function CustomersScreen() {
 
   const renderCustomer = useCallback(
     ({ item }: { item: Customer }) => (
-      <CustomerCard customer={item} onPress={() => router.push(`/(store-admin)/customers/${item.id}`)} />
+      <CustomerCard
+        customer={item}
+        onPress={() => router.push(`/(store-admin)/customers/${item.id}` as never)}
+      />
     ),
     [router],
   );
@@ -309,63 +164,134 @@ export default function CustomersScreen() {
 
   if (customersLoading && !data) {
     return (
-      <View style={screenStyles.loader}>
+      <View style={styles.loader}>
         <Spinner />
       </View>
     );
   }
 
+  if (isError && !data) {
+    return (
+      <View style={styles.root}>
+        <EmptyState
+          title="No se pudieron cargar los clientes"
+          description="Revisa tu sesión o conexión e intenta de nuevo."
+          actionLabel="Reintentar"
+          onAction={() => refetch()}
+          icon="users"
+        />
+      </View>
+    );
+  }
+
   return (
-    <View style={screenStyles.root}>
+    <View style={styles.root}>
       <FlatList
         data={customers}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderCustomer}
-        numColumns={2}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
           <View>
-            <StatsGrid stats={stats} />
-            <View style={{ paddingHorizontal: spacing[4], marginBottom: spacing[3] }}>
+            <CustomerStatsGrid stats={stats} />
+            <View style={styles.searchWrap}>
               <SearchBar
                 value={search}
-                onSubmit={handleSearch}
+                onChangeText={handleSearch}
                 onClear={() => handleSearch('')}
                 placeholder="Buscar clientes..."
               />
             </View>
-            <FilterChips
-              activeFilter={stateFilter}
-              onSelect={(v) => setStateFilter(v)}
-            />
+            <FilterChips activeFilter={stateFilter} onSelect={setStateFilter} />
           </View>
         }
         ListEmptyComponent={
-          customersLoading ? (
-            <Spinner />
-          ) : (
-            <EmptyState
-              title="Sin clientes"
-              description="Aún no tienes clientes registrados"
-              actionLabel="Crear cliente"
-              onAction={() => router.push('/(store-admin)/customers/create')}
-              icon="users"
-            />
-          )
+          <EmptyState
+            title="Sin clientes"
+            description="Aún no tienes clientes registrados"
+            actionLabel="Crear cliente"
+            onAction={() => router.push('/(store-admin)/customers/create' as never)}
+            icon="users"
+          />
         }
         ListFooterComponent={renderFooter}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refetch} />
-        }
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.3}
-        contentContainerStyle={{ paddingBottom: spacing[24], paddingHorizontal: spacing[2] }}
+        contentContainerStyle={styles.listContent}
       />
+
       <Pressable
-        onPress={() => router.push('/(store-admin)/customers/create')}
-        style={screenStyles.fab}
+        onPress={() => router.push('/(store-admin)/customers/create' as never)}
+        style={styles.fab}
       >
         <Icon name="plus" size={24} color={colors.background} />
       </Pressable>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  loader: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colorScales.gray[50],
+  },
+  searchWrap: {
+    marginBottom: spacing[3],
+  },
+  filterList: {
+    paddingBottom: spacing[4],
+    gap: spacing[2],
+  },
+  filterChip: {
+    minHeight: 36,
+    paddingHorizontal: spacing[4],
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  filterChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  filterChipInactive: {
+    backgroundColor: colors.background,
+    borderColor: colorScales.gray[200],
+  },
+  filterTextActive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.background,
+  },
+  filterTextInactive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+  },
+  listContent: {
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[24],
+  },
+  separator: {
+    height: spacing[3],
+  },
+  fab: {
+    position: 'absolute',
+    bottom: spacing[6],
+    right: spacing[6],
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.lg,
+  },
+});

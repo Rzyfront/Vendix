@@ -37,8 +37,9 @@ function getTaxRateSum(product: Product): number {
   if (!product.tax_assignments || product.tax_assignments.length === 0) return 0;
   let total = 0;
   for (const assignment of product.tax_assignments) {
-    if (assignment.tax_category?.tax_rates) {
-      for (const rate of assignment.tax_category.tax_rates) {
+    const taxCategory = assignment.tax_category ?? (assignment as any).tax_categories;
+    if (taxCategory?.tax_rates) {
+      for (const rate of taxCategory.tax_rates) {
         total += rate.rate;
       }
     }
@@ -46,8 +47,15 @@ function getTaxRateSum(product: Product): number {
   return total;
 }
 
+function getSellableUnitPrice(product: Product, variant?: ProductVariant | null): number {
+  if (variant?.is_on_sale && variant.sale_price != null) return Number(variant.sale_price) || 0;
+  if (variant?.price_override != null) return Number(variant.price_override) || 0;
+  if (product.is_on_sale && product.sale_price != null) return Number(product.sale_price) || 0;
+  return Number(product.base_price) || 0;
+}
+
 function buildCartItem(product: Product, variant?: ProductVariant | null, quantity: number = 1): CartItem {
-  const unitPrice = variant?.price_override != null ? variant.price_override : product.base_price;
+  const unitPrice = getSellableUnitPrice(product, variant);
   const rateSum = getTaxRateSum(product);
   const taxAmount = unitPrice * quantity * rateSum;
   const finalPrice = unitPrice * (1 + rateSum);
@@ -69,7 +77,7 @@ function buildCartItem(product: Product, variant?: ProductVariant | null, quanti
 
 function recalcItem(item: CartItem): CartItem {
   const rateSum = getTaxRateSum(item.product);
-  const unitPrice = item.variant?.price_override != null ? item.variant.price_override : item.product.base_price;
+  const unitPrice = getSellableUnitPrice(item.product, item.variant);
   const taxAmount = unitPrice * item.quantity * rateSum;
   const finalPrice = unitPrice * (1 + rateSum);
   const totalPrice = item.quantity * finalPrice;

@@ -1,4 +1,5 @@
 import apiClient from '@/core/api/client';
+import { unwrapPaginated } from '@/core/api/pagination';
 import type { ApiResponse, PaginatedResponse } from '../types';
 import type {
   Expense,
@@ -43,7 +44,7 @@ export const ExpenseService = {
       state: params?.state,
     });
     const res = await apiClient.get(`/store/expenses${query}`);
-    return unwrap<PaginatedResponse<Expense>>(res);
+    return unwrapPaginated<Expense>(res, { page: params?.page ?? 1, limit: params?.limit ?? 20 });
   },
 
   async getById(id: string): Promise<Expense> {

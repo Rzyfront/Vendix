@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { CartesianChart, Line } from 'victory-native';
 import { SafeChart, TrendChartFallback } from '@/shared/components/chart/chart-fallback';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
@@ -64,14 +64,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing[12],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  statsGridOverride: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
     marginBottom: spacing[4],
-    gap: spacing[3],
-  },
-  statsItem: {
-    width: '48%',
   },
   chartCard: {
     marginBottom: spacing[4],
@@ -239,46 +235,25 @@ const OverviewScreen = () => {
             </View>
           ) : summary ? (
             <>
-              <View style={styles.statsGrid}>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Ingresos Totales"
-                    value={formatCurrency(summary.total_revenue)}
-                    icon={<Icon name="trending-up" size={18} color={colors.primary} />}
-                    trend={
+              <StatsGrid
+                style={styles.statsGridOverride}
+                items={[
+                  {
+                    label: 'Ingresos Totales',
+                    value: formatCurrency(summary.total_revenue),
+                    icon: <Icon name="trending-up" size={14} color={colors.primary} />,
+                    trend:
                       summary.revenue_growth != null
                         ? { value: summary.revenue_growth, positive: summary.revenue_growth >= 0 }
-                        : undefined
-                    }
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Gastos Totales"
-                    value={formatCurrency(summary.total_expenses)}
-                    icon={<Icon name="wallet" size={18} color={colors.error} />}
-                    trend={
-                      summary.expense_growth != null
-                        ? { value: summary.expense_growth, positive: summary.expense_growth <= 0 }
-                        : undefined
-                    }
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Impuestos"
-                    value={formatCurrency(summary.total_taxes)}
-                    icon={<Icon name="calculator" size={18} color={colorScales.blue[500]} />}
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Ganancia Neta"
-                    value={formatCurrency(summary.net_profit)}
-                    icon={<Icon name="dollar-sign" size={18} color={colors.primary} />}
-                  />
-                </View>
-              </View>
+                        : undefined,
+                  },
+                  {
+                    label: 'Ganancia Neta',
+                    value: formatCurrency(summary.net_profit),
+                    icon: <Icon name="dollar-sign" size={14} color={colors.primary} />,
+                  },
+                ]}
+              />
 
               <Card style={styles.chartCard}>
                 <Card.Header title="Margen de Ganancia" />

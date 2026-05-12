@@ -31,7 +31,7 @@ import { Icon } from '@/shared/components/icon/icon';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Modal } from '@/shared/components/modal/modal';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastSuccess, toastError, toastInfo } from '@/shared/components/toast/toast.store';
@@ -127,13 +127,10 @@ const sectionStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statsContainer: {
-    flexDirection: 'row',
-    gap: spacing[3],
+  statsGridOverride: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
     marginBottom: spacing[4],
-  },
-  statsItem: {
-    flex: 1,
   },
   fab: {
     position: 'absolute',
@@ -592,17 +589,24 @@ function UsersTab() {
         }
         ListHeaderComponent={
           <View style={sectionStyles.content}>
-            <View style={sectionStyles.statsContainer}>
-              <View style={sectionStyles.statsItem}>
-                <StatsCard label="Total Usuarios" value={String(totalUsers)} icon={<Icon name="users" size={16} color={colorScales.green[600]} />} />
-              </View>
-              <View style={sectionStyles.statsItem}>
-                <StatsCard label="Activos" value={String(activeUsers)} icon={<Icon name="user-check" size={16} color={colorScales.green[600]} />} />
-              </View>
-            </View>
+            <StatsGrid
+              style={sectionStyles.statsGridOverride}
+              items={[
+                {
+                  label: 'Total Usuarios',
+                  value: String(totalUsers),
+                  icon: <Icon name="users" size={14} color={colorScales.green[600]} />,
+                },
+                {
+                  label: 'Activos',
+                  value: String(activeUsers),
+                  icon: <Icon name="user-check" size={14} color={colorScales.green[600]} />,
+                },
+              ]}
+            />
             <SearchBar
               value={search}
-              onSubmit={handleSearch}
+              onChangeText={handleSearch}
               onClear={() => handleSearch('')}
               placeholder="Buscar usuarios..."
             />

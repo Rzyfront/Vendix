@@ -2,15 +2,16 @@ import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateLocationDto, UpdateLocationDto } from '@/features/store/services/inventory.service';
 import { LOCATION_TYPE_LABELS } from '@/features/store/types';
 import type { Location, LocationType } from '@/features/store/types';
-import { Card } from '@/shared/components/card/card';
-import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { RecordCard } from '@/shared/components/record-card/record-card';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
@@ -32,26 +33,23 @@ const STATE_LABELS: Record<string, string> = {
 };
 
 const LocationCard = ({ item, onEdit }: { item: Location; onEdit: () => void }) => (
-  <Pressable onPress={onEdit}>
-    <Card style={styles.cardMargin}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-          {item.code && <Text style={styles.cardSubtitle}>{item.code}</Text>}
-        </View>
-        <View style={styles.badgeRow}>
-          <Badge label={LOCATION_TYPE_LABELS[item.type]} variant={TYPE_VARIANT[item.type]} size="sm" />
-          <Badge label={STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
-        </View>
-      </View>
-      {item.address && (
-        <View style={styles.cardFooter}>
-          <Icon name="building" size={12} color={colorScales.gray[400]} />
-          <Text style={styles.footerDetail} numberOfLines={1}>{item.address}</Text>
-        </View>
-      )}
-    </Card>
-  </Pressable>
+  <RecordCard
+    title={item.name}
+    subtitle={item.address || 'Sin dirección registrada'}
+    eyebrow={item.code ? `Código ${item.code}` : undefined}
+    media={{ icon: item.type === 'warehouse' ? 'warehouse' : 'store' }}
+    badges={[
+      { label: LOCATION_TYPE_LABELS[item.type], variant: TYPE_VARIANT[item.type] },
+      { label: STATE_LABELS[item.state], variant: STATE_VARIANT[item.state] },
+    ]}
+    details={[
+      { label: 'Tipo', value: LOCATION_TYPE_LABELS[item.type], icon: 'warehouse' },
+      { label: 'Estado', value: STATE_LABELS[item.state], icon: 'check' },
+      { label: 'Código', value: item.code || 'Sin código', icon: 'barcode' },
+      { label: 'Dirección', value: item.address || 'Sin dirección', icon: 'building' },
+    ]}
+    onPress={onEdit}
+  />
 );
 
 const emptyForm: CreateLocationDto = { name: '', code: '', type: 'warehouse', address: '' };
@@ -71,10 +69,7 @@ export default function LocationsScreen() {
         limit: 20,
         search: search || undefined,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -146,7 +141,7 @@ export default function LocationsScreen() {
         ListHeaderComponent={
           <View>
             <View style={styles.searchWrap}>
-              <Input label="Buscar" value={search} onChangeText={setSearch} placeholder="Buscar ubicaciones..." />
+              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar ubicaciones..." />
             </View>
           </View>
         }
@@ -205,7 +200,7 @@ export default function LocationsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
+  searchWrap: { marginBottom: spacing[3] },
   cardMargin: { marginHorizontal: spacing[4], marginBottom: spacing[3] },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
   cardHeaderLeft: { flex: 1 },
@@ -214,7 +209,7 @@ const styles = StyleSheet.create({
   badgeRow: { flexDirection: 'column', gap: spacing[1], alignItems: 'flex-end' },
   cardFooter: { flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginTop: spacing[2], paddingTop: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
   footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
-  listContent: { paddingBottom: spacing[6] },
+  listContent: { paddingHorizontal: spacing[4], paddingBottom: spacing[6], gap: spacing[3] },
   fab: { position: 'absolute', bottom: spacing[6], right: spacing[6], width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContent: { backgroundColor: colors.card, borderTopLeftRadius: borderRadius['2xl'], borderTopRightRadius: borderRadius['2xl'], maxHeight: '85%', paddingBottom: spacing[6] },

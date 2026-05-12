@@ -18,7 +18,7 @@ export function isIphone(): boolean {
 }
 
 export function isIpad(): boolean {
-  return isIOS && Platform.osVersion?.includes('iPad');
+  return isIOS && String((Platform as any).osVersion ?? '').includes('iPad');
 }
 
 export function select<T>(options: { ios?: T; android?: T; web?: T; default?: T }): T | undefined {

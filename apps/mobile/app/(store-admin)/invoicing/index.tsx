@@ -3,6 +3,7 @@ import { View, FlatList, RefreshControl, Pressable, StyleSheet } from 'react-nat
 import { useRouter } from 'expo-router';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { InvoiceService } from '@/features/store/services/invoice.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import {
   Invoice,
   InvoiceStatus,
@@ -10,7 +11,7 @@ import {
   INVOICE_STATUS_VARIANT,
   INVOICE_TYPE_LABELS,
 } from '@/features/store/types/invoice.types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -89,10 +90,7 @@ export default function InvoicesList() {
         search: search || undefined,
         status: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -128,36 +126,21 @@ export default function InvoicesList() {
         renderItem={renderItem}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total Facturado"
-                  value={formatCurrency(stats?.totalAmount ?? 0)}
-                  icon={<Icon name="dollar-sign" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pendientes"
-                  value={stats?.pending ?? 0}
-                  icon={<Icon name="clock" size={16} color={colorScales.amber[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Aceptadas"
-                  value={stats?.accepted ?? 0}
-                  icon={<Icon name="check" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Rechazadas"
-                  value={stats?.rejected ?? 0}
-                  icon={<Icon name="x-circle" size={16} color={colorScales.red[600]} />}
-                />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Total Facturado',
+                  value: formatCurrency(stats?.totalAmount ?? 0),
+                  icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
+                },
+                {
+                  label: 'Pendientes',
+                  value: stats?.pending ?? 0,
+                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
               <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar facturas..." />
@@ -229,14 +212,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing[1],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
+  statsWrap: {
+    paddingHorizontal: spacing[4],
   },
   searchWrap: {
     paddingHorizontal: spacing[4],

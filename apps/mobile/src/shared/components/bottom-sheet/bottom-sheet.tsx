@@ -11,12 +11,8 @@ interface BottomSheetProps {
   children: React.ReactNode;
   snapPoint?: SnapPoint;
   enableDrag?: boolean;
+  scrollable?: boolean;
 }
-
-const snapHeights: Record<SnapPoint, string> = {
-  partial: '50%',
-  full: '90%',
-};
 
 const styles = StyleSheet.create({
   backdrop: {
@@ -49,9 +45,9 @@ export function BottomSheet({
   onClose,
   children,
   snapPoint = 'partial',
+  scrollable = true,
 }: BottomSheetProps) {
   const insets = useSafeAreaInsets();
-  const height = snapHeights[snapPoint];
 
   const handleClose = useCallback(() => {
     onClose();
@@ -74,9 +70,17 @@ export function BottomSheet({
             <View style={styles.handle} />
           </Pressable>
         </View>
-        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {children}
-        </ScrollView>
+        {scrollable ? (
+          <ScrollView
+            style={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View style={styles.scrollContent}>{children}</View>
+        )}
       </View>
     </Modal>
   );

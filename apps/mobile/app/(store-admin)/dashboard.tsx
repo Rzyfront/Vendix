@@ -1,9 +1,8 @@
 import { useState, useMemo, useCallback } from 'react';
-import { View, ScrollView, Text, Pressable, StyleSheet, Dimensions } from 'react-native';
+import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { CartesianChart, Line } from 'victory-native';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
@@ -14,7 +13,7 @@ import { formatCurrency } from '@/shared/utils/currency';
 import { DashboardService, AnalyticsService } from '@/features/store/services';
 import type { DatePreset } from '@/features/store/types';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import { SafeChart, TrendChartFallback, ChannelListFallback } from '@/shared/components/chart/chart-fallback';
+import { TrendChartFallback, ChannelListFallback } from '@/shared/components/chart/chart-fallback';
 
 const PRESETS: { label: string; value: DatePreset }[] = [
   { label: 'Hoy', value: 'today' },
@@ -32,6 +31,7 @@ const styles = StyleSheet.create({
   inner: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
+    paddingBottom: spacing[6],
   },
   presetScroll: {
     marginBottom: spacing[4],
@@ -65,14 +65,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing[12],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  statsGridOverride: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
     marginBottom: spacing[4],
-    gap: spacing[3],
-  },
-  statsItem: {
-    width: '48%',
   },
   chartCard: {
     marginBottom: spacing[4],
@@ -103,10 +99,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.cardBorder,
   },
+  alertRowLast: {
+    borderBottomWidth: 0,
+    paddingBottom: 0,
+  },
   alertLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[3],
+    flex: 1,
   },
   alertDot: {
     height: 8,
@@ -123,7 +124,7 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   chartContainer: {
-    height: 200,
+    minHeight: 120,
   },
   channelRow: {
     flexDirection: 'row',
@@ -155,7 +156,8 @@ const styles = StyleSheet.create({
   quickLinksGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing[3],
+    justifyContent: 'space-between',
+    rowGap: spacing[3],
   },
   quickLinkItem: {
     width: '48%',
@@ -292,9 +294,6 @@ const DashboardScreen = () => {
     }));
   }, [channelData]);
 
-  const screenWidth = Dimensions.get('window').width;
-  const chartWidth = screenWidth - spacing[4] * 4;
-
   const quickLinks = [
     { label: 'Ventas', icon: 'bar-chart-2', route: '/analytics' },
     { label: 'Productos', icon: 'package', route: '/products' },
@@ -331,46 +330,29 @@ const DashboardScreen = () => {
               <Spinner />
             </View>
           ) : summary ? (
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Ingresos"
-                  value={formatCurrency(summary.total_revenue)}
-                  icon={<Icon name="dollar-sign" size={18} color={colors.primary} />}
-                  trend={
+            <StatsGrid
+              style={styles.statsGridOverride}
+              items={[
+                {
+                  label: 'Ingresos',
+                  value: formatCurrency(summary.total_revenue),
+                  icon: <Icon name="dollar-sign" size={14} color={colors.primary} />,
+                  trend:
                     summary.revenue_growth != null
                       ? { value: summary.revenue_growth, positive: summary.revenue_growth >= 0 }
-                      : undefined
-                  }
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Órdenes"
-                  value={summary.total_orders.toLocaleString()}
-                  icon={<Icon name="shopping-cart" size={18} color={colors.primary} />}
-                  trend={
+                      : undefined,
+                },
+                {
+                  label: 'Órdenes',
+                  value: summary.total_orders.toLocaleString(),
+                  icon: <Icon name="shopping-cart" size={14} color={colors.primary} />,
+                  trend:
                     summary.orders_growth != null
                       ? { value: summary.orders_growth, positive: summary.orders_growth >= 0 }
-                      : undefined
-                  }
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Ticket Promedio"
-                  value={formatCurrency(summary.average_order_value)}
-                  icon={<Icon name="trending-up" size={18} color={colors.primary} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Clientes"
-                  value={summary.total_customers.toLocaleString()}
-                  icon={<Icon name="home" size={18} color={colors.primary} />}
-                />
-              </View>
-            </View>
+                      : undefined,
+                },
+              ]}
+            />
           ) : (
             <EmptyState title="Sin datos" description="No hay datos de ventas" />
           )}
@@ -380,27 +362,7 @@ const DashboardScreen = () => {
             <Card.Body>
               {chartData.length > 0 ? (
                 <View style={styles.chartContainer}>
-                  <SafeChart
-                    fallback={<TrendChartFallback data={chartData} />}
-                  >
-                    <CartesianChart
-                      data={chartData}
-                      xKey="x"
-                      yKeys={['revenue']}
-                      padding={{ top: 20, bottom: 40, left: 50, right: 20 }}
-                      axisOptions={{
-                        font: null,
-                        tickCount: 5,
-                        formatYLabel: (value: number) => formatCurrency(value),
-                        lineColor: colors.cardBorder,
-                        labelColor: colors.text.secondary,
-                      }}
-                    >
-                      {({ points }: any) => (
-                        <Line points={points.revenue} color={colors.primary} strokeWidth={2} />
-                      )}
-                    </CartesianChart>
-                  </SafeChart>
+                  <TrendChartFallback data={chartData} />
                 </View>
               ) : (
                 <EmptyState title="Sin datos" description="Sin datos de tendencia" />
@@ -413,19 +375,7 @@ const DashboardScreen = () => {
               <Card.Header title="Ventas por Canal" />
               <Card.Body>
                 <View style={styles.chartContainer}>
-                  <SafeChart
-                    fallback={<ChannelListFallback data={channelChartData} />}
-                  >
-                    {channelChartData.map((item, index) => (
-                      <View key={index} style={styles.channelRow}>
-                        <View style={[styles.channelDot, { backgroundColor: item.color }]} />
-                        <Text style={styles.channelLabel}>{item.label}</Text>
-                        <Text style={styles.channelValue}>
-                          {((item.value / channelChartData.reduce((s, i) => s + i.value, 0)) * 100).toFixed(0)}%
-                        </Text>
-                      </View>
-                    ))}
-                  </SafeChart>
+                  <ChannelListFallback data={channelChartData} />
                 </View>
               </Card.Body>
             </Card>
@@ -435,11 +385,12 @@ const DashboardScreen = () => {
             <Card style={styles.alertsCard}>
               <Card.Header title="Alertas" />
               <Card.Body>
-                {alerts.map((alert) => (
+                {alerts.map((alert, idx) => (
                   <Pressable
                     key={alert.label}
                     style={({ pressed }) => [
                       styles.alertRow,
+                      idx === alerts.length - 1 && styles.alertRowLast,
                       pressed && styles.alertPressable,
                     ]}
                     onPress={() => router.push(alert.route as any)}
@@ -448,7 +399,9 @@ const DashboardScreen = () => {
                       <View
                         style={[styles.alertDot, { backgroundColor: alert.color }]}
                       />
-                      <Text style={styles.alertLabel}>{alert.label}</Text>
+                      <Text style={styles.alertLabel} numberOfLines={1}>
+                        {alert.label}
+                      </Text>
                     </View>
                     <Text style={styles.alertCount}>{alert.count}</Text>
                   </Pressable>

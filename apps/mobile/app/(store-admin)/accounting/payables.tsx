@@ -2,9 +2,10 @@ import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Modal as RNModal, StyleSheet } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AccountingService } from '@/features/store/services/accounting.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { Payable } from '@/features/store/types';
 import { PAYABLE_STATE_LABELS, PAYABLE_STATE_VARIANTS } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -87,10 +88,7 @@ export default function PayablesScreen() {
         search: search || undefined,
         state: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -137,39 +135,24 @@ export default function PayablesScreen() {
         )}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total"
-                  value={payables.length}
-                  icon={<Icon name="store" size={16} color={colorScales.blue[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pendiente"
-                  value={formatCurrency(payables.reduce((s, r) => s + (r.state === 'pending' ? r.balance : 0), 0))}
-                  icon={<Icon name="clock" size={16} color={colorScales.amber[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Vencido"
-                  value={formatCurrency(payables.reduce((s, r) => s + (r.state === 'overdue' ? r.balance : 0), 0))}
-                  icon={<Icon name="alert-triangle" size={16} color={colorScales.red[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pagado"
-                  value={formatCurrency(payables.reduce((s, r) => s + r.paid_amount, 0))}
-                  icon={<Icon name="check-circle" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Pendiente',
+                  value: formatCurrency(payables.reduce((s, r) => s + (r.state === 'pending' ? r.balance : 0), 0)),
+                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                },
+                {
+                  label: 'Vencido',
+                  value: formatCurrency(payables.reduce((s, r) => s + (r.state === 'overdue' ? r.balance : 0), 0)),
+                  icon: <Icon name="alert-triangle" size={14} color={colorScales.red[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <SearchBar value={search} onSubmit={(text) => setSearch(text)} placeholder="Buscar obligaciones..." />
+              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar obligaciones..." />
             </View>
 
             <View style={styles.filterRow}>
@@ -249,14 +232,8 @@ const styles = StyleSheet.create({
     backgroundColor: colorScales.gray[50],
   },
   flex1: { flex: 1 },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
+  statsWrap: {
+    paddingHorizontal: spacing[4],
   },
   searchWrap: {
     paddingHorizontal: spacing[4],

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AccountingService } from '@/features/store/services/accounting.service';
 import type { Account, ACCOUNT_TYPE_LABELS } from '@/features/store/types';
 import { ACCOUNT_TYPE_LABELS as AccountTypeLabels, ACCOUNT_NATURE_LABELS } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -233,39 +233,24 @@ export default function ChartOfAccountsScreen() {
         renderItem={renderAccount}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total Cuentas"
-                  value={stats.total}
-                  icon={<Icon name="list-tree" size={16} color={colorScales.blue[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Activas"
-                  value={stats.active}
-                  icon={<Icon name="check-circle" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Tipos"
-                  value={stats.types}
-                  icon={<Icon name="layers" size={16} color={colorScales.amber[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Niveles"
-                  value={Math.max(...flattenAccounts(accounts).map((a) => a._depth + 1), 0)}
-                  icon={<Icon name="git-branch" size={16} color={colorScales.blue[600]} />}
-                />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Total Cuentas',
+                  value: stats.total,
+                  icon: <Icon name="list-tree" size={14} color={colorScales.blue[600]} />,
+                },
+                {
+                  label: 'Activas',
+                  value: stats.active,
+                  icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <SearchBar value={search} onSubmit={(text) => setSearch(text)} placeholder="Buscar cuenta..." />
+              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar cuenta..." />
             </View>
 
             <View style={styles.actionsRow}>
@@ -358,14 +343,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colorScales.gray[50],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
+  statsWrap: {
+    paddingHorizontal: spacing[4],
   },
   searchWrap: {
     paddingHorizontal: spacing[4],

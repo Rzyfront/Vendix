@@ -21,7 +21,7 @@ export const Endpoints = {
       CREATE: '/store/products',
       UPDATE: '/store/products/:id',
       DELETE: '/store/products/:id',
-      SEARCH: '/store/products/search',
+      SEARCH: '/store/products',
       STATS: '/store/products/stats/store/:storeId',
       DEACTIVATE: '/store/products/:id/deactivate',
       VARIANTS: '/store/products/:productId/variants',
@@ -73,8 +73,8 @@ export const Endpoints = {
       CREATE: '/store/customers',
       UPDATE: '/store/customers/:id',
       DELETE: '/store/customers/:id',
-      SEARCH: '/store/customers/search',
-      STATS: '/store/customers/stats',
+      SEARCH: '/store/customers',
+      STATS: '/store/customers/stats/store/:storeId',
       TOPUP: '/store/customers/:id/topup',
     },
     CATEGORIES: {
@@ -90,7 +90,10 @@ export const Endpoints = {
       CATEGORIES: '/store/taxes/categories',
     },
     PAYMENT_METHODS: {
-      LIST: '/store/payments/methods',
+      LIST: '/store/payments/payment-methods',
+    },
+    PAYMENTS: {
+      POS: '/store/payments/pos',
     },
     CASH_REGISTERS: {
       LIST: '/store/cash-registers',
@@ -132,23 +135,30 @@ export const Endpoints = {
         CREATE: '/store/inventory/adjustments',
       },
       TRANSFERS: {
-        LIST: '/store/inventory/transfers',
-        CREATE: '/store/inventory/transfers',
+        LIST: '/store/stock-transfers',
+        CREATE: '/store/stock-transfers',
       },
       MOVEMENTS: {
         LIST: '/store/inventory/movements',
       },
       SUPPLIERS: {
-        LIST: '/store/suppliers',
-        CREATE: '/store/suppliers',
-        UPDATE: '/store/suppliers/:id',
-        DELETE: '/store/suppliers/:id',
+        LIST: '/store/inventory/suppliers',
+        CREATE: '/store/inventory/suppliers',
+        UPDATE: '/store/inventory/suppliers/:id',
+        DELETE: '/store/inventory/suppliers/:id',
       },
       LOCATIONS: {
-        LIST: '/store/locations',
-        CREATE: '/store/locations',
-        UPDATE: '/store/locations/:id',
+        LIST: '/store/inventory/locations',
+        CREATE: '/store/inventory/locations',
+        UPDATE: '/store/inventory/locations/:id',
       },
+    },
+    PURCHASE_ORDERS: {
+      LIST: '/store/orders/purchase-orders',
+      GET: '/store/orders/purchase-orders/:id',
+      CREATE: '/store/orders/purchase-orders',
+      RECEIVE: '/store/orders/purchase-orders/:id/receive',
+      COST_PREVIEW: '/store/orders/purchase-orders/cost-preview',
     },
     ACCOUNTING: {
       ACCOUNTS: {

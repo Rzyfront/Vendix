@@ -45,9 +45,12 @@ export interface ProductVariant {
   attributes?: string | null;
   price_override?: number | null;
   cost_price?: number | null;
+  profit_margin?: number | null;
   is_on_sale?: boolean;
   sale_price?: number | null;
   stock_quantity: number;
+  track_inventory_override?: boolean | null;
+  effective_track_inventory?: boolean;
   image_id?: number | null;
   image?: ProductImage | null;
   created_at: string;
@@ -93,6 +96,7 @@ export interface TaxCategory {
   id: number;
   name: string;
   description?: string | null;
+  store_id?: number;
   tax_rates?: TaxRate[];
 }
 
@@ -126,7 +130,29 @@ export interface ProductQuery {
   pos_optimized?: boolean;
   barcode?: string;
   include_stock?: boolean;
+  include_variants?: boolean;
   product_type?: ProductType;
+}
+
+export interface StockByLocationDto {
+  location_id: number;
+  quantity: number;
+  notes?: string;
+}
+
+export interface CreateProductVariantDto {
+  id?: number;
+  sku: string;
+  name?: string;
+  price_override?: number;
+  cost_price?: number;
+  profit_margin?: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
+  stock_quantity?: number;
+  stock_by_location?: StockByLocationDto[];
+  attributes?: Record<string, unknown>;
+  track_inventory_override?: boolean | null;
 }
 
 export interface CreateProductDto {
@@ -135,8 +161,10 @@ export interface CreateProductDto {
   description?: string;
   base_price: number;
   cost_price?: number;
+  profit_margin?: number;
   is_on_sale?: boolean;
   sale_price?: number;
+  available_for_ecommerce?: boolean;
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
@@ -146,6 +174,10 @@ export interface CreateProductDto {
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
+  stock_by_location?: StockByLocationDto[];
+  variants?: CreateProductVariantDto[];
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
-export interface UpdateProductDto extends Partial<CreateProductDto> {}
+export type UpdateProductDto = Partial<CreateProductDto>;

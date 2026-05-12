@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react';
 import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { FlatList } from 'react-native';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
@@ -62,14 +62,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing[12],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  statsGridOverride: {
+    paddingHorizontal: 0,
+    paddingTop: 0,
     marginBottom: spacing[4],
-    gap: spacing[3],
-  },
-  statsItem: {
-    width: '48%',
   },
   cardSection: {
     marginBottom: spacing[4],
@@ -191,36 +187,21 @@ const InventoryScreen = () => {
             </View>
           ) : data ? (
             <>
-              <View style={styles.statsGrid}>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Total Productos"
-                    value={data.total_products.toLocaleString()}
-                    icon={<Icon name="package" size={18} color={colors.primary} />}
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Bajo Stock"
-                    value={data.low_stock_count.toLocaleString()}
-                    icon={<Icon name="alert-triangle" size={18} color={colors.warning} />}
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Sin Stock"
-                    value={data.out_of_stock_count.toLocaleString()}
-                    icon={<Icon name="ban" size={18} color={colors.error} />}
-                  />
-                </View>
-                <View style={styles.statsItem}>
-                  <StatsCard
-                    label="Valor Total"
-                    value={formatCurrency(data.total_value)}
-                    icon={<Icon name="dollar-sign" size={18} color={colorScales.blue[500]} />}
-                  />
-                </View>
-              </View>
+              <StatsGrid
+                style={styles.statsGridOverride}
+                items={[
+                  {
+                    label: 'Total Productos',
+                    value: data.total_products.toLocaleString(),
+                    icon: <Icon name="package" size={14} color={colors.primary} />,
+                  },
+                  {
+                    label: 'Valor Total',
+                    value: formatCurrency(data.total_value),
+                    icon: <Icon name="dollar-sign" size={14} color={colorScales.blue[500]} />,
+                  },
+                ]}
+              />
 
               {data.top_movers?.length > 0 && (
                 <Card style={styles.cardSection}>

@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ExpenseService } from '@/features/store/services/expense.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type {
   Expense,
   ExpenseCategory,
@@ -19,7 +20,7 @@ import type {
 
 type ExpenseState = Expense['state'];
 
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -118,10 +119,7 @@ export default function ExpensesScreen() {
         search: search || undefined,
         state: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -274,42 +272,27 @@ export default function ExpensesScreen() {
         renderItem={renderItem}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total Gastos"
-                  value={formatCurrency(stats?.totalAmount ?? 0)}
-                  icon={<Icon name="dollar-sign" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pendientes"
-                  value={stats?.pending ?? 0}
-                  icon={<Icon name="clock" size={16} color={colorScales.amber[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Aprobados"
-                  value={stats?.approved ?? 0}
-                  icon={<Icon name="check-circle" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pagados"
-                  value={stats?.paid ?? 0}
-                  icon={<Icon name="credit-card" size={16} color={colorScales.blue[600]} />}
-                />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Total Gastos',
+                  value: formatCurrency(stats?.totalAmount ?? 0),
+                  icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
+                },
+                {
+                  label: 'Pendientes',
+                  value: stats?.pending ?? 0,
+                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchRow}>
               <View style={styles.searchFlex}>
                 <SearchBar
                   value={search}
-                  onSubmit={setSearch}
+                  onChangeText={setSearch}
                   onClear={() => setSearch('')}
                   placeholder="Buscar gastos..."
                 />
@@ -529,14 +512,8 @@ const styles = StyleSheet.create({
     fontWeight: '700' as any,
     color: colorScales.gray[900],
   },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
+  statsWrap: {
+    paddingHorizontal: spacing[4],
   },
   searchRow: {
     flexDirection: 'row',
@@ -658,4 +635,3 @@ const styles = StyleSheet.create({
     color: colorScales.gray[700],
   },
 });
-

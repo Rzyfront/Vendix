@@ -1,4 +1,4 @@
-import React, { Component, ReactNode } from 'react';
+import { Component, type ReactNode } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors, spacing, borderRadius, colorScales, typography } from '@/shared/theme';
 
@@ -78,16 +78,16 @@ interface SafeChartProps {
 
 export function SafeChart({ children, fallback }: SafeChartProps) {
   return (
-    <ErrorBoundary fallback={<>{fallback}</>}>
+    <ChartErrorBoundary fallback={fallback}>
       {children}
-    </ErrorBoundary>
+    </ChartErrorBoundary>
   );
 }
 
-const ErrorBoundary: Component<
+class ChartErrorBoundary extends Component<
   { fallback: ReactNode; children: ReactNode },
   { hasError: boolean }
-> = class extends Component {
+> {
   state = { hasError: false };
 
   static getDerivedStateFromError() {
@@ -98,7 +98,7 @@ const ErrorBoundary: Component<
     if (this.state.hasError) return this.props.fallback;
     return this.props.children;
   }
-};
+}
 
 const styles = StyleSheet.create({
   title: {
@@ -124,12 +124,12 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 24,
     backgroundColor: colorScales.gray[100],
-    borderRadius: borderRadius.xs,
+    borderRadius: borderRadius.sm,
     justifyContent: 'flex-end',
     overflow: 'hidden',
   },
   bar: {
-    borderRadius: borderRadius.xs,
+    borderRadius: borderRadius.sm,
     backgroundColor: colorScales.gray[300],
     width: '100%',
   },

@@ -1,4 +1,5 @@
 import { apiClient, Endpoints } from '@/core/api';
+import { unwrapPaginated } from '@/core/api/pagination';
 import type {
   ApiResponse,
   PaginatedResponse,
@@ -10,6 +11,9 @@ import type {
   ShipOrderDto,
   CancelOrderDto,
   RefundOrderDto,
+  PaymentMethod,
+  CreatePosPaymentDto,
+  PosPaymentResponse,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -49,7 +53,7 @@ export const OrderService = {
       sort_order: query?.sort_order,
     };
     const res = await apiClient.get(`${Endpoints.STORE.ORDERS.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<Order>>(res);
+    return unwrapPaginated<Order>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async getById(id: number): Promise<Order> {
@@ -112,13 +116,13 @@ export const OrderService = {
 
   async create(dto: {
     customer_id?: string;
-    items: Array<{
+    items: {
       product_id: string;
       variant_id?: string;
       quantity: number;
       unit_price: number;
       tax_amount: number;
-    }>;
+    }[];
     notes?: string;
     subtotal: number;
     tax_amount: number;
@@ -128,5 +132,15 @@ export const OrderService = {
   }): Promise<Order> {
     const res = await apiClient.post(Endpoints.STORE.ORDERS.CREATE, dto);
     return unwrap<Order>(res);
+  },
+
+  async getPaymentMethods(): Promise<PaymentMethod[]> {
+    const res = await apiClient.get(Endpoints.STORE.PAYMENT_METHODS.LIST);
+    return unwrap<PaymentMethod[]>(res);
+  },
+
+  async processPosPayment(dto: CreatePosPaymentDto): Promise<PosPaymentResponse> {
+    const res = await apiClient.post(Endpoints.STORE.PAYMENTS.POS, dto);
+    return unwrap<PosPaymentResponse>(res);
   },
 };

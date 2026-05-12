@@ -11,6 +11,7 @@ const routeTitles: Record<string, string> = {
   products: 'Productos',
   orders: 'Órdenes',
   inventory: 'Inventario',
+  purchase: 'Comprar Inventario',
   adjustments: 'Ajustes de Stock',
   transfers: 'Transferencias',
   movements: 'Movimientos',

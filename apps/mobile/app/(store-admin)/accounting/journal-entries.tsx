@@ -3,12 +3,13 @@ import { View, Text, FlatList, RefreshControl, Pressable, Modal as RNModal, Text
 import { useRouter } from 'expo-router';
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AccountingService } from '@/features/store/services/accounting.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { JournalEntry, JournalEntryLine, Account } from '@/features/store/types';
 import {
   JOURNAL_ENTRY_STATE_LABELS,
   JOURNAL_ENTRY_STATE_VARIANTS,
 } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -109,10 +110,7 @@ export default function JournalEntriesScreen() {
         search: search || undefined,
         state: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -194,39 +192,24 @@ export default function JournalEntriesScreen() {
         )}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total Asientos"
-                  value={stats?.total ?? 0}
-                  icon={<Icon name="book-open" size={16} color={colorScales.blue[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Borradores"
-                  value={stats?.drafts ?? 0}
-                  icon={<Icon name="edit" size={16} color={colorScales.amber[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Contabilizados"
-                  value={stats?.posted ?? 0}
-                  icon={<Icon name="check-circle" size={16} color={colorScales.green[600]} />}
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Anulados"
-                  value={stats?.voided ?? 0}
-                  icon={<Icon name="x-circle" size={16} color={colorScales.red[600]} />}
-                />
-              </View>
-            </View>
+            <StatsGrid
+              style={styles.statsWrap}
+              items={[
+                {
+                  label: 'Total Asientos',
+                  value: stats?.total ?? 0,
+                  icon: <Icon name="book-open" size={14} color={colorScales.blue[600]} />,
+                },
+                {
+                  label: 'Contabilizados',
+                  value: stats?.posted ?? 0,
+                  icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
+                },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <SearchBar value={search} onSubmit={(text) => setSearch(text)} placeholder="Buscar asientos..." />
+              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar asientos..." />
             </View>
 
             <View style={styles.filterRow}>
@@ -339,14 +322,8 @@ const styles = StyleSheet.create({
     backgroundColor: colorScales.gray[50],
   },
   flex1: { flex: 1 },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
+  statsWrap: {
+    paddingHorizontal: spacing[4],
   },
   searchWrap: {
     paddingHorizontal: spacing[4],

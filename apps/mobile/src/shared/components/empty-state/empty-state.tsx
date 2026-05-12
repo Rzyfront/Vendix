@@ -1,9 +1,11 @@
+import { type ReactNode } from 'react';
 import { View, Text, StyleSheet, type ViewProps, type ViewStyle } from 'react-native';
 import { Button } from '../button/button';
+import { Icon } from '../icon/icon';
 import { colorScales, spacing, typography } from '@/shared/theme';
 
 interface EmptyStateProps extends ViewProps {
-  icon?: React.ReactNode;
+  icon?: ReactNode | string;
   title: string;
   description?: string;
   actionLabel?: string;
@@ -47,11 +49,15 @@ export function EmptyState({
   style,
   ...props
 }: EmptyStateProps) {
+  const iconContent = typeof icon === 'string' ? (
+    <Icon name={icon} size={42} color={colorScales.gray[400]} />
+  ) : icon;
+
   return (
     <View style={[styles.container, style]} {...props}>
-      {icon && (
+      {iconContent && (
         <View style={styles.iconWrapper}>
-          {icon}
+          {iconContent}
         </View>
       )}
       <Text style={styles.title}>

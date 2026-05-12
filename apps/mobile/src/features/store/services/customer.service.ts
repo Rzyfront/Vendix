@@ -1,4 +1,5 @@
 import { apiClient, Endpoints } from '@/core/api';
+import { unwrapPaginated } from '@/core/api/pagination';
 import type {
   ApiResponse,
   PaginatedResponse,
@@ -32,8 +33,9 @@ function buildQuery(params?: Record<string, unknown>): string {
 }
 
 export const CustomerService = {
-  async stats(): Promise<CustomerStats> {
-    const res = await apiClient.get(Endpoints.STORE.CUSTOMERS.STATS);
+  async stats(storeId: number): Promise<CustomerStats> {
+    const endpoint = Endpoints.STORE.CUSTOMERS.STATS.replace(':storeId', String(storeId));
+    const res = await apiClient.get(endpoint);
     return unwrap<CustomerStats>(res);
   },
 
@@ -45,7 +47,7 @@ export const CustomerService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.CUSTOMERS.LIST}${buildQuery(params)}`);
-    return unwrap<PaginatedResponse<Customer>>(res);
+    return unwrapPaginated<Customer>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
   },
 
   async getById(id: string): Promise<CustomerWithWallet> {
@@ -74,7 +76,7 @@ export const CustomerService = {
     const res = await apiClient.get(
       `${Endpoints.STORE.CUSTOMERS.SEARCH}?search=${encodeURIComponent(query)}&limit=${limit}`,
     );
-    return unwrap<PaginatedResponse<Customer>>(res);
+    return unwrapPaginated<Customer>(res, { page: 1, limit });
   },
 
   async topup(id: string, amount: number): Promise<CustomerWithWallet> {

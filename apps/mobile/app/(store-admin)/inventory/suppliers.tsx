@@ -2,14 +2,15 @@ import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateSupplierDto, UpdateSupplierDto } from '@/features/store/services/inventory.service';
 import type { Supplier } from '@/features/store/types';
-import { Card } from '@/shared/components/card/card';
-import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { RecordCard } from '@/shared/components/record-card/record-card';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatRelative } from '@/shared/utils/date';
@@ -26,32 +27,25 @@ const SUPPLIER_STATE_LABELS: Record<string, string> = {
 };
 
 const SupplierCard = ({ item, onEdit }: { item: Supplier; onEdit: () => void }) => (
-  <Pressable onPress={onEdit}>
-    <Card style={styles.cardMargin}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-          {item.code && <Text style={styles.cardSubtitle}>{item.code}</Text>}
-        </View>
-        <Badge label={SUPPLIER_STATE_LABELS[item.state]} variant={SUPPLIER_STATE_VARIANT[item.state]} size="sm" />
-      </View>
-      <View style={styles.cardFooter}>
-        {item.email && (
-          <View style={styles.footerItem}>
-            <Icon name="mail" size={12} color={colorScales.gray[400]} />
-            <Text style={styles.footerDetail} numberOfLines={1}>{item.email}</Text>
-          </View>
-        )}
-        {item.phone && (
-          <View style={styles.footerItem}>
-            <Icon name="phone" size={12} color={colorScales.gray[400]} />
-            <Text style={styles.footerDetail}>{item.phone}</Text>
-          </View>
-        )}
-        <Text style={styles.footerDate}>{formatRelative(item.created_at)}</Text>
-      </View>
-    </Card>
-  </Pressable>
+  <RecordCard
+    title={item.name}
+    subtitle={item.email || item.phone || 'Sin contacto registrado'}
+    eyebrow={item.code ? `Código ${item.code}` : undefined}
+    media={{ icon: 'building' }}
+    badges={[
+      {
+        label: SUPPLIER_STATE_LABELS[item.state],
+        variant: SUPPLIER_STATE_VARIANT[item.state],
+      },
+    ]}
+    details={[
+      { label: 'Email', value: item.email || 'Sin email', icon: 'mail' },
+      { label: 'Teléfono', value: item.phone || 'Sin teléfono', icon: 'phone' },
+      { label: 'Dirección', value: item.address || 'Sin dirección', icon: 'store' },
+      { label: 'Creado', value: formatRelative(item.created_at), icon: 'calendar' },
+    ]}
+    onPress={onEdit}
+  />
 );
 
 const emptyForm: CreateSupplierDto = { name: '', code: '', email: '', phone: '', address: '' };
@@ -71,10 +65,7 @@ export default function SuppliersScreen() {
         limit: 20,
         search: search || undefined,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
@@ -155,7 +146,7 @@ export default function SuppliersScreen() {
         ListHeaderComponent={
           <View>
             <View style={styles.searchWrap}>
-              <Input label="Buscar" value={search} onChangeText={setSearch} placeholder="Buscar proveedores..." />
+              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar proveedores..." />
             </View>
           </View>
         }
@@ -208,7 +199,7 @@ export default function SuppliersScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
+  searchWrap: { marginBottom: spacing[3] },
   cardMargin: { marginHorizontal: spacing[4], marginBottom: spacing[3] },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
   cardHeaderLeft: { flex: 1 },
@@ -218,7 +209,7 @@ const styles = StyleSheet.create({
   footerItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] },
   footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
   footerDate: { fontSize: typography.fontSize.xs, color: colorScales.gray[400], marginLeft: 'auto' },
-  listContent: { paddingBottom: spacing[6] },
+  listContent: { paddingHorizontal: spacing[4], paddingBottom: spacing[6], gap: spacing[3] },
   fab: { position: 'absolute', bottom: spacing[6], right: spacing[6], width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   modalContent: { backgroundColor: colors.card, borderTopLeftRadius: borderRadius['2xl'], borderTopRightRadius: borderRadius['2xl'], maxHeight: '85%', paddingBottom: spacing[6] },

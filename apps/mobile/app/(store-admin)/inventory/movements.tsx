@@ -1,60 +1,88 @@
 import { useState, useCallback } from 'react';
 import { View, Text, FlatList, RefreshControl, Pressable, StyleSheet } from 'react-native';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import type { StockMovement, MovementType } from '@/features/store/types';
-import { MOVEMENT_TYPE_LABELS } from '@/features/store/types';
-import { Card } from '@/shared/components/card/card';
-import { Badge } from '@/shared/components/badge/badge';
-import { Icon } from '@/shared/components/icon/icon';
-import { Input } from '@/shared/components/input/input';
+import { MOVEMENT_TYPE_LABELS, MOVEMENT_INBOUND_TYPES, MOVEMENT_OUTBOUND_TYPES } from '@/features/store/types';
+import { RecordCard } from '@/shared/components/record-card/record-card';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors } from '@/shared/theme';
 
-const TYPE_VARIANT: Record<MovementType, 'success' | 'error' | 'info' | 'warning'> = {
-  purchase: 'success',
-  sale: 'error',
+const TYPE_VARIANT: Record<MovementType, 'success' | 'error' | 'info' | 'warning' | 'default'> = {
+  stock_in: 'success',
+  stock_out: 'error',
+  transfer: 'warning',
   adjustment: 'info',
-  transfer_in: 'warning',
-  transfer_out: 'warning',
+  sale: 'error',
+  return: 'success',
+  damage: 'error',
+  expiration: 'error',
+};
+
+const TYPE_ICON: Record<MovementType, string> = {
+  stock_in: 'arrow-down-circle',
+  stock_out: 'arrow-up-circle',
+  transfer: 'repeat',
+  adjustment: 'edit-3',
+  sale: 'shopping-cart',
+  return: 'corner-up-left',
+  damage: 'alert-triangle',
+  expiration: 'clock',
 };
 
 type FilterChip = { label: string; value: MovementType | 'all' };
 
 const FILTER_CHIPS: FilterChip[] = [
   { label: 'Todos', value: 'all' },
-  { label: 'Compra', value: 'purchase' },
+  { label: 'Entrada', value: 'stock_in' },
+  { label: 'Salida', value: 'stock_out' },
   { label: 'Venta', value: 'sale' },
+  { label: 'Transferencia', value: 'transfer' },
   { label: 'Ajuste', value: 'adjustment' },
-  { label: 'Transferencia', value: 'transfer_in' },
 ];
 
+function signFor(item: StockMovement): '+' | '-' | '' {
+  if (MOVEMENT_INBOUND_TYPES.has(item.movement_type)) return '+';
+  if (MOVEMENT_OUTBOUND_TYPES.has(item.movement_type)) return '-';
+  if (item.movement_type === 'adjustment') return item.quantity < 0 ? '-' : '+';
+  return '';
+}
+
+function footerToneFor(item: StockMovement): 'success' | 'error' | 'default' {
+  if (MOVEMENT_INBOUND_TYPES.has(item.movement_type)) return 'success';
+  if (MOVEMENT_OUTBOUND_TYPES.has(item.movement_type)) return 'error';
+  if (item.movement_type === 'adjustment') return item.quantity < 0 ? 'error' : 'success';
+  return 'default';
+}
+
 const MovementCard = ({ item }: { item: StockMovement }) => {
-  const isPositive = item.type === 'purchase' || item.type === 'transfer_in';
-  const variant = TYPE_VARIANT[item.type];
-  const label = item.type === 'transfer_in' ? 'Transfer. Entrante' : item.type === 'transfer_out' ? 'Transfer. Saliente' : MOVEMENT_TYPE_LABELS[item.type];
+  const variant = TYPE_VARIANT[item.movement_type] ?? 'default';
+  const label = MOVEMENT_TYPE_LABELS[item.movement_type] ?? item.movement_type;
+  const icon = TYPE_ICON[item.movement_type] ?? 'package';
+  const sign = signFor(item);
+  const absQty = Math.abs(item.quantity);
+  const subtitle = item.reference || item.notes || undefined;
 
   return (
-    <Card style={styles.cardMargin}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardHeaderLeft}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.product_name}</Text>
-          <View style={styles.subtitleRow}>
-            <Text style={styles.quantityText}>
-              {isPositive ? '+' : '-'}{item.quantity}
-            </Text>
-            {item.location_name && <Text style={styles.cardSubtitle}>{item.location_name}</Text>}
-          </View>
-        </View>
-        <Badge label={label} variant={variant} size="sm" />
-      </View>
-      <View style={styles.cardFooter}>
-        {item.reference && <Text style={styles.footerDetail}>Ref: {item.reference}</Text>}
-        <Text style={styles.footerDate}>{formatRelative(item.created_at)}</Text>
-      </View>
-    </Card>
+    <RecordCard
+      title={item.product_name || 'Producto sin nombre'}
+      subtitle={subtitle}
+      eyebrow={label.toUpperCase()}
+      media={{ icon }}
+      badges={[{ label, variant }]}
+      details={[
+        { label: 'Ubicación', value: item.location_name || '—', icon: 'map-pin' },
+        { label: 'Tienda', value: item.store_name || '—', icon: 'store' },
+        { label: 'Usuario', value: item.user_name || '—', icon: 'user' },
+        { label: 'Fecha', value: formatRelative(item.created_at), icon: 'clock' },
+      ]}
+      footerLabel="Cantidad"
+      footerValue={`${sign}${absQty}`}
+      footerTone={footerToneFor(item)}
+    />
   );
 };
 
@@ -62,27 +90,16 @@ export default function MovementsScreen() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<MovementType | 'all'>('all');
 
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
+  const { data, isLoading, refetch, isRefetching } = useQuery({
     queryKey: ['movements', search, activeFilter],
-    queryFn: ({ pageParam = 1 }) =>
+    queryFn: () =>
       InventoryService.getMovements({
-        page: pageParam,
-        limit: 20,
         search: search || undefined,
-        type: activeFilter === 'all' ? undefined : activeFilter,
+        movement_type: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
-    initialPageParam: 1,
   });
 
-  const movements = data?.pages.flatMap((p) => p.data) ?? [];
-
-  const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const movements: StockMovement[] = data?.data ?? [];
 
   const handleRefresh = useCallback(() => refetch(), [refetch]);
 
@@ -90,12 +107,12 @@ export default function MovementsScreen() {
     <View style={styles.container}>
       <FlatList
         data={movements}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <MovementCard item={item} />}
         ListHeaderComponent={
           <View>
             <View style={styles.searchWrap}>
-              <Input label="Buscar" value={search} onChangeText={setSearch} placeholder="Buscar movimientos..." />
+              <SearchBar value={search} onChangeText={setSearch} onClear={() => setSearch('')} placeholder="Buscar movimientos..." />
             </View>
 
             <View style={styles.filterRow}>
@@ -116,10 +133,8 @@ export default function MovementsScreen() {
         ListEmptyComponent={
           isLoading ? <Spinner /> : <EmptyState title="Sin movimientos" description="No se encontraron movimientos de stock" />
         }
-        ListFooterComponent={isFetchingNextPage ? <Spinner /> : null}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} />}
-        onEndReached={handleEndReached}
-        onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
     </View>
@@ -128,23 +143,14 @@ export default function MovementsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
-  filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginBottom: spacing[3] },
+  searchWrap: { marginBottom: spacing[3] },
+  filterRow: { flexDirection: 'row', gap: spacing[2], marginBottom: spacing[3], flexWrap: 'wrap' },
   chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },
   chipActive: { backgroundColor: colors.primary },
   chipInactive: { backgroundColor: colorScales.gray[200] },
   chipText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any },
   chipTextActive: { color: '#fff' },
   chipTextInactive: { color: colorScales.gray[600] },
-  cardMargin: { marginHorizontal: spacing[4], marginBottom: spacing[3] },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
-  cardHeaderLeft: { flex: 1 },
-  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '600' as any, color: colorScales.gray[900] },
-  subtitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginTop: 2 },
-  quantityText: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colorScales.gray[700] },
-  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500] },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing[2], paddingTop: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
-  footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
-  footerDate: { fontSize: typography.fontSize.xs, color: colorScales.gray[400] },
-  listContent: { paddingBottom: spacing[6] },
+  separator: { height: spacing[3] },
+  listContent: { paddingHorizontal: spacing[4], paddingBottom: spacing[6] },
 });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, Image } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Image } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
@@ -12,7 +12,7 @@ import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
-import { spacing, borderRadius, typography, colorScales, colors } from '@/shared/theme';
+import { spacing, typography, colorScales, colors } from '@/shared/theme';
 
 const stateVariant = (state: ProductState) =>
   state === 'active' ? 'success' : state === 'inactive' ? 'warning' : 'default';
@@ -155,7 +155,7 @@ export default function ProductDetailScreen() {
         <View style={styles.footerRow}>
           <Button
             title="Editar"
-            onPress={() => router.push(`/(store-admin)/products/edit/${id}` as never)}
+            onPress={() => router.push({ pathname: '/products/edit', params: { id } } as never)}
             variant="primary"
             fullWidth
           />

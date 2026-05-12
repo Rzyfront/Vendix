@@ -1,25 +1,24 @@
-import { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, Pressable, StyleSheet } from 'react-native';
+import { useCallback, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { OrderService } from '@/features/store/services/order.service';
+import { getNextPageParam } from '@/core/api/pagination';
 import {
   Order,
+  OrderChannel,
   OrderState,
-  ORDER_STATE_LABELS,
   ORDER_STATE_COLORS,
+  ORDER_STATE_LABELS,
 } from '@/features/store/types';
-import { StatsCard } from '@/shared/components/stats-card/stats-card';
-import { Card } from '@/shared/components/card/card';
-import { Icon } from '@/shared/components/icon/icon';
-import { Badge } from '@/shared/components/badge/badge';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { RecordCard } from '@/shared/components/record-card/record-card';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { ListItem } from '@/shared/components/list-item/list-item';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative } from '@/shared/utils/date';
-import { spacing, borderRadius, colorScales, colors } from '@/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
 
 const STATE_VARIANT_MAP: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   default: 'default',
@@ -40,81 +39,84 @@ const FILTER_CHIPS: FilterChip[] = [
   { label: 'Canceladas', value: 'cancelled' },
 ];
 
-function getChannelIcon(channel: string): string {
+function channelLabel(channel?: OrderChannel | null): string {
   switch (channel) {
-    case 'pos': return 'shopping-bag';
-    case 'ecommerce': return 'shopping-cart';
-    case 'whatsapp': return 'message-circle';
-    case 'marketplace': return 'store';
-    default: return 'circle-dot';
+    case 'pos':
+      return 'POS';
+    case 'ecommerce':
+      return 'Ecommerce';
+    case 'agent':
+      return 'Agente';
+    case 'whatsapp':
+      return 'WhatsApp';
+    case 'marketplace':
+      return 'Marketplace';
+    default:
+      return 'Manual';
   }
 }
 
-function getChannelColor(channel: string): string {
+function channelIcon(channel?: OrderChannel | null): string {
   switch (channel) {
-    case 'pos': return colorScales.blue[500];
-    case 'ecommerce': return colors.primary;
-    case 'whatsapp': return colorScales.green[500];
-    case 'marketplace': return colorScales.amber[500];
-    default: return colorScales.gray[400];
+    case 'pos':
+      return 'shopping-bag';
+    case 'ecommerce':
+      return 'shopping-cart';
+    case 'whatsapp':
+      return 'phone';
+    case 'marketplace':
+      return 'store';
+    default:
+      return 'file-text';
   }
+}
+
+function customerName(order: Order): string {
+  if (!order.customer) return 'Cliente no registrado';
+  return `${order.customer.first_name || ''} ${order.customer.last_name || ''}`.trim() || order.customer.email;
 }
 
 const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) => {
-  const badgeVariant =
-    STATE_VARIANT_MAP[ORDER_STATE_COLORS[order.state]] ?? 'default';
+  const badgeVariant = STATE_VARIANT_MAP[ORDER_STATE_COLORS[order.state]] ?? 'default';
+  const paid = Number(order.total_paid ?? 0);
+  const remaining = Number(order.remaining_balance ?? 0);
+  const paymentValue =
+    remaining > 0
+      ? `Saldo ${formatCurrency(remaining)}`
+      : paid > 0
+        ? 'Pagada'
+        : 'Pendiente';
 
   return (
-    <Pressable onPress={onPress}>
-      <Card style={styles.cardMargin}>
-        <View style={styles.orderCardHeader}>
-          <View style={styles.flex1}>
-            <View style={styles.orderCardTitleRow}>
-              <ListItem
-                title={`#${order.order_number}`}
-                subtitle={
-                  order.customer
-                    ? `${order.customer.first_name} ${order.customer.last_name}`
-                    : undefined
-                }
-              />
-            </View>
-          </View>
-          <Badge
-            label={ORDER_STATE_LABELS[order.state]}
-            variant={badgeVariant}
-            size="sm"
-          />
-        </View>
-
-        <View style={styles.orderCardFooter}>
-          <View style={styles.orderCardFooterLeft}>
-            {order.channel && (
-              <Icon
-                name={getChannelIcon(order.channel)}
-                size={14}
-                color={getChannelColor(order.channel)}
-              />
-            )}
-            <ListItem
-              title={formatRelative(order.created_at)}
-            />
-          </View>
-          <ListItem
-            title={formatCurrency(order.grand_total)}
-          />
-        </View>
-      </Card>
-    </Pressable>
+    <RecordCard
+      title={`Orden #${order.order_number}`}
+      subtitle={customerName(order)}
+      eyebrow={formatRelative(order.created_at)}
+      media={{ icon: channelIcon(order.channel) }}
+      badges={[
+        { label: ORDER_STATE_LABELS[order.state], variant: badgeVariant },
+        { label: channelLabel(order.channel), variant: 'info' },
+      ]}
+      details={[
+        { label: 'Canal', value: channelLabel(order.channel), icon: channelIcon(order.channel) },
+        { label: 'Items', value: order.order_items?.length ?? '-', icon: 'package' },
+        { label: 'Pago', value: paymentValue, icon: 'wallet' },
+        { label: 'Fecha', value: formatRelative(order.created_at), icon: 'calendar' },
+      ]}
+      footerLabel="Total"
+      footerValue={formatCurrency(order.grand_total)}
+      footerTone="success"
+      onPress={onPress}
+    />
   );
 };
 
-const Orders = () => {
+export default function Orders() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<OrderState | 'all'>('all');
 
-  const { data: stats, isLoading: statsLoading } = useQuery({
+  const { data: stats } = useQuery({
     queryKey: ['order-stats'],
     queryFn: () => OrderService.stats(),
   });
@@ -136,18 +138,11 @@ const Orders = () => {
         search: search || undefined,
         status: activeFilter === 'all' ? undefined : activeFilter,
       }),
-    getNextPageParam: (lastPage) => {
-      const { page, totalPages } = lastPage.pagination;
-      return page < totalPages ? page + 1 : undefined;
-    },
+    getNextPageParam,
     initialPageParam: 1,
   });
 
-  const orders = data?.pages.flatMap((p) => p.data) ?? [];
-
-  const handlePressOrder = (id: number) => {
-    router.push(`/(store-admin)/orders/${id}`);
-  };
+  const orders = data?.pages.flatMap((page) => page.data) ?? [];
 
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) {
@@ -155,15 +150,14 @@ const Orders = () => {
     }
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleRefresh = useCallback(() => {
-    refetch();
-  }, [refetch]);
-
   const renderItem = useCallback(
     ({ item }: { item: Order }) => (
-      <OrderCard order={item} onPress={() => handlePressOrder(item.id)} />
+      <OrderCard
+        order={item}
+        onPress={() => router.push(`/(store-admin)/orders/${item.id}` as never)}
+      />
     ),
-    [],
+    [router],
   );
 
   const renderFooter = useCallback(() => {
@@ -177,150 +171,107 @@ const Orders = () => {
         data={orders}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
           <View>
-            <View style={styles.statsGrid}>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Total Órdenes"
-                  value={stats?.total_orders ?? 0}
-                  icon="clipboard-list"
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Ingresos"
-                  value={formatCurrency(stats?.total_revenue ?? 0)}
-                  icon="dollar-sign"
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Pendientes"
-                  value={stats?.pending_orders ?? 0}
-                  icon="clock"
-                />
-              </View>
-              <View style={styles.statsItem}>
-                <StatsCard
-                  label="Completadas"
-                  value={stats?.completed_orders ?? 0}
-                  icon="check"
-                />
-              </View>
-            </View>
+            <StatsGrid
+              items={[
+                { label: 'Total Órdenes', value: stats?.total_orders ?? 0, icon: 'clipboard-list' },
+                { label: 'Ingresos', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign' },
+              ]}
+            />
 
             <View style={styles.searchWrap}>
-              <SearchBar value={search} onSubmit={(text) => setSearch(text)} placeholder="Buscar órdenes..." />
+              <SearchBar
+                value={search}
+                onChangeText={setSearch}
+                onClear={() => setSearch('')}
+                placeholder="Buscar órdenes..."
+              />
             </View>
 
-            <View style={styles.filterRow}>
-              {FILTER_CHIPS.map((chip) => (
-                <Pressable
-                  key={chip.value}
-                  onPress={() => setActiveFilter(chip.value)}
-                  style={[
-                    styles.chip,
-                    activeFilter === chip.value ? styles.chipActive : styles.chipInactive,
-                  ]}
-                >
-                  <ListItem
-                    title={chip.label}
-                  />
-                </Pressable>
-              ))}
-            </View>
+            <FlatList
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              data={FILTER_CHIPS}
+              keyExtractor={(item) => item.value}
+              contentContainerStyle={styles.filterList}
+              renderItem={({ item }) => {
+                const active = activeFilter === item.value;
+                return (
+                  <Pressable
+                    onPress={() => setActiveFilter(item.value)}
+                    style={[styles.filterChip, active ? styles.filterChipActive : styles.filterChipInactive]}
+                  >
+                    <Text style={active ? styles.filterTextActive : styles.filterTextInactive}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              }}
+            />
           </View>
         }
         ListEmptyComponent={
           ordersLoading ? (
             <Spinner />
           ) : (
-            <EmptyState
-              title="Sin órdenes"
-              description="No se encontraron órdenes"
-            />
+            <EmptyState title="Sin órdenes" description="No se encontraron órdenes" icon="clipboard-list" />
           )
         }
         ListFooterComponent={renderFooter}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} />
-        }
+        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
     </View>
   );
-};
+}
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colorScales.gray[50],
   },
-  flex1: {
-    flex: 1,
-  },
-  cardMargin: {
-    marginBottom: spacing[3],
-  },
-  orderCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: spacing[2],
-  },
-  orderCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: spacing[1],
-  },
-  orderCardFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: spacing[2],
-  },
-  orderCardFooterLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    padding: spacing[4],
-  },
-  statsItem: {
-    width: '48%',
-  },
   searchWrap: {
-    paddingHorizontal: spacing[4],
     marginBottom: spacing[3],
   },
-  filterRow: {
-    flexDirection: 'row',
+  filterList: {
+    paddingBottom: spacing[4],
     gap: spacing[2],
+  },
+  filterChip: {
+    minHeight: 36,
     paddingHorizontal: spacing[4],
-    marginBottom: spacing[3],
-  },
-  chip: {
-    paddingHorizontal: spacing[3],
-    paddingVertical: 6,
     borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
   },
-  chipActive: {
+  filterChipActive: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  chipInactive: {
-    backgroundColor: colorScales.gray[200],
+  filterChipInactive: {
+    backgroundColor: colors.background,
+    borderColor: colorScales.gray[200],
+  },
+  filterTextActive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.background,
+  },
+  filterTextInactive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
   },
   listContent: {
+    paddingHorizontal: spacing[4],
     paddingBottom: spacing[6],
   },
+  separator: {
+    height: spacing[3],
+  },
 });
-
-export default Orders;
