@@ -7,6 +7,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 // Chart of Accounts
 import { ChartOfAccountsController } from './chart-of-accounts/chart-of-accounts.controller';
 import { ChartOfAccountsService } from './chart-of-accounts/chart-of-accounts.service';
+import { DefaultChartOfAccountsSeederService } from '../../../common/services/default-chart-of-accounts-seeder.service';
 
 // Journal Entries
 import { JournalEntriesController } from './journal-entries/journal-entries.controller';
@@ -82,6 +83,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
   providers: [
     ModuleFlowGuard,
     ChartOfAccountsService,
+    DefaultChartOfAccountsSeederService,
     JournalEntriesService,
     JournalEntryFlowService,
     FiscalPeriodsService,
@@ -109,6 +111,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
   ],
   exports: [
     ChartOfAccountsService,
+    DefaultChartOfAccountsSeederService,
     JournalEntriesService,
     JournalEntryFlowService,
     FiscalPeriodsService,

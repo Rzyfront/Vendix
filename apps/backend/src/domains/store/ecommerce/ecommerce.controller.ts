@@ -1,4 +1,13 @@
-import { Controller, Get, Patch, Post, Body, Param, UseInterceptors, UploadedFile } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Post,
+  Body,
+  Param,
+  UseInterceptors,
+  UploadedFile,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '../../../common/responses/response.service';
@@ -84,10 +93,7 @@ export class EcommerceController {
         `slider-${Date.now()}.webp`,
       );
 
-      return this.responseService.created(
-        result,
-        'Imagen subida exitosamente',
-      );
+      return this.responseService.created(result, 'Imagen subida exitosamente');
     } catch (error) {
       return this.responseService.error(
         'Error al subir la imagen',

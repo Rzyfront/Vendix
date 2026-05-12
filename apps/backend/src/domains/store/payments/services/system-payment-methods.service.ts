@@ -16,7 +16,7 @@ export class SystemPaymentMethodsService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
-  ) { }
+  ) {}
 
   /**
    * Get all system payment methods
@@ -34,10 +34,12 @@ export class SystemPaymentMethodsService {
       orderBy: { name: 'asc' },
     });
 
-    return Promise.all(methods.map(async (method) => ({
-      ...method,
-      logo_url: await this.s3Service.signUrl(method.logo_url),
-    })));
+    return Promise.all(
+      methods.map(async (method) => ({
+        ...method,
+        logo_url: await this.s3Service.signUrl(method.logo_url),
+      })),
+    );
   }
 
   /**

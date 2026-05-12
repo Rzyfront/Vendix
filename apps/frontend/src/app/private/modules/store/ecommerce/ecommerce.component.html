@@ -130,21 +130,21 @@
                   <div
                     class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group"
                   >
-                    @if (logoPreview) {
+                    @if (logoPreview()) {
                       <img
-                        [src]="logoPreview"
+                        [src]="logoPreview()"
                         alt="Logo preview"
                         class="w-full h-full object-contain p-2"
                       />
                     }
-                    @if (!logoPreview && !isUploadingLogo) {
+                    @if (!logoPreview() && !isUploadingLogo()) {
                       <div class="text-gray-400 flex flex-col items-center">
                         <app-icon name="image" size="24"></app-icon>
                         <span class="text-[10px] mt-1">Sin logo</span>
                       </div>
                     }
                     <!-- Loading State -->
-                    @if (isUploadingLogo) {
+                    @if (isUploadingLogo()) {
                       <div
                         class="absolute inset-0 bg-white/80 flex items-center justify-center"
                       >
@@ -154,7 +154,7 @@
                       </div>
                     }
                     <!-- Botón Eliminar (Overlay) -->
-                    @if (logoPreview && !isUploadingLogo) {
+                    @if (logoPreview() && !isUploadingLogo()) {
                       <button
                         type="button"
                         (click)="removeLogo()"
@@ -169,12 +169,12 @@
                     <app-button
                       variant="outline"
                       size="sm"
-                      [loading]="isUploadingLogo"
+                      [loading]="isUploadingLogo()"
                       (clicked)="triggerLogoInput()"
                     >
                       <app-icon name="upload" size="14" slot="icon"></app-icon>
                       <span>{{
-                        logoPreview ? "Cambiar Logo" : "Subir Logo"
+                        logoPreview() ? "Cambiar Logo" : "Subir Logo"
                       }}</span>
                     </app-button>
                     <p class="text-xs text-gray-500">
@@ -226,7 +226,7 @@
                     <div class="color-card-row">
                       <input
                         type="color"
-                        [value]="primaryColorControl.value"
+                        [value]="primaryColor()"
                         (change)="onColorPickerChange('primary_color', $event)"
                         class="color-picker"
                       />
@@ -243,7 +243,7 @@
                     <div class="color-card-row">
                       <input
                         type="color"
-                        [value]="secondaryColorControl.value"
+                        [value]="secondaryColor()"
                         (change)="
                           onColorPickerChange('secondary_color', $event)
                         "
@@ -262,7 +262,7 @@
                     <div class="color-card-row">
                       <input
                         type="color"
-                        [value]="accentColorControl.value"
+                        [value]="accentColor()"
                         (change)="onColorPickerChange('accent_color', $event)"
                         class="color-picker"
                       />
@@ -349,11 +349,11 @@
                 </p>
                 <!-- Thumbnails Grid Compacto -->
                 <div class="flex gap-2 flex-wrap">
-                  @for (img of sliderImages; track img; let i = $index) {
+                  @for (img of sliderImages(); track img; let i = $index) {
                     <div
                       class="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500 group"
-                      [class.border-primary-500]="activeImageIndex === i"
-                      [class.border-gray-200]="activeImageIndex !== i"
+                      [class.border-primary-500]="activeImageIndex() === i"
+                      [class.border-gray-200]="activeImageIndex() !== i"
                       [class.opacity-60]="img.uploading"
                       (click)="!img.uploading && setActiveImage(i)"
                     >
@@ -384,7 +384,7 @@
                       }
                     </div>
                   }
-                  @if (sliderImages.length < 5 && !isUploadingImage) {
+                  @if (sliderImages().length < 5 && !isUploadingImage()) {
                     <div
                       class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
                       (click)="triggerFileInput()"
@@ -396,9 +396,9 @@
                 </div>
                 <!-- Metadata Compacta (solo si hay imagen seleccionada) -->
                 @if (
-                  sliderImages.length > 0 &&
-                  sliderImages[activeImageIndex] &&
-                  !sliderImages[activeImageIndex].uploading
+                  sliderImages().length > 0 &&
+                  sliderImages()[activeImageIndex()] &&
+                  !sliderImages()[activeImageIndex()].uploading
                 ) {
                   <div
                     class="p-4 bg-primary-50/50 border border-primary-100 rounded-xl shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
@@ -412,8 +412,8 @@
                       >
                         <img
                           [src]="
-                            sliderImages[activeImageIndex].url ||
-                            sliderImages[activeImageIndex].thumbnail
+                            sliderImages()[activeImageIndex()].url ||
+                            sliderImages()[activeImageIndex()].thumbnail
                           "
                           alt="Current editing"
                           class="w-full h-full object-cover"
@@ -424,7 +424,7 @@
                           class="text-xs font-bold text-primary-900 uppercase tracking-wider"
                         >
                           Modificando Contenido: Imagen #{{
-                            activeImageIndex + 1
+                            activeImageIndex() + 1
                           }}
                         </h4>
                         <p class="text-[10px] text-primary-600 font-medium">
@@ -435,7 +435,9 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <app-input
                         label="Título del Slide"
-                        [ngModel]="sliderImages[activeImageIndex].title || ''"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].title || ''
+                        "
                         [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onTitleInputChange($event)"
                         placeholder="Ej: Nueva Colección 2024"
@@ -443,7 +445,9 @@
                       ></app-input>
                       <app-input
                         label="Párrafo Descriptivo (Leyenda)"
-                        [ngModel]="sliderImages[activeImageIndex].caption || ''"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].caption || ''
+                        "
                         [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onCaptionInputChange($event)"
                         placeholder="Ej: Descubre nuestras ofertas exclusivas..."
@@ -600,6 +604,11 @@
               ></app-input>
               <!-- Toggles del Checkout -->
               <app-setting-toggle
+                [formControl]="requireRegistrationControl"
+                label="Requerir registro"
+                description="Obligar a crear cuenta"
+              ></app-setting-toggle>
+              <app-setting-toggle
                 [formControl]="whatsappCheckoutControl"
                 label="Whatsapp Checkout"
                 description="Permitir terminar compra en whatsapp"
@@ -633,11 +642,6 @@
                   </div>
                 </div>
               }
-              <app-setting-toggle
-                [formControl]="requireRegistrationControl"
-                label="Requerir registro"
-                description="Obligar a crear cuenta"
-              ></app-setting-toggle>
             </div>
           </div>
         </div>
@@ -675,21 +679,21 @@
     </form>
   }
 
-  @defer (when isShareModalOpen) {
+  @defer (when isShareModalOpen()) {
     <app-store-share-modal
-      [isOpen]="isShareModalOpen"
+      [isOpen]="isShareModalOpen()"
       [storeUrl]="ecommerceUrl"
       [storeName]="storeName"
-      [logoUrl]="logoPreview"
-      [primaryColor]="primaryColorControl.value"
-      [secondaryColor]="secondaryColorControl.value"
-      [accentColor]="accentColorControl.value"
-      (closed)="isShareModalOpen = false"
+      [logoUrl]="logoPreview()"
+      [primaryColor]="primaryColor()"
+      [secondaryColor]="secondaryColor()"
+      [accentColor]="accentColor()"
+      (closed)="isShareModalOpen.set(false)"
     >
     </app-store-share-modal>
   }
 
-  @defer (when showTourModal) {
+  @defer (when showTourModal()) {
     <app-tour-modal
       [(isOpen)]="showTourModal"
       [tourConfig]="ecommerceTourConfig"

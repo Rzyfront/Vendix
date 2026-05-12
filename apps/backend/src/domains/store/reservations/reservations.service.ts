@@ -18,6 +18,7 @@ import {
 import { AvailabilityService } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
 import { S3Service } from '@common/services/s3.service';
+import { PriceResolverService } from '../products/services/price-resolver.service';
 
 @Injectable()
 export class ReservationsService {
@@ -29,6 +30,7 @@ export class ReservationsService {
     private readonly ordersService: OrdersService,
     private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
+    private readonly priceResolverService: PriceResolverService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -67,6 +69,20 @@ export class ReservationsService {
         },
       },
     },
+    product_variants: {
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        attributes: true,
+        price_override: true,
+        is_on_sale: true,
+        sale_price: true,
+        service_duration_minutes: true,
+        buffer_minutes: true,
+        preparation_time_minutes: true,
+      },
+    },
     provider: {
       select: {
         id: true,
@@ -95,11 +111,15 @@ export class ReservationsService {
     }
     // Sign the product image URL if it's an S3 key
     if (booking?.product?.image_url) {
-      booking.product.image_url = await this.s3Service.signUrl(booking.product.image_url);
+      booking.product.image_url = await this.s3Service.signUrl(
+        booking.product.image_url,
+      );
     }
     // Sign the provider avatar URL if it's an S3 key
     if (booking?.provider?.avatar_url) {
-      booking.provider.avatar_url = await this.s3Service.signUrl(booking.provider.avatar_url);
+      booking.provider.avatar_url = await this.s3Service.signUrl(
+        booking.provider.avatar_url,
+      );
     }
     return booking;
   }
@@ -127,11 +147,39 @@ export class ReservationsService {
         requires_booking: true,
         service_duration_minutes: true,
         booking_mode: true,
+        base_price: true,
+        is_on_sale: true,
+        sale_price: true,
+        track_inventory: true,
       },
     });
 
     if (!product) {
       throw new NotFoundException('Producto/servicio no encontrado');
+    }
+
+    // Validate product_variant_id if provided
+    let selectedVariant: {
+      id: number;
+      price_override: Prisma.Decimal | null;
+      is_on_sale: boolean;
+      sale_price: Prisma.Decimal | null;
+      track_inventory_override: boolean | null;
+    } | null = null;
+    if (dto.product_variant_id) {
+      selectedVariant = await this.prisma.product_variants.findFirst({
+        where: { id: dto.product_variant_id, product_id: dto.product_id },
+        select: {
+          id: true,
+          price_override: true,
+          is_on_sale: true,
+          sale_price: true,
+          track_inventory_override: true,
+        },
+      });
+      if (!selectedVariant) {
+        throw new BadRequestException('Variant does not belong to product');
+      }
     }
 
     if (!product.requires_booking) {
@@ -255,6 +303,7 @@ export class ReservationsService {
             notes: dto.notes,
             order_id: dto.order_id,
             provider_id: resolvedProviderId,
+            product_variant_id: dto.product_variant_id ?? null,
             created_by_user_id: context?.user_id,
             updated_at: new Date(),
           },
@@ -268,13 +317,38 @@ export class ReservationsService {
     // 7. Auto-crear orden de venta vinculada
     if (!dto.order_id && !dto.skip_order_creation) {
       try {
-        const price = Number(booking.product?.base_price) || 0;
+        const priceResult = this.priceResolverService.resolvePrice({
+          product: {
+            base_price: Number(product.base_price),
+            is_on_sale: product.is_on_sale,
+            sale_price:
+              product.sale_price != null ? Number(product.sale_price) : null,
+            track_inventory: product.track_inventory,
+          },
+          variant: selectedVariant
+            ? {
+                price_override:
+                  selectedVariant.price_override != null
+                    ? Number(selectedVariant.price_override)
+                    : null,
+                is_on_sale: selectedVariant.is_on_sale,
+                sale_price:
+                  selectedVariant.sale_price != null
+                    ? Number(selectedVariant.sale_price)
+                    : null,
+                track_inventory_override:
+                  selectedVariant.track_inventory_override,
+              }
+            : undefined,
+        });
+        const price = priceResult.unitPrice;
         const order = await this.ordersService.create(
           {
             customer_id: dto.customer_id,
             items: [
               {
                 product_id: dto.product_id,
+                product_variant_id: dto.product_variant_id,
                 product_name: booking.product?.name || 'Servicio',
                 quantity: 1,
                 unit_price: price,
@@ -320,6 +394,7 @@ export class ReservationsService {
   async hold(dto: {
     customer_id: number;
     product_id: number;
+    product_variant_id?: number;
     date: string;
     start_time: string;
     end_time: string;
@@ -351,6 +426,16 @@ export class ReservationsService {
       );
     }
 
+    if (dto.product_variant_id) {
+      const variantOk = await this.prisma.product_variants.findFirst({
+        where: { id: dto.product_variant_id, product_id: dto.product_id },
+        select: { id: true },
+      });
+      if (!variantOk) {
+        throw new BadRequestException('Variant does not belong to product');
+      }
+    }
+
     const isFreeBooking =
       product.booking_mode === booking_mode_enum.free_booking;
 
@@ -377,6 +462,7 @@ export class ReservationsService {
         store_id,
         customer_id: dto.customer_id,
         product_id: dto.product_id,
+        product_variant_id: dto.product_variant_id ?? null,
         booking_number,
         date: new Date(dto.date),
         start_time: dto.start_time,
@@ -817,8 +903,12 @@ export class ReservationsService {
     });
 
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.status !== 'confirmed') throw new BadRequestException('Solo bookings confirmados pueden hacer check-in');
-    if (booking.checked_in_at) throw new BadRequestException('Check-in ya registrado');
+    if (booking.status !== 'confirmed')
+      throw new BadRequestException(
+        'Solo bookings confirmados pueden hacer check-in',
+      );
+    if (booking.checked_in_at)
+      throw new BadRequestException('Check-in ya registrado');
 
     const updated = await this.prisma.bookings.update({
       where: { id },

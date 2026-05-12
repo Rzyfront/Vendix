@@ -177,38 +177,7 @@ import { CurrencyService } from '../../../../services/currency.service';
       }
 
       .help-icon:hover {
-        color: var(--color-warning);
-      }
-
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.5rem 0.75rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        border-radius: var(--radius-md);
-        white-space: nowrap;
-        box-shadow: var(--shadow-lg);
-        z-index: 50;
-        margin-bottom: 0.5rem;
-        pointer-events: none;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 5px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.25rem;
-        z-index: 50;
-        pointer-events: none;
+        color: var(--color-primary);
       }
 
       .field-required {
@@ -618,7 +587,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="countryOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-selector
                   formControlName="state_province"
@@ -628,7 +597,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="departmentOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-selector
                   formControlName="city"
@@ -638,7 +607,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="cityOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-input
                   formControlName="postal_code"
@@ -648,6 +617,22 @@ import { CurrencyService } from '../../../../services/currency.service';
                 ></app-input>
               </div>
             </div>
+
+            <!-- Inventory Location Selection (Optional - for ORG_ADMIN) -->
+            @if (locationOptions.length > 0) {
+              <div class="form-grid" style="margin-top: 1rem;">
+                <div class="form-field full-width">
+                  <app-selector
+                    formControlName="default_location_id"
+                    [label]="'Ubicación de inventario default'"
+                    styleVariant="modern"
+                    placeholder="Selecciona una ubicación (opcional)"
+                    [options]="locationOptions"
+                    [required]="false"
+                  ></app-selector>
+                </div>
+              </div>
+            }
           </div>
         </form>
       </div>
@@ -669,6 +654,7 @@ export class StoreSetupStepComponent implements OnInit {
   departments: Department[] = [];
   cities: City[] = [];
   currencies: { value: string; label: string }[] = [];
+  locationOptions: { value: number; label: string }[] = [];
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();

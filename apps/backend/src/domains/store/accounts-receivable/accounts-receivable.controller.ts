@@ -1,15 +1,7 @@
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards } from '@nestjs/common';
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AccountsReceivableService } from './accounts-receivable.service';
 import { ArAgingService } from './services/ar-aging.service';
@@ -52,7 +44,10 @@ export class AccountsReceivableController {
   @Permissions('store:accounts_receivable:read')
   async getAgingReport() {
     const result = await this.aging_service.getAgingReport();
-    return this.response_service.success(result, 'Reporte de antigüedad obtenido');
+    return this.response_service.success(
+      result,
+      'Reporte de antigüedad obtenido',
+    );
   }
 
   // ─── DASHBOARD ─────────────────────────────────────────────
@@ -60,7 +55,10 @@ export class AccountsReceivableController {
   @Permissions('store:accounts_receivable:read')
   async getDashboard() {
     const result = await this.ar_service.getDashboard();
-    return this.response_service.success(result, 'Dashboard de cartera obtenido');
+    return this.response_service.success(
+      result,
+      'Dashboard de cartera obtenido',
+    );
   }
 
   // ─── COLLECTION: UPCOMING DUE ─────────────────────────────
@@ -70,7 +68,10 @@ export class AccountsReceivableController {
     const result = await this.collection_service.getUpcomingDue(
       days ? parseInt(days, 10) : 7,
     );
-    return this.response_service.success(result, 'Próximos vencimientos obtenidos');
+    return this.response_service.success(
+      result,
+      'Próximos vencimientos obtenidos',
+    );
   }
 
   // ─── COLLECTION: OVERDUE BY CUSTOMER ──────────────────────
@@ -78,7 +79,10 @@ export class AccountsReceivableController {
   @Permissions('store:accounts_receivable:read')
   async getOverdueByCustomer() {
     const result = await this.collection_service.getOverdueByCustomer();
-    return this.response_service.success(result, 'Deuda vencida por cliente obtenida');
+    return this.response_service.success(
+      result,
+      'Deuda vencida por cliente obtenida',
+    );
   }
 
   // --- Parameter Routes (MUST be last) ---
@@ -99,12 +103,11 @@ export class AccountsReceivableController {
     @Body() dto: RegisterArPaymentDto,
     @Req() req: any,
   ) {
-    const result = await this.ar_service.registerPayment(
-      +id,
-      dto,
-      req.user.id,
+    const result = await this.ar_service.registerPayment(+id, dto, req.user.id);
+    return this.response_service.success(
+      result,
+      'Pago registrado exitosamente',
     );
-    return this.response_service.success(result, 'Pago registrado exitosamente');
   }
 
   // ─── CREATE PAYMENT AGREEMENT ──────────────────────────────
@@ -115,12 +118,11 @@ export class AccountsReceivableController {
     @Body() dto: CreatePaymentAgreementDto,
     @Req() req: any,
   ) {
-    const result = await this.agreement_service.create(
-      +id,
-      dto,
-      req.user.id,
+    const result = await this.agreement_service.create(+id, dto, req.user.id);
+    return this.response_service.success(
+      result,
+      'Acuerdo de pago creado exitosamente',
     );
-    return this.response_service.success(result, 'Acuerdo de pago creado exitosamente');
   }
 
   // ─── WRITE OFF ─────────────────────────────────────────────
@@ -128,6 +130,9 @@ export class AccountsReceivableController {
   @Permissions('store:accounts_receivable:write_off')
   async writeOff(@Param('id') id: string, @Req() req: any) {
     const result = await this.ar_service.writeOff(+id, req.user.id);
-    return this.response_service.success(result, 'Cuenta castigada exitosamente');
+    return this.response_service.success(
+      result,
+      'Cuenta castigada exitosamente',
+    );
   }
 }

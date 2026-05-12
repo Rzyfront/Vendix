@@ -1,10 +1,30 @@
-import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import * as crypto from 'crypto';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
+
+// States considered terminal for compare-and-swap and idempotency checks.
+const PAYMENT_TERMINAL_STATES = [
+  'succeeded',
+  'captured',
+  'failed',
+  'cancelled',
+  'refunded',
+] as const;
+
+// Order states from which we can still transition to paid/cancelled.
+const ORDER_OPEN_STATES = ['created', 'pending_payment', 'processing'] as const;
 
 @Injectable()
 export class WebhookHandlerService {
@@ -16,12 +36,33 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    @Optional() @Inject(forwardRef(() => PaymentLinksService))
+    @Optional()
+    @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
     try {
+      // Deduplication: INSERT ON CONFLICT DO NOTHING at the start of every
+      // webhook handler. If this event was already processed, return 200
+      // immediately so the gateway stops retrying.
+      const dedupKey = this.extractDedupKey(event);
+      if (dedupKey) {
+        const inserted = await this.prisma.withoutScope().$executeRaw<number>(
+          Prisma.sql`
+            INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
+            VALUES (${event.processor}, ${dedupKey}, ${event.eventType}, NOW())
+            ON CONFLICT (processor, event_id) DO NOTHING
+          `,
+        );
+        if (inserted === 0) {
+          this.logger.log(
+            `Duplicate webhook detected for ${event.processor}:${dedupKey}, returning 200`,
+          );
+          return;
+        }
+      }
+
       this.logger.log(
         `Processing webhook from ${event.processor}: ${event.eventType}`,
       );
@@ -53,6 +94,35 @@ export class WebhookHandlerService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Extracts a deterministic deduplication key from a webhook event.
+   * Falls back to a SHA-256 hash of the raw body when no canonical id
+   * is present.
+   */
+  private extractDedupKey(event: WebhookEvent): string | null {
+    const data = event.data;
+
+    if (data?.id && typeof data.id === 'string') {
+      return data.id;
+    }
+    if (data?.transaction?.id && typeof data.transaction.id === 'string') {
+      return data.transaction.id;
+    }
+    if (data?.transactionId && typeof data.transactionId === 'string') {
+      return data.transactionId;
+    }
+    if (data?.resource?.id && typeof data.resource.id === 'string') {
+      return data.resource.id;
+    }
+
+    // Fallback: hash the raw body so duplicate payloads always match
+    if (event.rawBody) {
+      return crypto.createHash('sha256').update(event.rawBody).digest('hex');
+    }
+
+    return null;
   }
 
   private async handleStripeWebhook(event: WebhookEvent): Promise<void> {
@@ -112,50 +182,159 @@ export class WebhookHandlerService {
     }
   }
 
+  /**
+   * Generic, atomic, idempotent payment-state transition. Used by Stripe,
+   * PayPal, bank transfer webhooks AND by the Wompi flow (via
+   * `applyWompiTransaction` -> `handleWompiPaymentLookup`) so the compare-and-swap
+   * logic lives in exactly one place.
+   *
+   * Atomicity strategy:
+   *  - Wraps the entire payment lookup + update + (optional) order transition
+   *    in a single `prisma.withoutScope().$transaction()` so two concurrent
+   *    webhooks (or webhook + force-confirm) racing on the same row can't
+   *    both write conflicting state.
+   *  - Uses `tx.payments.updateMany({ where: { id, state: NOT IN terminal } })`
+   *    as the compare-and-swap. If `count === 0` the row was finalized by
+   *    another transaction in flight — we log and bail out without touching
+   *    the order (the other tx already drove the order transition).
+   *
+   * Order-state transition (succeeded/captured) is handled in the SAME
+   * transaction via `updateOrderStatus(orderId, tx)`.
+   * Order-cancellation (failed/cancelled) is handled OUTSIDE the tx because
+   * `OrderFlowService.cancelOrder` runs its own tx + audit + stock release
+   * (compare-and-swap on order state still applies inside `cancelOrder`).
+   */
   private async updatePaymentStatus(
     transactionId: string,
     status: string,
     gatewayResponse: any,
-  ): Promise<void> {
+    options?: { matchedPayment?: any; extraUpdate?: Record<string, any> },
+  ): Promise<{
+    paymentId: number | null;
+    orderId: number | null;
+    transitioned: boolean;
+    shouldConfirmOrder: boolean;
+  }> {
     try {
-      // Use unscoped client because webhooks execute outside tenant context
-      const client = this.prisma.withoutScope();
-      const payment = await client.payments.findFirst({
-        where: { transaction_id: transactionId },
-      });
+      const result = await this.prisma
+        .withoutScope()
+        .$transaction(async (tx) => {
+          // Resolve the payment row. If the caller already located it via the
+          // Wompi multi-key priority (`findWompiPayment`), reuse that row to
+          // avoid a redundant lookup and guarantee both code paths target the
+          // exact same record.
+          let payment = options?.matchedPayment ?? null;
+          if (!payment) {
+            payment = await tx.payments.findFirst({
+              where: { gateway_reference: transactionId },
+            });
+            if (!payment) {
+              payment = await tx.payments.findFirst({
+                where: { transaction_id: transactionId },
+              });
+            }
+          }
 
-      if (!payment) {
-        this.logger.warn(`Payment not found for transaction: ${transactionId}`);
-        return;
+          if (!payment) {
+            this.logger.warn(
+              `Payment not found for transaction: ${transactionId}`,
+            );
+            return {
+              paymentId: null,
+              orderId: null,
+              transitioned: false,
+              shouldConfirmOrder: false,
+            };
+          }
+
+          // Idempotency: short-circuit if already in a terminal state.
+          if (
+            (PAYMENT_TERMINAL_STATES as readonly string[]).includes(
+              payment.state,
+            )
+          ) {
+            this.logger.log(
+              `Payment ${payment.id} already in final state '${payment.state}', skipping duplicate webhook`,
+            );
+            return {
+              paymentId: payment.id,
+              orderId: payment.order_id,
+              transitioned: false,
+              shouldConfirmOrder: false,
+            };
+          }
+
+          const updateData: any = {
+            state: status,
+            gateway_response: gatewayResponse,
+            updated_at: new Date(),
+            ...(options?.extraUpdate ?? {}),
+          };
+
+          if (status === 'succeeded' || status === 'captured') {
+            updateData.paid_at = new Date();
+          }
+
+          // Compare-and-swap: only update if the row is still NOT in a terminal
+          // state. If `count === 0`, another concurrent webhook already
+          // finalized this payment — log and let the other transaction own
+          // the order-state transition.
+          const cas = await tx.payments.updateMany({
+            where: {
+              id: payment.id,
+              state: { notIn: [...PAYMENT_TERMINAL_STATES] },
+            },
+            data: updateData,
+          });
+
+          if (cas.count === 0) {
+            this.logger.log(
+              `Payment ${payment.id} concurrent update detected, skipping (state changed mid-flight)`,
+            );
+            return {
+              paymentId: payment.id,
+              orderId: payment.order_id,
+              transitioned: false,
+              shouldConfirmOrder: false,
+            };
+          }
+
+          // Within the tx we only DECIDE whether the order should be confirmed
+          // (read-only aggregate against the just-updated payment). The actual
+          // confirmPayment call happens AFTER the tx commits — see below —
+          // because OrderFlowService opens its own tx and would deadlock here.
+          let shouldConfirmOrder = false;
+          if (status === 'succeeded' || status === 'captured') {
+            shouldConfirmOrder = await this.updateOrderStatus(
+              payment.order_id,
+              tx,
+            );
+          }
+
+          return {
+            paymentId: payment.id,
+            orderId: payment.order_id,
+            transitioned: true,
+            shouldConfirmOrder,
+          };
+        });
+
+      // Post-commit side effects: confirm or cancel the order via
+      // OrderFlowService, which manages its own tx, events, and audit log.
+      if (result.transitioned && result.orderId) {
+        if (result.shouldConfirmOrder) {
+          await this.confirmOrderPaid(result.orderId);
+        } else if (status === 'failed' || status === 'cancelled') {
+          await this.cancelOrderIfOpen(result.orderId, status, gatewayResponse);
+        }
       }
 
-      // Idempotencia: si el pago ya está en estado final, no reprocesar
-      const finalStates = ['succeeded', 'captured', 'failed', 'cancelled', 'refunded'];
-      if (finalStates.includes(payment.state)) {
-        this.logger.log(`Payment ${payment.id} already in final state '${payment.state}', skipping duplicate webhook`);
-        return;
+      if (result.paymentId) {
+        this.logger.log(
+          `Payment ${result.paymentId} updated to status: ${status}`,
+        );
       }
-
-      const updateData: any = {
-        state: status,
-        gateway_response: gatewayResponse,
-        updated_at: new Date(),
-      };
-
-      if (status === 'succeeded' || status === 'captured') {
-        updateData.paid_at = new Date();
-      }
-
-      await client.payments.update({
-        where: { id: payment.id },
-        data: updateData,
-      });
-
-      if (status === 'succeeded' || status === 'captured') {
-        await this.updateOrderStatus(payment.order_id);
-      }
-
-      this.logger.log(`Payment ${payment.id} updated to status: ${status}`);
+      return result;
     } catch (error) {
       this.logger.error(
         `Error updating payment status: ${error.message}`,
@@ -165,9 +344,64 @@ export class WebhookHandlerService {
     }
   }
 
-  private async updateOrderStatus(orderId: number): Promise<void> {
+  /**
+   * Cancels the order (releases stock, fires events, audit log) only if it's
+   * in an open state. Compare-and-swap on order state lives inside
+   * `OrderFlowService.cancelOrder`. Wrapped in store context because that
+   * service expects tenant context for scoped queries.
+   */
+  private async cancelOrderIfOpen(
+    orderId: number,
+    paymentStatus: string,
+    gatewayResponse: any,
+  ): Promise<void> {
     try {
       const client = this.prisma.withoutScope();
+      const order = await client.orders.findUnique({ where: { id: orderId } });
+      if (!order) return;
+      if (!(ORDER_OPEN_STATES as readonly string[]).includes(order.state)) {
+        return;
+      }
+
+      const reason =
+        gatewayResponse?.transaction?.status_message ||
+        `Payment ${paymentStatus}`;
+
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.cancelOrder(orderId, { reason });
+        },
+      );
+      this.logger.log(
+        `Order ${orderId} auto-cancelled via OrderFlowService due to payment ${paymentStatus}`,
+      );
+    } catch (cancelErr) {
+      this.logger.warn(
+        `Failed to auto-cancel order ${orderId}: ${cancelErr.message}`,
+      );
+    }
+  }
+
+  /**
+   * Reads the order + its payments and, if total paid >= grand_total AND the
+   * order is still in `pending_payment`, drives the order to its paid state
+   * via `OrderFlowService.confirmPayment`.
+   *
+   * `tx` (optional) is the Prisma transaction client. When passed we use it
+   * for the payment-aggregate read so the read sees the just-updated payment
+   * row within the same snapshot. `OrderFlowService.confirmPayment` ALWAYS
+   * runs outside this tx (it manages its own tx + events + audit), so we
+   * never nest transactions and never deadlock on row locks.
+   *
+   * Returns `true` when confirmPayment was invoked (caller may want to log).
+   */
+  private async updateOrderStatus(
+    orderId: number,
+    tx?: Prisma.TransactionClient,
+  ): Promise<boolean> {
+    try {
+      const client = tx ?? this.prisma.withoutScope();
       const order = await client.orders.findUnique({
         where: { id: orderId },
         include: {
@@ -176,26 +410,74 @@ export class WebhookHandlerService {
       });
 
       if (!order) {
-        return;
+        return false;
       }
 
       const totalPaid = order.payments
         .filter((p: any) => p.state === 'succeeded' || p.state === 'captured')
         .reduce((sum: number, p: any) => sum + Number(p.amount), 0);
 
-      if (totalPaid >= Number(order.grand_total)) {
-        if (order.state === 'pending_payment') {
-          // Usar OrderFlowService con contexto de store (maneja pagos, eventos, auditoría)
-          await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
-            await this.orderFlowService.confirmPayment(orderId);
-          });
-          this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
-        }
+      if (totalPaid < Number(order.grand_total)) {
+        return false;
       }
+
+      if (order.state !== 'pending_payment') {
+        return false;
+      }
+
+      // IMPORTANT: do NOT call OrderFlowService.confirmPayment from inside
+      // an open `$transaction`. confirmPayment opens its own tx and would
+      // deadlock against the row locks we hold on the payment row. Instead,
+      // when `tx` is provided, we return `true` and let the caller invoke
+      // confirmPayment after the tx commits.
+      if (tx) {
+        return true;
+      }
+
+      // No outer tx — safe to invoke OrderFlowService directly.
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.confirmPayment(orderId);
+        },
+      );
+      this.logger.log(
+        `Order ${orderId} payment confirmed via OrderFlowService`,
+      );
+      return true;
     } catch (error) {
       this.logger.error(
         `Error updating order status: ${error.message}`,
         error.stack,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Invokes OrderFlowService.confirmPayment in store context. Used after
+   * the payment-update tx commits so we don't nest transactions.
+   */
+  private async confirmOrderPaid(orderId: number): Promise<void> {
+    try {
+      const client = this.prisma.withoutScope();
+      const order = await client.orders.findUnique({ where: { id: orderId } });
+      if (!order) return;
+      if (order.state !== 'pending_payment') return;
+
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.confirmPayment(orderId);
+        },
+      );
+      this.logger.log(
+        `Order ${orderId} payment confirmed via OrderFlowService`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `Failed to confirm order ${orderId} after payment: ${err.message}`,
+        err.stack,
       );
     }
   }
@@ -211,62 +493,168 @@ export class WebhookHandlerService {
           return;
         }
 
-        const statusMap: Record<string, string> = {
-          APPROVED: 'succeeded',
-          DECLINED: 'failed',
-          VOIDED: 'cancelled',
-          ERROR: 'failed',
-        };
-
-        const mappedStatus = statusMap[txn.status];
-        if (mappedStatus) {
-          // Usar reference (vendix_{storeId}_{orderId}_{timestamp}) que guardamos en el pago
-          const lookupKey = txn.reference || txn.id;
-          await this.updatePaymentStatus(lookupKey, mappedStatus, data);
-
-          // Auto-cancel order when payment is declined or errored
-          if (mappedStatus === 'failed' || mappedStatus === 'cancelled') {
-            try {
-              const client = this.prisma.withoutScope();
-              const payment = await client.payments.findFirst({
-                where: { transaction_id: lookupKey },
-              });
-              if (payment) {
-                const order = await client.orders.findUnique({
-                  where: { id: payment.order_id },
-                });
-                if (order && ['created', 'pending_payment', 'processing'].includes(order.state)) {
-                  // Usar OrderFlowService con contexto (libera stock, cancela pagos, auditoría)
-                  await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
-                    await this.orderFlowService.cancelOrder(payment.order_id, {
-                      reason: `Pago rechazado por Wompi: ${txn.status}`,
-                    });
-                  });
-                  this.logger.log(`Order ${payment.order_id} auto-cancelled via OrderFlowService due to payment ${txn.status}`);
-                }
-              }
-            } catch (cancelErr) {
-              this.logger.warn(`Failed to auto-cancel order: ${cancelErr.message}`);
-            }
-          }
-
-          // Check if this transaction is linked to a payment link
-          const paymentLinkId = txn.payment_link_id;
-          if (paymentLinkId && mappedStatus === 'succeeded') {
-            try {
-              await this.paymentLinksService?.handlePaymentCompleted(paymentLinkId, txn);
-            } catch (error) {
-              this.logger.warn(`Failed to update payment link: ${error.message}`);
-            }
-          }
-        } else {
-          this.logger.log(`Wompi transaction ${txn.id} still PENDING`);
-        }
+        await this.applyWompiTransaction(txn, data);
         break;
       }
       default:
         this.logger.log(`Unhandled Wompi event: ${eventType}`);
     }
+  }
+
+  /**
+   * Public, reusable handler that applies a Wompi transaction object to the
+   * local payment + order state. Same shape as `data.transaction` from the
+   * `transaction.updated` webhook event. Used by:
+   *   1. Webhook arrivals (`handleWompiWebhook`)
+   *   2. Frontend-driven force-confirm flow (`CheckoutService.confirmWompiPayment`)
+   *      that polls Wompi directly when the user returns from the widget.
+   *
+   * `gatewayResponse` defaults to `{ transaction: txn }` so callers from a
+   * polled flow don't need to fabricate an event envelope.
+   *
+   * Returns the mapped payment state once applied, or `null` when the
+   * transaction is still PENDING / unmappable. Idempotent: running twice on
+   * the same final-state transaction is safe.
+   */
+  async applyWompiTransaction(
+    txn: any,
+    gatewayResponse?: any,
+  ): Promise<string | null> {
+    if (!txn?.id) {
+      this.logger.warn('applyWompiTransaction called without txn.id');
+      return null;
+    }
+
+    const statusMap: Record<string, string> = {
+      APPROVED: 'succeeded',
+      DECLINED: 'failed',
+      VOIDED: 'cancelled',
+      ERROR: 'failed',
+    };
+
+    const mappedStatus = statusMap[txn.status];
+    if (!mappedStatus) {
+      this.logger.log(
+        `Wompi transaction ${txn.id} still PENDING (status=${txn.status})`,
+      );
+      return null;
+    }
+
+    const payload = gatewayResponse ?? { transaction: txn };
+
+    // Wompi sends BOTH:
+    //   - txn.reference: Vendix-generated `vendix_<storeId>_<orderId>_<ts>`
+    //   - txn.id: Wompi's real transaction id
+    // We persist `reference` in `payments.gateway_reference` and update
+    // `payments.transaction_id` to the real Wompi id once we find the row.
+    //
+    // Delegating to `updatePaymentStatus` (the unified atomic CAS path) means
+    // Wompi shares the exact same atomic state machine + post-commit
+    // confirm/cancel orchestration as Stripe / PayPal / bank transfer.
+    await this.handleWompiPaymentLookup(txn, mappedStatus, payload);
+
+    // Check if this transaction is linked to a payment link.
+    const paymentLinkId = txn.payment_link_id;
+    if (paymentLinkId && mappedStatus === 'succeeded') {
+      try {
+        await this.paymentLinksService?.handlePaymentCompleted(
+          paymentLinkId,
+          txn,
+        );
+      } catch (error) {
+        this.logger.warn(`Failed to update payment link: ${error.message}`);
+      }
+    }
+
+    return mappedStatus;
+  }
+
+  /**
+   * Wompi-specific payment lookup with 3-level priority:
+   *   1. PRIMARY: gateway_reference == txn.reference  (the canonical match)
+   *   2. FALLBACK: transaction_id == txn.id           (real Wompi id, set on prior webhook)
+   *   3. LAST RESORT: transaction_id == txn.reference (legacy rows pre-gateway_reference)
+   */
+  private async findWompiPayment(txn: any): Promise<any | null> {
+    const client = this.prisma.withoutScope();
+
+    if (txn?.reference) {
+      const byRef = await client.payments.findFirst({
+        where: { gateway_reference: String(txn.reference) },
+      });
+      if (byRef) return byRef;
+    }
+
+    if (txn?.id) {
+      const byId = await client.payments.findFirst({
+        where: { transaction_id: String(txn.id) },
+      });
+      if (byId) return byId;
+    }
+
+    if (txn?.reference) {
+      const legacyByRef = await client.payments.findFirst({
+        where: { transaction_id: String(txn.reference) },
+      });
+      if (legacyByRef) return legacyByRef;
+    }
+
+    return null;
+  }
+
+  /**
+   * Look up the Wompi payment row using the 3-level priority, compute
+   * Wompi-specific extra fields (transaction_id backfill, gateway_reference
+   * fill on legacy rows), then delegate to the unified atomic
+   * `updatePaymentStatus` so Wompi shares the same compare-and-swap +
+   * post-commit confirm/cancel logic as the other processors.
+   */
+  private async handleWompiPaymentLookup(
+    txn: any,
+    status: string,
+    gatewayResponse: any,
+  ): Promise<void> {
+    const payment = await this.findWompiPayment(txn);
+    if (!payment) {
+      this.logger.warn(
+        `Wompi payment not found. reference=${txn?.reference} id=${txn?.id}`,
+      );
+      return;
+    }
+
+    // Wompi-specific patches that don't apply to other processors:
+    const extraUpdate: Record<string, any> = {};
+
+    // Backfill the real Wompi transaction id when our row still has the
+    // placeholder created in `createPaymentRecord` (matches `<type>_<ts>_<rand>`).
+    const placeholderRe = /^[a-z_]+_\d{10,}_[a-z0-9]+$/i;
+    if (
+      txn?.id &&
+      payment.transaction_id &&
+      placeholderRe.test(payment.transaction_id) &&
+      payment.transaction_id !== String(txn.id)
+    ) {
+      extraUpdate.transaction_id = String(txn.id);
+    }
+
+    // Make sure gateway_reference is set even on legacy rows we matched via fallback
+    if (txn?.reference && !payment.gateway_reference) {
+      extraUpdate.gateway_reference = String(txn.reference);
+    }
+
+    // Use the canonical (Vendix) reference as the lookup key, falling back to
+    // the Wompi id. The `matchedPayment` option short-circuits the lookup
+    // inside `updatePaymentStatus` so we hit the exact row resolved by the
+    // Wompi 3-level priority.
+    const lookupKey = txn?.reference
+      ? String(txn.reference)
+      : String(txn?.id ?? '');
+
+    await this.updatePaymentStatus(lookupKey, status, gatewayResponse, {
+      matchedPayment: payment,
+      extraUpdate:
+        Object.keys(extraUpdate).length > 0 ? extraUpdate : undefined,
+    });
   }
 
   private async handleDispute(

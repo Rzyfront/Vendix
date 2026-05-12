@@ -26,9 +26,7 @@ export class EcommercePrismaService extends BasePrismaService {
   ];
 
   // Modelos que NO tienen store_id pero sí customer_id (heredan scope vía relación)
-  private readonly customer_only_models = [
-    'payments',
-  ];
+  private readonly customer_only_models = ['payments'];
 
   constructor() {
     super();
@@ -55,7 +53,11 @@ export class EcommercePrismaService extends BasePrismaService {
       'createMany',
     ];
 
-    const all_models = [...this.store_only_models, ...this.store_user_models, ...this.customer_only_models];
+    const all_models = [
+      ...this.store_only_models,
+      ...this.store_user_models,
+      ...this.customer_only_models,
+    ];
 
     for (const model of all_models) {
       extensions[model] = {};
@@ -120,7 +122,9 @@ export class EcommercePrismaService extends BasePrismaService {
         scoped_args.data = applyToData(scoped_args.data);
       } else if (operation === 'createMany') {
         if (Array.isArray(scoped_args.data)) {
-          scoped_args.data = scoped_args.data.map((item: any) => applyToData(item));
+          scoped_args.data = scoped_args.data.map((item: any) =>
+            applyToData(item),
+          );
         } else {
           scoped_args.data = applyToData(scoped_args.data);
         }

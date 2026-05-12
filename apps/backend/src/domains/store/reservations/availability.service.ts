@@ -28,8 +28,9 @@ export class AvailabilityService {
     product_id: number,
     date_from: string,
     date_to: string,
-    provider_id?: number,
+    options: { provider_id?: number; product_variant_id?: number } = {},
   ): Promise<AvailabilitySlot[]> {
+    const { provider_id, product_variant_id } = options;
     // 1. Obtener producto con duracion y booking_mode
     const product = await this.prisma.products.findFirst({
       where: { id: product_id },
@@ -43,8 +44,23 @@ export class AvailabilityService {
 
     if (!product) return [];
 
-    const duration = product.service_duration_minutes || 60;
-    const buffer = product.buffer_minutes || 0;
+    // Resolve variant-specific duration/buffer if applicable
+    let variant: {
+      service_duration_minutes: number | null;
+      buffer_minutes: number | null;
+    } | null = null;
+    if (product_variant_id) {
+      variant = await this.prisma.product_variants.findFirst({
+        where: { id: product_variant_id, product_id },
+        select: { service_duration_minutes: true, buffer_minutes: true },
+      });
+    }
+
+    const duration =
+      variant?.service_duration_minutes ??
+      product.service_duration_minutes ??
+      60;
+    const buffer = variant?.buffer_minutes ?? product.buffer_minutes ?? 0;
     const isFreeBooking =
       product.booking_mode === booking_mode_enum.free_booking;
 

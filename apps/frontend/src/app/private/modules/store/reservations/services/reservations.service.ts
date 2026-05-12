@@ -112,13 +112,22 @@ export class ReservationsService {
     );
   }
 
-  getAvailability(productId: number, dateFrom: string, dateTo: string, providerId?: number): Observable<AvailabilitySlot[]> {
+  getAvailability(
+    productId: number,
+    dateFrom: string,
+    dateTo: string,
+    providerId?: number,
+    productVariantId?: number,
+  ): Observable<AvailabilitySlot[]> {
     let params = new HttpParams()
       .set('date_from', dateFrom)
       .set('date_to', dateTo);
 
     if (providerId) {
       params = params.set('provider_id', providerId.toString());
+    }
+    if (productVariantId) {
+      params = params.set('product_variant_id', productVariantId.toString());
     }
 
     return this.http.get<any>(`${this.apiUrl}/availability/${productId}`, { params }).pipe(

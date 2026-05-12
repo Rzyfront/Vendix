@@ -1,0 +1,367 @@
+<div class="w-full min-h-full pb-24">
+  <!-- Loading state -->
+  @if (loading()) {
+    <div class="max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-4 animate-pulse" aria-busy="true">
+      <div class="h-12 bg-gray-200 rounded-xl w-1/2"></div>
+      <div class="h-32 bg-gray-200 rounded-2xl"></div>
+      <div class="h-48 bg-gray-200 rounded-2xl"></div>
+      <div class="h-32 bg-gray-200 rounded-2xl"></div>
+    </div>
+  }
+
+  <!-- Not found -->
+  @if (!loading() && notFound()) {
+    <div class="max-w-3xl mx-auto px-4 py-10">
+      <app-empty-state
+        icon="file-text"
+        title="Factura no encontrada"
+        description="La factura solicitada no existe o no pertenece a esta tienda."
+      ></app-empty-state>
+      <div class="flex justify-center mt-4">
+        <app-button variant="primary" (clicked)="goBack()">
+          <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
+          Volver al historial
+        </app-button>
+      </div>
+    </div>
+  }
+
+  <!-- Detail -->
+  @if (!loading() && !notFound() && invoice(); as inv) {
+    <div class="max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+      <!-- Header -->
+      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div class="flex items-start gap-3 min-w-0">
+          <a
+            routerLink="/admin/subscription/history"
+            class="inline-flex items-center gap-1.5 text-sm text-text-secondary hover:text-text-primary transition-colors mt-1 shrink-0"
+            aria-label="Volver al historial"
+          >
+            <app-icon name="arrow-left" [size]="18"></app-icon>
+            <span class="hidden sm:inline">Volver</span>
+          </a>
+          <div class="min-w-0">
+            <h1 class="text-xl md:text-2xl font-semibold text-text-primary truncate">
+              Factura {{ inv.invoice_number }}
+            </h1>
+            <div class="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span
+                class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium"
+                [class]="stateBadgeClass()"
+              >
+                {{ stateLabel() }}
+              </span>
+              <span class="text-xs text-text-secondary">
+                Emitida el {{ formatDate(inv.created_at) }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <app-button
+            variant="secondary"
+            size="sm"
+            [disabled]="downloadingPdf()"
+            (clicked)="downloadPdf()"
+            title="Descargar factura como PDF"
+          >
+            <app-icon
+              [name]="downloadingPdf() ? 'loader-2' : 'download'"
+              [size]="16"
+              slot="icon"
+              [class.animate-spin]="downloadingPdf()"
+            ></app-icon>
+            {{ downloadingPdf() ? 'Generando...' : 'Descargar PDF' }}
+          </app-button>
+        </div>
+      </div>
+
+      <!-- Periodo facturado -->
+      <app-card customClasses="!p-5">
+        <div class="flex items-center gap-2 mb-3">
+          <app-icon name="calendar" [size]="18" class="text-primary"></app-icon>
+          <h2 class="text-base font-semibold text-text-primary">Periodo facturado</h2>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Inicio</p>
+            <p class="text-sm font-medium text-text-primary mt-1">
+              {{ formatDate(inv.period_start) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Fin</p>
+            <p class="text-sm font-medium text-text-primary mt-1">
+              {{ formatDate(inv.period_end) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Ciclo</p>
+            <p class="text-sm font-medium text-text-primary mt-1">
+              {{ billingCycleLabel() }}
+            </p>
+          </div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-border grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Vencimiento</p>
+            <p class="text-sm font-medium text-text-primary mt-1">
+              {{ formatDate(inv.due_date) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Pagada</p>
+            <p class="text-sm font-medium text-text-primary mt-1">
+              {{ inv.paid_at ? formatDate(inv.paid_at) : 'Pendiente' }}
+            </p>
+          </div>
+          <div>
+            <p class="text-xs text-text-secondary uppercase tracking-wide">Moneda</p>
+            <p class="text-sm font-medium text-text-primary mt-1">{{ currency() }}</p>
+          </div>
+        </div>
+      </app-card>
+
+      <!-- Líneas de detalle -->
+      <app-card customClasses="!p-0 overflow-hidden">
+        <div class="px-5 py-4 border-b border-border flex items-center gap-2">
+          <app-icon name="list" [size]="18" class="text-primary"></app-icon>
+          <h2 class="text-base font-semibold text-text-primary">Líneas de detalle</h2>
+          @if (hasPlanChange()) {
+            <span class="ml-auto inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+              Cambio de plan
+            </span>
+          }
+        </div>
+
+        @if (lineItems().length === 0) {
+          <div class="px-5 py-8 text-center text-sm text-text-secondary">
+            Esta factura no tiene líneas de detalle.
+          </div>
+        } @else {
+          <!-- Desktop table -->
+          <div class="hidden md:block">
+            <table class="w-full text-sm">
+              <thead class="bg-muted/50">
+                <tr class="text-left text-xs uppercase tracking-wide text-text-secondary">
+                  <th class="px-5 py-3 font-medium">Descripción</th>
+                  <th class="px-5 py-3 font-medium text-right">Cantidad</th>
+                  <th class="px-5 py-3 font-medium text-right">Precio unitario</th>
+                  <th class="px-5 py-3 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (item of lineItems(); track $index) {
+                  <tr class="border-t border-border align-top">
+                    <td class="px-5 py-3">
+                      <div class="font-medium text-text-primary">{{ item.description }}</div>
+                      <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                        @if (item.meta.plan_code) {
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wide">
+                            {{ item.meta.plan_code }}
+                          </span>
+                        }
+                        @if (item.meta.prorated) {
+                          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                            Prorrateado
+                          </span>
+                        }
+                      </div>
+                    </td>
+                    <td class="px-5 py-3 text-right text-text-primary">{{ item.quantity }}</td>
+                    <td class="px-5 py-3 text-right text-text-primary">
+                      {{ (+item.unit_price | currency: currency()) ?? '-' }}
+                    </td>
+                    <td class="px-5 py-3 text-right font-medium text-text-primary">
+                      {{ (+item.total | currency: currency()) ?? '-' }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+              <tfoot>
+                <tr class="border-t-2 border-border bg-muted/30">
+                  <td class="px-5 py-3 text-sm font-medium text-text-secondary" colspan="3">
+                    Subtotal
+                  </td>
+                  <td class="px-5 py-3 text-right text-sm font-medium text-text-primary">
+                    {{ (inv.amount | currency: currency()) ?? '-' }}
+                  </td>
+                </tr>
+                <tr class="bg-muted/30">
+                  <td class="px-5 py-2 text-sm font-medium text-text-secondary" colspan="3">
+                    Impuestos
+                  </td>
+                  <td class="px-5 py-2 text-right text-sm font-medium text-text-primary">
+                    {{ (inv.tax | currency: currency()) ?? '-' }}
+                  </td>
+                </tr>
+                <tr class="bg-muted/50">
+                  <td class="px-5 py-3 text-base font-semibold text-text-primary" colspan="3">
+                    Total
+                  </td>
+                  <td class="px-5 py-3 text-right text-base font-semibold text-text-primary">
+                    {{ (inv.total | currency: currency()) ?? '-' }}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Mobile cards -->
+          <div class="md:hidden divide-y divide-border">
+            @for (item of lineItems(); track $index) {
+              <div class="px-5 py-4">
+                <div class="font-medium text-text-primary text-sm">{{ item.description }}</div>
+                <div class="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                  @if (item.meta.plan_code) {
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200 uppercase tracking-wide">
+                      {{ item.meta.plan_code }}
+                    </span>
+                  }
+                  @if (item.meta.prorated) {
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                      Prorrateado
+                    </span>
+                  }
+                </div>
+                <div class="grid grid-cols-3 gap-2 mt-3 text-xs">
+                  <div>
+                    <p class="text-text-secondary">Cant.</p>
+                    <p class="text-text-primary font-medium mt-0.5">{{ item.quantity }}</p>
+                  </div>
+                  <div>
+                    <p class="text-text-secondary">Unit.</p>
+                    <p class="text-text-primary font-medium mt-0.5">
+                      {{ (+item.unit_price | currency: currency()) ?? '-' }}
+                    </p>
+                  </div>
+                  <div class="text-right">
+                    <p class="text-text-secondary">Total</p>
+                    <p class="text-text-primary font-semibold mt-0.5">
+                      {{ (+item.total | currency: currency()) ?? '-' }}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            }
+            <div class="px-5 py-4 bg-muted/40 space-y-1.5 text-sm">
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Subtotal</span>
+                <span class="text-text-primary">{{ (inv.amount | currency: currency()) ?? '-' }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Impuestos</span>
+                <span class="text-text-primary">{{ (inv.tax | currency: currency()) ?? '-' }}</span>
+              </div>
+              <div class="flex justify-between pt-2 mt-1 border-t border-border">
+                <span class="font-semibold text-text-primary">Total</span>
+                <span class="font-semibold text-text-primary">{{ (inv.total | currency: currency()) ?? '-' }}</span>
+              </div>
+            </div>
+          </div>
+        }
+      </app-card>
+
+      <!-- Distribución (split) -->
+      @if (splitBreakdown(); as split) {
+        <app-card customClasses="!p-5">
+          <div class="flex items-center gap-2 mb-3">
+            <app-icon name="git-branch" [size]="18" class="text-primary"></app-icon>
+            <h2 class="text-base font-semibold text-text-primary">Distribución (split)</h2>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div class="rounded-xl border border-border p-4 bg-muted/30">
+              <p class="text-xs text-text-secondary uppercase tracking-wide">Vendix share</p>
+              <p class="text-lg font-semibold text-text-primary mt-1">
+                {{ (+split.vendix_share | currency: currency()) ?? '-' }}
+              </p>
+            </div>
+            <div class="rounded-xl border border-border p-4 bg-muted/30">
+              <p class="text-xs text-text-secondary uppercase tracking-wide">Partner share</p>
+              <p class="text-lg font-semibold text-text-primary mt-1">
+                {{ (+split.partner_share | currency: currency()) ?? '-' }}
+              </p>
+            </div>
+            <div class="rounded-xl border border-border p-4 bg-muted/30">
+              <p class="text-xs text-text-secondary uppercase tracking-wide">Margen aplicado</p>
+              <p class="text-lg font-semibold text-text-primary mt-1">
+                @if (marginPctNumber() !== null) {
+                  {{ marginPctNumber() | number: '1.0-2' }}%
+                } @else {
+                  -
+                }
+              </p>
+            </div>
+          </div>
+          @if (marginPctNumber() !== null) {
+            <p class="text-xs text-text-secondary mt-3">
+              Esta tienda opera bajo un partner con un margen del
+              <span class="font-medium text-text-primary">{{ marginPctNumber() | number: '1.0-2' }}%</span>.
+            </p>
+          }
+        </app-card>
+      }
+
+      <!-- Pagos -->
+      <app-card customClasses="!p-0 overflow-hidden">
+        <div class="px-5 py-4 border-b border-border flex items-center gap-2">
+          <app-icon name="credit-card" [size]="18" class="text-primary"></app-icon>
+          <h2 class="text-base font-semibold text-text-primary">Pagos</h2>
+        </div>
+        @if (payments().length === 0) {
+          <div class="px-5 py-6 text-center text-sm text-text-secondary">
+            Aún no se han registrado intentos de pago para esta factura.
+          </div>
+        } @else {
+          <div class="divide-y divide-border">
+            @for (p of payments(); track p.id) {
+              <div class="px-5 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div class="flex items-center gap-3 min-w-0">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span
+                        class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium"
+                        [class]="paymentStateBadgeClass(p.state)"
+                      >
+                        {{ paymentStateLabel(p.state) }}
+                      </span>
+                      <span class="text-xs text-text-secondary">#{{ p.id }}</span>
+                    </div>
+                    <div class="text-xs text-text-secondary mt-1 truncate">
+                      @if (p.payment_method) {
+                        <span class="font-medium text-text-primary">{{ p.payment_method }}</span>
+                      }
+                      @if (p.gateway_reference) {
+                        <span class="ml-1.5">· Ref: {{ p.gateway_reference }}</span>
+                      }
+                    </div>
+                  </div>
+                </div>
+                <div class="flex flex-col sm:items-end sm:text-right">
+                  <span class="text-sm font-semibold text-text-primary">
+                    {{ (+p.amount | currency: (p.currency || currency())) ?? '-' }}
+                  </span>
+                  <span class="text-xs text-text-secondary">
+                    {{ p.paid_at ? formatDate(p.paid_at) : (p.created_at ? formatDate(p.created_at) : '-') }}
+                  </span>
+                </div>
+              </div>
+            }
+          </div>
+        }
+      </app-card>
+
+      <!-- Disclaimer (footer) -->
+      <div class="rounded-xl border border-border bg-muted/40 p-4">
+        <div class="flex items-start gap-2.5">
+          <app-icon name="info" [size]="16" class="text-text-secondary mt-0.5 shrink-0"></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            Las suscripciones de Vendix no son reembolsables. La cancelación detiene la próxima
+            renovación pero no genera devolución del periodo facturado ni de pagos previos.
+          </p>
+        </div>
+      </div>
+    </div>
+  }
+</div>

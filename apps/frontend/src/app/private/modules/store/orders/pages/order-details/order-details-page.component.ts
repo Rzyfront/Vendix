@@ -1,6 +1,6 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
-import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
@@ -15,7 +15,11 @@ import {
   OrderActionConfig,
   PayOrderDto,
   RefundRecord,
+  FastTrackOrderDto,
+  AssignShippingMethodDto,
 } from '../../interfaces/order.interface';
+import { PosShippingService } from '../../../pos/services/pos-shipping.service';
+import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -30,12 +34,14 @@ import { PaymentMethodsService } from '../../../settings/payments/services/payme
 import { StorePaymentMethod, PaymentMethodState } from '../../../settings/payments/interfaces/payment-methods.interface';
 import { ShippingMethodsService } from '../../../settings/shipping/services/shipping-methods.service';
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
+import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
+import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
 
 export interface LifecycleStep {
   key: string;
@@ -101,7 +107,18 @@ export class OrderDetailsPageComponent {
   isLoadingShippingMethods = signal(false);
   showShippingMethodCard = signal(false);
   selectedShippingMethodId = signal<number | null>(null);
+  selectedShippingRateId = signal<number | null>(null);
   shippingAssignForm!: FormGroup;
+
+  // Shipping rate auto-calculation
+  isCalculatingRate = signal(false);
+  calculatedRate = signal<{ rate_id: number; cost: number; rate_name?: string; zone?: string } | null>(null);
+  manualCostOverride = signal(false);
+
+  // Fast-track
+  showFastTrackModal = signal(false);
+  fastTrackEnabled = signal(false);
+  fastTrackForm!: FormGroup;
 
   // Reactive forms (ship, deliver, cancel — pay and refund are in their own components)
   shipForm!: FormGroup;
@@ -238,14 +255,73 @@ export class OrderDetailsPageComponent {
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
-    const terminalStates: OrderState[] = ['cancelled', 'refunded', 'finished'];
-    return order.delivery_type === 'other' && !terminalStates.includes(order.state);
+    const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    if (order.delivery_type === 'direct_delivery') return false;
+    return !order.shipping_method_id;
+  });
+
+  readonly shippingMethodInfo = computed(() => {
+    const order = this.order();
+    if (!order?.shipping_method) return null;
+    const method = order.shipping_method;
+    return {
+      name: method.name,
+      type: method.type,
+      provider: method.provider_name,
+      minDays: method.min_days,
+      maxDays: method.max_days,
+      logoUrl: method.logo_url,
+      rate: order.shipping_rate?.name || null,
+      cost: order.shipping_cost,
+    };
+  });
+
+  readonly canEditShipping = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
 
   readonly selectedShippingMethod = computed(() => {
     const id = this.selectedShippingMethodId();
     if (!id) return null;
     return this.shippingMethods().find(m => m.id === id) || null;
+  });
+
+  readonly shippingRatesForSelectedMethod = computed<ShippingRate[]>(() => {
+    const m = this.selectedShippingMethod() as (StoreShippingMethod & { shipping_rates?: ShippingRate[]; rates?: ShippingRate[] }) | null;
+    if (!m) return [];
+    return m.shipping_rates ?? m.rates ?? [];
+  });
+
+  readonly finalShippingRateId = computed(() => {
+    if (this.manualCostOverride()) return null;
+    return this.calculatedRate()?.rate_id ?? null;
+  });
+
+  readonly finalShippingCost = computed(() => {
+    if (this.manualCostOverride()) {
+      return Number(this.shippingAssignForm?.get('shipping_cost')?.value) || 0;
+    }
+    return this.calculatedRate()?.cost ?? 0;
+  });
+
+  readonly blockedByMissingShipping = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    const needsShipping = o.delivery_type !== 'direct_delivery' && o.delivery_type !== 'other';
+    const terminal = ['cancelled', 'refunded', 'finished'].includes(o.state);
+    return needsShipping && !o.shipping_method_id && !terminal;
+  });
+
+  readonly canFastTrack = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    if (['finished', 'cancelled', 'refunded'].includes(o.state)) return false;
+    if (this.blockedByMissingShipping()) return false;
+    return (o.order_items?.length ?? 0) > 0;
   });
 
   // ── Sorted Timeline (chronological ascending, deduplicated) ──
@@ -287,6 +363,19 @@ export class OrderDetailsPageComponent {
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
+
+    if (this.blockedByMissingShipping()) {
+      return [
+        {
+          id: 'info',
+          type: 'alert',
+          color: 'warning',
+          icon: 'alert-triangle',
+          label: 'Asigna un metodo de envio para continuar con el flujo.',
+        } as OrderActionConfig,
+        { id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' },
+      ];
+    }
 
     const state = order.state;
     const delivery = order.delivery_type || 'direct_delivery';
@@ -644,6 +733,7 @@ export class OrderDetailsPageComponent {
   private currencyService = inject(CurrencyFormatService);
   private authFacade = inject(AuthFacade);
   private ticketService = inject(PosTicketService);
+  private posShippingService = inject(PosShippingService);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -667,6 +757,23 @@ export class OrderDetailsPageComponent {
 
     this.cancelForm = this.fb.group({
       reason: ['', [Validators.required, Validators.minLength(3)]],
+    });
+
+    this.fastTrackForm = this.fb.group({
+      payment: this.fb.group({
+        payment_method_id: this.fb.control<number | null>(null),
+        amount: this.fb.control<number | null>(null),
+        reference: this.fb.control<string>(''),
+      }),
+      ship: this.fb.group({
+        tracking_number: this.fb.control<string>(''),
+        carrier: this.fb.control<string>(''),
+        notes: this.fb.control<string>(''),
+      }),
+      deliver: this.fb.group({
+        delivered_to: this.fb.control<string>(''),
+        delivery_notes: this.fb.control<string>(''),
+      }),
     });
 
     this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
@@ -1093,6 +1200,64 @@ export class OrderDetailsPageComponent {
       });
   }
 
+  openFastTrackModal(): void {
+    if (this.paymentMethods().length === 0) {
+      this.loadPaymentMethods();
+    }
+    const order = this.order();
+    if (order && !this.hasSuccessfulPayment()) {
+      this.fastTrackForm.get('payment')?.patchValue({ amount: Number(order.grand_total) || 0 });
+    }
+    this.showFastTrackModal.set(true);
+  }
+
+  submitFastTrack(): void {
+    if (!this.orderId) return;
+
+    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: number | null; amount: number | null; reference: string };
+    const shipGroup = this.fastTrackForm.get('ship')!.value as Record<string, unknown>;
+    const deliverGroup = this.fastTrackForm.get('deliver')!.value as Record<string, unknown>;
+
+    const dto: FastTrackOrderDto = {};
+    if (!this.hasSuccessfulPayment() && paymentGroup.payment_method_id) {
+      dto.payment = {
+        payment_method_id: Number(paymentGroup.payment_method_id),
+        amount: Number(paymentGroup.amount) || undefined,
+        reference: paymentGroup.reference || undefined,
+      } as any;
+    }
+    const shipClean = this.compactObject(shipGroup);
+    if (Object.keys(shipClean).length) dto.ship = shipClean as any;
+    const deliverClean = this.compactObject(deliverGroup);
+    if (Object.keys(deliverClean).length) dto.deliver = deliverClean as any;
+
+    this.isProcessingAction.set(true);
+    this.ordersService
+      .flowFastTrack(this.orderId, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isProcessingAction.set(false);
+          this.showFastTrackModal.set(false);
+          this.fastTrackEnabled.set(false);
+          this.toastService.success('Orden procesada exitosamente');
+          this.loadData();
+        },
+        error: (err) => {
+          this.isProcessingAction.set(false);
+          this.toastService.error(err.message || 'Error al procesar la orden');
+        },
+      });
+  }
+
+  private compactObject<T extends Record<string, any>>(obj: T): Partial<T> {
+    const out: any = {};
+    Object.keys(obj).forEach(k => {
+      if (obj[k] !== '' && obj[k] !== null && obj[k] !== undefined) out[k] = obj[k];
+    });
+    return out;
+  }
+
   openRefundModal(): void {
     this.showRefundModal.set(true);
   }
@@ -1264,7 +1429,66 @@ export class OrderDetailsPageComponent {
 
   onShippingMethodSelect(methodId: number): void {
     this.selectedShippingMethodId.set(methodId);
-    this.shippingAssignForm.patchValue({ shipping_method_id: methodId });
+    this.selectedShippingRateId.set(null);
+    this.calculatedRate.set(null);
+    this.manualCostOverride.set(false);
+    this.shippingAssignForm.patchValue({ shipping_method_id: methodId, shipping_cost: 0 });
+
+    const order = this.order();
+    const address = order?.addresses_orders_shipping_address_idToaddresses;
+    const items = order?.order_items ?? [];
+
+    if (!address || items.length === 0) {
+      this.manualCostOverride.set(true);
+      this.toastService.warning('Sin direccion o items: ingresa el costo manualmente');
+      return;
+    }
+
+    this.isCalculatingRate.set(true);
+    const payloadItems = items.map(i => ({
+      product_id: Number(i.product_id),
+      quantity: Number(i.quantity),
+      price: Number(i.unit_price),
+    }));
+
+    this.posShippingService
+      .calculateShipping(payloadItems, {
+        country_code: address.country_code || '',
+        state_province: address.state_province,
+        city: address.city,
+        address_line1: address.address_line1,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (options: PosShippingOption[]) => {
+          this.isCalculatingRate.set(false);
+          const match = options.find(o => o.method_id === methodId);
+          if (match && (match as any).rate_id) {
+            this.calculatedRate.set({
+              rate_id: (match as any).rate_id,
+              cost: Number(match.cost),
+              rate_name: (match as any).rate_name,
+              zone: (match as any).zone_name,
+            });
+            this.shippingAssignForm.patchValue({ shipping_cost: Number(match.cost) });
+          } else {
+            this.manualCostOverride.set(true);
+            this.toastService.warning('Este metodo no tiene tarifa para la direccion del cliente. Ingresa el costo manual.');
+          }
+        },
+        error: () => {
+          this.isCalculatingRate.set(false);
+          this.manualCostOverride.set(true);
+          this.toastService.error('No se pudo calcular la tarifa. Ingresa el costo manual.');
+        },
+      });
+  }
+
+  toggleManualCost(checked: boolean): void {
+    this.manualCostOverride.set(checked);
+    if (!checked && this.calculatedRate()) {
+      this.shippingAssignForm.patchValue({ shipping_cost: this.calculatedRate()!.cost });
+    }
   }
 
   submitShippingAssignment(): void {
@@ -1272,13 +1496,11 @@ export class OrderDetailsPageComponent {
     if (!this.orderId || !methodId) return;
 
     this.isProcessingAction.set(true);
-    const dto: { shipping_method_id: number; shipping_cost?: number } = {
+    const dto: AssignShippingMethodDto = {
       shipping_method_id: methodId,
+      shipping_rate_id: this.finalShippingRateId(),
+      shipping_cost: this.finalShippingCost(),
     };
-    const cost = this.shippingAssignForm.get('shipping_cost')?.value;
-    if (cost !== null && cost !== undefined && cost !== '') {
-      dto.shipping_cost = Number(cost);
-    }
 
     this.ordersService
       .assignShippingMethod(this.orderId, dto)
@@ -1288,6 +1510,9 @@ export class OrderDetailsPageComponent {
           this.isProcessingAction.set(false);
           this.showShippingMethodCard.set(false);
           this.selectedShippingMethodId.set(null);
+          this.selectedShippingRateId.set(null);
+          this.calculatedRate.set(null);
+          this.manualCostOverride.set(false);
           this.toastService.success('Metodo de envio asignado exitosamente');
           this.loadData();
         },
@@ -1301,6 +1526,9 @@ export class OrderDetailsPageComponent {
   skipShippingAssignment(): void {
     this.showShippingMethodCard.set(false);
     this.selectedShippingMethodId.set(null);
+    this.selectedShippingRateId.set(null);
+    this.calculatedRate.set(null);
+    this.manualCostOverride.set(false);
   }
 
   // ── Installment Actions ─────────────────────────────────────
@@ -1413,6 +1641,17 @@ export class OrderDetailsPageComponent {
     this.router.navigate(['/admin/pos'], { queryParams: { editOrder: order.id } });
   }
 
+  getShippingTypeBadgeClass(type: string): string {
+    const map: Record<string, string> = {
+      own_fleet: 'bg-blue-100 text-blue-700',
+      carrier: 'bg-purple-100 text-purple-700',
+      third_party_provider: 'bg-amber-100 text-amber-700',
+      pickup: 'bg-emerald-100 text-emerald-700',
+      custom: 'bg-gray-100 text-gray-700',
+    };
+    return map[type] || 'bg-gray-100 text-gray-700';
+  }
+
   getPaymentStateClass(state: string): string {
     const classes: Record<string, string> = {
       pending: 'bg-yellow-500/20 text-yellow-400',
@@ -1509,6 +1748,10 @@ export class OrderDetailsPageComponent {
       DELETE: 'Orden Eliminada',
     };
     return actionLabels[action] || log.action || 'Evento';
+  }
+
+  parseVariantAttributes(raw: unknown): VariantAttribute[] {
+    return parseVariantAttributes(raw);
   }
 
   getAuditActionLabel(action: string): string {

@@ -1,4 +1,4 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, computed, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -46,6 +46,11 @@ export class SupplierListComponent {
   readonly currentPage = input(1);
   readonly totalPages = input(1);
   readonly limit = input(10);
+  /**
+   * When false, mutation UI (create button, row edit/delete) is hidden.
+   * Driven by AuthFacade.operatingScope() in the parent component.
+   */
+  readonly canMutate = input(true);
 
   readonly refresh = output<void>();
   readonly search = output<string>();
@@ -79,16 +84,21 @@ export class SupplierListComponent {
   // Current filter values
   filterValues: FilterValues = {};
 
-  // Dropdown actions
-  dropdownActions: DropdownAction[] = [
-    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
-    {
-      label: 'Nuevo Proveedor',
-      icon: 'plus',
-      action: 'create',
-      variant: 'primary',
-    },
-  ];
+  // Dropdown actions — "Nuevo Proveedor" is hidden when mutations are disabled.
+  readonly dropdownActions = computed<DropdownAction[]>(() => {
+    const baseActions: DropdownAction[] = [
+      { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    ];
+    if (this.canMutate()) {
+      baseActions.push({
+        label: 'Nuevo Proveedor',
+        icon: 'plus',
+        action: 'create',
+        variant: 'primary',
+      });
+    }
+    return baseActions;
+  });
 
   // Table Configuration
   tableColumns: TableColumn[] = [
@@ -120,20 +130,24 @@ export class SupplierListComponent {
     },
   ];
 
-  tableActions: TableAction[] = [
-    {
-      label: 'Editar',
-      icon: 'edit',
-      variant: 'info',
-      action: (item: Supplier) => this.edit.emit(item),
-    },
-    {
-      label: 'Eliminar',
-      icon: 'trash-2',
-      variant: 'danger',
-      action: (item: Supplier) => this.delete.emit(item),
-    },
-  ];
+  // Row-level actions — empty when mutations are disabled (read-only mode).
+  readonly tableActions = computed<TableAction[]>(() => {
+    if (!this.canMutate()) return [];
+    return [
+      {
+        label: 'Editar',
+        icon: 'edit',
+        variant: 'info',
+        action: (item: Supplier) => this.edit.emit(item),
+      },
+      {
+        label: 'Eliminar',
+        icon: 'trash-2',
+        variant: 'danger',
+        action: (item: Supplier) => this.delete.emit(item),
+      },
+    ];
+  });
 
   // Card Config for mobile - enhanced with avatar fallback
   cardConfig: ItemListCardConfig = {
@@ -175,12 +189,22 @@ export class SupplierListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        if (!this.canMutate()) return;
         this.create.emit();
         break;
       case 'refresh':
         this.refresh.emit();
         break;
     }
+  }
+
+  /**
+   * Row click opens the edit modal — suppress in read-only mode.
+   * STORE_ADMIN can still see the row (read), just can't edit it.
+   */
+  onRowClick(supplier: Supplier): void {
+    if (!this.canMutate()) return;
+    this.edit.emit(supplier);
   }
 
   // Helper methods

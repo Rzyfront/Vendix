@@ -1,0 +1,25 @@
+meta {
+  name: Superadmin Archive Plan
+  type: http
+  seq: 24
+}
+
+# Depends on 21-superadmin-plan-create.bru — uses {{superadmin_plan_id}}
+# Endpoint is PATCH /:id/archive (soft archive); DELETE /:id is the hard remove path.
+
+patch {
+  url: {{url}}/superadmin/subscriptions/plans/{{superadmin_plan_id}}/archive
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Plan archived successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Plan state is archived", function() {
+    expect(res.body.data.state).to.equal("archived");
+  });
+}

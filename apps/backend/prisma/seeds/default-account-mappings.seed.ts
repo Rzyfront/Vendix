@@ -97,6 +97,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Stock Transfers
   'stock_transfer.completed.inventory_origin': '1435',
   'stock_transfer.completed.inventory_destination': '1435',
+  'intercompany_transfer.shipped.receivable': '1365',
+  'intercompany_transfer.shipped.inventory': '1435',
+  'intercompany_transfer.received.inventory': '1435',
+  'intercompany_transfer.received.payable': '2355',
   'commission.calculated.expense': '5295',
   'commission.calculated.payable': '2335',
   // Nómina individual — gastos de nómina (débitos)
@@ -133,6 +137,13 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'cash_register.closed.shortage': '5295',
   'cash_register.movement.cash': '1105',
   'cash_register.movement.other': '2805',
+  // SaaS Subscription (RNC-31) — Store side: gasto admin del cliente
+  'saas_subscription_expense.expense': '5135',
+  'saas_subscription_expense.cash_bank': '1110',
+  // SaaS Subscription (RNC-31) — Platform side: ingreso Vendix + partner payable
+  'saas_revenue.cash_bank': '1110',
+  'saas_revenue.revenue': '4135',
+  'saas_revenue.partner_payable': '2335',
 };
 
 /**
@@ -193,27 +204,20 @@ export async function seedDefaultAccountMappings(
       });
 
       if (existing) {
-        // Update existing mapping
-        await client.accounting_account_mappings.update({
-          where: { id: existing.id },
-          data: {
-            account_id,
-            is_active: true,
-          },
-        });
-      } else {
-        // Create new mapping
-        await client.accounting_account_mappings.create({
-          data: {
-            organization_id: org.id,
-            store_id: null,
-            mapping_key,
-            account_id,
-            is_active: true,
-          },
-        });
+        // Preserve user-edited mapping — never overwrite account_id once set.
+        mappings_skipped++;
+        continue;
       }
 
+      await client.accounting_account_mappings.create({
+        data: {
+          organization_id: org.id,
+          store_id: null,
+          mapping_key,
+          account_id,
+          is_active: true,
+        },
+      });
       mappings_created++;
     }
 
@@ -222,7 +226,7 @@ export async function seedDefaultAccountMappings(
 
   console.log(
     `[Account Mappings] Processed ${organizations_processed} organizations: ` +
-      `${mappings_created} mappings created/updated, ${mappings_skipped} skipped`,
+      `${mappings_created} mappings created, ${mappings_skipped} skipped (preserved existing)`,
   );
 
   return { organizations_processed, mappings_created, mappings_skipped };

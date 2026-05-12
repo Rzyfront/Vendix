@@ -19,9 +19,38 @@ import {
 import { StoreSettings } from './interfaces/store-settings.interface';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppSettingsDto } from './dto/settings-schemas.dto';
+import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { getDefaultStoreSettings } from './defaults/default-store-settings';
+import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+
+/**
+ * Top-level keys retained when sanitizing an incoming settings payload.
+ * Anything else is dropped and logged. Order does not matter.
+ */
+const KNOWN_SECTIONS = [
+  'general',
+  'inventory',
+  'checkout',
+  'notifications',
+  'pos',
+  'receipts',
+  'branding',
+  'fonts',
+  'publication',
+  'operations',
+  'panel_ui',
+  'ecommerce',
+  'module_flows',
+  'fiscal_status',
+  'fiscal_data',
+  // `app` is intentionally accepted here because the service maps it to
+  // branding via updateStoreBranding(); the migrator strips persisted `app`
+  // afterwards. The legacy alias should not break update calls.
+  'app',
+] as const;
 
 @Injectable()
 export class SettingsService {
@@ -33,7 +62,80 @@ export class SettingsService {
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
     private auditService: AuditService,
+    private migrator: SettingsMigratorService,
+    private fiscalScope: FiscalScopeService,
   ) {}
+
+  /**
+   * Idempotently ensures a `store_settings` row exists for the given store
+   * with current default settings. Never overwrites an existing row.
+   * Safe to call from store-creation flows or as auto-heal on first read.
+   */
+  async ensureDefaults(storeId: number): Promise<void> {
+    if (!storeId) return;
+    await this.prisma.store_settings.upsert({
+      where: { store_id: storeId },
+      create: {
+        store_id: storeId,
+        settings: getDefaultStoreSettings() as any,
+      },
+      update: {},
+    });
+  }
+
+  /**
+   * Filter unknown top-level keys, validate retained sections against
+   * `UpdateSettingsDto` (with whitelist + skipMissingProperties), and return
+   * the sanitized DTO. Known-section validation errors are surfaced via
+   * SYS_VALIDATION_001; deprecated keys are dropped and logged.
+   */
+  private sanitizeAndValidate(
+    raw: Record<string, unknown>,
+    storeId: number,
+  ): UpdateSettingsDto {
+    const filtered: Record<string, unknown> = {};
+    const droppedKeys: string[] = [];
+
+    const knownSet = new Set<string>(KNOWN_SECTIONS as readonly string[]);
+    for (const [key, value] of Object.entries(raw ?? {})) {
+      if (knownSet.has(key)) {
+        filtered[key] = value;
+      } else {
+        droppedKeys.push(key);
+      }
+    }
+
+    if (droppedKeys.length > 0) {
+      this.logger.warn(
+        `[Settings] dropped deprecated keys storeId=${storeId} keys=${droppedKeys.join(
+          ',',
+        )}`,
+      );
+    }
+
+    const dto = plainToInstance(UpdateSettingsDto, filtered, {
+      enableImplicitConversion: true,
+    });
+
+    const errors = validateSync(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      skipMissingProperties: true,
+      stopAtFirstError: false,
+    });
+
+    if (errors.length > 0) {
+      throw new VendixHttpException(ErrorCodes.SYS_VALIDATION_001, undefined, {
+        validation: errors.map((e) => ({
+          property: e.property,
+          constraints: e.constraints ?? {},
+          children: e.children?.length ? e.children.map((c) => c.property) : [],
+        })),
+      });
+    }
+
+    return dto;
+  }
 
   async getSettings(): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
@@ -42,6 +144,10 @@ export class SettingsService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Auto-heal: legacy stores without a settings row get one with current
+    // defaults before we read. Idempotent — never overwrites existing data.
+    await this.ensureDefaults(store_id);
 
     // Obtener datos de la tienda desde la tabla stores
     const store = await this.prisma.stores.findUnique({
@@ -60,8 +166,31 @@ export class SettingsService {
       where: { store_id },
     });
 
+    // Run lazy schema migrations against the persisted JSON. If any migration
+    // applied, persist the migrated value so subsequent reads are idempotent.
+    let rawSettings = (storeSettings?.settings || {}) as any;
+    if (storeSettings?.settings) {
+      const result = this.migrator.migrate(rawSettings);
+      if (result.changed) {
+        try {
+          await this.prisma.store_settings.update({
+            where: { store_id },
+            data: { settings: result.migrated, updated_at: new Date() },
+          });
+          this.logger.log(
+            `[Settings] migrated store ${store_id}: v${result.fromVersion}->v${result.toVersion}`,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[Settings] failed to persist migration for store ${store_id}: ${err?.message ?? err}`,
+          );
+        }
+      }
+      rawSettings = result.migrated;
+    }
+
     // Read branding from store_settings.settings.branding (source of truth)
-    const settings = (storeSettings?.settings || {}) as StoreSettings;
+    const settings = (rawSettings || {}) as StoreSettings;
     const branding = settings.branding || getDefaultStoreSettings().branding;
 
     // Map branding to legacy app structure for compatibility
@@ -124,7 +253,9 @@ export class SettingsService {
     };
   }
 
-  async updateSettings(dto: UpdateSettingsDto): Promise<StoreSettings> {
+  async updateSettings(
+    raw: Record<string, unknown> | UpdateSettingsDto,
+  ): Promise<StoreSettings> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     const user_id = context?.user_id;
@@ -132,6 +263,13 @@ export class SettingsService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Sanitize unknown top-level keys and validate retained sections.
+    // This replaces the previous, ineffective controller-side ValidationPipe.
+    const dto: UpdateSettingsDto = this.sanitizeAndValidate(
+      raw as Record<string, unknown>,
+      store_id,
+    );
 
     // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
     const storeSettings = await this.prisma.store_settings.findUnique({
@@ -142,9 +280,6 @@ export class SettingsService {
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
-
-    // Solo validar las secciones que se están actualizando
-    await this.validatePartialSettings(dto);
 
     // Handle app section - update branding in store_settings.settings.branding
     if (dto.app) {
@@ -332,7 +467,7 @@ export class SettingsService {
       await this.auditService.logUpdate(
         user_id!,
         AuditResource.SETTINGS,
-        store_id!, // Validado arriba, siempre existe aquí
+        store_id, // Validado arriba, siempre existe aquí
         null, // No guardamos el objeto completo de oldValues
         changedSections, // Solo las secciones que cambiaron
         {
@@ -616,30 +751,6 @@ export class SettingsService {
     }
   }
 
-  private async validatePartialSettings(dto: UpdateSettingsDto): Promise<void> {
-    // Validar solo las secciones que se están enviando (no son undefined)
-    const partialDto = new UpdateSettingsDto();
-
-    for (const key of Object.keys(dto)) {
-      const value = dto[key as keyof UpdateSettingsDto];
-      if (value !== undefined) {
-        (partialDto as any)[key] = value;
-      }
-    }
-
-    const errors = validateSync(partialDto, {
-      whitelist: true,
-      forbidNonWhitelisted: false,
-      stopAtFirstError: false,
-    });
-
-    if (errors.length > 0) {
-      throw new BadRequestException(
-        `Invalid settings structure: ${errors.map((e) => e.toString()).join(', ')}`,
-      );
-    }
-  }
-
   async create(data: any) {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -681,6 +792,188 @@ export class SettingsService {
     return this.prisma.store_settings.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Patch-style update for `settings.fiscal_data`. Deep-merges over the
+   * existing section so partial payloads are safe. Other settings sections
+   * (branding, panel_ui, etc.) are never touched.
+   *
+   * Canonical endpoint: `PATCH /store/settings/fiscal-data`.
+   */
+  async getFiscalData(): Promise<StoreSettings['fiscal_data']> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    let organization_id = context?.organization_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (!organization_id) {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    if (fiscalScope === 'ORGANIZATION') {
+      const orgSettings =
+        await this.organizationPrisma.withoutScope().organization_settings.findFirst({
+          where: { organization_id },
+          select: { settings: true },
+        });
+      return ((orgSettings?.settings as any)?.fiscal_data ??
+        {}) as StoreSettings['fiscal_data'];
+    }
+
+    await this.ensureDefaults(store_id);
+    const [existing, store] = await Promise.all([
+      this.prisma.store_settings.findUnique({
+        where: { store_id },
+        select: { settings: true },
+      }),
+      this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: {
+          legal_name: true,
+          tax_id: true,
+          tax_id_dv: true,
+          nit_type: true,
+        },
+      }),
+    ]);
+    const fiscalData = ((existing?.settings as any)?.fiscal_data ??
+      {}) as Record<string, unknown>;
+    return {
+      ...fiscalData,
+      legal_name: store?.legal_name ?? fiscalData.legal_name,
+      nit: store?.tax_id ?? fiscalData.nit,
+      nit_dv: store?.tax_id_dv ?? fiscalData.nit_dv,
+      tax_id: store?.tax_id ?? fiscalData.tax_id,
+      tax_id_dv: store?.tax_id_dv ?? fiscalData.tax_id_dv,
+      nit_type: store?.nit_type ?? fiscalData.nit_type,
+    } as StoreSettings['fiscal_data'];
+  }
+
+  async updateFiscalData(
+    dto: Record<string, unknown>,
+  ): Promise<StoreSettings['fiscal_data']> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const user_id = context?.user_id;
+    let organization_id = context?.organization_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (!organization_id) {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Fiscal data is managed at organization level for this organization.',
+      );
+    }
+
+    await this.ensureDefaults(store_id);
+
+    const existing = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+    });
+    const currentSettings = (existing?.settings ||
+      getDefaultStoreSettings()) as StoreSettings;
+    const previousFiscalData = currentSettings.fiscal_data ?? {};
+
+    const nextFiscalData = {
+      ...previousFiscalData,
+      ...dto,
+    };
+    const legal_name =
+      typeof dto.legal_name === 'string' ? dto.legal_name.trim() : undefined;
+    const tax_id =
+      typeof dto.tax_id === 'string'
+        ? dto.tax_id.trim()
+        : typeof dto.nit === 'string'
+          ? dto.nit.trim()
+          : undefined;
+    const tax_id_dv =
+      typeof dto.tax_id_dv === 'string'
+        ? dto.tax_id_dv.trim()
+        : typeof dto.nit_dv === 'string'
+          ? dto.nit_dv.trim()
+          : undefined;
+    const nit_type =
+      typeof dto.nit_type === 'string' ? dto.nit_type.trim() : undefined;
+
+    const updatedSettings: StoreSettings = {
+      ...currentSettings,
+      fiscal_data: nextFiscalData as StoreSettings['fiscal_data'],
+    };
+
+    await this.prisma.$transaction(async (tx: any) => {
+      await tx.store_settings.upsert({
+        where: { store_id },
+        update: {
+          settings: updatedSettings as any,
+          updated_at: new Date(),
+        },
+        create: {
+          store_id,
+          settings: updatedSettings as any,
+        },
+      });
+
+      await tx.stores.update({
+        where: { id: store_id },
+        data: {
+          ...(legal_name !== undefined && { legal_name: legal_name || null }),
+          ...(tax_id !== undefined && { tax_id: tax_id || null }),
+          ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
+          ...(nit_type !== undefined && { nit_type: nit_type || null }),
+          updated_at: new Date(),
+        },
+      });
+    });
+
+    try {
+      await this.auditService.logUpdate(
+        user_id!,
+        AuditResource.SETTINGS,
+        store_id,
+        { fiscal_data: previousFiscalData },
+        { fiscal_data: nextFiscalData },
+        { action: 'update_fiscal_data', store_id },
+      );
+    } catch (err) {
+      this.logger.warn(
+        `Audit log for fiscal_data update failed: ${(err as Error).message}`,
+      );
+    }
+
+    return nextFiscalData as StoreSettings['fiscal_data'];
   }
 
   /**

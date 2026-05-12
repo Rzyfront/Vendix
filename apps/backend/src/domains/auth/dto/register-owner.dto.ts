@@ -5,6 +5,7 @@ import {
   IsString,
   MinLength,
   Matches,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -29,7 +30,9 @@ export class RegisterOwnerDto {
   })
   @IsEmail({}, { message: 'Debe ser un email válido' })
   @IsNotEmpty({ message: 'El email es requerido' })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   email: string;
 
   @ApiProperty({
@@ -64,6 +67,20 @@ export class RegisterOwnerDto {
   })
   @IsString({ message: 'El teléfono debe ser un string' })
   @IsOptional()
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
   phone?: string;
+
+  @ApiPropertyOptional({
+    enum: ['STORE', 'ORGANIZATION'],
+    description:
+      'Fiscal scope inicial. STORE mantiene NIT/configuración DIAN por tienda; ORGANIZATION usa entidad fiscal consolidada.',
+  })
+  @IsOptional()
+  @IsEnum(['STORE', 'ORGANIZATION'] as any, {
+    message: 'fiscal_scope must be STORE or ORGANIZATION',
+  })
+  fiscal_scope?: 'STORE' | 'ORGANIZATION';
 }

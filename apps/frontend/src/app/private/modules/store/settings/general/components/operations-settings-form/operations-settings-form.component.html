@@ -1,0 +1,19 @@
+<div class="operations-settings-form">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Tiempos de Preparación</h4>
+      <div class="space-y-4">
+        <app-input
+          [formControl]="defaultPrepTimeControl"
+          type="number"
+          label="Tiempo de preparación por defecto"
+          placeholder="15"
+          helperText="minutos — usado cuando el producto no tiene tiempo definido"
+          min="0"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      </div>
+    </div>
+  </div>
+</div>

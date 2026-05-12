@@ -16,6 +16,12 @@ export interface CreateTransactionDto {
   transactionDate?: Date;
   userId?: number;
   orderItemId?: number;
+  /**
+   * Optional explicit organization_id for tenant isolation on inventory_transactions.
+   * If omitted, the service resolves it from RequestContextService, falling back to
+   * the product's store organization. Required at the DB level (NOT NULL).
+   */
+  organizationId?: number;
 }
 
 export interface TransactionQueryDto {

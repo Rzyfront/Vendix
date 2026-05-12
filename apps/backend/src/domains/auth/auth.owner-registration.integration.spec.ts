@@ -83,37 +83,37 @@ describe('Owner Registration Flow - Integration Tests', () => {
         },
       });
       expect(user).toBeDefined();
-      expect(user.first_name).toBe(validOwnerData.first_name);
-      expect(user.last_name).toBe(validOwnerData.last_name);
-      expect(user.email_verified).toBe(false);
-      expect(user.organization_id).toBe(organization!.id);
+      expect(user!.first_name).toBe(validOwnerData.first_name);
+      expect(user!.last_name).toBe(validOwnerData.last_name);
+      expect(user!.email_verified).toBe(false);
+      expect(user!.organization_id).toBe(organization!.id);
 
       // Verify user has owner role
-      const hasOwnerRole = user.user_roles.some(
-        (ur) => ur.roles.name === 'owner',
+      const hasOwnerRole = user!.user_roles.some(
+        (ur) => ur.roles!.name === 'owner',
       );
       expect(hasOwnerRole).toBe(true);
 
       // Verify email verification token was created
       const emailToken =
         await prismaService.email_verification_tokens.findFirst({
-          where: { user_id: user.id },
+          where: { user_id: user!.id },
         });
       expect(emailToken).toBeDefined();
-      expect(emailToken.verified).toBe(false);
-      expect(emailToken.expires_at).toBeInstanceOf(Date);
+      expect(emailToken!.verified).toBe(false);
+      expect(emailToken!.expires_at).toBeInstanceOf(Date);
 
       // Verify refresh token was created
       const refreshToken = await prismaService.refresh_tokens.findFirst({
-        where: { user_id: user.id },
+        where: { user_id: user!.id },
       });
       expect(refreshToken).toBeDefined();
-      expect(refreshToken.revoked).toBe(false);
+      expect(refreshToken!.revoked).toBe(false);
 
       // Step 2: Verify Email
       const verifyResponse = await request(app.getHttpServer())
         .post('/auth/verify-email')
-        .send({ token: emailToken.token })
+        .send({ token: emailToken!.token })
         .expect(200);
 
       const verifyResult = verifyResponse.body;
@@ -122,22 +122,22 @@ describe('Owner Registration Flow - Integration Tests', () => {
 
       // Verify email was marked as verified
       const updatedUser = await prismaService.users.findUnique({
-        where: { id: user.id },
+        where: { id: user!.id },
       });
-      expect(updatedUser.email_verified).toBe(true);
-      expect(updatedUser.state).toBe('active');
+      expect(updatedUser!.email_verified).toBe(true);
+      expect(updatedUser!.state).toBe('active');
 
       // Verify token was marked as used
       const usedToken =
         await prismaService.email_verification_tokens.findUnique({
-          where: { id: emailToken.id },
+          where: { id: emailToken!.id },
         });
-      expect(usedToken.verified).toBe(true);
+      expect(usedToken!.verified).toBe(true);
 
       // Step 3: Try to verify again with same token (should fail)
       await request(app.getHttpServer())
         .post('/auth/verify-email')
-        .send({ token: emailToken.token })
+        .send({ token: emailToken!.token })
         .expect(400);
 
       // Step 4: Try to resend verification (should fail because email is already verified)
@@ -203,7 +203,7 @@ describe('Owner Registration Flow - Integration Tests', () => {
       const expiredDate = new Date(Date.now() - 60 * 60 * 1000);
       await prismaService.email_verification_tokens.create({
         data: {
-          user_id: user.id,
+          user_id: user!.id,
           token: 'expired-token',
           expires_at: expiredDate,
           verified: false,
@@ -245,7 +245,7 @@ describe('Owner Registration Flow - Integration Tests', () => {
 
       // Verify old tokens were invalidated
       const oldTokens = await prismaService.email_verification_tokens.findMany({
-        where: { user_id: user.id },
+        where: { user_id: user!.id },
       });
       const verifiedTokens = oldTokens.filter(
         (token) => token.verified === true,
@@ -367,8 +367,8 @@ describe('Owner Registration Flow - Integration Tests', () => {
 
       await prismaService.user_roles.create({
         data: {
-          user_id: existingUser.id,
-          role_id: ownerRole.id,
+          user_id: existingUser!.id,
+          role_id: ownerRole!.id,
         },
       });
 

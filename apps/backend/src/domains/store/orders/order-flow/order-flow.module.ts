@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { OrderFlowService } from './order-flow.service';
-import { OrderFlowController, OrderRefundsController } from './order-flow.controller';
+import {
+  OrderFlowController,
+  OrderRefundsController,
+} from './order-flow.controller';
 import { PrismaModule } from '../../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { RefundCalculationService } from './services/refund-calculation.service';
@@ -9,6 +12,8 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
 import { CashRegistersModule } from '../../cash-registers/cash-registers.module';
 import { SettingsModule } from '../../settings/settings.module';
+import { OrderEtaService } from '../services/order-eta.service';
+import { OrderAutoFulfillmentListener } from './listeners/order-auto-fulfillment.listener';
 
 @Module({
   imports: [PrismaModule, ResponseModule, CashRegistersModule, SettingsModule],
@@ -19,7 +24,10 @@ import { SettingsModule } from '../../settings/settings.module';
     RefundFlowService,
     StockLevelManager,
     InventoryTransactionsService,
+    OrderEtaService,
+    // P3.4: ORG-scope auto-fulfillment of ecommerce orders.
+    OrderAutoFulfillmentListener,
   ],
-  exports: [OrderFlowService, RefundFlowService],
+  exports: [OrderFlowService, RefundFlowService, OrderEtaService],
 })
 export class OrderFlowModule {}

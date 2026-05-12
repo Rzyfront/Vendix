@@ -14,11 +14,13 @@ import {
   BadRequestException,
   Query,
   Res,
+  Logger,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsBulkService } from './products-bulk.service';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
@@ -33,10 +35,12 @@ import {
 @Controller('store/products/bulk')
 @UseGuards(PermissionsGuard)
 export class ProductsBulkController {
+  private readonly logger = new Logger(ProductsBulkController.name);
+
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   /**
    * Carga masiva desde JSON directo
@@ -223,23 +227,47 @@ export class ProductsBulkController {
       throw new BadRequestException('session_id es requerido');
     }
 
-    const result = await this.productsBulkService.uploadProductsFromSession(
-      body.session_id,
-      storeId,
-      req.user,
-    );
+    try {
+      const result = await this.productsBulkService.uploadProductsFromSession(
+        body.session_id,
+        storeId,
+        req.user,
+      );
 
-    if (result.failed > 0) {
+      if (result.failed > 0) {
+        return this.responseService.created(
+          result,
+          'Carga masiva completada con algunos errores',
+        );
+      }
+
       return this.responseService.created(
         result,
-        'Carga masiva completada con algunos errores',
+        'Carga masiva completada exitosamente',
+      );
+    } catch (error) {
+      this.logger.error(
+        `Bulk upload session failed (session_id=${body.session_id}): ${error?.message || error}`,
+        error?.stack,
+      );
+
+      // Dejar pasar excepciones HTTP conocidas (respetan su httpStatus y mapeo)
+      if (error instanceof VendixHttpException) throw error;
+      if (error instanceof BadRequestException) throw error;
+
+      // Fallback: mensaje real del error si está disponible, truncado
+      const rawMsg =
+        typeof error?.message === 'string'
+          ? error.message
+          : 'Error en carga masiva';
+      const truncated =
+        rawMsg.length > 200 ? rawMsg.slice(0, 200) + '...' : rawMsg;
+
+      throw new VendixHttpException(
+        ErrorCodes.BULK_PROD_UPLOAD_FAILED,
+        truncated,
       );
     }
-
-    return this.responseService.created(
-      result,
-      'Carga masiva completada exitosamente',
-    );
   }
 
   /**

@@ -167,7 +167,9 @@ export class StoreShippingZonesController {
   // ========== MÉTODOS DE ENVÍO DISPONIBLES ==========
 
   @Get('shipping-methods')
-  @ApiOperation({ summary: 'Get available shipping methods for creating rates' })
+  @ApiOperation({
+    summary: 'Get available shipping methods for creating rates',
+  })
   @ApiResponse({
     status: 200,
     description: 'Shipping methods retrieved successfully',
@@ -244,7 +246,10 @@ export class StoreShippingZonesController {
   ) {
     try {
       const data = await this.service.updateStoreZone(id, dto);
-      return this.responseService.updated(data, 'Zona actualizada correctamente');
+      return this.responseService.updated(
+        data,
+        'Zona actualizada correctamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al actualizar zona',
@@ -283,12 +288,18 @@ export class StoreShippingZonesController {
     description:
       'Shows changes made to the source system zone since this copy was last updated.',
   })
-  @ApiParam({ name: 'id', description: 'Store zone ID (must be a system_copy)' })
+  @ApiParam({
+    name: 'id',
+    description: 'Store zone ID (must be a system_copy)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Updates retrieved successfully',
   })
-  @ApiResponse({ status: 404, description: 'Zone not found or not a system copy' })
+  @ApiResponse({
+    status: 404,
+    description: 'Zone not found or not a system copy',
+  })
   async getSystemZoneUpdates(@Param('id', ParseIntPipe) id: number) {
     try {
       const data = await this.service.getSystemZoneUpdates(id);
@@ -310,12 +321,18 @@ export class StoreShippingZonesController {
     description:
       'Updates the store zone with the latest data from its source system zone.',
   })
-  @ApiParam({ name: 'id', description: 'Store zone ID (must be a system_copy)' })
+  @ApiParam({
+    name: 'id',
+    description: 'Store zone ID (must be a system_copy)',
+  })
   @ApiResponse({
     status: 200,
     description: 'Zone synchronized successfully',
   })
-  @ApiResponse({ status: 404, description: 'Zone not found or not a system copy' })
+  @ApiResponse({
+    status: 404,
+    description: 'Zone not found or not a system copy',
+  })
   async syncWithSystem(@Param('id', ParseIntPipe) id: number) {
     try {
       const data = await this.service.syncWithSystem(id);
@@ -391,7 +408,10 @@ export class StoreShippingZonesController {
   ) {
     try {
       const data = await this.service.updateStoreRate(id, dto);
-      return this.responseService.updated(data, 'Tarifa actualizada correctamente');
+      return this.responseService.updated(
+        data,
+        'Tarifa actualizada correctamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al actualizar tarifa',

@@ -1,3 +1,5 @@
+import type { FiscalStatusBlock } from './fiscal-status.model';
+
 export interface Organization {
   id: number;
   name: string;
@@ -6,6 +8,9 @@ export interface Organization {
   status: 'active' | 'inactive' | 'suspended' | 'pending';
   plan: 'basic' | 'premium' | 'enterprise';
   settings: OrganizationSettings;
+  account_type?: OrganizationAccountType;
+  operating_scope?: OrganizationOperatingScope;
+  fiscal_scope?: OrganizationFiscalScope;
   branding: OrganizationBranding;
   contact: OrganizationContact;
   limits: OrganizationLimits;
@@ -13,29 +18,54 @@ export interface Organization {
   updatedAt: Date;
 }
 
-export interface OrganizationSettings {
-  allowPublicStore: boolean;
-  allowMultipleStores: boolean;
-  maxStores: number;
-  maxUsers: number;
-  features: {
-    ecommerce: boolean;
-    inventory: boolean;
-    analytics: boolean;
-    multiCurrency: boolean;
-    taxManagement: boolean;
-    shippingManagement: boolean;
-  };
+export enum OrganizationAccountType {
+  SINGLE_STORE = 'SINGLE_STORE',
+  MULTI_STORE_ORG = 'MULTI_STORE_ORG',
 }
 
-export interface OrganizationBranding {
-  logo?: string;
-  primaryColor: string;
-  secondaryColor: string;
-  accentColor: string;
-  fontFamily: string;
-  customCss?: string;
+export type OrganizationOperatingScope = 'STORE' | 'ORGANIZATION';
+export type OrganizationFiscalScope = 'STORE' | 'ORGANIZATION';
+
+export interface OrganizationInventorySettings {
+  mode: 'organizational' | 'independent';
+  low_stock_alerts_scope: 'location' | 'store' | 'org';
+  fallback_on_stockout: 'reject' | 'ask_user' | 'auto_next_available';
+  costing_method?: 'weighted_average' | 'fifo';
 }
+
+export interface OrganizationSettings {
+  branding: OrganizationBrandingSettings;
+  inventory?: OrganizationInventorySettings;
+  fonts?: OrganizationFonts;
+  panel_ui?: OrganizationPanelUISettings;
+  payroll?: unknown;
+}
+
+export interface OrganizationBrandingSettings {
+  name: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  background_color: string;
+  surface_color: string;
+  text_color: string;
+  text_secondary_color: string;
+  text_muted_color: string;
+  logo_url?: string;
+  favicon_url?: string;
+}
+
+export interface OrganizationFonts {
+  primary: string;
+  secondary: string;
+  headings: string;
+}
+
+export interface OrganizationPanelUISettings {
+  ORG_ADMIN?: Record<string, boolean>;
+}
+
+export type OrganizationBranding = OrganizationBrandingSettings;
 
 export interface OrganizationContact {
   email: string;
@@ -99,6 +129,7 @@ export interface StoreSettings {
   taxEnabled: boolean;
   shippingEnabled: boolean;
   inventoryManagement: boolean;
+  fiscal_status?: FiscalStatusBlock;
 }
 
 export interface StoreContact {

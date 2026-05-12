@@ -1,24 +1,22 @@
-import {Component,
-  OnInit,
-  inject,
-  input,
-  output,
-  DestroyRef} from '@angular/core';
+import { Component, OnInit, inject, input, output, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators} from '@angular/forms';
+  Validators,
+} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent} from '../../../../../shared/components/index';
+  ModalComponent,
+  FileUploadDropzoneComponent,
+} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
-
-
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-user-create-modal',
@@ -27,8 +25,9 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
-],
+    ModalComponent,
+    FileUploadDropzoneComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -40,14 +39,13 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
           <app-input
             formControlName="first_name"
             label="Nombre *"
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -56,7 +54,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="Pérez"
             [required]="true"
             [control]="userForm.get('last_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -65,7 +63,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juanperez"
             [required]="true"
             [control]="userForm.get('username')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
           ></app-input>
 
@@ -76,7 +74,42 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juan@ejemplo.com"
             [required]="true"
             [control]="userForm.get('email')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
+          ></app-input>
+
+          <app-input
+            formControlName="phone"
+            label="Teléfono"
+            type="tel"
+            placeholder="+57 300 123 4567"
+            [control]="userForm.get('phone')"
+            [disabled]="isCreating()"
+          ></app-input>
+
+          <div class="space-y-2">
+            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+              Tipo de Documento
+            </label>
+            <select
+              formControlName="document_type"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              [disabled]="isCreating()"
+            >
+              <option value="">Seleccionar</option>
+              <option value="CC">Cédula de Ciudadanía</option>
+              <option value="CE">Cédula de Extranjería</option>
+              <option value="PASSPORT">Pasaporte</option>
+              <option value="NIT">NIT</option>
+              <option value="OTHER">Otro</option>
+            </select>
+          </div>
+
+          <app-input
+            formControlName="document_number"
+            label="Número de Documento"
+            placeholder="1234567890"
+            [control]="userForm.get('document_number')"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -86,21 +119,18 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
 
-
           <div class="space-y-2">
-            <label
-              class="block text-sm font-medium text-[var(--color-text-primary)]"
-            >
+            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
               Estado Inicial
             </label>
             <select
               formControlName="state"
               class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isCreating"
+              [disabled]="isCreating()"
             >
               <option value="">Seleccionar estado</option>
               <option [value]="UserState.ACTIVE">Activo</option>
@@ -110,6 +140,36 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
               </option>
             </select>
           </div>
+
+          <div class="col-span-2 space-y-2">
+            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+              Tienda Principal
+            </label>
+            <select
+              formControlName="main_store_id"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              [disabled]="isCreating()"
+            >
+              <option [ngValue]="null">Sin tienda principal</option>
+              @for (store of stores(); track store.id) {
+                <option [value]="store.id">{{ store.name }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500">
+              Selecciona la tienda principal del usuario (opcional)
+            </p>
+          </div>
+
+          <div class="col-span-2 space-y-2">
+            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+              Avatar
+            </label>
+            <app-file-upload-dropzone
+              [accept]="'image/*'"
+              (fileSelected)="onAvatarUploaded($event)"
+              (fileRemoved)="onAvatarRemoved()"
+            ></app-file-upload-dropzone>
+          </div>
         </div>
       </form>
 
@@ -117,15 +177,15 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="userForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Usuario
         </app-button>
@@ -138,19 +198,25 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
         display: block;
       }
     `,
-  ]})
+  ],
+})
 export class UserCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
+  private usersService = inject(UsersService);
+  private toastService = inject(ToastService);
+
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onUserCreated = output<void>();
+  readonly stores = input<Array<{ id: number; name: string }>>([]);
 
-  userForm: FormGroup;
-  isCreating: boolean = false;
+  userForm!: FormGroup;
+  readonly isCreating = signal(false);
+  readonly avatarUrl = signal<string | null>(null);
   UserState = UserState;
-usersService = inject(UsersService);
 
-  constructor(private fb: FormBuilder) {
+  ngOnInit(): void {
     this.userForm = this.fb.group({
       first_name: ['', [Validators.required, Validators.maxLength(100)]],
       last_name: ['', [Validators.required, Validators.maxLength(100)]],
@@ -167,6 +233,9 @@ usersService = inject(UsersService);
         '',
         [Validators.required, Validators.email, Validators.maxLength(255)],
       ],
+      phone: ['', [Validators.maxLength(20)]],
+      document_type: [''],
+      document_number: ['', [Validators.maxLength(50)]],
       password: [
         '',
         [
@@ -177,20 +246,34 @@ usersService = inject(UsersService);
           ),
         ],
       ],
-      state: [UserState.PENDING_VERIFICATION]});
+      state: [UserState.PENDING_VERIFICATION],
+      main_store_id: [null],
+      avatar_url: [''],
+    });
   }
 
-  ngOnInit(): void { }
-onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating) {
-      // Mark all fields as touched to trigger validation messages
+  onAvatarUploaded(file: File): void {
+    this.userForm.patchValue({ avatar_url: file.name });
+  }
+
+  onAvatarRemoved(): void {
+    this.userForm.patchValue({ avatar_url: '' });
+  }
+
+  onCancel(): void {
+    this.isOpenChange.emit(false);
+    this.resetForm();
+  }
+
+  onSubmit(): void {
+    if (this.userForm.invalid || this.isCreating()) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     const userData: CreateUserDto = this.userForm.value;
 
     this.usersService
@@ -198,25 +281,18 @@ onSubmit(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isCreating = false;
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
+          this.isCreating.set(false);
+          this.toastService.success('Usuario creado exitosamente');
           this.onUserCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();
         },
-        error: (error: any) => {
-          this.isCreating = false;
-          console.error('Error creating user:', error);
-          // TODO: Show user-friendly error message
-        }});
-  }
-
-  onCancel(): void {
-    this.isOpenChange.emit(false);
-    this.resetForm();
+        error: (error: unknown) => {
+          this.isCreating.set(false);
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message);
+        },
+      });
   }
 
   resetForm(): void {
@@ -225,7 +301,14 @@ onSubmit(): void {
       last_name: '',
       username: '',
       email: '',
+      phone: '',
+      document_type: '',
+      document_number: '',
       password: '',
-      state: UserState.PENDING_VERIFICATION});
+      state: UserState.PENDING_VERIFICATION,
+      main_store_id: null,
+      avatar_url: '',
+    });
+    this.avatarUrl.set(null);
   }
 }

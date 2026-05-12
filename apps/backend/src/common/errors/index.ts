@@ -1,2 +1,11 @@
-export { ErrorCodes, ErrorCodeEntry, ErrorCodeKey } from './error-codes';
-export { VendixHttpException } from './vendix-http.exception';
+export {
+  ErrorCodes,
+  ErrorCodeEntry,
+  ErrorCodeKey,
+  FiscalScopeBlockerCode,
+  FiscalScopeBlockerCodes,
+} from './error-codes';
+export {
+  VendixHttpException,
+  VendixHttpExceptionDetails,
+} from './vendix-http.exception';

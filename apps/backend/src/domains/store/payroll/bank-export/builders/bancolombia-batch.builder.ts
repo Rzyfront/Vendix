@@ -64,7 +64,7 @@ const BANK_NAME_TO_CODE: Record<string, string> = {
   'lulo bank': '70',
   // Common abbreviations
   bogota: '01',
-  'bogotá': '01',
+  bogotá: '01',
   popular: '02',
   gnb: '12',
 };
@@ -73,7 +73,10 @@ export class BancolombiaBatchBuilder implements BankBatchBuilder {
   bankCode = 'bancolombia';
   bankName = 'Bancolombia';
 
-  build(metadata: BankBatchMetadata, employees: BankBatchEmployee[]): BankBatchResult {
+  build(
+    metadata: BankBatchMetadata,
+    employees: BankBatchEmployee[],
+  ): BankBatchResult {
     const lines: string[] = [];
 
     // Header line (record type 1)
@@ -131,27 +134,30 @@ export class BancolombiaBatchBuilder implements BankBatchBuilder {
 
   // --- Header (264 chars) ---
 
-  private buildHeader(metadata: BankBatchMetadata, employees: BankBatchEmployee[]): string {
+  private buildHeader(
+    metadata: BankBatchMetadata,
+    employees: BankBatchEmployee[],
+  ): string {
     const nit = metadata.company_nit.replace(/[^0-9]/g, '');
     const date_str = this.formatDate(metadata.payment_date);
     const total = employees.reduce((sum, e) => sum + e.net_pay, 0);
 
     let line = '';
-    line += '1';                                                  // Pos 1: Record Type
-    line += this.padLeft(nit, 15);                                // Pos 2-16: Payer NIT
-    line += 'I';                                                  // Pos 17: Transmission Type (Immediate)
-    line += this.padRight('', 15);                                // Pos 18-32: Filler
-    line += '225';                                                // Pos 33-35: Payment Type (Payroll)
-    line += this.padRight('NOMINA', 10);                          // Pos 36-45: Description
-    line += date_str;                                             // Pos 46-53: Transmission Date
-    line += '1';                                                  // Pos 54: Send Sequence
-    line += date_str;                                             // Pos 55-62: Application Date
-    line += this.padLeft(String(employees.length), 6);            // Pos 63-68: Record Count
-    line += this.padLeft('0', 17);                                // Pos 69-85: Debit Sum (zeros)
-    line += this.formatAmount(total, 17);                         // Pos 86-102: Credit Sum
+    line += '1'; // Pos 1: Record Type
+    line += this.padLeft(nit, 15); // Pos 2-16: Payer NIT
+    line += 'I'; // Pos 17: Transmission Type (Immediate)
+    line += this.padRight('', 15); // Pos 18-32: Filler
+    line += '225'; // Pos 33-35: Payment Type (Payroll)
+    line += this.padRight('NOMINA', 10); // Pos 36-45: Description
+    line += date_str; // Pos 46-53: Transmission Date
+    line += '1'; // Pos 54: Send Sequence
+    line += date_str; // Pos 55-62: Application Date
+    line += this.padLeft(String(employees.length), 6); // Pos 63-68: Record Count
+    line += this.padLeft('0', 17); // Pos 69-85: Debit Sum (zeros)
+    line += this.formatAmount(total, 17); // Pos 86-102: Credit Sum
     line += this.padLeft(metadata.source_account.replace(/[^0-9]/g, ''), 11); // Pos 103-113: Debit Account
-    line += this.mapAccountType(metadata.source_account_type);    // Pos 114-115: Account Type
-    line += this.padRight('', 149);                               // Pos 116-264: Filler
+    line += this.mapAccountType(metadata.source_account_type); // Pos 114-115: Account Type
+    line += this.padRight('', 149); // Pos 116-264: Filler
 
     return line;
   }
@@ -163,16 +169,21 @@ export class BancolombiaBatchBuilder implements BankBatchBuilder {
     const bank_code = this.mapBankCode(employee.bank_name) || '00';
 
     let line = '';
-    line += '6';                                                                 // Pos 1: Record Type
-    line += this.padRight(employee.document_number, 15);                         // Pos 2-16: Beneficiary Doc
-    line += this.padRight(this.stripAccents(`${employee.first_name} ${employee.last_name}`).substring(0, 30), 30); // Pos 17-46: Beneficiary Name
-    line += bank_code;                                                           // Pos 47-48: Bank Code
-    line += this.padRight(employee.bank_account_number, 17);                     // Pos 49-65: Account Number
-    line += this.mapAccountType(employee.bank_account_type);                     // Pos 66-67: Account Type
-    line += this.formatAmount(employee.net_pay, 17);                             // Pos 68-84: Amount
-    line += date_str;                                                            // Pos 85-92: Application Date
-    line += this.padRight(employee.employee_code, 21);                           // Pos 93-113: Reference
-    line += this.padRight('', 151);                                              // Pos 114-264: Filler
+    line += '6'; // Pos 1: Record Type
+    line += this.padRight(employee.document_number, 15); // Pos 2-16: Beneficiary Doc
+    line += this.padRight(
+      this.stripAccents(
+        `${employee.first_name} ${employee.last_name}`,
+      ).substring(0, 30),
+      30,
+    ); // Pos 17-46: Beneficiary Name
+    line += bank_code; // Pos 47-48: Bank Code
+    line += this.padRight(employee.bank_account_number, 17); // Pos 49-65: Account Number
+    line += this.mapAccountType(employee.bank_account_type); // Pos 66-67: Account Type
+    line += this.formatAmount(employee.net_pay, 17); // Pos 68-84: Amount
+    line += date_str; // Pos 85-92: Application Date
+    line += this.padRight(employee.employee_code, 21); // Pos 93-113: Reference
+    line += this.padRight('', 151); // Pos 114-264: Filler
 
     return line;
   }

@@ -59,7 +59,7 @@ export class OptionsDropdownComponent {
   readonly triggerLabel = input<string>('Opciones');
 
   /** Icon for the trigger button */
-  readonly triggerIcon = input<IconName>('sliders-horizontal');
+  readonly triggerIcon = input<IconName>('plus');
 
   /** Debounce time in milliseconds for filter changes */
   readonly debounceMs = input<number>(350);
@@ -99,7 +99,7 @@ export class OptionsDropdownComponent {
   readonly localFilterValues = signal<FilterValues>({});
 
   /** Emits debounce trigger — value is the debounce time to apply */
-  private readonly debounceTrigger$ = new Subject<number>();
+  private readonly debounceTrigger$ = new Subject<number>(); // LEGÍTIMO — debounce pipeline para filterChange
 
   constructor() {
     // Sync filterValues input → local state

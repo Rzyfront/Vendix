@@ -10,7 +10,11 @@ import { ResponseModule } from '@common/responses/response.module';
 
 @Module({
   controllers: [InventoryAdjustmentsController],
-  providers: [InventoryAdjustmentsService, InventoryAdjustmentsBulkService, StockLevelManager],
+  providers: [
+    InventoryAdjustmentsService,
+    InventoryAdjustmentsBulkService,
+    StockLevelManager,
+  ],
   imports: [
     InventoryTransactionsModule,
     PrismaModule,

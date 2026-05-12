@@ -123,6 +123,18 @@ export class BreadcrumbService {
       parent: 'Organizaciones',
     },
     {
+      path: '/organization/config',
+      title: 'Configuración',
+      icon: 'settings',
+      parent: 'Organizaciones',
+    },
+    {
+      path: '/organization/config/inventory',
+      title: 'Inventario',
+      icon: 'warehouse',
+      parent: 'Configuración',
+    },
+    {
       path: '/organization/settings',
       title: 'Configuración',
       icon: 'settings',
@@ -559,40 +571,16 @@ export class BreadcrumbService {
 
     // Configuration
     {
-      path: '/admin/config',
-      title: 'Configuración',
-      parent: 'Panel Administrativo',
-      icon: 'settings',
-    },
-    {
       path: '/admin/config/application',
-      title: 'Configuración de Aplicación',
+      title: 'General',
       parent: 'Configuration',
       icon: 'sliders',
     },
     {
-      path: '/admin/config/policies',
-      title: 'Políticas',
-      parent: 'Configuration',
-      icon: 'file-text',
-    },
-    {
-      path: '/admin/config/integrations',
-      title: 'Integraciones',
-      parent: 'Configuration',
-      icon: 'link-2',
-    },
-    {
-      path: '/admin/config/taxes',
-      title: 'Impuestos',
+      path: '/admin/config/payment-methods',
+      title: 'Métodos de Pago',
       parent: 'Configuration',
       icon: 'credit-card',
-    },
-    {
-      path: '/admin/config/domains',
-      title: 'Dominios',
-      parent: 'Configuration',
-      icon: 'globe-2',
     },
 
     // STORE_ADMIN Routes
@@ -684,6 +672,12 @@ export class BreadcrumbService {
       title: 'Proveedores',
       parent: 'Inventario',
       icon: 'truck',
+    },
+    {
+      path: '/admin/inventory/stock/:productId',
+      title: 'Stock por Bodega',
+      parent: 'Inventario',
+      icon: 'warehouse',
     },
 
     // Orders
@@ -806,8 +800,20 @@ export class BreadcrumbService {
     {
       path: '/admin/invoicing',
       title: 'Facturación',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'file-text',
+    },
+    {
+      path: '/admin/invoicing/invoices',
+      title: 'Facturas',
+      parent: 'Facturación',
+      icon: 'receipt',
+    },
+    {
+      path: '/admin/invoicing/resolutions',
+      title: 'Resoluciones',
+      parent: 'Facturación',
+      icon: 'hash',
     },
     {
       path: '/admin/invoicing/dian-config',
@@ -820,7 +826,7 @@ export class BreadcrumbService {
     {
       path: '/admin/accounting',
       title: 'Contabilidad',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'book-open',
     },
     {
@@ -912,7 +918,7 @@ export class BreadcrumbService {
     {
       path: '/admin/payroll',
       title: 'Nómina',
-      parent: 'Tienda',
+      parent: 'Fiscal',
       icon: 'banknote',
     },
     {

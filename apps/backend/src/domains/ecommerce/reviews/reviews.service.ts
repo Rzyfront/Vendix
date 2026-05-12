@@ -19,7 +19,13 @@ export class EcommerceReviewsService {
   ) {}
 
   async getProductReviews(query: ReviewListQueryDto) {
-    const { product_id, page = 1, limit = 10, sort_by = 'recent', rating } = query;
+    const {
+      product_id,
+      page = 1,
+      limit = 10,
+      sort_by = 'recent',
+      rating,
+    } = query;
 
     const where: any = { product_id, state: 'approved' };
     if (rating) {
@@ -41,7 +47,9 @@ export class EcommerceReviewsService {
           users: { select: { id: true, first_name: true, last_name: true } },
           review_responses: {
             include: {
-              users: { select: { id: true, first_name: true, last_name: true } },
+              users: {
+                select: { id: true, first_name: true, last_name: true },
+              },
             },
           },
         },
@@ -57,11 +65,15 @@ export class EcommerceReviewsService {
     });
     const rating_distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     for (const r of distribution_raw) {
-      rating_distribution[r.rating as keyof typeof rating_distribution] = r._count;
+      rating_distribution[r.rating as keyof typeof rating_distribution] =
+        r._count;
     }
 
     // Compute avg and total from distribution
-    const total_count = Object.values(rating_distribution).reduce((a, b) => a + b, 0);
+    const total_count = Object.values(rating_distribution).reduce(
+      (a, b) => a + b,
+      0,
+    );
     const avg_rating =
       total_count > 0
         ? Object.entries(rating_distribution).reduce(
@@ -168,7 +180,8 @@ export class EcommerceReviewsService {
       review_id: review.id,
       product_id: dto.product_id,
       product_name: product?.name || 'Producto',
-      customer_name: `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
+      customer_name:
+        `${user?.first_name || ''} ${user?.last_name || ''}`.trim(),
       rating: dto.rating,
     });
 

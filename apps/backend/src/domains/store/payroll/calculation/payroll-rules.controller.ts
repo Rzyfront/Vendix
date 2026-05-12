@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Patch, Param, Body, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  Body,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { PayrollRulesService } from './payroll-rules.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { UpdatePayrollRulesDto } from './dto/update-payroll-rules.dto';
@@ -39,7 +47,13 @@ export class PayrollRulesController {
     @Param('year') year: string,
     @Body() dto: UpdatePayrollRulesDto,
   ) {
-    const result = await this.payroll_rules_service.updateRulesForYear(+year, dto);
-    return this.response_service.success(result, 'Payroll rules updated successfully');
+    const result = await this.payroll_rules_service.updateRulesForYear(
+      +year,
+      dto,
+    );
+    return this.response_service.success(
+      result,
+      'Payroll rules updated successfully',
+    );
   }
 }

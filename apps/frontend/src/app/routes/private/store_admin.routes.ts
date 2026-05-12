@@ -2,6 +2,7 @@ import { Routes } from '@angular/router';
 import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
+import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -457,6 +458,21 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'fiscal/wizard',
+            canActivate: [fiscalManagementGuard],
+            loadComponent: () =>
+              import('../../private/modules/store/settings/fiscal/wizard/fiscal-activation-wizard.component').then(
+                (c) => c.StoreFiscalActivationWizardComponent,
+              ),
+          },
+          {
+            path: 'fiscal',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/fiscal-management/fiscal-management.component').then(
+                (c) => c.StoreFiscalManagementComponent,
+              ),
+          },
+          {
             path: 'support',
             redirectTo: '/admin/help/support',
             pathMatch: 'full',
@@ -564,17 +580,18 @@ export const storeAdminRoutes: Routes = [
           ),
       },
       {
-        path: 'habeas-data',
-        loadChildren: () =>
-          import('../../private/modules/store/habeas-data/habeas-data.routes').then(
-            (m) => m.habeasDataRoutes,
-          ),
-      },
-      {
         path: 'taxes/ica',
         loadChildren: () =>
           import('../../private/modules/store/taxes/ica/ica.routes').then(
             (m) => m.icaRoutes,
+          ),
+      },
+      // Subscription Routes
+      {
+        path: 'subscription',
+        loadChildren: () =>
+          import('../../private/modules/store/subscription/subscription.routes').then(
+            (m) => m.default,
           ),
       },
     ],

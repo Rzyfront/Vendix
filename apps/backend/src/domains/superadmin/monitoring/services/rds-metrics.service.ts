@@ -43,19 +43,47 @@ export class RdsMetricsService {
     const periodSeconds = periodToSeconds(granularity);
 
     const dimensions = [
-      { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
+      {
+        Name: 'DBInstanceIdentifier',
+        Value: this.cloudWatchService.rdsDbIdentifier,
+      },
     ];
     const namespace = 'AWS/RDS';
 
     const queries: MetricQuery[] = [
-      { id: 'cpu_utilization', metricName: 'CPUUtilization', namespace, dimensions },
-      { id: 'database_connections', metricName: 'DatabaseConnections', namespace, dimensions },
-      { id: 'free_storage_space', metricName: 'FreeStorageSpace', namespace, dimensions },
-      { id: 'freeable_memory', metricName: 'FreeableMemory', namespace, dimensions },
+      {
+        id: 'cpu_utilization',
+        metricName: 'CPUUtilization',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'database_connections',
+        metricName: 'DatabaseConnections',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'free_storage_space',
+        metricName: 'FreeStorageSpace',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'freeable_memory',
+        metricName: 'FreeableMemory',
+        namespace,
+        dimensions,
+      },
       { id: 'read_iops', metricName: 'ReadIOPS', namespace, dimensions },
       { id: 'write_iops', metricName: 'WriteIOPS', namespace, dimensions },
       { id: 'read_latency', metricName: 'ReadLatency', namespace, dimensions },
-      { id: 'write_latency', metricName: 'WriteLatency', namespace, dimensions },
+      {
+        id: 'write_latency',
+        metricName: 'WriteLatency',
+        namespace,
+        dimensions,
+      },
     ];
 
     const resultsMap = await this.cloudWatchService.getMultipleMetrics(

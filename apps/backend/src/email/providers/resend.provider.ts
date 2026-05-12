@@ -92,10 +92,14 @@ export class ResendProvider implements EmailProvider {
       });
 
       if (result.error) {
-        this.logger.error('Resend email error (with attachments):', result.error);
+        this.logger.error(
+          'Resend email error (with attachments):',
+          result.error,
+        );
         return {
           success: false,
-          error: result.error.message || 'Failed to send email with attachments',
+          error:
+            result.error.message || 'Failed to send email with attachments',
         };
       }
 
@@ -190,6 +194,27 @@ export class ResendProvider implements EmailProvider {
     };
 
     const template = EmailTemplates.getOnboardingTemplate(templateData);
+    return this.sendEmail(to, template.subject, template.html, template.text);
+  }
+
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    const templateData: EmailTemplateData = {
+      username,
+      email: to,
+      token,
+      vlink: organizationSlug,
+      companyName: 'Vendix',
+      supportEmail: this.config.fromEmail,
+      year: new Date().getFullYear(),
+    };
+
+    const template = EmailTemplates.getInvitationTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 }

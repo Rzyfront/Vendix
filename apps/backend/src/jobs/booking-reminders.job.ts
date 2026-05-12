@@ -41,12 +41,17 @@ export class BookingRemindersJob {
         const reminderRules = settings?.reminders;
 
         // If no custom settings, use default rules
-        const rules = reminderRules && Array.isArray(reminderRules)
-          ? reminderRules.filter((r: any) => r.enabled)
-          : [
-              { time_before: '24h', channels: ['email', 'push'], enabled: true },
-              { time_before: '1h', channels: ['push'], enabled: true },
-            ];
+        const rules =
+          reminderRules && Array.isArray(reminderRules)
+            ? reminderRules.filter((r: any) => r.enabled)
+            : [
+                {
+                  time_before: '24h',
+                  channels: ['email', 'push'],
+                  enabled: true,
+                },
+                { time_before: '1h', channels: ['push'], enabled: true },
+              ];
 
         for (const rule of rules) {
           const ms = TIME_BEFORE_MS[rule.time_before];
@@ -72,29 +77,35 @@ export class BookingRemindersJob {
               },
             },
             include: {
-              customer: { select: { first_name: true, last_name: true, email: true } },
+              customer: {
+                select: { first_name: true, last_name: true, email: true },
+              },
               product: { select: { name: true } },
             },
           });
 
           for (const booking of bookings) {
             // Build the full booking datetime to check if it falls in the window
-            const dateStr = booking.date instanceof Date
-              ? booking.date.toISOString().split('T')[0]
-              : String(booking.date).split('T')[0];
-            const bookingDatetime = new Date(`${dateStr}T${booking.start_time}:00`);
+            const dateStr =
+              booking.date instanceof Date
+                ? booking.date.toISOString().split('T')[0]
+                : String(booking.date).split('T')[0];
+            const bookingDatetime = new Date(
+              `${dateStr}T${booking.start_time}:00`,
+            );
 
             if (bookingDatetime < targetStart || bookingDatetime > targetEnd) {
               continue;
             }
 
             // Check deduplication via booking_reminder_logs
-            const alreadySent = await this.prisma.booking_reminder_logs.findFirst({
-              where: {
-                booking_id: booking.id,
-                reminder_key: rule.time_before,
-              },
-            });
+            const alreadySent =
+              await this.prisma.booking_reminder_logs.findFirst({
+                where: {
+                  booking_id: booking.id,
+                  reminder_key: rule.time_before,
+                },
+              });
 
             if (alreadySent) continue;
 
@@ -116,7 +127,8 @@ export class BookingRemindersJob {
               store_id: store.id,
               booking_id: booking.id,
               booking_number: booking.booking_number,
-              customer_name: `${booking.customer?.first_name || ''} ${booking.customer?.last_name || ''}`.trim(),
+              customer_name:
+                `${booking.customer?.first_name || ''} ${booking.customer?.last_name || ''}`.trim(),
               customer_email: booking.customer?.email,
               service_name: booking.product?.name || 'Servicio',
               date: dateStr,
@@ -126,7 +138,9 @@ export class BookingRemindersJob {
             });
 
             total_sent++;
-            this.logger.log(`Reminder (${rule.time_before}) sent for booking ${booking.booking_number}`);
+            this.logger.log(
+              `Reminder (${rule.time_before}) sent for booking ${booking.booking_number}`,
+            );
           }
         }
       }

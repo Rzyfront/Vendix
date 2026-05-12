@@ -36,10 +36,8 @@ export class DianXmlSignerService {
       const sig = new SignedXml({
         privateKey: private_key,
         publicCert: certificate,
-        canonicalizationAlgorithm:
-          'http://www.w3.org/2001/10/xml-exc-c14n#',
-        signatureAlgorithm:
-          'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
+        canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
+        signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
       });
 
       // Add reference to the document root
@@ -62,8 +60,7 @@ export class DianXmlSignerService {
       // Compute and insert signature
       sig.computeSignature(xml_content, {
         location: {
-          reference:
-            `/*[local-name()='${root_element}']/*[local-name()='UBLExtensions']/*[local-name()='UBLExtension'][2]/*[local-name()='ExtensionContent']`,
+          reference: `/*[local-name()='${root_element}']/*[local-name()='UBLExtensions']/*[local-name()='UBLExtension'][2]/*[local-name()='ExtensionContent']`,
           action: 'append',
         },
       });
@@ -94,8 +91,7 @@ export class DianXmlSignerService {
 
       // Extract private key
       const key_bags = p12.getBags({ bagType: forge.oids.pkcs8ShroudedKeyBag });
-      const key_bag =
-        key_bags[forge.oids.pkcs8ShroudedKeyBag]?.[0];
+      const key_bag = key_bags[forge.oids.pkcs8ShroudedKeyBag]?.[0];
       if (!key_bag) {
         throw new Error('No private key found in .p12 file');
       }

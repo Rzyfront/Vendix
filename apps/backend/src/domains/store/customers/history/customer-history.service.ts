@@ -47,7 +47,9 @@ export class CustomerHistoryService {
       status: b.status,
       product: b.product,
       provider: b.provider,
-      has_intake_data: b.data_collection_submissions?.length > 0 && b.data_collection_submissions[0].status !== 'pending',
+      has_intake_data:
+        b.data_collection_submissions?.length > 0 &&
+        b.data_collection_submissions[0].status !== 'pending',
       has_prediagnosis: !!b.data_collection_submissions?.[0]?.ai_prediagnosis,
       notes_count: b.consultation_notes?.length ?? 0,
       has_snapshot: !!b.metadata_snapshot,
@@ -86,14 +88,25 @@ export class CustomerHistoryService {
       where: { customer_id: customerId, include_in_summary: true },
       include: {
         booking: {
-          select: { id: true, booking_number: true, date: true, product: { select: { name: true } } },
+          select: {
+            id: true,
+            booking_number: true,
+            date: true,
+            product: { select: { name: true } },
+          },
         },
       },
       orderBy: { created_at: 'desc' },
     });
   }
 
-  async addNote(customerId: number, bookingId: number, noteKey: string, noteValue: string, createdById?: number) {
+  async addNote(
+    customerId: number,
+    bookingId: number,
+    noteKey: string,
+    noteValue: string,
+    createdById?: number,
+  ) {
     const booking = await this.prisma.bookings.findFirst({
       where: { id: bookingId, customer_id: customerId },
     });
@@ -118,7 +131,10 @@ export class CustomerHistoryService {
 
     return this.prisma.customer_consultation_notes.update({
       where: { id: noteId },
-      data: { include_in_summary: !note.include_in_summary, updated_at: new Date() },
+      data: {
+        include_in_summary: !note.include_in_summary,
+        updated_at: new Date(),
+      },
     });
   }
 

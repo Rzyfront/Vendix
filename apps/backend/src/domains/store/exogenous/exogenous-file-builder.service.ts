@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { S3Service } from '@common/services/s3.service';
-import { EXOGENOUS_FORMATS, ExogenousFormatCode } from './constants/format-definitions';
+import {
+  EXOGENOUS_FORMATS,
+  ExogenousFormatCode,
+} from './constants/format-definitions';
 
 /**
  * Columnas fijas DIAN para medios magneticos
@@ -56,7 +59,9 @@ export class ExogenousFileBuilderService {
     if (lines.length === 0) return '';
 
     const is_balance_format = ['1008', '1009'].includes(format_code);
-    const columns = is_balance_format ? DIAN_COLUMNS.balance : DIAN_COLUMNS.default;
+    const columns = is_balance_format
+      ? DIAN_COLUMNS.balance
+      : DIAN_COLUMNS.default;
 
     const rows: string[] = [];
 
@@ -86,9 +91,15 @@ export class ExogenousFileBuilderService {
 
     const file_key = `exogenous/${organization_id}/${fiscal_year}/formato_${format_code}_${report_id}.txt`;
 
-    await this.s3_service.uploadFile(buffer, file_key, 'text/plain; charset=utf-8');
+    await this.s3_service.uploadFile(
+      buffer,
+      file_key,
+      'text/plain; charset=utf-8',
+    );
 
-    this.logger.log(`Exogenous TXT uploaded: ${file_key} (${lines.length} lines)`);
+    this.logger.log(
+      `Exogenous TXT uploaded: ${file_key} (${lines.length} lines)`,
+    );
 
     return file_key;
   }
@@ -102,7 +113,11 @@ export class ExogenousFileBuilderService {
 
   // ═══ Private helpers ═══
 
-  private buildDefaultLine(columns: DianColumnDef[], line: any, format_code: string): string {
+  private buildDefaultLine(
+    columns: DianColumnDef[],
+    line: any,
+    format_code: string,
+  ): string {
     const concept_code = this.mapConceptCode(line.concept_code, format_code);
     const names = this.splitName(line.third_party_name);
 
@@ -129,9 +144,15 @@ export class ExogenousFileBuilderService {
     return this.formatRow(columns, values);
   }
 
-  private buildBalanceLine(columns: DianColumnDef[], line: any, format_code: string): string {
-    const account_code = line.line_data?.account_code || line.concept_code || '';
-    const account_name = line.line_data?.account_name || line.third_party_name || '';
+  private buildBalanceLine(
+    columns: DianColumnDef[],
+    line: any,
+    format_code: string,
+  ): string {
+    const account_code =
+      line.line_data?.account_code || line.concept_code || '';
+    const account_name =
+      line.line_data?.account_name || line.third_party_name || '';
 
     const values: Record<string, string> = {
       concepto: format_code,
@@ -143,7 +164,10 @@ export class ExogenousFileBuilderService {
     return this.formatRow(columns, values);
   }
 
-  private formatRow(columns: DianColumnDef[], values: Record<string, string>): string {
+  private formatRow(
+    columns: DianColumnDef[],
+    values: Record<string, string>,
+  ): string {
     return columns
       .map((col) => {
         const raw = (values[col.name] || '').toString();
@@ -153,7 +177,12 @@ export class ExogenousFileBuilderService {
       .join('|');
   }
 
-  private padField(value: string, width: number, align: 'left' | 'right', pad_char = ' '): string {
+  private padField(
+    value: string,
+    width: number,
+    align: 'left' | 'right',
+    pad_char = ' ',
+  ): string {
     const truncated = value.substring(0, width);
     if (align === 'left') {
       return truncated.padEnd(width, pad_char);
@@ -182,8 +211,18 @@ export class ExogenousFileBuilderService {
 
     // Mapeos por formato
     const mappings: Record<string, Record<string, string>> = {
-      '1001': { RTE_FUENTE: '5001', RTE_IVA: '5002', RTE_ICA: '5003', RTE_OTROS: '5004' },
-      '1003': { RTE_FUENTE: '5001', RTE_IVA: '5002', RTE_ICA: '5003', RTE_OTROS: '5004' },
+      '1001': {
+        RTE_FUENTE: '5001',
+        RTE_IVA: '5002',
+        RTE_ICA: '5003',
+        RTE_OTROS: '5004',
+      },
+      '1003': {
+        RTE_FUENTE: '5001',
+        RTE_IVA: '5002',
+        RTE_ICA: '5003',
+        RTE_OTROS: '5004',
+      },
       '1005': { IVA_GENERADO: '5005', IVA_DESCONTABLE: '5006' },
       '1006': { IVA_REGIMEN_SIMPLE: '5007' },
       '1007': { INGRESOS: '4001' },
@@ -203,21 +242,41 @@ export class ExogenousFileBuilderService {
     otros_nombres: string;
   } {
     if (!full_name) {
-      return { primer_apellido: '', segundo_apellido: '', primer_nombre: '', otros_nombres: '' };
+      return {
+        primer_apellido: '',
+        segundo_apellido: '',
+        primer_nombre: '',
+        otros_nombres: '',
+      };
     }
 
     const parts = full_name.trim().split(/\s+/);
 
     if (parts.length === 1) {
-      return { primer_apellido: '', segundo_apellido: '', primer_nombre: parts[0], otros_nombres: '' };
+      return {
+        primer_apellido: '',
+        segundo_apellido: '',
+        primer_nombre: parts[0],
+        otros_nombres: '',
+      };
     }
 
     if (parts.length === 2) {
-      return { primer_apellido: parts[1], segundo_apellido: '', primer_nombre: parts[0], otros_nombres: '' };
+      return {
+        primer_apellido: parts[1],
+        segundo_apellido: '',
+        primer_nombre: parts[0],
+        otros_nombres: '',
+      };
     }
 
     if (parts.length === 3) {
-      return { primer_apellido: parts[1], segundo_apellido: parts[2], primer_nombre: parts[0], otros_nombres: '' };
+      return {
+        primer_apellido: parts[1],
+        segundo_apellido: parts[2],
+        primer_nombre: parts[0],
+        otros_nombres: '',
+      };
     }
 
     // 4+ parts

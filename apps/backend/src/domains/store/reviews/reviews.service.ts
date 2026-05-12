@@ -36,7 +36,8 @@ export class ReviewsService {
     if (rating) where.rating = rating;
     if (product_id) where.product_id = product_id;
     if (user_id) where.user_id = user_id;
-    if (verified_purchase !== undefined) where.verified_purchase = verified_purchase;
+    if (verified_purchase !== undefined)
+      where.verified_purchase = verified_purchase;
 
     if (search) {
       where.OR = [
@@ -54,7 +55,12 @@ export class ReviewsService {
         orderBy: { [sort_by]: sort_order },
         include: {
           users: {
-            select: { id: true, first_name: true, last_name: true, email: true },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
           },
           products: {
             select: { id: true, name: true, image_url: true },
@@ -83,17 +89,22 @@ export class ReviewsService {
   }
 
   async getStats() {
-    const [pending_count, approved_count, rejected_count, flagged_count, ratingAgg] =
-      await Promise.all([
-        this.prisma.reviews.count({ where: { state: 'pending' } }),
-        this.prisma.reviews.count({ where: { state: 'approved' } }),
-        this.prisma.reviews.count({ where: { state: 'rejected' } }),
-        this.prisma.reviews.count({ where: { state: 'flagged' } }),
-        this.prisma.reviews.aggregate({
-          _avg: { rating: true },
-          where: { state: 'approved' },
-        }),
-      ]);
+    const [
+      pending_count,
+      approved_count,
+      rejected_count,
+      flagged_count,
+      ratingAgg,
+    ] = await Promise.all([
+      this.prisma.reviews.count({ where: { state: 'pending' } }),
+      this.prisma.reviews.count({ where: { state: 'approved' } }),
+      this.prisma.reviews.count({ where: { state: 'rejected' } }),
+      this.prisma.reviews.count({ where: { state: 'flagged' } }),
+      this.prisma.reviews.aggregate({
+        _avg: { rating: true },
+        where: { state: 'approved' },
+      }),
+    ]);
 
     return {
       pending_count,

@@ -168,4 +168,33 @@ export class ConsoleProvider implements EmailProvider {
     const template = EmailTemplates.getOnboardingTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
+
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    const templateData: EmailTemplateData = {
+      username,
+      email: to,
+      token,
+      vlink: organizationSlug,
+      companyName: 'Vendix',
+      supportEmail: this.config.fromEmail,
+      year: new Date().getFullYear(),
+    };
+
+    const template = EmailTemplates.getInvitationTemplate(templateData);
+
+    this.logger.log(
+      `📧 INVITATION EMAIL to: ${to} | Subject: ${template.subject}`,
+    );
+    this.logger.log(
+      `🔗 INVITATION LINK: ${EmailTemplates.BASE_URL}/auth/verify-invitation?token=${token}`,
+    );
+
+    return this.sendEmail(to, template.subject, template.html, template.text);
+  }
 }

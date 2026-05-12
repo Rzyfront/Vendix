@@ -129,8 +129,12 @@ export class CouponsService {
         take: limit,
         orderBy: { [sort_by]: sort_order },
         include: {
-          coupon_products: { include: { product: { select: { id: true, name: true } } } },
-          coupon_categories: { include: { category: { select: { id: true, name: true } } } },
+          coupon_products: {
+            include: { product: { select: { id: true, name: true } } },
+          },
+          coupon_categories: {
+            include: { category: { select: { id: true, name: true } } },
+          },
           _count: { select: { coupon_uses: true } },
         },
       }),
@@ -152,8 +156,12 @@ export class CouponsService {
     const coupon = await this.prisma.coupons.findFirst({
       where: { id },
       include: {
-        coupon_products: { include: { product: { select: { id: true, name: true, sku: true } } } },
-        coupon_categories: { include: { category: { select: { id: true, name: true } } } },
+        coupon_products: {
+          include: { product: { select: { id: true, name: true, sku: true } } },
+        },
+        coupon_categories: {
+          include: { category: { select: { id: true, name: true } } },
+        },
         _count: { select: { coupon_uses: true } },
       },
     });
@@ -188,15 +196,23 @@ export class CouponsService {
       const updateData: any = {};
       if (dto.code !== undefined) updateData.code = dto.code;
       if (dto.name !== undefined) updateData.name = dto.name;
-      if (dto.description !== undefined) updateData.description = dto.description;
-      if (dto.discount_type !== undefined) updateData.discount_type = dto.discount_type;
-      if (dto.discount_value !== undefined) updateData.discount_value = dto.discount_value;
-      if (dto.min_purchase_amount !== undefined) updateData.min_purchase_amount = dto.min_purchase_amount;
-      if (dto.max_discount_amount !== undefined) updateData.max_discount_amount = dto.max_discount_amount;
+      if (dto.description !== undefined)
+        updateData.description = dto.description;
+      if (dto.discount_type !== undefined)
+        updateData.discount_type = dto.discount_type;
+      if (dto.discount_value !== undefined)
+        updateData.discount_value = dto.discount_value;
+      if (dto.min_purchase_amount !== undefined)
+        updateData.min_purchase_amount = dto.min_purchase_amount;
+      if (dto.max_discount_amount !== undefined)
+        updateData.max_discount_amount = dto.max_discount_amount;
       if (dto.max_uses !== undefined) updateData.max_uses = dto.max_uses;
-      if (dto.max_uses_per_customer !== undefined) updateData.max_uses_per_customer = dto.max_uses_per_customer;
-      if (dto.valid_from !== undefined) updateData.valid_from = new Date(dto.valid_from);
-      if (dto.valid_until !== undefined) updateData.valid_until = new Date(dto.valid_until);
+      if (dto.max_uses_per_customer !== undefined)
+        updateData.max_uses_per_customer = dto.max_uses_per_customer;
+      if (dto.valid_from !== undefined)
+        updateData.valid_from = new Date(dto.valid_from);
+      if (dto.valid_until !== undefined)
+        updateData.valid_until = new Date(dto.valid_until);
       if (dto.is_active !== undefined) updateData.is_active = dto.is_active;
       if (dto.applies_to !== undefined) updateData.applies_to = dto.applies_to;
 
@@ -233,8 +249,12 @@ export class CouponsService {
       return tx.coupons.findUnique({
         where: { id },
         include: {
-          coupon_products: { include: { product: { select: { id: true, name: true } } } },
-          coupon_categories: { include: { category: { select: { id: true, name: true } } } },
+          coupon_products: {
+            include: { product: { select: { id: true, name: true } } },
+          },
+          coupon_categories: {
+            include: { category: { select: { id: true, name: true } } },
+          },
         },
       });
     });
@@ -265,7 +285,10 @@ export class CouponsService {
     const now = new Date();
 
     // Check dates
-    if (now < new Date(coupon.valid_from) || now > new Date(coupon.valid_until)) {
+    if (
+      now < new Date(coupon.valid_from) ||
+      now > new Date(coupon.valid_until)
+    ) {
       throw new VendixHttpException(ErrorCodes.CPN_EXPIRED_001);
     }
 
@@ -297,7 +320,9 @@ export class CouponsService {
 
     // Check product/category applicability
     if (coupon.applies_to === 'SPECIFIC_PRODUCTS' && dto.product_ids?.length) {
-      const couponProductIds = coupon.coupon_products.map((cp) => cp.product_id);
+      const couponProductIds = coupon.coupon_products.map(
+        (cp) => cp.product_id,
+      );
       const hasApplicable = dto.product_ids.some((pid) =>
         couponProductIds.includes(pid),
       );
@@ -306,8 +331,13 @@ export class CouponsService {
       }
     }
 
-    if (coupon.applies_to === 'SPECIFIC_CATEGORIES' && dto.category_ids?.length) {
-      const couponCategoryIds = coupon.coupon_categories.map((cc) => cc.category_id);
+    if (
+      coupon.applies_to === 'SPECIFIC_CATEGORIES' &&
+      dto.category_ids?.length
+    ) {
+      const couponCategoryIds = coupon.coupon_categories.map(
+        (cc) => cc.category_id,
+      );
       const hasApplicable = dto.category_ids.some((cid) =>
         couponCategoryIds.includes(cid),
       );
@@ -319,7 +349,8 @@ export class CouponsService {
     // Calculate discount
     let discount_amount = 0;
     if (coupon.discount_type === 'PERCENTAGE') {
-      discount_amount = (dto.cart_subtotal * Number(coupon.discount_value)) / 100;
+      discount_amount =
+        (dto.cart_subtotal * Number(coupon.discount_value)) / 100;
       // Apply cap
       if (coupon.max_discount_amount) {
         discount_amount = Math.min(

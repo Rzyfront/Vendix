@@ -54,7 +54,12 @@ export class LayawayService {
           .minus(discount)
           .plus(tax);
         total_amount = total_amount.plus(subtotal);
-        return { ...item, discount_amount: discount, tax_amount: tax, subtotal };
+        return {
+          ...item,
+          discount_amount: discount,
+          tax_amount: tax,
+          subtotal,
+        };
       });
 
       const down_payment = new Prisma.Decimal(dto.down_payment_amount || 0);
@@ -179,7 +184,14 @@ export class LayawayService {
           layaway_items: true,
           layaway_installments: { orderBy: { installment_number: 'asc' } },
           layaway_payments: { orderBy: { created_at: 'desc' } },
-          customer: { select: { id: true, first_name: true, last_name: true, email: true } },
+          customer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
         },
       });
     });
@@ -223,7 +235,14 @@ export class LayawayService {
         take: limit,
         orderBy: { [sort_by]: sort_order },
         include: {
-          customer: { select: { id: true, first_name: true, last_name: true, email: true } },
+          customer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
           layaway_installments: {
             where: { state: 'pending' },
             orderBy: { due_date: 'asc' },
@@ -246,13 +265,23 @@ export class LayawayService {
     const plan = await this.prisma.layaway_plans.findUnique({
       where: { id },
       include: {
-        customer: { select: { id: true, first_name: true, last_name: true, email: true, phone: true } },
+        customer: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+          },
+        },
         created_by: { select: { id: true, first_name: true, last_name: true } },
         layaway_items: {
           include: {
             products: { select: { id: true, name: true, sku: true } },
             product_variants: { select: { id: true, name: true, sku: true } },
-            inventory_locations: { select: { id: true, name: true, code: true } },
+            inventory_locations: {
+              select: { id: true, name: true, code: true },
+            },
           },
         },
         layaway_installments: { orderBy: { installment_number: 'asc' } },
@@ -262,7 +291,9 @@ export class LayawayService {
             store_payment_methods: {
               select: { id: true, display_name: true },
             },
-            received_by: { select: { id: true, first_name: true, last_name: true } },
+            received_by: {
+              select: { id: true, first_name: true, last_name: true },
+            },
           },
         },
       },
@@ -326,7 +357,9 @@ export class LayawayService {
       }
 
       // 4. Determinar cuota a aplicar
-      let target_installment: (typeof plan.layaway_installments)[number] | undefined = undefined;
+      let target_installment:
+        | (typeof plan.layaway_installments)[number]
+        | undefined = undefined;
       if (dto.installment_id) {
         target_installment = plan.layaway_installments.find(
           (i) => i.id === dto.installment_id,
@@ -358,7 +391,10 @@ export class LayawayService {
       });
 
       // 6. Marcar cuota como pagada si aplica
-      if (target_installment && amount.greaterThanOrEqualTo(target_installment.amount)) {
+      if (
+        target_installment &&
+        amount.greaterThanOrEqualTo(target_installment.amount)
+      ) {
         await tx.layaway_installments.update({
           where: { id: target_installment.id },
           data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
@@ -367,14 +403,18 @@ export class LayawayService {
 
       // 7. Actualizar plan
       const new_paid = new Prisma.Decimal(plan.paid_amount).plus(amount);
-      const new_remaining = new Prisma.Decimal(plan.remaining_amount).minus(amount);
+      const new_remaining = new Prisma.Decimal(plan.remaining_amount).minus(
+        amount,
+      );
       const is_completed = new_remaining.lessThanOrEqualTo(0);
 
       await tx.layaway_plans.update({
         where: { id: plan_id },
         data: {
           paid_amount: new_paid,
-          remaining_amount: new_remaining.greaterThan(0) ? new_remaining : new Prisma.Decimal(0),
+          remaining_amount: new_remaining.greaterThan(0)
+            ? new_remaining
+            : new Prisma.Decimal(0),
           ...(is_completed && {
             state: 'completed',
             completed_at: new Date(),
@@ -405,7 +445,10 @@ export class LayawayService {
 
         // Marcar todas las cuotas pendientes como pagadas
         await tx.layaway_installments.updateMany({
-          where: { layaway_plan_id: plan_id, state: { in: ['pending', 'overdue'] } },
+          where: {
+            layaway_plan_id: plan_id,
+            state: { in: ['pending', 'overdue'] },
+          },
           data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
         });
 
@@ -429,7 +472,9 @@ export class LayawayService {
     return this.prisma.$transaction(async (tx: any) => {
       const plan = await tx.layaway_plans.findUnique({
         where: { id: plan_id },
-        include: { layaway_installments: { orderBy: { installment_number: 'asc' } } },
+        include: {
+          layaway_installments: { orderBy: { installment_number: 'asc' } },
+        },
       });
 
       if (!plan) {
@@ -496,7 +541,9 @@ export class LayawayService {
     const context = RequestContextService.getContext();
 
     return this.prisma.$transaction(async (tx: any) => {
-      const plan = await tx.layaway_plans.findUnique({ where: { id: plan_id } });
+      const plan = await tx.layaway_plans.findUnique({
+        where: { id: plan_id },
+      });
 
       if (!plan) {
         throw new VendixHttpException(ErrorCodes.LAY_FIND_001);
@@ -519,7 +566,10 @@ export class LayawayService {
 
       // 2. Cancelar cuotas pendientes
       await tx.layaway_installments.updateMany({
-        where: { layaway_plan_id: plan_id, state: { in: ['pending', 'overdue'] } },
+        where: {
+          layaway_plan_id: plan_id,
+          state: { in: ['pending', 'overdue'] },
+        },
         data: { state: 'cancelled', updated_at: new Date() },
       });
 
@@ -544,7 +594,9 @@ export class LayawayService {
 
       return tx.layaway_plans.findUnique({
         where: { id: plan_id },
-        include: { customer: { select: { id: true, first_name: true, last_name: true } } },
+        include: {
+          customer: { select: { id: true, first_name: true, last_name: true } },
+        },
       });
     });
   }
@@ -553,7 +605,9 @@ export class LayawayService {
 
   async complete(plan_id: number) {
     return this.prisma.$transaction(async (tx: any) => {
-      const plan = await tx.layaway_plans.findUnique({ where: { id: plan_id } });
+      const plan = await tx.layaway_plans.findUnique({
+        where: { id: plan_id },
+      });
 
       if (!plan) {
         throw new VendixHttpException(ErrorCodes.LAY_FIND_001);
@@ -570,12 +624,19 @@ export class LayawayService {
 
       await tx.layaway_plans.update({
         where: { id: plan_id },
-        data: { state: 'completed', completed_at: new Date(), updated_at: new Date() },
+        data: {
+          state: 'completed',
+          completed_at: new Date(),
+          updated_at: new Date(),
+        },
       });
 
       // Marcar cuotas pendientes como pagadas
       await tx.layaway_installments.updateMany({
-        where: { layaway_plan_id: plan_id, state: { in: ['pending', 'overdue'] } },
+        where: {
+          layaway_plan_id: plan_id,
+          state: { in: ['pending', 'overdue'] },
+        },
         data: { state: 'paid', paid_at: new Date(), updated_at: new Date() },
       });
 
@@ -597,7 +658,9 @@ export class LayawayService {
 
       return tx.layaway_plans.findUnique({
         where: { id: plan_id },
-        include: { customer: { select: { id: true, first_name: true, last_name: true } } },
+        include: {
+          customer: { select: { id: true, first_name: true, last_name: true } },
+        },
       });
     });
   }

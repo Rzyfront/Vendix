@@ -33,6 +33,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Component({
   selector: 'app-product-detail',
@@ -178,19 +179,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   (displayPriceLabel() ? minVariantPrice() : displayPrice())
                     | currency
                 }}</span>
-                @if (selectedVariant(); as sv) {
-                  @if (sv.is_on_sale || sv.price_override) {
-                    <span
-                      class="original-price"
-                      style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
-                      >{{ p.base_price | currency }}</span
-                    >
-                  }
-                } @else if (p.is_on_sale) {
+                @if (selectedPriceResolution()?.isOnSale) {
                   <span
                     class="original-price"
                     style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
-                    >{{ p.base_price | currency }}</span
+                    >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
               </div>
@@ -212,7 +205,6 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                             size="sm"
                             customClasses="v-btn"
                             [disabled]="
-                              !isOnDemand() &&
                               !getAvailableValues(group.name).includes(val)
                             "
                             (clicked)="selectAttributeValue(group.name, val)"
@@ -243,7 +235,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                         "
                         size="sm"
                         customClasses="v-btn"
-                        [disabled]="!isOnDemand() && v.stock_quantity === 0"
+                        [disabled]="!isVariantAvailable(v)"
                         (clicked)="selectVariant(v)"
                       >
                         {{ v.name }}
@@ -253,7 +245,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                             }}{{ v.final_price - p.final_price | currency }})
                           </span>
                         }
-                        @if (!isOnDemand() && v.stock_quantity === 0) {
+                        @if (!isVariantAvailable(v)) {
                           <span class="text-[10px] opacity-60 ml-1"
                             >(Agotado)</span
                           >
@@ -278,9 +270,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   variant="primary"
                   size="sm"
                   customClasses="btn-cart"
-                  [disabled]="
-                    !isService() && !isOnDemand() && displayStock() === 0
-                  "
+                  [disabled]="purchaseDisabled()"
                   (clicked)="onAddToCart(p)"
                 >
                   <app-icon slot="icon" name="shopping-cart" [size]="18" />
@@ -309,9 +299,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 size="md"
                 [fullWidth]="true"
                 customClasses="btn-buy-now"
-                [disabled]="
-                  !isService() && !isOnDemand() && displayStock() === 0
-                "
+                [disabled]="purchaseDisabled()"
                 (clicked)="onBuyNow(p)"
               >
                 {{
@@ -331,14 +319,15 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 } @else if (isOnDemand()) {
                   <span class="s-dot on-demand"></span>
                   <span class="s-text">Disponible bajo pedido</span>
-                } @else if (displayStock() > 0) {
-                  <span [class.warn]="displayStock() <= 5" class="s-dot"></span>
-                  <span class="s-text">{{
-                    displayStock() <= 5 ? 'Pocas unidades' : 'En stock'
-                  }}</span>
-                } @else {
+                } @else if (displayStock() === 0) {
                   <span class="s-dot err"></span>
-                  <span class="s-text">Sin stock</span>
+                  <span class="s-text">Agotado</span>
+                } @else if (displayStock() <= 5) {
+                  <span class="s-dot warn"></span>
+                  <span class="s-text">Pocas unidades</span>
+                } @else {
+                  <span class="s-dot"></span>
+                  <span class="s-text">En stock</span>
                 }
               </div>
 
@@ -1307,6 +1296,7 @@ export class ProductDetailComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private reviewsService = inject(EcommerceReviewsService);
+  private priceResolver = inject(PriceResolverService);
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -1376,7 +1366,7 @@ export class ProductDetailComponent implements OnInit {
     });
     const available = new Set<string>();
     for (const v of matching) {
-      if (v.attributes[groupName])
+      if (v.attributes[groupName] && this.isVariantAvailable(v))
         available.add(String(v.attributes[groupName]));
     }
     return Array.from(available);
@@ -1411,6 +1401,29 @@ export class ProductDetailComponent implements OnInit {
     return p.variants.find((v) => v.id === vid) || null;
   });
 
+  /** Price resolution using PriceResolverService */
+  selectedPriceResolution = computed(() => {
+    const p = this.product();
+    if (!p) return null;
+    const variant = this.selectedVariant();
+    return this.priceResolver.resolve(
+      {
+        id: String(p.id),
+        base_price: p.base_price,
+        is_on_sale: p.is_on_sale ?? false,
+        sale_price: p.sale_price ?? null,
+        track_inventory: p.track_inventory ?? true,
+      },
+      variant ? {
+        id: String(variant.id),
+        price_override: variant.price_override ?? null,
+        is_on_sale: variant.is_on_sale ?? false,
+        sale_price: variant.sale_price ?? null,
+        track_inventory_override: null,
+      } : undefined
+    );
+  });
+
   /** Minimum price across all variants */
   minVariantPrice = computed((): number => {
     const p = this.product();
@@ -1440,16 +1453,33 @@ export class ProductDetailComponent implements OnInit {
   displayStock = computed((): number => {
     const variant = this.selectedVariant();
     const p = this.product();
+    if (variant && !this.variantTracksInventory(variant)) return 999;
     if (variant) return variant.stock_quantity;
     if (p?.variants?.length) {
-      return p.variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
+      return p.variants.reduce(
+        (sum, v) =>
+          sum + (this.variantTracksInventory(v) ? v.stock_quantity || 0 : 999),
+        0,
+      );
     }
     return p?.stock_quantity || 0;
+  });
+
+  /** Check if variant attributes are missing when product has variants with attributes */
+  hasMissingVariantAttributes = computed((): boolean => {
+    const p = this.product();
+    if (!p?.variants?.length) return false;
+    const groups = this.attributeGroups();
+    if (!groups.length) return false;
+    const sel = this.selectedAttributes();
+    return Object.keys(sel).length < groups.length;
   });
 
   /** True when the product does not track inventory (bajo pedido / made-to-order) */
   isOnDemand = computed((): boolean => {
     const p = this.product();
+    const variant = this.selectedVariant();
+    if (variant) return !this.variantTracksInventory(variant);
     return p?.track_inventory === false;
   });
 
@@ -1457,6 +1487,18 @@ export class ProductDetailComponent implements OnInit {
   isService = computed((): boolean => {
     const p = this.product();
     return p?.product_type === 'service';
+  });
+
+  readonly selectedVariantUnavailable = computed((): boolean => {
+    const variant = this.selectedVariant();
+    return variant ? !this.isVariantAvailable(variant) : false;
+  });
+
+  readonly purchaseDisabled = computed((): boolean => {
+    if (this.hasMissingVariantAttributes()) return true;
+    if (this.isService()) return false;
+    if (this.selectedVariantUnavailable()) return true;
+    return !this.isOnDemand() && this.displayStock() === 0;
   });
 
   // Quick View Modal
@@ -1539,7 +1581,10 @@ export class ProductDetailComponent implements OnInit {
           this.product.set(product);
           this.activeImageUrl.set(product.image_url);
           if (product.variants?.length) {
-            const firstVariant = product.variants[0];
+            const firstVariant =
+              product.variants.find((variant) =>
+                this.isVariantAvailable(variant),
+              ) ?? product.variants[0];
             this.selectedVariantId.set(firstVariant.id);
             // Initialize attribute-based selection from first variant's attributes
             if (
@@ -1650,6 +1695,8 @@ export class ProductDetailComponent implements OnInit {
   }
 
   selectVariant(variant: ProductVariantDetail): void {
+    if (!this.isVariantAvailable(variant)) return;
+
     this.selectedVariantId.set(variant.id);
     // Update main image if variant has its own image
     if (variant.image_url) {
@@ -1662,6 +1709,8 @@ export class ProductDetailComponent implements OnInit {
   }
 
   selectAttributeValue(groupName: string, value: string): void {
+    if (!this.getAvailableValues(groupName).includes(value)) return;
+
     this.selectedAttributes.update((current) => {
       const next = { ...current };
       // Toggle off if re-clicking the same value
@@ -1699,7 +1748,11 @@ export class ProductDetailComponent implements OnInit {
       'product_type' in product &&
       product.product_type === 'service'
     ) {
-      this.router.navigate(['/book', product.id]);
+      this.router.navigate(['/book', product.id], {
+        queryParams: this.selectedVariantId()
+          ? { variant_id: this.selectedVariantId() }
+          : undefined,
+      });
       return;
     }
     const variantId = this.selectedVariantId() ?? undefined;
@@ -1729,7 +1782,11 @@ export class ProductDetailComponent implements OnInit {
   onBuyNow(product: ProductDetail): void {
     // For services that require booking, go to booking page
     if (this.isService() && product.requires_booking) {
-      this.router.navigate(['/book', product.id]);
+      this.router.navigate(['/book', product.id], {
+        queryParams: this.selectedVariantId()
+          ? { variant_id: this.selectedVariantId() }
+          : undefined,
+      });
       return;
     }
     // For regular products or services without booking, add to cart and go to cart
@@ -1749,6 +1806,21 @@ export class ProductDetailComponent implements OnInit {
     } else {
       this.router.navigate(['/cart']);
     }
+  }
+
+  private variantTracksInventory(variant: ProductVariantDetail): boolean {
+    if (typeof variant.effective_track_inventory === 'boolean') {
+      return variant.effective_track_inventory;
+    }
+
+    const productTracksInventory = this.product()?.track_inventory ?? true;
+    return variant.track_inventory_override ?? productTracksInventory;
+  }
+
+  isVariantAvailable(variant: ProductVariantDetail): boolean {
+    if (typeof variant.is_available === 'boolean') return variant.is_available;
+    if (!this.variantTracksInventory(variant)) return true;
+    return (variant.stock_quantity ?? 0) > 0;
   }
 
   onSubmitReview(): void {

@@ -12,12 +12,14 @@ export class AccountingReportsService {
    * Trial Balance: sums debit/credit by account for a fiscal period
    */
   async getTrialBalance(query: ReportQueryDto) {
-    const fiscal_period = await this.validateFiscalPeriod(query.fiscal_period_id);
+    const fiscal_period = await this.validateFiscalPeriod(
+      query.fiscal_period_id,
+    );
 
     const entry_where: Prisma.accounting_entriesWhereInput = {
       fiscal_period_id: query.fiscal_period_id,
       status: 'posted',
-      ...(query.store_id && { store_id: query.store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
         entry_date: {
           gte: new Date(query.date_from),
@@ -103,13 +105,25 @@ export class AccountingReportsService {
   async getBalanceSheet(query: ReportQueryDto) {
     const trial_balance = await this.getTrialBalance(query);
 
-    const assets = trial_balance.accounts.filter((a) => a.account_type === 'asset');
-    const liabilities = trial_balance.accounts.filter((a) => a.account_type === 'liability');
-    const equity = trial_balance.accounts.filter((a) => a.account_type === 'equity');
+    const assets = trial_balance.accounts.filter(
+      (a) => a.account_type === 'asset',
+    );
+    const liabilities = trial_balance.accounts.filter(
+      (a) => a.account_type === 'liability',
+    );
+    const equity = trial_balance.accounts.filter(
+      (a) => a.account_type === 'equity',
+    );
 
     const total_assets = assets.reduce((sum, a) => sum + a.balance, 0);
-    const total_liabilities = liabilities.reduce((sum, a) => sum + Math.abs(a.balance), 0);
-    const total_equity = equity.reduce((sum, a) => sum + Math.abs(a.balance), 0);
+    const total_liabilities = liabilities.reduce(
+      (sum, a) => sum + Math.abs(a.balance),
+      0,
+    );
+    const total_equity = equity.reduce(
+      (sum, a) => sum + Math.abs(a.balance),
+      0,
+    );
 
     return {
       fiscal_period: trial_balance.fiscal_period,
@@ -128,7 +142,8 @@ export class AccountingReportsService {
       balance_check: {
         total_assets,
         total_liabilities_and_equity: total_liabilities + total_equity,
-        is_balanced: Math.abs(total_assets - (total_liabilities + total_equity)) < 0.01,
+        is_balanced:
+          Math.abs(total_assets - (total_liabilities + total_equity)) < 0.01,
       },
     };
   }
@@ -139,11 +154,21 @@ export class AccountingReportsService {
   async getIncomeStatement(query: ReportQueryDto) {
     const trial_balance = await this.getTrialBalance(query);
 
-    const revenue_accounts = trial_balance.accounts.filter((a) => a.account_type === 'revenue');
-    const expense_accounts = trial_balance.accounts.filter((a) => a.account_type === 'expense');
+    const revenue_accounts = trial_balance.accounts.filter(
+      (a) => a.account_type === 'revenue',
+    );
+    const expense_accounts = trial_balance.accounts.filter(
+      (a) => a.account_type === 'expense',
+    );
 
-    const total_revenue = revenue_accounts.reduce((sum, a) => sum + Math.abs(a.balance), 0);
-    const total_expenses = expense_accounts.reduce((sum, a) => sum + Math.abs(a.balance), 0);
+    const total_revenue = revenue_accounts.reduce(
+      (sum, a) => sum + Math.abs(a.balance),
+      0,
+    );
+    const total_expenses = expense_accounts.reduce(
+      (sum, a) => sum + Math.abs(a.balance),
+      0,
+    );
     const net_income = total_revenue - total_expenses;
 
     return {
@@ -171,7 +196,9 @@ export class AccountingReportsService {
       );
     }
 
-    const fiscal_period = await this.validateFiscalPeriod(query.fiscal_period_id);
+    const fiscal_period = await this.validateFiscalPeriod(
+      query.fiscal_period_id,
+    );
 
     // Validate account exists
     const account = await this.prisma.chart_of_accounts.findFirst({
@@ -185,7 +212,7 @@ export class AccountingReportsService {
     const entry_where: Prisma.accounting_entriesWhereInput = {
       fiscal_period_id: query.fiscal_period_id,
       status: 'posted',
-      ...(query.store_id && { store_id: query.store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(query.date_from && {
         entry_date: {
           gte: new Date(query.date_from),

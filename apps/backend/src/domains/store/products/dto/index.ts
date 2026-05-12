@@ -15,10 +15,12 @@ import {
   IsJSON,
   IsNumber,
   Min,
+  Max,
   ValidateNested,
   IsNotEmpty,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export enum ProductState {
   ACTIVE = 'active',
@@ -116,11 +118,6 @@ export class CreateVariantWithStockDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -149,6 +146,11 @@ export class CreateVariantWithStockDto {
   @IsOptional()
   @IsString()
   variant_image_url?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean | null;
 }
 
 export class ProductImageDto {
@@ -343,6 +345,13 @@ export class CreateProductDto {
   @IsString()
   service_instructions?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @Type(() => Number)
+  preparation_time_minutes?: number;
+
   // Consultation-specific fields
   @IsOptional()
   @IsBoolean()
@@ -532,6 +541,13 @@ export class UpdateProductDto {
   @IsString()
   service_instructions?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @Type(() => Number)
+  preparation_time_minutes?: number;
+
   // Consultation-specific fields
   @IsOptional()
   @IsBoolean()
@@ -576,6 +592,11 @@ export class UpdateProductDto {
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 
   @IsOptional()
   @IsArray()
@@ -704,11 +725,6 @@ export class CreateProductVariantDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -727,6 +743,38 @@ export class CreateProductVariantDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean | null;
+  @ApiPropertyOptional({
+    description: 'Override of service duration in minutes',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  service_duration_minutes?: number;
+
+  @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
+  @IsOptional()
+  @IsEnum(['per_session', 'package', 'subscription'])
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+
+  @ApiPropertyOptional({
+    description: 'Override of buffer minutes between bookings',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  buffer_minutes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Override of preparation time before service',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  preparation_time_minutes?: number;
 }
 
 export class UpdateProductVariantDto {
@@ -774,11 +822,6 @@ export class UpdateProductVariantDto {
   is_on_sale?: boolean;
 
   @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  available_for_ecommerce?: boolean;
-
-  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -793,6 +836,48 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean | null;
+  @ApiPropertyOptional({
+    description: 'Override of service duration in minutes',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  service_duration_minutes?: number;
+
+  @ApiPropertyOptional({ enum: ['per_session', 'package', 'subscription'] })
+  @IsOptional()
+  @IsEnum(['per_session', 'package', 'subscription'])
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+
+  @ApiPropertyOptional({
+    description: 'Override of buffer minutes between bookings',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  buffer_minutes?: number;
+
+  @ApiPropertyOptional({
+    description: 'Override of preparation time before service',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  preparation_time_minutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export class UpdateProductWithVariantsDto {
@@ -1176,6 +1261,74 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsString()
   product_type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  track_inventory?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  service_duration_minutes?: number;
+
+  @IsOptional()
+  @IsString()
+  service_modality?: string;
+
+  @IsOptional()
+  @IsString()
+  service_pricing_type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_booking?: boolean;
+
+  @IsOptional()
+  @IsString()
+  booking_mode?: string;
+
+  @IsOptional()
+  @IsNumber()
+  buffer_minutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_recurring?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service_instructions?: string;
+
+  @IsOptional()
+  @IsNumber()
+  preparation_time_minutes?: number;
+
+  @IsOptional()
+  @IsNumber()
+  min_stock_level?: number;
+
+  @IsOptional()
+  @IsNumber()
+  max_stock_level?: number;
+
+  @IsOptional()
+  @IsNumber()
+  reorder_point?: number;
+
+  @IsOptional()
+  @IsNumber()
+  reorder_quantity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_serial_numbers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_batch_tracking?: boolean;
+
+  @IsOptional()
+  @IsString()
+  pricing_type?: string;
 }
 
 export class BulkProductUploadDto {
@@ -1187,6 +1340,7 @@ export class BulkProductUploadDto {
 }
 
 export class BulkUploadItemResultDto {
+  row_number?: number;
   product_name?: string;
   sku?: string;
   action?: 'create' | 'update';

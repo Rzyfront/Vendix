@@ -1,0 +1,31 @@
+meta {
+  name: Superadmin List Plans
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{url}}/superadmin/subscriptions/plans?state=active&page=1&limit=10
+  body: none
+  auth: inherit
+}
+
+params:query {
+  state: active
+  page: 1
+  limit: 10
+}
+
+tests {
+  test("Plans listed successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an("array");
+  });
+
+  test("Pagination meta present", function() {
+    expect(res.body.meta).to.have.property("total");
+    expect(res.body.meta).to.have.property("page");
+    expect(res.body.meta).to.have.property("limit");
+  });
+}

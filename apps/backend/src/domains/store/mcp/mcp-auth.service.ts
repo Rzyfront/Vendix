@@ -35,7 +35,10 @@ export class McpAuthService {
       // In production: implement OAuth 2.1 with separate MCP client credentials
       const secret = this.configService.get<string>('JWT_SECRET');
       if (!secret) {
-        throw new VendixHttpException(ErrorCodes.AI_MCP_001, 'JWT_SECRET not configured');
+        throw new VendixHttpException(
+          ErrorCodes.AI_MCP_001,
+          'JWT_SECRET not configured',
+        );
       }
       const decoded = jwt.verify(token, secret) as any;
 
@@ -65,7 +68,9 @@ export class McpAuthService {
       const permissions =
         user?.user_roles?.flatMap(
           (ur) =>
-            ur.roles?.role_permissions?.map((rp) => rp.permissions?.name || '') || [],
+            ur.roles?.role_permissions?.map(
+              (rp) => rp.permissions?.name || '',
+            ) || [],
         ) || [];
 
       return {

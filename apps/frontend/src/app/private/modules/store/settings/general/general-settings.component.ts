@@ -1,4 +1,5 @@
-import { Component, inject, OnInit, computed, signal } from '@angular/core';
+import { Component, inject, OnInit, computed, signal, DestroyRef, effect } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
@@ -9,6 +10,7 @@ import { NotificationsSettingsForm } from './components/notifications-settings-f
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
+import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
@@ -30,6 +32,7 @@ import { firstValueFrom } from 'rxjs';
     PosSettingsForm,
     ReceiptsSettingsForm,
     AppSettingsForm,
+    OperationsSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
 ],
@@ -37,32 +40,34 @@ import { firstValueFrom } from 'rxjs';
   styleUrls: ['./general-settings.component.scss'],
 })
 export class GeneralSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private settings_service = inject(StoreSettingsService);
   private toast_service = inject(ToastService);
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
 
-  isVendixDomain = false;
-  storeAppUrl: string | null = null;
+  isVendixDomain = signal(false);
+  storeAppUrl = signal<string | null>(null);
 
-  settings: StoreSettings = {} as StoreSettings;
+  settings = signal<StoreSettings>({} as StoreSettings);
   isLoading = signal(true);
+  settingsLoaded = signal(false);
   isSaving = signal(false);
   hasUnsavedChanges = signal(false);
   lastSaved = signal<Date | null>(null);
   activeSection = signal('identity');
 
-  showTemplates = false;
-  templates: any[] = [];
+  showTemplates = signal(false);
+  templates = signal<any[]>([]);
 
-  // Pending file uploads (lazy — deferred until save)
-  pendingAppLogo: { file: File; preview: string } | null = null;
-  pendingAppFavicon: { file: File; preview: string } | null = null;
+  pendingAppLogo = signal<{ file: File; preview: string } | null>(null);
+  pendingAppFavicon = signal<{ file: File; preview: string } | null>(null);
 
   readonly sections = [
     { id: 'identity', label: 'Identidad', icon: 'user' },
     { id: 'branding', label: 'Marca', icon: 'palette' },
     { id: 'inventory', label: 'Inventario', icon: 'package' },
+    { id: 'operations', label: 'Operaciones', icon: 'clock' },
     { id: 'notifications', label: 'Alertas', icon: 'bell' },
     { id: 'pos', label: 'POS', icon: 'monitor' },
     { id: 'receipts', label: 'Recibos', icon: 'file-text' },
@@ -94,9 +99,12 @@ export class GeneralSettingsComponent implements OnInit {
     }
   ]);
 
+  private readonly configEffect = effect(() => {
+    this.isVendixDomain.set(!!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain);
+  });
+
   ngOnInit() {
     this.loadSettings();
-    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
     this.resolveStoreAppUrl();
   }
 
@@ -104,22 +112,23 @@ export class GeneralSettingsComponent implements OnInit {
     const hostname = this.authFacade.userDomainHostname();
     const slug = this.authFacade.userOrganizationSlug();
     if (hostname) {
-      this.storeAppUrl = `${window.location.protocol}//${hostname}`;
+      this.storeAppUrl.set(`${window.location.protocol}//${hostname}`);
     } else if (slug) {
-      this.storeAppUrl = '/' + slug;
+      this.storeAppUrl.set('/' + slug);
     }
   }
 
   loadSettings() {
-    this.settings_service.getSettings().subscribe({
+    this.settings_service.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.settings = response.data;
-        // Clean shipping data if present to prevent 400 Bad Request
-        if ((this.settings as any).shipping) {
-          delete (this.settings as any).shipping;
+        const data = { ...(response.data as StoreSettings) };
+        if ((data as any).shipping) {
+          delete (data as any).shipping;
         }
+        this.settings.set(data);
         this.isLoading.set(false);
         this.hasUnsavedChanges.set(false);
+        this.settingsLoaded.set(true);
       },
       error: (error) => {
         console.error('Error loading settings:', error);
@@ -130,9 +139,9 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   loadTemplates() {
-    this.settings_service.getSystemTemplates().subscribe({
+    this.settings_service.getSystemTemplates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.templates = response.data;
+        this.templates.set(response.data);
       },
       error: (error) => {
         console.error('Error loading templates:', error);
@@ -142,21 +151,18 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   onSectionChange(section: keyof StoreSettings, new_settings: any) {
-    this.settings = {
-      ...this.settings,
-      [section]: new_settings,
-    };
+    this.settings.update((s) => ({ ...s, [section]: new_settings }));
     this.hasUnsavedChanges.set(true);
     this.lastSaved.set(null);
   }
 
   onPendingAppLogo(event: { file: File; preview: string } | null): void {
-    this.pendingAppLogo = event;
+    this.pendingAppLogo.set(event);
     this.hasUnsavedChanges.set(true);
   }
 
   onPendingAppFavicon(event: { file: File; preview: string } | null): void {
-    this.pendingAppFavicon = event;
+    this.pendingAppFavicon.set(event);
     this.hasUnsavedChanges.set(true);
   }
 
@@ -182,36 +188,38 @@ export class GeneralSettingsComponent implements OnInit {
 
   async saveAllSettings() {
     this.isSaving.set(true);
-    // Ensure shipping is not sent
-    if ((this.settings as any).shipping) {
-      delete (this.settings as any).shipping;
+    if ((this.settings() as any).shipping) {
+      this.settings.update((s) => {
+        const { shipping, ...rest } = s as any;
+        return rest as StoreSettings;
+      });
     }
 
     try {
-      // Upload pending brand assets to S3 in parallel before saving settings
       const uploads: Promise<void>[] = [];
 
-      if (this.pendingAppLogo) {
-        const logoFile = this.pendingAppLogo.file;
+      const pendingLogo = this.pendingAppLogo();
+      if (pendingLogo) {
+        const logoFile = pendingLogo.file;
         uploads.push(
           firstValueFrom(this.settings_service.uploadStoreLogo(logoFile)).then((result) => {
-            // Sync logo to both app and general (store table)
-            this.settings = {
-              ...this.settings,
-              app: { ...this.settings.app, logo_url: result.key },
-              general: { ...this.settings.general, logo_url: result.key },
-            };
-            this.pendingAppLogo = null;
+            this.settings.update((s) => ({
+              ...s,
+              app: { ...s.app, logo_url: result.key },
+              general: { ...s.general, logo_url: result.key },
+            }));
+            this.pendingAppLogo.set(null);
           }),
         );
       }
 
-      if (this.pendingAppFavicon) {
-        const faviconFile = this.pendingAppFavicon.file;
+      const pendingFavicon = this.pendingAppFavicon();
+      if (pendingFavicon) {
+        const faviconFile = pendingFavicon.file;
         uploads.push(
           firstValueFrom(this.settings_service.uploadStoreFavicon(faviconFile)).then((result) => {
-            this.settings = { ...this.settings, app: { ...this.settings.app, favicon_url: result.key } };
-            this.pendingAppFavicon = null;
+            this.settings.update((s) => ({ ...s, app: { ...s.app, favicon_url: result.key } }));
+            this.pendingAppFavicon.set(null);
           }),
         );
       }
@@ -220,19 +228,19 @@ export class GeneralSettingsComponent implements OnInit {
         await Promise.all(uploads);
       }
 
-      // Only send sections managed by this component to prevent legacy/unknown properties from round-tripping
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations',
       ];
+      const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {
-        if (this.settings[key] !== undefined) {
-          (acc as any)[key] = this.settings[key];
+        if (currentSettings[key] !== undefined) {
+          (acc as any)[key] = currentSettings[key];
         }
         return acc;
       }, {} as Partial<StoreSettings>);
 
       // Save all settings
-      this.settings_service.saveSettingsNow(sanitizedSettings).subscribe({
+      this.settings_service.saveSettingsNow(sanitizedSettings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);
@@ -257,7 +265,7 @@ export class GeneralSettingsComponent implements OnInit {
         '¿Estás seguro de restablecer todas las configuraciones a valores por defecto?',
       )
     ) {
-      this.settings_service.resetToDefault().subscribe({
+      this.settings_service.resetToDefault().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => this.loadSettings(),
         error: (error) => {
           console.error('Error resetting settings:', error);
@@ -268,7 +276,7 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   openTemplates() {
-    this.showTemplates = true;
+    this.showTemplates.set(true);
     this.loadTemplates();
   }
 
@@ -278,10 +286,10 @@ export class GeneralSettingsComponent implements OnInit {
         `¿Aplicar la plantilla "${template_name}"? Esto reemplazará toda la configuración actual.`,
       )
     ) {
-      this.settings_service.applyTemplate(template_name).subscribe({
+      this.settings_service.applyTemplate(template_name).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
-          this.settings = response.data;
-          this.showTemplates = false;
+          this.settings.set(response.data);
+          this.showTemplates.set(false);
           this.toast_service.success('Plantilla aplicada correctamente');
         },
         error: (error) => {

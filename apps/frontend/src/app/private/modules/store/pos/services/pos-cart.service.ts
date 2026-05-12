@@ -23,6 +23,7 @@ export type {
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Injectable({
   providedIn: 'root',
@@ -31,7 +32,10 @@ export class PosCartService {
   readonly cartState = signal<CartState>(this.getInitialState());
   readonly loading = signal<boolean>(false);
 
-  constructor(private productService: PosProductService) { }
+  constructor(
+    private productService: PosProductService,
+    private priceResolver: PriceResolverService,
+  ) { }
 
   // Observable getters
   get cartState$(): Observable<CartState> {
@@ -511,9 +515,7 @@ export class PosCartService {
         );
 
     // Variant-aware pricing
-    const basePrice = request.variant?.price_override ?? request.product.price;
-    const baseCost = request.variant?.cost_price ?? request.product.cost;
-
+    const basePrice = this.resolveUnitPrice(request.product, request.variant);
     let updatedItems: CartItem[];
 
     if (existingItemIndex >= 0) {
@@ -816,8 +818,8 @@ export class PosCartService {
       });
     }
 
-    // Only validate stock when the product tracks inventory
-    if (request.product?.track_inventory !== false) {
+    // Only validate stock when the line effectively tracks inventory
+    if (this.doesLineTrackInventory(request.product, request.variant)) {
       const availableStock = request.variant ? request.variant.stock : request.product.stock;
 
       // Check current cart quantity for this product+variant combo
@@ -841,6 +843,35 @@ export class PosCartService {
     }
 
     return errors;
+  }
+
+  private doesLineTrackInventory(
+    product: Product,
+    variant?: PosProductVariant,
+  ): boolean {
+    return variant?.track_inventory_override ?? product.track_inventory ?? true;
+  }
+
+  private resolveUnitPrice(product: Product, variant?: PosProductVariant): number {
+    const resolution = this.priceResolver.resolve(
+      {
+        id: product.id,
+        base_price: product.price,
+        is_on_sale: product.is_on_sale ?? false,
+        sale_price: product.sale_price ?? null,
+        track_inventory: product.track_inventory ?? true,
+      },
+      variant
+        ? {
+            id: variant.id.toString(),
+            price_override: variant.price_override ?? null,
+            is_on_sale: variant.is_on_sale ?? false,
+            sale_price: variant.sale_price ?? null,
+            track_inventory_override: variant.track_inventory_override ?? null,
+          }
+        : undefined,
+    );
+    return resolution.unitPrice;
   }
 
   /**
@@ -924,4 +955,3 @@ export class PosCartService {
     return 'DISC_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
   }
 }
-

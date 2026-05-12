@@ -67,6 +67,7 @@
                 placeholder="Ej. Camiseta Algodón Premium"
                 [error]="getErrorMessage('name')"
                 [required]="true"
+                tooltipText="Nombre visible del producto en catálogo, facturas y buscador. Sé descriptivo y consistente."
                 customWrapperClass="!mt-0"
               ></app-input>
 
@@ -75,6 +76,7 @@
                 formControlName="sku"
                 placeholder="Ej. CAM-001"
                 [error]="getErrorMessage('sku')"
+                tooltipText="Código interno único del producto. Útil para inventario, etiquetas y búsqueda rápida en POS."
                 customWrapperClass="!mt-0"
               ></app-input>
 
@@ -83,6 +85,7 @@
                 formControlName="slug"
                 placeholder="camiseta-algodon-premium"
                 [error]="getErrorMessage('slug')"
+                tooltipText="Identificador para la URL pública del producto. Se genera automáticamente desde el nombre."
                 customWrapperClass="!mt-0"
               ></app-input>
             </div>
@@ -155,7 +158,9 @@
           </div>
 
           <!-- Grid 3x2: Pricing compacto -->
-          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+          <div
+            class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-3 md:gap-x-4 gap-y-4 md:gap-y-5"
+          >
             <!-- Row 1: Costo | Margen | Precio Base -->
             <app-input
               [label]="
@@ -217,7 +222,7 @@
                 [options]="taxCategoryOptions"
                 formControlName="tax_category_ids"
                 placeholder="Seleccionar impuestos..."
-                helpText="Afectan al precio final"
+                tooltipText="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
               ></app-multi-selector>
 
               <app-button
@@ -426,7 +431,7 @@
             <!-- Horizontal Thumbnails Carousel -->
             <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
               <!-- Upload Button -->
-              @if (imageUrls.length < 5 && !isLoadingImages) {
+              @if (imageUrls.length < 5 && !isLoadingImages()) {
                 <button
                   type="button"
                   (click)="triggerFileUpload()"
@@ -442,7 +447,7 @@
               }
 
               <!-- Loading Indicator Mobile -->
-              @if (isLoadingImages) {
+              @if (isLoadingImages()) {
                 <div
                   class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center"
                 >
@@ -450,7 +455,7 @@
                     class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"
                   ></div>
                   <span class="text-[9px] text-primary-600 mt-1"
-                    >{{ loadingProgress }}%</span
+                    >{{ loadingProgress() }}%</span
                   >
                 </div>
               }
@@ -522,30 +527,29 @@
             >
             </app-setting-toggle>
 
-            <!-- Row 2: Variantes + Inventario (solo productos físicos) -->
-            @if (!isService) {
-              <div>
-                <app-setting-toggle
-                  [ngModel]="hasVariants"
-                  (ngModelChange)="toggleVariants($event)"
-                  [ngModelOptions]="{ standalone: true }"
-                  label="Este producto tiene variantes"
-                  description="Agrega opciones como tamaño, color o material"
+            <!-- Row 2: Variantes + Inventario -->
+            <div>
+              <app-setting-toggle
+                [ngModel]="hasVariants"
+                (ngModelChange)="toggleVariants($event)"
+                [ngModelOptions]="{ standalone: true }"
+                label="Este producto tiene variantes"
+                [description]="isService ? 'Agrega opciones como duración o precio' : 'Agrega opciones como tamaño, color o material'"
+              >
+              </app-setting-toggle>
+              @if (
+                !hasVariants &&
+                (!productForm.get("sku")?.value ||
+                  productForm.get("sku")?.value.trim() === "")
+              ) {
+                <p
+                  class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
                 >
-                </app-setting-toggle>
-                @if (
-                  !hasVariants &&
-                  (!productForm.get("sku")?.value ||
-                    productForm.get("sku")?.value.trim() === "")
-                ) {
-                  <p
-                    class="text-[10px] text-amber-600 mt-1 flex items-center gap-1 px-1"
-                  >
-                    <app-icon name="alert-triangle" size="10"></app-icon>
-                    Configura un SKU para habilitar variantes
-                  </p>
-                }
-              </div>
+                  <app-icon name="alert-triangle" size="10"></app-icon>
+                  Configura un SKU para habilitar variantes
+                </p>
+              }
+            </div>
 
               <app-setting-toggle
                 formControlName="track_inventory"
@@ -557,31 +561,20 @@
                 "
               >
               </app-setting-toggle>
-            } @else {
-              <div
-                class="flex items-center gap-2 px-3 py-2.5 mt-3 bg-purple-50 rounded-xl border border-purple-200 md:col-span-2"
-              >
-                <app-icon
-                  name="briefcase"
-                  size="16"
-                  class="text-purple-600"
-                ></app-icon>
-                <span class="text-sm text-purple-700 font-medium"
-                  >Servicio — siempre disponible</span
-                >
-              </div>
-            }
           </div>
         </section>
 
-        <!-- Clasificación y Etiquetas Section -->
+        <!-- Clasificación y Medidas (unificada: marca/categorías + dimensiones/peso) -->
         <section
           class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
             <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
             <h2 class="text-base font-bold text-gray-900">
-              Clasificación y Etiquetas
+              Clasificación
+              @if (!isService) {
+                <span class="text-gray-400 font-medium"> y Medidas</span>
+              }
             </h2>
           </div>
 
@@ -595,6 +588,7 @@
                   [options]="brandOptions"
                   formControlName="brand_ids"
                   placeholder="Seleccionar marca..."
+                  tooltipText="Marca del producto. Se usa para filtros en catálogo y reportes de ventas."
                 ></app-multi-selector>
 
                 <app-button
@@ -616,6 +610,7 @@
                   [options]="categoryOptions"
                   formControlName="category_ids"
                   placeholder="Seleccionar categorías..."
+                  tooltipText="Categorías donde aparecerá el producto. Un producto puede pertenecer a varias a la vez."
                 ></app-multi-selector>
 
                 <app-button
@@ -628,6 +623,64 @@
               </div>
             </div>
           </div>
+
+          @if (!isService) {
+            <div class="pt-4 border-t border-gray-100 space-y-3">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="package"
+                  size="16"
+                  class="text-primary-600"
+                ></app-icon>
+                <span class="text-sm font-semibold text-gray-700"
+                  >Dimensiones y Peso</span
+                >
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+                <ng-container formGroupName="dimensions">
+                  <app-input
+                    label="Largo (cm)"
+                    type="number"
+                    formControlName="length"
+                    [control]="
+                      $any(productForm.get('dimensions'))?.get('length')
+                    "
+                    placeholder="0.00"
+                    tooltipText="Largo del producto empacado en centímetros. Se usa para cotizar envíos y ocupar espacio en almacén."
+                    customWrapperClass="!mt-0"
+                  ></app-input>
+                  <app-input
+                    label="Ancho (cm)"
+                    type="number"
+                    formControlName="width"
+                    [control]="$any(productForm.get('dimensions'))?.get('width')"
+                    placeholder="0.00"
+                    tooltipText="Ancho del producto empacado en centímetros."
+                    customWrapperClass="!mt-0"
+                  ></app-input>
+                  <app-input
+                    label="Alto (cm)"
+                    type="number"
+                    formControlName="height"
+                    [control]="
+                      $any(productForm.get('dimensions'))?.get('height')
+                    "
+                    placeholder="0.00"
+                    tooltipText="Alto del producto empacado en centímetros."
+                    customWrapperClass="!mt-0"
+                  ></app-input>
+                </ng-container>
+                <app-input
+                  label="Peso (kg)"
+                  type="number"
+                  formControlName="weight"
+                  placeholder="0.00"
+                  tooltipText="Peso del producto empacado en kilogramos. Afecta el cálculo de envío."
+                  customWrapperClass="!mt-0"
+                ></app-input>
+              </div>
+            </div>
+          }
         </section>
 
         <!-- Service-Specific Fields -->
@@ -654,8 +707,8 @@
                 type="number"
                 formControlName="service_duration_minutes"
                 placeholder="Ej. 60"
+                tooltipText="Duración estimada del servicio en minutos. Define la franja horaria que bloquea al proveedor."
                 customWrapperClass="!mt-0"
-                helperText="Duración estimada en minutos"
               ></app-input>
 
               <app-selector
@@ -663,6 +716,7 @@
                 [options]="serviceModalityOptions"
                 formControlName="service_modality"
                 placeholder="Seleccionar modalidad"
+                tooltipText="Dónde se presta el servicio: presencial, virtual o híbrido."
                 customWrapperClass="!mt-0"
               >
               </app-selector>
@@ -672,6 +726,7 @@
                 [options]="servicePricingTypeOptions"
                 formControlName="service_pricing_type"
                 placeholder="Seleccionar tipo"
+                tooltipText="Forma de cobrar: por hora, por sesión, paquete o suscripción."
                 customWrapperClass="!mt-0"
               >
               </app-selector>
@@ -702,6 +757,7 @@
                   { value: 'free_booking', label: 'Reserva libre' },
                 ]"
                 placeholder="Seleccionar modo"
+                tooltipText="'Requiere proveedor' asocia la cita a un profesional específico; 'Reserva libre' solo bloquea horario."
                 customWrapperClass="!mt-0"
               >
               </app-selector>
@@ -804,70 +860,6 @@
           </section>
         }
 
-        <!-- Dimensiones y Peso Section (only for physical products) -->
-        @if (!isService) {
-          <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
-          >
-            <div class="flex items-center gap-2">
-              <app-icon
-                name="package"
-                size="18"
-                class="text-primary-600"
-              ></app-icon>
-              <h2 class="text-base font-bold text-gray-900">
-                Dimensiones y Peso
-              </h2>
-            </div>
-
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
-              <ng-container formGroupName="dimensions">
-                <!-- Length -->
-                <app-input
-                  label="Largo"
-                  type="number"
-                  formControlName="length"
-                  [control]="$any(productForm.get('dimensions'))?.get('length')"
-                  placeholder="0.00"
-                  helperText="cm"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-
-                <!-- Width -->
-                <app-input
-                  label="Ancho"
-                  type="number"
-                  formControlName="width"
-                  [control]="$any(productForm.get('dimensions'))?.get('width')"
-                  placeholder="0.00"
-                  helperText="cm"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-
-                <!-- Height -->
-                <app-input
-                  label="Alto"
-                  type="number"
-                  formControlName="height"
-                  [control]="$any(productForm.get('dimensions'))?.get('height')"
-                  placeholder="0.00"
-                  helperText="cm"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-              </ng-container>
-
-              <!-- Weight -->
-              <app-input
-                label="Peso"
-                type="number"
-                formControlName="weight"
-                placeholder="0.00"
-                helperText="kg"
-                customWrapperClass="!mt-0"
-              ></app-input>
-            </div>
-          </section>
-        }
       </div>
 
       <!-- Right Column: Images & Stock (Desktop only) -->
@@ -1013,7 +1005,7 @@
             @if (imageUrls.length < 5) {
               <div class="group mt-4 relative">
                 <!-- Loading Indicator -->
-                @if (isLoadingImages) {
+                @if (isLoadingImages()) {
                   <div
                     class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2"
                   >
@@ -1024,15 +1016,15 @@
                       Cargando imágenes...
                     </p>
                     <p class="text-xs text-primary-600 mt-1">
-                      {{ loadingProgress }}%
+                      {{ loadingProgress() }}%
                     </p>
                   </div>
                 }
                 <div
                   (click)="triggerFileUpload()"
                   class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
-                  [class.opacity-50]="isLoadingImages"
-                  [class.pointer-events-none]="isLoadingImages"
+                  [class.opacity-50]="isLoadingImages()"
+                  [class.pointer-events-none]="isLoadingImages()"
                 >
                   <div
                     class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
@@ -1345,12 +1337,73 @@
           <!-- end @else track_inventory -->
         </section>
 
+        <!-- Promociones & Operaciones (Desktop sidebar, unificada) -->
+        <section
+          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">
+              @if (isEditMode()) {
+                Promociones
+                <span class="text-gray-400 font-medium"> & Operaciones</span>
+              } @else {
+                Operaciones
+              }
+            </h2>
+          </div>
+
+          @if (isEditMode()) {
+            <div class="space-y-2">
+              <p class="text-xs text-gray-500">
+                Asocia promociones activas a este producto.
+              </p>
+              <app-multi-selector
+                label="Promociones"
+                [options]="promotionOptions"
+                [ngModel]="productPromotionIds"
+                [ngModelOptions]="{ standalone: true }"
+                (valueChange)="onPromotionsChange($event)"
+                placeholder="Seleccionar promociones..."
+                tooltipText="Descuentos o campañas activas asociadas a este producto. Se aplican automáticamente al checkout."
+              >
+              </app-multi-selector>
+            </div>
+
+            <div class="pt-4 border-t border-gray-100 space-y-2">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  name="clock"
+                  size="16"
+                  class="text-primary-600"
+                ></app-icon>
+                <span class="text-sm font-semibold text-gray-700"
+                  >Operaciones</span
+                >
+              </div>
+              <app-input
+                label="Tiempo de preparación (min)"
+                type="number"
+                formControlName="preparation_time_minutes"
+                placeholder="Usa default de tienda"
+                tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+                customWrapperClass="!mt-0"
+              ></app-input>
+            </div>
+          } @else {
+            <app-input
+              label="Tiempo de preparación (min)"
+              type="number"
+              formControlName="preparation_time_minutes"
+              placeholder="Usa default de tienda"
+              tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+              customWrapperClass="!mt-0"
+            ></app-input>
+          }
+        </section>
+
         <!-- Proveedores del Servicio (Desktop sidebar) -->
-        @if (
-          productForm.get("requires_booking")?.value &&
-          isEditMode() &&
-          productId
-        ) {
+        @if (productForm.get("requires_booking")?.value) {
           <section
             class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
@@ -1365,58 +1418,42 @@
               </h2>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-              @for (provider of assignedProviders(); track provider.id) {
-                <div
-                  class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
-                >
-                  <span
-                    class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
-                  >
-                    {{ getProviderInitials(provider) }}
-                  </span>
-                  <span class="text-gray-700 font-medium">{{
-                    provider.display_name || provider.employee?.first_name
-                  }}</span>
-                  <button
-                    class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    (click)="removeProviderFromService(provider.id)"
-                  >
-                    <app-icon name="x" [size]="12"></app-icon>
-                  </button>
+            @if (!isEditMode() || !productId) {
+              <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                Guarda el producto para asignar proveedores.
+              </p>
+            } @else {
+              @if (loadingProviders()) {
+                <p class="text-sm text-gray-400 italic">Cargando proveedores...</p>
+              }
+
+              <app-multi-selector
+                [options]="providerSelectorOptions()"
+                [ngModel]="assignedProviderIds()"
+                [ngModelOptions]="{ standalone: true }"
+                (valueChange)="onProvidersSelectionChange($event)"
+                placeholder="Selecciona proveedores"
+                helpText="Los proveedores asignados podrán recibir reservas de este servicio"
+              ></app-multi-selector>
+
+              @if (assignedProviders().length > 0) {
+                <div class="flex flex-wrap items-center gap-2 pt-2">
+                  @for (provider of assignedProviders(); track provider.id) {
+                    <div
+                      class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
+                    >
+                      <span
+                        class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
+                      >
+                        {{ getProviderInitials(provider) }}
+                      </span>
+                      <span class="text-gray-700 font-medium">{{
+                        provider.display_name || provider.employee?.first_name
+                      }}</span>
+                    </div>
+                  }
                 </div>
               }
-
-              @if (availableProvidersForProduct().length > 0) {
-                <select
-                  class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  (change)="
-                    addProviderToService($any($event.target).value);
-                    $any($event.target).value = ''
-                  "
-                >
-                  <option value="">+ Agregar proveedor</option>
-                  @for (
-                    provider of availableProvidersForProduct();
-                    track provider.id
-                  ) {
-                    <option [value]="provider.id">
-                      {{
-                        provider.display_name ||
-                          provider.employee?.first_name +
-                            " " +
-                            provider.employee?.last_name
-                      }}
-                    </option>
-                  }
-                </select>
-              }
-            </div>
-
-            @if (assignedProviders().length === 0 && !loadingProviders()) {
-              <p class="text-sm text-gray-400 italic">
-                No hay proveedores asignados.
-              </p>
             }
 
             <button
@@ -1431,33 +1468,6 @@
           </section>
         }
 
-        <!-- Promotions Section (Desktop sidebar, edit mode only) -->
-        @if (isEditMode()) {
-          <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
-          >
-            <div class="flex items-center gap-2">
-              <app-icon
-                name="tag"
-                size="18"
-                class="text-primary-600"
-              ></app-icon>
-              <h2 class="text-base font-bold text-gray-900">Promociones</h2>
-            </div>
-            <p class="text-sm text-gray-500">
-              Asocia promociones activas a este producto.
-            </p>
-            <app-multi-selector
-              label="Promociones"
-              [options]="promotionOptions"
-              [ngModel]="productPromotionIds"
-              [ngModelOptions]="{ standalone: true }"
-              (valueChange)="onPromotionsChange($event)"
-              placeholder="Seleccionar promociones..."
-            >
-            </app-multi-selector>
-          </section>
-        }
       </div>
     </div>
 
@@ -1549,9 +1559,7 @@
     }
 
     <!-- MOBILE: Proveedores del Servicio (visible only on mobile) -->
-    @if (
-      productForm.get("requires_booking")?.value && isEditMode() && productId
-    ) {
+    @if (productForm.get("requires_booking")?.value) {
       <section
         class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
       >
@@ -1562,58 +1570,41 @@
           </h2>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          @for (provider of assignedProviders(); track provider.id) {
-            <div
-              class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
-            >
-              <span
-                class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
-              >
-                {{ getProviderInitials(provider) }}
-              </span>
-              <span class="text-gray-700 font-medium">{{
-                provider.display_name || provider.employee?.first_name
-              }}</span>
-              <button
-                class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                (click)="removeProviderFromService(provider.id)"
-              >
-                <app-icon name="x" [size]="12"></app-icon>
-              </button>
+        @if (!isEditMode() || !productId) {
+          <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+            Guarda el producto para asignar proveedores.
+          </p>
+        } @else {
+          @if (loadingProviders()) {
+            <p class="text-sm text-gray-400 italic">Cargando proveedores...</p>
+          }
+
+          <app-multi-selector
+            [options]="providerSelectorOptions()"
+            [ngModel]="assignedProviderIds()"
+            [ngModelOptions]="{ standalone: true }"
+            (valueChange)="onProvidersSelectionChange($event)"
+            placeholder="Selecciona proveedores"
+          ></app-multi-selector>
+
+          @if (assignedProviders().length > 0) {
+            <div class="flex flex-wrap items-center gap-2 pt-2">
+              @for (provider of assignedProviders(); track provider.id) {
+                <div
+                  class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
+                >
+                  <span
+                    class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
+                  >
+                    {{ getProviderInitials(provider) }}
+                  </span>
+                  <span class="text-gray-700 font-medium">{{
+                    provider.display_name || provider.employee?.first_name
+                  }}</span>
+                </div>
+              }
             </div>
           }
-
-          @if (availableProvidersForProduct().length > 0) {
-            <select
-              class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              (change)="
-                addProviderToService($any($event.target).value);
-                $any($event.target).value = ''
-              "
-            >
-              <option value="">+ Agregar proveedor</option>
-              @for (
-                provider of availableProvidersForProduct();
-                track provider.id
-              ) {
-                <option [value]="provider.id">
-                  {{
-                    provider.display_name ||
-                      provider.employee?.first_name +
-                        " " +
-                        provider.employee?.last_name
-                  }}
-                </option>
-              }
-            </select>
-          }
-        </div>
-
-        @if (assignedProviders().length === 0 && !loadingProviders()) {
-          <p class="text-sm text-gray-400 italic">
-            No hay proveedores asignados.
-          </p>
         }
 
         <button
@@ -1628,170 +1619,151 @@
       </section>
     }
 
-    <!-- MOBILE: Promotions Section (edit mode only) -->
-    @if (isEditMode()) {
-      <section
-        class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
-      >
-        <div class="flex items-center gap-2">
-          <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
-          <h2 class="text-base font-bold text-gray-900">Promociones</h2>
+    <!-- MOBILE: Promociones & Operaciones (unificada) -->
+    <section
+      class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
+    >
+      <div class="flex items-center gap-2">
+        <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+        <h2 class="text-base font-bold text-gray-900">
+          @if (isEditMode()) {
+            Promociones
+            <span class="text-gray-400 font-medium"> & Operaciones</span>
+          } @else {
+            Operaciones
+          }
+        </h2>
+      </div>
+
+      @if (isEditMode()) {
+        <div class="space-y-2">
+          <p class="text-xs text-gray-500">
+            Asocia promociones activas a este producto.
+          </p>
+          <app-multi-selector
+            label="Promociones"
+            [options]="promotionOptions"
+            [ngModel]="productPromotionIds"
+            [ngModelOptions]="{ standalone: true }"
+            (valueChange)="onPromotionsChange($event)"
+            placeholder="Seleccionar promociones..."
+            tooltipText="Descuentos o campañas activas asociadas a este producto. Se aplican automáticamente al checkout."
+          >
+          </app-multi-selector>
         </div>
-        <p class="text-sm text-gray-500">
-          Asocia promociones activas a este producto.
-        </p>
-        <app-multi-selector
-          label="Promociones"
-          [options]="promotionOptions"
-          [ngModel]="productPromotionIds"
-          [ngModelOptions]="{ standalone: true }"
-          (valueChange)="onPromotionsChange($event)"
-          placeholder="Seleccionar promociones..."
-        >
-        </app-multi-selector>
-      </section>
-    }
+
+        <div class="pt-4 border-t border-gray-100 space-y-2">
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="clock"
+              size="16"
+              class="text-primary-600"
+            ></app-icon>
+            <span class="text-sm font-semibold text-gray-700">Operaciones</span>
+          </div>
+          <app-input
+            label="Tiempo de preparación (min)"
+            type="number"
+            formControlName="preparation_time_minutes"
+            placeholder="Usa default de tienda"
+            tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+            customWrapperClass="!mt-0"
+          ></app-input>
+        </div>
+      } @else {
+        <app-input
+          label="Tiempo de preparación (min)"
+          type="number"
+          formControlName="preparation_time_minutes"
+          placeholder="Usa default de tienda"
+          tooltipText="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+          customWrapperClass="!mt-0"
+        ></app-input>
+      }
+    </section>
 
     <!-- Variants Section (Full Width) -->
     @if (hasVariants) {
       <section
         class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
       >
-        <div class="flex items-center gap-2">
-          <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
-          <div>
-            <h2 class="text-base font-bold text-gray-900">
-              Variantes
-              @if (generatedVariants.length > 0) {
-                <span
-                  class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-bold leading-none text-white bg-primary rounded-full"
-                >
-                  {{ generatedVariants.length }}
-                </span>
-              }
-            </h2>
-            <p class="text-xs text-gray-500">
-              Configura las combinaciones de tu producto
-            </p>
-          </div>
+        <div class="flex items-center gap-2 min-w-0">
+          <app-icon
+            name="layers"
+            size="18"
+            class="text-primary-600"
+          ></app-icon>
+          <h2 class="text-base font-bold text-gray-900 flex items-center gap-2">
+            Variantes
+            @if (generatedVariants.length > 0) {
+              <span
+                class="inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-bold leading-none text-white bg-primary rounded-full"
+              >
+                {{ generatedVariants.length }}
+              </span>
+            }
+            <span
+              class="help-icon-inline text-gray-400 hover:text-warning"
+              data-tooltip="Los atributos (Color, Talla, Material...) generan combinaciones. Cada combinación es una variante del producto con su propio SKU, precio y stock independientes."
+            >
+              <app-icon name="help-circle" [size]="14"></app-icon>
+            </span>
+          </h2>
         </div>
+
         <!-- Variants UI -->
         <div class="space-y-4 md:space-y-5">
-          <!-- Variant count preview -->
-          @if (
-            variantAttributes.length > 0 &&
-            previewVariantCount > 0 &&
-            generatedVariants.length > 0
-          ) {
-            <div
-              class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/15 rounded-xl"
-            >
-              <app-icon
-                name="layers"
-                size="16"
-                class="text-primary-600"
-              ></app-icon>
-              <span class="text-sm font-medium text-primary-700">
-                <strong>{{ generatedVariants.length }}</strong> variante{{
-                  generatedVariants.length !== 1 ? "s" : ""
-                }}
-                generada{{ generatedVariants.length !== 1 ? "s" : "" }}
-                automáticamente
-              </span>
-            </div>
-          }
-
           <!-- Duplicate SKU Warning -->
           @if (hasDuplicateSkus && generatedVariants.length > 0) {
             <div
-              class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
+              class="flex items-center gap-2 p-2.5 bg-red-50 border border-red-200 rounded-lg"
             >
               <app-icon
                 name="alert-triangle"
-                size="16"
-                class="text-red-600"
+                size="14"
+                class="text-red-600 flex-shrink-0"
               ></app-icon>
-              <span class="text-sm font-medium text-red-700">
-                Hay SKUs duplicados entre las variantes. Cada variante debe tener
-                un SKU único para guardar.
+              <span class="text-xs font-medium text-red-700">
+                SKUs duplicados. Cada variante debe tener un SKU único.
               </span>
-            </div>
-          }
-
-          <!-- Bulk Actions Bar -->
-          @if (generatedVariants.length > 0) {
-            <div
-              class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl"
-            >
-              <span
-                class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2"
-              >
-                {{ generatedVariants.length }} variantes
-              </span>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="applyBasePriceToAll()"
-              >
-                <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
-                Aplicar precio base a todas
-              </app-button>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="applyBaseCostToAll()"
-              >
-                <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
-                Aplicar costo base a todas
-              </app-button>
             </div>
           }
 
           <!-- Quick Attribute Buttons -->
-          <div class="flex flex-wrap gap-2">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-xs text-gray-500 mr-1">Añadir atributo:</span>
             <button
               type="button"
               (click)="addQuickAttribute('Color')"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+              data-tooltip="Agrega un atributo Color. Ingresa luego los valores (Rojo, Azul, ...)."
+              class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-dashed border-primary/30 text-primary-600 hover:bg-primary/5 transition-colors"
             >
-              <app-icon name="plus" size="12"></app-icon> Color
+              <app-icon name="plus" size="11"></app-icon> Color
             </button>
             <button
               type="button"
               (click)="addQuickAttribute('Talla')"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+              data-tooltip="Agrega un atributo Talla. Ingresa luego los valores (S, M, L, ...)."
+              class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-dashed border-primary/30 text-primary-600 hover:bg-primary/5 transition-colors"
             >
-              <app-icon name="plus" size="12"></app-icon> Talla
+              <app-icon name="plus" size="11"></app-icon> Talla
             </button>
             <button
               type="button"
               (click)="addQuickAttribute('Material')"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+              data-tooltip="Agrega un atributo Material. Ingresa luego los valores (Algodón, Lana, ...)."
+              class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-dashed border-primary/30 text-primary-600 hover:bg-primary/5 transition-colors"
             >
-              <app-icon name="plus" size="12"></app-icon> Material
+              <app-icon name="plus" size="11"></app-icon> Material
             </button>
             <button
               type="button"
               (click)="addAttribute()"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-gray-300 text-gray-600 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-colors"
+              data-tooltip="Crea un atributo con un nombre personalizado (p.ej. Sabor, Capacidad, Edición)."
+              class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-dashed border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
             >
-              <app-icon name="plus" size="12"></app-icon> Personalizado
+              <app-icon name="plus" size="11"></app-icon> Personalizado
             </button>
-          </div>
-          <!-- Info tooltip about attributes -->
-          <div
-            class="flex items-start gap-2 p-2.5 bg-gray-50 border border-gray-200 rounded-lg"
-          >
-            <app-icon
-              name="info"
-              size="14"
-              class="text-gray-400 mt-0.5 flex-shrink-0"
-            ></app-icon>
-            <p class="text-[11px] text-gray-500 leading-relaxed">
-              Los valores se agregan con Enter. Cada combinación de valores
-              genera automáticamente una variante con su propio precio, stock y
-              SKU.
-            </p>
           </div>
           <!-- Attribute Manager -->
           <div class="space-y-3 md:space-y-4">
@@ -1808,14 +1780,22 @@
                       [ngModelOptions]="{ standalone: true }"
                       placeholder="Ej. Talla, Color"
                       (inputBlur)="onAttributeNameBlur(i)"
+                      tooltipText="Etiqueta del eje de variación. Ejemplos: 'Color', 'Talla', 'Material', 'Capacidad'. Define la dimensión, no los valores."
                       customWrapperClass="!mt-0"
                     ></app-input>
                   </div>
                   <div class="flex-1">
                     <label
-                      class="block text-sm font-medium text-text-primary mb-2"
-                      >Valores (Enter para agregar)</label
+                      class="flex items-center gap-1 text-sm font-medium text-text-primary mb-2"
                     >
+                      <span>Valores</span>
+                      <span
+                        class="help-icon-inline text-gray-400 hover:text-warning"
+                        data-tooltip="Opciones concretas del atributo. Escribe y presiona Enter para cada una (ej. 'Rojo', 'Azul'). El producto de todos los valores de cada atributo genera las variantes."
+                      >
+                        <app-icon name="help-circle" [size]="12"></app-icon>
+                      </span>
+                    </label>
                     <div
                       class="flex flex-wrap gap-2 px-3 py-1.5 bg-surface rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors"
                     >
@@ -1847,17 +1827,10 @@
                         (blur)="addAttributeValue(i, $event)"
                       />
                     </div>
-                    @if (attr.values.length === 0) {
-                      <p
-                        class="text-[10px] text-text-muted mt-1 flex items-center gap-1"
-                      >
-                        <app-icon name="info" size="10"></app-icon>
-                        Presiona Enter para agregar cada valor
-                      </p>
-                    }
                   </div>
                   <button
                     (click)="removeAttribute(i)"
+                    title="Eliminar este atributo"
                     class="self-end md:mt-6 text-destructive hover:text-destructive/80 p-2"
                   >
                     <app-icon name="trash-2" size="18"></app-icon>
@@ -1874,73 +1847,37 @@
               Agregar Atributo
             </button>
           </div>
-          <!-- Variant count preview -->
-          @if (
-            variantAttributes.length > 0 &&
-            previewVariantCount > 0 &&
-            generatedVariants.length > 0
-          ) {
-            <div
-              class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/15 rounded-xl"
-            >
-              <app-icon
-                name="layers"
-                size="16"
-                class="text-primary-600"
-              ></app-icon>
-              <span class="text-sm font-medium text-primary-700">
-                <strong>{{ generatedVariants.length }}</strong> variante{{
-                  generatedVariants.length !== 1 ? "s" : ""
-                }}
-                generada{{ generatedVariants.length !== 1 ? "s" : "" }}
-                automáticamente
-              </span>
-            </div>
-          }
-          <!-- Duplicate SKU Warning -->
-          @if (hasDuplicateSkus && generatedVariants.length > 0) {
-            <div
-              class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
-            >
-              <app-icon
-                name="alert-triangle"
-                size="16"
-                class="text-red-600"
-              ></app-icon>
-              <span class="text-sm font-medium text-red-700">
-                Hay SKUs duplicados entre las variantes. Cada variante debe
-                tener un SKU único para guardar.
-              </span>
-            </div>
-          }
-          <!-- Bulk Actions Bar -->
+          <!-- Bulk Actions Bar (encima de la lista/tabla de variantes) -->
           @if (generatedVariants.length > 0) {
             <div
-              class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl"
+              class="flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg"
             >
-              <span
-                class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2"
-              >
-                {{ generatedVariants.length }} variantes
+              <span class="text-xs font-medium text-gray-500">
+                Aplicar a todas:
               </span>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="applyBasePriceToAll()"
-              >
-                <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
-                Aplicar precio base a todas
-              </app-button>
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="applyBaseCostToAll()"
-              >
-                <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
-                Aplicar costo base a todas
-              </app-button>
+              <div class="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  (click)="applyBasePriceToAll()"
+                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-white hover:border-primary/40 hover:text-primary-700 transition-colors"
+                  data-tooltip="Copia el precio base del producto al precio de venta de todas las variantes."
+                >
+                  <app-icon name="dollar-sign" [size]="13"></app-icon>
+                  Precio
+                </button>
+                <button
+                  type="button"
+                  (click)="applyBaseCostToAll()"
+                  class="help-icon-inline inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md text-gray-700 border border-gray-200 bg-white hover:border-primary/40 hover:text-primary-700 transition-colors"
+                  data-tooltip="Copia el precio de costo del producto al costo de todas las variantes."
+                >
+                  <app-icon name="calculator" [size]="13"></app-icon>
+                  Costo
+                </button>
+              </div>
             </div>
           }
+
           <!-- Generated Variants - Mobile Cards View (Collapsible) -->
           @if (generatedVariants.length > 0) {
             <div class="lg:hidden space-y-2">
@@ -2093,6 +2030,18 @@
                           customWrapperClass="!mt-0"
                         ></app-input>
                       </div>
+                      <div class="pt-2">
+                        <app-selector
+                          label="Control de inventario"
+                          size="sm"
+                          [options]="variantTrackInventoryOptions"
+                          [ngModel]="getVariantTrackInventoryValue(variant)"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="
+                            updateVariantTrackInventoryOverride(variant, $event)
+                          "
+                        ></app-selector>
+                      </div>
                       <div
                         class="flex justify-end pt-2 border-t border-gray-100"
                       >
@@ -2165,6 +2114,11 @@
                       class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
                       SKU
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Inventario
                     </th>
                     <th class="px-3 py-3 w-10"></th>
                   </tr>
@@ -2338,6 +2292,19 @@
                           placeholder="SKU"
                           customWrapperClass="!mt-0"
                         ></app-input>
+                      </td>
+                      <!-- track_inventory_override -->
+                      <td class="px-3 py-2">
+                        <app-selector
+                          size="sm"
+                          [options]="variantTrackInventoryOptions"
+                          [ngModel]="getVariantTrackInventoryValue(variant)"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="
+                            updateVariantTrackInventoryOverride(variant, $event)
+                          "
+                          customWrapperClass="!mt-0"
+                        ></app-selector>
                       </td>
                       <!-- Delete -->
                       <td class="px-2 py-2">

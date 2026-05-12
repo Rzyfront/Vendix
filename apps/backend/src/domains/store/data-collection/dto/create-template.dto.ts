@@ -1,4 +1,14 @@
-import { IsString, IsOptional, IsEnum, IsBoolean, IsArray, ValidateNested, IsInt, MaxLength, Matches } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsArray,
+  ValidateNested,
+  IsInt,
+  MaxLength,
+  Matches,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CreateTemplateItemDto {
@@ -31,7 +41,9 @@ export class CreateTemplateItemDto {
 
   @IsOptional()
   @IsString()
-  @Matches(/^(25|33|50|75|100)$/, { message: 'width must be 25, 33, 50, 75, or 100' })
+  @Matches(/^(25|33|50|75|100)$/, {
+    message: 'width must be 25, 33, 50, 75, or 100',
+  })
   width?: string;
 
   @IsOptional()

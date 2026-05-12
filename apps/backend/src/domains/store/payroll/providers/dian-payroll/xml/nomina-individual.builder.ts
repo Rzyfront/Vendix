@@ -195,10 +195,7 @@ export class NominaIndividualBuilder {
   /**
    * Builds the <Devengados> section with all earnings sub-elements.
    */
-  private static buildDevengados(
-    root: any,
-    data: NominaDocumentData,
-  ): void {
+  private static buildDevengados(root: any, data: NominaDocumentData): void {
     const devengados = root.ele('Devengados');
     const earnings = data.earnings;
 
@@ -256,8 +253,7 @@ export class NominaIndividualBuilder {
         Pago: earnings.primas.payment.toFixed(2),
       };
       if (earnings.primas.non_taxable_payment != null) {
-        primas_attrs.PagoNS =
-          earnings.primas.non_taxable_payment.toFixed(2);
+        primas_attrs.PagoNS = earnings.primas.non_taxable_payment.toFixed(2);
       }
       devengados.ele('Primas').att(primas_attrs);
     }
@@ -327,10 +323,7 @@ export class NominaIndividualBuilder {
   /**
    * Builds the <Deducciones> section with all deduction sub-elements.
    */
-  private static buildDeducciones(
-    root: any,
-    data: NominaDocumentData,
-  ): void {
+  private static buildDeducciones(root: any, data: NominaDocumentData): void {
     const deducciones = root.ele('Deducciones');
     const deductions = data.deductions;
 
@@ -353,8 +346,7 @@ export class NominaIndividualBuilder {
     ) {
       const fondo_sp_attrs: Record<string, string> = {};
       if (deductions.solidarity_fund_pct != null) {
-        fondo_sp_attrs.Porcentaje =
-          deductions.solidarity_fund_pct.toFixed(2);
+        fondo_sp_attrs.Porcentaje = deductions.solidarity_fund_pct.toFixed(2);
       }
       if (deductions.solidarity_fund_amount != null) {
         fondo_sp_attrs.DeduccionSP =
@@ -379,10 +371,7 @@ export class NominaIndividualBuilder {
     }
 
     // OtrasDeducciones (optional)
-    if (
-      deductions.other_deductions &&
-      deductions.other_deductions.length > 0
-    ) {
+    if (deductions.other_deductions && deductions.other_deductions.length > 0) {
       const otras = deducciones.ele('OtrasDeducciones');
       for (const other of deductions.other_deductions) {
         otras.ele('OtraDeduccion').att({

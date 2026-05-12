@@ -110,8 +110,10 @@ export class AppMetricsService {
         usedMemory: parseField(allInfo, 'used_memory_human') || '0B',
         usedMemoryBytes: Number(parseField(allInfo, 'used_memory')) || 0,
         connectedClients: Number(parseField(allInfo, 'connected_clients')) || 0,
-        opsPerSec: Number(parseField(allInfo, 'instantaneous_ops_per_sec')) || 0,
-        totalSystemMemory: parseField(allInfo, 'total_system_memory_human') || 'N/A',
+        opsPerSec:
+          Number(parseField(allInfo, 'instantaneous_ops_per_sec')) || 0,
+        totalSystemMemory:
+          parseField(allInfo, 'total_system_memory_human') || 'N/A',
         maxMemory: parseField(allInfo, 'maxmemory_human') || 'N/A',
         evictionPolicy: parseField(allInfo, 'maxmemory_policy') || 'N/A',
         keyspaceHits: Number(parseField(allInfo, 'keyspace_hits')) || 0,

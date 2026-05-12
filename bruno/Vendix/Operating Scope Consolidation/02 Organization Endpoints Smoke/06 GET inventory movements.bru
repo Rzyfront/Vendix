@@ -1,0 +1,21 @@
+meta {
+  name: 06 GET inventory movements
+  type: http
+  seq: 6
+}
+
+get {
+  url: http://{{url}}/organization/inventory/movements
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

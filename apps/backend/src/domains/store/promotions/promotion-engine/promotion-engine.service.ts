@@ -175,10 +175,11 @@ export class PromotionEngineService {
       throw new BadRequestException('Promocion no valida o expirada');
     }
 
-    if (promotion.usage_limit && promotion.usage_count >= promotion.usage_limit) {
-      throw new BadRequestException(
-        'Promocion ha alcanzado su limite de uso',
-      );
+    if (
+      promotion.usage_limit &&
+      promotion.usage_count >= promotion.usage_limit
+    ) {
+      throw new BadRequestException('Promocion ha alcanzado su limite de uso');
     }
 
     if (promotion.per_customer_limit && customerId) {

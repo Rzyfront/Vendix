@@ -7,7 +7,12 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
+import {
+  formatPeriodFromDate,
+  parseDateRange,
+  getPreviousPeriod,
+  getDateTruncInterval,
+} from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -298,7 +303,7 @@ export class ProductsAnalyticsService {
         product_id: p.id,
         name: p.name,
         sku: p.sku || '',
-        image_url: (p as any).product_images?.[0]?.image_url || null,
+        image_url: p.product_images?.[0]?.image_url || null,
         base_price: basePrice,
         cost_price: costPrice,
         stock_quantity: p.stock_quantity || 0,
@@ -313,10 +318,7 @@ export class ProductsAnalyticsService {
     // Sort by sales-derived fields if requested
     if (query.sort_by === 'units_sold' || query.sort_by === 'revenue') {
       const dir = query.sort_order === 'asc' ? 1 : -1;
-      data.sort(
-        (a, b) =>
-          ((a as any)[query.sort_by!] - (b as any)[query.sort_by!]) * dir,
-      );
+      data.sort((a, b) => (a[query.sort_by!] - b[query.sort_by!]) * dir);
     }
 
     return {
@@ -506,19 +508,26 @@ export class ProductsAnalyticsService {
       .flatMap((r) => r.refund_items.map((ri) => ri.order_item_id))
       .filter(Boolean);
 
-    const refundedOrderItems = refundedOrderItemIds.length > 0
-      ? await this.prisma.order_items.findMany({
-          where: { id: { in: refundedOrderItemIds } },
-          select: { id: true, product_id: true },
-        })
-      : [];
+    const refundedOrderItems =
+      refundedOrderItemIds.length > 0
+        ? await this.prisma.order_items.findMany({
+            where: { id: { in: refundedOrderItemIds } },
+            select: { id: true, product_id: true },
+          })
+        : [];
 
-    const refundByProduct = new Map<number | null, { quantity: number; amount: number }>();
+    const refundByProduct = new Map<
+      number | null,
+      { quantity: number; amount: number }
+    >();
     for (const refund of refundsWithItems) {
       for (const ri of refund.refund_items) {
         const oi = refundedOrderItems.find((o) => o.id === ri.order_item_id);
         if (!oi?.product_id) continue;
-        const existing = refundByProduct.get(oi.product_id) || { quantity: 0, amount: 0 };
+        const existing = refundByProduct.get(oi.product_id) || {
+          quantity: 0,
+          amount: 0,
+        };
         existing.quantity += Number(ri.quantity || 0);
         existing.amount += Number(ri.refund_amount || 0);
         refundByProduct.set(oi.product_id, existing);
@@ -548,12 +557,16 @@ export class ProductsAnalyticsService {
     const allResults = completedItems
       .filter((r) => r.product_id !== null)
       .map((r) => {
-        const product = productMap.get(r.product_id!);
+        const product = productMap.get(r.product_id);
         const unitsSold = Number(r._sum.quantity || 0);
         const revenue = Number(r._sum.total_price || 0);
         const orderCount = r._count.id || 0;
-        const refunds = refundByProduct.get(r.product_id!) || { quantity: 0, amount: 0 };
-        const returnRate = unitsSold > 0 ? (refunds.quantity / unitsSold) * 100 : 0;
+        const refunds = refundByProduct.get(r.product_id) || {
+          quantity: 0,
+          amount: 0,
+        };
+        const returnRate =
+          unitsSold > 0 ? (refunds.quantity / unitsSold) * 100 : 0;
 
         return {
           product_id: r.product_id,
@@ -642,9 +655,10 @@ export class ProductsAnalyticsService {
     const results = items
       .filter((r) => r.product_id !== null)
       .map((r) => {
-        const product = productMap.get(r.product_id!);
+        const product = productMap.get(r.product_id);
         const revenue = Number(r._sum.total_price || 0);
-        const totalCost = Number(r._sum.cost_price || 0) * Number(r._sum.quantity || 0);
+        const totalCost =
+          Number(r._sum.cost_price || 0) * Number(r._sum.quantity || 0);
         const unitsSold = Number(r._sum.quantity || 0);
         const profit = revenue - totalCost;
         const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
@@ -670,7 +684,8 @@ export class ProductsAnalyticsService {
           avg_selling_price: unitsSold > 0 ? revenue / unitsSold : 0,
           catalog_base_price: basePrice,
           catalog_cost_price: catalogCostPrice,
-          catalog_margin: catalogMargin !== null ? Number(catalogMargin.toFixed(2)) : null,
+          catalog_margin:
+            catalogMargin !== null ? Number(catalogMargin.toFixed(2)) : null,
         };
       })
       .sort((a, b) => b.profit - a.profit);
@@ -684,7 +699,10 @@ export class ProductsAnalyticsService {
       total_revenue: totalRevenue,
       total_cost: totalCost,
       total_profit: totalProfit,
-      overall_margin: totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0,
+      overall_margin:
+        totalRevenue > 0
+          ? Number(((totalProfit / totalRevenue) * 100).toFixed(2))
+          : 0,
     };
 
     const isPaginated = query.page !== undefined && query.limit !== undefined;
@@ -717,16 +735,16 @@ export class ProductsAnalyticsService {
   async getProductPerformanceForExport(query: ProductsAnalyticsQueryDto) {
     const exportQuery = { ...query, page: undefined, limit: 10000 };
     const result = await this.getProductPerformance(exportQuery);
-    const rows = Array.isArray(result) ? result : (result as any).data || [];
+    const rows = Array.isArray(result) ? result : result.data || [];
     return rows.map((r: any) => ({
-      'Producto': r.product_name,
-      'SKU': r.sku,
+      Producto: r.product_name,
+      SKU: r.sku,
       'Unidades Vendidas': r.units_sold,
-      'Ingresos': r.revenue,
-      'Devoluciones': r.refunded_units,
+      Ingresos: r.revenue,
+      Devoluciones: r.refunded_units,
       'Monto Devuelto': r.refunded_amount,
       'Tasa Devolución (%)': r.return_rate,
-      'Órdenes': r.order_count,
+      Órdenes: r.order_count,
     }));
   }
 
@@ -735,16 +753,15 @@ export class ProductsAnalyticsService {
     const result = await this.getProductProfitability(exportQuery);
     const rows = (result as any).products || (result as any).data || [];
     return rows.map((r: any) => ({
-      'Producto': r.product_name,
-      'SKU': r.sku,
-      'Categoría': r.category || '',
+      Producto: r.product_name,
+      SKU: r.sku,
+      Categoría: r.category || '',
       'Unidades Vendidas': r.units_sold,
-      'Ingresos': r.revenue,
+      Ingresos: r.revenue,
       'Costo Total': r.total_cost,
-      'Ganancia': r.profit,
+      Ganancia: r.profit,
       'Margen (%)': r.margin,
       'Markup (%)': r.markup,
     }));
   }
-
 }

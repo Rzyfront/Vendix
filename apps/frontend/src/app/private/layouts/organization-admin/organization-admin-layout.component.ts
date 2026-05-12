@@ -15,6 +15,11 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
+// S1.2 — SubscriptionBannerComponent removed from ORG_ADMIN. The banner is
+// store-scoped only; org-level renders would either flash stale data or show
+// the wrong tienda's status.
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 import { map } from 'rxjs/operators';
@@ -40,6 +45,8 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     SidebarComponent,
     HeaderComponent,
     OnboardingModalComponent,
+    PaywallOutletComponent,
+    FiscalObligationBannerComponent,
   ],
   template: `
     <div class="flex">
@@ -71,6 +78,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         >
         </app-header>
 
+        <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
+        <app-fiscal-obligation-banner />
+
         <!-- Page Content (Scrollable) -->
         <main
           class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -91,6 +101,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         (completed)="onOnboardingCompleted($event)"
       ></app-onboarding-modal>
     }
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
@@ -165,38 +178,230 @@ export class OrganizationAdminLayoutComponent {
       route: '/admin/users',
     },
     {
+      label: 'Inventario',
+      icon: 'warehouse',
+      children: [
+        {
+          label: 'Compras',
+          icon: 'shopping-bag',
+          route: '/admin/purchase-orders',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
+        },
+        {
+          label: 'Niveles de Stock',
+          icon: '',
+          route: '/admin/inventory/stock-levels',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
+        },
+        {
+          label: 'Ubicaciones',
+          icon: '',
+          route: '/admin/inventory/locations',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Movimientos',
+          icon: '',
+          route: '/admin/inventory/movements',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Proveedores',
+          icon: '',
+          route: '/admin/inventory/suppliers',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Transferencias',
+          icon: '',
+          route: '/admin/inventory/transfers',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Ajustes de Stock',
+          icon: '',
+          route: '/admin/inventory/adjustments',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Números de Serie',
+          icon: '',
+          route: '/admin/inventory/serial-numbers',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+        {
+          label: 'Lotes',
+          icon: 'layers',
+          route: '/admin/inventory/batches',
+          alwaysVisible: true,
+          requiredOperatingScope: 'ORGANIZATION',
+          showLocked: true,
+          lockedBadge: 'ORG',
+          lockedTooltip: 'Disponible en modo ORGANIZATION',
+        },
+      ],
+    },
+    {
       label: 'Dominios',
       icon: 'globe',
       route: '/admin/domains',
     },
     {
-      label: 'Auditoría y Cumplimiento',
+      label: 'Roles',
       icon: 'shield',
+      route: '/admin/roles',
+    },
+    {
+      label: 'Auditoría y Cumplimiento',
+      icon: 'eye',
       route: '/admin/audit/logs',
+    },
+    {
+      label: 'Reportes',
+      icon: 'bar-chart',
+      children: [
+        {
+          label: 'Ventas',
+          icon: '',
+          route: '/admin/reports/sales',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Inventario',
+          icon: '',
+          route: '/admin/reports/inventory',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Financiero',
+          icon: '',
+          route: '/admin/reports/financial',
+          alwaysVisible: true,
+        },
+      ],
     },
     {
       label: 'Contabilidad',
       icon: 'book-open',
-      route: '/admin/accounting',
+      alwaysVisible: true,
+      children: [
+        {
+          label: 'Plan de Cuentas',
+          icon: '',
+          route: '/admin/accounting/chart-of-accounts',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Asientos Contables',
+          icon: '',
+          route: '/admin/accounting/journal-entries',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Periodos Fiscales',
+          icon: '',
+          route: '/admin/accounting/fiscal-periods',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Mapeo de Cuentas',
+          icon: '',
+          route: '/admin/accounting/account-mappings',
+          alwaysVisible: true,
+        },
+      ],
+    },
+    {
+      label: 'Facturación',
+      icon: 'receipt',
+      alwaysVisible: true,
+      children: [
+        {
+          label: 'Facturas',
+          icon: '',
+          route: '/admin/invoicing/invoices',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Resoluciones',
+          icon: '',
+          route: '/admin/invoicing/resolutions',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Configuración DIAN',
+          icon: '',
+          route: '/admin/invoicing/dian-config',
+          alwaysVisible: true,
+        },
+      ],
     },
     {
       label: 'Nómina',
       icon: 'banknote',
       route: '/admin/payroll',
+      alwaysVisible: true,
     },
     {
       label: 'Configuración',
       icon: 'settings',
       children: [
         {
-          label: 'Configuración de Aplicación',
+          label: 'General',
           icon: 'sliders',
           route: '/admin/config/application',
         },
         {
-          label: 'Metodos de pago',
+          label: 'Modo operativo',
+          icon: 'building',
+          route: '/admin/settings/operating-scope',
+        },
+        {
+          label: 'Modo fiscal',
+          icon: 'receipt',
+          route: '/admin/settings/fiscal-scope',
+        },
+        {
+          label: 'Manejo fiscal',
+          icon: 'receipt',
+          route: '/admin/settings/fiscal',
+        },
+        {
+          label: 'Métodos de Pago',
           icon: 'credit-card',
-          route: '/admin/config/payments-methods',
+          route: '/admin/config/payment-methods',
         },
       ],
     },

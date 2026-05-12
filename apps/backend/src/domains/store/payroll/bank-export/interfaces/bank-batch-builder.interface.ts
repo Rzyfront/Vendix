@@ -36,6 +36,9 @@ export interface BankBatchResult {
 export interface BankBatchBuilder {
   bankCode: string;
   bankName: string;
-  build(metadata: BankBatchMetadata, employees: BankBatchEmployee[]): BankBatchResult;
+  build(
+    metadata: BankBatchMetadata,
+    employees: BankBatchEmployee[],
+  ): BankBatchResult;
   validate(employees: BankBatchEmployee[]): string[];
 }

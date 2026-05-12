@@ -1,0 +1,21 @@
+meta {
+  name: 03 STORE_ADMIN to store orders - 200
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/store/orders
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("STORE_ADMIN can reach /api/store/* → 200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

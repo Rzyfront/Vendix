@@ -78,7 +78,12 @@ export class PaystubPdfBuilder {
         doc.on('error', reject);
 
         // --- Header ---
-        this.drawHeader(doc, data.company_name, data.company_nit, data.company_logo_buffer);
+        this.drawHeader(
+          doc,
+          data.company_name,
+          data.company_nit,
+          data.company_logo_buffer,
+        );
 
         // --- Title ---
         doc.moveDown(0.5);
@@ -191,7 +196,12 @@ export class PaystubPdfBuilder {
         doc.on('error', reject);
 
         // --- Header ---
-        this.drawHeader(doc, data.company_name, data.company_nit, data.company_logo_buffer);
+        this.drawHeader(
+          doc,
+          data.company_name,
+          data.company_nit,
+          data.company_logo_buffer,
+        );
 
         // --- Title ---
         doc.moveDown(0.5);
@@ -271,7 +281,10 @@ export class PaystubPdfBuilder {
 
         const benefits: { label: string; value: number }[] = [
           { label: 'Cesantias', value: data.severance },
-          { label: 'Intereses sobre Cesantias', value: data.severance_interest },
+          {
+            label: 'Intereses sobre Cesantias',
+            value: data.severance_interest,
+          },
           { label: 'Prima de Servicios', value: data.bonus },
           { label: 'Vacaciones', value: data.vacation },
           { label: 'Salario Pendiente', value: data.pending_salary },
@@ -376,10 +389,7 @@ export class PaystubPdfBuilder {
     doc: PDFKit.PDFDocument,
     title: string,
   ): void {
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(10)
-      .text(title, MARGIN, doc.y);
+    doc.font('Helvetica-Bold').fontSize(10).text(title, MARGIN, doc.y);
     doc.moveDown(0.3);
   }
 
@@ -419,10 +429,7 @@ export class PaystubPdfBuilder {
     }
   }
 
-  private static drawNetPay(
-    doc: PDFKit.PDFDocument,
-    net_pay: number,
-  ): void {
+  private static drawNetPay(doc: PDFKit.PDFDocument, net_pay: number): void {
     // Draw a highlighted box for net pay
     const box_y = doc.y;
     const box_height = 30;

@@ -805,14 +805,14 @@ export class PopComponent implements OnInit, OnDestroy {
   @ViewChild(PopProductSelectionComponent)
   productSelection!: PopProductSelectionComponent;
 
-  onSupplierCreated(supplierId: number): void {
-    this.header.refreshSuppliers();
-    this.popCartService.setSupplier(supplierId);
+  onSupplierCreated(supplier: { id: number; name: string; code?: string }): void {
+    this.header.addSupplier(supplier);
+    this.popCartService.setSupplier(supplier.id);
   }
 
-  onWarehouseCreated(warehouseId: number): void {
-    this.header.refreshLocations();
-    this.popCartService.setLocation(warehouseId);
+  onWarehouseCreated(warehouse: { id: number; name: string; code?: string }): void {
+    this.header.addLocation(warehouse);
+    this.popCartService.setLocation(warehouse.id);
   }
 
   onLotSave(lotInfo: any): void {

@@ -5,7 +5,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 
 describe('StorePaymentMethodsService', () => {
   let service: StorePaymentMethodsService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   const mockStorePaymentMethod = {
     id: 1,
@@ -71,7 +71,7 @@ describe('StorePaymentMethodsService', () => {
       providers: [
         StorePaymentMethodsService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
@@ -80,7 +80,7 @@ describe('StorePaymentMethodsService', () => {
     service = module.get<StorePaymentMethodsService>(
       StorePaymentMethodsService,
     );
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {
@@ -96,7 +96,7 @@ describe('StorePaymentMethodsService', () => {
         .spyOn(mockPrismaService.store_users, 'findFirst')
         .mockResolvedValue({ id: 1 });
 
-      const result = await service.getEnabledForStore(1, mockUser);
+      const result = await service.getEnabledForStore();
 
       expect(result).toEqual([mockStorePaymentMethod]);
     });
@@ -121,7 +121,7 @@ describe('StorePaymentMethodsService', () => {
         .spyOn(mockPrismaService.store_payment_methods, 'create')
         .mockResolvedValue(mockStorePaymentMethod);
 
-      const result = await service.enableForStore(1, 1, enableDto, mockUser);
+      const result = await service.enableForStore(1, enableDto);
 
       expect(result).toEqual(mockStorePaymentMethod);
     });
@@ -137,7 +137,7 @@ describe('StorePaymentMethodsService', () => {
         .mockResolvedValue(null);
 
       try {
-        await service.enableForStore(1, 999, enableDto, mockUser);
+        await service.enableForStore(999, enableDto);
       } catch (error) {
         expect(error).toBeInstanceOf(BadRequestException);
       }
@@ -157,7 +157,7 @@ describe('StorePaymentMethodsService', () => {
         .mockResolvedValue(mockStorePaymentMethod);
 
       try {
-        await service.enableForStore(1, 1, enableDto, mockUser);
+        await service.enableForStore(1, enableDto);
       } catch (error) {
         expect(error).toBeInstanceOf(BadRequestException);
       }
@@ -179,7 +179,7 @@ describe('StorePaymentMethodsService', () => {
         .spyOn(mockPrismaService.store_payment_methods, 'update')
         .mockResolvedValue(updatedMethod);
 
-      const result = await service.updateStoreMethod(1, 1, updateDto, mockUser);
+      const result = await service.updateStoreMethod(1, updateDto);
 
       expect(result).toEqual(updatedMethod);
     });
@@ -200,7 +200,7 @@ describe('StorePaymentMethodsService', () => {
         .spyOn(mockPrismaService.store_payment_methods, 'delete')
         .mockResolvedValue(mockStorePaymentMethod);
 
-      const result = await service.removeFromStore(1, 1, mockUser);
+      const result = await service.removeFromStore(1);
 
       expect(result).toEqual({
         success: true,

@@ -22,10 +22,10 @@ export class ConfigFacade {
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
 
-  readonly appConfig = toSignal(this.appConfig$);
+  readonly appConfig = toSignal(this.appConfig$, { initialValue: null as AppConfig | null });
   readonly isLoading = toSignal(this.isLoading$, { initialValue: false });
-  readonly error = toSignal(this.error$);
-  readonly domainConfig = toSignal(this.domainConfig$);
+  readonly error = toSignal(this.error$, { initialValue: null });
+  readonly domainConfig = toSignal(this.domainConfig$, { initialValue: null as import('../../models/domain-config.interface').DomainConfig | null });
 
   // ─── Synchronous getters — powered by signals (no take(1) antipattern) ────
 

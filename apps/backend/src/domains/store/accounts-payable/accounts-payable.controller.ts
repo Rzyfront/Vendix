@@ -1,15 +1,7 @@
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards } from '@nestjs/common';
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Query,
-  Req,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AccountsPayableService } from './accounts-payable.service';
 import { ApAgingService } from './services/ap-aging.service';
@@ -118,12 +110,11 @@ export class AccountsPayableController {
     @Body() dto: RegisterApPaymentDto,
     @Req() req: any,
   ) {
-    const result = await this.ap_service.registerPayment(
-      +id,
-      dto,
-      req.user.id,
+    const result = await this.ap_service.registerPayment(+id, dto, req.user.id);
+    return this.response_service.success(
+      result,
+      'Pago registrado exitosamente',
     );
-    return this.response_service.success(result, 'Pago registrado exitosamente');
   }
 
   // ─── SCHEDULE PAYMENT ──────────────────────────────────────
@@ -156,6 +147,9 @@ export class AccountsPayableController {
   @Permissions('store:accounts_payable:write_off')
   async writeOff(@Param('id') id: string, @Req() req: any) {
     const result = await this.ap_service.writeOff(+id, req.user.id);
-    return this.response_service.success(result, 'Cuenta castigada exitosamente');
+    return this.response_service.success(
+      result,
+      'Cuenta castigada exitosamente',
+    );
   }
 }

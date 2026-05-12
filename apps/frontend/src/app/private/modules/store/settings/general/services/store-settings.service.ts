@@ -11,6 +11,29 @@ import {
 import * as AuthActions from '../../../../../../core/store/auth/auth.actions';
 import { CurrencyFormatService } from '../../../../../../shared/pipes';
 
+export type StoreFiscalNitType =
+  | 'NIT'
+  | 'CC'
+  | 'CE'
+  | 'TI'
+  | 'PP'
+  | 'NIT_EXTRANJERIA';
+
+export interface StoreFiscalData {
+  legal_name?: string | null;
+  tax_id?: string | null;
+  tax_id_dv?: string | null;
+  nit?: string | null;
+  nit_dv?: string | null;
+  nit_type?: StoreFiscalNitType | null;
+  [key: string]: unknown;
+}
+
+export interface StoreFiscalDataRequestOptions {
+  scope?: 'store' | 'organization';
+  store_id?: number | null;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -45,6 +68,34 @@ export class StoreSettingsService {
       )
       .pipe(
         map((response) => response || { success: true, data: null }),
+        catchError(this.handleError)
+      );
+  }
+
+  getFiscalData(
+    options?: StoreFiscalDataRequestOptions,
+  ): Observable<ApiResponse<StoreFiscalData>> {
+    return this.http
+      .get<ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }>(
+        this.fiscalDataUrl(options),
+      )
+      .pipe(
+        map((response) => this.mapFiscalDataResponse(response)),
+        catchError(this.handleError)
+      );
+  }
+
+  updateFiscalData(
+    dto: Partial<StoreFiscalData>,
+    options?: StoreFiscalDataRequestOptions,
+  ): Observable<ApiResponse<StoreFiscalData>> {
+    return this.http
+      .patch<ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }>(
+        this.fiscalDataUrl(options),
+        dto,
+      )
+      .pipe(
+        map((response) => this.mapFiscalDataResponse(response)),
         catchError(this.handleError)
       );
   }
@@ -142,6 +193,33 @@ export class StoreSettingsService {
         map((response) => response || { success: true, data: null }),
         catchError(this.handleError)
       );
+  }
+
+  private fiscalDataUrl(options?: StoreFiscalDataRequestOptions): string {
+    const scope = options?.scope ?? 'store';
+    const baseUrl =
+      scope === 'organization'
+        ? `${environment.apiUrl}/organization`
+        : this.api_base_url;
+    const storeId = options?.store_id;
+    const query =
+      scope === 'organization' && storeId != null ? `?store_id=${storeId}` : '';
+
+    return `${baseUrl}/settings/fiscal-data${query}`;
+  }
+
+  private mapFiscalDataResponse(
+    response: ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData },
+  ): ApiResponse<StoreFiscalData> {
+    const payload = (response as any)?.data ?? response;
+    const fiscalData =
+      payload?.fiscal_data ?? payload?.settings?.fiscal_data ?? payload ?? {};
+
+    return {
+      success: (response as any)?.success ?? true,
+      message: (response as any)?.message,
+      data: fiscalData as StoreFiscalData,
+    };
   }
 
   private handleError(error: any): Observable<never> {

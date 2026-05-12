@@ -1,0 +1,38 @@
+meta {
+  name: Sync All Stores
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/superadmin/settings/sync-all-stores
+  body: none
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Sync runs and returns success envelope", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Result has totalScanned/totalMigrated/errors", function() {
+    expect(res.body.data).to.have.property('totalScanned');
+    expect(res.body.data).to.have.property('totalMigrated');
+    expect(res.body.data).to.have.property('errors');
+    expect(res.body.data.errors).to.be.an('array');
+  });
+
+  test("Counts are non-negative numbers", function() {
+    expect(res.body.data.totalScanned).to.be.a('number');
+    expect(res.body.data.totalMigrated).to.be.a('number');
+    expect(res.body.data.totalScanned).to.be.at.least(0);
+    expect(res.body.data.totalMigrated).to.be.at.least(0);
+  });
+}

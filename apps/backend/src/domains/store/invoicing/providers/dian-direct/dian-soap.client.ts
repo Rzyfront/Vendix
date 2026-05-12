@@ -121,9 +121,14 @@ export class DianSoapClient {
       const fs = require('fs');
       const header_end = soap_body.indexOf('<soap:Body>');
       if (header_end > 0) {
-        fs.writeFileSync('/tmp/dian_soap_request.xml', soap_body.substring(0, header_end + 100));
+        fs.writeFileSync(
+          '/tmp/dian_soap_request.xml',
+          soap_body.substring(0, header_end + 100),
+        );
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     for (let attempt = 1; attempt <= this.max_retries; attempt++) {
       const start_time = Date.now();
@@ -171,7 +176,11 @@ export class DianSoapClient {
         last_error = error as Error;
 
         // Only retry on network errors/timeouts, not on validation failures
-        if (error.name === 'AbortError' || error.code === 'ECONNRESET' || error.code === 'ECONNREFUSED') {
+        if (
+          error.name === 'AbortError' ||
+          error.code === 'ECONNRESET' ||
+          error.code === 'ECONNREFUSED'
+        ) {
           const delay_ms = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
           this.logger.warn(
             `DIAN request attempt ${attempt}/${this.max_retries} failed (${error.message}). Retrying in ${delay_ms}ms...`,
@@ -216,13 +225,12 @@ export class DianSoapClient {
       const fault_reason_match = response_xml.match(
         /<s:Text[^>]*>(.*?)<\/s:Text>/,
       );
-      const fault_code_match = response_xml.match(
-        /<s:Value>(.*?)<\/s:Value>/,
-      );
+      const fault_code_match = response_xml.match(/<s:Value>(.*?)<\/s:Value>/);
       return {
         success: false,
         status_code: fault_code_match?.[1] || String(http_status),
-        status_message: fault_reason_match?.[1] || `SOAP Fault (HTTP ${http_status})`,
+        status_message:
+          fault_reason_match?.[1] || `SOAP Fault (HTTP ${http_status})`,
         raw_response: response_xml,
         duration_ms,
         is_soap_fault: true,
@@ -247,9 +255,7 @@ export class DianSoapClient {
     const status_message_match = response_xml.match(
       /<b:StatusMessage>(.*?)<\/b:StatusMessage>/,
     );
-    const is_valid_match = response_xml.match(
-      /<b:IsValid>(.*?)<\/b:IsValid>/,
-    );
+    const is_valid_match = response_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
 
     const status_code = status_code_match?.[1] || String(http_status);
     const status_message =
@@ -278,7 +284,12 @@ export class DianSoapClient {
     credentials?: WsSecurityCredentials,
   ): string {
     if (credentials) {
-      return this.buildSignedEnvelope(endpoint, soap_action, body_content, credentials);
+      return this.buildSignedEnvelope(
+        endpoint,
+        soap_action,
+        body_content,
+        credentials,
+      );
     }
 
     return [
@@ -366,17 +377,26 @@ export class DianSoapClient {
     const to_serialized = serializer.serializeToString(to_element);
     // Only inject namespaces that aren't already present
     const ns_to_inject: string[] = [];
-    if (!to_serialized.includes(`xmlns:soap="`)) ns_to_inject.push(`xmlns:soap="${NS.soap}"`);
-    if (!to_serialized.includes(`xmlns:wcf="`)) ns_to_inject.push(`xmlns:wcf="${NS.wcf}"`);
-    if (!to_serialized.includes(`xmlns:wsa="`)) ns_to_inject.push(`xmlns:wsa="${NS.wsa}"`);
-    const to_with_ns = ns_to_inject.length > 0
-      ? to_serialized.replace('<wsa:To ', `<wsa:To ${ns_to_inject.join(' ')} `)
-      : to_serialized;
+    if (!to_serialized.includes(`xmlns:soap="`))
+      ns_to_inject.push(`xmlns:soap="${NS.soap}"`);
+    if (!to_serialized.includes(`xmlns:wcf="`))
+      ns_to_inject.push(`xmlns:wcf="${NS.wcf}"`);
+    if (!to_serialized.includes(`xmlns:wsa="`))
+      ns_to_inject.push(`xmlns:wsa="${NS.wsa}"`);
+    const to_with_ns =
+      ns_to_inject.length > 0
+        ? to_serialized.replace(
+            '<wsa:To ',
+            `<wsa:To ${ns_to_inject.join(' ')} `,
+          )
+        : to_serialized;
     const to_doc = parser.parseFromString(to_with_ns, 'text/xml');
     const c14n = new ExclusiveCanonicalization();
-    const canonical_to_str = c14n.process(to_doc.documentElement, {
-      inclusiveNamespacesPrefixList: ['wsa', 'soap', 'wcf', 'wsu'],
-    }).toString();
+    const canonical_to_str = c14n
+      .process(to_doc.documentElement, {
+        inclusiveNamespacesPrefixList: ['wsa', 'soap', 'wcf', 'wsu'],
+      })
+      .toString();
 
     this.logger.debug(`Canonical <wsa:To>: ${canonical_to_str}`);
 
@@ -410,9 +430,11 @@ export class DianSoapClient {
       `<ds:SignedInfo xmlns:ds="${NS.ds}" xmlns:wsa="${NS.wsa}" xmlns:soap="${NS.soap}" xmlns:wcf="${NS.wcf}">`,
     );
     const si_doc = parser.parseFromString(si_with_ns, 'text/xml');
-    const canonical_si_str = c14n.process(si_doc.documentElement, {
-      inclusiveNamespacesPrefixList: ['ds', 'wsa', 'soap', 'wcf'],
-    }).toString();
+    const canonical_si_str = c14n
+      .process(si_doc.documentElement, {
+        inclusiveNamespacesPrefixList: ['ds', 'wsa', 'soap', 'wcf'],
+      })
+      .toString();
 
     this.logger.debug(`Canonical SignedInfo: ${canonical_si_str}`);
 
@@ -435,8 +457,13 @@ export class DianSoapClient {
       `</ds:Signature>`;
 
     // Insert signature into the envelope string (before </wsse:Security>)
-    return ('<?xml version="1.0" encoding="UTF-8"?>' +
-      envelope_xml.replace('</wsse:Security>', signature_block + '</wsse:Security>'));
+    return (
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      envelope_xml.replace(
+        '</wsse:Security>',
+        signature_block + '</wsse:Security>',
+      )
+    );
   }
 
   /**
@@ -449,10 +476,15 @@ export class DianSoapClient {
     soap_action: string,
     credentials?: WsSecurityCredentials,
   ): string {
-    return this.wrapEnvelope(endpoint, soap_action, `<wcf:SendBillSync>
+    return this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:SendBillSync>
       <wcf:fileName>${file_name}</wcf:fileName>
       <wcf:contentFile>${zip_base64}</wcf:contentFile>
-    </wcf:SendBillSync>`, credentials);
+    </wcf:SendBillSync>`,
+      credentials,
+    );
   }
 
   /**
@@ -466,11 +498,16 @@ export class DianSoapClient {
     soap_action: string,
     credentials?: WsSecurityCredentials,
   ): string {
-    return this.wrapEnvelope(endpoint, soap_action, `<wcf:SendTestSetAsync>
+    return this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:SendTestSetAsync>
       <wcf:fileName>${file_name}</wcf:fileName>
       <wcf:contentFile>${zip_base64}</wcf:contentFile>
       <wcf:testSetId>${test_set_id}</wcf:testSetId>
-    </wcf:SendTestSetAsync>`, credentials);
+    </wcf:SendTestSetAsync>`,
+      credentials,
+    );
   }
 
   /**
@@ -482,8 +519,13 @@ export class DianSoapClient {
     soap_action: string,
     credentials?: WsSecurityCredentials,
   ): string {
-    return this.wrapEnvelope(endpoint, soap_action, `<wcf:GetStatus>
+    return this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:GetStatus>
       <wcf:trackId>${tracking_id}</wcf:trackId>
-    </wcf:GetStatus>`, credentials);
+    </wcf:GetStatus>`,
+      credentials,
+    );
   }
 }

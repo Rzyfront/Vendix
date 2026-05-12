@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 
@@ -12,10 +13,47 @@ import {
 } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  FiscalScopeService,
+  OrganizationFiscalScope,
+} from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class TaxesService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private fiscalScope: FiscalScopeService,
+  ) {}
+
+  private async getFiscalContext(): Promise<{
+    organization_id: number;
+    store_id: number;
+    fiscal_scope: OrganizationFiscalScope;
+  }> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    let organization_id = context?.organization_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (!organization_id) {
+      const store = await this.prisma.withoutScope().stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+
+    if (!organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const fiscal_scope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
+    return { organization_id, store_id, fiscal_scope };
+  }
 
   /**
    * Calculates taxes for a product based on its assignments.
@@ -70,23 +108,23 @@ export class TaxesService {
   }
 
   async create(createTaxCategoryDto: CreateTaxCategoryDto, user: any) {
-    const context = RequestContextService.getContext();
-    const store_id = context?.store_id;
-
-    if (!store_id) {
-      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    const context = await this.getFiscalContext();
+    if (context.fiscal_scope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Taxes are managed at organization level for this organization.',
+      );
     }
 
     return this.prisma.tax_categories.create({
       data: {
         name: createTaxCategoryDto.name,
         description: createTaxCategoryDto.description,
-        store_id: store_id,
+        store_id: context.store_id,
         tax_rates: {
           create: {
             name: createTaxCategoryDto.name,
             rate: Number(createTaxCategoryDto.rate) / 100,
-            store_id: store_id,
+            store_id: context.store_id,
             is_compound: createTaxCategoryDto.is_compound || false,
             priority: createTaxCategoryDto.sort_order || 0,
           },
@@ -99,6 +137,7 @@ export class TaxesService {
   }
 
   async findAll(query: TaxCategoryQueryDto) {
+    const context = await this.getFiscalContext();
     const { page = 1, limit = 10, search } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
@@ -109,6 +148,25 @@ export class TaxesService {
     // ✅ BYPASS MANUAL ELIMINADO - ahora usa scoping automático de PrismaService
     // El filtro store_id se aplica automáticamente según el contexto del usuario
     // Los usuarios solo pueden ver tax_categories de su store actual
+
+    if (context.fiscal_scope === 'ORGANIZATION') {
+      where.organization_id = context.organization_id;
+      where.store_id = null;
+      const [taxCategories, total] = await Promise.all([
+        this.prisma.withoutScope().tax_categories.findMany({
+          where,
+          skip,
+          take: limit,
+          include: { tax_rates: true },
+        }),
+        this.prisma.withoutScope().tax_categories.count({ where }),
+      ]);
+
+      return {
+        data: taxCategories,
+        meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      };
+    }
 
     const [taxCategories, total] = await Promise.all([
       this.prisma.tax_categories.findMany({
@@ -127,6 +185,21 @@ export class TaxesService {
   }
 
   async findOne(id: number, user: any) {
+    const context = await this.getFiscalContext();
+    if (context.fiscal_scope === 'ORGANIZATION') {
+      const taxCategory =
+        await this.prisma.withoutScope().tax_categories.findFirst({
+          where: {
+            id,
+            organization_id: context.organization_id,
+            store_id: null,
+          },
+          include: { tax_rates: true },
+        });
+      if (!taxCategory) throw new VendixHttpException(ErrorCodes.CAT_FIND_001);
+      return taxCategory;
+    }
+
     // Auto-scoped by StorePrismaService
     const taxCategory = await this.prisma.tax_categories.findFirst({
       where: { id },
@@ -141,6 +214,12 @@ export class TaxesService {
     updateTaxCategoryDto: UpdateTaxCategoryDto,
     user: any,
   ) {
+    const context = await this.getFiscalContext();
+    if (context.fiscal_scope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Taxes are managed at organization level for this organization.',
+      );
+    }
     await this.findOne(id, user);
     return this.prisma.tax_categories.update({
       where: { id },
@@ -149,6 +228,12 @@ export class TaxesService {
   }
 
   async remove(id: number, user: any) {
+    const context = await this.getFiscalContext();
+    if (context.fiscal_scope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Taxes are managed at organization level for this organization.',
+      );
+    }
     await this.findOne(id, user);
     return this.prisma.tax_categories.delete({ where: { id } });
   }

@@ -1,5 +1,4 @@
-import { IsOptional, IsString, IsNumber } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsString } from 'class-validator';
 
 export class QueryBankAccountDto {
   @IsOptional()
@@ -10,8 +9,6 @@ export class QueryBankAccountDto {
   @IsString()
   status?: string;
 
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  store_id?: number;
+  // store_id deprecated (phase3-round2): scope is derived from RequestContextService
+  // (StorePrismaService auto-scopes) for /store/* endpoints.
 }

@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  effect,
   signal,
   inject,
 } from '@angular/core';
@@ -68,6 +69,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { environment } from '../../../../../../../environments/environment';
+import { saleLessThanBaseValidator } from '../../utils/product-validators';
 
 interface VariantAttribute {
   name: string;
@@ -88,7 +90,10 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
+  track_inventory_override?: boolean | null;
 }
+
+export type { GeneratedVariant };
 
 @Component({
   selector: 'app-product-create-page',
@@ -324,6 +329,50 @@ interface GeneratedVariant {
           background-position: 0% 50%;
         }
       }
+
+      /* ── Inline tooltip help icon (styled tooltip, not native [title]) ── */
+      .help-icon-inline {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: help;
+        transition: color 0.2s ease;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        border-radius: var(--radius-sm);
+        white-space: normal;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+        max-width: 280px;
+        width: max-content;
+        text-align: center;
+        line-height: 1.4;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -362,13 +411,32 @@ export class ProductCreatePageComponent {
   allProviders = signal<ServiceProvider[]>([]);
   loadingProviders = signal(false);
 
+  readonly assignedProviderIds = computed<number[]>(() =>
+    this.assignedProviders().map((p) => p.id),
+  );
+
+  readonly providerSelectorOptions = computed<MultiSelectorOption[]>(() =>
+    this.allProviders().map((p) => {
+      const fullName =
+        `${p.employee?.first_name ?? ''} ${p.employee?.last_name ?? ''}`.trim();
+      return {
+        value: p.id,
+        label: p.display_name || fullName || `Proveedor #${p.id}`,
+        description: p.employee?.position || undefined,
+      };
+    }),
+  );
+
   // Promotions
   promotionOptions: MultiSelectorOption[] = [];
   productPromotionIds: number[] = [];
 
-  // Image loading state for feedback visual
-  isLoadingImages = false;
-  loadingProgress = 0;
+  // Image loading state for feedback visual (signals — reactive bajo Zoneless)
+  readonly isLoadingImages = signal(false);
+  readonly loadingProgress = signal(0);
+
+  // Reactividad: requires_booking como signal derivado del form para disparar effects
+  readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
@@ -421,6 +489,10 @@ export class ProductCreatePageComponent {
     return this.productForm.get('product_type')?.value === 'service';
   }
 
+  get preparationTimeMinutesControl(): FormControl<number | null> {
+    return this.productForm.get('preparation_time_minutes') as FormControl<number | null>;
+  }
+
   get hasDuplicateSkus(): boolean {
     const skus = this.generatedVariants
       .map((v) => v.sku?.trim())
@@ -465,7 +537,9 @@ export class ProductCreatePageComponent {
   generatedVariants: GeneratedVariant[] = [];
   removedVariantKeys = new Set<string>();
   expandedVariantIndex = signal<number | null>(null);
-  stockTransferMode: 'first' | 'distribute' | 'reset' = 'reset';
+  stockTransferMode: 'first' | 'distribute' | 'reset' | null = null;
+  readonly originalBaseStock = signal(0);
+  readonly originalHadVariants = signal(false);
 
   // New Attribute Input
   newAttributeName = '';
@@ -507,10 +581,30 @@ export class ProductCreatePageComponent {
     // Sincronizar trigger con cambios del formulario
     this.productForm.valueChanges
       .pipe(takeUntilDestroyed())
-      .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+      .subscribe((value: any) => {
+        this.formUpdateTrigger.update((v) => v + 1);
+        // Espejar requires_booking en signal para effect reactivo
+        const next = !!value?.requires_booking;
+        if (next !== this.requiresBookingSig()) {
+          this.requiresBookingSig.set(next);
+        }
+        this.normalizeVariantTrackingForParent();
+      });
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+
+    // Auto-cargar proveedores cuando se activa requires_booking (o al entrar en edit con el flag ya activo)
+    effect(() => {
+      const enabled = this.requiresBookingSig();
+      const pid = this.productId;
+      if (enabled && pid) {
+        this.loadProviders(pid);
+        this.loadAllProviders();
+      } else if (!enabled) {
+        this.assignedProviders.set([]);
+      }
+    });
 
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
@@ -644,6 +738,9 @@ export class ProductCreatePageComponent {
       send_preconsultation: [false],
       consultation_template_id: [null],
       preconsultation_template_id: [null],
+      preparation_time_minutes: [null as number | null],
+    }, {
+      validators: [saleLessThanBaseValidator()],
     });
 
     this.setupPriceCalculations(form);
@@ -792,6 +889,7 @@ export class ProductCreatePageComponent {
       consultation_template_id: product.consultation_template_id || null,
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
+      preparation_time_minutes: product.preparation_time_minutes || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -800,17 +898,20 @@ export class ProductCreatePageComponent {
       },
     });
 
-    // Load providers if this is a bookable service
-    if (product.requires_booking && product.id) {
-      this.loadProviders(product.id);
-      this.loadAllProviders();
-    }
+    // Providers se auto-cargan vía effect() que observa requiresBookingSig
+    // (el patchValue dispara valueChanges → espejea requires_booking en el signal)
 
     // Load images
     if (product.product_images && product.product_images.length > 0) {
       this.imageUrls = product.product_images.map((img: any) => img.image_url);
       this.imageIds = product.product_images.map((img: any) => img.id ?? null);
     }
+
+    // Capture original baseline for strict variant/stock transition guards
+    this.originalBaseStock.set(Number(product.stock_quantity ?? 0));
+    this.originalHadVariants.set(
+      !!(product.product_variants && product.product_variants.length > 0),
+    );
 
     // Load variants if present
     if (product.product_variants && product.product_variants.length > 0) {
@@ -831,6 +932,10 @@ export class ProductCreatePageComponent {
         attributes: v.attributes || {},
         image_url: v.product_images?.image_url || undefined,
         image_id: v.image_id || undefined,
+        track_inventory_override:
+          v.track_inventory_override === undefined
+            ? undefined
+            : v.track_inventory_override,
       }));
 
       // Reconstruct variantAttributes from loaded variants
@@ -848,6 +953,7 @@ export class ProductCreatePageComponent {
       );
 
       this.removedVariantKeys.clear();
+      this.normalizeVariantTrackingForParent();
     }
   }
 
@@ -927,7 +1033,10 @@ export class ProductCreatePageComponent {
   }
 
   get totalVariantStock(): number {
-    return this.generatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+    return this.generatedVariants.reduce(
+      (sum, v) => sum + (Number(v.stock) || 0),
+      0,
+    );
   }
 
   toggleVariants(isChecked: boolean): void {
@@ -953,7 +1062,7 @@ export class ProductCreatePageComponent {
         return;
       }
 
-      this.stockTransferMode = 'reset';
+      this.stockTransferMode = null;
       this.applyVariantToggle(true);
     } else {
       if (this.isEditMode() && this.generatedVariants.length > 0) {
@@ -1126,7 +1235,8 @@ export class ProductCreatePageComponent {
         continue;
       }
 
-      // New variant
+      // New stock-tracked product variants manage their own stock. Variants for
+      // products sold on demand inherit the parent availability instead.
       newVariants.push({
         name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : '',
@@ -1137,10 +1247,36 @@ export class ProductCreatePageComponent {
         sale_price: 0,
         stock: 0,
         attributes,
+        track_inventory_override: this.getDefaultVariantTrackInventoryOverride(),
       });
     }
 
     this.generatedVariants = newVariants;
+  }
+
+  private getDefaultVariantTrackInventoryOverride(): boolean | undefined {
+    return this.productForm.get('track_inventory')?.value === true
+      ? true
+      : undefined;
+  }
+
+  private normalizeVariantTrackingForParent(): void {
+    if (this.productForm.get('track_inventory')?.value === true) return;
+
+    let changed = false;
+    this.generatedVariants = this.generatedVariants.map((variant) => {
+      if (variant.track_inventory_override !== true) return variant;
+
+      changed = true;
+      return {
+        ...variant,
+        track_inventory_override: undefined,
+      };
+    });
+
+    if (changed) {
+      this.formUpdateTrigger.update((value) => value + 1);
+    }
   }
 
   onAttributeNameBlur(attrIndex: number): void {
@@ -1481,82 +1617,91 @@ export class ProductCreatePageComponent {
     fileInput?.click();
   }
 
-  onFileSelect(event: Event): void {
+  async onFileSelect(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const files = input.files;
-    if (files) {
-      const filesArray = Array.from(files);
-      const remainingSlots = 5 - this.imageUrls.length;
+    if (!files) return;
 
-      if (remainingSlots <= 0) {
-        this.toastService.warning('Límite de 5 imágenes alcanzado');
-        input.value = '';
-        return;
-      }
+    const filesArray = Array.from(files);
+    const remainingSlots = 5 - this.imageUrls.length;
 
-      const filesToProcess = filesArray
-        .slice(0, remainingSlots)
-        .filter((file) => file.type.startsWith('image/'));
+    if (remainingSlots <= 0) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      input.value = '';
+      return;
+    }
 
-      if (filesToProcess.length === 0) {
-        this.toastService.warning(
-          'Por favor selecciona archivos de imagen válidos',
-        );
-        input.value = '';
-        return;
-      }
+    const filesToProcess = filesArray
+      .slice(0, remainingSlots)
+      .filter((file) => file.type.startsWith('image/'));
 
-      // Show loading feedback
-      this.isLoadingImages = true;
-      this.loadingProgress = 0;
+    if (filesToProcess.length === 0) {
+      this.toastService.warning(
+        'Por favor selecciona archivos de imagen válidos',
+      );
+      input.value = '';
+      return;
+    }
 
-      // Process images sequentially to avoid race conditions
-      this.processImagesSequentially(filesToProcess, 0).then(() => {
-        this.isLoadingImages = false;
-        this.loadingProgress = 0;
-        if (this.imageUrls.length === 1) {
-          this.activeImageIndex = 0;
+    this.isLoadingImages.set(true);
+    this.loadingProgress.set(0);
+
+    let successCount = 0;
+    try {
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        try {
+          const dataUrl = await this.readFileAsDataURL(file);
+          this.imageUrls.push(dataUrl);
+          this.imageIds.push(null);
+          successCount++;
+        } catch (err) {
+          this.toastService.error(`Error al cargar la imagen: ${file.name}`);
         }
-        this.toastService.success(
-          `${filesToProcess.length} imagen(es) cargada(s) correctamente`,
+        this.loadingProgress.set(
+          Math.round(((i + 1) / filesToProcess.length) * 100),
         );
-      });
-
+      }
+      if (this.imageUrls.length === 1) {
+        this.activeImageIndex = 0;
+      }
+      if (successCount > 0) {
+        this.toastService.success(
+          `${successCount} imagen(es) cargada(s) correctamente`,
+        );
+      }
+    } finally {
+      this.isLoadingImages.set(false);
+      this.loadingProgress.set(0);
       input.value = '';
     }
   }
 
-  private processImagesSequentially(
-    files: File[],
-    index: number,
-  ): Promise<void> {
-    return new Promise((resolve) => {
-      if (index >= files.length) {
-        resolve();
-        return;
-      }
-
-      const file = files[index];
+  private readFileAsDataURL(file: File, timeoutMs = 30_000): Promise<string> {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      const timer = setTimeout(() => {
+        reader.abort();
+        reject(new Error(`Timeout leyendo ${file.name}`));
+      }, timeoutMs);
 
       reader.onload = (e) => {
-        const result = e.target?.result as string;
-        this.imageUrls.push(result);
-        this.imageIds.push(null);
-
-        // Update progress
-        this.loadingProgress = Math.round(((index + 1) / files.length) * 100);
-
-        // Process next image
-        this.processImagesSequentially(files, index + 1).then(resolve);
+        clearTimeout(timer);
+        const result = e.target?.result;
+        if (typeof result === 'string') {
+          resolve(result);
+        } else {
+          reject(new Error(`Resultado inválido leyendo ${file.name}`));
+        }
       };
-
       reader.onerror = () => {
-        this.toastService.error(`Error al cargar la imagen: ${file.name}`);
-        // Continue with next image even if this one failed
-        this.processImagesSequentially(files, index + 1).then(resolve);
+        clearTimeout(timer);
+        reject(reader.error ?? new Error(`Error leyendo ${file.name}`));
       };
-
+      reader.onabort = () => {
+        clearTimeout(timer);
+        reject(new Error(`Lectura abortada: ${file.name}`));
+      };
       reader.readAsDataURL(file);
     });
   }
@@ -1640,10 +1785,18 @@ export class ProductCreatePageComponent {
   onSubmit(): void {
     if (this.productForm.invalid || this.isSubmitting()) {
       this.productForm.markAllAsTouched();
-      this.toastService.error(
-        'Por favor, completa todos los campos requeridos correctamente',
-        'Formulario inválido',
-      );
+      const saleErr = this.productForm.errors?.['saleLessThanBase'];
+      if (saleErr) {
+        this.toastService.error(
+          'El precio de oferta debe ser menor al precio base.',
+          'Precio de oferta inválido',
+        );
+      } else {
+        this.toastService.error(
+          'Por favor, completa todos los campos requeridos correctamente',
+          'Formulario inválido',
+        );
+      }
       return;
     }
 
@@ -1675,6 +1828,61 @@ export class ProductCreatePageComponent {
         this.toastService.error(
           `${emptySkuVariants.length} variante(s) no tienen SKU configurado. Cada variante necesita un SKU único.`,
           'SKU requerido',
+        );
+        return;
+      }
+
+      // Strict guard: edit mode, transitioning simple→variants, base stock > 0.
+      // Force a non-reset mode AND ensure variant totals match the base stock
+      // (no stock can be "lost" in the transition).
+      const baseline = this.originalBaseStock();
+      const isTransitioning =
+        this.isEditMode() && !this.originalHadVariants() && baseline > 0;
+      if (isTransitioning) {
+        if (!this.stockTransferMode || this.stockTransferMode === 'reset') {
+          this.toastService.error(
+            "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
+            'Redistribución requerida',
+          );
+          this.showStockTransferDialog(baseline);
+          return;
+        }
+        if (this.totalVariantStock !== baseline) {
+          this.toastService.error(
+            `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
+            'Totales desalineados',
+          );
+          return;
+        }
+      }
+
+      // Track-inventory products with variants must declare at least one unit of stock
+      // across the variants (otherwise the product becomes unsellable silently).
+      const trackInventoryEnabled = !!this.productForm.get('track_inventory')?.value;
+      if (trackInventoryEnabled) {
+        const allVariantsTrackInventory = this.generatedVariants.every((v) => {
+          if (v.track_inventory_override === false) return false;
+          return true;
+        });
+        if (allVariantsTrackInventory && this.totalVariantStock <= 0) {
+          this.toastService.error(
+            'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
+            'Stock de variantes requerido',
+          );
+          return;
+        }
+      }
+
+      const invalidSaleVariant = this.generatedVariants.find((v) => {
+        if (!v.is_on_sale) return false;
+        const salePrice = Number(v.sale_price || 0);
+        const regularPrice = Number(v.price || 0);
+        return salePrice <= 0 || salePrice >= regularPrice;
+      });
+      if (invalidSaleVariant) {
+        this.toastService.error(
+          `La oferta de la variante ${invalidSaleVariant.sku} debe ser mayor a 0 y menor que su precio regular.`,
+          'Precio de oferta inválido',
         );
         return;
       }
@@ -1722,6 +1930,9 @@ export class ProductCreatePageComponent {
           ? formValue.pricing_type.value
           : formValue.pricing_type || 'unit',
       product_type: formValue.product_type || 'physical',
+      preparation_time_minutes: formValue.preparation_time_minutes
+        ? Number(formValue.preparation_time_minutes)
+        : undefined,
       // Service-specific fields
       ...(isServiceType && {
         service_duration_minutes: formValue.service_duration_minutes
@@ -1766,7 +1977,8 @@ export class ProductCreatePageComponent {
         id: v.id,
         sku: v.sku,
         name: v.name,
-        price_override: Number(v.price),
+        // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
+        price_override: Number(v.price) > 0 ? Number(v.price) : null,
         cost_price: Number(v.cost_price),
         profit_margin: Number(v.profit_margin),
         is_on_sale: !!v.is_on_sale,
@@ -1777,6 +1989,11 @@ export class ProductCreatePageComponent {
         variant_image_url: v.image_url?.startsWith('data:')
           ? v.image_url
           : undefined,
+        // null = heredar track_inventory del producto; true/false = override explícito
+        track_inventory_override:
+          v.track_inventory_override === undefined
+            ? null
+            : v.track_inventory_override,
       }));
 
       // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
@@ -1789,8 +2006,15 @@ export class ProductCreatePageComponent {
       productData.variants = [];
     }
 
-    if (this.isEditMode()) {
+    if (this.isEditMode() && this.stockTransferMode) {
       productData.stock_transfer_mode = this.stockTransferMode;
+    }
+
+    // Reverse transfer: disabling variants on a product that previously had variants.
+    // Backend auto-sums all variant stock into base stock; flag is required as an
+    // explicit confirmation (any non-reset value works).
+    if (this.isEditMode() && !this.hasVariants && this.originalHadVariants()) {
+      productData.variant_removal_stock_mode = 'distribute';
     }
 
     const request$ =
@@ -2060,6 +2284,16 @@ export class ProductCreatePageComponent {
     return this.allProviders().filter((p) => !assignedIds.has(p.id));
   }
 
+  onProvidersSelectionChange(ids: (string | number)[]): void {
+    if (!this.productId) return;
+    const nextIds = new Set(ids.map(Number));
+    const currentIds = new Set(this.assignedProviderIds());
+    const toAdd = [...nextIds].filter((id) => !currentIds.has(id));
+    const toRemove = [...currentIds].filter((id) => !nextIds.has(id));
+    toAdd.forEach((id) => this.addProviderToService(id));
+    toRemove.forEach((id) => this.removeProviderFromService(id));
+  }
+
   addProviderToService(providerIdStr: string | number): void {
     const providerId = Number(providerIdStr);
     if (!providerId || !this.productId) return;
@@ -2111,5 +2345,46 @@ export class ProductCreatePageComponent {
 
   goToScheduleConfig(): void {
     this.router.navigate(['/admin/reservations/schedules']);
+  }
+
+  // ─── Variant track_inventory_override helpers ──────────────────────────────
+  readonly variantTrackInventoryOptions: SelectorOption[] = [
+    { value: 'inherit', label: 'Heredar del producto' },
+    { value: 'track', label: 'Manejar stock' },
+    { value: 'availability_only', label: 'Solo disponibilidad (sin stock)' },
+  ];
+
+  /** Convert the tri-state override boolean | null into a selector string value. */
+  getVariantTrackInventoryValue(variant: GeneratedVariant): string {
+    if (variant.track_inventory_override === true) return 'track';
+    if (variant.track_inventory_override === false) return 'availability_only';
+    return 'inherit';
+  }
+
+  /** Handle selector change → map back to boolean | null and enforce parent rules. */
+  updateVariantTrackInventoryOverride(
+    variant: GeneratedVariant,
+    value: string,
+  ): void {
+    const parentTrackInventory =
+      this.productForm.get('track_inventory')?.value === true;
+
+    let next: boolean | null | undefined;
+    if (value === 'track') next = true;
+    else if (value === 'availability_only') next = false;
+    else next = undefined;
+
+    // Guardrail: if parent does NOT track inventory, a variant cannot force 'track'.
+    if (!parentTrackInventory && next === true) {
+      this.toastService.error(
+        'El producto no rastrea inventario. La variante no puede activar control de stock.',
+        'Configuración incompatible',
+      );
+      return;
+    }
+
+    variant.track_inventory_override = next;
+    // Trigger CD for the template — array mutation is not signal-backed here
+    this.generatedVariants = [...this.generatedVariants];
   }
 }

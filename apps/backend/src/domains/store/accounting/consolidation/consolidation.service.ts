@@ -178,7 +178,9 @@ export class ConsolidationService {
     const session = await this.findSessionOrFail(id);
 
     if (session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     if (session.status !== 'in_progress') {
@@ -200,7 +202,9 @@ export class ConsolidationService {
     const session = await this.findSessionOrFail(id);
 
     if (session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     return this.prisma.consolidation_sessions.update({
@@ -218,7 +222,9 @@ export class ConsolidationService {
     const session = await this.findSessionOrFail(session_id);
 
     if (session.status === 'completed' || session.status === 'cancelled') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     // Validate account exists
@@ -264,7 +270,9 @@ export class ConsolidationService {
     }
 
     if (adjustment.session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     return this.prisma.consolidation_adjustments.delete({
@@ -275,7 +283,10 @@ export class ConsolidationService {
   /**
    * Drill-down: get intercompany transactions with filters and pagination
    */
-  async getTransactionsDrilldown(session_id: number, query: QueryTransactionsDto) {
+  async getTransactionsDrilldown(
+    session_id: number,
+    query: QueryTransactionsDto,
+  ) {
     await this.validateMultiStore();
     await this.findSessionOrFail(session_id);
 
@@ -284,10 +295,11 @@ export class ConsolidationService {
     const skip = (page - 1) * limit;
 
     const where: any = { session_id };
-    if (query.store_id) where.OR = [
-      { from_store_id: query.store_id },
-      { to_store_id: query.store_id },
-    ];
+    if (query.store_id)
+      where.OR = [
+        { from_store_id: query.store_id },
+        { to_store_id: query.store_id },
+      ];
     if (query.account_id) where.account_id = query.account_id;
     if (query.eliminated !== undefined) where.eliminated = query.eliminated;
 
@@ -364,7 +376,8 @@ export class ConsolidationService {
       summary: {
         total_adjustments: adjustments.length,
         total_ic_transactions: ic_transactions.length,
-        eliminated_count: ic_transactions.filter((t: any) => t.eliminated).length,
+        eliminated_count: ic_transactions.filter((t: any) => t.eliminated)
+          .length,
         pending_count: ic_transactions.filter((t: any) => !t.eliminated).length,
         total_elimination_amount: adjustments
           .filter((a: any) => a.type === 'elimination')
@@ -393,7 +406,10 @@ export class ConsolidationService {
     };
 
     // 3. Upload JSON to S3
-    const json_buffer = Buffer.from(JSON.stringify(export_data, null, 2), 'utf-8');
+    const json_buffer = Buffer.from(
+      JSON.stringify(export_data, null, 2),
+      'utf-8',
+    );
     const s3_key = `organizations/${context.organization_id}/consolidation/export_session_${session_id}_${Date.now()}.json`;
 
     await this.s3_service.uploadFile(json_buffer, s3_key, 'application/json');

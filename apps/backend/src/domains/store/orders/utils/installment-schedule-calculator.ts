@@ -16,7 +16,9 @@ export interface ScheduleParams {
   interest_type?: 'simple' | 'compound'; // Default: 'simple'
 }
 
-export function calculateSchedule(params: ScheduleParams): InstallmentScheduleItem[] {
+export function calculateSchedule(
+  params: ScheduleParams,
+): InstallmentScheduleItem[] {
   const {
     total_amount,
     num_installments,
@@ -27,14 +29,31 @@ export function calculateSchedule(params: ScheduleParams): InstallmentScheduleIt
   } = params;
 
   if (!interest_rate || interest_rate === 0) {
-    return calculateNoInterestSchedule(total_amount, num_installments, frequency, first_installment_date);
+    return calculateNoInterestSchedule(
+      total_amount,
+      num_installments,
+      frequency,
+      first_installment_date,
+    );
   }
 
   if (interest_type === 'compound') {
-    return calculateCompoundInterestSchedule(total_amount, num_installments, frequency, first_installment_date, interest_rate);
+    return calculateCompoundInterestSchedule(
+      total_amount,
+      num_installments,
+      frequency,
+      first_installment_date,
+      interest_rate,
+    );
   }
 
-  return calculateSimpleInterestSchedule(total_amount, num_installments, frequency, first_installment_date, interest_rate);
+  return calculateSimpleInterestSchedule(
+    total_amount,
+    num_installments,
+    frequency,
+    first_installment_date,
+    interest_rate,
+  );
 }
 
 /**
@@ -85,12 +104,16 @@ function calculateSimpleInterestSchedule(
   const periodic_rate = annual_rate / periods_per_year;
 
   // Simple interest: I = P × r × n
-  const total_interest = Math.round(total_amount * periodic_rate * num_installments * 100) / 100;
+  const total_interest =
+    Math.round(total_amount * periodic_rate * num_installments * 100) / 100;
   const total_with_interest = total_amount + total_interest;
 
-  const base_installment = Math.floor((total_with_interest / num_installments) * 100) / 100;
-  const base_capital = Math.floor((total_amount / num_installments) * 100) / 100;
-  const base_interest = Math.floor((total_interest / num_installments) * 100) / 100;
+  const base_installment =
+    Math.floor((total_with_interest / num_installments) * 100) / 100;
+  const base_capital =
+    Math.floor((total_amount / num_installments) * 100) / 100;
+  const base_interest =
+    Math.floor((total_interest / num_installments) * 100) / 100;
 
   let remaining_capital = total_amount;
   let remaining_total = total_with_interest;
@@ -108,8 +131,10 @@ function calculateSimpleInterestSchedule(
       ? Math.round(remaining_total * 100) / 100
       : base_installment;
 
-    remaining_capital = Math.round((remaining_capital - capital_value) * 100) / 100;
-    remaining_total = Math.round((remaining_total - installment_value) * 100) / 100;
+    remaining_capital =
+      Math.round((remaining_capital - capital_value) * 100) / 100;
+    remaining_total =
+      Math.round((remaining_total - installment_value) * 100) / 100;
 
     schedule.push({
       installment_number: i,
@@ -141,13 +166,20 @@ function calculateCompoundInterestSchedule(
   const periodic_rate = annual_rate / periods_per_year;
 
   // FV = P × (1 + r)^n — interest capitalizes each period
-  const total_with_interest = Math.round(total_amount * Math.pow(1 + periodic_rate, num_installments) * 100) / 100;
-  const total_interest = Math.round((total_with_interest - total_amount) * 100) / 100;
+  const total_with_interest =
+    Math.round(
+      total_amount * Math.pow(1 + periodic_rate, num_installments) * 100,
+    ) / 100;
+  const total_interest =
+    Math.round((total_with_interest - total_amount) * 100) / 100;
 
   // Equal installments dividing the compounded total
-  const base_installment = Math.floor((total_with_interest / num_installments) * 100) / 100;
-  const base_capital = Math.floor((total_amount / num_installments) * 100) / 100;
-  const base_interest = Math.floor((total_interest / num_installments) * 100) / 100;
+  const base_installment =
+    Math.floor((total_with_interest / num_installments) * 100) / 100;
+  const base_capital =
+    Math.floor((total_amount / num_installments) * 100) / 100;
+  const base_interest =
+    Math.floor((total_interest / num_installments) * 100) / 100;
 
   let remaining_capital = total_amount;
   let remaining_total = total_with_interest;
@@ -165,8 +197,10 @@ function calculateCompoundInterestSchedule(
       ? Math.round(remaining_total * 100) / 100
       : base_installment;
 
-    remaining_capital = Math.round((remaining_capital - capital_value) * 100) / 100;
-    remaining_total = Math.round((remaining_total - installment_value) * 100) / 100;
+    remaining_capital =
+      Math.round((remaining_capital - capital_value) * 100) / 100;
+    remaining_total =
+      Math.round((remaining_total - installment_value) * 100) / 100;
 
     schedule.push({
       installment_number: i,
@@ -191,22 +225,30 @@ export function calculateTotalWithInterest(params: ScheduleParams): number {
 
 function getPeriodsPerYear(frequency: string): number {
   switch (frequency) {
-    case 'weekly': return 52;
-    case 'biweekly': return 26;
-    case 'monthly': return 12;
-    default: return 12;
+    case 'weekly':
+      return 52;
+    case 'biweekly':
+      return 26;
+    case 'monthly':
+      return 12;
+    default:
+      return 12;
   }
 }
 
-export function addFrequency(base_date: Date, frequency: string, periods: number): Date {
+export function addFrequency(
+  base_date: Date,
+  frequency: string,
+  periods: number,
+): Date {
   const date = new Date(base_date);
 
   switch (frequency) {
     case 'weekly':
-      date.setDate(date.getDate() + (7 * periods));
+      date.setDate(date.getDate() + 7 * periods);
       break;
     case 'biweekly':
-      date.setDate(date.getDate() + (15 * periods));
+      date.setDate(date.getDate() + 15 * periods);
       break;
     case 'monthly':
       date.setMonth(date.getMonth() + periods);

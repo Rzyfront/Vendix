@@ -1,11 +1,11 @@
-import {Component, inject, signal,
+import {Component, inject, signal, effect, untracked,
   DestroyRef} from '@angular/core';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
-import { filter, switchMap, take, of, catchError } from 'rxjs';
+import { of, catchError } from 'rxjs';
 
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -173,7 +173,11 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
-  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)'};
+  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)',
+  'intercompany_transfer.shipped.receivable': 'CxC Intercompany',
+  'intercompany_transfer.shipped.inventory': 'Inventario Enviado Intercompany',
+  'intercompany_transfer.received.inventory': 'Inventario Recibido Intercompany',
+  'intercompany_transfer.received.payable': 'CxP Intercompany'};
 
 const GROUP_DEFINITIONS: Array<{
   key: string;
@@ -261,7 +265,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'stock_transfers',
     label: 'Transferencias de Stock',
     icon: 'repeat',
-    prefixes: ['stock_transfer.completed.']},
+    prefixes: ['stock_transfer.completed.', 'intercompany_transfer.']},
   {
     key: 'commissions',
     label: 'Comisiones',
@@ -345,33 +349,38 @@ export class AccountMappingsComponent {
         this.has_changes.set(false);
       });
 
-    this.tenantFacade.currentEnvironment$
-      .pipe(
-        filter((env): env is AppType => !!env),
-        take(1),
-        switchMap((env) => {
-          const endpoint = this.getSettingsEndpoint(env);
-          if (!endpoint) {
-            this.flows_loaded.set(true);
-            return of(null);
-          }
-          return this.http
-            .get<any>(`${environment.apiUrl}${endpoint}`)
-            .pipe(catchError(() => of(null)));
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((res) => {
-        if (res) {
-          const settings = res?.data?.settings || res?.data || res;
-          this.flow_toggles.set(
-            settings?.module_flows?.accounting ||
-              settings?.accounting_flows ||
-              {},
-          );
-        }
+    // Reacciona al signal currentEnvironment. Guardado con flows_loaded
+    // leído en untracked para evitar re-ejecutar cuando nosotros mismos
+    // lo seteamos en true.
+    effect(() => {
+      const env = this.tenantFacade.currentEnvironment() as AppType | null;
+      if (!env) return;
+      if (untracked(() => this.flows_loaded())) return;
+
+      const endpoint = this.getSettingsEndpoint(env);
+      if (!endpoint) {
         this.flows_loaded.set(true);
-      });
+        return;
+      }
+
+      this.http
+        .get<any>(`${environment.apiUrl}${endpoint}`)
+        .pipe(
+          catchError(() => of(null)),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe((res) => {
+          if (res) {
+            const settings = res?.data?.settings || res?.data || res;
+            this.flow_toggles.set(
+              settings?.module_flows?.accounting ||
+                settings?.accounting_flows ||
+                {},
+            );
+          }
+          this.flows_loaded.set(true);
+        });
+    });
   }
 
   private getSettingsEndpoint(env: AppType): string | null {
@@ -379,7 +388,7 @@ export class AccountMappingsComponent {
       case AppType.STORE_ADMIN:
         return '/store/settings';
       case AppType.ORG_ADMIN:
-        return '/organization/settings';
+        return '/organization/settings'; // domain-isolation-ok: AppType branch routes ORG_ADMIN context to /organization/* explicitly
       default:
         return null;
     }

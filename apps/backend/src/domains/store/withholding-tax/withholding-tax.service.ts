@@ -4,8 +4,12 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
-import { CreateWithholdingConceptDto, UpdateWithholdingConceptDto } from './dto';
+import {
+  CreateWithholdingConceptDto,
+  UpdateWithholdingConceptDto,
+} from './dto';
 import { WithholdingCertificateData } from './interfaces/withholding.interface';
 
 @Injectable()
@@ -14,6 +18,7 @@ export class WithholdingTaxService {
     private readonly prisma: StorePrismaService,
     private readonly calculator: WithholdingCalculatorService,
     private readonly event_emitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   // ===== Withholding Concepts CRUD =====
@@ -38,10 +43,16 @@ export class WithholdingTaxService {
 
   async createConcept(dto: CreateWithholdingConceptDto) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Check for duplicate code
     const existing = await this.prisma.withholding_concepts.findFirst({
       where: {
+        accounting_entity_id: accounting_entity.id,
         code: dto.code,
       },
     });
@@ -53,6 +64,7 @@ export class WithholdingTaxService {
     return this.prisma.withholding_concepts.create({
       data: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         code: dto.code,
         name: dto.name,
         rate: new Prisma.Decimal(dto.rate),
@@ -71,9 +83,11 @@ export class WithholdingTaxService {
     if (dto.code !== undefined) data.code = dto.code;
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.rate !== undefined) data.rate = new Prisma.Decimal(dto.rate);
-    if (dto.min_uvt_threshold !== undefined) data.min_uvt_threshold = new Prisma.Decimal(dto.min_uvt_threshold);
+    if (dto.min_uvt_threshold !== undefined)
+      data.min_uvt_threshold = new Prisma.Decimal(dto.min_uvt_threshold);
     if (dto.applies_to !== undefined) data.applies_to = dto.applies_to;
-    if (dto.supplier_type_filter !== undefined) data.supplier_type_filter = dto.supplier_type_filter;
+    if (dto.supplier_type_filter !== undefined)
+      data.supplier_type_filter = dto.supplier_type_filter;
 
     return this.prisma.withholding_concepts.update({
       where: { id },
@@ -103,11 +117,17 @@ export class WithholdingTaxService {
 
   async createUvt(data: { year: number; value_cop: number }) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Upsert: if the year already exists, update; otherwise create
     const existing = await this.prisma.uvt_values.findFirst({
       where: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year: data.year,
       },
     });
@@ -122,6 +142,7 @@ export class WithholdingTaxService {
     return this.prisma.uvt_values.create({
       data: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year: data.year,
         value_cop: new Prisma.Decimal(data.value_cop),
       },
@@ -130,7 +151,11 @@ export class WithholdingTaxService {
 
   // ===== Withholding Calculation =====
 
-  async calculateWithholding(amount: number, concept_code: string, supplier_type?: string) {
+  async calculateWithholding(
+    amount: number,
+    concept_code: string,
+    supplier_type?: string,
+  ) {
     const context = RequestContextService.getContext()!;
 
     return this.calculator.calculateWithholding({
@@ -143,8 +168,17 @@ export class WithholdingTaxService {
 
   // ===== Apply Withholding to Invoice =====
 
-  async applyWithholding(invoice_id: number, concept_code: string, supplier_type?: string) {
+  async applyWithholding(
+    invoice_id: number,
+    concept_code: string,
+    supplier_type?: string,
+  ) {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Get the invoice to determine the base amount
     const invoice = await this.prisma.invoices.findFirst({
@@ -155,7 +189,10 @@ export class WithholdingTaxService {
     });
 
     if (!invoice) {
-      throw new VendixHttpException(ErrorCodes.WHT_CALCULATION_ERROR, 'Invoice not found');
+      throw new VendixHttpException(
+        ErrorCodes.WHT_CALCULATION_ERROR,
+        'Invoice not found',
+      );
     }
 
     const base_amount = Number(invoice.subtotal_amount || invoice.total_amount);
@@ -175,6 +212,7 @@ export class WithholdingTaxService {
     // Get the concept for the ID
     const concept = await this.prisma.withholding_concepts.findFirst({
       where: {
+        accounting_entity_id: accounting_entity.id,
         code: concept_code,
         is_active: true,
       },
@@ -189,6 +227,7 @@ export class WithholdingTaxService {
     const uvt = await this.prisma.uvt_values.findFirst({
       where: {
         organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         year,
       },
     });
@@ -198,8 +237,9 @@ export class WithholdingTaxService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id || null,
+        accounting_entity_id: accounting_entity.id,
         invoice_id,
-        supplier_id: (invoice as any).supplier_id || null,
+        supplier_id: invoice.supplier_id || null,
         concept_id: concept.id,
         base_amount: new Prisma.Decimal(base_amount),
         withholding_rate: new Prisma.Decimal(result.rate),
@@ -214,12 +254,13 @@ export class WithholdingTaxService {
     this.event_emitter.emit('withholding.applied', {
       organization_id: context.organization_id,
       store_id: context.store_id,
+      accounting_entity_id: accounting_entity.id,
       invoice_id,
       base_amount,
       withholding_amount: result.withholding_amount,
       net_amount,
       concept_name: result.concept_name,
-      supplier_name: (invoice as any).supplier?.name || 'N/A',
+      supplier_name: invoice.supplier?.name || 'N/A',
       user_id: context.user_id,
     });
 
@@ -233,8 +274,16 @@ export class WithholdingTaxService {
 
   // ===== Certificate Generation =====
 
-  async generateCertificate(supplier_id: number, year: number): Promise<WithholdingCertificateData> {
+  async generateCertificate(
+    supplier_id: number,
+    year: number,
+  ): Promise<WithholdingCertificateData> {
     const context = RequestContextService.getContext()!;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     // Get supplier info
     const supplier = await this.prisma.suppliers.findFirst({
@@ -242,12 +291,17 @@ export class WithholdingTaxService {
     });
 
     if (!supplier) {
-      throw new VendixHttpException(ErrorCodes.WHT_CALCULATION_ERROR, 'Supplier not found');
+      throw new VendixHttpException(
+        ErrorCodes.WHT_CALCULATION_ERROR,
+        'Supplier not found',
+      );
     }
 
     // Get all calculations for this supplier in the given year
     const calculations = await this.prisma.withholding_calculations.findMany({
       where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: accounting_entity.id,
         supplier_id,
         year,
       },
@@ -270,14 +324,16 @@ export class WithholdingTaxService {
     let total_withheld = 0;
 
     for (const calc of calculations) {
-      const month = calc.created_at ? new Date(calc.created_at).getMonth() + 1 : 1;
+      const month = calc.created_at
+        ? new Date(calc.created_at).getMonth() + 1
+        : 1;
       const base = Number(calc.base_amount);
       const amount = Number(calc.withholding_amount);
       const rate = Number(calc.withholding_rate);
 
       monthly_breakdown.push({
         month,
-        concept: (calc as any).concept?.name || 'N/A',
+        concept: calc.concept?.name || 'N/A',
         base,
         rate,
         amount,
@@ -343,12 +399,16 @@ export class WithholdingTaxService {
       current_uvt_value: current_uvt ? Number(current_uvt.value_cop) : null,
       current_uvt_year: current_uvt ? current_uvt.year : null,
       monthly: {
-        total_withheld: Number(monthly_withholdings._sum.withholding_amount || 0),
+        total_withheld: Number(
+          monthly_withholdings._sum.withholding_amount || 0,
+        ),
         total_base: Number(monthly_withholdings._sum.base_amount || 0),
         count: monthly_withholdings._count,
       },
       yearly: {
-        total_withheld: Number(yearly_withholdings._sum.withholding_amount || 0),
+        total_withheld: Number(
+          yearly_withholdings._sum.withholding_amount || 0,
+        ),
         total_base: Number(yearly_withholdings._sum.base_amount || 0),
         count: yearly_withholdings._count,
       },

@@ -51,6 +51,10 @@ export class ReservationFormModalComponent {
   readonly initialCustomer = input<any>(null);
   readonly posMode = input(false);
 
+  readonly selectedVariant = computed(
+    () => this.initialProduct()?.selected_variant ?? null,
+  );
+
   // Wizard
   currentStep = signal(0);
 
@@ -151,7 +155,7 @@ export class ReservationFormModalComponent {
     return false;
   });
 
-  private searchSubject = new Subject<string>();
+  private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap customer search stream
 
   constructor() {
     // Debounced customer search
@@ -307,7 +311,13 @@ export class ReservationFormModalComponent {
     if (!productId || !date) return;
 
     this.loadingSlots.set(true);
-    this.reservationsService.getAvailability(productId, date, date, this.selectedProvider()?.id)
+    this.reservationsService.getAvailability(
+      productId,
+      date,
+      date,
+      this.selectedProvider()?.id,
+      this.selectedVariant()?.id,
+    )
       .subscribe({
         next: (slots) => {
           this.availableSlots.set(slots.filter(s => s.total_available > 0));
@@ -351,6 +361,7 @@ export class ReservationFormModalComponent {
     const dto: CreateBookingDto = {
       customer_id: customer.id,
       product_id: service.id,
+      product_variant_id: this.selectedVariant()?.id || undefined,
       date: this.selectedDate(),
       start_time: this.startTime(),
       end_time: this.endTime() || this.getEndTime(),

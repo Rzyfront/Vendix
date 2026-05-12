@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { randomUUID } from 'crypto';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   AIProvider,
@@ -17,6 +18,9 @@ import { REDIS_CLIENT } from '../common/redis/redis.module';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AILoggingService } from './ai-logging.service';
 import { RequestContextService } from '../common/context/request-context.service';
+import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
+import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
+import { isAIFeatureKey } from '../domains/store/subscriptions/types/access.types';
 
 @Injectable()
 export class AIEngineService implements OnModuleInit {
@@ -31,6 +35,8 @@ export class AIEngineService implements OnModuleInit {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly aiLoggingService: AILoggingService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly subscriptionAccess: SubscriptionAccessService,
+    private readonly gateConfig: SubscriptionGateConfig,
   ) {}
 
   async onModuleInit() {
@@ -95,7 +101,10 @@ export class AIEngineService implements OnModuleInit {
       }
 
       this.providers.set(config.id, provider);
-      this.configSettings.set(config.id, (config.settings as Record<string, any>) || {});
+      this.configSettings.set(
+        config.id,
+        (config.settings as Record<string, any>) || {},
+      );
     } catch (error: any) {
       this.logger.error(
         `Failed to initialize provider "${config.provider}" (${config.sdk_type}): ${error.message}`,
@@ -106,9 +115,7 @@ export class AIEngineService implements OnModuleInit {
   private resolveApiKey(config: any): string {
     if (config.api_key_ref) return config.api_key_ref;
     const envKey = `AI_${config.provider.toUpperCase().replace(/\s+/g, '_')}_API_KEY`;
-    return (
-      process.env[envKey] || this.configService.get<string>(envKey) || ''
-    );
+    return process.env[envKey] || this.configService.get<string>(envKey) || '';
   }
 
   private getDefaultProvider(): AIProvider {
@@ -131,7 +138,8 @@ export class AIEngineService implements OnModuleInit {
     if (!response.success) {
       this.logger.error(`AI chat failed: ${response.error}`);
     }
-    const thinking = options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
+    const thinking =
+      options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
     return this.sanitizeResponse(response, thinking);
   }
 
@@ -144,7 +152,8 @@ export class AIEngineService implements OnModuleInit {
     if (!response.success) {
       this.logger.error(`AI complete failed: ${response.error}`);
     }
-    const thinking = options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
+    const thinking =
+      options?.thinking ?? this.isThinkingEnabled(this.defaultConfigId);
     return this.sanitizeResponse(response, thinking);
   }
 
@@ -158,7 +167,10 @@ export class AIEngineService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
     }
     const thinking = options?.thinking ?? this.isThinkingEnabled(configId);
-    return this.sanitizeResponse(await provider.chat(messages, options), thinking);
+    return this.sanitizeResponse(
+      await provider.chat(messages, options),
+      thinking,
+    );
   }
 
   async testProvider(
@@ -176,7 +188,10 @@ export class AIEngineService implements OnModuleInit {
       this.initializeProvider(config);
       const freshProvider = this.providers.get(configId);
       if (!freshProvider) {
-        return { success: false, message: `Unknown sdk_type: ${config.sdk_type}` };
+        return {
+          success: false,
+          message: `Unknown sdk_type: ${config.sdk_type}`,
+        };
       }
       const result = await freshProvider.testConnection();
       await this.prisma.ai_engine_configs.update({
@@ -233,6 +248,9 @@ export class AIEngineService implements OnModuleInit {
         throw new VendixHttpException(ErrorCodes.AI_APP_003);
       }
 
+      // Subscription gate (log-only by default; enforces when AI_GATE_ENFORCE=true).
+      await this.runSubscriptionGate(appKey, app.ai_feature_category);
+
       // Rate limit check
       await this.checkRateLimit(app);
 
@@ -286,7 +304,10 @@ export class AIEngineService implements OnModuleInit {
       const maxRetries = retryConfig?.maxRetries ?? 0;
       const delayMs = retryConfig?.delayMs ?? 1000;
 
-      let lastResponse: AIResponse = { success: false, error: 'No attempt made' };
+      let lastResponse: AIResponse = {
+        success: false,
+        error: 'No attempt made',
+      };
 
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         lastResponse = await provider.chat(messages, options);
@@ -301,6 +322,14 @@ export class AIEngineService implements OnModuleInit {
           lastResponse.content = this.formatOutput(
             lastResponse.content || '',
             app.output_format,
+          );
+
+          // Subscription quota consumption (best-effort; never throws).
+          await this.consumeSubscriptionQuota(
+            app.ai_feature_category,
+            lastResponse.usage?.totalTokens ??
+              (lastResponse.usage?.promptTokens ?? 0) +
+                (lastResponse.usage?.completionTokens ?? 0),
           );
 
           logStatus = 'success';
@@ -390,6 +419,18 @@ export class AIEngineService implements OnModuleInit {
         return;
       }
 
+      // Subscription gate (log-only by default; throws in enforce mode).
+      try {
+        await this.runSubscriptionGate(appKey, app.ai_feature_category);
+      } catch (err: any) {
+        lastChunk = {
+          type: 'error',
+          error: err?.message ?? 'Subscription gate denied',
+        };
+        yield lastChunk;
+        return;
+      }
+
       await this.checkRateLimit(app);
 
       resolvedConfigId = app.config_id || this.defaultConfigId;
@@ -404,7 +445,10 @@ export class AIEngineService implements OnModuleInit {
       }
 
       if (!provider.chatStream) {
-        lastChunk = { type: 'error', error: 'Streaming not supported by this provider' };
+        lastChunk = {
+          type: 'error',
+          error: 'Streaming not supported by this provider',
+        };
         yield lastChunk;
         return;
       }
@@ -447,6 +491,15 @@ export class AIEngineService implements OnModuleInit {
         lastChunk = { type: 'error', error: error.message };
         yield lastChunk;
       }
+
+      // Consume quota on successful completion.
+      if (lastChunk?.type === 'done') {
+        const usage = lastChunk.usage;
+        const tokens =
+          usage?.totalTokens ??
+          (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, tokens);
+      }
     } finally {
       // Log after stream completes — always runs regardless of early returns
       const latencyMs = Date.now() - startTime;
@@ -474,7 +527,8 @@ export class AIEngineService implements OnModuleInit {
         cost_usd: costUsd,
         latency_ms: latencyMs,
         status: lastChunk?.type === 'error' ? 'error' : 'success',
-        error_message: lastChunk?.type === 'error' ? lastChunk.error : undefined,
+        error_message:
+          lastChunk?.type === 'error' ? lastChunk.error : undefined,
         input_preview: variables ? JSON.stringify(variables) : undefined,
       });
     }
@@ -543,6 +597,127 @@ export class AIEngineService implements OnModuleInit {
         .trim();
     }
     return response;
+  }
+
+  /**
+   * Invoke SubscriptionAccessService gate for the current request's store.
+   * - No storeId in context → skip (treated as internal caller).
+   * - featureCategory not a valid AIFeatureKey → skip (legacy app not
+   *   categorized yet).
+   * - ENFORCE when SubscriptionGateConfig.isEnforce() is true;
+   *   log-only (default) otherwise.
+   */
+  private async runSubscriptionGate(
+    appKey: string,
+    featureCategory: string | null,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return; // internal caller
+    if (!featureCategory || !isAIFeatureKey(featureCategory)) {
+      // Unmapped application — record for observability but never block.
+      this.logger.debug(
+        `AI_GATE_SKIP appKey=${appKey} reason=unmapped_feature_category`,
+      );
+      return;
+    }
+    const feature = featureCategory;
+
+    let result: Awaited<
+      ReturnType<SubscriptionAccessService['canUseAIFeature']>
+    >;
+    try {
+      result = await this.subscriptionAccess.canUseAIFeature(storeId, feature);
+    } catch (err) {
+      this.logger.error(
+        `AI_GATE_ERROR appKey=${appKey} feature=${feature} err=${(err as Error).message}`,
+      );
+      if (this.gateConfig.isEnforce()) {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+      }
+      return;
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'AI_GATE_CHECK',
+        appKey,
+        storeId,
+        feature,
+        allowed: result.allowed,
+        mode: result.mode,
+        reason: result.reason,
+        state: result.subscription_state,
+        enforce: this.gateConfig.isEnforce(),
+      }),
+    );
+
+    if (result.mode === 'block' && this.gateConfig.isEnforce()) {
+      const key =
+        (result.reason as keyof typeof ErrorCodes) ?? 'SUBSCRIPTION_005';
+      const entry = ErrorCodes[key] ?? ErrorCodes.SUBSCRIPTION_005;
+      const details = {
+        subscription_state: result.subscription_state,
+        plan_id: result.plan_id ?? null,
+        has_record: result.has_record,
+      };
+      throw new VendixHttpException(entry, undefined, details);
+    }
+  }
+
+  /**
+   * Consume subscription quota after a successful provider call.
+   * Best-effort: never throws, any Redis failure is logged by the service.
+   */
+  private async consumeSubscriptionQuota(
+    featureCategory: string | null,
+    units: number,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return;
+    if (!featureCategory || !isAIFeatureKey(featureCategory)) return;
+    const feature = featureCategory;
+
+    // Quota unit policy per feature:
+    //   text_generation → token count (units arg)
+    //   streaming_chat  → 1 message
+    //   async_queue     → 1 job
+    //   rag_embeddings  → document count (caller should pass; fallback=1)
+    //   tool_agents / conversations → no numeric quota
+    let effectiveUnits: number;
+    switch (feature) {
+      case 'text_generation':
+        effectiveUnits = Math.max(0, Math.floor(units));
+        break;
+      case 'streaming_chat':
+      case 'async_queue':
+        effectiveUnits = 1;
+        break;
+      case 'rag_embeddings':
+        effectiveUnits = Math.max(1, Math.floor(units || 1));
+        break;
+      default:
+        return;
+    }
+    if (effectiveUnits <= 0) return;
+
+    try {
+      // requestId is now MANDATORY for atomic dedup (G7). The HTTP path
+      // populates it via middleware; queue processors re-establish the
+      // RequestContext from job data before calling aiEngine.run(). In the
+      // rare case where neither is set (internal/cron callers), synthesize
+      // a fresh UUID — a unique requestId is harmless: it just disables
+      // dedup for that single call (no retry exists to dedup against).
+      const requestId =
+        RequestContextService.getRequestId() ?? `internal-${randomUUID()}`;
+      await this.subscriptionAccess.consumeAIQuota(
+        storeId,
+        feature,
+        effectiveUnits,
+        requestId,
+      );
+    } catch {
+      // Already logged inside the service. Never bubble.
+    }
   }
 
   private formatOutput(content: string, format: string): string {

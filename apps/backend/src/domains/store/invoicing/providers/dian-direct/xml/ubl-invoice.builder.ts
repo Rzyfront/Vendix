@@ -1,7 +1,10 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
-import { DIAN_DOCUMENT_TYPES, DIAN_OPERATION_TYPES } from '../constants/dian-document-types';
+import {
+  DIAN_DOCUMENT_TYPES,
+  DIAN_OPERATION_TYPES,
+} from '../constants/dian-document-types';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -68,12 +71,8 @@ export class UblInvoiceBuilder {
     doc
       .ele(UBL_NAMESPACES.CBC, 'CustomizationID')
       .txt(UBL_CONSTANTS.CUSTOMIZATION_ID);
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'ProfileID')
-      .txt(UBL_CONSTANTS.PROFILE_ID);
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID')
-      .txt(profile_execution_id);
+    doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
+    doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(invoice_data.invoice_number);
     doc
       .ele(UBL_NAMESPACES.CBC, 'UUID')
@@ -81,9 +80,7 @@ export class UblInvoiceBuilder {
       .att('schemeName', 'CUFE-SHA384')
       .txt(cufe);
 
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'IssueDate')
-      .txt(invoice_data.issue_date);
+    doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(invoice_data.issue_date);
 
     const issue_time =
       new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
@@ -97,9 +94,7 @@ export class UblInvoiceBuilder {
       doc.ele(UBL_NAMESPACES.CBC, 'Note').txt(invoice_data.notes);
     }
 
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'DocumentCurrencyCode')
-      .txt(currency);
+    doc.ele(UBL_NAMESPACES.CBC, 'DocumentCurrencyCode').txt(currency);
 
     doc
       .ele(UBL_NAMESPACES.CBC, 'LineCountNumeric')
@@ -108,12 +103,8 @@ export class UblInvoiceBuilder {
     // 3. Invoice period (optional — for recurrent invoicing)
     if (invoice_data.due_date) {
       const period = doc.ele(UBL_NAMESPACES.CAC, 'InvoicePeriod');
-      period
-        .ele(UBL_NAMESPACES.CBC, 'StartDate')
-        .txt(invoice_data.issue_date);
-      period
-        .ele(UBL_NAMESPACES.CBC, 'EndDate')
-        .txt(invoice_data.due_date);
+      period.ele(UBL_NAMESPACES.CBC, 'StartDate').txt(invoice_data.issue_date);
+      period.ele(UBL_NAMESPACES.CBC, 'EndDate').txt(invoice_data.due_date);
     }
 
     // 4. Supplier party
@@ -135,17 +126,10 @@ export class UblInvoiceBuilder {
       .txt(invoice_data.due_date || invoice_data.issue_date);
 
     // 7. Tax totals
-    UblCommonBuilder.buildTaxTotals(
-      doc,
-      invoice_data.taxes,
-      currency,
-    );
+    UblCommonBuilder.buildTaxTotals(doc, invoice_data.taxes, currency);
 
     // 8. Legal monetary total
-    const monetary = doc.ele(
-      UBL_NAMESPACES.CAC,
-      'LegalMonetaryTotal',
-    );
+    const monetary = doc.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
     monetary
       .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
       .att('currencyID', currency)

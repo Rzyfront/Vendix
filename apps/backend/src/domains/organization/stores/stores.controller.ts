@@ -30,7 +30,7 @@ export class StoresController {
   constructor(
     private readonly storesService: StoresService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('organization:stores:create')
@@ -79,6 +79,25 @@ export class StoresController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener las tiendas',
+        error.message,
+      );
+    }
+  }
+
+  @Get('check-code')
+  async checkCode(@Query('code') code: string) {
+    try {
+      const exists = await this.storesService.checkCode(code);
+      if (exists) {
+        return this.responseService.conflict(
+          'El código de tienda ya existe',
+          'store_code',
+        );
+      }
+      return this.responseService.success({ available: true });
+    } catch (error) {
+      return this.responseService.error(
+        'Error al verificar el código',
         error.message,
       );
     }

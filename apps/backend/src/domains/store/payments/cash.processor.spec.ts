@@ -34,6 +34,7 @@ describe('CashPaymentProcessor', () => {
         currency: 'USD',
         storePaymentMethodId: 1,
         storeId: 1,
+        idempotencyKey: 'idem-cash-1',
       };
 
       const result: PaymentResult = await processor.processPayment(paymentData);
@@ -53,6 +54,7 @@ describe('CashPaymentProcessor', () => {
         currency: 'USD',
         storePaymentMethodId: 1,
         storeId: 1,
+        idempotencyKey: 'idem-cash-2',
       };
 
       const result1 = await processor.processPayment(paymentData);
@@ -94,6 +96,7 @@ describe('CashPaymentProcessor', () => {
         currency: 'USD',
         storePaymentMethodId: 1,
         storeId: 1,
+        idempotencyKey: 'idem-cash-validate-1',
       };
 
       const result = await processor.validatePayment(validPaymentData);
@@ -109,6 +112,7 @@ describe('CashPaymentProcessor', () => {
         currency: 'USD',
         storePaymentMethodId: 1,
         storeId: 1,
+        idempotencyKey: 'idem-cash-validate-2',
       };
 
       const result = await processor.validatePayment(invalidPaymentData);
@@ -124,6 +128,7 @@ describe('CashPaymentProcessor', () => {
         currency: '', // Missing currency
         storePaymentMethodId: 1,
         storeId: 1,
+        idempotencyKey: 'idem-cash-validate-3',
       };
 
       const result = await processor.validatePayment(invalidPaymentData);

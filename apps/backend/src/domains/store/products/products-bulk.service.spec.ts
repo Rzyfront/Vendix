@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductsBulkService } from './products-bulk.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
@@ -23,7 +23,7 @@ jest.mock('slugify', () => ({
 
 describe('ProductsBulkService', () => {
   let service: ProductsBulkService;
-  let prismaService: PrismaService;
+  let prismaService: StorePrismaService;
   let productsService: ProductsService;
   let variantService: ProductVariantService;
   let accessValidationService: AccessValidationService;
@@ -96,7 +96,7 @@ describe('ProductsBulkService', () => {
       providers: [
         ProductsBulkService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -123,7 +123,7 @@ describe('ProductsBulkService', () => {
     }).compile();
 
     service = module.get<ProductsBulkService>(ProductsBulkService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<StorePrismaService>(StorePrismaService);
     productsService = module.get<ProductsService>(ProductsService);
     variantService = module.get<ProductVariantService>(ProductVariantService);
     accessValidationService = module.get<AccessValidationService>(

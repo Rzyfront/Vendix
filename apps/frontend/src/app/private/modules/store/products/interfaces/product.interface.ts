@@ -69,6 +69,7 @@ export interface Product {
   send_preconsultation?: boolean;
   consultation_template_id?: number;
   preconsultation_template_id?: number | null;
+  preparation_time_minutes?: number;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -139,6 +140,12 @@ export interface ProductVariant {
   is_on_sale?: boolean;
   sale_price?: number;
   stock_quantity: number;
+  track_inventory_override?: boolean | null;
+  effective_track_inventory?: boolean;
+  service_duration_minutes?: number;
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+  buffer_minutes?: number;
+  preparation_time_minutes?: number;
   image_id?: number;
   created_at: Date;
   updated_at: Date;
@@ -235,6 +242,7 @@ export interface CreateProductDto {
   send_preconsultation?: boolean;
   consultation_template_id?: number | null;
   preconsultation_template_id?: number | null;
+  preparation_time_minutes?: number;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -242,6 +250,7 @@ export interface CreateProductDto {
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface UpdateProductDto {
@@ -289,12 +298,13 @@ export interface UpdateProductDto {
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface CreateProductVariantDto {
   sku: string;
   name?: string;
-  price_override?: number;
+  price_override?: number | null;
   price?: number;
   cost_price?: number;
   profit_margin?: number;
@@ -304,6 +314,11 @@ export interface CreateProductVariantDto {
   image_id?: number;
   attributes?: Record<string, any>;
   variant_image_url?: string;
+  track_inventory_override?: boolean | null;
+  service_duration_minutes?: number;
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+  buffer_minutes?: number;
+  preparation_time_minutes?: number;
 }
 
 export interface CreateProductImageDto {

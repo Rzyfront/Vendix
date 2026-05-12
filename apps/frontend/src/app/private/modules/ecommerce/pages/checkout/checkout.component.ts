@@ -4,9 +4,12 @@ import {
   OnInit,
   DestroyRef,
   signal,
+  computed,
   inject,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -17,10 +20,12 @@ import {
   Validators,
 } from '@angular/forms';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { environment } from '../../../../../../environments/environment';
 import {
   CheckoutService,
   PaymentMethod,
   CheckoutRequest,
+  GuestCheckoutCustomer,
   BookingSelection,
   WompiWidgetConfig,
 } from '../../services/checkout.service';
@@ -52,6 +57,11 @@ import {
   SelectorOption,
 } from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { AuthFacade } from '../../../../../core/store';
+import {
+  GuestCheckoutData,
+  GuestCheckoutDataModalComponent,
+} from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
 
 @Component({
   selector: 'app-checkout',
@@ -69,6 +79,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     IconComponent,
     SelectorComponent,
     BookingSlotPickerComponent,
+    GuestCheckoutDataModalComponent,
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
@@ -83,9 +94,26 @@ export class CheckoutComponent implements OnInit {
   readonly selected_address_id = signal<number | null>(null);
   readonly use_new_address = signal(false);
   readonly save_new_address = signal(true);
+  readonly is_authenticated = signal(false);
 
   address_form!: FormGroup;
   readonly notes = signal('');
+
+  readonly etaPreview = signal<{
+    readyAt: string;
+    deliveredAt: string;
+    prepMinutes: number;
+    transitMinutes: number;
+  } | null>(null);
+  readonly etaLabel = computed(() => {
+    const eta = this.etaPreview();
+    if (!eta) return '';
+    if (this.selected_shipping_method_id) {
+      const totalMin = eta.prepMinutes + eta.transitMinutes;
+      return `Entrega estimada: ~${totalMin} min`;
+    }
+    return `Listo en ~${eta.prepMinutes} min`;
+  });
 
   readonly is_loading = signal(true);
   readonly is_submitting = signal(false);
@@ -101,8 +129,8 @@ export class CheckoutComponent implements OnInit {
   readonly step = signal(1);
 
   // ========== BOOKING ==========
-  /** Booking selections keyed by product_id */
-  bookingSelections = new Map<number, BookingSelection>();
+  /** Booking selections keyed by product and variant, so variant services do not overwrite each other. */
+  bookingSelections = new Map<string, BookingSelection>();
 
   /** True when cart has at least one bookable service */
   get cartHasBookableServices(): boolean {
@@ -137,7 +165,7 @@ export class CheckoutComponent implements OnInit {
     if (!this.cartHasBookableServices) return true;
     const bookableItems = this.bookableItems;
     return bookableItems.every((item) =>
-      this.bookingSelections.has(item.product_id),
+      this.bookingSelections.has(this.getBookingKey(item)),
     );
   }
 
@@ -169,6 +197,10 @@ export class CheckoutComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   private toast = inject(ToastService);
   private wompiService = inject(WompiService);
+  private auth_facade = inject(AuthFacade);
+  readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
+  private guest_data_decision_made = false;
+  private guest_checkout_data: GuestCheckoutData | null = null;
 
   constructor(
     private cart_service: CartService,
@@ -183,6 +215,12 @@ export class CheckoutComponent implements OnInit {
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
+
+    this.auth_facade.isAuthenticated$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((isAuthenticated) =>
+        this.is_authenticated.set(isAuthenticated),
+      );
 
     this.setupLocationData();
     this.loadData();
@@ -205,16 +243,21 @@ export class CheckoutComponent implements OnInit {
         booking.start_time &&
         booking.end_time
       ) {
-        // Verify the product is actually in the current cart
-        const isInCart = this.cart()?.items?.some(
-          (item) => item.product_id === booking.product_id,
+        // Verify the product/variant is actually in the current cart.
+        const cartItem = this.cart()?.items?.find(
+          (item) =>
+            item.product_id === booking.product_id &&
+            (booking.product_variant_id
+              ? item.product_variant_id === booking.product_variant_id
+              : true),
         );
-        if (!isInCart) {
+        if (!cartItem) {
           sessionStorage.removeItem('pending_booking');
           return;
         }
-        this.bookingSelections.set(booking.product_id, {
+        this.bookingSelections.set(this.getBookingKey(cartItem), {
           product_id: booking.product_id,
+          product_variant_id: booking.product_variant_id,
           date: booking.date,
           start_time: booking.start_time,
           end_time: booking.end_time,
@@ -293,21 +336,37 @@ export class CheckoutComponent implements OnInit {
 
   loadData(): void {
     this.is_loading.set(true);
+    const isAuthenticated = this.auth_facade.isAuthenticated();
+    this.is_authenticated.set(isAuthenticated);
 
     // Load cart
-    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
-      this.cart.set(cart);
-      // Restore pending booking only after cart is loaded
-      this.restorePendingBooking();
-      if (!this.orderPlaced && (!cart || cart.items.length === 0)) {
-        this.router.navigate(['/cart']);
-      }
-    });
+    this.cart_service.cart$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cart) => {
+        this.cart.set(cart);
+        this.restorePendingBooking();
+        if (cart && cart.items.length > 0) {
+          this.loadEtaPreview();
+        }
+        if (!this.orderPlaced && (!cart || cart.items.length === 0)) {
+          this.router.navigate(['/cart']);
+        }
+      });
 
-    this.cart_service.getCart().subscribe();
+    if (isAuthenticated) {
+      this.cart_service.getCart().subscribe();
+    } else {
+      this.use_new_address.set(true);
+      this.save_new_address.set(false);
+    }
 
     // Load payment methods (initially without shipping type filter)
     this.loadPaymentMethods();
+
+    if (!isAuthenticated) {
+      this.is_loading.set(false);
+      return;
+    }
 
     // Load addresses
     this.account_service.getAddresses().subscribe({
@@ -458,8 +517,33 @@ export class CheckoutComponent implements OnInit {
     this.selected_shipping_method_type = option.method_type || null;
     this.shipping_cost = cost;
 
-    // Reload payment methods based on shipping type
     this.loadPaymentMethods(option.method_type);
+    this.loadEtaPreview(option.method_id);
+  }
+
+  async loadEtaPreview(shippingMethodId?: number) {
+    const cartId = this.cart()?.id;
+    if (!cartId) return;
+    try {
+      const params = new URLSearchParams({ cart_id: String(cartId) });
+      if (shippingMethodId)
+        params.set('shipping_method_id', String(shippingMethodId));
+      const response = await fetch(
+        `${environment.apiUrl}/store/orders/preview-eta?${params}`,
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem('token')}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+      if (response.ok) {
+        const data = await response.json();
+        this.etaPreview.set(data);
+      }
+    } catch {
+      // silently fail - ETA is non-critical
+    }
   }
 
   loadPaymentMethods(shippingType?: string): void {
@@ -544,7 +628,11 @@ export class CheckoutComponent implements OnInit {
       }
 
       // If using new address and save_new_address is checked, save it first
-      if (this.use_new_address() && this.save_new_address()) {
+      if (
+        this.is_authenticated() &&
+        this.use_new_address() &&
+        this.save_new_address()
+      ) {
         this.saveNewAddressAndContinue();
         return;
       }
@@ -593,11 +681,12 @@ export class CheckoutComponent implements OnInit {
 
   /** Handle booking slot selection from the picker */
   onBookingSlotSelected(
-    productId: number,
+    item: CartItem,
     slot: { date: string; start_time: string; end_time: string },
   ): void {
-    this.bookingSelections.set(productId, {
-      product_id: productId,
+    this.bookingSelections.set(this.getBookingKey(item), {
+      product_id: item.product_id,
+      product_variant_id: item.product_variant_id || undefined,
       date: slot.date,
       start_time: slot.start_time,
       end_time: slot.end_time,
@@ -605,13 +694,13 @@ export class CheckoutComponent implements OnInit {
   }
 
   /** Check if a specific product has a booking selection */
-  hasBookingForProduct(productId: number): boolean {
-    return this.bookingSelections.has(productId);
+  hasBookingForItem(item: CartItem): boolean {
+    return this.bookingSelections.has(this.getBookingKey(item));
   }
 
   /** Get the booking selection summary for a product */
-  getBookingSummary(productId: number): string {
-    const booking = this.bookingSelections.get(productId);
+  getBookingSummary(item: CartItem): string {
+    const booking = this.bookingSelections.get(this.getBookingKey(item));
     if (!booking) return '';
     const date = new Date(booking.date + 'T12:00:00');
     const formatted = date.toLocaleDateString('es-CO', {
@@ -620,6 +709,10 @@ export class CheckoutComponent implements OnInit {
       month: 'short',
     });
     return `${formatted}, ${booking.start_time} - ${booking.end_time}`;
+  }
+
+  getBookingKey(item: CartItem): string {
+    return `${item.product_id}:${item.product_variant_id ?? 'base'}`;
   }
 
   /**
@@ -692,7 +785,7 @@ export class CheckoutComponent implements OnInit {
     return {
       ...addressValue,
       type: 'shipping',
-      is_primary: this.addresses.length === 0, // Make it primary if it's the first address
+      is_primary: this.addresses().length === 0, // Make it primary if it's the first address
     };
   }
 
@@ -703,6 +796,11 @@ export class CheckoutComponent implements OnInit {
   placeOrder(): void {
     if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
+      return;
+    }
+
+    if (!this.is_authenticated() && !this.guest_data_decision_made) {
+      this.guestDataModal()?.open();
       return;
     }
 
@@ -731,6 +829,7 @@ export class CheckoutComponent implements OnInit {
         product_variant_id: item.product_variant_id || undefined,
         quantity: item.quantity,
       })),
+      guest_customer: this.toGuestCustomer(this.guest_checkout_data),
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address()) {
@@ -773,6 +872,7 @@ export class CheckoutComponent implements OnInit {
           if (response.success) {
             this.orderPlaced = true;
             const orderId = response.data.order_id;
+            const publicOrderToken = response.data.public_order_token;
             const totalAmount =
               (this.cart()?.subtotal ?? 0) + this.shipping_cost;
 
@@ -781,12 +881,15 @@ export class CheckoutComponent implements OnInit {
                 orderId,
                 totalAmount,
                 undefined,
-                `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+                publicOrderToken
+                  ? `${window.location.origin}/pedido/${publicOrderToken}?wompi_callback=true`
+                  : `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+                publicOrderToken,
               )
               .subscribe({
                 next: (res) => {
                   this.wompiWidgetLoading.set(false);
-                  this.openWompiWidget(res.data, orderId);
+                  this.openWompiWidget(res.data, orderId, publicOrderToken);
                 },
                 error: (err) => {
                   this.wompiWidgetLoading.set(false);
@@ -813,9 +916,19 @@ export class CheckoutComponent implements OnInit {
         if (response.success) {
           this.orderPlaced = true;
           this.is_submitting.set(false);
-          this.router.navigate(['/account/orders', response.data.order_id], {
-            queryParams: { success: true },
-          });
+          if (!this.is_authenticated() && response.data.public_order_token) {
+            this.cart_service.clearAllCart();
+            this.router.navigate(
+              ['/pedido', response.data.public_order_token],
+              {
+                queryParams: { success: true },
+              },
+            );
+          } else {
+            this.router.navigate(['/account/orders', response.data.order_id], {
+              queryParams: { success: true },
+            });
+          }
         }
       },
       error: (err) => {
@@ -827,9 +940,30 @@ export class CheckoutComponent implements OnInit {
     });
   }
 
+  onGuestDataCompleted(data: GuestCheckoutData | null): void {
+    this.guest_checkout_data = data;
+    this.guest_data_decision_made = true;
+    this.placeOrder();
+  }
+
+  private toGuestCustomer(
+    data: GuestCheckoutData | null,
+  ): GuestCheckoutCustomer | undefined {
+    if (!data) return undefined;
+    return {
+      first_name: data.first_name,
+      last_name: data.last_name,
+      email: data.email,
+      phone: data.phone,
+      document_type: data.document_type,
+      document_number: data.document_number,
+    };
+  }
+
   async openWompiWidget(
     config: WompiWidgetConfig,
     orderId: number,
+    publicOrderToken?: string | null,
   ): Promise<void> {
     try {
       await this.wompiService.loadWidgetScript();
@@ -848,13 +982,42 @@ export class CheckoutComponent implements OnInit {
         },
       });
 
-      checkout.open((result: any) => {
+      checkout.open(async (result: any) => {
         const transaction = result?.transaction;
         if (transaction) {
+          // Force-confirm against Wompi via backend so the order/payment
+          // state is correct on return — the webhook is still the canonical
+          // path; this is a UX fallback. NEVER block the redirect on failure.
+          if (
+            transaction.status === 'APPROVED' ||
+            transaction.status === 'DECLINED' ||
+            transaction.status === 'ERROR'
+          ) {
+            try {
+              await firstValueFrom(
+                this.checkout_service.confirmWompiPayment(
+                  orderId,
+                  publicOrderToken,
+                ),
+              );
+            } catch (err) {
+              console.warn('confirm-wompi-payment failed', err);
+            }
+          }
+
           if (transaction.status === 'APPROVED') {
-            this.router.navigate(['/account/orders', orderId], {
-              queryParams: { success: true },
-            });
+            this.orderPlaced = true;
+            if (publicOrderToken) {
+              this.cart_service.clearAllCart();
+            }
+            this.router.navigate(
+              publicOrderToken
+                ? ['/pedido', publicOrderToken]
+                : ['/account/orders', orderId],
+              {
+                queryParams: { success: true },
+              },
+            );
           } else if (
             transaction.status === 'DECLINED' ||
             transaction.status === 'ERROR'
@@ -865,9 +1028,14 @@ export class CheckoutComponent implements OnInit {
             );
           } else {
             // PENDING — redirect to order detail for status check
-            this.router.navigate(['/account/orders', orderId], {
-              queryParams: { wompi_callback: true },
-            });
+            this.router.navigate(
+              publicOrderToken
+                ? ['/pedido', publicOrderToken]
+                : ['/account/orders', orderId],
+              {
+                queryParams: { wompi_callback: true },
+              },
+            );
           }
         } else {
           // User closed widget without paying

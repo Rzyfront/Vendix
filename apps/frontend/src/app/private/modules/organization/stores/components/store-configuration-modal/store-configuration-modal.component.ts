@@ -1,8 +1,7 @@
-import {Component, inject, OnInit, OnDestroy, OnChanges, SimpleChanges, input, output, model, signal, DestroyRef} from '@angular/core';
+import {Component, inject, OnInit, OnChanges, SimpleChanges, input, output, model, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 import {
@@ -377,7 +376,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
   ],
 })
 export class StoreConfigurationModalComponent
-  implements OnInit, OnDestroy, OnChanges
+  implements OnInit, OnChanges
 {
   private destroyRef = inject(DestroyRef);
   private currencyFormatService = inject(CurrencyFormatService);
@@ -408,8 +407,6 @@ export class StoreConfigurationModalComponent
     { id: 'pos', label: 'Punto de Venta', icon: 'monitor' },
     { id: 'receipts', label: 'Recibos', icon: 'file-text' },
   ];
-
-  private destroy$$ = new Subject<void>();
 
   // Default settings for fallback
   private defaultSettings: StoreSettings = {
@@ -499,7 +496,6 @@ export class StoreConfigurationModalComponent
     this.isLoading.set(true);
     this.settings_service
       .getStoreSettings(storeId)
-      .pipe(takeUntil(this.destroy$$))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: ApiResponse<StoreSettings>) => {
           if (response.data) {
@@ -539,7 +535,6 @@ export class StoreConfigurationModalComponent
     this.isSaving.set(true);
     this.settings_service
       .saveSettingsNow(storeId, this.settings())
-      .pipe(takeUntil(this.destroy$$))
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: ApiResponse<StoreSettings>) => {
           if (response.data) {
@@ -622,7 +617,6 @@ export class StoreConfigurationModalComponent
       this.isLoading.set(true);
       this.settings_service
         .resetToDefault(storeId)
-        .pipe(takeUntil(this.destroy$$))
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: (response: ApiResponse<StoreSettings>) => {
             if (response.data) {
@@ -715,8 +709,4 @@ export class StoreConfigurationModalComponent
     this.lastSaved.set(null);
   }
 
-  ngOnDestroy(): void {
-    this.destroy$$.next();
-    this.destroy$$.complete();
-  }
 }

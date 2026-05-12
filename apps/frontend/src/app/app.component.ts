@@ -1,5 +1,6 @@
-import {Component, effect, inject, OnInit, signal, DestroyRef} from '@angular/core';
-import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { isPlatformBrowser } from '@angular/common';
+import {Component, PLATFORM_ID, effect, inject, signal} from '@angular/core';
+import {toSignal} from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
 import { RouteManagerService } from './core/services/route-manager.service';
@@ -34,8 +35,10 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
       <main>
         <router-outlet></router-outlet>
       </main>
-      <app-toast-container></app-toast-container>
-      <app-global-user-modals></app-global-user-modals>
+      @if (isBrowser) {
+        <app-toast-container></app-toast-container>
+        <app-global-user-modals></app-global-user-modals>
+      }
     }
   `,
   styles: `
@@ -44,27 +47,47 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
     }
   `,
 })
-export class AppComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
+export class AppComponent {
   private routeManager = inject(RouteManagerService);
   private configFacade = inject(ConfigFacade);
   private toastService = inject(ToastService);
+  private platformId = inject(PLATFORM_ID);
 
   is_loading = signal(true);
+  readonly isBrowser = isPlatformBrowser(this.platformId);
   config_error = toSignal(this.configFacade.error$, {
     initialValue: null as any,
   });
 
+  private readonly routesConfigured = toSignal(this.routeManager.routesConfigured$, {
+    initialValue: false,
+  });
+
   constructor() {
+    // Track whether the boot-timeout warning is still relevant. Once routes
+    // are configured (the happy path) we cancel the timeout so the spurious
+    // "Boot timeout - routes did not configure" error never logs after a
+    // successful boot.
+    let bootTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
     effect(() => {
-      if (!this.is_loading()) {
+      if (this.routesConfigured()) {
+        this.is_loading.set(false);
         this.removePrerenderGate();
+        if (bootTimeoutId !== null) {
+          clearTimeout(bootTimeoutId);
+          bootTimeoutId = null;
+        }
       }
     });
-  }
 
-  ngOnInit() {
-    this.setupRouteErrorHandling();
+    bootTimeoutId = setTimeout(() => {
+      bootTimeoutId = null;
+      // Only fire the failure path if routes actually never configured.
+      if (this.routesConfigured()) return;
+      this.is_loading.set(false);
+      console.error('[AppComponent] Boot timeout - routes did not configure');
+    }, 10000);
   }
 
   private removePrerenderGate(): void {
@@ -73,22 +96,5 @@ export class AppComponent implements OnInit {
     document.documentElement.classList.remove('vendix-prerender-hidden');
     document.getElementById('vendix-prerender-gate')?.remove();
     document.querySelector('.vendix-gate-spinner')?.remove();
-  }
-
-  private setupRouteErrorHandling(): void {
-    this.routeManager.routesConfigured$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (configured) => {
-        this.is_loading.set(!configured);
-      },
-      error: (error) => {
-        console.error('[AppComponent] Route manager error:', error);
-        this.is_loading.set(false);
-        this.toastService.error(
-          'Ocurrió un error al cargar la aplicación',
-          'Error de Inicialización',
-          10000,
-        );
-      },
-    });
   }
 }

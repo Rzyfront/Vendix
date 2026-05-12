@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { EncryptionService } from '../../../../common/services/encryption.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class DianConfigService {
@@ -13,6 +14,7 @@ export class DianConfigService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly encryption: EncryptionService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -23,12 +25,27 @@ export class DianConfigService {
     return context;
   }
 
+  private requireOrganizationId(value: number | undefined): number {
+    if (typeof value !== 'number') {
+      throw new BadRequestException('Organization context is required');
+    }
+    return value;
+  }
+
+  private requireStoreId(value: number | undefined): number {
+    if (typeof value !== 'number') {
+      throw new BadRequestException('Store context is required');
+    }
+    return value;
+  }
+
   private maskSensitiveFields(config: any) {
     return {
       ...config,
       software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted:
-        config.certificate_password_encrypted ? '****' : null,
+      certificate_password_encrypted: config.certificate_password_encrypted
+        ? '****'
+        : null,
     };
   }
 
@@ -38,10 +55,17 @@ export class DianConfigService {
    */
   async getDashboard() {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
     // Get all configs for this store
-    const configs = await this.prisma.dian_configurations.findMany({
-      where: { store_id: context.store_id },
+    const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { organization_id, store_id: null }
+          : { store_id: context.store_id },
       select: {
         id: true,
         name: true,
@@ -157,9 +181,16 @@ export class DianConfigService {
    */
   async getConfigs() {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
-    const configs = await this.prisma.dian_configurations.findMany({
-      where: { store_id: context.store_id },
+    const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { organization_id, store_id: null }
+          : { store_id: context.store_id },
       orderBy: [{ is_default: 'desc' }, { created_at: 'asc' }],
     });
 
@@ -170,8 +201,17 @@ export class DianConfigService {
    * Gets a single DIAN configuration by ID.
    */
   async getConfigById(id: number) {
-    const config = await this.prisma.dian_configurations.findFirst({
-      where: { id },
+    const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+
+    const config = await this.prisma.withoutScope().dian_configurations.findFirst({
+      where:
+        fiscalScope === 'ORGANIZATION'
+          ? { id, organization_id, store_id: null }
+          : { id, store_id: context.store_id },
     });
 
     if (!config) {
@@ -187,18 +227,37 @@ export class DianConfigService {
    */
   async create(dto: CreateDianConfigDto) {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const store_id = this.requireStoreId(context.store_id);
+
+    // Block store-level creation when fiscal_scope=ORGANIZATION: the DIAN
+    // configuration is owned at the organization level in that case and must
+    // be managed via the org wizard (OrgDianConfigService).
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
+    if (fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization. Use the organization-level wizard.',
+      );
+    }
 
     // Check if this is the first config for this store
     const existing_count = await this.prisma.dian_configurations.count({
-      where: { store_id: context.store_id },
+      where: { store_id },
     });
 
     const should_be_default = dto.is_default || existing_count === 0;
+    const accounting_entity_id = await this.resolveAccountingEntityId(
+      organization_id,
+      store_id,
+    );
 
     const config = await this.prisma.dian_configurations.create({
       data: {
-        organization_id: context.organization_id,
-        store_id: context.store_id,
+        organization_id,
+        store_id,
+        accounting_entity_id,
         name: dto.name,
         nit: dto.nit,
         nit_type: dto.nit_type || 'NIT',
@@ -217,7 +276,7 @@ export class DianConfigService {
     }
 
     this.logger.log(
-      `DIAN config "${dto.name}" created for store ${context.store_id}`,
+      `DIAN config "${dto.name}" created for store ${store_id}`,
     );
 
     return this.maskSensitiveFields(config);
@@ -234,6 +293,11 @@ export class DianConfigService {
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
+    }
 
     const update_data: any = {};
 
@@ -242,13 +306,27 @@ export class DianConfigService {
     if (dto.nit_type !== undefined) update_data.nit_type = dto.nit_type;
     if (dto.nit_dv !== undefined) update_data.nit_dv = dto.nit_dv;
     if (dto.is_default !== undefined) update_data.is_default = dto.is_default;
-    if (dto.software_id !== undefined) update_data.software_id = dto.software_id;
-    if (dto.software_pin !== undefined)
+    if (dto.software_id !== undefined)
+      update_data.software_id = dto.software_id;
+    // Skip if masked sentinel — frontend sends '****' to indicate "no change"
+    if (dto.software_pin !== undefined && dto.software_pin !== '****')
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined) update_data.environment = dto.environment;
-    if (dto.test_set_id !== undefined) update_data.test_set_id = dto.test_set_id;
+    if (dto.environment !== undefined)
+      update_data.environment = dto.environment;
+    if (dto.test_set_id !== undefined)
+      update_data.test_set_id = dto.test_set_id;
+    if (
+      dto.nit !== undefined ||
+      dto.nit_type !== undefined ||
+      dto.nit_dv !== undefined
+    ) {
+      update_data.accounting_entity_id = await this.resolveAccountingEntityId(
+        config.organization_id,
+        config.store_id,
+      );
+    }
 
     const updated = await this.prisma.dian_configurations.update({
       where: { id },
@@ -262,6 +340,17 @@ export class DianConfigService {
     this.logger.log(`DIAN config ${id} updated`);
 
     return this.maskSensitiveFields(updated);
+  }
+
+  private async resolveAccountingEntityId(
+    organization_id: number,
+    store_id: number,
+  ): Promise<number> {
+    const entity = await this.fiscalScope.resolveAccountingEntityForFiscal({
+      organization_id,
+      store_id,
+    });
+    return entity.id;
   }
 
   /**
@@ -279,6 +368,11 @@ export class DianConfigService {
 
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
     }
 
     const updated = await this.prisma.dian_configurations.update({
@@ -337,6 +431,11 @@ export class DianConfigService {
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
+    }
 
     await this.prisma.dian_configurations.update({
       where: { id },
@@ -363,6 +462,11 @@ export class DianConfigService {
 
     if (!config) {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
+    }
+    if (config.store_id === null) {
+      throw new BadRequestException(
+        'DIAN configuration is managed at organization level for this organization.',
+      );
     }
 
     await this.prisma.dian_configurations.delete({
@@ -393,14 +497,21 @@ export class DianConfigService {
    */
   async getAuditLogs(page = 1, limit = 20, config_id?: number) {
     const context = this.getContext();
+    const organization_id = this.requireOrganizationId(context.organization_id);
+    const fiscalScope = await this.fiscalScope.requireFiscalScope(
+      organization_id,
+    );
 
     let where_clause: any;
 
     if (config_id) {
       where_clause = { dian_configuration_id: config_id };
     } else {
-      const configs = await this.prisma.dian_configurations.findMany({
-        where: { store_id: context.store_id },
+      const configs = await this.prisma.withoutScope().dian_configurations.findMany({
+        where:
+          fiscalScope === 'ORGANIZATION'
+            ? { organization_id, store_id: null }
+            : { store_id: context.store_id },
         select: { id: true },
       });
 

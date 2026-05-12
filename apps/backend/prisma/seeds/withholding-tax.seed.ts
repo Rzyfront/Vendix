@@ -5,9 +5,8 @@ import { getPrismaClient } from './shared/client';
  * Withholding Tax (Retención en la Fuente) Seed
  *
  * Seeds UVT values and default withholding concepts for Colombian tax compliance.
- * Uses upsert for idempotency based on unique constraints:
- * - uvt_values: [organization_id, year]
- * - withholding_concepts: [organization_id, code]
+ * Keeps legacy organization defaults with accounting_entity_id=null.
+ * Entity-specific records are managed at runtime by fiscal scope services.
  */
 export async function seedWithholdingTax(
   prisma?: PrismaClient,
@@ -23,22 +22,30 @@ export async function seedWithholdingTax(
   ];
 
   for (const uvt of uvt_values) {
-    await client.uvt_values.upsert({
+    const existing = await client.uvt_values.findFirst({
       where: {
-        organization_id_year: {
-          organization_id,
-          year: uvt.year,
-        },
-      },
-      update: {
-        value_cop: uvt.value_cop,
-      },
-      create: {
         organization_id,
+        accounting_entity_id: null,
         year: uvt.year,
-        value_cop: uvt.value_cop,
       },
+      select: { id: true },
     });
+
+    if (existing) {
+      await client.uvt_values.update({
+        where: { id: existing.id },
+        data: { value_cop: uvt.value_cop },
+      });
+    } else {
+      await client.uvt_values.create({
+        data: {
+          organization_id,
+          accounting_entity_id: null,
+          year: uvt.year,
+          value_cop: uvt.value_cop,
+        },
+      });
+    }
     console.log(`  ✅ UVT ${uvt.year}: $${uvt.value_cop.toLocaleString('es-CO')}`);
   }
 
@@ -103,32 +110,40 @@ export async function seedWithholdingTax(
   ];
 
   for (const concept of concepts) {
-    await client.withholding_concepts.upsert({
+    const existing = await client.withholding_concepts.findFirst({
       where: {
-        organization_id_code: {
-          organization_id,
-          code: concept.code,
-        },
-      },
-      update: {
-        name: concept.name,
-        rate: concept.rate,
-        min_uvt_threshold: concept.min_uvt_threshold,
-        applies_to: concept.applies_to,
-        supplier_type_filter: concept.supplier_type_filter,
-        is_active: true,
-      },
-      create: {
         organization_id,
+        accounting_entity_id: null,
         code: concept.code,
-        name: concept.name,
-        rate: concept.rate,
-        min_uvt_threshold: concept.min_uvt_threshold,
-        applies_to: concept.applies_to,
-        supplier_type_filter: concept.supplier_type_filter,
-        is_active: true,
       },
+      select: { id: true },
     });
+
+    const data = {
+      name: concept.name,
+      rate: concept.rate,
+      min_uvt_threshold: concept.min_uvt_threshold,
+      applies_to: concept.applies_to,
+      supplier_type_filter: concept.supplier_type_filter,
+      is_active: true,
+    };
+
+    if (existing) {
+      await client.withholding_concepts.update({
+        where: { id: existing.id },
+        data,
+      });
+    } else {
+      await client.withholding_concepts.create({
+        data: {
+          organization_id,
+          accounting_entity_id: null,
+          code: concept.code,
+          ...data,
+        },
+      });
+    }
+
     console.log(`  ✅ Concept ${concept.code}: ${concept.name} (${concept.rate * 100}%)`);
   }
 

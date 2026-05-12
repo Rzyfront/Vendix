@@ -10,10 +10,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  ticket_priority_enum,
-  ticket_category_enum,
-} from '@prisma/client';
+import { ticket_priority_enum, ticket_category_enum } from '@prisma/client';
 
 export class TicketAttachmentDto {
   @ApiProperty({ description: 'Base64 encoded image' })

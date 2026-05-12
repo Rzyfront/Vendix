@@ -2,7 +2,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
-import { CreateTemplateDto, CreateTemplateSectionDto } from './dto/create-template.dto';
+import {
+  CreateTemplateDto,
+  CreateTemplateSectionDto,
+} from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
 
 @Injectable()
@@ -53,7 +56,9 @@ export class TemplatesService {
       where: { tab_id: null, parent_section_id: null },
       orderBy: { sort_order: 'asc' as const },
     },
-    products: { include: { product: { select: { id: true, name: true, slug: true } } } },
+    products: {
+      include: { product: { select: { id: true, name: true, slug: true } } },
+    },
   };
 
   constructor(
@@ -102,15 +107,21 @@ export class TemplatesService {
   }
 
   async updateTemplate(templateId: number, dto: UpdateTemplateDto) {
-    const existing = await this.prisma.data_collection_templates.findUnique({ where: { id: templateId } });
+    const existing = await this.prisma.data_collection_templates.findUnique({
+      where: { id: templateId },
+    });
     if (!existing) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
 
     // If tabs or sections are provided, delete existing structure and recreate
     if (dto.tabs !== undefined || dto.sections !== undefined) {
       // Delete tabs (cascades to tab-linked sections → items)
-      await this.prisma.data_collection_tabs.deleteMany({ where: { template_id: templateId } });
+      await this.prisma.data_collection_tabs.deleteMany({
+        where: { template_id: templateId },
+      });
       // Delete remaining standalone sections (no tab)
-      await this.prisma.data_collection_sections.deleteMany({ where: { template_id: templateId } });
+      await this.prisma.data_collection_sections.deleteMany({
+        where: { template_id: templateId },
+      });
     }
 
     await this.prisma.data_collection_templates.update({
@@ -174,17 +185,19 @@ export class TemplatesService {
   }
 
   async getTemplateForProduct(productId: number) {
-    const productTemplate = await this.prisma.data_collection_template_products.findFirst({
-      where: { product_id: productId },
-      include: { template: { include: this.TEMPLATE_INCLUDE } },
-    });
+    const productTemplate =
+      await this.prisma.data_collection_template_products.findFirst({
+        where: { product_id: productId },
+        include: { template: { include: this.TEMPLATE_INCLUDE } },
+      });
 
     if (productTemplate) return productTemplate.template;
 
-    const defaultTemplate = await this.prisma.data_collection_templates.findFirst({
-      where: { is_default: true, status: 'active' },
-      include: this.TEMPLATE_INCLUDE,
-    });
+    const defaultTemplate =
+      await this.prisma.data_collection_templates.findFirst({
+        where: { is_default: true, status: 'active' },
+        include: this.TEMPLATE_INCLUDE,
+      });
 
     return defaultTemplate;
   }
@@ -195,20 +208,26 @@ export class TemplatesService {
     return this.createTemplate({
       name: `${source.name} (copia)`,
       description: source.description,
-      icon: (source as any).icon,
+      icon: source.icon,
       entity_type: source.entity_type,
-      tabs: (source as any).tabs?.map((t: any, tIdx: number) => ({
+      tabs: source.tabs?.map((t: any, tIdx: number) => ({
         title: t.title,
         icon: t.icon,
         sort_order: t.sort_order ?? tIdx,
-        sections: t.sections?.map((s: any, sIdx: number) => this.mapSectionForDuplicate(s, sIdx)),
+        sections: t.sections?.map((s: any, sIdx: number) =>
+          this.mapSectionForDuplicate(s, sIdx),
+        ),
       })),
-      sections: source.sections.map((s: any, sIdx: number) => this.mapSectionForDuplicate(s, sIdx)),
+      sections: source.sections.map((s: any, sIdx: number) =>
+        this.mapSectionForDuplicate(s, sIdx),
+      ),
     });
   }
 
   async assignProducts(templateId: number, productIds: number[]) {
-    const existing = await this.prisma.data_collection_templates.findUnique({ where: { id: templateId } });
+    const existing = await this.prisma.data_collection_templates.findUnique({
+      where: { id: templateId },
+    });
     if (!existing) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
 
     await this.prisma.data_collection_template_products.deleteMany({
@@ -217,7 +236,7 @@ export class TemplatesService {
 
     if (productIds.length > 0) {
       await this.prisma.data_collection_template_products.createMany({
-        data: productIds.map(productId => ({
+        data: productIds.map((productId) => ({
           template_id: templateId,
           product_id: productId,
         })),
@@ -228,13 +247,17 @@ export class TemplatesService {
   }
 
   async deleteTemplate(templateId: number) {
-    const existing = await this.prisma.data_collection_templates.findUnique({ where: { id: templateId } });
+    const existing = await this.prisma.data_collection_templates.findUnique({
+      where: { id: templateId },
+    });
     if (!existing) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
 
     // Check if template is in use by any submission
-    const submissionCount = await this.prisma.data_collection_submissions.count({
-      where: { template_id: templateId },
-    });
+    const submissionCount = await this.prisma.data_collection_submissions.count(
+      {
+        where: { template_id: templateId },
+      },
+    );
     if (submissionCount > 0) {
       throw new VendixHttpException(ErrorCodes.DCOL_DELETE_001);
     }
@@ -302,17 +325,18 @@ export class TemplatesService {
       if (sectionDto.child_sections?.length) {
         for (let cIdx = 0; cIdx < sectionDto.child_sections.length; cIdx++) {
           const childDto = sectionDto.child_sections[cIdx];
-          const childSection = await this.prisma.data_collection_sections.create({
-            data: {
-              template_id: templateId,
-              tab_id: tabId,
-              parent_section_id: section.id,
-              title: childDto.title,
-              description: childDto.description,
-              icon: childDto.icon,
-              sort_order: childDto.sort_order ?? cIdx,
-            },
-          });
+          const childSection =
+            await this.prisma.data_collection_sections.create({
+              data: {
+                template_id: templateId,
+                tab_id: tabId,
+                parent_section_id: section.id,
+                title: childDto.title,
+                description: childDto.description,
+                icon: childDto.icon,
+                sort_order: childDto.sort_order ?? cIdx,
+              },
+            });
 
           if (childDto.items?.length) {
             await this.prisma.data_collection_items.createMany({
@@ -326,7 +350,7 @@ export class TemplatesService {
                 placeholder: item.placeholder,
                 validation_rules: item.validation_rules ?? undefined,
                 width: item.width,
-            icon: item.icon,
+                icon: item.icon,
               })),
             });
           }
@@ -366,7 +390,7 @@ export class TemplatesService {
           placeholder: i.placeholder,
           validation_rules: i.validation_rules,
           width: i.width,
-        icon: i.icon,
+          icon: i.icon,
         })),
       })),
     };

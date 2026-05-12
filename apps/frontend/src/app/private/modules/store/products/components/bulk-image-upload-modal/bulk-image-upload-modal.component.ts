@@ -1,4 +1,4 @@
-import {Component, inject, input, output, effect, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, effect, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
@@ -32,7 +32,7 @@ import {
       subtitle="Asigna imágenes a múltiples productos usando un archivo ZIP"
     >
       <!-- INTRO SCREEN (before wizard) -->
-      @if (showingIntro) {
+      @if (showingIntro()) {
         <div class="space-y-3">
           <!-- Header -->
           <div class="text-center">
@@ -89,7 +89,7 @@ import {
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
-                [checked]="dontShowIntroAgain"
+                [checked]="dontShowIntroAgain()"
                 (change)="toggleDontShowAgain()"
                 class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
               />
@@ -99,28 +99,28 @@ import {
               <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   class="h-full bg-primary rounded-full transition-all duration-100"
-                  [style.width.%]="introProgress"
+                  [style.width.%]="introProgress()"
                 ></div>
               </div>
-              <span class="text-[10px] text-gray-400">{{ introCountdown }}s</span>
+              <span class="text-[10px] text-gray-400">{{ introCountdown() }}s</span>
             </div>
           </div>
         </div>
       }
 
       <!-- WIZARD (after intro) -->
-      @if (!showingIntro) {
+      @if (!showingIntro()) {
         <!-- Steps Line -->
         <div class="mb-4">
           <app-steps-line
             [steps]="steps"
-            [currentStep]="currentStep"
+            [currentStep]="currentStep()"
             size="sm"
           ></app-steps-line>
         </div>
 
         <!-- STEP 0: Preparar -->
-        @if (currentStep === 0) {
+        @if (currentStep() === 0) {
           <div class="space-y-3">
             <!-- Compact hint -->
             <div class="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex items-start gap-2">
@@ -180,8 +180,8 @@ import {
                 (dragleave)="onDragLeave($event)"
                 (drop)="onDrop($event)"
                 (click)="fileInput.click()"
-                [class.border-blue-500]="isDragging"
-                [class.bg-blue-50]="isDragging"
+                [class.border-blue-500]="isDragging()"
+                [class.bg-blue-50]="isDragging()"
               >
                 <input
                   #fileInput
@@ -191,66 +191,66 @@ import {
                   (change)="onFileSelected($event)"
                 />
 
-                @if (!selectedFile) {
+                @if (selectedFile(); as file) {
+                  <app-icon name="file" [size]="36" class="mx-auto text-blue-500 mb-2"></app-icon>
+                  <p class="text-sm text-gray-900 font-medium">{{ file.name }}</p>
+                  <p class="text-xs text-gray-500 mt-0.5">{{ formatFileSize(file.size) }}</p>
+                } @else {
                   <app-icon
                     name="upload-cloud"
                     [size]="36"
                     class="mx-auto text-gray-400 mb-2"
-                    [class.text-blue-500]="isDragging"
+                    [class.text-blue-500]="isDragging()"
                   ></app-icon>
                   <p class="text-sm text-gray-900 font-medium">Arrastra tu archivo .zip aquí</p>
                   <p class="text-xs text-gray-500 mt-0.5">o haz clic para seleccionar · Máximo 100 MB</p>
-                }
-
-                @if (selectedFile) {
-                  <app-icon name="file" [size]="36" class="mx-auto text-blue-500 mb-2"></app-icon>
-                  <p class="text-sm text-gray-900 font-medium">{{ selectedFile.name }}</p>
-                  <p class="text-xs text-gray-500 mt-0.5">{{ formatFileSize(selectedFile.size) }}</p>
                 }
               </div>
             </div>
 
             <!-- Upload Error -->
-            @if (uploadError) {
+            @if (uploadError()) {
               <div class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2">
                 <app-icon name="alert-circle" [size]="14" class="shrink-0 mt-0.5"></app-icon>
-                <p>{{ uploadError }}</p>
+                <p>{{ uploadError() }}</p>
               </div>
             }
           </div>
         }
 
       <!-- STEP 1: Revisar -->
-      @if (currentStep === 1) {
+      @if (currentStep() === 1) {
         <div class="space-y-3">
           <!-- Loading state -->
-          @if (isAnalyzing) {
-            <div class="py-8 text-center">
-              <app-icon name="loader" [size]="36" class="text-primary mb-3 animate-spin"></app-icon>
-              <p class="text-sm text-gray-900 font-medium">Analizando archivo ZIP...</p>
-              <p class="text-xs text-gray-500 mt-1">Verificando SKUs y formatos de imagen</p>
+          @if (isAnalyzing()) {
+            <div class="flex flex-col items-center justify-center py-8 gap-3">
+              <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
+              <div class="text-center">
+                <p class="text-sm text-gray-900 font-medium">Analizando archivo ZIP...</p>
+                <p class="text-xs text-gray-500 mt-1">Verificando SKUs y formatos de imagen</p>
+              </div>
             </div>
           }
 
           <!-- Analysis results -->
-          @if (analysisResult && !isAnalyzing) {
+          @if (analysisResult() && !isAnalyzing()) {
             <!-- Summary stats cards -->
             <div class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible">
               <div class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0">
                 <div class="text-[10px] text-blue-600 font-medium">Total SKUs</div>
-                <div class="text-xl font-bold text-blue-700">{{ analysisResult!.total_skus }}</div>
+                <div class="text-xl font-bold text-blue-700">{{ analysisResult()!.total_skus }}</div>
               </div>
               <div class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0">
                 <div class="text-[10px] text-green-600 font-medium">Listos</div>
-                <div class="text-xl font-bold text-green-700">{{ analysisResult!.ready }}</div>
+                <div class="text-xl font-bold text-green-700">{{ analysisResult()!.ready }}</div>
               </div>
               <div class="min-w-[100px] bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 shrink-0">
                 <div class="text-[10px] text-amber-600 font-medium">Advertencias</div>
-                <div class="text-xl font-bold text-amber-700">{{ analysisResult!.with_warnings }}</div>
+                <div class="text-xl font-bold text-amber-700">{{ analysisResult()!.with_warnings }}</div>
               </div>
               <div class="min-w-[100px] bg-red-50 px-3 py-2 rounded-lg border border-red-100 shrink-0">
                 <div class="text-[10px] text-red-600 font-medium">Errores</div>
-                <div class="text-xl font-bold text-red-700">{{ analysisResult!.with_errors }}</div>
+                <div class="text-xl font-bold text-red-700">{{ analysisResult()!.with_errors }}</div>
               </div>
             </div>
 
@@ -269,7 +269,7 @@ import {
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-gray-200">
-                    @for (sku of analysisResult!.skus; track sku.sku) {
+                    @for (sku of analysisResult()!.skus; track sku.sku) {
                       <tr>
                         <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900">{{ sku.sku }}</td>
                         <td class="px-4 py-2 text-sm text-gray-600 max-w-[200px] truncate">
@@ -316,7 +316,7 @@ import {
 
             <!-- Mobile cards -->
             <div class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto">
-              @for (sku of analysisResult!.skus; track sku.sku) {
+              @for (sku of analysisResult()!.skus; track sku.sku) {
                 <div class="border rounded-lg p-3 bg-white">
                   <div class="flex items-center justify-between mb-2">
                     <span class="font-mono text-sm font-medium text-gray-900">{{ sku.sku }}</span>
@@ -355,45 +355,48 @@ import {
       }
 
       <!-- STEP 2: Resultados -->
-      @if (currentStep === 2) {
+      @if (currentStep() === 2) {
         <div class="space-y-3">
           <!-- Loading state -->
-          @if (isUploading) {
-            <div class="py-8 text-center">
-              <app-icon name="loader" [size]="36" class="text-primary mb-3 animate-spin"></app-icon>
-              <p class="text-sm text-gray-900 font-medium">Subiendo imágenes...</p>
-              <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos momentos</p>
+          @if (isUploading()) {
+            <div class="flex flex-col items-center justify-center py-8 gap-3">
+              <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
+              <div class="text-center">
+                <p class="text-sm text-gray-900 font-medium">Subiendo imágenes...</p>
+                <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos momentos</p>
+              </div>
             </div>
           }
 
           <!-- Upload Error -->
-          @if (uploadError && !isUploading) {
+          @if (uploadError() && !isUploading()) {
             <div class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2">
               <app-icon name="alert-circle" [size]="14" class="shrink-0 mt-0.5"></app-icon>
-              <p>{{ uploadError }}</p>
+              <p>{{ uploadError() }}</p>
             </div>
           }
 
           <!-- Results -->
-          @if (uploadResults && !isUploading) {
+          @if (uploadResults(); as upload) {
+            @if (!isUploading()) {
             <!-- Summary -->
             <div class="bg-white border rounded-lg overflow-hidden">
               <div class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
                 <h4 class="text-sm font-medium text-gray-900">Resumen de Carga</h4>
-                <span class="text-xs text-gray-500">{{ uploadResults.total_skus_processed || 0 }} SKUs</span>
+                <span class="text-xs text-gray-500">{{ upload.total_skus_processed || 0 }} SKUs</span>
               </div>
               <div class="p-3 grid grid-cols-3 gap-2">
                 <div class="bg-green-50 px-3 py-2 rounded border border-green-100">
                   <div class="text-[10px] text-green-600 font-medium">Exitosos</div>
-                  <div class="text-xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
+                  <div class="text-xl font-bold text-green-700">{{ upload.successful || 0 }}</div>
                 </div>
                 <div class="bg-red-50 px-3 py-2 rounded border border-red-100">
                   <div class="text-[10px] text-red-600 font-medium">Fallidos</div>
-                  <div class="text-xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
+                  <div class="text-xl font-bold text-red-700">{{ upload.failed || 0 }}</div>
                 </div>
                 <div class="bg-amber-50 px-3 py-2 rounded border border-amber-100">
                   <div class="text-[10px] text-amber-600 font-medium">Omitidos</div>
-                  <div class="text-xl font-bold text-amber-700">{{ uploadResults.skipped || 0 }}</div>
+                  <div class="text-xl font-bold text-amber-700">{{ upload.skipped || 0 }}</div>
                 </div>
               </div>
             </div>
@@ -414,7 +417,7 @@ import {
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-gray-200">
-                    @for (result of uploadResults.results; track result.sku) {
+                    @for (result of upload.results; track result.sku) {
                       <tr>
                         <td class="px-4 py-2 whitespace-nowrap text-sm font-mono font-medium text-gray-900">
                           {{ result.sku }}
@@ -440,6 +443,7 @@ import {
                 </table>
               </div>
             </div>
+            }
           }
         </div>
       }
@@ -448,7 +452,7 @@ import {
 
       <!-- Footer -->
       <div slot="footer" class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4">
-        @if (showingIntro) {
+        @if (showingIntro()) {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           <app-button variant="primary" (clicked)="skipIntro()">
             Continuar
@@ -456,28 +460,28 @@ import {
           </app-button>
         }
         <!-- Step 0 -->
-        @if (!showingIntro && currentStep === 0) {
+        @if (!showingIntro() && currentStep() === 0) {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
-          @if (selectedFile) {
-            <app-button variant="primary" (clicked)="analyzeFile()" [disabled]="isAnalyzing">
+          @if (selectedFile()) {
+            <app-button variant="primary" (clicked)="analyzeFile()" [disabled]="isAnalyzing()">
               <app-icon name="search" [size]="16" slot="icon"></app-icon>
               Analizar Archivo
             </app-button>
           }
         }
         <!-- Step 1 -->
-        @if (!showingIntro && currentStep === 1 && !isAnalyzing) {
+        @if (!showingIntro() && currentStep() === 1 && !isAnalyzing()) {
           <app-button variant="outline" (clicked)="goBack()">Atrás</app-button>
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
-          @if (analysisResult && canProceed) {
+          @if (analysisResult() && canProceed()) {
             <app-button variant="primary" (clicked)="proceedWithUpload()">
               <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-              Proceder con Carga ({{ totalImagesToUpload }} imágenes)
+              Proceder con Carga ({{ totalImagesToUpload() }} imágenes)
             </app-button>
           }
         }
         <!-- Step 2 -->
-        @if (!showingIntro && currentStep === 2 && !isUploading) {
+        @if (!showingIntro() && currentStep() === 2 && !isUploading()) {
           <app-button variant="outline" (clicked)="onCancel()">Cerrar</app-button>
         }
       </div>
@@ -502,36 +506,36 @@ export class BulkImageUploadModalComponent {
   private static readonly INTRO_TICK = 100; // progress bar tick interval
 
   // Intro state
-  showingIntro = false;
-  dontShowIntroAgain = false;
-  introProgress = 0;
-  introCountdown = 20;
+  readonly showingIntro = signal(false);
+  readonly dontShowIntroAgain = signal(false);
+  readonly introProgress = signal(0);
+  readonly introCountdown = signal(20);
   private introTimerId: ReturnType<typeof setInterval> | null = null;
   private introElapsed = 0;
 
   // Wizard state
-  steps: StepsLineItem[] = [
+  readonly steps: StepsLineItem[] = [
     { label: 'Preparar' },
     { label: 'Revisar' },
     { label: 'Resultados' },
   ];
-  currentStep = 0;
+  readonly currentStep = signal(0);
 
   // File state
-  selectedFile: File | null = null;
-  isDragging = false;
+  readonly selectedFile = signal<File | null>(null);
+  readonly isDragging = signal(false);
 
   // Analysis state
-  isAnalyzing = false;
-  analysisResult: BulkImageAnalysisResult | null = null;
-  sessionId: string | null = null;
+  readonly isAnalyzing = signal(false);
+  readonly analysisResult = signal<BulkImageAnalysisResult | null>(null);
+  private sessionId: string | null = null;
 
   // Upload state
-  isUploading = false;
-  uploadResults: BulkImageUploadResult | null = null;
+  readonly isUploading = signal(false);
+  readonly uploadResults = signal<BulkImageUploadResult | null>(null);
 
   // Error state
-  uploadError: string | null = null;
+  readonly uploadError = signal<string | null>(null);
 
   // Supported formats for display
   supportedFormats = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.tiff', '.heic', '.heif', '.avif', '.svg'];
@@ -551,29 +555,31 @@ export class BulkImageUploadModalComponent {
   }
 
   // Computed properties
-  get canProceed(): boolean {
-    if (!this.analysisResult) return false;
-    return this.analysisResult.ready > 0 || this.analysisResult.with_warnings > 0;
-  }
+  readonly canProceed = computed(() => {
+    const result = this.analysisResult();
+    if (!result) return false;
+    return result.ready > 0 || result.with_warnings > 0;
+  });
 
-  get totalImagesToUpload(): number {
-    if (!this.analysisResult) return 0;
-    return this.analysisResult.skus
+  readonly totalImagesToUpload = computed(() => {
+    const result = this.analysisResult();
+    if (!result) return 0;
+    return result.skus
       .filter(s => s.status !== 'error')
       .reduce((sum, s) => sum + s.images_to_upload, 0);
-  }
+  });
 
   // Intro logic
   private onModalOpen() {
     const dismissed = localStorage.getItem(BulkImageUploadModalComponent.INTRO_CACHE_KEY);
     if (dismissed === 'true') {
-      this.showingIntro = false;
+      this.showingIntro.set(false);
       return;
     }
-    this.showingIntro = true;
+    this.showingIntro.set(true);
     this.introElapsed = 0;
-    this.introProgress = 0;
-    this.introCountdown = Math.ceil(BulkImageUploadModalComponent.INTRO_DURATION / 1000);
+    this.introProgress.set(0);
+    this.introCountdown.set(Math.ceil(BulkImageUploadModalComponent.INTRO_DURATION / 1000));
     this.startIntroTimer();
   }
 
@@ -581,8 +587,12 @@ export class BulkImageUploadModalComponent {
     this.clearIntroTimer();
     this.introTimerId = setInterval(() => {
       this.introElapsed += BulkImageUploadModalComponent.INTRO_TICK;
-      this.introProgress = Math.min(100, (this.introElapsed / BulkImageUploadModalComponent.INTRO_DURATION) * 100);
-      this.introCountdown = Math.max(0, Math.ceil((BulkImageUploadModalComponent.INTRO_DURATION - this.introElapsed) / 1000));
+      this.introProgress.set(
+        Math.min(100, (this.introElapsed / BulkImageUploadModalComponent.INTRO_DURATION) * 100),
+      );
+      this.introCountdown.set(
+        Math.max(0, Math.ceil((BulkImageUploadModalComponent.INTRO_DURATION - this.introElapsed) / 1000)),
+      );
 
       if (this.introElapsed >= BulkImageUploadModalComponent.INTRO_DURATION) {
         this.skipIntro();
@@ -599,26 +609,24 @@ export class BulkImageUploadModalComponent {
 
   skipIntro() {
     this.clearIntroTimer();
-    if (this.dontShowIntroAgain) {
+    if (this.dontShowIntroAgain()) {
       localStorage.setItem(BulkImageUploadModalComponent.INTRO_CACHE_KEY, 'true');
     }
-    this.showingIntro = false;
+    this.showingIntro.set(false);
   }
 
   toggleDontShowAgain() {
-    this.dontShowIntroAgain = !this.dontShowIntroAgain;
+    this.dontShowIntroAgain.update(v => !v);
   }
 
   // Navigation
   goBack() {
-    if (this.currentStep > 0) {
-      this.currentStep--;
-    }
+    this.currentStep.update(step => (step > 0 ? step - 1 : step));
   }
 
   // Cancel/Close
   onCancel() {
-    if ((this.uploadResults?.successful ?? 0) > 0) {
+    if ((this.uploadResults()?.successful ?? 0) > 0) {
       this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);
@@ -627,18 +635,18 @@ export class BulkImageUploadModalComponent {
 
   resetState() {
     this.clearIntroTimer();
-    this.showingIntro = false;
-    this.introProgress = 0;
+    this.showingIntro.set(false);
+    this.introProgress.set(0);
     this.introElapsed = 0;
-    this.currentStep = 0;
-    this.selectedFile = null;
-    this.isDragging = false;
-    this.isAnalyzing = false;
-    this.analysisResult = null;
+    this.currentStep.set(0);
+    this.selectedFile.set(null);
+    this.isDragging.set(false);
+    this.isAnalyzing.set(false);
+    this.analysisResult.set(null);
     this.sessionId = null;
-    this.isUploading = false;
-    this.uploadResults = null;
-    this.uploadError = null;
+    this.isUploading.set(false);
+    this.uploadResults.set(null);
+    this.uploadError.set(null);
   }
 
   // Step 0: File operations
@@ -664,19 +672,19 @@ export class BulkImageUploadModalComponent {
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = true;
+    this.isDragging.set(true);
   }
 
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
   }
 
   onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
 
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
@@ -703,22 +711,23 @@ export class BulkImageUploadModalComponent {
       return;
     }
 
-    this.selectedFile = file;
-    this.uploadError = null;
+    this.selectedFile.set(file);
+    this.uploadError.set(null);
   }
 
   // Step 0 -> 1: Analyze
   analyzeFile() {
-    if (!this.selectedFile) return;
+    const file = this.selectedFile();
+    if (!file) return;
 
-    this.isAnalyzing = true;
-    this.uploadError = null;
-    this.currentStep = 1;
+    this.isAnalyzing.set(true);
+    this.uploadError.set(null);
+    this.currentStep.set(1);
 
-    this.productsService.analyzeBulkImages(this.selectedFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.productsService.analyzeBulkImages(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        this.isAnalyzing = false;
-        this.analysisResult = result;
+        this.isAnalyzing.set(false);
+        this.analysisResult.set(result);
         this.sessionId = result.session_id;
 
         if (result.with_errors > 0) {
@@ -726,9 +735,11 @@ export class BulkImageUploadModalComponent {
         }
       },
       error: (error) => {
-        this.isAnalyzing = false;
-        this.currentStep = 0;
-        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error al analizar el archivo';
+        this.isAnalyzing.set(false);
+        this.currentStep.set(0);
+        this.uploadError.set(
+          typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error al analizar el archivo',
+        );
         this.toastService.error('Error al analizar el archivo ZIP');
       },
     });
@@ -738,13 +749,13 @@ export class BulkImageUploadModalComponent {
   proceedWithUpload() {
     if (!this.sessionId) return;
 
-    this.isUploading = true;
-    this.currentStep = 2;
+    this.isUploading.set(true);
+    this.currentStep.set(2);
 
     this.productsService.uploadBulkImagesFromSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        this.isUploading = false;
-        this.uploadResults = result;
+        this.isUploading.set(false);
+        this.uploadResults.set(result);
 
         if (result.failed > 0 || result.skipped > 0) {
           this.toastService.warning('La carga se completó con algunos errores u omisiones.');
@@ -753,8 +764,10 @@ export class BulkImageUploadModalComponent {
         }
       },
       error: (error) => {
-        this.isUploading = false;
-        this.uploadError = typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error en la carga';
+        this.isUploading.set(false);
+        this.uploadError.set(
+          typeof error === 'string' ? error : error?.error?.message || error?.message || 'Error en la carga',
+        );
         this.toastService.error('Error en la carga masiva de imágenes');
       },
     });

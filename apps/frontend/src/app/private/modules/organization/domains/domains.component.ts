@@ -18,9 +18,11 @@ import {
   DomainOwnership,
   CreateDomainDto,
   UpdateDomainDto,
-  VerifyDomainResult} from './interfaces/domain.interface';
+  VerifyDomainResult,
+  DnsInstructions} from './interfaces/domain.interface';
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
+import { environment } from '../../../../../environments/environment';
 
 import {
   DomainCreateModalComponent,
@@ -30,16 +32,17 @@ import {
 
 import {
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
   ToastService,
   TableColumn,
   TableAction,
   StatsComponent,
-  SelectorOption,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-  EmptyStateComponent} from '../../../../shared/components/index';
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
+  CardComponent} from '../../../../shared/components/index';
 
 interface StatItem {
   title: string;
@@ -63,20 +66,21 @@ interface StoreOption {
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
-    EmptyStateComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
     DomainDeleteConfirmationComponent,
     DomainVerifyModalComponent,
     InputsearchComponent,
-    IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
+    CardComponent,
   ],
   template: `
-    <div class="space-y-6">
+    <div class="w-full overflow-x-hidden">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         @for (item of statsItems(); track item) {
           <app-stats
             [title]="item.title"
@@ -91,137 +95,72 @@ interface StoreOption {
       </div>
 
       <!-- Domains List -->
-      <div class="bg-surface rounded-card shadow-card border border-border">
-        <div class="px-6 py-4 border-b border-border">
+      <app-card [responsive]="true" [padding]="false">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
           <div
-            class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <div class="flex-1 min-w-0">
-              <h2 class="text-lg font-semibold text-text-primary">
-                Todos los dominios ({{ domains().length }})
-              </h2>
-            </div>
-
-            <div
-              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
-              <!-- Search Input -->
+              Dominios
+              <span class="text-text-secondary font-normal">
+                ({{ domains().length }})
+              </span>
+            </h2>
+
+            <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
-                class="w-full sm:w-64"
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 size="sm"
                 placeholder="Buscar dominios..."
-                [debounceTime]="1000"
-                (searchChange)="onSearchChange($event)"
+                [ngModel]="searchTerm()"
+                [debounceTime]="300"
+                (search)="onSearchChange($event)"
               ></app-inputsearch>
 
-              <!-- Status Filter -->
-              <select
-                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-                (change)="onStatusChange($event)"
-                [value]="selectedStatus()"
-              >
-                <option value="">Todos los Estados</option>
-                <option value="active">Activo</option>
-                <option value="pending_dns">Pendiente DNS</option>
-                <option value="pending_ssl">Pendiente SSL</option>
-                <option value="disabled">Deshabilitado</option>
-              </select>
-
-              <!-- Ownership Filter -->
-              <select
-                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-                (change)="onOwnershipChange($event)"
-                [value]="selectedOwnership()"
-              >
-                <option value="">Todos los Tipos</option>
-                <option value="vendix_subdomain">Subdominio Vendix</option>
-                <option value="custom_domain">Dominio Personalizado</option>
-                <option value="custom_subdomain">
-                  Subdominio Personalizado
-                </option>
-              </select>
-
-              <!-- Store Filter -->
-              <select
-                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-                (change)="onStoreChange($event)"
-                [value]="selectedStoreId()"
-              >
-                <option value="">Todas las Tiendas</option>
-                @for (store of stores(); track store) {
-                  <option [value]="store.id">
-                    {{ store.name }}
-                  </option>
-                }
-              </select>
-
-              <div class="flex gap-2 items-center">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="refreshDomains()"
-                  [disabled]="isLoading()"
-                  title="Actualizar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateModal()"
-                  title="Nuevo Dominio"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Dominio</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs()"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="isLoading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onDropdownAction($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
 
-        <!-- Loading State -->
-        @if (isLoading()) {
-          <div class="p-8 text-center">
-            <div
-              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-            <p class="mt-2 text-text-secondary">Cargando dominios...</p>
-          </div>
-        }
-
-        <!-- Empty State -->
-        @if (!isLoading() && domains().length === 0) {
-          <app-empty-state
-            icon="globe"
-            [title]="getEmptyStateTitle()"
-            [description]="getEmptyStateDescription()"
-            actionButtonText="Crear Dominio"
-            [showRefreshButton]="hasFilters()"
-            [showClearFilters]="hasFilters()"
-            (actionClick)="openCreateModal()"
-            (refreshClick)="refreshDomains()"
-            (clearFiltersClick)="clearFilters()"
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="domains()"
+            [columns]="tableColumns"
+            [cardConfig]="cardConfig"
+            [actions]="tableActions"
+            [loading]="isLoading()"
+            [sortable]="true"
+            actionsDisplay="dropdown"
+            [emptyTitle]="getEmptyStateTitle()"
+            [emptyDescription]="getEmptyStateDescription()"
+            emptyMessage="No hay dominios registrados"
+            emptyActionText="Crear dominio"
+            emptyActionIcon="plus"
+            emptyIcon="globe"
+            [showEmptyAction]="!hasFilters()"
+            [showEmptyRefresh]="hasFilters()"
+            [showEmptyClearFilters]="hasFilters()"
+            (sort)="onTableSort($event)"
+            (emptyActionClick)="openCreateModal()"
+            (emptyRefreshClick)="refreshDomains()"
+            (emptyClearFiltersClick)="clearFilters()"
           >
-          </app-empty-state>
-        }
-
-        <!-- Domains Table -->
-        @if (!isLoading() && domains().length > 0) {
-          <div class="p-6">
-            <app-responsive-data-view
-              [data]="domains()"
-              [columns]="tableColumns"
-              [cardConfig]="cardConfig"
-              [actions]="tableActions"
-              [loading]="isLoading()"
-              emptyMessage="No hay dominios registrados"
-              emptyIcon="globe"
-              (sort)="onTableSort($event)"
-            >
-            </app-responsive-data-view>
-          </div>
-        }
-      </div>
+          </app-responsive-data-view>
+        </div>
+      </app-card>
 
       <!-- Create Domain Modal -->
       <app-domain-create-modal
@@ -247,6 +186,8 @@ interface StoreOption {
         [isVerifying]="isVerifyingDomain()"
         [domain]="selectedDomainForVerify()"
         [verificationResult]="verificationResult()"
+        [dnsInstructions]="dnsInstructions()"
+        [edgeHost]="edgeHost()"
         (verify)="verifyDomain($event)"
         (cancel)="onVerifyModalCancel()"
       ></app-domain-verify-modal>
@@ -280,6 +221,64 @@ export class DomainsComponent implements OnInit {
   readonly selectedStatus = signal('');
   readonly selectedOwnership = signal('');
   readonly selectedStoreId = signal('');
+
+  readonly filterConfigs = computed<FilterConfig[]>(() => [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      placeholder: 'Todos los estados',
+      options: [
+        { value: '', label: 'Todos los estados' },
+        ...this.domainsService.getDomainStatusOptions(),
+      ],
+    },
+    {
+      key: 'ownership',
+      label: 'Tipo',
+      type: 'select',
+      placeholder: 'Todos los tipos',
+      options: [
+        { value: '', label: 'Todos los tipos' },
+        ...this.domainsService.getDomainOwnershipOptions(),
+      ],
+    },
+    {
+      key: 'store_id',
+      label: 'Tienda',
+      type: 'select',
+      placeholder: 'Todas las tiendas',
+      options: [
+        { value: '', label: 'Todas las tiendas' },
+        { value: '__organization__', label: 'Organización' },
+        ...this.stores().map((store) => ({
+          value: String(store.id),
+          label: store.name,
+        })),
+      ],
+    },
+  ]);
+
+  readonly filterValues = computed<FilterValues>(() => ({
+    status: this.selectedStatus() || null,
+    ownership: this.selectedOwnership() || null,
+    store_id: this.selectedStoreId() || null,
+  }));
+
+  readonly dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo dominio',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+    {
+      label: 'Actualizar',
+      icon: 'refresh',
+      action: 'refresh',
+      variant: 'outline',
+    },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -345,7 +344,16 @@ export class DomainsComponent implements OnInit {
         colorMap: {
           active: '#22c55e',
           pending_dns: '#f59e0b',
+          pending_ownership: '#f59e0b',
+          verifying_ownership: '#f59e0b',
           pending_ssl: '#f97316',
+          pending_certificate: '#f97316',
+          issuing_certificate: '#f97316',
+          pending_alias: '#6366f1',
+          propagating: '#06b6d4',
+          failed_ownership: '#ef4444',
+          failed_certificate: '#ef4444',
+          failed_alias: '#ef4444',
           disabled: '#ef4444'}},
       transform: (value: string) => this.formatStatus(value)},
     {
@@ -404,6 +412,12 @@ export class DomainsComponent implements OnInit {
       variant: 'secondary',
       show: (domain: Domain) => this.canVerifyDomain(domain)},
     {
+      label: 'Provisionar',
+      icon: 'refresh-cw',
+      action: (domain: Domain) => this.provisionDomain(domain),
+      variant: 'warning',
+      show: (domain: Domain) => this.canProvisionDomain(domain)},
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (domain: Domain) => this.deleteDomain(domain),
@@ -415,7 +429,9 @@ export class DomainsComponent implements OnInit {
   cardConfig: ItemListCardConfig = {
     titleKey: 'hostname',
     subtitleKey: 'store.name',
-    subtitleTransform: (val: any) => val || 'Organización',
+    subtitleTransform: (domain: Domain) => domain.store?.name || 'Organización',
+    avatarFallbackIcon: 'globe',
+    avatarShape: 'square',
     badgeKey: 'status',
     badgeConfig: {
       type: 'custom',
@@ -423,7 +439,16 @@ export class DomainsComponent implements OnInit {
       colorMap: {
         active: '#22c55e',
         pending_dns: '#f59e0b',
+        pending_ownership: '#f59e0b',
+        verifying_ownership: '#f59e0b',
         pending_ssl: '#f97316',
+        pending_certificate: '#f97316',
+        issuing_certificate: '#f97316',
+        pending_alias: '#6366f1',
+        propagating: '#06b6d4',
+        failed_ownership: '#ef4444',
+        failed_certificate: '#ef4444',
+        failed_alias: '#ef4444',
         disabled: '#ef4444'}},
     badgeTransform: (val: string) => this.formatStatus(val),
     detailKeys: [
@@ -451,6 +476,14 @@ export class DomainsComponent implements OnInit {
   readonly isVerifyingDomain = signal(false);
   readonly selectedDomainForVerify = signal<Domain | null>(null);
   readonly verificationResult = signal<VerifyDomainResult | null>(null);
+  readonly dnsInstructions = signal<DnsInstructions | null>(null);
+  // Edge host (CloudFront target) for the DNS CNAME value, fetched from
+  // backend `getDnsInstructions().target`. Falls back to the platform domain
+  // from environment so the modal never renders with an empty value.
+  readonly dnsInstructionsTarget = signal<string | null>(null);
+  readonly edgeHost = computed(
+    () => this.dnsInstructionsTarget() ?? environment.vendixDomain,
+  );
 
   readonly isDeleteModalOpen = model<boolean>(false);
   readonly selectedDomainForDelete = signal<Domain | null>(null);
@@ -471,7 +504,7 @@ private loadInitialData(): void {
     this.isLoading.set(true);
 
     forkJoin({
-      stores: this.storesService.getStores({})})
+      stores: this.storesService.getStores({ limit: 200 })})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
@@ -498,13 +531,17 @@ private loadInitialData(): void {
     this.isLoading.set(true);
 
     const query: DomainQueryDto = {
+      limit: 200,
       ...(this.searchTerm() && { search: this.searchTerm() }),
       ...(this.selectedStatus() && {
         status: this.selectedStatus() as DomainStatus}),
       ...(this.selectedOwnership() && {
         ownership: this.selectedOwnership() as DomainOwnership}),
       ...(this.selectedStoreId() && {
-        store_id: parseInt(this.selectedStoreId(), 10)})};
+        store_id:
+          this.selectedStoreId() === '__organization__'
+            ? '__organization__'
+            : parseInt(this.selectedStoreId(), 10)})};
 
     this.domainsService
       .getDomains(query)
@@ -588,19 +625,27 @@ private loadInitialData(): void {
     this.loadDomains();
   }
 
-  onStatusChange(event: Event): void {
-    this.selectedStatus.set((event.target as HTMLSelectElement).value);
+  onFilterChange(values: FilterValues): void {
+    this.selectedStatus.set(this.getSingleFilterValue(values, 'status'));
+    this.selectedOwnership.set(this.getSingleFilterValue(values, 'ownership'));
+    this.selectedStoreId.set(this.getSingleFilterValue(values, 'store_id'));
     this.loadDomains();
   }
 
-  onOwnershipChange(event: Event): void {
-    this.selectedOwnership.set((event.target as HTMLSelectElement).value);
-    this.loadDomains();
+  onDropdownAction(action: string): void {
+    switch (action) {
+      case 'create':
+        this.openCreateModal();
+        break;
+      case 'refresh':
+        this.refreshDomains();
+        break;
+    }
   }
 
-  onStoreChange(event: Event): void {
-    this.selectedStoreId.set((event.target as HTMLSelectElement).value);
-    this.loadDomains();
+  private getSingleFilterValue(values: FilterValues, key: string): string {
+    const value = values[key];
+    return typeof value === 'string' ? value : '';
   }
 
   onTableSort(sortEvent: {
@@ -698,13 +743,35 @@ private loadInitialData(): void {
   openVerifyModal(domain: Domain): void {
     this.selectedDomainForVerify.set(domain);
     this.verificationResult.set(null);
+    this.dnsInstructions.set(null);
+    this.dnsInstructionsTarget.set(null);
     this.isVerifyModalOpen.set(true);
+
+    // Load DNS instructions from backend so the modal can render the real
+    // edge host (target). If the call fails, the computed `edgeHost` falls
+    // back to environment.vendixDomain.
+    this.domainsService
+      .getDnsInstructions(domain.hostname)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data?.target) {
+            this.dnsInstructions.set(response.data);
+            this.dnsInstructionsTarget.set(response.data.target);
+          }
+        },
+        error: (error) => {
+          console.error('Error loading DNS instructions:', error);
+        },
+      });
   }
 
   onVerifyModalCancel(): void {
     this.isVerifyModalOpen.set(false);
     this.selectedDomainForVerify.set(null);
     this.verificationResult.set(null);
+    this.dnsInstructions.set(null);
+    this.dnsInstructionsTarget.set(null);
   }
 
   verifyDomain(hostname: string): void {
@@ -720,7 +787,9 @@ private loadInitialData(): void {
             if (response.data.verified) {
               this.loadDomains();
               this.loadStats();
-              this.toastService.success('Dominio verificado exitosamente');
+              this.toastService.success(
+                'Propiedad verificada. Certificado pendiente de emisión.',
+              );
             }
           }
           this.isVerifyingDomain.set(false);
@@ -731,6 +800,36 @@ private loadInitialData(): void {
             error.error?.message || 'Error al verificar el dominio',
           );
           this.isVerifyingDomain.set(false);
+        }});
+  }
+
+  canProvisionDomain(domain: Domain): boolean {
+    return (
+      this.canVerifyDomain(domain) &&
+      domain.last_verified_at != null &&
+      domain.status !== DomainStatus.ACTIVE &&
+      domain.status !== DomainStatus.FAILED_OWNERSHIP
+    );
+  }
+
+  provisionDomain(domain: Domain): void {
+    this.domainsService
+      .provisionNext(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.toastService.success('Provisioning actualizado');
+            this.refreshDomains();
+          } else {
+            this.toastService.error('Respuesta inválida al provisionar');
+          }
+        },
+        error: (error) => {
+          console.error('Error provisioning domain:', error);
+          this.toastService.error(
+            error.error?.message || 'Error al provisionar el dominio',
+          );
         }});
   }
 
@@ -798,7 +897,16 @@ private loadInitialData(): void {
     const statusMap: Record<string, string> = {
       active: 'Activo',
       pending_dns: 'DNS Pendiente',
+      pending_ownership: 'Propiedad pendiente',
+      verifying_ownership: 'Verificando propiedad',
       pending_ssl: 'SSL Pendiente',
+      pending_certificate: 'Certificado pendiente',
+      issuing_certificate: 'Emitiendo certificado',
+      pending_alias: 'Alias pendiente',
+      propagating: 'Propagando',
+      failed_ownership: 'Falló propiedad',
+      failed_certificate: 'Falló certificado',
+      failed_alias: 'Falló alias',
       disabled: 'Deshabilitado'};
     return statusMap[status] || status;
   }

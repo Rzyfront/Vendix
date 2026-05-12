@@ -13,6 +13,7 @@ export interface AvailabilitySlot {
 
 export interface CreateBookingDto {
   product_id: number;
+  product_variant_id?: number;
   date: string;
   start_time: string;
   end_time: string;
@@ -82,10 +83,14 @@ export class EcommerceBookingService {
     productId: number,
     dateFrom: string,
     dateTo: string,
+    productVariantId?: number,
   ): Observable<{ success: boolean; data: AvailabilitySlot[] }> {
-    const params = new HttpParams()
+    let params = new HttpParams()
       .set('date_from', dateFrom)
       .set('date_to', dateTo);
+    if (productVariantId) {
+      params = params.set('product_variant_id', productVariantId.toString());
+    }
 
     return this.http.get<{ success: boolean; data: AvailabilitySlot[] }>(
       `${this.api_url}/availability/${productId}`,

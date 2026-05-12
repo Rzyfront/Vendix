@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InventoryAdjustmentsService } from './inventory-adjustments.service';
@@ -90,23 +86,46 @@ export class InventoryAdjustmentsBulkService {
           'Cantidad Actual': sl.quantity_on_hand,
           'Cantidad Nueva': '',
           'Tipo Ajuste': '',
-          'Descripción': '',
+          Descripción: '',
         }));
     }
 
     if (data.length === 0) {
       // Template vacío con ejemplos
       data = [
-        { SKU: 'PROD-001', 'Nombre Producto': 'Producto Ejemplo 1', 'Cantidad Actual': '(se ignora)', 'Cantidad Nueva': 50, 'Tipo Ajuste': 'count_variance', 'Descripción': 'Conteo físico' },
-        { SKU: 'PROD-002', 'Nombre Producto': 'Producto Ejemplo 2', 'Cantidad Actual': '(se ignora)', 'Cantidad Nueva': 30, 'Tipo Ajuste': '', 'Descripción': '' },
-        { SKU: 'PROD-003', 'Nombre Producto': 'Producto Ejemplo 3', 'Cantidad Actual': '(se ignora)', 'Cantidad Nueva': 0, 'Tipo Ajuste': 'damage', 'Descripción': 'Mercancía dañada' },
+        {
+          SKU: 'PROD-001',
+          'Nombre Producto': 'Producto Ejemplo 1',
+          'Cantidad Actual': '(se ignora)',
+          'Cantidad Nueva': 50,
+          'Tipo Ajuste': 'count_variance',
+          Descripción: 'Conteo físico',
+        },
+        {
+          SKU: 'PROD-002',
+          'Nombre Producto': 'Producto Ejemplo 2',
+          'Cantidad Actual': '(se ignora)',
+          'Cantidad Nueva': 30,
+          'Tipo Ajuste': '',
+          Descripción: '',
+        },
+        {
+          SKU: 'PROD-003',
+          'Nombre Producto': 'Producto Ejemplo 3',
+          'Cantidad Actual': '(se ignora)',
+          'Cantidad Nueva': 0,
+          'Tipo Ajuste': 'damage',
+          Descripción: 'Mercancía dañada',
+        },
       ];
     }
 
     const ws = XLSX.utils.json_to_sheet(data, { header: headers });
 
     // Ajustar ancho de columnas
-    const col_widths = headers.map((h) => ({ wch: Math.max(h.length + 5, 20) }));
+    const col_widths = headers.map((h) => ({
+      wch: Math.max(h.length + 5, 20),
+    }));
     ws['!cols'] = col_widths;
 
     const wb = XLSX.utils.book_new();
@@ -141,7 +160,14 @@ export class InventoryAdjustmentsBulkService {
 
     // 2. Validar y resolver SKUs → product_ids
     const results: BulkAdjustmentItemResultDto[] = [];
-    const valid_items: { product_id: number; product_variant_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[] = [];
+    const valid_items: {
+      product_id: number;
+      product_variant_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[] = [];
     let successful = 0;
     let failed = 0;
 
@@ -241,9 +267,13 @@ export class InventoryAdjustmentsBulkService {
 
       // Determinar tipo de ajuste: por fila o global
       const row_type = this.normalizeAdjustmentType(row.type);
-      const adjustment_type = row_type || upload_dto.adjustment_type || 'count_variance';
+      const adjustment_type =
+        row_type || upload_dto.adjustment_type || 'count_variance';
 
-      const description = row.description?.toString().trim() || upload_dto.description || 'Ajuste masivo de inventario';
+      const description =
+        row.description?.toString().trim() ||
+        upload_dto.description ||
+        'Ajuste masivo de inventario';
 
       valid_items.push({
         product_id: product.id,
@@ -350,7 +380,8 @@ export class InventoryAdjustmentsBulkService {
           const key = header_map[index];
           if (key && !key.startsWith('_')) {
             // Ignorar columnas de referencia (prefijo _)
-            const val = cell_value === undefined || cell_value === null ? '' : cell_value;
+            const val =
+              cell_value === undefined || cell_value === null ? '' : cell_value;
 
             if (key === 'quantity_after') {
               const num = parseFloat(val);
@@ -399,7 +430,7 @@ export class InventoryAdjustmentsBulkService {
       perdida: 'loss',
       robo: 'theft',
       hurto: 'theft',
-      'expiración': 'expiration',
+      expiración: 'expiration',
       expiracion: 'expiration',
       vencimiento: 'expiration',
       conteo: 'count_variance',

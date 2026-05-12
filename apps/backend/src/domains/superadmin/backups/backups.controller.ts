@@ -37,7 +37,10 @@ export class BackupController {
   @ApiOperation({
     summary: 'Get overall backup status (last backup, PITR, retention)',
   })
-  @ApiResponse({ status: 200, description: 'Backup status retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Backup status retrieved successfully',
+  })
   async getStatus() {
     const data = await this.rdsBackupService.getStatus();
     return this.responseService.success(data, 'Backup status retrieved');

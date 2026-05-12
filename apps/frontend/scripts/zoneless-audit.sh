@@ -19,11 +19,12 @@ count_html() { rg -l "$1" --type html 2>/dev/null | wc -l | tr -d ' '; }
 # Use grep -E (not rg) for -vE filtering because rg doesn't support -vE combined flag.
 #  - dialog.service.ts: EventEmitter of dynamically created components (manual DestroyRef cleanup).
 #  - pos-scale.service.ts: same pattern (componentRef.confirm/cancel subscribe + DestroyRef.onDestroy).
+#  - subscription.facade.ts: SubscriptionActions.subscribe(...) is an NgRx action creator, not RxJS.
 #  - auth.interceptor.ts: filter + take(1) is legitimate RxJS composition per skill §10 (also keeps
 #    explanatory comments referencing BehaviorSubject that must be excluded from the regression check).
 #  - account-mappings.component.ts: filter + take(1) + switchMap legitimate composition per skill §10.
 #  - *.spec.ts: test files.
-EXEMPT_SUBSCRIBE='(dialog\.service\.ts|pos-scale\.service\.ts|\.spec\.ts$)'
+EXEMPT_SUBSCRIBE='(dialog\.service\.ts|pos-scale\.service\.ts|subscription\.facade\.ts|\.spec\.ts$)'
 EXEMPT_TAKE1='(auth\.interceptor\.ts|account-mappings\.component\.ts|\.spec\.ts$)'
 EXEMPT_BEHAVIORSUBJECT='(auth\.interceptor\.ts)'
 
@@ -47,7 +48,7 @@ hits=$(count_with_exempt 'EventEmitter' '')
 hits=$(rg -l 'NgZone' --type ts 2>/dev/null | grep -v 'app.config.ts' | wc -l | tr -d ' ')
 [ "$hits" = "0" ] && ok "NgZone residual: 0" || fail "NgZone residual: $hits archivos"
 
-hits=$(count_with_exempt 'markForCheck|detectChanges' '')
+hits=$(count_with_exempt 'markForCheck|detectChanges' '\.spec\.ts$')
 [ "$hits" = "0" ] && ok "markForCheck/detectChanges: 0" || fail "markForCheck/detectChanges: $hits archivos"
 
 hits=$(count_html '\*ngIf|\*ngFor|\*ngSwitch')

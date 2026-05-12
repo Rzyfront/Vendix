@@ -290,10 +290,21 @@
                       <p class="text-[11px] font-mono text-gray-400 mt-0.5">
                         SKU: {{ item.variant_sku || "N/A" }}
                       </p>
-                      @if (item.variant_attributes) {
-                        <div class="mt-1 text-xs text-gray-500">
-                          {{ item.variant_attributes }}
-                        </div>
+                      @if (parseVariantAttributes(item.variant_attributes); as attrs) {
+                        @if (attrs.length) {
+                          <div class="mt-1 flex flex-wrap gap-1">
+                            @for (attr of attrs; track attr.name + attr.value) {
+                              <span
+                                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 border border-border text-[11px] text-gray-700"
+                              >
+                                @if (attr.name) {
+                                  <span class="font-medium text-gray-500">{{ attr.name }}:</span>
+                                }
+                                <span class="font-semibold">{{ attr.value }}</span>
+                              </span>
+                            }
+                          </div>
+                        }
                       }
                     </div>
 
@@ -574,8 +585,8 @@
 
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
         <div class="flex flex-col gap-3 lg:pt-0 pt-1">
-          <!-- SHIPPING METHOD ASSIGNMENT (only for delivery_type 'other') -->
-          @if (showShippingAssignment()) {
+          <!-- SHIPPING METHOD ASSIGNMENT (universal) -->
+          @if (showShippingAssignment() || showShippingMethodCard()) {
             <div
               class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm"
             >
@@ -592,8 +603,7 @@
 
               @if (!showShippingMethodCard()) {
                 <p class="text-xs text-amber-700 mb-3">
-                  Esta orden no tiene un metodo de envio asignado. Puedes
-                  asignar uno para definir el tipo de entrega.
+                  Esta orden no tiene un metodo de envio asignado. Asigna uno para definir el tipo de entrega.
                 </p>
                 <app-button
                   variant="primary"
@@ -602,10 +612,9 @@
                   customClasses="!bg-amber-600 hover:!bg-amber-700"
                 >
                   <app-icon slot="icon" name="package" size="16"></app-icon>
-                  Seleccionar
+                  Seleccionar Metodo
                 </app-button>
               } @else {
-                <!-- Expanded: method list -->
                 @if (isLoadingShippingMethods()) {
                   <div class="flex justify-center py-4">
                     <div
@@ -657,24 +666,53 @@
                   </div>
                 }
 
-                <!-- Shipping cost field (shown when a method is selected) -->
                 @if (selectedShippingMethod()) {
-                  <div class="mb-3" [formGroup]="shippingAssignForm">
-                    <label class="block text-xs font-bold text-amber-800 mb-1"
-                      >Costo de envio</label
-                    >
+                  @if (isCalculatingRate()) {
+                    <div class="flex items-center gap-2 py-3 mb-3 text-xs text-amber-700">
+                      <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-600"></div>
+                      Calculando tarifa para la direccion del cliente…
+                    </div>
+                  } @else if (calculatedRate(); as r) {
+                    <div class="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                      <div class="flex items-center justify-between">
+                        <div>
+                          <p class="text-xs font-bold text-emerald-800">Tarifa aplicable</p>
+                          <p class="text-sm text-emerald-900">
+                            {{ r.rate_name || 'Tarifa' }}@if (r.zone) { · {{ r.zone }} }
+                          </p>
+                        </div>
+                        <span class="text-sm font-bold text-emerald-900">{{ r.cost | currency }}</span>
+                      </div>
+                    </div>
+                  }
+
+                  <label class="flex items-start gap-2 mb-2 text-xs text-amber-800 cursor-pointer">
                     <input
-                      type="number"
-                      formControlName="shipping_cost"
-                      min="0"
-                      step="0.01"
-                      class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
-                      placeholder="0.00"
+                      type="checkbox"
+                      [checked]="manualCostOverride()"
+                      (change)="toggleManualCost($any($event.target).checked)"
+                      class="mt-0.5"
                     />
-                  </div>
+                    <span>Editar costo manualmente</span>
+                  </label>
+
+                  @if (manualCostOverride()) {
+                    <div class="mb-3" [formGroup]="shippingAssignForm">
+                      <label class="block text-xs font-bold text-amber-800 mb-1"
+                        >Costo de envio</label
+                      >
+                      <input
+                        type="number"
+                        formControlName="shipping_cost"
+                        min="0"
+                        step="0.01"
+                        class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  }
                 }
 
-                <!-- Action buttons -->
                 <div class="flex items-center gap-2">
                   <app-button
                     variant="outline"
@@ -699,6 +737,61 @@
                 </div>
               }
             </div>
+          }
+
+          <!-- SHIPPING INFO BLOCK (always visible when method assigned) -->
+          @if (shippingMethodInfo(); as info) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div class="flex items-center justify-between mb-3">
+                <h2
+                  class="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2"
+                >
+                  <app-icon name="truck" size="14" class="text-primary-600"></app-icon>
+                  Informacion de Envio
+                </h2>
+                @if (canEditShipping() && !showShippingAssignment()) {
+                  <button
+                    class="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+                    (click)="openShippingAssignCard()"
+                  >
+                    <app-icon name="edit" size="12"></app-icon>
+                    Cambiar
+                  </button>
+                }
+              </div>
+              <div class="space-y-2 text-sm">
+                <div class="flex items-center gap-2">
+                  <span class="text-text-secondary font-medium">Metodo:</span>
+                  <span class="font-semibold text-gray-900">{{ info.name }}</span>
+                  <span
+                    class="text-xs px-1.5 py-0.5 rounded font-medium"
+                    [ngClass]="getShippingTypeBadgeClass(info.type)"
+                  >{{ shippingMethodsService.getShippingMethodTypeLabel(info.type) }}</span>
+                </div>
+                @if (info.provider) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Transportista:</span>
+                    <span class="text-gray-900">{{ info.provider }}</span>
+                  </div>
+                }
+                @if (info.rate) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Tarifa:</span>
+                    <span class="text-gray-900">{{ info.rate }}</span>
+                  </div>
+                }
+                <div class="flex items-center gap-2">
+                  <span class="text-text-secondary font-medium">Costo:</span>
+                  <span class="font-bold text-gray-900">{{ info.cost | currency }}</span>
+                </div>
+                @if (info.minDays && info.maxDays) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Entrega estimada:</span>
+                    <span class="text-gray-900">{{ info.minDays }}-{{ info.maxDays }} dias habiles</span>
+                  </div>
+                }
+              </div>
+            </app-card>
           }
 
           <!-- 4. PROGRESO DE LA ORDEN -->
@@ -1018,6 +1111,39 @@
                 class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border"
               >
                 No hay acciones disponibles
+              </div>
+            }
+
+            @if (canFastTrack()) {
+              <div class="mt-4 pt-4 border-t border-border">
+                <label class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    [checked]="fastTrackEnabled()"
+                    (change)="fastTrackEnabled.set($any($event.target).checked)"
+                    class="mt-0.5"
+                  />
+                  <div>
+                    <p class="text-sm font-bold text-amber-800">Procesar orden completa</p>
+                    <p class="text-xs text-text-secondary mt-0.5">
+                      Ejecuta en cadena: confirmar pago (si falta), despachar, entregar y finalizar.
+                      Cada paso queda en el historial. Si algun paso falla, la orden queda en el ultimo estado completado y podras reintentar.
+                    </p>
+                  </div>
+                </label>
+
+                @if (fastTrackEnabled()) {
+                  <app-button
+                    variant="outline-warning"
+                    [fullWidth]="true"
+                    customClasses="mt-2"
+                    (clicked)="openFastTrackModal()"
+                    [disabled]="isProcessingAction()"
+                  >
+                    <app-icon slot="icon" name="zap" size="16"></app-icon>
+                    Confirmar y procesar todo
+                  </app-button>
+                }
               </div>
             }
           </app-card>
@@ -1536,5 +1662,112 @@
         (refundSubmitted)="onRefundSubmitted()"
       />
     }
+
+    <!-- FAST-TRACK MODAL -->
+    <app-modal
+      [isOpen]="showFastTrackModal()"
+      (closed)="showFastTrackModal.set(false)"
+      title="Procesar orden completa"
+      size="md"
+    >
+      <div class="p-4 space-y-4" [formGroup]="fastTrackForm">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-3">
+          <app-icon name="alert-triangle" size="18" class="text-amber-600 mt-0.5"></app-icon>
+          <div>
+            <p class="text-sm font-bold text-amber-800">Accion en cadena</p>
+            <p class="text-xs text-amber-700 mt-0.5">
+              Se ejecutaran pago (si falta), despacho, entrega y finalizacion. Si un paso falla,
+              la orden queda en el ultimo estado completado.
+            </p>
+          </div>
+        </div>
+
+        @if (!hasSuccessfulPayment()) {
+          <div formGroupName="payment" class="space-y-2">
+            <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Pago</h4>
+            <label class="block text-sm font-bold text-gray-700">Metodo de pago</label>
+            <select
+              formControlName="payment_method_id"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+            >
+              <option [ngValue]="null">Seleccionar metodo…</option>
+              @for (pm of paymentMethods(); track pm.id) {
+                <option [ngValue]="pm.id">{{ pm.display_name }}</option>
+              }
+            </select>
+            <label class="block text-sm font-bold text-gray-700 mt-2">Monto</label>
+            <input
+              type="number"
+              formControlName="amount"
+              min="0"
+              step="0.01"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+            />
+            <label class="block text-sm font-bold text-gray-700 mt-2">Referencia (opcional)</label>
+            <input
+              type="text"
+              formControlName="reference"
+              class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+            />
+          </div>
+        } @else {
+          <p class="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">
+            Pago ya confirmado.
+          </p>
+        }
+
+        <div formGroupName="ship" class="space-y-2">
+          <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Envio (opcional)</h4>
+          <label class="block text-sm font-bold text-gray-700">Numero de rastreo</label>
+          <input
+            type="text"
+            formControlName="tracking_number"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+          />
+          <label class="block text-sm font-bold text-gray-700 mt-2">Transportista</label>
+          <input
+            type="text"
+            formControlName="carrier"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+          />
+          <label class="block text-sm font-bold text-gray-700 mt-2">Notas</label>
+          <textarea
+            formControlName="notes"
+            rows="2"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm resize-none"
+          ></textarea>
+        </div>
+
+        <div formGroupName="deliver" class="space-y-2">
+          <h4 class="text-xs font-bold text-gray-700 uppercase tracking-wider">Entrega (opcional)</h4>
+          <label class="block text-sm font-bold text-gray-700">Recibido por</label>
+          <input
+            type="text"
+            formControlName="delivered_to"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+          />
+          <label class="block text-sm font-bold text-gray-700 mt-2">Notas de entrega</label>
+          <textarea
+            formControlName="delivery_notes"
+            rows="2"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm resize-none"
+          ></textarea>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button variant="outline" (clicked)="showFastTrackModal.set(false)">Cancelar</app-button>
+        <app-button
+          variant="outline-warning"
+          (clicked)="submitFastTrack()"
+          [disabled]="isProcessingAction()"
+        >
+          {{ isProcessingAction() ? 'Procesando…' : 'Procesar todo' }}
+        </app-button>
+      </div>
+    </app-modal>
   }
 </div>

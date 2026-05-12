@@ -33,7 +33,8 @@ export class ConsultationsController {
   @Permissions('store:reservations:read')
   @Get(':bookingId')
   async getContext(@Param('bookingId', ParseIntPipe) bookingId: number) {
-    const result = await this.consultationsService.getConsultationContext(bookingId);
+    const result =
+      await this.consultationsService.getConsultationContext(bookingId);
     return this.responseService.success(result);
   }
 
@@ -43,7 +44,10 @@ export class ConsultationsController {
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() dto: SaveConsultationNotesDto,
   ) {
-    const result = await this.consultationsService.saveConsultationNotes(bookingId, dto.notes);
+    const result = await this.consultationsService.saveConsultationNotes(
+      bookingId,
+      dto.notes,
+    );
     return this.responseService.success(result, 'Notas guardadas');
   }
 
@@ -53,7 +57,10 @@ export class ConsultationsController {
     @Param('bookingId', ParseIntPipe) bookingId: number,
     @Body() body: { responses: any[] },
   ) {
-    const result = await this.consultationsService.saveProviderResponses(bookingId, body.responses);
+    const result = await this.consultationsService.saveProviderResponses(
+      bookingId,
+      body.responses,
+    );
     return this.responseService.success(result, 'Respuestas guardadas');
   }
 
@@ -74,7 +81,8 @@ export class ConsultationsController {
   @Permissions('store:reservations:write')
   @Patch(':bookingId/complete')
   async complete(@Param('bookingId', ParseIntPipe) bookingId: number) {
-    const result = await this.consultationsService.completeConsultation(bookingId);
+    const result =
+      await this.consultationsService.completeConsultation(bookingId);
     return this.responseService.success(result, 'Consulta completada');
   }
 }

@@ -19,7 +19,8 @@ export class DepreciationMonthlyJob {
 
     // Calculate for previous month
     const now = new Date();
-    const year = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+    const year =
+      now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
     const month = now.getMonth() === 0 ? 12 : now.getMonth(); // previous month
     const period_date = new Date(year, month - 1, 1);
 
@@ -62,7 +63,10 @@ export class DepreciationMonthlyJob {
             const rate = 2 / useful_life_years;
             const book_value = cost - accumulated;
             if (book_value <= salvage) continue;
-            monthly_amount = Math.min((rate * book_value) / 12, book_value - salvage);
+            monthly_amount = Math.min(
+              (rate * book_value) / 12,
+              book_value - salvage,
+            );
           } else {
             // straight_line
             if (cost - accumulated <= salvage) continue;
@@ -74,8 +78,10 @@ export class DepreciationMonthlyJob {
           if (monthly_amount <= 0) continue;
 
           monthly_amount = Math.round(monthly_amount * 100) / 100;
-          const new_accumulated = Math.round((accumulated + monthly_amount) * 100) / 100;
-          const new_book_value = Math.round((cost - new_accumulated) * 100) / 100;
+          const new_accumulated =
+            Math.round((accumulated + monthly_amount) * 100) / 100;
+          const new_book_value =
+            Math.round((cost - new_accumulated) * 100) / 100;
 
           // Create entry and update asset
           await this.prisma.$transaction(async (tx: any) => {

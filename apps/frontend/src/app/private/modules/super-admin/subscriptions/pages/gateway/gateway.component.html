@@ -1,0 +1,315 @@
+<div class="flex flex-col">
+  <app-sticky-header
+    title="Pasarela de pagos"
+    subtitle="Configura las credenciales Wompi de la plataforma para cobrar suscripciones"
+    icon="shield-check"
+    variant="glass"
+    [badgeText]="
+      statusActive()
+        ? 'Configurada · ' + environmentLabel()
+        : isConfigured()
+          ? 'Inactiva'
+          : 'No configurada'
+    "
+    [badgeColor]="statusActive() ? 'green' : 'red'"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  ></app-sticky-header>
+
+  @if (loading()) {
+    <div class="px-2 md:px-6 pb-6">
+      <div
+        class="bg-surface rounded-card border border-border p-6 flex items-center justify-center min-h-[200px]"
+      >
+        <div class="text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-sm text-text-secondary">
+            Cargando configuración...
+          </p>
+        </div>
+      </div>
+    </div>
+  } @else {
+    <form
+      [formGroup]="form"
+      (ngSubmit)="onSave()"
+      class="px-2 md:px-6 pb-6 space-y-6"
+    >
+      <!-- Estado actual -->
+      @if (isConfigured()) {
+        <div
+          class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-3"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="info"
+              [size]="18"
+              customClasses="text-primary"
+            ></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              Estado actual
+            </h2>
+          </div>
+
+          <dl class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt class="text-text-secondary">Ambiente</dt>
+              <dd class="font-medium text-text-primary">
+                {{ environmentLabel() }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-text-secondary">Activa</dt>
+              <dd class="font-medium text-text-primary">
+                {{ currentConfig()?.is_active ? 'Sí' : 'No' }}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-text-secondary">Último test</dt>
+              <dd class="font-medium text-text-primary">
+                @if (currentConfig()?.last_tested_at) {
+                  {{ currentConfig()?.last_tested_at | date: 'short' }}
+                  <span
+                    class="ml-2 text-xs"
+                    [class.text-green-600]="
+                      currentConfig()?.last_test_result?.ok
+                    "
+                    [class.text-red-600]="
+                      !currentConfig()?.last_test_result?.ok
+                    "
+                  >
+                    {{
+                      currentConfig()?.last_test_result?.ok
+                        ? '· OK'
+                        : '· Falló'
+                    }}
+                  </span>
+                } @else {
+                  Nunca
+                }
+              </dd>
+            </div>
+            <div>
+              <dt class="text-text-secondary">Actualizado</dt>
+              <dd class="font-medium text-text-primary">
+                {{
+                  (currentConfig()?.updated_at | date: 'short') || '—'
+                }}
+              </dd>
+            </div>
+          </dl>
+
+          @if (
+            currentConfig()?.last_test_result &&
+            !currentConfig()?.last_test_result?.ok &&
+            currentConfig()?.last_test_result?.message
+          ) {
+            <div
+              class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"
+            >
+              {{ currentConfig()?.last_test_result?.message }}
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Credenciales -->
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="key"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Credenciales Wompi
+          </h2>
+        </div>
+
+        @if (isConfigured()) {
+          <p class="text-sm text-text-secondary">
+            Las credenciales actuales están guardadas y encriptadas. Deja un
+            campo vacío para mantener su valor actual; complétalo solo si
+            quieres rotar la credencial.
+          </p>
+        } @else {
+          <p class="text-sm text-text-secondary">
+            Ingresa las 4 credenciales que entrega Wompi en su panel de
+            comerciante. Se guardan encriptadas — nunca se mostrarán de
+            nuevo en texto plano.
+          </p>
+        }
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-input
+            label="Llave pública"
+            type="text"
+            formControlName="public_key"
+            [control]="form.get('public_key')"
+            [required]="!isConfigured()"
+            [placeholder]="
+              isConfigured()
+                ? maskedPlaceholder('public_key')
+                : 'pub_test_xxxx o pub_prod_xxxx'
+            "
+            helperText="Empieza con pub_test_ (sandbox) o pub_prod_ (producción)"
+          ></app-input>
+
+          <app-input
+            label="Llave privada"
+            type="password"
+            formControlName="private_key"
+            [control]="form.get('private_key')"
+            [required]="!isConfigured()"
+            [placeholder]="
+              isConfigured()
+                ? maskedPlaceholder('private_key')
+                : 'prv_test_xxxx o prv_prod_xxxx'
+            "
+            helperText="Empieza con prv_test_ (sandbox) o prv_prod_ (producción)"
+          ></app-input>
+
+          <app-input
+            label="Secret de eventos"
+            type="password"
+            formControlName="events_secret"
+            [control]="form.get('events_secret')"
+            [required]="!isConfigured()"
+            [placeholder]="
+              isConfigured()
+                ? maskedPlaceholder('events_secret')
+                : 'Secret de webhooks de Wompi'
+            "
+            helperText="Usado para validar la firma de los webhooks entrantes"
+          ></app-input>
+
+          <app-input
+            label="Secret de integridad"
+            type="password"
+            formControlName="integrity_secret"
+            [control]="form.get('integrity_secret')"
+            [required]="!isConfigured()"
+            [placeholder]="
+              isConfigured()
+                ? maskedPlaceholder('integrity_secret')
+                : 'Secret de firma de transacciones'
+            "
+            helperText="Usado para firmar las transacciones que se envían a Wompi"
+          ></app-input>
+        </div>
+      </div>
+
+      <!-- Configuración -->
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="settings"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Configuración
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <app-selector
+            label="Ambiente"
+            formControlName="environment"
+            [options]="environmentOptions"
+            [required]="true"
+          ></app-selector>
+
+          <div class="flex items-center gap-2 pb-2">
+            <app-toggle formControlName="is_active"></app-toggle>
+            <span class="text-sm text-text-primary">
+              Activar esta configuración
+            </span>
+          </div>
+        </div>
+
+        @if (selectedEnvironment() === 'production') {
+          <div
+            class="border border-amber-300 bg-amber-50 rounded-md px-4 py-3 space-y-2"
+          >
+            <div class="flex items-start gap-2">
+              <app-icon
+                name="alert-triangle"
+                [size]="18"
+                customClasses="text-amber-600 mt-0.5"
+              ></app-icon>
+              <div class="text-sm text-amber-900">
+                <p class="font-semibold">Estás configurando producción.</p>
+                <p>
+                  Esta configuración procesará cobros reales a las tiendas.
+                  Antes de activar, ejecuta y aprueba un test de conexión.
+                </p>
+              </div>
+            </div>
+            <label
+              class="flex items-center gap-2 text-sm text-amber-900 pt-1 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                class="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                formControlName="confirm_production"
+              />
+              <span>
+                Confirmo que las credenciales pertenecen al ambiente de
+                producción y entiendo que se cobrará dinero real.
+              </span>
+            </label>
+            @if (
+              form.errors?.['confirm_production_required'] &&
+              form.controls.confirm_production.touched
+            ) {
+              <p class="text-xs text-red-700">
+                Debes confirmar para continuar con producción.
+              </p>
+            }
+          </div>
+        }
+      </div>
+
+      <!-- Acciones inline (mobile-friendly fallback) -->
+      <div class="flex flex-col md:flex-row gap-2 md:justify-end">
+        <app-button
+          type="button"
+          variant="outline"
+          [loading]="testing()"
+          [disabled]="
+            testing() ||
+            saving() ||
+            (!isConfigured() && !allSecretsFilled())
+          "
+          (clicked)="onTest()"
+        >
+          <app-icon slot="icon" name="zap" [size]="16"></app-icon>
+          Probar conexión
+        </app-button>
+
+        <app-button
+          type="submit"
+          variant="primary"
+          [loading]="saving()"
+          [disabled]="saving() || testing() || form.invalid"
+        >
+          <app-icon slot="icon" name="save" [size]="16"></app-icon>
+          {{ isConfigured() ? 'Actualizar pasarela' : 'Guardar pasarela' }}
+        </app-button>
+      </div>
+    </form>
+  }
+</div>

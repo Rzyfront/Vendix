@@ -58,7 +58,10 @@ export class CreateZoneDto {
   @IsString({ each: true })
   zip_codes?: string[];
 
-  @ApiPropertyOptional({ description: 'Whether the zone is active', default: true })
+  @ApiPropertyOptional({
+    description: 'Whether the zone is active',
+    default: true,
+  })
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
@@ -99,7 +102,8 @@ export class CreateRateDto {
   base_cost: number;
 
   @ApiPropertyOptional({
-    description: 'Cost per unit (kg for weight_based, currency for price_based)',
+    description:
+      'Cost per unit (kg for weight_based, currency for price_based)',
     example: 10.0,
   })
   @IsOptional()
@@ -138,7 +142,10 @@ export class CreateRateDto {
   @Type(() => Number)
   free_shipping_threshold?: number;
 
-  @ApiPropertyOptional({ description: 'Whether the rate is active', default: true })
+  @ApiPropertyOptional({
+    description: 'Whether the rate is active',
+    default: true,
+  })
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;

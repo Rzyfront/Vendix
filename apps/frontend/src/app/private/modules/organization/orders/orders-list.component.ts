@@ -1,8 +1,13 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import {
+  Component,
+  DestroyRef,
+  OnInit,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { FormBuilder, FormGroup } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../environments/environment';
 
 import {
@@ -11,10 +16,8 @@ import {
   OrderStatus,
   PaymentStatus,
   OrderType,
-  OrderStore,
 } from './interfaces/order.interface';
 
-// Import shared components
 import {
   TableColumn,
   TableAction,
@@ -25,40 +28,34 @@ import {
   ItemListCardConfig,
 } from '../../../../shared/components/index';
 
-// Import order components
 import { OrderStatsComponent } from './components/order-stats.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { OrderCreateModalComponent } from './components/order-create-modal.component';
+import { OrganizationOrdersService } from './services/organization-orders.service';
 
-// Import styles
 import './orders-list.component.css';
 
 @Component({
   selector: 'app-orders-list',
   standalone: true,
   imports: [
-    FormsModule,
-    ReactiveFormsModule,
     InputsearchComponent,
     ButtonComponent,
     OrderStatsComponent,
     OrderCreateModalComponent,
     IconComponent,
-    ResponsiveDataViewComponent
-],
+    ResponsiveDataViewComponent,
+  ],
   templateUrl: './orders-list.component.html',
 })
-export class OrdersListComponent implements OnInit, OnDestroy {
+export class OrdersListComponent implements OnInit {
+  private ordersService = inject(OrganizationOrdersService);
+  private currencyService = inject(CurrencyFormatService);
+  private fb = inject(FormBuilder);
+  private destroyRef = inject(DestroyRef);
+
   readonly orders = signal<OrderListItem[]>([]);
   readonly isLoading = signal(false);
-  searchTerm = '';
-  selectedStatus = '';
-  selectedPaymentStatus = '';
-  selectedStore = '';
-  selectedOrderType = '';
-  selectedDateFrom = '';
-  selectedDateTo = '';
-
   readonly stats = signal<OrderStats>({
     total_orders: 0,
     pending_orders: 0,
@@ -77,86 +74,46 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     recent_orders: [],
   });
 
+  searchTerm = '';
+  selectedStatus = '';
+  selectedPaymentStatus = '';
+  selectedStore = '';
+  selectedOrderType = '';
+  selectedDateFrom = '';
+  selectedDateTo = '';
+
   cardConfig!: ItemListCardConfig;
 
-  // Table configuration
   tableColumns: TableColumn[] = [
-    {
-      key: 'order_date',
-      label: 'Date & Time',
-      sortable: true,
-      width: '180px',
-      transform: (value: string) => this.formatDate(value),
-    },
-    {
-      key: 'customer',
-      label: 'Customer',
-      sortable: true,
-      width: '150px',
-      transform: (customer: any) =>
-        `${customer.first_name} ${customer.last_name}`,
-    },
     {
       key: 'order_number',
       label: 'Order #',
       sortable: true,
       width: '120px',
+      priority: 1,
+    },
+    {
+      key: 'customer',
+      label: 'Customer',
+      sortable: true,
+      priority: 1,
+      transform: (customer: any) =>
+        customer ? `${customer.first_name} ${customer.last_name}` : 'Guest',
     },
     {
       key: 'store',
       label: 'Store',
       sortable: true,
+      priority: 2,
+      transform: (store: any) => store?.name || 'N/A',
+    },
+    {
+      key: 'order_date',
+      label: 'Date',
+      sortable: true,
       width: '120px',
-      transform: (store: any) => store.name,
-    },
-    {
-      key: 'order_type',
-      label: 'Type',
-      sortable: true,
-      width: '100px',
-    },
-    {
-      key: 'status',
-      label: 'Status',
-      sortable: true,
-      width: '100px',
-      align: 'center',
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          pending: '#eab308',
-          confirmed: '#3b82f6',
-          processing: '#8b5cf6',
-          shipped: '#6366f1',
-          delivered: '#22c55e',
-          cancelled: '#ef4444',
-          refunded: '#f97316',
-        },
-      },
-      transform: (value: string) =>
-        value.charAt(0) + value.slice(1).toLowerCase(),
-    },
-    {
-      key: 'payment_status',
-      label: 'Payment',
-      sortable: true,
-      width: '100px',
-      align: 'center',
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          pending: '#eab308',
-          paid: '#22c55e',
-          failed: '#ef4444',
-          refunded: '#f97316',
-          partially_refunded: '#f59e0b',
-        },
-      },
-      transform: (value: string) => value.replace('_', ' '),
+      priority: 3,
+      transform: (date: string) => this.formatDate(date),
     },
     {
       key: 'total_amount',
@@ -164,7 +121,44 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'right',
       width: '120px',
-      transform: (value: number) => `$${value.toFixed(2)}`,
+      priority: 1,
+      transform: (value: number) => this.formatCurrency(value),
+    },
+    {
+      key: 'estimated_delivered_at',
+      label: 'ETA',
+      sortable: false,
+      width: '100px',
+      priority: 3,
+      transform: (_: any, item: any) =>
+        this.formatEta(item?.estimated_ready_at, item?.estimated_delivered_at),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      sortable: true,
+      width: '120px',
+      badge: true,
+      priority: 1,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm',
+      },
+      transform: (value: string) =>
+        value ? value.charAt(0) + value.slice(1).toLowerCase() : 'Unknown',
+    },
+    {
+      key: 'payment_status',
+      label: 'Payment',
+      sortable: true,
+      width: '120px',
+      badge: true,
+      priority: 2,
+      badgeConfig: {
+        type: 'status',
+        size: 'sm',
+      },
+      transform: (value: string) => value?.replace('_', ' ') || 'Unknown',
     },
   ];
 
@@ -173,7 +167,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       label: 'View Details',
       icon: 'eye',
       action: (order: OrderListItem) => this.viewOrderDetails(order),
-      variant: 'secondary',
+      variant: 'ghost',
     },
     {
       label: 'Print Invoice',
@@ -183,115 +177,24 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Available stores for filter
   availableStores: Array<{ id: string; name: string }> = [];
 
-  // Create Order Modal
   showCreateOrderModal = false;
   storeOptionsForModal: Array<{ label: string; value: string }> = [];
 
-  // Filter form
   filterForm!: FormGroup;
 
-  private subscriptions: Subscription[] = [];
-  private currencyService = inject(CurrencyFormatService);
-
-  constructor(private fb: FormBuilder) {
+  constructor() {
     this.initializeFilterForm();
     this.initializeTableConfig();
   }
 
   private initializeTableConfig(): void {
-    this.tableColumns = [
-      {
-        key: 'order_number',
-        label: 'Order #',
-        sortable: true,
-        width: '120px',
-        priority: 1,
-      },
-      {
-        key: 'customer',
-        label: 'Customer',
-        sortable: true,
-        priority: 1,
-        transform: (customer: any) =>
-          `${customer.first_name} ${customer.last_name}`,
-      },
-      {
-        key: 'store',
-        label: 'Store',
-        sortable: true,
-        priority: 2,
-        transform: (store: any) => store.name,
-      },
-      {
-        key: 'order_date',
-        label: 'Date',
-        sortable: true,
-        width: '120px',
-        priority: 3,
-        transform: (date: string) => this.formatDate(date),
-      },
-      {
-        key: 'total_amount',
-        label: 'Total',
-        sortable: true,
-        align: 'right',
-        width: '120px',
-        priority: 1,
-        transform: (value: number) => `$${value.toFixed(2)}`,
-      },
-      {
-        key: 'status',
-        label: 'Status',
-        sortable: true,
-        width: '120px',
-        badge: true,
-        priority: 1,
-        badgeConfig: {
-          type: 'status',
-          size: 'sm',
-        },
-        transform: (value: string) =>
-          value.charAt(0) + value.slice(1).toLowerCase(),
-      },
-      {
-        key: 'payment_status',
-        label: 'Payment',
-        sortable: true,
-        width: '120px',
-        badge: true,
-        priority: 2,
-        badgeConfig: {
-          type: 'status',
-          size: 'sm',
-        },
-        transform: (value: string) => value.replace('_', ' '),
-      },
-    ];
-
-    this.tableActions = [
-      {
-        label: 'View Details',
-        icon: '👁️',
-        action: (order: OrderListItem) => this.viewOrderDetails(order),
-        variant: 'ghost',
-      },
-      {
-        label: 'Print Invoice',
-        icon: '🖨️',
-        action: (order: OrderListItem) => this.printInvoice(order),
-        variant: 'ghost',
-      },
-    ];
-
-
-    // Card configuration for mobile
     this.cardConfig = {
       titleKey: 'order_number',
       subtitleKey: 'customer',
-      subtitleTransform: (c: any) => `${c.first_name} ${c.last_name}`,
+      subtitleTransform: (c: any) =>
+        c ? `${c.first_name} ${c.last_name}` : 'Guest',
       badgeKey: 'status',
       badgeConfig: {
         type: 'custom',
@@ -307,18 +210,24 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         },
       },
       badgeTransform: (value: string) =>
-        value.charAt(0).toUpperCase() + value.slice(1).toLowerCase(),
+        value ? value.charAt(0).toUpperCase() + value.slice(1).toLowerCase() : 'Unknown',
       detailKeys: [
         { key: 'store.name', label: 'Store', icon: 'shopping-bag' },
         {
           key: 'total_amount',
           label: 'Total',
-          transform: (v: number) => `$${v.toFixed(2)}`,
+          transform: (v: number) => this.formatCurrency(v),
         },
         {
           key: 'order_date',
           label: 'Date',
           transform: (v: string) => this.formatDate(v),
+        },
+        {
+          key: 'estimated_delivered_at',
+          label: 'ETA',
+          transform: (_: any, item: any) =>
+            this.formatEta(item?.estimated_ready_at, item?.estimated_delivered_at),
         },
       ],
     };
@@ -329,10 +238,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.loadOrders();
     this.loadStats();
     this.loadAvailableStores();
-  }
-
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
   }
 
   private initializeFilterForm(): void {
@@ -360,180 +265,74 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   loadAvailableStores(): void {
-    // TODO: Replace with actual API call
-    // For now, generate mock stores
-    this.availableStores = [
-      { id: 'store_1', name: 'Main Street Store' },
-      { id: 'store_2', name: 'Downtown Store' },
-      { id: 'store_3', name: 'Mall Store' },
-      { id: 'store_4', name: 'Online Store' },
-    ];
-
-    // Also populate store options for modal
-    this.storeOptionsForModal = this.availableStores.map((store) => ({
-      label: store.name,
-      value: store.id,
-    }));
+    this.availableStores = [];
+    this.storeOptionsForModal = [];
   }
 
   loadOrders(): void {
     this.isLoading.set(true);
 
-    // Build query parameters
-    const params = new URLSearchParams();
-    if (this.searchTerm) params.append('search', this.searchTerm);
-    if (this.selectedStatus) params.append('status', this.selectedStatus);
-    if (this.selectedPaymentStatus)
-      params.append('payment_status', this.selectedPaymentStatus);
-    if (this.selectedStore) params.append('store_id', this.selectedStore);
-    if (this.selectedOrderType)
-      params.append('order_type', this.selectedOrderType);
-    if (this.selectedDateFrom)
-      params.append('date_from', this.selectedDateFrom);
-    if (this.selectedDateTo) params.append('date_to', this.selectedDateTo);
-    params.append('page', '1');
-    params.append('limit', '100');
+    const queryParams: any = {
+      page: 1,
+      limit: 100,
+    };
 
-    // Make real API call
-    fetch(`${environment.apiUrl}/orders?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-        'Content-Type': 'application/json',
-      },
-    })
-      .then((response) => response.json())
-      .then((response: any) => {
-        if (response.data && response.data.length > 0) {
-          // Transform backend data to frontend format
-          this.orders.set(response.data.map((order: any) => ({
-            id: order.id.toString(),
-            order_number: order.order_number,
-            customer: {
-              id: order.customer_id.toString(),
-              first_name: `Customer${order.customer_id}`,
-              last_name: 'User',
-              email: `customer${order.customer_id}@example.com`,
-            },
-            store: {
-              id: order.store.id.toString(),
-              name: order.store.name,
-              slug:
-                order.store.store_code ||
-                order.store.name.toLowerCase().replace(/\s+/g, '-'),
-            },
-            order_type: order.order_type || 'sale',
-            status: order.state,
-            payment_status: order.payment_status || 'pending',
-            total_amount: parseFloat(order.grand_total),
-            subtotal: parseFloat(order.subtotal_amount),
-            tax_amount: parseFloat(order.tax_amount),
-            shipping_amount: parseFloat(order.shipping_cost),
-            discount_amount: parseFloat(order.discount_amount),
-            currency: order.currency,
-            order_date: order.created_at,
-            items_count: order.order_items?.length || 0,
-            notes: order.internal_notes || '',
-            created_at: order.created_at,
-            updated_at: order.updated_at,
-          })));
-        } else {
-          // Fallback to mock data if API fails
-          this.orders.set(this.generateMockOrders());
-        }
-        this.updateStats();
-        this.isLoading.set(false);
-      })
-      .catch((error) => {
-        console.error('Error loading orders:', error);
-        // Fallback to mock data
-        this.orders.set(this.generateMockOrders());
-        this.updateStats();
-        this.isLoading.set(false);
-      });
-  }
+    if (this.searchTerm) queryParams.search = this.searchTerm;
+    if (this.selectedStatus) queryParams.status = this.selectedStatus;
+    if (this.selectedPaymentStatus) queryParams.payment_status = this.selectedPaymentStatus;
+    if (this.selectedStore) queryParams.store_id = this.selectedStore;
+    if (this.selectedOrderType) queryParams.order_type = this.selectedOrderType;
+    if (this.selectedDateFrom) queryParams.date_from = this.selectedDateFrom;
+    if (this.selectedDateTo) queryParams.date_to = this.selectedDateTo;
 
-  private generateMockOrders(): OrderListItem[] {
-    const mockOrders: OrderListItem[] = [];
-    const statuses = Object.values(OrderStatus);
-    const paymentStatuses = Object.values(PaymentStatus);
-
-    for (let i = 0; i < 50; i++) {
-      const date = new Date();
-      date.setDate(date.getDate() - Math.floor(Math.random() * 30));
-
-      mockOrders.push({
-        id: `order_${i + 1}`,
-        order_number: `ORD-${String(i + 1).padStart(5, '0')}`,
-        customer: {
-          id: `customer_${Math.floor(Math.random() * 100)}`,
-          first_name: `Customer${Math.floor(Math.random() * 100)}`,
-          last_name: `Name${Math.floor(Math.random() * 100)}`,
-          email: `customer${Math.floor(Math.random() * 100)}@example.com`,
+    this.ordersService
+      .getOrders(queryParams)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data) {
+            this.orders.set(response.data);
+          } else {
+            this.orders.set([]);
+          }
+          this.isLoading.set(false);
         },
-        store: {
-          id: `store_${Math.floor(Math.random() * 10)}`,
-          name: `Store ${Math.floor(Math.random() * 10) + 1}`,
-          slug: `store-${Math.floor(Math.random() * 10) + 1}`,
+        error: (error) => {
+          console.error('Error loading orders:', error);
+          this.orders.set([]);
+          this.isLoading.set(false);
         },
-        order_type: OrderType.SALE,
-        status: statuses[
-          Math.floor(Math.random() * statuses.length)
-        ] as OrderStatus,
-        payment_status: paymentStatuses[
-          Math.floor(Math.random() * paymentStatuses.length)
-        ] as PaymentStatus,
-        total_amount: Math.floor(Math.random() * 1000) + 50,
-        subtotal: 0,
-        tax_amount: 0,
-        shipping_amount: 0,
-        discount_amount: 0,
-        currency: this.currencyService.currencyCode() || 'USD',
-        order_date: date.toISOString(),
-        items_count: Math.floor(Math.random() * 10) + 1,
-        notes: '',
-        created_at: date.toISOString(),
-        updated_at: date.toISOString(),
       });
-    }
-
-    return mockOrders.sort(
-      (a, b) =>
-        new Date(b.order_date).getTime() - new Date(a.order_date).getTime(),
-    );
   }
 
   loadStats(): void {
-    // TODO: Replace with actual API call
-    // For now, calculate from loaded data
-    this.updateStats();
-  }
+    const params: any = {};
+    if (this.selectedStore) params.store_id = this.selectedStore;
+    if (this.selectedDateFrom) params.date_from = this.selectedDateFrom;
+    if (this.selectedDateTo) params.date_to = this.selectedDateTo;
 
-  updateStats(): void {
-    const orders = this.orders();
-    const s = { ...this.stats() };
-    s.total_orders = orders.length;
-    s.pending_orders = orders.filter((o) => o.status === OrderStatus.PENDING).length;
-    s.confirmed_orders = orders.filter((o) => o.status === OrderStatus.CONFIRMED).length;
-    s.processing_orders = orders.filter((o) => o.status === OrderStatus.PROCESSING).length;
-    s.shipped_orders = orders.filter((o) => o.status === OrderStatus.SHIPPED).length;
-    s.delivered_orders = orders.filter((o) => o.status === OrderStatus.DELIVERED).length;
-    s.cancelled_orders = orders.filter((o) => o.status === OrderStatus.CANCELLED).length;
-    s.refunded_orders = orders.filter((o) => o.status === OrderStatus.REFUNDED).length;
-    s.total_revenue = orders
-      .filter((o) => o.payment_status === PaymentStatus.PAID)
-      .reduce((sum, o) => sum + o.total_amount, 0);
-    s.pending_revenue = orders
-      .filter((o) => o.payment_status === PaymentStatus.PENDING)
-      .reduce((sum, o) => sum + o.total_amount, 0);
-    s.average_order_value =
-      orders.length > 0
-        ? orders.reduce((sum, o) => sum + o.total_amount, 0) / orders.length
-        : 0;
-    this.stats.set(s);
+    this.ordersService
+      .getOrderStats(params.date_from, params.date_to, params.store_id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data) {
+            this.stats.set({
+              ...response.data,
+              orders_by_store: response.data.orders_by_store || [],
+              recent_orders: [],
+            });
+          }
+        },
+        error: (error) => {
+          console.error('Error loading stats:', error);
+        },
+      });
   }
 
   refreshOrders(): void {
     this.loadOrders();
+    this.loadStats();
   }
 
   clearFilters(): void {
@@ -583,36 +382,49 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     this.loadOrders();
   }
 
-  viewOrderDetails(order: OrderListItem): void {}
+  viewOrderDetails(order: OrderListItem): void {
+    console.log('View order details:', order);
+  }
+
+  printInvoice(order: OrderListItem): void {
+    this.ordersService
+      .printInvoice(order.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `invoice-${order.order_number}.pdf`;
+          link.click();
+          window.URL.revokeObjectURL(url);
+        },
+        error: (error) => {
+          console.error('Error printing invoice:', error);
+        },
+      });
+  }
 
   exportOrders(): void {
     if (this.orders().length === 0) {
       return;
     }
 
-    try {
-      // Create CSV content
-      const csvContent = this.generateCSV();
+    const csvContent = this.generateCSV();
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
 
-      // Create blob and download
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute(
+      'download',
+      `orders_export_${new Date().toISOString().split('T')[0]}.csv`,
+    );
+    link.style.visibility = 'hidden';
 
-      link.setAttribute('href', url);
-      link.setAttribute(
-        'download',
-        `orders_export_${new Date().toISOString().split('T')[0]}.csv`,
-      );
-      link.style.visibility = 'hidden';
-
-      // Append to body, click, and clean up
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error('Error exporting orders:', error);
-    }
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   }
 
   private generateCSV(): string {
@@ -629,8 +441,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
     const rows = this.orders().map((order) => [
       order.order_number,
-      `${order.customer.first_name} ${order.customer.last_name}`,
-      order.store.name,
+      order.customer ? `${order.customer.first_name} ${order.customer.last_name}` : 'Guest',
+      order.store?.name || 'N/A',
       order.order_type,
       order.status,
       order.payment_status,
@@ -638,58 +450,42 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       this.formatDate(order.order_date),
     ]);
 
-    // Combine headers and rows
-    const csvContent = [headers, ...rows]
+    return [headers, ...rows]
       .map((row) => row.map((cell) => `"${cell}"`).join(','))
       .join('\n');
-
-    return csvContent;
   }
 
-  // Helper methods
   formatDate(dateString: string): string {
-    return new Date(dateString).toLocaleDateString('es-ES', {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('es-CO', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
     });
   }
 
+  formatEta(estimatedReadyAt?: string, estimatedDeliveredAt?: string): string {
+    const target = estimatedDeliveredAt || estimatedReadyAt;
+    if (!target) return '-';
+    const date = new Date(target);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    const diffMin = Math.round(Math.abs(diffMs) / 60000);
+    const prefix = diffMs > 0 ? 'in' : 'ago';
+    if (diffMin < 60) return `${prefix} ${diffMin} min`;
+    const diffHours = Math.floor(diffMin / 60);
+    const remainMin = diffMin % 60;
+    return `${prefix} ${diffHours}h ${remainMin}m`;
+  }
+
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);
   }
-
-  getStatusClass(status: string): string {
-    const colorMap: Record<string, string> = {
-      pending: 'text-yellow-600 bg-yellow-100',
-      confirmed: 'text-blue-600 bg-blue-100',
-      processing: 'text-purple-600 bg-purple-100',
-      shipped: 'text-indigo-600 bg-indigo-100',
-      delivered: 'text-green-600 bg-green-100',
-      cancelled: 'text-red-600 bg-red-100',
-      refunded: 'text-orange-600 bg-orange-100',
-    };
-    return colorMap[status] || 'text-gray-600 bg-gray-100';
-  }
-
-  getPaymentStatusClass(status: string): string {
-    const colorMap: Record<string, string> = {
-      pending: 'text-yellow-600 bg-yellow-100',
-      paid: 'text-green-600 bg-green-100',
-      failed: 'text-red-600 bg-red-100',
-      refunded: 'text-orange-600 bg-orange-100',
-      partially_refunded: 'text-orange-500 bg-orange-100',
-    };
-    return colorMap[status] || 'text-gray-600 bg-gray-100';
-  }
-
-  printInvoice(order: OrderListItem): void {}
 
   onTableSort(sortEvent: {
     column: string;
     direction: 'asc' | 'desc' | null;
   }): void {
-    // TODO: Implement server-side sorting
     this.loadOrders();
   }
 
@@ -707,7 +503,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     return 'Orders will appear here when customers make purchases';
   }
 
-  // Create Order Modal Methods
   createOrder(): void {
     this.showCreateOrderModal = true;
   }
@@ -721,45 +516,28 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   onOrderCreated(orderData: any): void {
-    // Transform the created order data to match frontend format
     const newOrder: OrderListItem = {
       id: orderData.id?.toString() || `order_${Date.now()}`,
-      order_number:
-        orderData.order_number ||
-        `ORD-${String(this.orders().length + 1).padStart(5, '0')}`,
-      customer: {
-        id: orderData.customer_id?.toString() || '1',
-        first_name: `Customer${orderData.customer_id || 1}`,
-        last_name: 'New',
-        email: `customer${orderData.customer_id || 1}@example.com`,
-      },
-      store: {
-        id: orderData.store_id?.toString() || '1',
-        name: orderData.stores?.name || `Store ${orderData.store_id || 1}`,
-        slug:
-          orderData.stores?.store_code || `store-${orderData.store_id || 1}`,
-      },
-      order_type: orderData.order_type || 'sale',
-      status: orderData.state || OrderStatus.PENDING,
+      order_number: orderData.order_number || `ORD-${String(this.orders().length + 1).padStart(5, '0')}`,
+      customer: orderData.customer || { id: '1', first_name: 'Guest', last_name: '', email: '' },
+      store: orderData.store || { id: '1', name: 'Store', slug: 'store' },
+      order_type: orderData.order_type || OrderType.SALE,
+      status: orderData.status || OrderStatus.PENDING,
       payment_status: orderData.payment_status || PaymentStatus.PENDING,
-      total_amount: parseFloat(orderData.grand_total) || 0,
-      subtotal: parseFloat(orderData.subtotal_amount) || 0,
+      total_amount: parseFloat(orderData.total_amount) || 0,
+      subtotal: parseFloat(orderData.subtotal) || 0,
       tax_amount: parseFloat(orderData.tax_amount) || 0,
-      shipping_amount: parseFloat(orderData.shipping_cost) || 0,
+      shipping_amount: parseFloat(orderData.shipping_amount) || 0,
       discount_amount: parseFloat(orderData.discount_amount) || 0,
-      currency:
-        orderData.currency || this.currencyService.currencyCode() || 'USD',
+      currency: orderData.currency || this.currencyService.currencyCode() || 'COP',
       order_date: orderData.created_at || new Date().toISOString(),
-      items_count: orderData.order_items?.length || 1,
-      notes: orderData.internal_notes || '',
+      items_count: orderData.items?.length || 1,
+      notes: orderData.notes || '',
       created_at: orderData.created_at || new Date().toISOString(),
       updated_at: orderData.updated_at || new Date().toISOString(),
     };
 
-    // Add the new order to the beginning of the list
     this.orders.update((list) => [newOrder, ...list]);
-
-    // Refresh stats to include the new order
-    this.updateStats();
+    this.loadStats();
   }
 }

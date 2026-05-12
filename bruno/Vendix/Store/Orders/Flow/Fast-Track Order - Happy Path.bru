@@ -1,0 +1,54 @@
+meta {
+  name: Fast-Track Order - Happy Path
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/store/orders/{{orderId}}/flow/fast-track
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  x-store-id: {{storeId}}
+}
+
+body:json {
+  {
+    "payment": {
+      "store_payment_method_id": {{storePaymentMethodId}},
+      "payment_type": "direct",
+      "amount_received": 0
+    },
+    "ship": {
+      "tracking_number": "FT-TRACK-001",
+      "carrier": "Test Carrier",
+      "notes": "Fast-tracked from Bruno test"
+    },
+    "deliver": {
+      "delivered_to": "Test Recipient",
+      "delivery_notes": "Fast-track happy path"
+    }
+  }
+}
+
+tests {
+  test("Fast-track successful (200)", function() {
+    expect(res.getStatus()).to.equal(200);
+    expect(res.getBody().success).to.be.true;
+  });
+
+  test("Order reaches finished state", function() {
+    const body = res.getBody();
+    expect(body).to.have.property('data');
+    expect(body.data).to.have.property('state');
+    expect(body.data.state).to.equal('finished');
+  });
+
+  test("Order has shipping method assigned", function() {
+    const body = res.getBody();
+    expect(body.data.shipping_method_id).to.not.be.null;
+  });
+}

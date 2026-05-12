@@ -90,7 +90,7 @@ export class RolesComponent implements OnInit {
   private fb = inject(FormBuilder);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
-searchSubject = new Subject<string>();
+searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   // Table configuration
   tableColumns: TableColumn[] = [

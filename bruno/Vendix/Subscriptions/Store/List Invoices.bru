@@ -1,0 +1,23 @@
+meta {
+  name: List Invoices
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/store/subscriptions/current/invoices?page=1&limit=10
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+tests {
+  test("List invoices successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property('data');
+  });
+}

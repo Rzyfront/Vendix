@@ -16,9 +16,7 @@ const execPromise = promisify(exec);
 
 @Controller()
 export class AppController {
-  constructor(
-    private readonly appService: AppService,
-  ) { }
+  constructor(private readonly appService: AppService) {}
 
   @Public()
   @Get()
@@ -35,15 +33,14 @@ export class AppController {
     }
 
     try {
-
-
       // Ejecutar el seed script compilado
       const { stdout, stderr } = await execPromise('node prisma/seed.js', {
         cwd: '/app/dist',
         env: { ...process.env },
       });
 
-      if (stderr) { }
+      if (stderr) {
+      }
 
       return {
         success: true,
@@ -71,10 +68,13 @@ export class AppController {
     try {
       // Ejecutar script con argumento de módulo opcional
       const moduleArg = body.module ? ` ${body.module}` : '';
-      const { stdout, stderr } = await execPromise(`node prisma/seeds/shared/database-scripts/clean.js${moduleArg}`, {
-        cwd: '/app/dist',
-        env: { ...process.env },
-      });
+      const { stdout, stderr } = await execPromise(
+        `node prisma/seeds/shared/database-scripts/clean.js${moduleArg}`,
+        {
+          cwd: '/app/dist',
+          env: { ...process.env },
+        },
+      );
 
       return {
         success: true,
@@ -104,10 +104,13 @@ export class AppController {
     }
 
     try {
-      const { stdout, stderr } = await execPromise('node prisma/seeds/shared/database-scripts/reset.js', {
-        cwd: '/app/dist',
-        env: { ...process.env },
-      });
+      const { stdout, stderr } = await execPromise(
+        'node prisma/seeds/shared/database-scripts/reset.js',
+        {
+          cwd: '/app/dist',
+          env: { ...process.env },
+        },
+      );
 
       return {
         success: true,
@@ -133,10 +136,13 @@ export class AppController {
     }
 
     try {
-      const { stdout, stderr } = await execPromise('node prisma/seeds/shared/database-scripts/stats.js', {
-        cwd: '/app/dist',
-        env: { ...process.env },
-      });
+      const { stdout, stderr } = await execPromise(
+        'node prisma/seeds/shared/database-scripts/stats.js',
+        {
+          cwd: '/app/dist',
+          env: { ...process.env },
+        },
+      );
 
       return {
         success: true,

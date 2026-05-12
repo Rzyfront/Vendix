@@ -561,6 +561,15 @@ export class PublicationSettingsDto {
   allow_public_access?: boolean;
 }
 
+export class OperationsSettingsDto {
+  @ApiProperty({ example: 15, required: false })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  default_preparation_time_minutes?: number;
+}
+
 export class PanelUISettingsDto {
   @IsOptional()
   STORE_ADMIN?: Record<string, boolean>;

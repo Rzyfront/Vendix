@@ -1,0 +1,43 @@
+meta {
+  name: 08 POST fiscal-periods canonical
+  type: http
+  seq: 8
+}
+
+post {
+  url: http://{{url}}/store/accounting/fiscal-periods
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "name": "Wizard Fiscal Year 2026",
+    "start_date": "2026-01-01",
+    "end_date": "2026-12-31"
+  }
+}
+
+tests {
+  test("creates fiscal period or reports duplicate", function () {
+    expect(res.status).to.be.oneOf([200, 201, 409]);
+    if (res.status === 200 || res.status === 201) {
+      const body = res.body.data || res.body;
+      expect(body).to.have.property('id');
+      bru.setVar("fiscal_period_id", body.id);
+    }
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    const body = res.body.data || res.body;
+    if (body && body.id) {
+      bru.setVar("fiscal_period_id", body.id);
+    }
+  }
+}

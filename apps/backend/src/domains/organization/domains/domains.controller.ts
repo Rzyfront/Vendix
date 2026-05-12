@@ -26,6 +26,7 @@ import {
   PaginatedResponse,
 } from '@common/responses';
 import { DomainsService } from './domains.service';
+import { DomainRegistrationGuard } from '@common/services/rate-limit/domain-registration.guard';
 import {
   DomainSettingResponse,
   DomainListResponse,
@@ -52,7 +53,7 @@ export class DomainsController {
   constructor(
     private readonly domainsService: DomainsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   // ========== ENDPOINTS PRIVADOS (requieren autenticación) ==========
 
@@ -60,6 +61,7 @@ export class DomainsController {
    * Crear configuración de dominio
    */
   @Post()
+  @UseGuards(DomainRegistrationGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:create')
   @HttpCode(HttpStatus.CREATED)
@@ -80,18 +82,23 @@ export class DomainsController {
    * Obtener todas las configuraciones con filtros
    */
   @Get()
-  @Get()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
   async getAllDomainSettings(
     @Query('organizationId') organization_id: string,
     @Query('storeId') store_id: string,
+    @Query('store_id') store_id_alias: string,
     @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('ownership') ownership?: string,
+    @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Req() req?: AuthenticatedRequest,
   ): Promise<PaginatedResponse<DomainSettingResponse>> {
     const filters: any = {};
+    let page_value = 1;
+    let limit_value = 10;
     const user_role = req?.user?.user_roles?.[0]?.roles?.name; // Simple check, ideally use helper
     const is_super_admin = user_role === UserRole.SUPER_ADMIN;
 
@@ -105,38 +112,54 @@ export class DomainsController {
       filters.organization_id = req?.user?.organization_id;
     }
 
-    if (store_id) {
-      const s_id = parseInt(store_id, 10);
-      if (isNaN(s_id)) {
-        throw new BadRequestException('Invalid storeId parameter');
+    const store_filter = store_id ?? store_id_alias;
+    if (store_filter) {
+      if (store_filter === '__organization__') {
+        filters.store_id = '__organization__';
+      } else {
+        const s_id = parseInt(store_filter, 10);
+        if (isNaN(s_id)) {
+          throw new BadRequestException('Invalid storeId parameter');
+        }
+        filters.store_id = s_id;
       }
-      filters.store_id = s_id;
     }
 
-    if (search) filters.search = search;
     if (limit) {
       const val = parseInt(limit, 10);
       if (isNaN(val) || val <= 0) {
         throw new BadRequestException('Invalid limit parameter');
       }
+      limit_value = val;
       filters.limit = val;
+    }
+    if (page) {
+      const val = parseInt(page, 10);
+      if (isNaN(val) || val <= 0) {
+        throw new BadRequestException('Invalid page parameter');
+      }
+      page_value = val;
     }
     if (offset) {
       const val = parseInt(offset, 10);
       if (isNaN(val) || val < 0) {
         throw new BadRequestException('Invalid offset parameter');
       }
-      filters.offset = val;
+      page_value = Math.floor(val / limit_value) + 1;
     }
+    filters.page = page_value;
+    filters.limit = limit_value;
+
+    if (search) filters.search = search;
+    if (status) filters.status = status;
+    if (ownership) filters.ownership = ownership;
 
     const result = await this.domainsService.getAllDomainSettings(filters);
-    const page = Math.floor((filters.offset || 0) / (filters.limit || 10)) + 1;
-    const limit_value = filters.limit || 10;
 
     return this.responseService.paginated(
       result.data,
       result.total,
-      page,
+      page_value,
       limit_value,
       'Domain settings retrieved successfully',
     );
@@ -155,7 +178,9 @@ export class DomainsController {
     const is_super_admin = user_role === UserRole.SUPER_ADMIN;
 
     // Super admins see all stats, others see only their organization
-    const organization_id = is_super_admin ? undefined : req?.user?.organization_id;
+    const organization_id = is_super_admin
+      ? undefined
+      : req?.user?.organization_id;
 
     const stats = await this.domainsService.getDomainStats(organization_id);
     return this.responseService.success(
@@ -327,5 +352,148 @@ export class DomainsController {
   ): Promise<SuccessResponse<VerifyDomainResult>> {
     const result = await this.domainsService.verifyDomain(hostname, body);
     return this.responseService.success(result, 'Domain verified successfully');
+  }
+
+  /**
+   * Renovar certificado SSL
+   */
+  @Post(':id/ssl-renew')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async renewSsl(
+    @Param('id') id: string,
+  ): Promise<
+    SuccessResponse<{ renewed: boolean; ssl_status: string; message: string }>
+  > {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.renewSsl(domainId);
+    return this.responseService.success(
+      result,
+      'SSL certificate renewed successfully',
+    );
+  }
+
+  @Post(':id/certificate/request')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async startCertificateProvisioning(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.startCertificateProvisioning(
+      domainId,
+    );
+    // domain_settings row from Prisma update() carries Date|null fields and a
+    // nullable organization_id; the API response shape (DomainSettingResponse)
+    // declares stringified timestamps. The runtime payload is compatible — the
+    // response interceptor serializes Date instances. Cast to satisfy the
+    // declared response type without changing behavior.
+    return this.responseService.success(
+      result as unknown as DomainSettingResponse,
+      'Certificate provisioning started successfully',
+    );
+  }
+
+  @Get(':id/certificate/status')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async refreshCertificateStatus(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.refreshCertificateStatus(domainId);
+    return this.responseService.success(
+      result as unknown as DomainSettingResponse,
+      'Certificate status refreshed successfully',
+    );
+  }
+
+  @Post(':id/cloudfront/alias')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async attachCloudFrontAlias(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.attachCloudFrontAlias(domainId);
+    return this.responseService.success(
+      result as unknown as DomainSettingResponse,
+      'CloudFront alias attached successfully',
+    );
+  }
+
+  @Get(':id/cloudfront/status')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async refreshCloudFrontStatus(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.refreshCloudFrontStatus(domainId);
+    return this.responseService.success(
+      result as unknown as DomainSettingResponse,
+      'CloudFront status refreshed successfully',
+    );
+  }
+
+  @Post(':id/provision-next')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async provisionNext(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<DomainSettingResponse>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.provisionNext(domainId);
+    return this.responseService.success(
+      result as unknown as DomainSettingResponse,
+      'Domain provisioning advanced successfully',
+    );
+  }
+
+  /**
+   * Obtener instrucciones DNS para un dominio
+   */
+  @Get('dns-instructions/:hostname')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async getDnsInstructions(@Param('hostname') hostname: string): Promise<
+    SuccessResponse<{
+      hostname: string;
+      ownership: string;
+      dns_type: 'CNAME' | 'A';
+      target: string;
+      requires_alias?: boolean;
+      instructions: {
+        record_type: string;
+        name: string;
+        value: string;
+        ttl: number;
+        purpose?: string;
+      }[];
+    }>
+  > {
+    const result = await this.domainsService.getDnsInstructions(hostname);
+    return this.responseService.success(
+      result,
+      'DNS instructions retrieved successfully',
+    );
   }
 }

@@ -39,7 +39,7 @@ export class StockLevelsService {
   }
 
   findByLocation(locationId: number, query: StockLevelQueryDto) {
-    // Validate location access implicitly by the query scope? 
+    // Validate location access implicitly by the query scope?
     // If locationId is not in store, findMany returns empty. Correct.
     return this.prisma.stock_levels.findMany({
       where: {

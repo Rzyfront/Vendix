@@ -1,0 +1,48 @@
+meta {
+  name: Superadmin Gateway PATCH First Insert With Full Credentials
+  type: http
+  seq: 44
+}
+
+# Creates the initial platform_gateway:wompi row with sandbox dummy
+# credentials. After this runs, tests 45 and 46 can rely on the row
+# existing. Run AFTER test 43 (empty-body) to validate the full flow.
+
+patch {
+  url: {{url}}/superadmin/subscriptions/gateway/wompi
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "public_key": "pub_test_aaa",
+    "private_key": "prv_test_bbb",
+    "events_secret": "events_secret_xxx",
+    "integrity_secret": "integrity_secret_yyy",
+    "environment": "sandbox",
+    "is_active": false
+  }
+}
+
+tests {
+  test("Gateway configured successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Configured flag is true", function() {
+    expect(res.body.data).to.have.property("configured");
+    expect(res.body.data.configured).to.equal(true);
+  });
+
+  test("Environment and is_active reflect the request", function() {
+    expect(res.body.data.environment).to.equal("sandbox");
+    expect(res.body.data.is_active).to.equal(false);
+  });
+
+  test("Public key is exposed in masked credentials", function() {
+    expect(res.body.data).to.have.property("credentials_masked");
+    expect(res.body.data.credentials_masked.public_key).to.equal("pub_test_aaa");
+  });
+}

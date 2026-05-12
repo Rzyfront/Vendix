@@ -1,0 +1,24 @@
+meta {
+  name: 02 GET accounting journal-entries
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/organization/accounting/journal-entries
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("envelope is well formed", function () {
+    expect(res.body).to.have.property("success");
+  });
+}

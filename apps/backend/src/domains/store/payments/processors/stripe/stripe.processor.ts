@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { BasePaymentProcessor } from '../../interfaces/base-processor.interface';
 import {
   PaymentData,
@@ -13,10 +14,24 @@ export class StripeProcessor extends BasePaymentProcessor {
 
       const transactionId = this.generateTransactionId();
 
+      // Stripe SDK accepts `{ idempotencyKey }` as second arg of every
+      // write call (e.g. `stripe.paymentIntents.create(data, { idempotencyKey })`).
+      // Fall back to a fresh UUID for back-compat with legacy callers.
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
       if (this.isTestMode()) {
-        return this.simulateTestPayment(paymentData, transactionId);
+        return this.simulateTestPayment(
+          paymentData,
+          transactionId,
+          idempotencyKey,
+        );
       }
 
+      // NOTE: When the real Stripe SDK is wired up here, pass the key as the
+      // second argument: stripe.paymentIntents.create(intentParams, { idempotencyKey })
       return {
         success: true,
         transactionId,
@@ -28,6 +43,7 @@ export class StripeProcessor extends BasePaymentProcessor {
           status: 'succeeded',
           amount: this.formatAmount(paymentData.amount),
           currency: paymentData.currency.toLowerCase(),
+          idempotency_key: idempotencyKey,
         },
       };
     } catch (error) {
@@ -72,10 +88,10 @@ export class StripeProcessor extends BasePaymentProcessor {
     try {
       return Boolean(
         paymentData.amount > 0 &&
-          paymentData.currency &&
-          paymentData.orderId &&
-          paymentData.storeId &&
-          this.config.credentials?.secretKey,
+        paymentData.currency &&
+        paymentData.orderId &&
+        paymentData.storeId &&
+        this.config.credentials?.secretKey,
       );
     } catch (error) {
       return false;
@@ -116,6 +132,7 @@ export class StripeProcessor extends BasePaymentProcessor {
   private simulateTestPayment(
     paymentData: PaymentData,
     transactionId: string,
+    idempotencyKey: string,
   ): PaymentResult {
     const shouldFail = Math.random() < 0.1;
 
@@ -129,6 +146,7 @@ export class StripeProcessor extends BasePaymentProcessor {
             message: 'Your card was declined.',
             type: 'card_error',
           },
+          idempotency_key: idempotencyKey,
         },
       };
     }
@@ -158,6 +176,7 @@ export class StripeProcessor extends BasePaymentProcessor {
               return_url: paymentData.returnUrl,
             },
           },
+          idempotency_key: idempotencyKey,
         },
       };
     }
@@ -172,6 +191,7 @@ export class StripeProcessor extends BasePaymentProcessor {
         status: 'succeeded',
         amount: this.formatAmount(paymentData.amount),
         currency: paymentData.currency.toLowerCase(),
+        idempotency_key: idempotencyKey,
       },
     };
   }

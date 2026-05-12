@@ -8,7 +8,12 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
+import {
+  formatPeriodFromDate,
+  parseDateRange,
+  getPreviousPeriod,
+  getDateTruncInterval,
+} from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -253,7 +258,8 @@ export class CustomersAnalyticsService {
         const customer = customerMap.get(r.customer_id as number);
         return {
           id: r.customer_id,
-          customer_name: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
+          customer_name:
+            `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
           first_name: customer?.first_name || '',
           last_name: customer?.last_name || '',
           email: customer?.email || '',
@@ -305,7 +311,8 @@ export class CustomersAnalyticsService {
       const customer = customerMap.get(r.customer_id as number);
       return {
         id: r.customer_id,
-        customer_name: `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
+        customer_name:
+          `${customer?.first_name || ''} ${customer?.last_name || ''}`.trim(),
         first_name: customer?.first_name || '',
         last_name: customer?.last_name || '',
         email: customer?.email || '',
@@ -734,4 +741,6 @@ export class CustomersAnalyticsService {
     });
   }
 
+=======
+>>>>>>> origin/dev
 }

@@ -27,8 +27,20 @@ export class BookingConfirmationService {
 
     await this.prisma.booking_confirmation_tokens.createMany({
       data: [
-        { booking_id: bookingId, store_id: booking.store_id, token: confirmToken, action: 'confirm', expires_at: expiresAt },
-        { booking_id: bookingId, store_id: booking.store_id, token: cancelToken, action: 'cancel', expires_at: expiresAt },
+        {
+          booking_id: bookingId,
+          store_id: booking.store_id,
+          token: confirmToken,
+          action: 'confirm',
+          expires_at: expiresAt,
+        },
+        {
+          booking_id: bookingId,
+          store_id: booking.store_id,
+          token: cancelToken,
+          action: 'cancel',
+          expires_at: expiresAt,
+        },
       ],
     });
 
@@ -59,14 +71,19 @@ export class BookingConfirmationService {
   }
 
   async processToken(token: string) {
-    const tokenRecord = await this.prisma.withoutScope().booking_confirmation_tokens.findUnique({
-      where: { token },
-      include: { booking: true },
-    });
+    const tokenRecord = await this.prisma
+      .withoutScope()
+      .booking_confirmation_tokens.findUnique({
+        where: { token },
+        include: { booking: true },
+      });
 
-    if (!tokenRecord) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_001);
-    if (tokenRecord.used) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
-    if (tokenRecord.expires_at < new Date()) throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_001);
+    if (!tokenRecord)
+      throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_001);
+    if (tokenRecord.used)
+      throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_002);
+    if (tokenRecord.expires_at < new Date())
+      throw new VendixHttpException(ErrorCodes.BOOK_CONFIRM_001);
 
     await this.prisma.withoutScope().booking_confirmation_tokens.update({
       where: { id: tokenRecord.id },

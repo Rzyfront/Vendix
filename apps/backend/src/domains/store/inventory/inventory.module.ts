@@ -9,11 +9,14 @@ import { InventoryController } from './inventory.controller';
 import { InventoryValidationService } from './services/inventory-validation.service';
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
 import { StockLevelManager } from './shared/services/stock-level-manager.service';
+import { StockValidatorService } from './shared/services/stock-validator.service';
 import { InventoryBatchesService } from './batches/inventory-batches.service';
 import { InventorySerialNumbersService } from './serial-numbers/inventory-serial-numbers.service';
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CostingService } from './shared/services/costing.service';
+import { CostingMethodResolverService } from './shared/services/costing-method-resolver.service';
+import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [
@@ -23,6 +26,7 @@ import { CostingService } from './shared/services/costing.service';
     MovementsModule,
     SuppliersModule,
     InventoryAdjustmentsModule,
+    PrismaModule,
   ],
   controllers: [InventoryController],
   providers: [
@@ -30,7 +34,9 @@ import { CostingService } from './shared/services/costing.service';
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    StockValidatorService,
     CostingService,
+    CostingMethodResolverService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,
@@ -44,10 +50,12 @@ import { CostingService } from './shared/services/costing.service';
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    StockValidatorService,
     CostingService,
+    CostingMethodResolverService,
     InventoryBatchesService,
     InventorySerialNumbersService,
     InventoryTransactionsService,
   ],
 })
-export class InventoryModule { }
+export class InventoryModule {}

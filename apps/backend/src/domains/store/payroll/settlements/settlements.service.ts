@@ -50,12 +50,24 @@ export class SettlementsService {
     const where: Prisma.payroll_settlementsWhereInput = {
       ...(search && {
         OR: [
-          { settlement_number: { contains: search, mode: 'insensitive' as const } },
+          {
+            settlement_number: {
+              contains: search,
+              mode: 'insensitive' as const,
+            },
+          },
           {
             employee: {
               OR: [
-                { first_name: { contains: search, mode: 'insensitive' as const } },
-                { last_name: { contains: search, mode: 'insensitive' as const } },
+                {
+                  first_name: {
+                    contains: search,
+                    mode: 'insensitive' as const,
+                  },
+                },
+                {
+                  last_name: { contains: search, mode: 'insensitive' as const },
+                },
               ],
             },
           },
@@ -140,12 +152,15 @@ export class SettlementsService {
   /**
    * Generate a unique settlement number: LIQ-{YEAR}-{PADDED_SEQ}
    */
-  async generateSettlementNumber(): Promise<string> {
+  async generateSettlementNumber(
+    accounting_entity_id?: number | null,
+  ): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `LIQ-${year}`;
 
     const latest = await this.prisma.payroll_settlements.findFirst({
       where: {
+        ...(accounting_entity_id && { accounting_entity_id }),
         settlement_number: { startsWith: prefix },
       },
       orderBy: { settlement_number: 'desc' },

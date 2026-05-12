@@ -1,0 +1,38 @@
+meta {
+  name: AI Gate Denied
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{url}}/store/ai-chat/conversations
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token_blocked}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "title": "Test conversation for AI gate"
+  }
+}
+
+tests {
+  test("AI access denied for blocked store", function() {
+    expect(res.status).to.be.oneOf([402, 403, 404, 409]);
+    expect(res.body).to.be.an("object");
+  });
+
+  test("Error code relates to subscription", function() {
+    if (res.body.error && res.body.error.code) {
+      expect(res.body.error.code).to.match(/^SUBSCRIPTION_/);
+    }
+  });
+}

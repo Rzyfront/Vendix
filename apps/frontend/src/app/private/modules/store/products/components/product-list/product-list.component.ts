@@ -5,7 +5,7 @@ import {
   inject,
   effect,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { RouterModule, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -57,6 +57,7 @@ import './product-list.component.css';
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
+  private router = inject(Router);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -248,6 +249,14 @@ export class ProductListComponent {
       icon: 'trash-2',
       action: (product: Product) => this.delete.emit(product),
       variant: 'danger',
+    },
+    {
+      label: 'Stock por bodega',
+      icon: 'warehouse',
+      action: (product: Product) =>
+        this.router.navigate([`/admin/inventory/stock/${product.id}`]),
+      variant: 'info',
+      show: (product: Product) => product.track_inventory !== false && product.product_type !== 'service',
     },
   ];
 

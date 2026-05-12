@@ -2,7 +2,7 @@ import {
   Controller,
   Get,
   Post,
-  Put,
+  Patch,
   Delete,
   Body,
   Param,
@@ -47,7 +47,7 @@ export class ResolutionsController {
     );
   }
 
-  @Put(':id')
+  @Patch(':id')
   @Permissions('invoicing:write')
   async update(
     @Param('id') id: string,

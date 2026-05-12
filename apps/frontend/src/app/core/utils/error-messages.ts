@@ -12,6 +12,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
 
+  // Uploads
+  UPLOAD_FILE_001: 'Seleccione un archivo para subir.',
+  UPLOAD_CONTEXT_001: 'Debe seleccionar una organizacion para subir archivos.',
+  UPLOAD_STORE_CONTEXT_001:
+    'Debe seleccionar una tienda para subir este archivo.',
+  UPLOAD_ORG_001: 'No se encontro la organizacion para subir el archivo.',
+  UPLOAD_STORE_001: 'No se encontro la tienda para subir el archivo.',
+  UPLOAD_TYPE_001: 'El tipo de archivo no esta soportado en esta seccion.',
+  UPLOAD_FORBIDDEN_001: 'No tiene permisos para acceder a este archivo.',
+  UPLOAD_FAILED_001: 'No se pudo subir el archivo. Intente de nuevo.',
+
   // Payments
   PAY_INVALID_ORDER_001: 'La orden no es valida o no existe.',
   PAY_INVALID_AMOUNT_001: 'El monto del pago no es valido.',
@@ -64,6 +75,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORG_PERM_001: 'No tiene permisos para acceder a esta organizacion.',
   ORG_CONTEXT_001: 'Debe seleccionar una organizacion.',
   ORG_USER_001: 'Usuario de la organizacion no encontrado.',
+  ORG_USER_002: 'Ya existe un usuario con este email en la organizacion.',
+  ORG_USER_003: 'Estado de usuario no válido para esta operación.',
   ORG_STORE_001: 'Tienda no encontrada.',
   ORG_ROLE_001: 'Rol no encontrado.',
   ORG_DOMAIN_001: 'Dominio no encontrado.',
@@ -91,6 +104,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Debes configurar un SKU para el producto antes de activar las variantes.',
   PROD_VALIDATE_003: 'El SKU de la variante no puede estar vacío.',
 
+  // Product/Service & Variants Validation
+  PROD_SVC_VARIANTS_001: 'Los productos tipo SERVICIO no pueden tener variantes.',
+  PROD_SVC_HAS_VARIANTS_001: 'No se puede cambiar a SERVICE un producto con variantes existentes.',
+  PROD_TRACKING_CHANGE_001: 'Para cambiar el seguimiento de inventario con variantes activas, selecciona un modo de transferencia de stock.',
+  PROD_SALE_PRICE_001: 'El precio de oferta debe ser mayor que 0 y menor que el precio base.',
+  PROD_VAR_SALE_PRICE_001: 'El precio de oferta de la variante debe ser mayor que 0 y menor que su precio de referencia.',
+  PROD_VAR_PRICE_001: 'El precio personalizado de la variante debe ser nulo o mayor que 0.',
+  PROD_VAR_REMOVE_001: 'Para eliminar variantes con stock, selecciona un modo de eliminación de stock.',
+  PROD_HAS_RESERVATIONS_001: 'Esta operación está bloqueada porque existen reservas de stock activas.',
+  PROD_SKU_COLLISION_001: 'El SKU especificado ya existe en una variante de esta tienda.',
+  INV_VARIANT_TRACKING_001: 'El valor de override de seguimiento de inventario no es válido.',
+
+
   // Bulk Products
   BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
   BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
@@ -108,6 +134,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_PERM_001: 'No tiene permisos para acceder a esta orden.',
   ORD_STATUS_001: 'Estado de orden invalido.',
   ORD_SHIP_001: 'Metodo de envio no encontrado.',
+  ORD_SHIP_REQUIRED_001: 'Debes asignar un método de envío antes de continuar.',
+  ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
+  ORD_SHIP_RATE_MISMATCH_001: 'La tarifa seleccionada no corresponde al método de envío.',
+  ORD_SHIP_LOCKED_001: 'No es posible cambiar el método: la orden ya fue enviada.',
 
   // Inventory
   INV_FIND_001: 'Inventario no encontrado.',
@@ -239,16 +269,6 @@ export const ERROR_MESSAGES: Record<string, string> = {
   EXO_GENERATION_FAILED: 'Error al generar el reporte exogeno.',
   EXO_VALIDATION_ERRORS: 'Se encontraron errores de completitud en los datos.',
 
-  // Habeas Data (Proteccion de Datos)
-  HABEAS_EXPORT_RATE_LIMIT:
-    'Solo se permite una exportacion de datos cada 24 horas.',
-  HABEAS_ANON_SELF: 'No puede anonimizar su propia cuenta.',
-  HABEAS_ANON_ALREADY: 'El usuario ya fue anonimizado.',
-  HABEAS_EXPORT_PROCESSING: 'Ya hay una exportacion en proceso.',
-  HABEAS_ANON_REQUEST_NOT_FOUND:
-    'No se encontro la solicitud de anonimizacion.',
-  HABEAS_CONSENT_INVALID: 'Tipo de consentimiento invalido.',
-
   // AI MCP
   AI_MCP_001: 'La autenticacion fallo. Verifique sus credenciales.',
   AI_MCP_002: 'No tiene permisos para realizar esta accion.',
@@ -298,6 +318,70 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Email Templates
   EMAIL_TPL_001: 'Plantilla de email no encontrada.',
+
+  // SaaS Subscriptions
+  SUBSCRIPTION_001: 'Esta tienda no tiene una suscripcion activa.',
+  SUBSCRIPTION_002: 'La suscripcion esta en borrador; debe activarse.',
+  SUBSCRIPTION_003: 'La suscripcion fue cancelada o expiro.',
+  SUBSCRIPTION_004: 'La tienda no tiene una suscripcion activa para funciones de IA.',
+  SUBSCRIPTION_005: 'Esta funcion no esta incluida en tu plan actual.',
+  SUBSCRIPTION_006: 'Se agoto la cuota de IA para este periodo de facturacion.',
+  SUBSCRIPTION_007: 'Tu suscripcion esta vencida; algunas funciones de IA estan limitadas.',
+  SUBSCRIPTION_008: 'Suscripcion suspendida por falta de pago.',
+  SUBSCRIPTION_009: 'Suscripcion bloqueada. Regulariza tu pago para continuar.',
+  SUBSCRIPTION_010: 'El plan seleccionado no es valido.',
+  SUBSCRIPTION_INTERNAL_ERROR: 'Ocurrio un error al procesar tu suscripcion. Intenta de nuevo.',
+  SUBSCRIPTION_VALIDATION: 'Hay datos faltantes o invalidos. Revisa los campos del formulario.',
+  SUBSCRIPTION_PAY_001: 'No se pudo procesar el pago de la suscripcion. Verifica tu metodo de pago.',
+  SUBSCRIPTION_PRORATION_001: 'No se pudo calcular el ajuste prorrateado del cambio de plan.',
+  SUBSCRIPTION_PROMO_002: 'Este plan promocional ya no es elegible para tu tienda.',
+  SUBSCRIPTION_TOKEN_INVALID: 'El metodo de pago caduco o no es valido. Reemplaza la tarjeta para continuar.',
+  SUBSCRIPTION_CARD_DECLINED: 'Tu tarjeta fue rechazada. Verifica los datos o usa otro medio de pago.',
+  SUBSCRIPTION_PROVIDER_UNAVAILABLE: 'La pasarela de pago no responde. Intentalo nuevamente en unos minutos.',
+  SUBSCRIPTION_GATEWAY_001: 'Las credenciales de la pasarela no son validas. Contacta al administrador.',
+  SUBSCRIPTION_GATEWAY_002: 'La pasarela aun no fue probada. Pidele al administrador que ejecute una prueba de conexion.',
+  SUBSCRIPTION_GATEWAY_003: 'Pagos no disponibles temporalmente. La pasarela de Vendix no esta activa; contacta al soporte.',
+  PROMO_NOT_ELIGIBLE: 'El cupon no aplica para esta tienda. Verifica el codigo o las condiciones del cupon.',
+
+  // Partner / Reseller
+  PARTNER_001: 'Esta organizacion no es un partner revendedor.',
+  PARTNER_002: 'El margen supera el maximo permitido por el plan base.',
+  PARTNER_003: 'No puedes habilitar funciones que no estan incluidas en el plan base.',
+  PARTNER_004: 'Este pago de comisiones ya fue procesado.',
+
+  // Promotional plans
+  PROMO_001: 'El plan promocional ya no es elegible.',
+
+  // Plans (catalog)
+  PLAN_001: 'Este plan esta archivado y no acepta nuevas suscripciones.',
+  PLAN_002: 'Este plan no esta disponible para reventa.',
+
+  // Trial
+  TRIAL_001: 'Tu periodo de prueba termino. Elige un plan para continuar.',
+
+  // DIAN Electronic Invoicing
+  DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
+  DIAN_CONFIG_002: 'Ya existe una configuracion DIAN para esta tienda.',
+  DIAN_CERT_001: 'El archivo de certificado es invalido.',
+  DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
+  DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',
+  DIAN_CONN_001: 'No se pudo conectar con la DIAN. Intenta de nuevo.',
+  DIAN_SEND_001: 'La DIAN rechazo el documento.',
+  DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
+
+  // Invoicing
+  INVOICING_FIND_001: 'No se encontro la factura.',
+  INVOICING_FIND_002: 'No se encontro la resolucion de facturacion.',
+  INVOICING_FIND_003: 'No se encontro la orden asociada.',
+  INVOICING_FIND_004: 'No se encontro la orden de venta asociada.',
+  INVOICING_CREATE_001: 'No se pudo crear la factura. Revisa los datos e intenta de nuevo.',
+  INVOICING_VALIDATE_001: 'La factura no cumple las validaciones. Revisa los datos.',
+  INVOICING_STATUS_001: 'No puedes pasar la factura a ese estado desde el actual.',
+  INVOICING_STATUS_002: 'No puedes modificar la factura en su estado actual.',
+  INVOICING_RESOLUTION_001: 'No hay una resolucion activa para numerar facturas. Configura una en Resoluciones.',
+  INVOICING_RESOLUTION_002: 'La resolucion se agoto. Crea una nueva resolucion para seguir facturando.',
+  INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
+  INVOICING_PROVIDER_001: 'Fallo la comunicacion con el proveedor de facturacion electronica.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

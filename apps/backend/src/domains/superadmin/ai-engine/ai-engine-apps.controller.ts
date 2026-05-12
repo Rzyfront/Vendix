@@ -33,7 +33,10 @@ export class AIEngineAppsController {
   @ApiResponse({ status: 201, description: 'Application created' })
   async create(@Body() dto: CreateAIAppDto) {
     const result = await this.appsService.create(dto);
-    return this.responseService.created(result, 'AI application created successfully');
+    return this.responseService.created(
+      result,
+      'AI application created successfully',
+    );
   }
 
   @Get()
@@ -55,7 +58,10 @@ export class AIEngineAppsController {
   @ApiResponse({ status: 200, description: 'Dashboard stats retrieved' })
   async getDashboardStats() {
     const stats = await this.appsService.getDashboardStats();
-    return this.responseService.success(stats, 'Dashboard statistics retrieved');
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved',
+    );
   }
 
   @Get(':id')
@@ -74,7 +80,10 @@ export class AIEngineAppsController {
     @Body() dto: UpdateAIAppDto,
   ) {
     const app = await this.appsService.update(id, dto);
-    return this.responseService.updated(app, 'AI application updated successfully');
+    return this.responseService.updated(
+      app,
+      'AI application updated successfully',
+    );
   }
 
   @Delete(':id')

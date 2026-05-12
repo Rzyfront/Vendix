@@ -1,4 +1,5 @@
 import {
+  ChangeDetectionStrategy,
   Component,
   inject,
   DestroyRef,
@@ -7,6 +8,7 @@ import {
   effect,
   signal,
   computed,
+  untracked,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -15,7 +17,6 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { filter } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store';
@@ -253,6 +254,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
       [version]="previewDoc().version"
     ></app-legal-preview-modal>
   `,
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AuthModalComponent {
   readonly isOpen = input(false);
@@ -304,31 +306,33 @@ export class AuthModalComponent {
       last_name: [''],
     });
 
-    // Auto-close modal on successful authentication (using takeUntilDestroyed)
-    this.authFacade.isAuthenticated$
-      .pipe(
-        takeUntilDestroyed(this.destroyRef),
-        filter((isAuth) => isAuth && this.isOpen()),
-      )
-      .subscribe(() => {
-        // Al autenticarse (especialmente tras registro), registrar aceptaciones si hay pendientes
-        this.processPendingAcceptances();
-        this.onClose();
-      });
+    // Auto-close modal on successful authentication — effect sobre signal de facade
+    effect(() => {
+      const shouldClose =
+        this.authFacade.isAuthenticated() && this.isOpen();
+      if (shouldClose) {
+        untracked(() => {
+          this.processPendingAcceptances();
+          this.onClose();
+        });
+      }
+    });
 
-    // Listen for auth errors
-    this.authFacade.error$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((error) => {
-        if (error && this.isOpen()) {
+    // Listen for auth errors — effect sobre signal de facade
+    effect(() => {
+      const error = this.authFacade.authError();
+      const open = this.isOpen();
+      if (error && open) {
+        untracked(() => {
           const rawMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           const { title, message } = this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
           this.toast.error(message, title, 4000);
-        }
-      });
+        });
+      }
+    });
 
     // Clear error when user starts typing + track password value for computed signals
     this.authForm.valueChanges
@@ -340,20 +344,25 @@ export class AuthModalComponent {
         }
       });
 
-    // React to input changes (replaces ngOnChanges)
+    // React to parent input changes (replaces ngOnChanges).
+    // untracked() evita que mutar isLogin o leer signals internos re-dispare el effect
+    // y revierta el tab switch que el usuario hace via switchMode().
     effect(() => {
       const mode = this.initialMode();
       const open = this.isOpen();
+      const isLoginMode = mode === 'login';
 
-      this.isLogin.set(mode === 'login');
-      this.updateValidators();
+      untracked(() => {
+        this.isLogin.set(isLoginMode);
+        this.updateValidators();
 
-      if (open) {
-        this.errorMessage.set(null);
-        if (!this.isLogin()) {
-          this.loadPendingDocuments();
+        if (open) {
+          this.errorMessage.set(null);
+          if (!isLoginMode) {
+            this.loadPendingDocuments();
+          }
         }
-      }
+      });
     });
   }
 

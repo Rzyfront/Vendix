@@ -349,7 +349,7 @@ export class HelpCenterComponent {
   private helpCenterService = inject(HelpCenterService);
   private route = inject(ActivatedRoute);
   private destroyRef = inject(DestroyRef);
-  private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   articles = signal<HelpArticle[]>([]);
   categories = signal<HelpCategory[]>([]);

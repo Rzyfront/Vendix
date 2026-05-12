@@ -1,4 +1,4 @@
-import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
+import {Component, model, output, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -17,6 +17,7 @@ import {
 } from '../../../../../../shared/components';
 
 import { SuppliersService } from '../../services/suppliers.service';
+import { Supplier } from '../../interfaces';
 
 /**
  * Quick-create modal for suppliers in POP
@@ -34,8 +35,7 @@ import { SuppliersService } from '../../services/suppliers.service';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [(isOpen)]="isOpen"
       (cancel)="onClose()"
       size="md"
       title="Crear Proveedor Rápido"
@@ -132,10 +132,9 @@ import { SuppliersService } from '../../services/suppliers.service';
 })
 export class PopSupplierQuickCreateComponent {
   private destroyRef = inject(DestroyRef);
-  readonly isOpen = input(false);
-  readonly isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
-  readonly supplierCreated = output<number>();
+  readonly supplierCreated = output<Supplier>();
 
   private fb = inject(FormBuilder);
   private suppliersService = inject(SuppliersService);
@@ -189,9 +188,9 @@ export class PopSupplierQuickCreateComponent {
       next: (response: any) => {
         if (response.success && response.data) {
           this.toastService.success('Proveedor creado correctamente');
-          this.supplierCreated.emit(response.data.id);
+          this.supplierCreated.emit(response.data);
           this.resetForm();
-          this.isOpenChange.emit(false);
+          this.isOpen.set(false);
           this.close.emit();
         } else {
           this.toastService.error(
@@ -223,7 +222,7 @@ export class PopSupplierQuickCreateComponent {
 
   onClose(): void {
     this.resetForm();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.close.emit();
   }
 

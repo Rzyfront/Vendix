@@ -1,0 +1,52 @@
+meta {
+  name: Validate Stock Default
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/payments/pos
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": 1,
+    "items": [
+      {
+        "product_id": 20,
+        "product_name": "Test Product Low Stock",
+        "quantity": 999999,
+        "unit_price": 99.99,
+        "total_price": 98999900.01
+      }
+    ],
+    "subtotal": 98999900.01,
+    "total_amount": 98999900.01,
+    "store_payment_method_id": 1,
+    "amount_received": 99000000.00,
+    "allow_oversell": false
+  }
+}
+
+tests {
+  test("POS payment rejected for insufficient stock without allow_oversell", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error indicates insufficient stock", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('stock');
+  });
+
+  test("Error mentions allow_oversell option", function() {
+    expect(res.body.message).to.include('allow_oversell');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

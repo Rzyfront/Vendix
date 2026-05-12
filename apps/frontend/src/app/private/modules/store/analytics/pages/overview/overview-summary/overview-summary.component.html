@@ -108,8 +108,13 @@
             ></div>
           </div>
         } @else {
+<<<<<<< HEAD
           @defer (on viewport) {
             <app-chart [options]="gaugeChartOptions()" size="medium"></app-chart>
+=======
+          @defer (on immediate) {
+            <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
+>>>>>>> origin/dev
           } @placeholder {
             <div
               class="h-64 bg-surface-secondary animate-pulse rounded-xl"
@@ -189,7 +194,7 @@
             ></div>
           </div>
         } @else {
-          @defer (on viewport) {
+          @defer (on immediate) {
             <app-chart
               [options]="comparativeChartOptions()"
               size="large"

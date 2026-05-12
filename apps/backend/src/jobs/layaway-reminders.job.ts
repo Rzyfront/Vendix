@@ -22,25 +22,28 @@ export class LayawayRemindersJob {
 
     try {
       const now = new Date();
-      const three_days_from_now = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+      const three_days_from_now = new Date(
+        now.getTime() + 3 * 24 * 60 * 60 * 1000,
+      );
 
       // Find pending installments due in the next 3 days without a reminder
-      const upcoming_installments = await this.prisma.layaway_installments.findMany({
-        where: {
-          state: 'pending',
-          due_date: {
-            gte: now,
-            lte: three_days_from_now,
+      const upcoming_installments =
+        await this.prisma.layaway_installments.findMany({
+          where: {
+            state: 'pending',
+            due_date: {
+              gte: now,
+              lte: three_days_from_now,
+            },
+            reminder_sent_at: null,
+            layaway_plan: { state: { in: ['active'] } },
           },
-          reminder_sent_at: null,
-          layaway_plan: { state: { in: ['active'] } },
-        },
-        include: {
-          layaway_plan: {
-            select: { id: true, store_id: true, plan_number: true },
+          include: {
+            layaway_plan: {
+              select: { id: true, store_id: true, plan_number: true },
+            },
           },
-        },
-      });
+        });
 
       if (upcoming_installments.length === 0) {
         this.logger.debug('No upcoming installments to remind');
@@ -67,7 +70,10 @@ export class LayawayRemindersJob {
 
       this.logger.log(`Sent ${upcoming_installments.length} payment reminders`);
     } catch (error) {
-      this.logger.error(`Layaway payment reminders failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Layaway payment reminders failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

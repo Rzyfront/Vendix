@@ -55,9 +55,7 @@ export class AIAgentService {
 
     // Filter tools if specific ones requested
     const filteredTools = params.tools?.length
-      ? toolDefinitions.filter((t) =>
-          params.tools!.includes(t.function.name),
-        )
+      ? toolDefinitions.filter((t) => params.tools!.includes(t.function.name))
       : toolDefinitions;
 
     const messages: AIMessage[] = [];
@@ -119,7 +117,9 @@ export class AIAgentService {
 
         // If finish_reason is 'length', the response was truncated
         if (response.finish_reason === 'length') {
-          this.logger.warn(`Agent response truncated (max tokens) at iteration ${iteration}`);
+          this.logger.warn(
+            `Agent response truncated (max tokens) at iteration ${iteration}`,
+          );
         }
 
         // If no tool calls, we have the final answer

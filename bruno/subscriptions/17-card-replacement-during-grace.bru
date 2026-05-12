@@ -1,0 +1,70 @@
+meta {
+  name: Card Replacement During Grace
+  type: http
+  seq: 17
+}
+
+# S2.2 — Verifies the replace-PM flow during a grace_* dunning window:
+#   1. Tokenize a fresh PM via POST /store/subscriptions/payment-methods/:oldId/replace
+#   2. Confirm the old PM is marked state='replaced' with replaced_by_id set
+#   3. Confirm the new PM is created in state='active' and inherits is_default
+#      when the old one was the default
+#   4. After the replace, dunning_state.payment_method_invalid should flip to false
+#
+# Pre-conditions:
+#   - Store subscription in state='grace_soft' or 'grace_hard'
+#   - One existing PM (state='invalid' or 'active') whose id is set in the
+#     environment as `pm_to_replace_id`
+#   - A valid Wompi sandbox token in `wompi_sandbox_token`
+
+post {
+  url: {{url}}/store/subscriptions/payment-methods/{{pm_to_replace_id}}/replace
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "provider_token": "{{wompi_sandbox_token}}",
+    "type": "card",
+    "last4": "4242",
+    "brand": "visa",
+    "expiry_month": "12",
+    "expiry_year": "2030",
+    "card_holder": "Bruno Test",
+    "is_default": true
+  }
+}
+
+tests {
+  test("Replace PM returns 200 or 201", function() {
+    expect(res.status).to.be.oneOf([200, 201, 400, 402, 404]);
+  });
+
+  test("On success, the new PM payload contains id + last4 + is_default", function() {
+    if (res.status === 200 || res.status === 201) {
+      const body = res.body.data ?? res.body;
+      expect(body).to.have.property("id");
+      expect(body).to.have.property("last4");
+      expect(body.last4).to.equal("4242");
+      expect(body.is_default).to.equal(true);
+    }
+  });
+
+  test("On Wompi token failure, error code is in the SUBSCRIPTION_* family", function() {
+    if (res.status >= 400 && res.body?.error?.code) {
+      expect(res.body.error.code).to.match(/^SUBSCRIPTION_/);
+    }
+  });
+}
+
+# Follow-up assertions to be done in a sequential collection run:
+#  - GET /store/subscriptions/payment-methods → old PM has state='replaced',
+#    new PM has state='active' and inherited is_default=true
+#  - GET /store/subscriptions/current/dunning-state → payment_method_invalid=false
+#  - POST /store/subscriptions/retry-payment → succeeds and transitions back
+#    to active (or returns DUNNING_001 if no payable invoice remains)

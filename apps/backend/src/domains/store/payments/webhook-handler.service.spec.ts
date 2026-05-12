@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookHandlerService } from './services/webhook-handler.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { WebhookEvent } from './interfaces';
 
 describe('WebhookHandlerService', () => {
   let service: WebhookHandlerService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   const mockStripeEvent: WebhookEvent = {
     processor: 'stripe',
@@ -44,14 +44,14 @@ describe('WebhookHandlerService', () => {
       providers: [
         WebhookHandlerService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
     }).compile();
 
     service = module.get<WebhookHandlerService>(WebhookHandlerService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {

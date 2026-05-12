@@ -1,4 +1,4 @@
-import {Component, inject, input, output, OnChanges, OnInit, SimpleChanges, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, OnChanges, OnInit, SimpleChanges, DestroyRef, signal} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -45,32 +45,32 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
   footerForm!: FormGroup;
 
   // Flag to skip emission during initial patch
-  private isPatching = false;
+  private isPatching = signal(false);
 
   // Track expanded sections
-  expandedSections = {
+  readonly expandedSections = signal({
     store_info: true,
     links: true,
     help: true,
     social: true,
-  };
+  });
 
   // Track expanded FAQ items
-  expandedFaqIndex: number | null = null;
+  readonly expandedFaqIndex = signal<number | null>(null);
 
   ngOnInit(): void {
     this.createForm();
     const data = this.initialData();
     if (data) {
-      this.isPatching = true;
+      this.isPatching.set(true);
       this.patchForm(data);
-      this.isPatching = false;
+      this.isPatching.set(false);
     }
 
     // Emit changes with debounce - skip emissions during patching
     this.footerForm.valueChanges
       .pipe(
-        filter(() => !this.isPatching),
+        filter(() => !this.isPatching()),
         debounceTime(300),
       )
       .pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
@@ -86,9 +86,9 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
       !changes['initialData'].firstChange &&
       this.footerForm
     ) {
-      this.isPatching = true;
+      this.isPatching.set(true);
       this.patchForm(this.initialData());
-      this.isPatching = false;
+      this.isPatching.set(false);
     }
   }
 
@@ -193,24 +193,24 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
 
     // Expand the new item if adding manually
     if (!item) {
-      this.expandedFaqIndex = this.faqArray.length - 1;
+      this.expandedFaqIndex.set(this.faqArray.length - 1);
     }
   }
 
   removeFaqItem(index: number): void {
     this.faqArray.removeAt(index);
-    if (this.expandedFaqIndex === index) {
-      this.expandedFaqIndex = null;
+    if (this.expandedFaqIndex() === index) {
+      this.expandedFaqIndex.set(null);
     }
   }
 
   toggleFaqItem(index: number): void {
-    this.expandedFaqIndex = this.expandedFaqIndex === index ? null : index;
+    this.expandedFaqIndex.update(current => current === index ? null : index);
   }
 
   // Section toggle
-  toggleSection(section: keyof typeof this.expandedSections): void {
-    this.expandedSections[section] = !this.expandedSections[section];
+  toggleSection(section: 'store_info' | 'links' | 'help' | 'social'): void {
+    this.expandedSections.update(s => ({ ...s, [section]: !s[section] }));
   }
 
   // Get form value properly formatted

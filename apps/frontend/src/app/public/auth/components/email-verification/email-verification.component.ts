@@ -1,5 +1,5 @@
 import {Component, OnInit, inject, signal,
-  DestroyRef} from '@angular/core';
+  DestroyRef, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ConfigFacade } from '../../../../core/store/config';
 
@@ -173,6 +173,12 @@ import { IconComponent } from '../../../../shared/components';
   styleUrls: []})
 export class EmailVerificationComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
+  private toast = inject(ToastService);
+  private configFacade = inject(ConfigFacade);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private authFacade = inject(AuthFacade);
+
   readonly verificationStatus = signal<'pending' | 'success' | 'error'>('pending');
   readonly isLoading = signal(true);
   error: string | null = null;
@@ -180,13 +186,7 @@ export class EmailVerificationComponent implements OnInit {
   token: string | null = null;
   logoUrl: string = '';
 
-  private toast = inject(ToastService);
-  private configFacade = inject(ConfigFacade);
-  private route = inject(ActivatedRoute);
-  private router = inject(Router);
-constructor(private authFacade: AuthFacade) {}
-ngOnInit(): void {
-    // Load branding logo
+  private readonly brandingEffect = effect(() => {
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
       this.logoUrl = appConfig.branding?.logo?.url || '';
@@ -194,7 +194,9 @@ ngOnInit(): void {
         this.logoUrl = 'vlogo.png';
       }
     }
+  });
 
+  ngOnInit(): void {
     // Get the token from the route parameters
     this.token = this.route.snapshot.queryParamMap.get('token');
 

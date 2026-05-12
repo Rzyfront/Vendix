@@ -1,0 +1,34 @@
+meta {
+  name: 11 POST mark-step-completed default_taxes
+  type: http
+  seq: 11
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/accounting/mark-step-completed
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "step": "default_taxes",
+    "ref": {
+      "scope": "STORE"
+    }
+  }
+}
+
+tests {
+  test("records default_taxes step in accounting completed_steps", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    const completed = body.fiscal_status.accounting.wizard.completed_steps || [];
+    const steps = completed.map(s => s.step || s);
+    expect(steps).to.include('default_taxes');
+  });
+}

@@ -7,10 +7,14 @@ import {
   IsArray,
   IsNumber,
   Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { shipping_method_type_enum, shipping_rate_type_enum } from '@prisma/client';
+import {
+  shipping_method_type_enum,
+  shipping_rate_type_enum,
+} from '@prisma/client';
 
 // --- Methods ---
 export class CreateShippingMethodDto {
@@ -40,6 +44,13 @@ export class CreateShippingMethodDto {
   @IsInt()
   @IsOptional()
   max_days?: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @IsOptional()
+  @Type(() => Number)
+  transit_time_minutes?: number;
 
   @IsBoolean()
   @IsOptional()

@@ -66,6 +66,10 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
   readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
+<<<<<<< HEAD
+=======
+  readonly dateRange = toSignal(this.dateRange$, { initialValue: null! });
+>>>>>>> origin/dev
 
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),

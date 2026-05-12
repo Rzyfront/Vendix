@@ -6,8 +6,8 @@ import { ResponseModule } from '@common/responses/response.module';
 
 @Global() // ✅ Hacemos el módulo global para no tener que importarlo en todos lados
 @Module({
-    imports: [ResponseModule, PrismaModule],
-    providers: [AuditService, AuditInterceptor],
-    exports: [AuditService, AuditInterceptor],
+  imports: [ResponseModule, PrismaModule],
+  providers: [AuditService, AuditInterceptor],
+  exports: [AuditService, AuditInterceptor],
 })
-export class AuditModule { }
+export class AuditModule {}

@@ -1,0 +1,24 @@
+meta {
+  name: 01 GET current fiscal scope
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/organization/settings/fiscal-scope
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("returns current fiscal scope", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(["STORE", "ORGANIZATION"]).to.include(body.current);
+    expect(["STORE", "ORGANIZATION"]).to.include(body.operating_scope);
+  });
+}

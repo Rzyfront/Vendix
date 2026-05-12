@@ -296,6 +296,22 @@ export class LocationsComponent implements OnInit {
       },
     },
     {
+      key: 'is_default',
+      label: 'Principal',
+      priority: 2,
+      width: '110px',
+      transform: (value: boolean) => (value ? 'Principal' : '—'),
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          Principal: 'success',
+        },
+      },
+      cellClass: (value: boolean) =>
+        value ? 'text-green-700 font-semibold' : 'text-gray-400',
+    },
+    {
       key: 'is_active',
       label: 'Estado',
       priority: 1,
@@ -309,6 +325,14 @@ export class LocationsComponent implements OnInit {
 
   table_actions: TableAction[] = [
     {
+      label: 'Marcar como principal',
+      icon: 'check-circle',
+      variant: 'success',
+      tooltip: 'Establecer esta bodega como la principal del store',
+      show: (item: InventoryLocation) => !item.is_default && item.is_active,
+      action: (item: InventoryLocation) => this.confirmSetAsDefault(item),
+    },
+    {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
@@ -318,6 +342,7 @@ export class LocationsComponent implements OnInit {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
+      show: (item: InventoryLocation) => !item.is_default,
       action: (item: InventoryLocation) => this.confirmDelete(item),
     },
   ];
@@ -327,9 +352,14 @@ export class LocationsComponent implements OnInit {
     subtitleKey: 'code',
     avatarFallbackIcon: 'map-pin',
     avatarShape: 'square',
-    badgeKey: 'is_active',
-    badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
+    // El badge mobile destaca "Principal" cuando la bodega es default;
+    // si no, conserva el indicador de estado activo/inactivo.
+    badgeKey: 'is_default',
+    badgeConfig: { type: 'custom', size: 'sm' },
+    badgeTransform: (val: boolean, item?: InventoryLocation) => {
+      if (val) return 'Principal';
+      return item?.is_active ? 'Activo' : 'Inactivo';
+    },
     footerKey: 'type',
     footerLabel: 'Tipo',
     footerTransform: (value: string) => {
@@ -355,6 +385,12 @@ export class LocationsComponent implements OnInit {
           };
           return types[value] || value;
         },
+      },
+      {
+        key: 'is_active',
+        label: 'Estado',
+        icon: 'activity',
+        transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
       },
     ],
   };
@@ -512,6 +548,7 @@ export class LocationsComponent implements OnInit {
 
   onSaveLocation(data: CreateLocationDto | UpdateLocationDto): void {
     this.is_submitting.set(true);
+    const shouldSetDefault = Boolean(data.is_default);
 
     const loc = this.selected_location();
     if (loc) {
@@ -520,10 +557,12 @@ export class LocationsComponent implements OnInit {
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
-            this.toastService.success('Ubicación actualizada correctamente');
-            this.is_submitting.set(false);
-            this.closeModal();
-            this.loadLocations();
+            if (shouldSetDefault) {
+              this.setDefaultAfterSave(loc.id, 'Ubicación actualizada correctamente');
+              return;
+            }
+
+            this.finishLocationSave('Ubicación actualizada correctamente');
           },
           error: (error) => {
             this.toastService.error(error || 'Error al actualizar ubicación');
@@ -535,18 +574,43 @@ export class LocationsComponent implements OnInit {
         .createLocation(data as CreateLocationDto)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: () => {
-            this.toastService.success('Ubicación creada correctamente');
-            this.is_submitting.set(false);
-            this.closeModal();
-            this.loadLocations();
+          next: (response) => {
+            const createdId = response.data?.id;
+            if (shouldSetDefault && createdId) {
+              this.setDefaultAfterSave(createdId, 'Ubicación creada correctamente');
+              return;
+            }
+
+            this.finishLocationSave('Ubicación creada correctamente');
           },
           error: (error) => {
             this.toastService.error(error || 'Error al crear ubicación');
             this.is_submitting.set(false);
           },
-        });
+      });
     }
+  }
+
+  private setDefaultAfterSave(locationId: number, successMessage: string): void {
+    this.locationsService
+      .setAsDefault(locationId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.finishLocationSave(successMessage),
+        error: (error) => {
+          this.toastService.error(
+            error || 'La ubicación se guardó, pero no se pudo marcar como principal',
+          );
+          this.is_submitting.set(false);
+        },
+      });
+  }
+
+  private finishLocationSave(message: string): void {
+    this.toastService.success(message);
+    this.is_submitting.set(false);
+    this.closeModal();
+    this.loadLocations();
   }
 
   confirmDelete(location: InventoryLocation): void {
@@ -576,6 +640,60 @@ export class LocationsComponent implements OnInit {
         },
         error: (error) => {
           this.toastService.error(error || 'Error al eliminar ubicación');
+        },
+      });
+  }
+
+  confirmSetAsDefault(location: InventoryLocation): void {
+    const previousDefault = this.locations().find(
+      (l) => l.is_default && l.id !== location.id,
+    );
+    const previousInfo = previousDefault
+      ? ` La anterior principal "${previousDefault.name}" se desmarcará automáticamente.`
+      : '';
+
+    this.dialogService
+      .confirm({
+        title: 'Marcar como bodega principal',
+        message: `¿Deseas establecer "${location.name}" como la bodega principal del store?${previousInfo}`,
+        confirmText: 'Marcar como principal',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed) => {
+        if (confirmed) {
+          this.setAsDefault(location);
+        }
+      });
+  }
+
+  setAsDefault(location: InventoryLocation): void {
+    const previousDefault = this.locations().find(
+      (l) => l.is_default && l.id !== location.id,
+    );
+
+    this.locationsService
+      .setAsDefault(location.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          // Update-in-place: evita un refetch y preserva el orden/página actual.
+          this.locations.update((list) =>
+            list.map((l) => ({
+              ...l,
+              is_default: l.id === location.id,
+            })),
+          );
+
+          const msg = previousDefault
+            ? `"${location.name}" es la nueva bodega principal. "${previousDefault.name}" ya no es default.`
+            : `"${location.name}" marcada como bodega principal.`;
+          this.toastService.success(msg);
+        },
+        error: (error) => {
+          this.toastService.error(
+            error || 'Error al marcar la bodega como principal',
+          );
         },
       });
   }

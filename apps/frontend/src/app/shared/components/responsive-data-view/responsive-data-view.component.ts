@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal, computed } from '@angular/core';
 
 import { TableComponent } from '../table/table.component';
 import { ItemListComponent } from '../item-list/item-list.component';
@@ -8,6 +8,7 @@ import {
   TableAction,
   TableSize,
   SortDirection,
+  TableActionsDisplay,
 } from '../table/table.component';
 import {
   ItemListCardConfig,
@@ -15,7 +16,13 @@ import {
 } from '../item-list/item-list.interfaces';
 
 // Re-export types for consumer convenience
-export type { TableColumn, TableAction, TableSize, SortDirection };
+export type {
+  TableColumn,
+  TableAction,
+  TableSize,
+  SortDirection,
+  TableActionsDisplay,
+};
 export type { ItemListCardConfig, ItemListSize };
 
 /**
@@ -65,6 +72,7 @@ export type { ItemListCardConfig, ItemListSize };
           [bordered]="bordered()"
           [compact]="compact()"
           [sortable]="sortable()"
+          [actionsDisplay]="actionsDisplay()"
           (sort)="sort.emit($event)"
           (rowClick)="rowClick.emit($event)"
         ></app-table>
@@ -82,6 +90,7 @@ export type { ItemListCardConfig, ItemListSize };
           [emptyMessage]="emptyMessage()"
           [emptyIcon]="emptyIcon()"
           [size]="itemListSize()"
+          [actionsDisplay]="actionsDisplay()"
           (itemClick)="rowClick.emit($event)"
           (actionClick)="actionClick.emit($event)"
         ></app-item-list>
@@ -107,6 +116,7 @@ export class ResponsiveDataViewComponent {
   readonly bordered = input(false);
   readonly compact = input(false);
   readonly sortable = input(false);
+  readonly actionsDisplay = input<TableActionsDisplay>('buttons');
 
   // Item List configuration
   readonly cardConfig = input.required<ItemListCardConfig>();
@@ -115,7 +125,9 @@ export class ResponsiveDataViewComponent {
 
   // Shared configuration
   readonly actions = input<TableAction[]>();
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly emptyMessage = input('No hay datos disponibles');
 
   // Empty state enhanced inputs

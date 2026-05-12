@@ -27,18 +27,28 @@ export class RequestContextInterceptor implements NestInterceptor {
       is_owner: false,
     };
 
+    // Propagate X-Request-Id for idempotent operations (e.g. quota dedup)
+    const requestId = req.headers['x-request-id'];
+    if (typeof requestId === 'string' && requestId) {
+      contextObj.request_id = requestId;
+    }
+
     // Combined Context Logic
     if (user) {
       const roles =
         user.user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
+      const effectiveRoles: string[] = user.roles || roles;
+
       contextObj.user_id = user.id || user.user_id;
       contextObj.organization_id = user.organization_id;
       contextObj.store_id = user.store_id;
-      contextObj.roles = user.roles || roles;
+      contextObj.app_type = user.app_type; // ✅ Del JWT — DomainScopeGuard
+      contextObj.roles = effectiveRoles;
       contextObj.permissions = user.permissions || [];
-      contextObj.is_super_admin = user.is_super_admin || contextObj.roles.includes('super_admin');
-      contextObj.is_owner = user.is_owner || contextObj.roles.includes('owner');
+      contextObj.is_super_admin =
+        user.is_super_admin || effectiveRoles.includes('super_admin');
+      contextObj.is_owner = user.is_owner || effectiveRoles.includes('owner');
       contextObj.email = user.email;
     }
 

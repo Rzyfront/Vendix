@@ -1,4 +1,4 @@
-import { Component, inject, input, output, effect } from '@angular/core';
+import { Component, inject, input, output, effect, signal, computed } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -114,7 +114,9 @@ export class CustomerModalComponent {
 
   readonly isOpen = input(false);
   readonly customer = input<Customer | null>(null);
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
   readonly save = output<CreateCustomerRequest>();

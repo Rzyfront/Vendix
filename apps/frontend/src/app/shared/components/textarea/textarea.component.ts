@@ -2,7 +2,8 @@ import {
   Component,
   forwardRef,
   input,
-  output
+  output,
+  signal,
 } from '@angular/core';
 
 import {
@@ -11,11 +12,13 @@ import {
   AbstractControl,
 } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
+import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 
 @Component({
   selector: 'app-textarea',
   standalone: true,
-  imports: [],
+  imports: [IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -30,8 +33,16 @@ import { FormStyleVariant } from '../../types/form.types';
         <label
           [for]="textareaId"
           [class]="labelClasses"
+          class="label-with-tooltip"
           >
-          {{ label() }}
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <app-tooltip [content]="tooltipText()" position="top">
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
+          }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1"
               >*</span
@@ -45,9 +56,9 @@ import { FormStyleVariant } from '../../types/form.types';
           <textarea
             [id]="textareaId"
             [placeholder]="placeholder()"
-            [disabled]="disabled"
+            [disabled]="disabled()"
             [readonly]="readonly()"
-            [value]="value"
+            [value]="value()"
             [rows]="rows()"
             [class]="textareaClasses"
             [style]="customStyle()"
@@ -85,17 +96,36 @@ import { FormStyleVariant } from '../../types/form.types';
       resize: vertical;
       min-height: 80px;
     }
+
+    .label-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .help-icon {
+      color: var(--color-text-muted);
+      cursor: help;
+      position: relative;
+      display: inline-flex;
+      transition: color 0.2s ease;
+    }
+
+    .help-icon:hover {
+      color: var(--color-primary);
+    }
   `],
 })
 export class TextareaComponent implements ControlValueAccessor {
   readonly label = input<string | undefined>(undefined);
   readonly placeholder = input('');
   readonly rows = input(3);
-  disabled = false;
+  readonly disabled = signal(false);
   readonly readonly = input(false);
   readonly required = input(false);
   readonly error = input<string>();
   readonly helperText = input<string | undefined>(undefined);
+  readonly tooltipText = input<string>('');
   readonly control = input<AbstractControl | null>();
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly customStyle = input('');
@@ -107,7 +137,7 @@ export class TextareaComponent implements ControlValueAccessor {
   readonly textareaFocus = output<void>();
   readonly textareaBlur = output<void>();
 
-  value = '';
+  readonly value = signal('');
   textareaId = `textarea-${Math.random().toString(36).substr(2, 9)}`;
 
   // ControlValueAccessor implementation
@@ -115,7 +145,7 @@ export class TextareaComponent implements ControlValueAccessor {
   private onTouched = () => { };
 
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -127,7 +157,7 @@ export class TextareaComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabled.set(isDisabled);
   }
 
   get labelClasses(): string {
@@ -239,9 +269,10 @@ export class TextareaComponent implements ControlValueAccessor {
 
   onInput(event: Event): void {
     const target = event.target as HTMLTextAreaElement;
-    this.value = target.value;
-    this.onChange(this.value);
-    this.valueChange.emit(this.value);
+    const newValue = target.value;
+    this.value.set(newValue);
+    this.onChange(newValue);
+    this.valueChange.emit(newValue);
   }
 
   onBlur(): void {

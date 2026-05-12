@@ -51,7 +51,9 @@ export class ScheduleValidationService {
     });
 
     const hasAdminRole = userRoles.some((ur) =>
-      ['owner', 'admin', 'manager'].includes(ur.roles?.name?.toLowerCase() || ''),
+      ['owner', 'admin', 'manager'].includes(
+        ur.roles?.name?.toLowerCase() || '',
+      ),
     );
 
     return hasAdminRole;
@@ -61,16 +63,19 @@ export class ScheduleValidationService {
    * Valida si el POS está dentro del horario de atención
    * Returns ScheduleValidationResult con detalles
    */
-  async validateBusinessHours(storeId: number): Promise<ScheduleValidationResult> {
+  async validateBusinessHours(
+    storeId: number,
+  ): Promise<ScheduleValidationResult> {
     // Obtener configuración de la tienda
     const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id: storeId },
       select: { settings: true },
     });
 
-    const settings = storeSettings?.settings as any;
+    const settings = storeSettings?.settings;
     const posSettings = settings?.pos || {};
-    const enableScheduleValidation = posSettings.enable_schedule_validation || false;
+    const enableScheduleValidation =
+      posSettings.enable_schedule_validation || false;
     const businessHours = posSettings.business_hours || {};
     const timezone = settings?.general?.timezone || 'America/Bogota';
 
@@ -85,11 +90,21 @@ export class ScheduleValidationService {
     }
 
     const { day, hours, minutes } = this.getDateInTimezone(timezone);
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const currentDayName = dayNames[day];
     const currentTime = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
 
-    const todayHours = businessHours[currentDayName] as BusinessHours | undefined;
+    const todayHours = businessHours[currentDayName] as
+      | BusinessHours
+      | undefined;
     const curMinutes = hours * 60 + minutes;
 
     // Si no hay horario para hoy, permitir
@@ -117,7 +132,11 @@ export class ScheduleValidationService {
     }
 
     // Validar horario
-    const isWithin = this.isTimeWithinRange(currentTime, todayHours.open, todayHours.close);
+    const isWithin = this.isTimeWithinRange(
+      currentTime,
+      todayHours.open,
+      todayHours.close,
+    );
 
     if (isWithin) {
       return {
@@ -146,7 +165,10 @@ export class ScheduleValidationService {
   /**
    * Valida y lanza excepción si está fuera de horario (para usar en guards/middleware)
    */
-  async validateOrThrow(storeId: number, bypassForAdmins: boolean = true): Promise<void> {
+  async validateOrThrow(
+    storeId: number,
+    bypassForAdmins: boolean = true,
+  ): Promise<void> {
     // Verificar si puede saltarse la validación (admin)
     if (bypassForAdmins) {
       const canBypass = await this.canBypassScheduleCheck();
@@ -171,7 +193,11 @@ export class ScheduleValidationService {
    * Extracts day-of-week, hours and minutes in the store's timezone
    * using Intl.DateTimeFormat (no external dependencies).
    */
-  private getDateInTimezone(timezone: string): { day: number; hours: number; minutes: number } {
+  private getDateInTimezone(timezone: string): {
+    day: number;
+    hours: number;
+    minutes: number;
+  } {
     const now = new Date();
     try {
       const parts = new Intl.DateTimeFormat('en-US', {
@@ -182,24 +208,48 @@ export class ScheduleValidationService {
         hour12: false,
       }).formatToParts(now);
 
-      const weekdayStr = parts.find(p => p.type === 'weekday')?.value || '';
-      const hoursVal = parseInt(parts.find(p => p.type === 'hour')?.value || '0', 10);
-      const minutesVal = parseInt(parts.find(p => p.type === 'minute')?.value || '0', 10);
+      const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || '';
+      const hoursVal = parseInt(
+        parts.find((p) => p.type === 'hour')?.value || '0',
+        10,
+      );
+      const minutesVal = parseInt(
+        parts.find((p) => p.type === 'minute')?.value || '0',
+        10,
+      );
 
       const weekdayMap: Record<string, number> = {
-        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+        Sun: 0,
+        Mon: 1,
+        Tue: 2,
+        Wed: 3,
+        Thu: 4,
+        Fri: 5,
+        Sat: 6,
       };
       const dayVal = weekdayMap[weekdayStr] ?? now.getDay();
 
       return { day: dayVal, hours: hoursVal, minutes: minutesVal };
     } catch {
       // Fallback to local time if timezone is invalid
-      return { day: now.getDay(), hours: now.getHours(), minutes: now.getMinutes() };
+      return {
+        day: now.getDay(),
+        hours: now.getHours(),
+        minutes: now.getMinutes(),
+      };
     }
   }
 
   private getCurrentDayName(timezone?: string): string {
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     if (timezone) {
       const { day } = this.getDateInTimezone(timezone);
       return dayNames[day];
@@ -231,7 +281,11 @@ export class ScheduleValidationService {
     return `${hours}:${minutes}`;
   }
 
-  private isTimeWithinRange(current: string, open: string, close: string): boolean {
+  private isTimeWithinRange(
+    current: string,
+    open: string,
+    close: string,
+  ): boolean {
     const [curH, curM] = current.split(':').map(Number);
     const [openH, openM] = open.split(':').map(Number);
     const [closeH, closeM] = close.split(':').map(Number);
@@ -252,7 +306,15 @@ export class ScheduleValidationService {
     currentDay: number,
     currentMinutes: number,
   ): string {
-    const dayNames = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const dayNames = [
+      'sunday',
+      'monday',
+      'tuesday',
+      'wednesday',
+      'thursday',
+      'friday',
+      'saturday',
+    ];
     const spanishDays: Record<string, string> = {
       sunday: 'Domingo',
       monday: 'Lunes',
@@ -266,7 +328,11 @@ export class ScheduleValidationService {
     // First check if today opens later (before opening hour)
     const todayName = dayNames[currentDay];
     const todayHours = businessHours[todayName];
-    if (todayHours && todayHours.open !== 'closed' && todayHours.close !== 'closed') {
+    if (
+      todayHours &&
+      todayHours.open !== 'closed' &&
+      todayHours.close !== 'closed'
+    ) {
       const [openH, openM] = todayHours.open.split(':').map(Number);
       const openMinutes = openH * 60 + openM;
       if (currentMinutes < openMinutes) {

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, DestroyRef, inject, input, output } from '@angular/core';
+import { Component, OnInit, DestroyRef, effect, inject, input, output, Injector } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -20,8 +20,9 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })
-export class PosSettingsForm implements OnInit, OnChanges {
+export class PosSettingsForm implements OnInit {
   readonly settings = input.required<PosSettings>();
+  readonly settingsLoaded = input<boolean>(false);
   readonly settingsChange = output<PosSettings>();
 
   private destroyRef = inject(DestroyRef);
@@ -29,45 +30,59 @@ export class PosSettingsForm implements OnInit, OnChanges {
   constructor(
     private scaleService: PosScaleService,
     private toastService: ToastService,
-  ) {}
+  ) {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(
+          {
+            ...current,
+            business_hours: current.business_hours || this.getDefaultBusinessHours(),
+          },
+          { emitEvent: false },
+        );
+        this.syncDependentControlsState();
+      }
+    });
+  }
 
   form: FormGroup = new FormGroup({
-    allow_anonymous_sales: new FormControl(false),
-    anonymous_sales_as_default: new FormControl(false),
-    business_hours: new FormControl(this.getDefaultBusinessHours()),
-    enable_schedule_validation: new FormControl(false),
-    show_onscreen_keypad: new FormControl(true),
-    require_cash_drawer_open: new FormControl(false),
-    auto_print_receipt: new FormControl(true),
-    allow_price_edit: new FormControl(true),
-    allow_discount: new FormControl(true),
-    max_discount_percentage: new FormControl(15),
-    allow_refund_without_approval: new FormControl(false),
+    allow_anonymous_sales: new FormControl<boolean | null>(null),
+    anonymous_sales_as_default: new FormControl<boolean | null>(null),
+    business_hours: new FormControl<Record<string, BusinessHours> | null>(null),
+    enable_schedule_validation: new FormControl<boolean | null>(null),
+    show_onscreen_keypad: new FormControl<boolean | null>(null),
+    require_cash_drawer_open: new FormControl<boolean | null>(null),
+    auto_print_receipt: new FormControl<boolean | null>(null),
+    allow_price_edit: new FormControl<boolean | null>(null),
+    allow_discount: new FormControl<boolean | null>(null),
+    max_discount_percentage: new FormControl<number | null>(null),
+    allow_refund_without_approval: new FormControl<boolean | null>(null),
     scale: new FormGroup({
-      enabled: new FormControl(false),
-      allow_manual_weight_entry: new FormControl(true),
-      default_weight_unit: new FormControl('kg'),
+      enabled: new FormControl<boolean | null>(null),
+      allow_manual_weight_entry: new FormControl<boolean | null>(null),
+      default_weight_unit: new FormControl<string | null>(null),
       device: new FormGroup({
-        baud_rate: new FormControl(9600),
-        data_bits: new FormControl(8),
-        stop_bits: new FormControl(1),
-        parity: new FormControl('none'),
-        protocol: new FormControl('generic'),
+        baud_rate: new FormControl<number | null>(null),
+        data_bits: new FormControl<number | null>(null),
+        stop_bits: new FormControl<number | null>(null),
+        parity: new FormControl<string | null>(null),
+        protocol: new FormControl<string | null>(null),
       }),
     }),
     cash_register: new FormGroup({
-      enabled: new FormControl(false),
-      require_session_for_sales: new FormControl(false),
-      allow_multiple_sessions_per_user: new FormControl(false),
-      auto_create_default_register: new FormControl(true),
-      require_closing_count: new FormControl(true),
-      track_non_cash_payments: new FormControl(true),
+      enabled: new FormControl<boolean | null>(null),
+      require_session_for_sales: new FormControl<boolean | null>(null),
+      allow_multiple_sessions_per_user: new FormControl<boolean | null>(null),
+      auto_create_default_register: new FormControl<boolean | null>(null),
+      require_closing_count: new FormControl<boolean | null>(null),
+      track_non_cash_payments: new FormControl<boolean | null>(null),
     }),
     customer_queue: new FormGroup({
-      enabled: new FormControl(false),
-      queue_expiry_hours: new FormControl(12),
-      max_queue_size: new FormControl(0),
-      require_email: new FormControl(false),
+      enabled: new FormControl<boolean | null>(null),
+      queue_expiry_hours: new FormControl<number | null>(null),
+      max_queue_size: new FormControl<number | null>(null),
+      require_email: new FormControl<boolean | null>(null),
     }),
   });
 
@@ -226,43 +241,56 @@ export class PosSettingsForm implements OnInit, OnChanges {
     }
   }
 
+  private wireDone = false;
+
   ngOnInit() {
-    this.patchForm();
-    this.wireDependentControls();
+    // Defer wiring until data is loaded so dependent controls don't react to
+    // null bootstrap values.
+    effect(() => {
+      if (this.settingsLoaded() && !this.wireDone) {
+        this.wireDone = true;
+        this.wireDependentControls();
+      }
+    }, { injector: this.injector });
   }
 
-  ngOnChanges() {
-    this.patchForm();
+  private injector = inject(Injector);
+
+  private readonly dependentLinks = (): Array<[FormControl<boolean>, FormControl[]]> => [
+    [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
+    [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
+    [
+      this.cashRegisterEnabledControl,
+      [
+        this.requireSessionForSalesControl,
+        this.requireClosingCountControl,
+        this.trackNonCashPaymentsControl,
+        this.allowMultipleSessionsControl,
+        this.autoCreateDefaultRegisterControl,
+      ],
+    ],
+    [this.customerQueueEnabledControl, [this.requireEmailControl]],
+  ];
+
+  private applyDependents(enabled: boolean | null, dependents: FormControl[]) {
+    for (const dep of dependents) {
+      if (enabled) dep.enable({ emitEvent: false });
+      else dep.disable({ emitEvent: false });
+    }
+  }
+
+  private syncDependentControlsState() {
+    for (const [master, dependents] of this.dependentLinks()) {
+      this.applyDependents(master.value, dependents);
+    }
   }
 
   private wireDependentControls() {
-    const links: Array<[FormControl<boolean>, FormControl[]]> = [
-      [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
-      [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
-      [
-        this.cashRegisterEnabledControl,
-        [
-          this.requireSessionForSalesControl,
-          this.requireClosingCountControl,
-          this.trackNonCashPaymentsControl,
-          this.allowMultipleSessionsControl,
-          this.autoCreateDefaultRegisterControl,
-        ],
-      ],
-      [this.customerQueueEnabledControl, [this.requireEmailControl]],
-    ];
-
-    for (const [master, dependents] of links) {
-      const apply = (enabled: boolean | null) => {
-        for (const dep of dependents) {
-          if (enabled) dep.enable({ emitEvent: false });
-          else dep.disable({ emitEvent: false });
-        }
-      };
-      apply(master.value);
+    for (const [master, dependents] of this.dependentLinks()) {
+      this.applyDependents(master.value, dependents);
       master.valueChanges
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe(apply);
+        .subscribe((enabled) => this.applyDependents(enabled, dependents));
     }
   }
 
@@ -278,26 +306,15 @@ export class PosSettingsForm implements OnInit, OnChanges {
     };
   }
 
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue({
-        ...currentSettings,
-        business_hours:
-          currentSettings.business_hours || this.getDefaultBusinessHours(),
-      });
-    }
-  }
-
   onFieldChange() {
     if (this.form.valid) {
-      this.settingsChange.emit(this.form.value);
+      this.settingsChange.emit(this.form.getRawValue());
     }
   }
 
   onBusinessHoursChange() {
     if (this.form.valid) {
-      this.settingsChange.emit(this.form.value);
+      this.settingsChange.emit(this.form.getRawValue());
     }
   }
 

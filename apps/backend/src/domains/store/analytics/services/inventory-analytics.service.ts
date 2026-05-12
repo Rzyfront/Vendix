@@ -7,12 +7,20 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import { formatPeriodFromDate, parseDateRange, getDateTruncInterval } from '../utils/date.util';
+import {
+  formatPeriodFromDate,
+  parseDateRange,
+  getDateTruncInterval,
+} from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class InventoryAnalyticsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly operatingScopeService: OperatingScopeService,
+  ) {}
 
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     // Get all products with stock info (store scoping is automatic)
@@ -54,6 +62,12 @@ export class InventoryAnalyticsService {
         lowStockCount++;
       }
     }
+
+    const valuation = await this.getInventoryValuation(query);
+    totalStockValue = valuation.reduce(
+      (sum, item) => sum + Number(item.total_value || 0),
+      0,
+    );
 
     return {
       total_sku_count: totalSkuCount,
@@ -125,7 +139,7 @@ export class InventoryAnalyticsService {
         product_id: product.id,
         product_name: product.name,
         sku: product.sku,
-        image_url: (product as any).product_images?.[0]?.image_url || null,
+        image_url: product.product_images?.[0]?.image_url || null,
         quantity_on_hand: qty,
         quantity_reserved: 0, // TODO: Calculate from stock_reservations
         quantity_available: qty,
@@ -206,7 +220,7 @@ export class InventoryAnalyticsService {
           product_id: product.id,
           product_name: product.name,
           sku: product.sku,
-          image_url: (product as any).product_images?.[0]?.image_url || null,
+          image_url: product.product_images?.[0]?.image_url || null,
           quantity_available: qty,
           reorder_point: reorderPoint,
           days_of_stock: null, // TODO: Calculate from sales velocity
@@ -367,13 +381,48 @@ export class InventoryAnalyticsService {
   }
 
   async getInventoryValuation(query: InventoryAnalyticsQueryDto) {
-    // Get stock levels grouped by location, including product cost_price as fallback
-    const stockLevels = await this.prisma.stock_levels.findMany({
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const scope = await this.operatingScopeService.getOperatingScope(
+      context.organization_id,
+    );
+    const baseClient = this.prisma.withoutScope() as any;
+    const asOf = (query as any).as_of ? new Date((query as any).as_of) : null;
+    const storeFilter =
+      scope === 'STORE'
+        ? { store_id: context.store_id }
+        : {};
+
+    if (scope === 'STORE' && !context.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    if (asOf) {
+      return this.getHistoricalInventoryValuation(baseClient, {
+        organizationId: context.organization_id,
+        storeId: scope === 'STORE' ? context.store_id : null,
+        locationId: query.location_id,
+        asOf,
+      });
+    }
+
+    const stockLevels = await baseClient.stock_levels.findMany({
+      where: {
+        ...(query.location_id && { location_id: query.location_id }),
+        inventory_locations: {
+          organization_id: context.organization_id,
+          ...storeFilter,
+        },
+      },
       include: {
         inventory_locations: {
           select: {
             id: true,
             name: true,
+            store_id: true,
           },
         },
         products: {
@@ -381,8 +430,46 @@ export class InventoryAnalyticsService {
             cost_price: true,
           },
         },
+        product_variants: {
+          select: {
+            cost_price: true,
+          },
+        },
       },
     });
+
+    const layers = await baseClient.inventory_cost_layers.findMany({
+      where: {
+        quantity_remaining: { gt: 0 },
+        inventory_locations: {
+          organization_id: context.organization_id,
+          ...storeFilter,
+        },
+        ...(query.location_id && { location_id: query.location_id }),
+      },
+      select: {
+        product_id: true,
+        product_variant_id: true,
+        location_id: true,
+        quantity_remaining: true,
+        unit_cost: true,
+      },
+    });
+
+    const layerValueByStockKey = new Map<string, number>();
+    for (const layer of layers) {
+      const key = this.getStockKey(
+        layer.location_id,
+        layer.product_id,
+        layer.product_variant_id,
+      );
+      const value =
+        Number(layer.quantity_remaining || 0) * Number(layer.unit_cost || 0);
+      layerValueByStockKey.set(
+        key,
+        (layerValueByStockKey.get(key) || 0) + value,
+      );
+    }
 
     // Aggregate by location
     const locationMap = new Map<
@@ -395,9 +482,17 @@ export class InventoryAnalyticsService {
       const locationId = sl.inventory_locations?.id || 0;
       const locationName = sl.inventory_locations?.name || 'Sin ubicación';
       const qty = Number(sl.quantity_on_hand || 0);
+      const stockKey = this.getStockKey(
+        sl.location_id,
+        sl.product_id,
+        sl.product_variant_id,
+      );
+      const layerValue = layerValueByStockKey.get(stockKey);
       const cost =
-        Number(sl.cost_per_unit || 0) || Number(sl.products?.cost_price || 0);
-      const value = qty * cost;
+        Number(sl.cost_per_unit || 0) ||
+        Number(sl.product_variants?.cost_price || 0) ||
+        Number(sl.products?.cost_price || 0);
+      const value = layerValue !== undefined ? layerValue : qty * cost;
       totalValue += value;
 
       const existing = locationMap.get(locationId) || {
@@ -421,6 +516,83 @@ export class InventoryAnalyticsService {
           totalValue > 0 ? (data.value / totalValue) * 100 : 0,
       }))
       .sort((a, b) => b.total_value - a.total_value);
+  }
+
+  private async getHistoricalInventoryValuation(
+    baseClient: any,
+    params: {
+      organizationId: number;
+      storeId?: number | null;
+      locationId?: number;
+      asOf: Date;
+    },
+  ) {
+    const snapshots = await baseClient.inventory_valuation_snapshots.findMany({
+      where: {
+        organization_id: params.organizationId,
+        snapshot_at: { lte: params.asOf },
+        ...(params.storeId && { store_id: Number(params.storeId) }),
+        ...(params.locationId && { location_id: params.locationId }),
+      },
+      include: {
+        inventory_location: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { snapshot_at: 'desc' },
+    });
+
+    const latestByStockKey = new Map<string, any>();
+    for (const snapshot of snapshots) {
+      const key = this.getStockKey(
+        snapshot.location_id,
+        snapshot.product_id,
+        snapshot.product_variant_id,
+      );
+      if (!latestByStockKey.has(key)) latestByStockKey.set(key, snapshot);
+    }
+
+    const locationMap = new Map<
+      number,
+      { name: string; quantity: number; value: number }
+    >();
+    let totalValue = 0;
+
+    for (const snapshot of latestByStockKey.values()) {
+      const locationId = snapshot.location_id;
+      const quantity = Number(snapshot.quantity_on_hand || 0);
+      const value = Number(snapshot.total_value || 0);
+      totalValue += value;
+
+      const existing = locationMap.get(locationId) || {
+        name: snapshot.inventory_location?.name || 'Sin ubicación',
+        quantity: 0,
+        value: 0,
+      };
+      existing.quantity += quantity;
+      existing.value += value;
+      locationMap.set(locationId, existing);
+    }
+
+    return Array.from(locationMap.entries())
+      .map(([id, data]) => ({
+        location_id: id,
+        location_name: data.name,
+        total_quantity: data.quantity,
+        total_value: data.value,
+        average_cost: data.quantity > 0 ? data.value / data.quantity : 0,
+        percentage_of_total:
+          totalValue > 0 ? (data.value / totalValue) * 100 : 0,
+      }))
+      .sort((a, b) => b.total_value - a.total_value);
+  }
+
+  private getStockKey(
+    locationId: number,
+    productId: number,
+    variantId?: number | null,
+  ): string {
+    return `${locationId}:${productId}:${variantId ?? 'base'}`;
   }
 
   async getMovementSummary(query: InventoryAnalyticsQueryDto) {
@@ -579,5 +751,4 @@ export class InventoryAnalyticsService {
       Razón: m.reason || '-',
     }));
   }
-
 }

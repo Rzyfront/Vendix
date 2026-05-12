@@ -41,6 +41,11 @@ import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service
     InvoicePdfService,
     InvoiceRetryQueueService,
   ],
-  exports: [InvoicingService, InvoiceFlowService, InvoicePdfService, InvoiceRetryQueueService],
+  exports: [
+    InvoicingService,
+    InvoiceFlowService,
+    InvoicePdfService,
+    InvoiceRetryQueueService,
+  ],
 })
 export class InvoicingModule {}

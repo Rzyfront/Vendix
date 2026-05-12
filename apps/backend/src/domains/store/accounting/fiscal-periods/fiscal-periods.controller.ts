@@ -1,6 +1,10 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+  SkipModuleFlowGuard,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -29,6 +33,7 @@ export class FiscalPeriodsController {
   ) {}
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard loadInitial() lists fiscal periods while module still WIP
   @Permissions('store:accounting:fiscal_periods:read')
   async findAll() {
     const result = await this.fiscal_periods_service.findAll();
@@ -43,11 +48,15 @@ export class FiscalPeriodsController {
   }
 
   @Post()
+  @SkipModuleFlowGuard() // bootstrap: wizard creates the initial fiscal period to satisfy ACTIVE requirements
   @Permissions('store:accounting:fiscal_periods:create')
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateFiscalPeriodDto) {
     const result = await this.fiscal_periods_service.create(create_dto);
-    return this.response_service.success(result, 'Fiscal period created successfully');
+    return this.response_service.success(
+      result,
+      'Fiscal period created successfully',
+    );
   }
 
   @Put(':id')
@@ -57,7 +66,10 @@ export class FiscalPeriodsController {
     @Body() update_dto: UpdateFiscalPeriodDto,
   ) {
     const result = await this.fiscal_periods_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Fiscal period updated successfully');
+    return this.response_service.success(
+      result,
+      'Fiscal period updated successfully',
+    );
   }
 
   @Patch(':id/close')
@@ -65,7 +77,10 @@ export class FiscalPeriodsController {
   @HttpCode(HttpStatus.OK)
   async close(@Param('id') id: string) {
     const result = await this.fiscal_periods_service.close(+id);
-    return this.response_service.success(result, 'Fiscal period closed successfully');
+    return this.response_service.success(
+      result,
+      'Fiscal period closed successfully',
+    );
   }
 
   @Delete(':id')
@@ -73,6 +88,9 @@ export class FiscalPeriodsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.fiscal_periods_service.remove(+id);
-    return this.response_service.success(null, 'Fiscal period deleted successfully');
+    return this.response_service.success(
+      null,
+      'Fiscal period deleted successfully',
+    );
   }
 }

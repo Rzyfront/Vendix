@@ -498,6 +498,24 @@
 }
 
 // Booking
+.eta-banner {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-primary-light, rgba(59, 130, 246, 0.1));
+    border: 1px solid var(--color-primary, #3b82f6);
+    border-radius: var(--radius-md);
+    margin-bottom: 1.5rem;
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-medium);
+    color: var(--color-primary, #3b82f6);
+
+    .eta-icon {
+        font-size: var(--fs-base);
+    }
+}
+
 .booking-description {
     font-size: var(--fs-sm);
     color: var(--color-text-secondary);

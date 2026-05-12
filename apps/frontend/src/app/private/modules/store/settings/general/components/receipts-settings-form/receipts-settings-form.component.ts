@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+import { Component, effect, input, output } from '@angular/core';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
@@ -18,7 +18,7 @@ export interface ReceiptsSettings {
   templateUrl: './receipts-settings-form.component.html',
   styleUrls: ['./receipts-settings-form.component.scss'],
 })
-export class ReceiptsSettingsForm implements OnInit, OnChanges {
+export class ReceiptsSettingsForm {
   readonly settings = input.required<ReceiptsSettings>();
   readonly settingsChange = output<ReceiptsSettings>();
 
@@ -29,7 +29,6 @@ export class ReceiptsSettingsForm implements OnInit, OnChanges {
     receipt_footer: new FormControl('¡Gracias por su compra!'),
   });
 
-  // Getters for form controls
   get printReceiptControl() {
     return this.form.get('print_receipt') as FormControl;
   }
@@ -43,19 +42,13 @@ export class ReceiptsSettingsForm implements OnInit, OnChanges {
     return this.form.get('receipt_footer') as FormControl;
   }
 
-  ngOnInit() {
-    this.patchForm();
-  }
-
-  ngOnChanges() {
-    this.patchForm();
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
-    }
+  constructor() {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+      }
+    });
   }
 
   onFieldChange() {

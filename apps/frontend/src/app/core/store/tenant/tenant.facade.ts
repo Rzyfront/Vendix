@@ -72,22 +72,22 @@ export class TenantFacade {
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
 
-  readonly domainConfig = toSignal(this.domainConfig$);
-  readonly tenantConfig = toSignal(this.tenantConfig$);
-  readonly currentEnvironment = toSignal(this.currentEnvironment$);
+  readonly domainConfig = toSignal(this.domainConfig$, { initialValue: null as DomainConfig | null });
+  readonly tenantConfig = toSignal(this.tenantConfig$, { initialValue: null as TenantConfig | null });
+  readonly currentEnvironment = toSignal(this.currentEnvironment$, { initialValue: null as AppEnvironment | null });
   readonly tenantLoading = toSignal(this.loading$, { initialValue: false });
-  readonly tenantError = toSignal(this.error$);
+  readonly tenantError = toSignal(this.error$, { initialValue: null });
   readonly initialized = toSignal(this.initialized$, { initialValue: false });
-  readonly currentOrganization = toSignal(this.currentOrganization$);
-  readonly organizationName = toSignal(this.organizationName$);
-  readonly organizationSlug = toSignal(this.organizationSlug$);
-  readonly currentStore = toSignal(this.currentStore$);
-  readonly storeName = toSignal(this.storeName$);
-  readonly storeSlug = toSignal(this.storeSlug$);
-  readonly domainHostname = toSignal(this.domainHostname$);
+  readonly currentOrganization = toSignal(this.currentOrganization$, { initialValue: null as OrganizationConfig | null });
+  readonly organizationName = toSignal(this.organizationName$, { initialValue: '' });
+  readonly organizationSlug = toSignal(this.organizationSlug$, { initialValue: '' });
+  readonly currentStore = toSignal(this.currentStore$, { initialValue: null as StoreConfig | null });
+  readonly storeName = toSignal(this.storeName$, { initialValue: '' });
+  readonly storeSlug = toSignal(this.storeSlug$, { initialValue: '' });
+  readonly domainHostname = toSignal(this.domainHostname$, { initialValue: '' });
   readonly isVendixDomain = toSignal(this.isVendixDomain$, { initialValue: false });
-  readonly tenantInfo = toSignal(this.tenantInfo$);
-  readonly organizationInfo = toSignal(this.organizationInfo$);
+  readonly tenantInfo = toSignal(this.tenantInfo$, { initialValue: null as any });
+  readonly organizationInfo = toSignal(this.organizationInfo$, { initialValue: null as any });
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 

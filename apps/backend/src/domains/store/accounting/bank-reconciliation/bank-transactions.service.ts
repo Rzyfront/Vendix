@@ -17,7 +17,15 @@ export class BankTransactionsService {
   ) {}
 
   async findAll(query: QueryBankTransactionDto) {
-    const { bank_account_id, date_from, date_to, is_reconciled, search, page, limit } = query;
+    const {
+      bank_account_id,
+      date_from,
+      date_to,
+      is_reconciled,
+      search,
+      page,
+      limit,
+    } = query;
 
     const skip = ((page || 1) - 1) * (limit || 50);
     const take = limit || 50;
@@ -30,9 +38,10 @@ export class BankTransactionsService {
           ...(date_to && { lte: new Date(date_to) }),
         },
       }),
-      ...(date_to && !date_from && {
-        transaction_date: { lte: new Date(date_to) },
-      }),
+      ...(date_to &&
+        !date_from && {
+          transaction_date: { lte: new Date(date_to) },
+        }),
       ...(is_reconciled !== undefined && { is_reconciled }),
       ...(search && {
         OR: [
@@ -97,10 +106,7 @@ export class BankTransactionsService {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      throw new VendixHttpException(
-        ErrorCodes.STATEMENT_PARSE_ERROR,
-        message,
-      );
+      throw new VendixHttpException(ErrorCodes.STATEMENT_PARSE_ERROR, message);
     }
 
     if (parse_result.transactions.length === 0) {
@@ -117,7 +123,7 @@ export class BankTransactionsService {
       value_date: tx.value_date || null,
       description: tx.description,
       amount: tx.amount,
-      type: tx.type as any,
+      type: tx.type,
       reference: tx.reference || null,
       external_id: tx.external_id || null,
       counterparty: tx.counterparty || null,
@@ -144,11 +150,7 @@ export class BankTransactionsService {
     };
   }
 
-  async previewImport(
-    bank_account_id: number,
-    file: Buffer,
-    filename: string,
-  ) {
+  async previewImport(bank_account_id: number, file: Buffer, filename: string) {
     const account = await this.bank_accounts_service.findOne(bank_account_id);
 
     let column_mapping: any = undefined;
@@ -165,10 +167,7 @@ export class BankTransactionsService {
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      throw new VendixHttpException(
-        ErrorCodes.STATEMENT_PARSE_ERROR,
-        message,
-      );
+      throw new VendixHttpException(ErrorCodes.STATEMENT_PARSE_ERROR, message);
     }
 
     // Check for existing external_ids to report duplicates
@@ -209,7 +208,9 @@ export class BankTransactionsService {
     }
 
     if (transaction.is_reconciled) {
-      throw new VendixHttpException(ErrorCodes.BANK_TRANSACTION_ALREADY_RECONCILED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_TRANSACTION_ALREADY_RECONCILED,
+      );
     }
 
     const bank_account_id = transaction.bank_account_id;

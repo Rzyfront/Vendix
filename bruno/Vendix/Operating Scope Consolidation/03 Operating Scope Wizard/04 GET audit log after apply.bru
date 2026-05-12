@@ -1,0 +1,34 @@
+meta {
+  name: 04 GET audit log after apply
+  type: http
+  seq: 4
+}
+
+# Run AFTER request `03 POST apply ORGANIZATION on non-partner`. If that one
+# returned 200, the audit log must contain a fresh entry for the migration.
+
+get {
+  url: http://{{url}}/organization/settings/operating-scope
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("audit_log_recent is an array", function () {
+    expect(Array.isArray(res.body.audit_log_recent)).to.equal(true);
+  });
+  test("if previous apply was OK, log has at least one entry within last minute", function () {
+    if (bru.getEnvVar("scopeApplyOk") !== "1") return; // skip when apply was rejected
+    expect(res.body.audit_log_recent.length).to.be.greaterThan(0);
+    const last = res.body.audit_log_recent[0];
+    const ts = new Date(last.changed_at || last.created_at || last.timestamp || Date.now()).getTime();
+    expect(Date.now() - ts).to.be.lessThan(60_000);
+  });
+}

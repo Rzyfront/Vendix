@@ -1,6 +1,4 @@
-import {
-  Injectable,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import * as XLSX from 'xlsx';
 import * as bcrypt from 'bcryptjs';
@@ -134,16 +132,236 @@ export class EmployeesBulkService {
     ];
 
     const exampleData = [
-      { Nombre: 'Juan Carlos', Apellido: 'Pérez López', 'Tipo Documento': 'CC', 'Número Documento': '1020304050', 'Fecha Contratación': '2024-01-15', 'Tipo Contrato': 'Indefinido', 'Salario Base': 2500000, Cargo: 'Vendedor', Departamento: 'Ventas', 'Frecuencia Pago': 'Quincenal', Banco: 'Bancolombia', 'Número Cuenta': '12345678901', 'Tipo Cuenta': 'Ahorros', EPS: 'Sura', 'Fondo Pensión': 'Protección', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Porvenir', 'Caja Compensación': 'Comfama', '¿Es Usuario?': 'No', Email: '', Teléfono: '3001234567' },
-      { Nombre: 'María Fernanda', Apellido: 'García Rodríguez', 'Tipo Documento': 'CC', 'Número Documento': '1060708090', 'Fecha Contratación': '2024-03-01', 'Tipo Contrato': 'Término Fijo', 'Salario Base': 3200000, Cargo: 'Administradora', Departamento: 'Administración', 'Frecuencia Pago': 'Mensual', Banco: 'Davivienda', 'Número Cuenta': '98765432100', 'Tipo Cuenta': 'Corriente', EPS: 'Nueva EPS', 'Fondo Pensión': 'Porvenir', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Protección', 'Caja Compensación': 'Compensar', '¿Es Usuario?': 'Si', Email: 'maria.garcia@empresa.com', Teléfono: '3109876543' },
-      { Nombre: 'Andrés Felipe', Apellido: 'Martínez Ríos', 'Tipo Documento': 'CC', 'Número Documento': '1098765432', 'Fecha Contratación': '2023-06-10', 'Tipo Contrato': 'Indefinido', 'Salario Base': 4500000, Cargo: 'Contador', Departamento: 'Contabilidad', 'Frecuencia Pago': 'Mensual', Banco: 'BBVA', 'Número Cuenta': '55566677788', 'Tipo Cuenta': 'Ahorros', EPS: 'Sanitas', 'Fondo Pensión': 'Colfondos', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'FNA', 'Caja Compensación': 'Cafam', '¿Es Usuario?': 'Si', Email: 'andres.martinez@empresa.com', Teléfono: '3204567890' },
-      { Nombre: 'Laura Camila', Apellido: 'Hernández Ospina', 'Tipo Documento': 'CE', 'Número Documento': 'E-456789', 'Fecha Contratación': '2025-01-08', 'Tipo Contrato': 'Prestación de Servicios', 'Salario Base': 6000000, Cargo: 'Diseñadora Gráfica', Departamento: 'Marketing', 'Frecuencia Pago': 'Mensual', Banco: 'Nequi', 'Número Cuenta': '3115551234', 'Tipo Cuenta': 'Ahorros', EPS: 'Compensar', 'Fondo Pensión': 'Protección', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Porvenir', 'Caja Compensación': 'Colsubsidio', '¿Es Usuario?': 'No', Email: '', Teléfono: '3115551234' },
-      { Nombre: 'Carlos Eduardo', Apellido: 'Ramírez Duarte', 'Tipo Documento': 'CC', 'Número Documento': '79856432', 'Fecha Contratación': '2023-11-20', 'Tipo Contrato': 'Indefinido', 'Salario Base': 1423500, Cargo: 'Bodeguero', Departamento: 'Logística', 'Frecuencia Pago': 'Quincenal', Banco: 'Banco de Bogotá', 'Número Cuenta': '33344455566', 'Tipo Cuenta': 'Ahorros', EPS: 'Famisanar', 'Fondo Pensión': 'Porvenir', 'Nivel Riesgo ARL': 3, 'Fondo Cesantías': 'Colfondos', 'Caja Compensación': 'Comfenalco', '¿Es Usuario?': 'No', Email: '', Teléfono: '3178889900' },
-      { Nombre: 'Valentina', Apellido: 'Torres Mejía', 'Tipo Documento': 'TI', 'Número Documento': '1007654321', 'Fecha Contratación': '2025-02-01', 'Tipo Contrato': 'Aprendiz', 'Salario Base': 1300000, Cargo: 'Auxiliar Ventas', Departamento: 'Ventas', 'Frecuencia Pago': 'Quincenal', Banco: 'Bancolombia', 'Número Cuenta': '77788899900', 'Tipo Cuenta': 'Ahorros', EPS: 'Sura', 'Fondo Pensión': 'Protección', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Protección', 'Caja Compensación': 'Comfama', '¿Es Usuario?': 'No', Email: '', Teléfono: '3229998877' },
-      { Nombre: 'Santiago', Apellido: 'Moreno Castillo', 'Tipo Documento': 'CC', 'Número Documento': '1045678901', 'Fecha Contratación': '2024-07-15', 'Tipo Contrato': 'Indefinido', 'Salario Base': 2800000, Cargo: 'Cajero Principal', Departamento: 'Ventas', 'Frecuencia Pago': 'Semanal', Banco: 'Scotiabank Colpatria', 'Número Cuenta': '11122233344', 'Tipo Cuenta': 'Corriente', EPS: 'Salud Total', 'Fondo Pensión': 'Old Mutual', 'Nivel Riesgo ARL': 2, 'Fondo Cesantías': 'Porvenir', 'Caja Compensación': 'Cafam', '¿Es Usuario?': 'Si', Email: 'santiago.moreno@empresa.com', Teléfono: '3156667788' },
-      { Nombre: 'Diana Marcela', Apellido: 'López Vargas', 'Tipo Documento': 'CC', 'Número Documento': '52987654', 'Fecha Contratación': '2023-03-12', 'Tipo Contrato': 'Indefinido', 'Salario Base': 8500000, Cargo: 'Gerente General', Departamento: 'Dirección', 'Frecuencia Pago': 'Mensual', Banco: 'Itaú', 'Número Cuenta': '99988877766', 'Tipo Cuenta': 'Corriente', EPS: 'Colsanitas', 'Fondo Pensión': 'Skandia', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Colfondos', 'Caja Compensación': 'Compensar', '¿Es Usuario?': 'Si', Email: 'diana.lopez@empresa.com', Teléfono: '3013214567' },
-      { Nombre: 'Pedro José', Apellido: 'Gómez Salazar', 'Tipo Documento': 'PP', 'Número Documento': 'AX123456', 'Fecha Contratación': '2024-09-01', 'Tipo Contrato': 'Término Fijo', 'Salario Base': 3800000, Cargo: 'Técnico Mantenimiento', Departamento: 'Operaciones', 'Frecuencia Pago': 'Quincenal', Banco: 'Banco Popular', 'Número Cuenta': '44455566677', 'Tipo Cuenta': 'Ahorros', EPS: 'Medimás', 'Fondo Pensión': 'Porvenir', 'Nivel Riesgo ARL': 4, 'Fondo Cesantías': 'FNA', 'Caja Compensación': 'Combarranquilla', '¿Es Usuario?': 'No', Email: '', Teléfono: '3007776655' },
-      { Nombre: 'Natalia Andrea', Apellido: 'Restrepo Muñoz', 'Tipo Documento': 'CC', 'Número Documento': '1112223334', 'Fecha Contratación': '2024-11-18', 'Tipo Contrato': 'Indefinido', 'Salario Base': 2200000, Cargo: 'Asesora Comercial', Departamento: 'Ventas', 'Frecuencia Pago': 'Quincenal', Banco: 'Daviplata', 'Número Cuenta': '3142223344', 'Tipo Cuenta': 'Ahorros', EPS: 'Sura', 'Fondo Pensión': 'Protección', 'Nivel Riesgo ARL': 1, 'Fondo Cesantías': 'Protección', 'Caja Compensación': 'Comfama', '¿Es Usuario?': 'Si', Email: 'natalia.restrepo@empresa.com', Teléfono: '3142223344' },
+      {
+        Nombre: 'Juan Carlos',
+        Apellido: 'Pérez López',
+        'Tipo Documento': 'CC',
+        'Número Documento': '1020304050',
+        'Fecha Contratación': '2024-01-15',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 2500000,
+        Cargo: 'Vendedor',
+        Departamento: 'Ventas',
+        'Frecuencia Pago': 'Quincenal',
+        Banco: 'Bancolombia',
+        'Número Cuenta': '12345678901',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Sura',
+        'Fondo Pensión': 'Protección',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Porvenir',
+        'Caja Compensación': 'Comfama',
+        '¿Es Usuario?': 'No',
+        Email: '',
+        Teléfono: '3001234567',
+      },
+      {
+        Nombre: 'María Fernanda',
+        Apellido: 'García Rodríguez',
+        'Tipo Documento': 'CC',
+        'Número Documento': '1060708090',
+        'Fecha Contratación': '2024-03-01',
+        'Tipo Contrato': 'Término Fijo',
+        'Salario Base': 3200000,
+        Cargo: 'Administradora',
+        Departamento: 'Administración',
+        'Frecuencia Pago': 'Mensual',
+        Banco: 'Davivienda',
+        'Número Cuenta': '98765432100',
+        'Tipo Cuenta': 'Corriente',
+        EPS: 'Nueva EPS',
+        'Fondo Pensión': 'Porvenir',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Protección',
+        'Caja Compensación': 'Compensar',
+        '¿Es Usuario?': 'Si',
+        Email: 'maria.garcia@empresa.com',
+        Teléfono: '3109876543',
+      },
+      {
+        Nombre: 'Andrés Felipe',
+        Apellido: 'Martínez Ríos',
+        'Tipo Documento': 'CC',
+        'Número Documento': '1098765432',
+        'Fecha Contratación': '2023-06-10',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 4500000,
+        Cargo: 'Contador',
+        Departamento: 'Contabilidad',
+        'Frecuencia Pago': 'Mensual',
+        Banco: 'BBVA',
+        'Número Cuenta': '55566677788',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Sanitas',
+        'Fondo Pensión': 'Colfondos',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'FNA',
+        'Caja Compensación': 'Cafam',
+        '¿Es Usuario?': 'Si',
+        Email: 'andres.martinez@empresa.com',
+        Teléfono: '3204567890',
+      },
+      {
+        Nombre: 'Laura Camila',
+        Apellido: 'Hernández Ospina',
+        'Tipo Documento': 'CE',
+        'Número Documento': 'E-456789',
+        'Fecha Contratación': '2025-01-08',
+        'Tipo Contrato': 'Prestación de Servicios',
+        'Salario Base': 6000000,
+        Cargo: 'Diseñadora Gráfica',
+        Departamento: 'Marketing',
+        'Frecuencia Pago': 'Mensual',
+        Banco: 'Nequi',
+        'Número Cuenta': '3115551234',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Compensar',
+        'Fondo Pensión': 'Protección',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Porvenir',
+        'Caja Compensación': 'Colsubsidio',
+        '¿Es Usuario?': 'No',
+        Email: '',
+        Teléfono: '3115551234',
+      },
+      {
+        Nombre: 'Carlos Eduardo',
+        Apellido: 'Ramírez Duarte',
+        'Tipo Documento': 'CC',
+        'Número Documento': '79856432',
+        'Fecha Contratación': '2023-11-20',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 1423500,
+        Cargo: 'Bodeguero',
+        Departamento: 'Logística',
+        'Frecuencia Pago': 'Quincenal',
+        Banco: 'Banco de Bogotá',
+        'Número Cuenta': '33344455566',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Famisanar',
+        'Fondo Pensión': 'Porvenir',
+        'Nivel Riesgo ARL': 3,
+        'Fondo Cesantías': 'Colfondos',
+        'Caja Compensación': 'Comfenalco',
+        '¿Es Usuario?': 'No',
+        Email: '',
+        Teléfono: '3178889900',
+      },
+      {
+        Nombre: 'Valentina',
+        Apellido: 'Torres Mejía',
+        'Tipo Documento': 'TI',
+        'Número Documento': '1007654321',
+        'Fecha Contratación': '2025-02-01',
+        'Tipo Contrato': 'Aprendiz',
+        'Salario Base': 1300000,
+        Cargo: 'Auxiliar Ventas',
+        Departamento: 'Ventas',
+        'Frecuencia Pago': 'Quincenal',
+        Banco: 'Bancolombia',
+        'Número Cuenta': '77788899900',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Sura',
+        'Fondo Pensión': 'Protección',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Protección',
+        'Caja Compensación': 'Comfama',
+        '¿Es Usuario?': 'No',
+        Email: '',
+        Teléfono: '3229998877',
+      },
+      {
+        Nombre: 'Santiago',
+        Apellido: 'Moreno Castillo',
+        'Tipo Documento': 'CC',
+        'Número Documento': '1045678901',
+        'Fecha Contratación': '2024-07-15',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 2800000,
+        Cargo: 'Cajero Principal',
+        Departamento: 'Ventas',
+        'Frecuencia Pago': 'Semanal',
+        Banco: 'Scotiabank Colpatria',
+        'Número Cuenta': '11122233344',
+        'Tipo Cuenta': 'Corriente',
+        EPS: 'Salud Total',
+        'Fondo Pensión': 'Old Mutual',
+        'Nivel Riesgo ARL': 2,
+        'Fondo Cesantías': 'Porvenir',
+        'Caja Compensación': 'Cafam',
+        '¿Es Usuario?': 'Si',
+        Email: 'santiago.moreno@empresa.com',
+        Teléfono: '3156667788',
+      },
+      {
+        Nombre: 'Diana Marcela',
+        Apellido: 'López Vargas',
+        'Tipo Documento': 'CC',
+        'Número Documento': '52987654',
+        'Fecha Contratación': '2023-03-12',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 8500000,
+        Cargo: 'Gerente General',
+        Departamento: 'Dirección',
+        'Frecuencia Pago': 'Mensual',
+        Banco: 'Itaú',
+        'Número Cuenta': '99988877766',
+        'Tipo Cuenta': 'Corriente',
+        EPS: 'Colsanitas',
+        'Fondo Pensión': 'Skandia',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Colfondos',
+        'Caja Compensación': 'Compensar',
+        '¿Es Usuario?': 'Si',
+        Email: 'diana.lopez@empresa.com',
+        Teléfono: '3013214567',
+      },
+      {
+        Nombre: 'Pedro José',
+        Apellido: 'Gómez Salazar',
+        'Tipo Documento': 'PP',
+        'Número Documento': 'AX123456',
+        'Fecha Contratación': '2024-09-01',
+        'Tipo Contrato': 'Término Fijo',
+        'Salario Base': 3800000,
+        Cargo: 'Técnico Mantenimiento',
+        Departamento: 'Operaciones',
+        'Frecuencia Pago': 'Quincenal',
+        Banco: 'Banco Popular',
+        'Número Cuenta': '44455566677',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Medimás',
+        'Fondo Pensión': 'Porvenir',
+        'Nivel Riesgo ARL': 4,
+        'Fondo Cesantías': 'FNA',
+        'Caja Compensación': 'Combarranquilla',
+        '¿Es Usuario?': 'No',
+        Email: '',
+        Teléfono: '3007776655',
+      },
+      {
+        Nombre: 'Natalia Andrea',
+        Apellido: 'Restrepo Muñoz',
+        'Tipo Documento': 'CC',
+        'Número Documento': '1112223334',
+        'Fecha Contratación': '2024-11-18',
+        'Tipo Contrato': 'Indefinido',
+        'Salario Base': 2200000,
+        Cargo: 'Asesora Comercial',
+        Departamento: 'Ventas',
+        'Frecuencia Pago': 'Quincenal',
+        Banco: 'Daviplata',
+        'Número Cuenta': '3142223344',
+        'Tipo Cuenta': 'Ahorros',
+        EPS: 'Sura',
+        'Fondo Pensión': 'Protección',
+        'Nivel Riesgo ARL': 1,
+        'Fondo Cesantías': 'Protección',
+        'Caja Compensación': 'Comfama',
+        '¿Es Usuario?': 'Si',
+        Email: 'natalia.restrepo@empresa.com',
+        Teléfono: '3142223344',
+      },
     ];
 
     const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
@@ -200,19 +418,32 @@ export class EmployeesBulkService {
         },
       },
     });
-    const employeeDocMap = new Map<string, { id: number; first_name: string; last_name: string; store_ids: number[] }>();
+    const employeeDocMap = new Map<
+      string,
+      { id: number; first_name: string; last_name: string; store_ids: number[] }
+    >();
     for (const e of existingEmployees) {
       const key = `${e.document_type}-${e.document_number}`;
       const store_ids = e.employee_stores
         .filter((es: any) => es.status === 'active')
         .map((es: any) => es.store_id);
-      employeeDocMap.set(key, { id: e.id, first_name: e.first_name, last_name: e.last_name, store_ids });
+      employeeDocMap.set(key, {
+        id: e.id,
+        first_name: e.first_name,
+        last_name: e.last_name,
+        store_ids,
+      });
     }
 
     // 3. Pre-fetch existing users by document number for user linking warnings
     const existingUsers = await this.prisma.users.findMany({
       where: { organization_id: organizationId },
-      select: { id: true, document_type: true, document_number: true, email: true },
+      select: {
+        id: true,
+        document_type: true,
+        document_number: true,
+        email: true,
+      },
     });
     const userDocMap = new Map<string, { id: number; email: string }>();
     for (const u of existingUsers) {
@@ -233,7 +464,10 @@ export class EmployeesBulkService {
 
     for (let i = 0; i < employees.length; i++) {
       const emp = employees[i];
-      const docType = (emp.document_type || 'CC').toString().trim().toUpperCase();
+      const docType = (emp.document_type || 'CC')
+        .toString()
+        .trim()
+        .toUpperCase();
       const docNumber = (emp.document_number || '').toString().trim();
       const docKey = `${docType}-${docNumber}`;
 
@@ -269,7 +503,9 @@ export class EmployeesBulkService {
         item.errors.push('Fecha de contratacion es requerida');
       }
       if (!item.contract_type) {
-        item.warnings.push('Tipo de contrato no especificado, se usara "indefinido" por defecto');
+        item.warnings.push(
+          'Tipo de contrato no especificado, se usara "indefinido" por defecto',
+        );
       }
       if (item.base_salary <= 0) {
         item.warnings.push('Salario base es 0 o no especificado');
@@ -277,7 +513,9 @@ export class EmployeesBulkService {
 
       // Check is_user requires email
       if (item.is_user && !item.email) {
-        item.errors.push('Email es requerido cuando el empleado sera usuario del sistema');
+        item.errors.push(
+          'Email es requerido cuando el empleado sera usuario del sistema',
+        );
       }
 
       // Check duplicate document in batch
@@ -528,15 +766,26 @@ export class EmployeesBulkService {
     for (const empData of employees) {
       try {
         // Normalize contract type
-        const rawContract = (empData.contract_type || '').toString().trim().toLowerCase();
-        const normalizedContract = this.CONTRACT_TYPE_MAP[rawContract] || 'indefinite';
+        const rawContract = (empData.contract_type || '')
+          .toString()
+          .trim()
+          .toLowerCase();
+        const normalizedContract =
+          this.CONTRACT_TYPE_MAP[rawContract] || 'indefinite';
 
         // Normalize payment frequency
-        const rawFrequency = (empData.payment_frequency || '').toString().trim().toLowerCase();
-        const normalizedFrequency = this.PAYMENT_FREQUENCY_MAP[rawFrequency] || 'monthly';
+        const rawFrequency = (empData.payment_frequency || '')
+          .toString()
+          .trim()
+          .toLowerCase();
+        const normalizedFrequency =
+          this.PAYMENT_FREQUENCY_MAP[rawFrequency] || 'monthly';
 
         // Normalize document type
-        const docType = (empData.document_type || 'CC').toString().trim().toUpperCase();
+        const docType = (empData.document_type || 'CC')
+          .toString()
+          .trim()
+          .toUpperCase();
         const docNumber = empData.document_number.toString().trim();
 
         // Check for batch duplicate
@@ -544,8 +793,8 @@ export class EmployeesBulkService {
         if (duplicatesInBatch.has(docKey)) {
           const firstOccurrenceIndex = employees.findIndex(
             (e) =>
-              (e.document_type || 'CC').toString().trim().toUpperCase() === docType &&
-              e.document_number.toString().trim() === docNumber,
+              (e.document_type || 'CC').toString().trim().toUpperCase() ===
+                docType && e.document_number.toString().trim() === docNumber,
           );
           const currentIndex = employees.indexOf(empData);
           if (currentIndex !== firstOccurrenceIndex) {
@@ -655,7 +904,10 @@ export class EmployeesBulkService {
               let candidateUsername = `${username}${suffix}`;
               while (
                 await this.prisma.users.findFirst({
-                  where: { username: candidateUsername, organization_id: organizationId },
+                  where: {
+                    username: candidateUsername,
+                    organization_id: organizationId,
+                  },
                   select: { id: true },
                 })
               ) {
@@ -682,7 +934,8 @@ export class EmployeesBulkService {
             });
 
             // Create user_settings with default panel UI
-            const config = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+            const config =
+              await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
             await this.prisma.user_settings.create({
               data: {
                 user_id: newUser.id,
@@ -711,11 +964,13 @@ export class EmployeesBulkService {
           document_type: docType,
           document_number: docNumber,
           hire_date: empData.hire_date,
-          contract_type: normalizedContract as CreateEmployeeDto['contract_type'],
+          contract_type:
+            normalizedContract as CreateEmployeeDto['contract_type'],
           base_salary: Number(empData.base_salary),
           position: empData.position?.trim() || undefined,
           department: empData.department?.trim() || undefined,
-          payment_frequency: normalizedFrequency as CreateEmployeeDto['payment_frequency'],
+          payment_frequency:
+            normalizedFrequency as CreateEmployeeDto['payment_frequency'],
           bank_name: empData.bank_name?.trim() || undefined,
           bank_account_number: empData.bank_account_number?.trim() || undefined,
           bank_account_type: empData.bank_account_type?.trim() || undefined,
@@ -734,35 +989,47 @@ export class EmployeesBulkService {
         if (userCreated) users_created++;
         if (userLinked) users_linked++;
         if (action === 'created') successful++;
-        if (action === 'updated') { successful++; updated++; }
-        if (action === 'associated') { successful++; associated++; }
+        if (action === 'updated') {
+          successful++;
+          updated++;
+        }
+        if (action === 'associated') {
+          successful++;
+          associated++;
+        }
 
         results.push({
           employee,
           status: 'success',
           action: action,
-          message: action === 'created'
-            ? (userCreated ? 'Empleado creado y usuario del sistema generado'
-               : userLinked ? 'Empleado creado y vinculado a usuario existente'
-               : 'Empleado creado exitosamente')
-            : action === 'updated'
-              ? 'Datos del empleado actualizados'
-              : 'Empleado vinculado a esta tienda',
+          message:
+            action === 'created'
+              ? userCreated
+                ? 'Empleado creado y usuario del sistema generado'
+                : userLinked
+                  ? 'Empleado creado y vinculado a usuario existente'
+                  : 'Empleado creado exitosamente'
+              : action === 'updated'
+                ? 'Datos del empleado actualizados'
+                : 'Empleado vinculado a esta tienda',
           user_created: userCreated,
           user_linked: userLinked,
         });
       } catch (error) {
         failed++;
 
-        let safeMessage = 'Error al procesar el empleado. Verifique los datos e intente de nuevo.';
+        let safeMessage =
+          'Error al procesar el empleado. Verifique los datos e intente de nuevo.';
 
         if (error?.code === 'P2002') {
           const target = error.meta?.target as string[] | undefined;
           const field = target?.[0] ?? '';
           if (field.includes('username')) {
-            safeMessage = 'Ya existe un usuario con ese nombre de usuario en la organizacion.';
+            safeMessage =
+              'Ya existe un usuario con ese nombre de usuario en la organizacion.';
           } else if (field.includes('email')) {
-            safeMessage = 'Ya existe un usuario con ese correo electronico en la organizacion.';
+            safeMessage =
+              'Ya existe un usuario con ese correo electronico en la organizacion.';
           } else {
             safeMessage = `Ya existe un registro con el campo duplicado: ${field}`;
           }
@@ -792,9 +1059,11 @@ export class EmployeesBulkService {
     };
   }
 
-  validateBulkEmployees(
-    employees: BulkEmployeeItemDto[],
-  ): { isValid: boolean; errors: string[]; validEmployees: BulkEmployeeItemDto[] } {
+  validateBulkEmployees(employees: BulkEmployeeItemDto[]): {
+    isValid: boolean;
+    errors: string[];
+    validEmployees: BulkEmployeeItemDto[];
+  } {
     const errors: string[] = [];
     const validEmployees: BulkEmployeeItemDto[] = [];
 

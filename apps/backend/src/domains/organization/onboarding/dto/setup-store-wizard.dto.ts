@@ -2,6 +2,7 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsNumber,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -50,11 +51,22 @@ export class SetupStoreWizardDto {
   @MaxLength(100)
   timezone?: string;
 
-  @ApiPropertyOptional({ example: 'COP', description: 'ISO 4217 currency code' })
+  @ApiPropertyOptional({
+    example: 'COP',
+    description: 'ISO 4217 currency code',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(3)
   currency?: string;
+
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'Default inventory location ID for this store',
+  })
+  @IsOptional()
+  @IsNumber()
+  default_location_id?: number;
 
   // Address fields (pre-populated from organization)
   @ApiPropertyOptional({

@@ -9,7 +9,7 @@
       [attr.aria-expanded]="isActionsOpen()"
       [attr.aria-haspopup]="true"
       >
-      <app-icon name="zap" [size]="16"></app-icon>
+      <app-icon [name]="triggerIcon()" [size]="16"></app-icon>
       <span class="trigger-label-text">Acciones</span>
       <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
     </button>

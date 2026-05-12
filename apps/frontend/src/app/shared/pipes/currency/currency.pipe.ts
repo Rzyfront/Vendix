@@ -111,8 +111,13 @@ export class CurrencyFormatService {
       }
 
       // 2. Fallback: fetch via HTTP (for store-admin context where domain config may lack currency)
-      // Only attempt /store/settings if the user is authenticated
+      // Only attempt /store/settings if the user is authenticated AND has a store context
       if (!this.hasValidAuthState()) {
+        return null;
+      }
+
+      const storeId = this.tenantFacade.getCurrentStoreId();
+      if (!storeId) {
         return null;
       }
 

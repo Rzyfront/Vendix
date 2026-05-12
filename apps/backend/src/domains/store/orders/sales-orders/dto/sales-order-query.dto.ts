@@ -14,10 +14,8 @@ export class SalesOrderQueryDto {
   @IsOptional()
   organization_id?: number;
 
-  @ApiProperty({ description: 'Store ID', required: false })
-  @IsNumber()
-  @IsOptional()
-  store_id?: number;
+  // store_id deprecated (phase3-round2): scope is derived from RequestContextService
+  // for /store/* endpoints.
 
   @ApiProperty({ description: 'Customer ID', required: false })
   @IsNumber()

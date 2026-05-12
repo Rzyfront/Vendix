@@ -1,4 +1,13 @@
-import { IsString, IsOptional, IsEnum, IsBoolean, IsNotEmpty, MinLength, MaxLength, validateSync } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsEnum,
+  IsBoolean,
+  IsNotEmpty,
+  MinLength,
+  MaxLength,
+  validateSync,
+} from 'class-validator';
 import { template_config_type_enum } from '@prisma/client';
 
 export class CreateTemplateDto {

@@ -16,7 +16,6 @@ import {
   AdjustmentType,
 } from './interfaces/inventory-adjustment.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { InventoryTransactionsService } from '../transactions/inventory-transactions.service';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
 
 // Common include object for adjustment queries
@@ -41,6 +40,7 @@ const ADJUSTMENT_INCLUDE = {
       name: true,
       code: true,
       type: true,
+      store_id: true,
     },
   },
   inventory_batches: {
@@ -74,23 +74,12 @@ const ADJUSTMENT_INCLUDE = {
   },
 };
 
-// Map transaction type based on adjustment type
-// Note: Only 'adjustment_damage', 'damage', and 'expiration' are valid transaction types
-const getTransactionType = (
-  adjustmentType: AdjustmentType,
-): 'adjustment_damage' | 'damage' | 'expiration' => {
-  if (adjustmentType === 'damage') return 'damage';
-  if (adjustmentType === 'expiration') return 'expiration';
-  return 'adjustment_damage'; // Default for loss, theft, count_variance, manual_correction
-};
-
 @Injectable()
 export class InventoryAdjustmentsService {
   private readonly logger = new Logger(InventoryAdjustmentsService.name);
 
   constructor(
     private prisma: StorePrismaService,
-    private transactionsService: InventoryTransactionsService,
     private stockLevelManager: StockLevelManager,
     private eventEmitter: EventEmitter2,
   ) {}
@@ -224,7 +213,7 @@ export class InventoryAdjustmentsService {
       });
 
       // 4. Actualizar stock levels (siempre, tanto para lote como para stock general)
-      await this.stockLevelManager.updateStock({
+      const stockUpdate = await this.stockLevelManager.updateStock({
         product_id: productId,
         variant_id: variantId ?? undefined,
         location_id: locationId,
@@ -236,46 +225,31 @@ export class InventoryAdjustmentsService {
         validate_availability: false,
       });
 
-      // 5. Crear inventory transaction
-      await this.transactionsService.createTransaction({
-        productId: productId,
-        variantId: variantId ?? undefined,
-        type: getTransactionType(data.type),
-        quantityChange: quantityChange,
-        reason: `Inventory adjustment: ${data.type}${batchId ? ` (Batch: ${batchId})` : ''}`,
-        userId: userId || undefined,
-      });
-
-      // 6. Fetch product cost for accounting event
-      const product = await prisma.products.findUnique({
-        where: { id: productId },
-        select: { cost_price: true },
-      });
-
-      // 7. Transformar respuesta para mapear nombres de relaciones
+      // 5. Transformar respuesta para mapear nombres de relaciones
       return {
         adjustment: this.mapAdjustmentResponse(adjustment),
         quantity_change: quantityChange,
-        cost_per_unit: Number(product?.cost_price || 0),
+        cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
       };
     });
 
     // Emit inventory.adjusted for accounting after successful transaction
     try {
-      const cost_amount = Math.abs(
-        adjustment_result.quantity_change * adjustment_result.cost_per_unit,
-      );
+      const cost_amount = Math.abs(Number(adjustment_result.cost_amount || 0));
       if (cost_amount > 0) {
         this.eventEmitter.emit('inventory.adjusted', {
           adjustment_id: adjustment_result.adjustment.id,
           organization_id: organizationId,
+          store_id: adjustment_result.adjustment.inventory_locations?.store_id,
           quantity_change: adjustment_result.quantity_change,
           cost_amount,
           user_id: userId,
         });
       }
     } catch (error) {
-      this.logger.error(`Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`);
+      this.logger.error(
+        `Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`,
+      );
     }
 
     return adjustment_result.adjustment;
@@ -314,7 +288,15 @@ export class InventoryAdjustmentsService {
    */
   async batchCreateAdjustments(
     locationId: number,
-    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+    items: {
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[],
   ): Promise<InventoryAdjustment[]> {
     const results: InventoryAdjustment[] = [];
     for (const item of items) {
@@ -340,7 +322,15 @@ export class InventoryAdjustmentsService {
    */
   async batchCreateAndComplete(
     locationId: number,
-    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+    items: {
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[],
   ): Promise<InventoryAdjustment[]> {
     const results: InventoryAdjustment[] = [];
     const userIdRaw = RequestContextService.getUserId();
@@ -550,7 +540,10 @@ export class InventoryAdjustmentsService {
   /**
    * Libera TODAS las reservas activas de la organización
    */
-  async releaseAllReservations(): Promise<{ released_count: number; total_quantity: number }> {
+  async releaseAllReservations(): Promise<{
+    released_count: number;
+    total_quantity: number;
+  }> {
     return this.stockLevelManager.releaseAllActiveReservations();
   }
 

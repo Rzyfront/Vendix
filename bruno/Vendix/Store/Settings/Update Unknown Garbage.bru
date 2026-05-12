@@ -1,0 +1,47 @@
+meta {
+  name: Update Unknown Garbage
+  type: http
+  seq: 4
+}
+
+patch {
+  url: {{baseUrl}}/store/settings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "foo": "bar",
+    "random_legacy": { "x": 1 },
+    "pos": {
+      "allow_anonymous_sales": true
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Unknown keys are silently dropped (no 4xx)", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+  });
+
+  test("Response does not contain unknown keys", function() {
+    expect(res.body.data).to.not.have.property('foo');
+    expect(res.body.data).to.not.have.property('random_legacy');
+  });
+
+  test("Valid pos section was applied", function() {
+    expect(res.body.data).to.have.property('pos');
+    expect(res.body.data.pos).to.have.property('allow_anonymous_sales', true);
+  });
+
+  test("Schema version stamped", function() {
+    expect(res.body.data).to.have.property('_schema_version', 1);
+  });
+}

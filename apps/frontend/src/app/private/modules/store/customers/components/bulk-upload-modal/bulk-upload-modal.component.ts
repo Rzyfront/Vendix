@@ -92,9 +92,9 @@ import {
             </div>
           }
           @if (isProcessingFile()) {
-            <div class="animate-pulse flex flex-col items-center">
-              <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-              <p class="text-sm text-gray-500">Procesando archivo...</p>
+            <div class="flex flex-col items-center justify-center py-8 gap-3">
+              <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
+              <p class="text-sm text-gray-900 font-medium">Procesando archivo...</p>
             </div>
           }
         </div>
@@ -194,10 +194,10 @@ import {
         <div class="space-y-5 mt-2">
           <!-- Uploading state -->
           @if (isUploading()) {
-            <div class="py-12 flex flex-col items-center">
-              <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-              <p class="text-sm font-medium text-gray-700">Procesando {{ parsedData()?.length }} clientes...</p>
-              <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos segundos</p>
+            <div class="flex flex-col items-center justify-center py-8 gap-3">
+              <app-icon name="loader" [size]="36" class="text-primary animate-spin"></app-icon>
+              <p class="text-sm text-gray-900 font-medium">Procesando {{ parsedData()?.length }} clientes...</p>
+              <p class="text-xs text-gray-500">Esto puede tomar unos segundos</p>
             </div>
           }
 

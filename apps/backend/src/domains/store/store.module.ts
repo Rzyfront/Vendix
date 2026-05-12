@@ -25,6 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InvoicingModule } from './invoicing/invoicing.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { StorePayrollSettingsModule } from './payroll/payroll-settings.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -32,7 +33,6 @@ import { CouponsModule } from './coupons/coupons.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { CashRegistersModule } from './cash-registers/cash-registers.module';
 import { LayawayModule } from './layaway/layaway.module';
-import { HabeasDataModule } from './habeas-data/habeas-data.module';
 import { WithholdingTaxModule } from './withholding-tax/withholding-tax.module';
 import { ExogenousModule } from './exogenous/exogenous.module';
 import { ReservationsModule } from './reservations/reservations.module';
@@ -50,6 +50,7 @@ import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/inv
 import { MetadataModule } from './metadata/metadata.module';
 import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { ConsultationsModule } from './consultations/consultations.module';
     InvoicingModule,
     AccountingModule,
     PayrollModule,
+    StorePayrollSettingsModule,
     ReportsModule,
     StoreRolesModule,
     PromotionsModule,
@@ -84,7 +86,6 @@ import { ConsultationsModule } from './consultations/consultations.module';
     QuotationsModule,
     CashRegistersModule,
     LayawayModule,
-    HabeasDataModule,
     WithholdingTaxModule,
     ExogenousModule,
     ReservationsModule,
@@ -102,8 +103,9 @@ import { ConsultationsModule } from './consultations/consultations.module';
     MetadataModule,
     DataCollectionModule,
     ConsultationsModule,
+    SubscriptionsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule { }
+export class StoreDomainModule {}

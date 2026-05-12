@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   PaymentData,
@@ -17,7 +18,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
-  ) { }
+  ) {}
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
@@ -25,12 +26,26 @@ export class PaymentGatewayService {
 
   async processPayment(paymentData: PaymentData): Promise<PaymentResult> {
     try {
+      // The store/POS/eCommerce path through this service requires a
+      // resolved store_payment_methods.id. SaaS subscription billing has
+      // its own gateway path that resolves the method itself; the typed
+      // optionality on PaymentData accommodates both shapes, but here we
+      // hard-require it.
+      if (!paymentData.storePaymentMethodId) {
+        throw new PaymentError(
+          PaymentErrorCodes.PAYMENT_METHOD_DISABLED,
+          'storePaymentMethodId is required for store/POS/eCommerce payments',
+        );
+      }
+
       await this.validatePaymentData(paymentData);
 
       const paymentMethod = await this.getPaymentMethod(
         paymentData.storePaymentMethodId,
       );
-      const processor = this.getProcessor(paymentMethod.system_payment_method?.type || paymentMethod.type);
+      const processor = this.getProcessor(
+        paymentMethod.system_payment_method?.type || paymentMethod.type,
+      );
 
       if (!processor.isEnabled()) {
         throw new PaymentError(
@@ -44,8 +59,18 @@ export class PaymentGatewayService {
         paymentMethod.system_payment_method?.type || 'unknown',
       );
 
+      // Back-compat: legacy callers (existing eCommerce/POS DTOs) may not pass
+      // an idempotency key yet. Initialize a fresh UUID so the processor's
+      // provider call is still safe within this single attempt. Callers that
+      // need cross-attempt safety on retries MUST pass a stable key.
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
       const result = await processor.processPayment({
         ...paymentData,
+        idempotencyKey,
         metadata: {
           ...paymentData.metadata,
           paymentId: payment.id,
@@ -103,7 +128,9 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: paymentId },
-        include: { store_payment_method: { include: { system_payment_method: true } } },
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
       });
 
       if (!payment) {
@@ -143,7 +170,9 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: transactionId },
-        include: { store_payment_method: { include: { system_payment_method: true } } },
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
       });
 
       if (!payment) {
@@ -178,7 +207,7 @@ export class PaymentGatewayService {
             paymentData.storeId,
           ),
       this.validatorService.validatePaymentMethod(
-        paymentData.storePaymentMethodId,
+        paymentData.storePaymentMethodId as number,
         paymentData.storeId,
       ),
       skipOrderValidation
@@ -288,6 +317,13 @@ export class PaymentGatewayService {
 
     if (result.transactionId) {
       updateData.transaction_id = result.transactionId;
+    }
+
+    // Persist the Vendix-generated reference (e.g. Wompi `vendix_<storeId>_<orderId>_<ts>`)
+    // so that webhook arrivals carrying `txn.reference` can find the payment row
+    // BEFORE we know the real gateway transaction id. Critical for the Wompi flow.
+    if (result.gatewayReference) {
+      updateData.gateway_reference = result.gatewayReference;
     }
 
     await this.prisma.payments.update({

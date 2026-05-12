@@ -5,6 +5,7 @@ import {
   UpdateOrderDto,
   OrderQueryDto,
   UpdateOrderItemsDto,
+  AssignShippingMethodDto,
 } from './dto';
 import {
   Prisma,
@@ -20,6 +21,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 
 @Injectable()
 export class OrdersService {
@@ -32,6 +34,7 @@ export class OrdersService {
     private settingsService: SettingsService,
     private scheduleValidationService: ScheduleValidationService,
     private stockLevelManager: StockLevelManager,
+    private shippingCalculatorService: ShippingCalculatorService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -42,6 +45,20 @@ export class OrdersService {
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
+
+    // Backward-compat: if the client sent store_id in body, it must match context.
+    // If absent, derive it from context (authoritative source).
+    if (
+      createOrderDto.store_id !== undefined &&
+      createOrderDto.store_id !== null &&
+      createOrderDto.store_id !== store_id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'store_id in body does not match the authenticated context',
+      );
+    }
+    createOrderDto.store_id = store_id;
 
     // Validar horario de atención antes de crear la orden
     if (!createOrderDto.skip_schedule_validation) {
@@ -139,10 +156,11 @@ export class OrdersService {
         for (const item of order.order_items) {
           if (!item.products?.track_inventory) continue;
           try {
-            const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
-            );
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -154,7 +172,9 @@ export class OrdersService {
               false, // POS: don't validate availability (non-restrictive UX)
             );
           } catch (error) {
-            this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+            this.logger.warn(
+              `Stock reservation failed for product ${item.product_id}: ${error.message}`,
+            );
           }
         }
 
@@ -198,7 +218,7 @@ export class OrdersService {
       search,
       status,
       customer_id,
-      store_id,
+      // store_id removed: StorePrismaService auto-scopes /store/* queries.
       sort_by,
       sort_order,
       date_from,
@@ -217,6 +237,11 @@ export class OrdersService {
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
       ...(channel && { channel }),
+      ...(query.missing_shipping_method && {
+        shipping_method_id: null,
+        delivery_type: { not: 'direct_delivery' },
+        state: { notIn: ['finished', 'cancelled', 'refunded'] },
+      }),
       ...(date_from &&
         date_to && {
           created_at: {
@@ -341,7 +366,9 @@ export class OrdersService {
       order.order_items.map(async (item: any) => {
         if (item.products?.product_images?.length) {
           const mainImage = item.products.product_images[0];
-          mainImage.image_url = await this.s3Service.signUrl(mainImage.image_url);
+          mainImage.image_url = await this.s3Service.signUrl(
+            mainImage.image_url,
+          );
           item.products.image_url = mainImage.image_url;
         }
       }),
@@ -562,18 +589,18 @@ export class OrdersService {
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
-          include: {
-            products: {
-              include: {
-                product_images: {
-                  where: { is_main: true },
-                  take: 1,
+            include: {
+              products: {
+                include: {
+                  product_images: {
+                    where: { is_main: true },
+                    take: 1,
+                  },
                 },
               },
+              product_variants: true,
             },
-            product_variants: true,
           },
-        },
           addresses_orders_billing_address_idToaddresses: true,
           addresses_orders_shipping_address_idToaddresses: true,
           payments: true,
@@ -590,6 +617,198 @@ export class OrdersService {
         },
       });
     });
+  }
+
+  async assignShipping(orderId: number, dto: AssignShippingMethodDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+    });
+
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+
+    const lockedStates: string[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
+    if (lockedStates.includes(order.state)) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
+    }
+
+    const method = await this.prisma.shipping_methods.findFirst({
+      where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
+    });
+
+    if (!method) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_INVALID_METHOD_001);
+    }
+
+    let shippingCost = dto.shipping_cost ?? 0;
+    let resolvedRateId: number | null = dto.shipping_rate_id ?? null;
+
+    // Auto-calculate: resolve rate + cost from customer's shipping address
+    if (dto.auto_calculate && !dto.shipping_rate_id) {
+      const orderForCalc = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          addresses_orders_shipping_address_idToaddresses: true,
+          order_items: {
+            include: {
+              products: {
+                select: { id: true, weight: true, product_type: true },
+              },
+            },
+          },
+        },
+      });
+
+      const address =
+        orderForCalc?.addresses_orders_shipping_address_idToaddresses;
+      if (!address || !address.country_code) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
+        );
+      }
+
+      const items = (orderForCalc?.order_items ?? []).map((it) => ({
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        price: Number(it.total_price),
+        weight: it.weight
+          ? Number(it.weight)
+          : it.products?.weight
+            ? Number(it.products.weight) * Number(it.quantity)
+            : undefined,
+        product_type: it.products?.product_type || undefined,
+      }));
+
+      const options = await this.shippingCalculatorService.calculateRates(
+        storeId,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+        },
+      );
+
+      const match = options.find((o) => o.method_id === method.id);
+      if (!match) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
+        );
+      }
+
+      resolvedRateId = match.rate_id;
+      if (dto.shipping_cost === undefined) {
+        shippingCost = Number(match.cost);
+      }
+    } else if (dto.shipping_rate_id) {
+      const rate = await this.prisma.shipping_rates.findFirst({
+        where: { id: dto.shipping_rate_id, is_active: true },
+      });
+
+      if (!rate || rate.shipping_method_id !== method.id) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
+
+      if (dto.shipping_cost === undefined) {
+        shippingCost = Number(rate.base_cost);
+      }
+    }
+
+    const { deriveDeliveryType } =
+      await import('../shipping/shipping-derivation.util');
+    const deliveryType = deriveDeliveryType(method.type);
+
+    const newGrandTotal =
+      Number(order.subtotal_amount) +
+      Number(order.tax_amount) -
+      Number(order.discount_amount) +
+      shippingCost;
+
+    const updated = await this.prisma.orders.update({
+      where: { id: orderId },
+      data: {
+        shipping_method_id: method.id,
+        shipping_rate_id: resolvedRateId,
+        delivery_type: deliveryType,
+        shipping_cost: shippingCost,
+        grand_total: newGrandTotal,
+        updated_at: new Date(),
+      },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: {
+          include: {
+            products: {
+              include: {
+                product_images: { where: { is_main: true }, take: 1 },
+              },
+            },
+            product_variants: true,
+          },
+        },
+        addresses_orders_billing_address_idToaddresses: true,
+        addresses_orders_shipping_address_idToaddresses: true,
+        payments: {
+          include: {
+            store_payment_method: {
+              include: { system_payment_method: true },
+            },
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        shipping_method: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            provider_name: true,
+            min_days: true,
+            max_days: true,
+            logo_url: true,
+          },
+        },
+        shipping_rate: {
+          include: {
+            shipping_zone: {
+              select: { id: true, name: true, display_name: true },
+            },
+          },
+        },
+        users: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+      },
+    });
+
+    this.eventEmitter.emit('order.shipping_assigned', {
+      store_id: order.store_id,
+      order_id: orderId,
+      shipping_method_id: method.id,
+      delivery_type: deliveryType,
+    });
+
+    return updated;
   }
 
   async remove(id: number) {

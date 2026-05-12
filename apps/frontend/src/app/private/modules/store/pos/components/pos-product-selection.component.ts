@@ -191,7 +191,7 @@ import {
                 (click)="onAddToCart(product)"
                 class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
                 [class]="
-                  product.track_inventory !== false && product.stock === 0
+                  isProductCardUnavailable(product)
                     ? 'opacity-60 cursor-not-allowed'
                     : 'cursor-pointer hover:border-primary active:scale-[0.97]'
                 "
@@ -365,13 +365,8 @@ import {
                       }
                     </div>
                     <button
-                      class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
-                      [ngClass]="
-                        product.stock === 0
-                          ? 'opacity-50 cursor-not-allowed bg-muted'
-                          : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
-                      "
-                      [disabled]="product.stock === 0"
+                      [class]="getAddButtonClass(product)"
+                      [disabled]="isProductCardUnavailable(product)"
                       (click)="$event.stopPropagation(); onAddToCart(product)"
                       aria-label="Agregar al carrito"
                     >
@@ -531,7 +526,7 @@ export class PosProductSelectionComponent {
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
 
-  private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
@@ -806,16 +801,23 @@ export class PosProductSelectionComponent {
     this.productSelected.emit(product);
   }
 
-  async onAddToCart(product: any): Promise<void> {
-    // Interceptar servicios que requieren reserva (SIEMPRE antes de validaciones de precio)
-    if (
-      product.product_type === 'service' ||
-      product.requires_booking === true
-    ) {
-      this.bookingRequired.emit(product);
-      return;
-    }
+  isProductCardUnavailable(product: any): boolean {
+    return (
+      !product.has_variants &&
+      product.track_inventory !== false &&
+      product.stock === 0
+    );
+  }
 
+  getAddButtonClass(product: any): string {
+    const base =
+      'shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]';
+    return this.isProductCardUnavailable(product)
+      ? `${base} opacity-50 cursor-not-allowed bg-muted`
+      : `${base} bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95`;
+  }
+
+  async onAddToCart(product: any): Promise<void> {
     if (product.price <= 0) {
       this.dialogService
         .confirm({
@@ -840,6 +842,11 @@ export class PosProductSelectionComponent {
       return;
     }
 
+    if (product.requires_booking === true) {
+      this.bookingRequired.emit(product);
+      return;
+    }
+
     await this.addToCartNormal(product);
   }
 
@@ -849,6 +856,11 @@ export class PosProductSelectionComponent {
     this.selectedProductForVariant.set(null);
 
     if (!product) return;
+
+    if (product.requires_booking === true) {
+      this.bookingRequired.emit({ product, variant });
+      return;
+    }
 
     // If product is weight-based and scale is enabled, prompt for weight
     const isWeightProduct =

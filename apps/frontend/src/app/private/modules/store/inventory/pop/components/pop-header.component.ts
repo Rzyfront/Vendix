@@ -6,6 +6,8 @@ import {
   DestroyRef,
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { Observable, of } from "rxjs";
+import { catchError, map, tap } from "rxjs/operators";
 
 import { FormsModule } from "@angular/forms";
 
@@ -149,12 +151,13 @@ import { InventoryService } from "../../services/inventory.service";
             [class.config-flash-warning]="showConfigWarning()">
             <app-tooltip
               position="top"
-              color="warning"
+              color="ai"
               size="sm"
+              content="Selecciona proveedor y bodega"
               [visible]="showConfigWarning()"
               class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-            >Selecciona proveedor y bodega</app-tooltip>
-    
+            ></app-tooltip>
+
             <!-- 1. Supplier Selector -->
             <div class="flex flex-col gap-1.5 min-w-0">
               <label
@@ -182,10 +185,10 @@ import { InventoryService } from "../../services/inventory.service";
                     >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
-                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip() === 'supplier'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
-                    Nuevo Proveedor
-                  </app-tooltip>
+                  <app-tooltip position="top" size="sm" color="ai" content="Nuevo Proveedor"
+                    [visible]="hoveredTooltip() === 'supplier'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
+                  ></app-tooltip>
                 </div>
               </div>
             </div>
@@ -217,10 +220,10 @@ import { InventoryService } from "../../services/inventory.service";
                     >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
-                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip() === 'warehouse'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
-                    Nueva Bodega
-                  </app-tooltip>
+                  <app-tooltip position="top" size="sm" color="ai" content="Nueva Bodega"
+                    [visible]="hoveredTooltip() === 'warehouse'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
+                  ></app-tooltip>
                 </div>
               </div>
             </div>
@@ -281,11 +284,12 @@ import { InventoryService } from "../../services/inventory.service";
                     [class.config-flash-warning]="showConfigWarning()">
                     <app-tooltip
                       position="top"
-                      color="warning"
+                      color="ai"
                       size="sm"
+                      content="Selecciona proveedor y bodega"
                       [visible]="showConfigWarning()"
                       class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-                    >Selecciona proveedor y bodega</app-tooltip>
+                    ></app-tooltip>
                     <div class="flex flex-col gap-1.5 min-w-0">
                       <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
                         Proveedor <span class="text-destructive">*</span>
@@ -433,8 +437,8 @@ export class PopHeaderComponent {
   readonly openWarehouseModal = output<void>();
 
   constructor() {
-    this.loadSuppliers();
-    this.loadLocations();
+    this.loadSuppliers().subscribe();
+    this.loadLocations().subscribe();
     this.setupShippingMethods();
 
     this.popCartService.cartState$
@@ -486,20 +490,62 @@ export class PopHeaderComponent {
   // Data Loading
   // ============================================================
 
-  public refreshSuppliers(): void {
-    this.loadSuppliers();
+  /**
+   * Refresh suppliers list. Returns an Observable that emits once the options
+   * signal has been updated so callers can chain actions safely (e.g. selecting
+   * a newly created supplier without racing the HTTP response).
+   */
+  public refreshSuppliers(): Observable<void> {
+    return this.loadSuppliers();
   }
 
-  public refreshLocations(): void {
-    this.loadLocations();
+  /**
+   * Refresh locations list. Returns an Observable that emits once the options
+   * signal has been updated so callers can chain actions safely (e.g. selecting
+   * a newly created warehouse without racing the HTTP response).
+   */
+  public refreshLocations(): Observable<void> {
+    return this.loadLocations();
   }
 
-  private loadSuppliers(): void {
-    this.suppliersService
+  /**
+   * Add a newly created supplier in-memory to the selector options.
+   * Avoids re-fetching the whole list (which could trigger races with the cart state).
+   */
+  public addSupplier(supplier: { id: number; name: string; code?: string }): void {
+    const current = this.suppliers();
+    if (!current.some((s) => s.id === supplier.id)) {
+      this.suppliers.set([...current, supplier as PopSupplier]);
+      this.supplierOptions.set(this.suppliers().map((s) => ({
+        value: s.id,
+        label: s.name,
+        description: s.code,
+      })));
+    }
+  }
+
+  /**
+   * Add a newly created location in-memory to the selector options.
+   * Avoids re-fetching the whole list (which could trigger races with the cart state).
+   */
+  public addLocation(location: { id: number; name: string; code?: string }): void {
+    const current = this.locations();
+    if (!current.some((l) => l.id === location.id)) {
+      this.locations.set([...current, location as PopLocation]);
+      this.locationOptions.set(this.locations().map((l) => ({
+        value: l.id,
+        label: l.name,
+        description: l.code,
+      })));
+    }
+  }
+
+  private loadSuppliers(): Observable<void> {
+    return this.suppliersService
       .getSuppliers({ is_active: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        tap((response) => {
           if (response.success && response.data) {
             this.suppliers.set(response.data);
             this.supplierOptions.set(this.suppliers().map((s) => ({
@@ -508,19 +554,21 @@ export class PopHeaderComponent {
               description: s.code,
             })));
           }
-        },
-        error: (error) => {
+        }),
+        map(() => void 0),
+        catchError((error) => {
           console.error("Error loading suppliers:", error);
-        },
-      });
+          return of(void 0);
+        }),
+      );
   }
 
-  private loadLocations(): void {
-    this.inventoryService
+  private loadLocations(): Observable<void> {
+    return this.inventoryService
       .getLocations({ is_active: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        tap((response) => {
           if (response.success && response.data) {
             this.locations.set(response.data);
             this.locationOptions.set(this.locations().map((l) => ({
@@ -538,11 +586,13 @@ export class PopHeaderComponent {
               this.onLocationChange(this.selectedLocationId());
             }
           }
-        },
-        error: (error) => {
+        }),
+        map(() => void 0),
+        catchError((error) => {
           console.error("Error loading locations:", error);
-        },
-      });
+          return of(void 0);
+        }),
+      );
   }
 
   private setupShippingMethods(): void {

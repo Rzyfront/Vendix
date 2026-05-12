@@ -247,7 +247,7 @@ export class StoresComponent implements OnInit, OnChanges {
   readonly isSettingsModalOpen = signal(false);
   readonly isUpdatingSettings = signal(false);
   readonly selectedStoreForSettings = signal<StoreListItem | null>(null);
-private searchSubject$ = new Subject<string>();
+private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   constructor() {
     this.filterForm = this.fb.group({

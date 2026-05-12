@@ -45,11 +45,6 @@ export class CreateMovementDto {
   @IsOptional()
   unit_cost?: number;
 
-  @ApiProperty({ description: 'Reference number (optional)' })
-  @IsString()
-  @IsOptional()
-  reference_number?: string;
-
   @ApiProperty({ description: 'Reason for movement' })
   @IsString()
   @IsNotEmpty()
@@ -59,16 +54,6 @@ export class CreateMovementDto {
   @IsString()
   @IsOptional()
   notes?: string;
-
-  @ApiProperty({ description: 'Batch number (optional)' })
-  @IsString()
-  @IsOptional()
-  batch_number?: string;
-
-  @ApiProperty({ description: 'Serial number (optional)' })
-  @IsString()
-  @IsOptional()
-  serial_number?: string;
 
   @ApiProperty({ description: 'Expiration date (optional)' })
   @IsDateString()

@@ -1,3 +1,5 @@
+import type { FiscalStatusBlock } from './fiscal-status.model';
+
 export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -7,6 +9,8 @@ export interface StoreSettings {
   pos: PosSettings;
   receipts: ReceiptsSettings;
   app: AppSettings;
+  operations?: OperationsSettings;
+  fiscal_status?: FiscalStatusBlock;
 }
 
 export interface AppSettings {
@@ -36,6 +40,10 @@ export interface InventorySettings {
   track_inventory: boolean;
   allow_negative_stock: boolean;
   costing_method: 'cpp' | 'fifo';
+}
+
+export interface OperationsSettings {
+  default_preparation_time_minutes: number;
 }
 
 export interface CheckoutSettings {

@@ -1,0 +1,21 @@
+meta {
+  name: 04 ORG_ADMIN to org locations - 200
+  type: http
+  seq: 4
+}
+
+get {
+  url: http://{{url}}/organization/inventory/locations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("ORG_ADMIN can reach /api/organization/* → 200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

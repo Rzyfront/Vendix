@@ -11,7 +11,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 export class PaymentPoliciesController {
   constructor(
     private readonly paymentPoliciesService: PaymentPoliciesService,
-  ) { }
+  ) {}
 
   @Get()
   @Permissions('organization:payment_policies:read')

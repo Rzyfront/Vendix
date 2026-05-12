@@ -36,10 +36,7 @@ export class EmbeddingEventsListener {
   }
 
   @OnEvent('product.deleted')
-  async handleProductDeleted(event: {
-    store_id: number;
-    product_id: number;
-  }) {
+  async handleProductDeleted(event: { store_id: number; product_id: number }) {
     try {
       await this.embeddingQueue.add(
         'delete-embedding',

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { CreateProviderDto } from './dto/create-provider.dto';
@@ -15,12 +19,25 @@ export class ProvidersService {
 
   private readonly PROVIDER_INCLUDE = {
     employee: {
-      select: { id: true, first_name: true, last_name: true, position: true, status: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        position: true,
+        status: true,
+      },
     },
     services: {
       include: {
         product: {
-          select: { id: true, name: true, base_price: true, service_duration_minutes: true, buffer_minutes: true, booking_mode: true },
+          select: {
+            id: true,
+            name: true,
+            base_price: true,
+            service_duration_minutes: true,
+            buffer_minutes: true,
+            booking_mode: true,
+          },
         },
       },
     },
@@ -63,7 +80,9 @@ export class ProvidersService {
     });
 
     if (!employee) {
-      throw new NotFoundException(`Empleado #${dto.employee_id} no encontrado en esta tienda`);
+      throw new NotFoundException(
+        `Empleado #${dto.employee_id} no encontrado en esta tienda`,
+      );
     }
 
     // Check if provider already exists for this employee
@@ -72,14 +91,17 @@ export class ProvidersService {
     });
 
     if (existing) {
-      throw new ConflictException(`El empleado ya es un proveedor de servicios`);
+      throw new ConflictException(
+        `El empleado ya es un proveedor de servicios`,
+      );
     }
 
     return this.prisma.service_providers.create({
       data: {
         store_id: this.storeId,
         employee_id: dto.employee_id,
-        display_name: dto.display_name || `${employee.first_name} ${employee.last_name}`,
+        display_name:
+          dto.display_name || `${employee.first_name} ${employee.last_name}`,
         avatar_url: dto.avatar_url,
         bio: dto.bio,
       },
@@ -93,7 +115,9 @@ export class ProvidersService {
     return this.prisma.service_providers.update({
       where: { id },
       data: {
-        ...(dto.display_name !== undefined && { display_name: dto.display_name }),
+        ...(dto.display_name !== undefined && {
+          display_name: dto.display_name,
+        }),
         ...(dto.avatar_url !== undefined && { avatar_url: dto.avatar_url }),
         ...(dto.bio !== undefined && { bio: dto.bio }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
@@ -107,13 +131,16 @@ export class ProvidersService {
   async assignService(providerId: number, productId: number) {
     await this.findOne(providerId);
 
-    // Verify product is a bookable service
+    // Verify product exists in the store.
+    // Intentionally do NOT require `requires_booking = true`: provider assignment is
+    // configuration and may happen before the flag is toggled (progressive setup).
     const product = await this.prisma.products.findFirst({
-      where: { id: productId, store_id: this.storeId, requires_booking: true },
+      where: { id: productId, store_id: this.storeId },
+      select: { id: true },
     });
 
     if (!product) {
-      throw new NotFoundException(`Servicio #${productId} no encontrado o no requiere reserva`);
+      throw new NotFoundException(`Servicio #${productId} no encontrado`);
     }
 
     const existing = await this.prisma.provider_services.findFirst({
@@ -121,7 +148,9 @@ export class ProvidersService {
     });
 
     if (existing) {
-      throw new ConflictException(`El proveedor ya tiene asignado este servicio`);
+      throw new ConflictException(
+        `El proveedor ya tiene asignado este servicio`,
+      );
     }
 
     return this.prisma.provider_services.create({
@@ -141,7 +170,9 @@ export class ProvidersService {
       throw new NotFoundException(`Asignacion no encontrada`);
     }
 
-    await this.prisma.provider_services.delete({ where: { id: assignment.id } });
+    await this.prisma.provider_services.delete({
+      where: { id: assignment.id },
+    });
   }
 
   async getProvidersForService(productId: number) {
@@ -162,12 +193,13 @@ export class ProvidersService {
 
   async getAvailableEmployees() {
     // Get employees NOT yet linked as providers
-    const existingProviderEmployeeIds = await this.prisma.service_providers.findMany({
-      where: { store_id: this.storeId },
-      select: { employee_id: true },
-    });
+    const existingProviderEmployeeIds =
+      await this.prisma.service_providers.findMany({
+        where: { store_id: this.storeId },
+        select: { employee_id: true },
+      });
 
-    const linkedIds = existingProviderEmployeeIds.map(p => p.employee_id);
+    const linkedIds = existingProviderEmployeeIds.map((p) => p.employee_id);
 
     // employees is org-scoped automatically by StorePrismaService middleware.
     // Filter by store assignment via employee_stores junction table.

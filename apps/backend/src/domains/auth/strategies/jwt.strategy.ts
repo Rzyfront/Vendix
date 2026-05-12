@@ -4,10 +4,23 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
+// Domain scope claim — alineado con user_settings.app_type (app_type_enum).
+// Mantener este union manualmente sincronizado con prisma/schema.prisma → enum app_type_enum.
+// Único campo usado por DomainScopeGuard para autorizar /store/* vs /organization/*.
+export type JwtAppType =
+  | 'VENDIX_LANDING'
+  | 'VENDIX_ADMIN'
+  | 'ORG_LANDING'
+  | 'ORG_ADMIN'
+  | 'STORE_LANDING'
+  | 'STORE_ADMIN'
+  | 'STORE_ECOMMERCE';
+
 export interface JwtPayload {
   sub: number; // user id
   organization_id: number; // ✅ Scope de organización del token
   store_id?: number | null; // ✅ Scope de tienda del token (opcional)
+  app_type: JwtAppType; // ✅ Scope de dominio del token (DomainScopeGuard)
 }
 
 @Injectable()
@@ -27,7 +40,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
   async validate(payload: JwtPayload) {
-
     try {
       const user = await this.prismaService.users.findUnique({
         where: { id: parseInt(payload.sub.toString()) },
@@ -101,6 +113,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         fullName: `${user.first_name} ${user.last_name}`,
         organization_id: payload.organization_id, // ✅ Del TOKEN - Corregido
         store_id: payload.store_id || null, // ✅ Del TOKEN - Corregido
+        app_type: payload.app_type, // ✅ Del TOKEN — DomainScopeGuard
         stores, // ✅ Objeto store con logo_url para el sidebar
         user_roles: user.user_roles, // ✅ Mantener para el middleware
         roles: user.user_roles.map((ur) => ur.roles?.name || ''),

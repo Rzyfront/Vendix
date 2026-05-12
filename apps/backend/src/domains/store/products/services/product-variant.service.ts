@@ -91,6 +91,36 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
+      // Cross-validation: service-specific fields only for service products
+      const isService = product.product_type === 'service';
+      const hasServiceFields =
+        createVariantDto.service_duration_minutes !== undefined ||
+        createVariantDto.service_pricing_type !== undefined ||
+        createVariantDto.buffer_minutes !== undefined ||
+        createVariantDto.preparation_time_minutes !== undefined;
+
+      if (!isService && hasServiceFields) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VALIDATE_004,
+          'Service-specific fields can only be set on service product variants',
+        );
+      }
+
+      // BLOCK: Check for active stock reservations
+      const hasActiveReservations = await prisma.stock_reservations.findFirst({
+        where: {
+          product_id: product_id,
+          product_variant_id: null,
+          status: 'active',
+        },
+      });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot add variant to product with active stock reservations. Release reservations first.',
+        );
+      }
+
       // Verificar que el SKU no esté vacío
       if (!createVariantDto.sku || createVariantDto.sku.trim() === '') {
         throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_003);
@@ -136,6 +166,35 @@ export class ProductVariantService {
     createVariantDto: CreateProductVariantDto,
     user_id?: number,
   ) {
+    const priceOverride =
+      createVariantDto.price_override ?? createVariantDto.price;
+
+    // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
+    if (
+      priceOverride !== null &&
+      priceOverride !== undefined &&
+      priceOverride <= 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
+    }
+
+    // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
+    if (createVariantDto.is_on_sale) {
+      const basePrice = Number(product.base_price);
+      const salePrice = createVariantDto.sale_price;
+      const referencePrice = priceOverride ?? basePrice;
+
+      if (salePrice == null || salePrice <= 0 || salePrice >= referencePrice) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VAR_SALE_PRICE_001,
+          'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+        );
+      }
+    }
+
     // Crear variante usando scoped client
     const variant = await prisma.product_variants.create({
       data: {
@@ -143,12 +202,17 @@ export class ProductVariantService {
         sku: createVariantDto.sku,
         name: createVariantDto.name,
         attributes: createVariantDto.attributes,
-        price_override:
-          createVariantDto.price_override || createVariantDto.price,
+        price_override: priceOverride,
         cost_price: createVariantDto.cost_price,
         profit_margin: createVariantDto.profit_margin,
         is_on_sale: createVariantDto.is_on_sale,
         sale_price: createVariantDto.sale_price,
+        image_id: createVariantDto.image_id,
+        track_inventory_override: createVariantDto.track_inventory_override,
+        service_duration_minutes: createVariantDto.service_duration_minutes,
+        service_pricing_type: createVariantDto.service_pricing_type,
+        buffer_minutes: createVariantDto.buffer_minutes,
+        preparation_time_minutes: createVariantDto.preparation_time_minutes,
         created_at: new Date(),
         updated_at: new Date(),
       } as any,
@@ -210,6 +274,21 @@ export class ProductVariantService {
         throw new NotFoundException('Variante no encontrada');
       }
 
+      // BLOCK: Check for active stock reservations on this variant
+      const hasActiveReservations = await prisma.stock_reservations.findFirst({
+        where: {
+          product_id: existingVariant.product_id,
+          product_variant_id: variantId,
+          status: 'active',
+        },
+      });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot modify variant with active stock reservations. Release reservations first.',
+        );
+      }
+
       if (updateVariantDto.sku && updateVariantDto.sku.trim() !== '') {
         const existingSku = await prisma.product_variants.findFirst({
           where: {
@@ -260,15 +339,74 @@ export class ProductVariantService {
     existingVariant: any,
     user_id?: number,
   ) {
-    const { stock_quantity, ...variantData } = updateVariantDto;
+    const {
+      stock_quantity,
+      price,
+      available_for_ecommerce: _availableForEcommerce,
+      variant_removal_stock_mode: _variantRemovalStockMode,
+      stock_by_location: _stockByLocation,
+      variant_image_url: _variantImageUrl,
+      ...variantData
+    } = updateVariantDto as UpdateProductVariantDto & {
+      stock_by_location?: unknown;
+      variant_image_url?: string;
+    };
+    const priceOverride =
+      variantData.price_override !== undefined
+        ? variantData.price_override
+        : price !== undefined
+          ? price
+          : undefined;
+
+    const hasServiceFields =
+      variantData.service_duration_minutes !== undefined ||
+      variantData.service_pricing_type !== undefined ||
+      variantData.buffer_minutes !== undefined ||
+      variantData.preparation_time_minutes !== undefined;
+
+    if (existingVariant.products?.product_type !== 'service' && hasServiceFields) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_004,
+        'Service-specific fields can only be set on service product variants',
+      );
+    }
+
+    // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
+    if (
+      priceOverride !== null &&
+      priceOverride !== undefined &&
+      priceOverride <= 0
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
+    }
+
+    // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
+    const nextIsOnSale = variantData.is_on_sale ?? existingVariant.is_on_sale;
+    if (nextIsOnSale) {
+      const basePrice = Number(existingVariant.products?.base_price || 0);
+      const salePrice = variantData.sale_price ?? existingVariant.sale_price;
+      const nextPriceOverride =
+        priceOverride !== undefined ? priceOverride : existingVariant.price_override;
+      const referencePrice =
+        nextPriceOverride ?? basePrice;
+
+      if (salePrice == null || salePrice <= 0 || salePrice >= referencePrice) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VAR_SALE_PRICE_001,
+          'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+        );
+      }
+    }
 
     // Actualizar variante
     const variant = await prisma.product_variants.update({
       where: { id: variantId },
       data: {
         ...variantData,
-        price_override:
-          variantData.price_override ?? variantData.price ?? undefined,
+        price_override: priceOverride,
         updated_at: new Date(),
       } as any,
     });
@@ -354,6 +492,17 @@ export class ProductVariantService {
 
     if (!existingVariant) {
       throw new NotFoundException('Variante no encontrada');
+    }
+
+    // BLOCK: cannot delete variant with active stock reservations
+    const activeReservationsCount = await this.prisma.stock_reservations.count({
+      where: { product_variant_id: variantId, status: 'active' },
+    });
+    if (activeReservationsCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_HAS_RESERVATIONS_001,
+        'Operación bloqueada: existen reservas de stock activas',
+      );
     }
 
     const unscopedPrisma = this.prisma.withoutScope() as any;

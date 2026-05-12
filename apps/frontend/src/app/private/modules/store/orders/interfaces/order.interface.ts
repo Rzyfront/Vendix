@@ -230,6 +230,8 @@ export interface OrderQuery {
   page?: number;
   limit?: number;
 
+  missing_shipping_method?: boolean;
+
   // Ordenamiento
   sort?: string; // Format: 'field:direction' e.g., 'created_at:desc'
   sort_by?: string;
@@ -517,6 +519,24 @@ export interface PayOrderResponse {
     transaction_id: string;
     change?: number;
   };
+}
+
+/**
+ * Body for `POST /store/orders/:id/flow/fast-track`.
+ * Drives the backend OrderFlowService.fastTrackOrder to execute
+ * pay (optional if already paid) -> ship -> deliver -> finish in one call.
+ */
+export interface FastTrackOrderDto {
+  payment?: PayOrderDto;
+  ship?: ShipOrderDto;
+  deliver?: DeliverOrderDto;
+}
+
+export interface AssignShippingMethodDto {
+  shipping_method_id: number;
+  shipping_rate_id?: number | null;
+  shipping_cost?: number | null;
+  auto_calculate?: boolean;
 }
 
 export interface OrderFlowMetadata {

@@ -8,6 +8,7 @@ import { CatalogService, EcommerceProduct } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
+import { PriceResolverService } from '../../../../shared/services/pricing';
 
 export interface CartItem {
   id: number;
@@ -78,6 +79,7 @@ export class CartService {
     private catalog_service: CatalogService,
     private auth_facade: AuthFacade,
     private currencyFormatService: CurrencyFormatService,
+    private priceResolver: PriceResolverService,
   ) {
     this.initializeCart();
   }

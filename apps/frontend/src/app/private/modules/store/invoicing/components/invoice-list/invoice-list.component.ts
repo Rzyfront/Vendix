@@ -41,8 +41,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
     PaginationComponent,
     EmptyStateComponent,
     CardComponent
@@ -55,7 +53,6 @@ export class InvoiceListComponent {
 
   readonly create = output<void>();
   readonly view = output<Invoice>();
-  readonly resolutions = output<void>();
   readonly refresh = output<void>();
 
   private store = inject(Store);
@@ -107,7 +104,6 @@ export class InvoiceListComponent {
 
   // Dropdown actions
   dropdownActions: DropdownAction[] = [
-    { label: 'Resoluciones', icon: 'settings', action: 'resolutions' },
     {
       label: 'Nueva Factura',
       icon: 'plus',
@@ -242,9 +238,6 @@ export class InvoiceListComponent {
     switch (action) {
       case 'create':
         this.create.emit();
-        break;
-      case 'resolutions':
-        this.resolutions.emit();
         break;
     }
   }

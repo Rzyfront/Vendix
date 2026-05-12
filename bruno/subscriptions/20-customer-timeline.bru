@@ -1,0 +1,59 @@
+meta {
+  name: Customer Subscription Timeline
+  type: http
+  seq: 20
+}
+
+get {
+  url: {{url}}/store/subscriptions/current/events?limit=10
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Returns 200 (or 404 if no subscription)", function() {
+    expect(res.status).to.be.oneOf([200, 404]);
+  });
+
+  test("Response shape: data array + next_cursor field", function() {
+    if (res.status === 200) {
+      expect(res.body.success).to.be.true;
+      expect(res.body.data).to.be.an("object");
+      expect(res.body.data).to.have.property("data");
+      expect(res.body.data.data).to.be.an("array");
+      expect(res.body.data).to.have.property("next_cursor");
+      const nc = res.body.data.next_cursor;
+      expect(nc === null || typeof nc === "string").to.be.true;
+    }
+  });
+
+  test("Each event row has expected sanitized shape", function() {
+    if (res.status === 200 && res.body.data.data.length > 0) {
+      const e = res.body.data.data[0];
+      expect(e).to.have.property("id");
+      expect(e).to.have.property("type");
+      expect(e).to.have.property("from_state");
+      expect(e).to.have.property("to_state");
+      expect(e).to.have.property("payload");
+      expect(e).to.have.property("triggered_by");
+      expect(e).to.have.property("created_at");
+      expect(["user", "system", "cron"]).to.include(e.triggered_by);
+    }
+  });
+
+  test("Sensitive PII is NOT exposed (no triggered_by_user_id)", function() {
+    if (res.status === 200) {
+      const rows = res.body.data.data;
+      for (const e of rows) {
+        expect(e).to.not.have.property("triggered_by_user_id");
+        expect(e).to.not.have.property("triggered_by_job");
+      }
+    }
+  });
+
+  test("Limit parameter is respected (max 10 rows)", function() {
+    if (res.status === 200) {
+      expect(res.body.data.data.length).to.be.at.most(10);
+    }
+  });
+}

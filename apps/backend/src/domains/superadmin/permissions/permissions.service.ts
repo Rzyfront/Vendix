@@ -22,7 +22,7 @@ export class PermissionsService {
   constructor(
     private readonly prismaService: GlobalPrismaService,
     private readonly auditService: AuditService,
-  ) { }
+  ) {}
 
   // ===== CRUD PERMISSIONS =====
 

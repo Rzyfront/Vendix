@@ -258,10 +258,14 @@ export class EnvironmentSwitchService {
       organization_id = user.organization_id;
     }
 
+    // ✅ Incluir app_type en el payload — DomainScopeGuard depende de este claim
+    // para enrutar /store/* vs /organization/*. targetEnvironment es la fuente
+    // autoritativa: el usuario está cambiando explícitamente de dominio.
     const payload = {
       sub: user.id,
       organization_id: organization_id,
       store_id: store_id,
+      app_type: targetEnvironment,
     };
 
     const accessTokenExpiry =

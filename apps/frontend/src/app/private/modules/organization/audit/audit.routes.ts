@@ -13,10 +13,20 @@ const routes: Routes = [
     loadComponent: () =>
       import('./logs/logs.component').then((m) => m.LogsComponent),
   },
+  {
+    path: 'login-attempts',
+    loadComponent: () =>
+      import('./login-attempts/login-attempts.component').then((m) => m.LoginAttemptsComponent),
+  },
+  {
+    path: 'sessions',
+    loadComponent: () =>
+      import('./sessions/sessions.component').then((m) => m.SessionsComponent),
+  },
 ];
 
 @NgModule({
   imports: [RouterModule.forChild(routes)],
   exports: [RouterModule],
 })
-export class AuditRoutingModule { }
+export class AuditRoutingModule {}

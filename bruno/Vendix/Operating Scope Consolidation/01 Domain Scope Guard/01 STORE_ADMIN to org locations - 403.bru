@@ -1,0 +1,25 @@
+meta {
+  name: 01 STORE_ADMIN to org locations - 403
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/organization/inventory/locations
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("STORE_ADMIN cannot reach /api/organization/* → 403", function () {
+    expect(res.status).to.equal(403);
+  });
+  test("error message references domain isolation", function () {
+    const msg = JSON.stringify(res.body || {}).toLowerCase();
+    expect(msg.includes("organization") || msg.includes("forbidden")).to.equal(true);
+  });
+}

@@ -17,6 +17,7 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 import { FormStyleVariant } from '../../types/form.types';
 
 export interface MultiSelectorOption {
@@ -32,7 +33,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-multi-selector',
   standalone: true,
-  imports: [FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -45,9 +46,17 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
       @if (label()) {
         <label
           [class]="labelClasses"
+          class="label-with-tooltip"
           [class.opacity-50]="disabled()"
           >
-          {{ label() }}
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <app-tooltip [content]="tooltipText()" position="top">
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
+          }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-0.5">*</span>
           }
@@ -146,9 +155,12 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
                       ></app-icon>
                     }
                   </div>
-                  <span class="flex-1 text-[var(--color-text-primary)]" [class.text-primary-700]="isSelected(option.value)">{{ option.label }}</span>
+                  <span class="flex-1 min-w-0 text-[var(--color-text-primary)] truncate" [class.text-primary-700]="isSelected(option.value)">{{ option.label }}</span>
                   @if (option.description) {
-                    <span class="text-xs text-[var(--color-text-secondary)]">
+                    <span
+                      class="text-xs text-[var(--color-text-secondary)] truncate whitespace-nowrap overflow-hidden max-w-[40%] shrink-0"
+                      [title]="option.description"
+                    >
                       {{ option.description }}
                     </span>
                   }
@@ -188,6 +200,24 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
     :host {
       display: block;
     }
+
+    .label-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .help-icon {
+      color: var(--color-text-muted);
+      cursor: help;
+      position: relative;
+      display: inline-flex;
+      transition: color 0.2s ease;
+    }
+
+    .help-icon:hover {
+      color: var(--color-primary);
+    }
   `],
 })
 export class MultiSelectorComponent implements ControlValueAccessor {
@@ -196,6 +226,7 @@ export class MultiSelectorComponent implements ControlValueAccessor {
   readonly label = input<string>('');
   readonly placeholder = input<string>('Seleccionar...');
   readonly helpText = input<string>('');
+  readonly tooltipText = input<string>('');
   readonly errorText = input<string>('');
   readonly required = input<boolean>(false);
   readonly disabled = input<boolean>(false);

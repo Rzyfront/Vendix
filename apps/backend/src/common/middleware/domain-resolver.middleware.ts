@@ -11,7 +11,7 @@ export class DomainResolverMiddleware implements NestMiddleware {
   constructor(
     private readonly publicDomains: PublicDomainsService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
-  ) { }
+  ) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Usar originalUrl para asegurar que detectamos /ecommerce/ incluso con prefijos
@@ -43,7 +43,10 @@ export class DomainResolverMiddleware implements NestMiddleware {
 
       // Prioridad 2: Resolución por hostname
       const cacheKey = `domain:${hostname}`;
-      const cached = await this.cache.get<{ store_id: number; organization_id?: number }>(cacheKey);
+      const cached = await this.cache.get<{
+        store_id: number;
+        organization_id?: number;
+      }>(cacheKey);
       if (cached) {
         req['domain_context'] = cached;
         return next();

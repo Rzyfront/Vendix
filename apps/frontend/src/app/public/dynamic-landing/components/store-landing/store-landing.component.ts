@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, effect } from '@angular/core';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
@@ -139,14 +139,15 @@ export class StoreLandingComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private themeService = inject(ThemeService);
 
-  ngOnInit() {
+  ngOnInit() {}
+
+  private readonly configEffect = effect(() => {
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
       const domainConfig = appConfig.domainConfig;
       this.storeName = domainConfig.store_slug || 'Store';
       this.branding = appConfig.branding || {};
 
-      // Map custom config to view properties
       const customConfig = domainConfig.customConfig || {};
       this.heroTitle = customConfig.title || `Bienvenido a ${this.storeName}`;
       this.heroDescription =
@@ -155,15 +156,13 @@ export class StoreLandingComponent implements OnInit {
 
       this.buildHeroSlides();
 
-      // Apply domain branding colors to CSS variables
       if (appConfig.branding) {
         this.themeService.applyBranding(appConfig.branding);
       }
     } else {
-      // Fallback defaults
       this.buildHeroSlides();
     }
-  }
+  });
 
   private buildHeroSlides() {
     this.heroSlides = [

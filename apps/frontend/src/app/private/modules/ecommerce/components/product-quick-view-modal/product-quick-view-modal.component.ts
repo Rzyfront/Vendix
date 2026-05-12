@@ -120,8 +120,8 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                     <button
                       class="variant-chip"
                       [class.selected]="selectedVariant()?.id === variant.id"
-                      [class.out-of-stock]="!isOnDemand() && variant.stock_quantity === 0"
-                      [disabled]="!isOnDemand() && variant.stock_quantity === 0"
+                      [class.out-of-stock]="!isVariantAvailable(variant)"
+                      [disabled]="!isVariantAvailable(variant)"
                       (click)="selectVariant(variant)"
                     >
                       {{ getVariantLabel(variant) }}
@@ -179,7 +179,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 variant="secondary"
                 size="sm"
                 [fullWidth]="true"
-                [disabled]="(!isOnDemand() && displayStock() === 0) || (hasVariants() && !selectedVariant())"
+                [disabled]="purchaseDisabled()"
                 (clicked)="onAddToCart()"
               >
                 <app-icon slot="icon" name="shopping-cart" [size]="18" />
@@ -200,7 +200,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               variant="primary"
               size="md"
               [fullWidth]="true"
-              [disabled]="(!isOnDemand() && displayStock() === 0) || (hasVariants() && !selectedVariant())"
+              [disabled]="purchaseDisabled()"
               (clicked)="onBuyNow()"
             >
               <app-icon slot="icon" [name]="prod.requires_booking && prod.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
@@ -586,13 +586,23 @@ export class ProductQuickViewModalComponent {
 
   readonly displayStock = computed<number | null>(() => {
     const v = this.selectedVariant();
+    if (v && !this.variantTracksInventory(v)) return 999;
     if (v) return v.stock_quantity;
     return this.product()?.stock_quantity ?? null;
   });
 
-  readonly isOnDemand = computed(
-    () => this.product()?.track_inventory === false,
-  );
+  readonly isOnDemand = computed(() => {
+    const variant = this.selectedVariant();
+    if (variant) return !this.variantTracksInventory(variant);
+    return this.product()?.track_inventory === false;
+  });
+
+  readonly purchaseDisabled = computed(() => {
+    if (this.hasVariants() && !this.selectedVariant()) return true;
+    const variant = this.selectedVariant();
+    if (variant && !this.isVariantAvailable(variant)) return true;
+    return !this.isOnDemand() && this.displayStock() === 0;
+  });
 
   readonly displayImageUrl = computed<string | null>(() => {
     const v = this.selectedVariant();
@@ -645,6 +655,8 @@ export class ProductQuickViewModalComponent {
   }
 
   selectVariant(variant: ProductVariantDetail): void {
+    if (!this.isVariantAvailable(variant)) return;
+
     this.selectedVariant.set(
       this.selectedVariant()?.id === variant.id ? null : variant,
     );
@@ -657,6 +669,21 @@ export class ProductQuickViewModalComponent {
       if (values.length > 0) return values.join(' / ');
     }
     return variant.name || variant.sku;
+  }
+
+  private variantTracksInventory(variant: ProductVariantDetail): boolean {
+    if (typeof variant.effective_track_inventory === 'boolean') {
+      return variant.effective_track_inventory;
+    }
+
+    const productTracksInventory = this.product()?.track_inventory ?? true;
+    return variant.track_inventory_override ?? productTracksInventory;
+  }
+
+  isVariantAvailable(variant: ProductVariantDetail): boolean {
+    if (typeof variant.is_available === 'boolean') return variant.is_available;
+    if (!this.variantTracksInventory(variant)) return true;
+    return (variant.stock_quantity ?? 0) > 0;
   }
 
   loadProduct(): void {
@@ -678,14 +705,10 @@ export class ProductQuickViewModalComponent {
             this.product.set(prod);
             // Auto-select first available variant
             if (prod.variants?.length > 0) {
-              if (prod.track_inventory === false) {
-                this.selectedVariant.set(prod.variants[0]);
-              } else {
-                const firstAvailable = prod.variants.find(
-                  (v) => v.stock_quantity > 0,
-                );
-                this.selectedVariant.set(firstAvailable || prod.variants[0]);
-              }
+              const firstAvailable = prod.variants.find((variant) =>
+                this.isVariantAvailable(variant),
+              );
+              this.selectedVariant.set(firstAvailable || prod.variants[0]);
             }
           } else {
             this.hasError.set(true);
@@ -706,7 +729,11 @@ export class ProductQuickViewModalComponent {
     if (product.requires_booking && product.product_type === 'service') {
       const productId = product.id;
       this.onClose();
-      this.router.navigate(['/book', productId]);
+      this.router.navigate(['/book', productId], {
+        queryParams: this.selectedVariant()?.id
+          ? { variant_id: this.selectedVariant()?.id }
+          : undefined,
+      });
       return;
     }
     const sv = this.selectedVariant();
@@ -714,7 +741,12 @@ export class ProductQuickViewModalComponent {
     const variantInfo = sv
       ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
+    const result = this.cartService.addToCart(
+      product.id,
+      this.quantity(),
+      variantId,
+      variantInfo,
+    );
     if (result) {
       result.subscribe();
     }
@@ -729,7 +761,11 @@ export class ProductQuickViewModalComponent {
     if (product.requires_booking && product.product_type === 'service') {
       const productId = product.id;
       this.onClose();
-      this.router.navigate(['/book', productId]);
+      this.router.navigate(['/book', productId], {
+        queryParams: this.selectedVariant()?.id
+          ? { variant_id: this.selectedVariant()?.id }
+          : undefined,
+      });
       return;
     }
     const sv = this.selectedVariant();
@@ -737,7 +773,12 @@ export class ProductQuickViewModalComponent {
     const variantInfo = sv
       ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
+    const result = this.cartService.addToCart(
+      product.id,
+      this.quantity(),
+      variantId,
+      variantInfo,
+    );
     if (result) {
       result.subscribe({
         next: () => {

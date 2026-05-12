@@ -15,10 +15,8 @@ export class PurchaseOrderQueryDto {
   @IsOptional()
   organization_id?: number;
 
-  @ApiProperty({ description: 'Store ID', required: false })
-  @IsNumber()
-  @IsOptional()
-  store_id?: number;
+  // store_id deprecated (phase3-round2): scope is derived from RequestContextService
+  // for /store/* endpoints.
 
   @ApiProperty({ description: 'Supplier ID', required: false })
   @IsNumber()
@@ -76,12 +74,20 @@ export class PurchaseOrderQueryDto {
   @IsNumber()
   limit?: number = 10;
 
-  @ApiProperty({ description: 'Sort field', required: false, default: 'order_date' })
+  @ApiProperty({
+    description: 'Sort field',
+    required: false,
+    default: 'order_date',
+  })
   @IsOptional()
   @IsString()
   sort_by?: string = 'order_date';
 
-  @ApiProperty({ description: 'Sort direction', required: false, default: 'desc' })
+  @ApiProperty({
+    description: 'Sort direction',
+    required: false,
+    default: 'desc',
+  })
   @IsOptional()
   @IsString()
   sort_order?: 'asc' | 'desc' = 'desc';

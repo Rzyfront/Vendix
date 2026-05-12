@@ -37,7 +37,7 @@ export class LegalAcceptancesService {
     private readonly ecommercePrisma: EcommercePrismaService,
     private readonly auditService: AuditService,
     private readonly s3Service: S3Service,
-  ) { }
+  ) {}
 
   private async fetchContentFromS3(
     url: string | null,
@@ -399,13 +399,14 @@ export class LegalAcceptancesService {
         let hasAccepted = false;
         if (userId) {
           // Verificar si ya aceptó
-          const accepted = await this.globalPrisma.document_acceptances.findFirst({
-            where: {
-              user_id: userId,
-              document_id: docToUse.id,
-              acceptance_version: docToUse.version,
-            },
-          });
+          const accepted =
+            await this.globalPrisma.document_acceptances.findFirst({
+              where: {
+                user_id: userId,
+                document_id: docToUse.id,
+                acceptance_version: docToUse.version,
+              },
+            });
           hasAccepted = !!accepted;
         }
 

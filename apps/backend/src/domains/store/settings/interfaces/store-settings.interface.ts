@@ -1,3 +1,25 @@
+import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
+
+// ============================================================================
+// FISCAL DATA - Legal/tax identity of the store (NIT, regime, address, etc.)
+// ============================================================================
+export interface FiscalDataSettings {
+  nit?: string;
+  nit_dv?: string;
+  tax_id?: string;
+  tax_id_dv?: string;
+  nit_type?: 'NIT' | 'CC' | 'CE' | 'TI' | 'PP' | 'NIT_EXTRANJERIA';
+  legal_name?: string;
+  person_type?: 'NATURAL' | 'JURIDICA';
+  tax_regime?: 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+  ciiu?: string;
+  fiscal_address?: string;
+  country?: string;
+  department?: string;
+  city?: string;
+  tax_responsibilities?: string[];
+}
+
 // ============================================================================
 // BRANDING - Única fuente de verdad para colores, logo y theming
 // ============================================================================
@@ -219,6 +241,12 @@ export interface ModuleFlowsSettings {
 }
 
 export interface StoreSettings {
+  /**
+   * Internal schema version for migrations. See `SettingsMigratorService`.
+   * Stamped on every persist. Optional on read for legacy rows.
+   */
+  _schema_version?: number;
+
   // NUEVAS SECCIONES - Única fuente de verdad
   branding: BrandingSettings;
   fonts: FontsSettings;
@@ -234,8 +262,17 @@ export interface StoreSettings {
   // Module flows - Master toggles + per-module flow settings
   module_flows?: ModuleFlowsSettings;
 
+  // Fiscal status - semantic fiscal responsibility switches
+  fiscal_status?: FiscalStatusBlock;
+
+  // Fiscal data - legal/tax identity (NIT, regime, address, responsibilities)
+  fiscal_data?: FiscalDataSettings;
+
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;
+
+  // Operations - Preparation and delivery defaults
+  operations?: OperationsSettings;
 
   // Secciones existentes
   general: GeneralSettings;
@@ -352,7 +389,7 @@ export interface BusinessHours {
 // RESERVATIONS - Booking reminders, confirmation, and check-in settings
 // ============================================================================
 export interface BookingReminderRule {
-  time_before: string;       // '30m' | '1h' | '2h' | '24h' | '48h' | '1w'
+  time_before: string; // '30m' | '1h' | '2h' | '24h' | '48h' | '1w'
   channels: ('email' | 'push' | 'whatsapp' | 'in_app')[];
   enabled: boolean;
 }
@@ -376,4 +413,8 @@ export interface ReservationsSettings {
   reminders: BookingReminderRule[];
   confirmation: BookingConfirmationSettings;
   check_in: BookingCheckInSettings;
+}
+
+export interface OperationsSettings {
+  default_preparation_time_minutes: number;
 }

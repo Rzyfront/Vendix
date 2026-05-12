@@ -140,9 +140,7 @@ export class WalletService {
         : await this.walletBalance.debit(wallet.id, dto.amount, params);
 
     this.eventEmitter.emit(
-      dto.type === AdjustmentType.CREDIT
-        ? 'wallet.credited'
-        : 'wallet.debited',
+      dto.type === AdjustmentType.CREDIT ? 'wallet.credited' : 'wallet.debited',
       {
         wallet_id: wallet.id,
         store_id: wallet.store_id,

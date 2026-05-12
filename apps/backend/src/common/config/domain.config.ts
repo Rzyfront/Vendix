@@ -13,7 +13,7 @@ export class DomainConfigService {
   private static config: DomainConfig;
 
   static initialize(): DomainConfig {
-    const baseDomain = process.env.BASE_DOMAIN || 'vendix.com';
+    const baseDomain = process.env.BASE_DOMAIN || 'vendix.online';
     const isDevelopment =
       process.env.NODE_ENV === 'development' ||
       baseDomain.includes('localhost') ||

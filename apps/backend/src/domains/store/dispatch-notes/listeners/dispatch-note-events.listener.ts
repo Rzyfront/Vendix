@@ -361,8 +361,7 @@ export class DispatchNoteEventsListener {
 
       if (
         all_invoiced &&
-        (sales_order.status === 'shipped' ||
-          sales_order.status === 'confirmed')
+        (sales_order.status === 'shipped' || sales_order.status === 'confirmed')
       ) {
         await this.prisma.sales_orders.update({
           where: { id: sales_order_id },

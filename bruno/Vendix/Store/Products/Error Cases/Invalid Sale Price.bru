@@ -1,0 +1,43 @@
+meta {
+  name: Invalid Sale Price
+  type: http
+  seq: 18
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Producto con Precio de Oferta Invalido",
+    "base_price": 100.00,
+    "sku": "INVALID-SALE-PRICE-001",
+    "is_on_sale": true,
+    "sale_price": 100.00,
+    "state": "active"
+  }
+}
+
+tests {
+  test("Product with sale_price >= base_price is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is PROD_SALE_PRICE_001", function() {
+    expect(res.body).to.have.property('code', 'PROD_SALE_PRICE_001');
+  });
+
+  test("Error message mentions sale_price validation", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('sale_price');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

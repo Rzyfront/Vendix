@@ -85,7 +85,10 @@ export class InvoiceRetryJob {
         }
       }
     } catch (error) {
-      this.logger.error(`Invoice retry queue processing failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Invoice retry queue processing failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

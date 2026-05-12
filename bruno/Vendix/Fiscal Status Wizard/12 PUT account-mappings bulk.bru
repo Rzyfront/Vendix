@@ -1,0 +1,40 @@
+meta {
+  name: 12 PUT account-mappings bulk
+  type: http
+  seq: 12
+}
+
+put {
+  url: http://{{url}}/store/accounting/account-mappings
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "mappings": [
+      { "mapping_key": "SALES_REVENUE", "account_id": 1 },
+      { "mapping_key": "ACCOUNTS_RECEIVABLE", "account_id": 2 },
+      { "mapping_key": "ACCOUNTS_PAYABLE", "account_id": 3 },
+      { "mapping_key": "INVENTORY", "account_id": 4 },
+      { "mapping_key": "COGS", "account_id": 5 },
+      { "mapping_key": "TAX_PAYABLE", "account_id": 6 },
+      { "mapping_key": "CASH", "account_id": 7 },
+      { "mapping_key": "BANK", "account_id": 8 }
+    ]
+  }
+}
+
+tests {
+  test("bulk upsert account mappings succeeds or reports validation", function () {
+    expect(res.status).to.be.oneOf([200, 201, 400, 422]);
+    if (res.status === 200 || res.status === 201) {
+      const body = res.body.data || res.body;
+      expect(body).to.be.ok;
+    }
+  });
+}

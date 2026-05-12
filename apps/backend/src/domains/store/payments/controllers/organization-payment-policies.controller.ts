@@ -32,7 +32,7 @@ import {
 export class OrganizationPaymentPoliciesController {
   constructor(
     private readonly organizationPaymentPoliciesService: OrganizationPaymentPoliciesService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('organizations:update')

@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  Logger,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
@@ -48,9 +44,7 @@ export class InvoicePdfService {
   /**
    * Generates a PDF for an invoice, uploads to S3, and updates the invoice record.
    */
-  async generatePdf(
-    invoice_id: number,
-  ): Promise<{ key: string; url: string }> {
+  async generatePdf(invoice_id: number): Promise<{ key: string; url: string }> {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id },
       include: INVOICE_PDF_INCLUDE,
@@ -60,7 +54,7 @@ export class InvoicePdfService {
       throw new NotFoundException('Invoice not found');
     }
 
-    const org = (invoice as any).organization;
+    const org = invoice.organization;
 
     // Optionally download logo
     let logo_buffer: Buffer | undefined;
@@ -68,7 +62,9 @@ export class InvoicePdfService {
       try {
         logo_buffer = await this.s3_service.downloadImage(org.logo_url);
       } catch {
-        this.logger.warn('Could not download organization logo for invoice PDF');
+        this.logger.warn(
+          'Could not download organization logo for invoice PDF',
+        );
       }
     }
 
@@ -85,7 +81,7 @@ export class InvoicePdfService {
     );
 
     // Build customer name
-    const customer = (invoice as any).customer;
+    const customer = invoice.customer;
     const customer_name =
       invoice.customer_name ||
       (customer

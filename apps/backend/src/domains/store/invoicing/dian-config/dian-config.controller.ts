@@ -144,14 +144,15 @@ export class DianConfigController {
       if (validation.error?.includes('password')) {
         throw new VendixHttpException(ErrorCodes.DIAN_CERT_002);
       }
-      throw new VendixHttpException(
-        ErrorCodes.DIAN_CERT_001,
-        validation.error,
-      );
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
     }
 
     const s3_key = `dian/certificates/${config_id}/certificate.p12`;
-    await this.s3_service.uploadFile(file.buffer, s3_key, 'application/x-pkcs12');
+    await this.s3_service.uploadFile(
+      file.buffer,
+      s3_key,
+      'application/x-pkcs12',
+    );
 
     const result = await this.dian_config_service.updateCertificate(
       parseInt(config_id, 10),
@@ -195,5 +196,4 @@ export class DianConfigController {
     const result = await this.dian_test_service.getTestResults(id);
     return this.response_service.success(result);
   }
-
 }

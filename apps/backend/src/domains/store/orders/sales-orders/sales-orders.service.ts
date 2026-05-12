@@ -77,7 +77,11 @@ export class SalesOrdersService {
 
       // Create order items and reserve stock immediately
       for (const item of createSalesOrderDto.items) {
-        const cost_price = await resolveCostPrice(tx, item.product_id, item.product_variant_id);
+        const cost_price = await resolveCostPrice(
+          tx,
+          item.product_id,
+          item.product_variant_id,
+        );
 
         const orderItem = await tx.sales_order_items.create({
           data: {
@@ -521,7 +525,9 @@ export class SalesOrdersService {
       order.sales_order_items.map(async (item: any) => {
         if (item.products?.product_images?.length) {
           const mainImage = item.products.product_images[0];
-          mainImage.image_url = await this.s3Service.signUrl(mainImage.image_url);
+          mainImage.image_url = await this.s3Service.signUrl(
+            mainImage.image_url,
+          );
           item.products.image_url = mainImage.image_url;
         }
       }),

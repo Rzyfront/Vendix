@@ -1,0 +1,106 @@
+<div class="w-full max-w-7xl mx-auto px-4 py-2 lg:py-4 space-y-5">
+  <!-- Welcoming hero — soft tone, no paywall agresivo -->
+  <header class="text-center space-y-3 max-w-2xl mx-auto">
+    <span
+      class="inline-block bg-primary-100 text-primary-700 text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full"
+    >
+      Bienvenido a tu nueva tienda
+    </span>
+    <h1
+      class="text-3xl md:text-4xl font-extrabold text-text-primary leading-tight"
+    >
+      Elige tu plan para empezar a vender
+    </h1>
+    <p class="text-base text-text-secondary">
+      Tu tienda está casi lista. Selecciona el plan que mejor se ajuste a tu
+      negocio para activar todas las funciones de Vendix.
+    </p>
+  </header>
+
+  <!-- Billing cycle switcher -->
+  @if (!loading() && availableCycles().length > 1) {
+    <div class="flex justify-center">
+      <div
+        role="tablist"
+        aria-label="Ciclo de facturación"
+        class="inline-flex flex-wrap gap-1.5 bg-gray-200/80 rounded-xl p-1.5"
+      >
+        @for (cycle of availableCycles(); track cycle) {
+          <button
+            type="button"
+            role="tab"
+            [attr.aria-selected]="selectedCycle() === cycle"
+            (click)="selectCycle(cycle)"
+            class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
+            [class.bg-white]="selectedCycle() === cycle"
+            [class.shadow-md]="selectedCycle() === cycle"
+            [class.text-primary-700]="selectedCycle() === cycle"
+            [class.text-text-secondary]="selectedCycle() !== cycle"
+            [class.hover:text-text-primary]="selectedCycle() !== cycle"
+            [class.hover:bg-white/50]="selectedCycle() !== cycle"
+          >
+            {{ cycleLabel(cycle) }}
+          </button>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Loading skeletons -->
+  @if (loading()) {
+    <div
+      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6"
+    >
+      @for (i of [0, 1, 2]; track i) {
+        <app-pricing-card
+          [plan]="skeletonPlan"
+          [loading]="true"
+        ></app-pricing-card>
+      }
+    </div>
+  }
+
+  <!-- Empty state -->
+  @if (!loading() && visiblePlans().length === 0) {
+    <app-empty-state
+      icon="package"
+      iconColor="primary"
+      title="No hay planes disponibles"
+      description="Por el momento no hay planes activos para tu organización. Contacta al equipo de Vendix o a tu partner para activar planes."
+      [showActionButton]="false"
+    ></app-empty-state>
+  }
+
+  <!-- Plans grid -->
+  @if (!loading() && visiblePlans().length > 0) {
+    <div
+      class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch pt-2"
+    >
+      @for (plan of visiblePlans(); track plan.id) {
+        <app-pricing-card
+          [plan]="plan"
+          [subscriptionStatus]="subscriptionStatus()"
+          ctaLabel="Empezar con este plan"
+          (select)="selectPlan($event)"
+        ></app-pricing-card>
+      }
+    </div>
+  }
+
+  <!-- Footer helpers -->
+  @if (!loading() && visiblePlans().length > 0) {
+    <div
+      class="text-center pt-4 border-t border-border space-y-3 text-text-secondary"
+    >
+      <p class="text-xs">
+        ¿Necesitas comparar todas las opciones detalladas?
+      </p>
+      <app-button variant="ghost" size="sm" (clicked)="goToPlansCatalog()">
+        <span class="flex items-center gap-2">
+          <app-icon name="layout-grid" [size]="14"></app-icon>
+          Ver catálogo completo
+        </span>
+      </app-button>
+    </div>
+  }
+</div>

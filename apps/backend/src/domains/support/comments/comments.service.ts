@@ -180,7 +180,10 @@ export class CommentsService {
           attachment.base64_data,
           s3Key,
           attachment.mime_type,
-          { generateThumbnail: attachment.mime_type.startsWith('image/'), context: ImageContext.SUPPORT },
+          {
+            generateThumbnail: attachment.mime_type.startsWith('image/'),
+            context: ImageContext.SUPPORT,
+          },
         );
 
         keys.push(uploadResult.key);

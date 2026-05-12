@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Delete, Param, Body, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseGuards,
+} from '@nestjs/common';
 import { MetadataValuesService } from './metadata-values.service';
 import { BulkSetMetadataDto } from './dto/bulk-set-metadata.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -26,8 +35,15 @@ export class MetadataValuesController {
   @Post()
   @Permissions('store:settings:write')
   async setValues(@Body() dto: BulkSetMetadataDto) {
-    const result = await this.service.setValues(dto.entity_type, dto.entity_id, dto.values);
-    return this.responseService.success(result, 'Metadatos guardados correctamente');
+    const result = await this.service.setValues(
+      dto.entity_type,
+      dto.entity_id,
+      dto.values,
+    );
+    return this.responseService.success(
+      result,
+      'Metadatos guardados correctamente',
+    );
   }
 
   @Delete(':entityType/:entityId/:fieldId')
@@ -37,7 +53,14 @@ export class MetadataValuesController {
     @Param('entityId', ParseIntPipe) entityId: number,
     @Param('fieldId', ParseIntPipe) fieldId: number,
   ) {
-    const result = await this.service.deleteValue(fieldId, entityType, entityId);
-    return this.responseService.success(result, 'Valor eliminado correctamente');
+    const result = await this.service.deleteValue(
+      fieldId,
+      entityType,
+      entityId,
+    );
+    return this.responseService.success(
+      result,
+      'Valor eliminado correctamente',
+    );
   }
 }

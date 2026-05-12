@@ -1,0 +1,25 @@
+meta {
+  name: 05 GET financial trial balance by accounting entity
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/organization/reports/financial/trial-balance?fiscal_period_id={{fiscalPeriodId}}&accounting_entity_id={{accountingEntityId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("financial report accepts accounting_entity_id filter", function () {
+    expect([200, 400, 404]).to.include(res.status);
+    if (res.status === 200) {
+      const body = res.body.data || res.body;
+      expect(body).to.have.property("accounts");
+    }
+  });
+}

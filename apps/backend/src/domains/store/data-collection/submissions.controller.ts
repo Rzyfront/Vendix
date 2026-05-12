@@ -1,4 +1,14 @@
-import { Controller, Get, Post, Param, Body, Query, ParseIntPipe, UseGuards, Sse } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+  Sse,
+} from '@nestjs/common';
 import { SubmissionsService } from './submissions.service';
 import { CreateSubmissionDto } from './dto/create-submission.dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -39,12 +49,17 @@ export class SubmissionsController {
   @Permissions('store:reservations:write')
   async create(@Body() dto: CreateSubmissionDto) {
     const result = await this.service.createSubmission(dto);
-    return this.responseService.success(result, 'Formulario creado correctamente');
+    return this.responseService.success(
+      result,
+      'Formulario creado correctamente',
+    );
   }
 
   @Sse(':id/prediagnosis/stream')
   @Permissions('store:reservations:read')
-  streamPrediagnosis(@Param('id', ParseIntPipe) id: number): Observable<MessageEvent> {
+  streamPrediagnosis(
+    @Param('id', ParseIntPipe) id: number,
+  ): Observable<MessageEvent> {
     return this.service.streamPrediagnosis(id);
   }
 }

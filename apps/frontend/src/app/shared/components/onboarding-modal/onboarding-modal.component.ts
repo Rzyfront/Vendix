@@ -459,7 +459,10 @@ export class OnboardingModalComponent {
     this.subscribeToWizardData();
   }
 
-  onBusinessTypeSelected(event: { type: 'STORE' | 'ORGANIZATION' }): void {
+  onBusinessTypeSelected(event: {
+    type: 'STORE' | 'ORGANIZATION';
+    fiscal_scope?: 'STORE' | 'ORGANIZATION';
+  }): void {
     if (this.isProcessing()) return;
     this.isProcessing.set(true);
 
@@ -468,9 +471,13 @@ export class OnboardingModalComponent {
     // Smart Check: Skip if already selected same type
     const currentAppType =
       this.wizardStatus()?.user_settings?.config?.selected_app_type;
+    const currentFiscalScope =
+      this.wizardStatus()?.user_settings?.config?.selected_fiscal_scope;
     const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
+    const fiscalScope =
+      event.fiscal_scope ?? (event.type === 'STORE' ? 'STORE' : 'ORGANIZATION');
 
-    if (currentAppType === newAppType) {
+    if (currentAppType === newAppType && currentFiscalScope === fiscalScope) {
       this.steps.set(
         event.type === 'STORE' ? this.storeSteps : this.organizationSteps,
       );
@@ -485,6 +492,7 @@ export class OnboardingModalComponent {
     this.wizardService
       .selectAppType({
         app_type: event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN',
+        fiscal_scope: fiscalScope,
         notes: `User selected ${event.type} approach`,
       })
       .subscribe({
@@ -831,6 +839,9 @@ export class OnboardingModalComponent {
   nextStep(): void {
     if (!this.canGoNext() || this.isProcessing()) return;
 
+    // Save current step draft before moving
+    this.saveCurrentStepDraft();
+
     // Handle form submission based on current step
     switch (this.currentStep()) {
       case 1: { // Welcome - Business Type Selection
@@ -887,6 +898,56 @@ export class OnboardingModalComponent {
         this.isProcessing.set(true);
         this.wizardService.nextStep();
         this.isProcessing.set(false);
+    }
+  }
+
+  /**
+   * Save current step draft to backend
+   */
+  private saveCurrentStepDraft(): void {
+    const step = this.currentStep();
+    const businessType = this.businessType();
+
+    let stepName: string | null = null;
+    let stepData: any = null;
+
+    // Determine which step data to save based on current step
+    if (step === 3) {
+      stepName = 'user';
+      stepData = this.userForm.value;
+    } else if (step === 4) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'organization';
+        stepData = this.organizationForm.value;
+      } else {
+        stepName = 'store';
+        stepData = this.storeForm.value;
+      }
+    } else if (step === 5) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'store';
+        stepData = this.storeForm.value;
+      } else {
+        stepName = 'app_config';
+        stepData = this.appConfigForm.value;
+      }
+    } else if (step === 6) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'app_config';
+        stepData = this.appConfigForm.value;
+      }
+    }
+
+    if (stepName && stepData) {
+      // Fire and forget - don't wait for response
+      this.wizardService.saveWizardDraft(stepName, stepData).subscribe({
+        error: (err) => console.error('Error saving wizard draft:', err),
+      });
+
+      // Also update the step in backend
+      this.wizardService.updateWizardStep(step).subscribe({
+        error: (err) => console.error('Error updating wizard step:', err),
+      });
     }
   }
 

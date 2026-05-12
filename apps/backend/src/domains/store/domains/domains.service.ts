@@ -2,13 +2,74 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
+import { BlocklistService } from '../../../common/services/blocklist/blocklist.service';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { DnsResolverService } from '../../../common/services/dns/dns-resolver.service';
+import { DomainProvisioningService } from '../../../common/services/aws/domain-provisioning.service';
+
+const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
 
 @Injectable()
 export class StoreDomainsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly blocklist: BlocklistService,
+    private readonly dnsResolver: DnsResolverService,
+    private readonly domainProvisioning: DomainProvisioningService,
+  ) {}
+
+  private generateVerificationToken(): string {
+    return (
+      'vdx_' +
+      Math.random().toString(36).substring(2, 12) +
+      Date.now().toString(36)
+    );
+  }
+
+  private getTxtRecordName(hostname: string): string {
+    return `_vendix-verify.${hostname}`;
+  }
+
+  private getEdgeHost(): string {
+    return (
+      process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
+    );
+  }
+
+  private inferDomainType(appType: string, provided?: string): string {
+    if (provided) return provided;
+    return appType === 'STORE_ECOMMERCE' ? 'ecommerce' : 'store';
+  }
+
+  private validateStoreAppType(appType: string): void {
+    if (!STORE_APP_TYPES.includes(appType)) {
+      throw new BadRequestException(
+        'Store domains only support STORE_ECOMMERCE, STORE_LANDING or STORE_ADMIN',
+      );
+    }
+  }
+
+  private async ensureVerificationToken(domain: {
+    id: number;
+    verification_token: string | null;
+  }): Promise<string> {
+    if (domain.verification_token) return domain.verification_token;
+
+    const verification_token = this.generateVerificationToken();
+    await this.prisma.domain_settings.update({
+      where: { id: domain.id },
+      data: { verification_token, updated_at: new Date() },
+    });
+
+    return verification_token;
+  }
 
   /**
    * Create a new domain for the current store
@@ -16,37 +77,108 @@ export class StoreDomainsService {
   async create(create_domain_dto: {
     hostname: string;
     domain_type?: string;
+    app_type?: string;
     is_primary?: boolean;
     ownership?: string;
     config: Record<string, any>;
   }) {
-    // Check for existing hostname
+    create_domain_dto.hostname = create_domain_dto.hostname.trim().toLowerCase();
+
+    // Blocklist check — reject brand/financial/gov patterns
+    const blockResult = await this.blocklist.isBlocked(
+      create_domain_dto.hostname,
+    );
+    if (blockResult.blocked) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_DOMAIN_003,
+        `Hostname ${create_domain_dto.hostname} is blocked: ${blockResult.reason ?? 'policy'}`,
+        { hostname: create_domain_dto.hostname, pattern: blockResult.pattern },
+      );
+    }
+
+    // Check for existing hostname (excluyendo terminales — pueden re-claimarse)
     const existing_domain = await this.prisma.domain_settings.findFirst({
-      where: { hostname: create_domain_dto.hostname },
+      where: {
+        hostname: { equals: create_domain_dto.hostname, mode: 'insensitive' },
+        status: {
+          notIn: [
+            'disabled',
+            'failed_ownership',
+            'failed_certificate',
+            'failed_alias',
+          ],
+        },
+      },
     });
 
     if (existing_domain) {
       throw new ConflictException('Domain with this hostname already exists');
     }
 
-    const domain_type = (create_domain_dto.domain_type || 'store') as any;
+    const app_type = create_domain_dto.app_type || 'STORE_ECOMMERCE';
+    this.validateStoreAppType(app_type);
 
-    // Ensure only one active domain per type
-    if (create_domain_dto.is_primary) {
-      await this.ensureSingleActiveType(domain_type);
+    const domain_type = this.inferDomainType(
+      app_type,
+      create_domain_dto.domain_type,
+    ) as any;
+    const ownership = (create_domain_dto.ownership ||
+      'vendix_subdomain') as any;
+
+    // Vendix subdomains: Vendix controla el DNS, activación inmediata.
+    // Custom domains: SIEMPRE pending_ownership — sólo prueba DNS desbloquea active.
+    const isVendixSubdomain = ownership === 'vendix_subdomain';
+    const status = isVendixSubdomain ? 'active' : 'pending_ownership';
+
+    const is_primary = isVendixSubdomain
+      ? create_domain_dto.is_primary || false
+      : false;
+
+    if (status === 'active' && is_primary) {
+      await this.ensureSingleActiveApp(app_type);
     }
 
+    const tokenExpiryDays = parseInt(
+      process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
+      10,
+    );
+    const expires_token_at = isVendixSubdomain
+      ? null
+      : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+
     // Create domain - store_id is auto-injected by StorePrismaService
-    return this.prisma.domain_settings.create({
+    const created = await this.prisma.domain_settings.create({
       data: {
         hostname: create_domain_dto.hostname,
         domain_type,
-        is_primary: create_domain_dto.is_primary || false,
-        status: create_domain_dto.is_primary ? 'active' : 'pending_dns',
-        ownership: (create_domain_dto.ownership || 'vendix_subdomain') as any,
+        app_type: app_type as any,
+        is_primary,
+        status: status as any,
+        ssl_status: isVendixSubdomain ? ('issued' as any) : ('pending' as any),
+        ownership,
         config: create_domain_dto.config as any,
+        verification_token: isVendixSubdomain
+          ? null
+          : this.generateVerificationToken(),
+        expires_token_at,
       },
     });
+
+    if (status === 'active') {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: created.id,
+        hostname: created.hostname,
+        organization_id: created.organization_id,
+        store_id: created.store_id,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: created.id,
+        hostname: created.hostname,
+      });
+    }
+
+    return created;
   }
 
   private async ensureSingleActiveType(domain_type: any, exclude_id?: number) {
@@ -54,6 +186,21 @@ export class StoreDomainsService {
     await this.prisma.domain_settings.updateMany({
       where: {
         domain_type,
+        status: 'active',
+        id: exclude_id ? { not: exclude_id } : undefined,
+      },
+      data: {
+        status: 'disabled',
+        is_primary: false,
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  private async ensureSingleActiveApp(app_type: string, exclude_id?: number) {
+    await this.prisma.domain_settings.updateMany({
+      where: {
+        app_type: app_type as any,
         status: 'active',
         id: exclude_id ? { not: exclude_id } : undefined,
       },
@@ -73,9 +220,11 @@ export class StoreDomainsService {
     limit?: number;
     search?: string;
     domain_type?: string;
+    app_type?: string;
     status?: string;
   }) {
-    const { page = 1, limit = 10, search, domain_type, status } = query;
+    const { page = 1, limit = 10, search, domain_type, app_type, status } =
+      query;
     const skip = (page - 1) * limit;
     const take = Number(limit);
 
@@ -87,6 +236,10 @@ export class StoreDomainsService {
 
     if (domain_type) {
       where.domain_type = domain_type as any;
+    }
+
+    if (app_type) {
+      where.app_type = app_type as any;
     }
 
     if (status) {
@@ -137,6 +290,7 @@ export class StoreDomainsService {
     id: number,
     update_domain_dto: {
       domain_type?: string;
+      app_type?: string;
       is_primary?: boolean;
       status?: string;
       ssl_status?: string;
@@ -150,21 +304,46 @@ export class StoreDomainsService {
       updated_at: new Date(),
     };
 
+    const app_type = update_domain_dto.app_type || existing_domain.app_type;
+    this.validateStoreAppType(app_type);
+
     const domain_type =
-      update_domain_dto.domain_type || existing_domain.domain_type;
+      update_domain_dto.domain_type ||
+      this.inferDomainType(app_type, existing_domain.domain_type);
 
     if (update_domain_dto.domain_type !== undefined) {
       update_data.domain_type = update_domain_dto.domain_type as any;
     }
 
+    if (update_domain_dto.app_type !== undefined) {
+      update_data.app_type = update_domain_dto.app_type as any;
+    }
+
+    if (
+      update_domain_dto.status === 'active' &&
+      CUSTOM_OWNERSHIPS.includes(existing_domain.ownership) &&
+      existing_domain.status !== 'active'
+    ) {
+      throw new ConflictException(
+        'Custom domains must be verified before being activated',
+      );
+    }
+
     if (update_domain_dto.status === 'active') {
-      await this.ensureSingleActiveType(domain_type, id);
+      await this.ensureSingleActiveApp(app_type, id);
     }
 
     if (update_domain_dto.is_primary === true) {
       update_data.is_primary = true;
-      update_data.status = 'active';
-      await this.ensureSingleActiveType(domain_type, id);
+      // Sólo elevar a 'active' si la propiedad ya está probada
+      // (vendix_subdomain o ya estaba activo). Custom domains en pending_*
+      // deben pasar por verify() antes — no atajos vía is_primary.
+      const isVendixSubdomain =
+        existing_domain.ownership === 'vendix_subdomain';
+      if (isVendixSubdomain || existing_domain.status === 'active') {
+        update_data.status = 'active';
+      }
+      await this.ensureSingleActiveApp(app_type, id);
     } else if (update_domain_dto.is_primary === false) {
       update_data.is_primary = false;
     }
@@ -185,10 +364,36 @@ export class StoreDomainsService {
       update_data.config = update_domain_dto.config as any;
     }
 
-    return this.prisma.domain_settings.update({
+    const updated = await this.prisma.domain_settings.update({
       where: { id },
       data: update_data,
     });
+
+    const transitioned_to_active =
+      existing_domain.status !== 'active' && updated.status === 'active';
+    const transitioned_to_disabled =
+      existing_domain.status !== 'disabled' && updated.status === 'disabled';
+
+    if (transitioned_to_active) {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+      });
+    } else if (transitioned_to_disabled) {
+      this.eventEmitter.emit('domain.disabled', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    }
+
+    return updated;
   }
 
   /**
@@ -201,28 +406,214 @@ export class StoreDomainsService {
       throw new ConflictException('Cannot delete primary domain');
     }
 
-    return this.prisma.domain_settings.delete({
+    const removed = await this.prisma.domain_settings.delete({
       where: { id },
     });
+
+    this.eventEmitter.emit('domain.disabled', {
+      domainId: removed.id,
+      hostname: removed.hostname,
+    });
+
+    return removed;
   }
 
   /**
-   * Set a domain as primary for the store
+   * Set a domain as primary for the store.
+   * IMPORTANTE: sólo puede activar dominios cuya propiedad ya esté probada
+   * (status active o vendix_subdomain). Custom domains en pending_ownership
+   * NO pueden saltar a active vía este endpoint — deben pasar por verify().
    */
   async setAsPrimary(id: number) {
     const domain = await this.findOne(id);
 
-    // Deactivate other domains of the same type
-    await this.ensureSingleActiveType(domain.domain_type, id);
+    const isVendixSubdomain = domain.ownership === 'vendix_subdomain';
+    if (!isVendixSubdomain && domain.status !== 'active') {
+      throw new ConflictException(
+        'Custom domains must be verified (DNS proof of ownership) before being set as primary',
+      );
+    }
 
-    // Set new primary domain and ensure it's active
-    return this.prisma.domain_settings.update({
+    // Deactivate other domains of the same app target for this store.
+    await this.ensureSingleActiveApp(domain.app_type, id);
+
+    const updated = await this.prisma.domain_settings.update({
       where: { id },
       data: {
         is_primary: true,
-        status: 'active',
+        status: 'active' as any,
         updated_at: new Date(),
       },
     });
+
+    if (domain.status !== 'active') {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    }
+
+    return updated;
+  }
+
+  async verifyDomain(id: number) {
+    const domain = await this.findOne(id);
+
+    if (!CUSTOM_OWNERSHIPS.includes(domain.ownership)) {
+      throw new BadRequestException('Domain type not verifiable');
+    }
+
+    const verification_token = await this.ensureVerificationToken(domain);
+    const txt_name = this.getTxtRecordName(domain.hostname);
+    const txt = await this.dnsResolver.hasTxtRecord(txt_name, verification_token);
+    const status_before = domain.status;
+
+    const checks: Record<string, any> = {
+      txt: {
+        valid: txt.found,
+        name: txt_name,
+        expected: verification_token,
+        seenIn: txt.seenIn,
+        reason: txt.found ? undefined : 'TXT ownership record not found',
+      },
+    };
+
+    let status_after = status_before;
+    let ssl_status = domain.ssl_status;
+
+    if (txt.found) {
+      const updated = await this.prisma.domain_settings.update({
+        where: { id: domain.id },
+        data: {
+          status: 'pending_certificate',
+          ssl_status: 'pending',
+          last_verified_at: new Date(),
+          last_error: null,
+          updated_at: new Date(),
+        },
+      });
+      status_after = updated.status;
+      ssl_status = updated.ssl_status;
+
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    } else {
+      await this.prisma.domain_settings.update({
+        where: { id: domain.id },
+        data: {
+          status: 'failed_ownership',
+          last_error: 'TXT ownership record not found',
+          updated_at: new Date(),
+        },
+      });
+      status_after = 'failed_ownership';
+    }
+
+    return {
+      hostname: domain.hostname,
+      status_before,
+      status_after,
+      ssl_status,
+      verified: txt.found,
+      checks,
+      suggested_fixes: txt.found
+        ? []
+        : [
+            `Create a TXT record named ${txt_name} with value ${verification_token}`,
+            'Wait for DNS propagation and retry verification.',
+          ],
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async startCertificateProvisioning(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.startCertificateProvisioning(id);
+  }
+
+  async refreshCertificateStatus(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.refreshCertificateStatus(id);
+  }
+
+  async attachCloudFrontAlias(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.attachCloudFrontAlias(id);
+  }
+
+  async refreshCloudFrontStatus(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.refreshCloudFrontStatus(id);
+  }
+
+  async provisionNext(id: number) {
+    await this.findOne(id);
+    return this.domainProvisioning.provisionNext(id);
+  }
+
+  async getDnsInstructions(id: number) {
+    const domain = await this.findOne(id);
+    const verification_token = CUSTOM_OWNERSHIPS.includes(domain.ownership)
+      ? await this.ensureVerificationToken(domain)
+      : domain.verification_token;
+    const edgeHost = this.getEdgeHost();
+    const isSubdomain =
+      domain.ownership === 'custom_subdomain' ||
+      domain.ownership === 'third_party_subdomain' ||
+      domain.ownership === 'vendix_subdomain';
+
+    const instructions: {
+      record_type: string;
+      name: string;
+      value: string;
+      ttl: number;
+      purpose?: string;
+    }[] = [];
+
+    if (verification_token) {
+      instructions.push({
+        record_type: 'TXT',
+        name: this.getTxtRecordName(domain.hostname),
+        value: verification_token,
+        ttl: 300,
+        purpose: 'ownership',
+      });
+    }
+
+    if (domain.validation_cname_name && domain.validation_cname_value) {
+      instructions.push({
+        record_type: 'CNAME',
+        name: domain.validation_cname_name,
+        value: domain.validation_cname_value,
+        ttl: 300,
+        purpose: 'certificate',
+      });
+    }
+
+    instructions.push({
+      record_type: !isSubdomain ? 'ALIAS/ANAME' : 'CNAME',
+      name: isSubdomain ? domain.hostname.split('.')[0] : '@',
+      value: edgeHost,
+      ttl: 300,
+      purpose: 'routing',
+    });
+
+    return {
+      hostname: domain.hostname,
+      ownership: domain.ownership,
+      dns_type: 'CNAME' as const,
+      target: edgeHost,
+      requires_alias: !isSubdomain,
+      instructions,
+    };
   }
 }

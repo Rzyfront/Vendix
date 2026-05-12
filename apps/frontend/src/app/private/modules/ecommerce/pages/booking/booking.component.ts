@@ -16,8 +16,9 @@ import {
   EcommerceBookingService,
   AvailabilitySlot,
 } from '../../services/ecommerce-booking.service';
-import { CatalogService, ProductDetail } from '../../services/catalog.service';
+import { CatalogService, ProductDetail, ProductVariantDetail } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StepsLineComponent } from '../../../../../shared/components/steps-line/steps-line.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -49,6 +50,7 @@ export class BookingComponent implements OnInit {
   private cartService = inject(CartService);
   private authFacade = inject(AuthFacade);
   private toast = inject(ToastService);
+  private storeUiService = inject(StoreUiService);
 
   private destroyRef = inject(DestroyRef);
 
@@ -61,6 +63,15 @@ export class BookingComponent implements OnInit {
   // Product
   product = signal<ProductDetail | null>(null);
   productId = signal<number>(0);
+
+  // Variant selection
+  readonly variants = signal<ProductVariantDetail[]>([]);
+  readonly selectedVariantId = signal<number | null>(null);
+  readonly selectedVariant = computed(() => {
+    const id = this.selectedVariantId();
+    if (!id) return null;
+    return this.variants().find((v) => v.id === id) ?? null;
+  });
 
   // Step 1 - Calendar
   currentMonth = signal(new Date());
@@ -222,6 +233,12 @@ export class BookingComponent implements OnInit {
     }
 
     this.productId.set(Number(idParam));
+    const variantId = Number(
+      this.route.snapshot.queryParamMap.get('variant_id'),
+    );
+    if (Number.isFinite(variantId) && variantId > 0) {
+      this.selectedVariantId.set(variantId);
+    }
 
     // Check auth state
     this.authFacade.isAuthenticated$
@@ -254,6 +271,11 @@ export class BookingComponent implements OnInit {
         next: (response) => {
           if (response.success) {
             this.product.set(response.data);
+            this.variants.set(response.data.variants ?? []);
+            if (!this.selectedVariantId() && response.data.variants?.length) {
+              this.selectedVariantId.set(response.data.variants[0].id);
+              this.loadAvailabilityForMonth();
+            }
             this.isFreeBooking.set(
               response.data.booking_mode === 'free_booking',
             );
@@ -277,7 +299,7 @@ export class BookingComponent implements OnInit {
     const dateTo = this.formatDateISO(new Date(year, m + 1, 0));
 
     this.bookingService
-      .getAvailability(this.productId(), dateFrom, dateTo)
+      .getAvailability(this.productId(), dateFrom, dateTo, this.selectedVariantId() ?? undefined)
       .subscribe({
         next: (response) => {
           const rawSlots = response.data || response || [];
@@ -317,6 +339,13 @@ export class BookingComponent implements OnInit {
   nextMonth(): void {
     const curr = this.currentMonth();
     this.currentMonth.set(new Date(curr.getFullYear(), curr.getMonth() + 1, 1));
+    this.loadAvailabilityForMonth();
+  }
+
+  // --- Variant selection ---
+
+  onVariantSelected(variant: ProductVariantDetail): void {
+    this.selectedVariantId.set(variant.id);
     this.loadAvailabilityForMonth();
   }
 
@@ -370,17 +399,29 @@ export class BookingComponent implements OnInit {
       endTime = slot.end_time;
     }
 
-    const bookingSelection = {
+    const variantId = this.selectedVariantId();
+    const bookingSelection: Record<string, any> = {
       product_id: this.productId(),
       date,
       start_time: startTime,
       end_time: endTime,
     };
+    if (variantId) {
+      bookingSelection['product_variant_id'] = variantId;
+    }
     sessionStorage.setItem('pending_booking', JSON.stringify(bookingSelection));
 
     const product = this.product();
+    const variant = this.selectedVariant();
     if (product) {
-      const result = this.cartService.addToCart(product.id, 1);
+      const result = this.cartService.addToCart(
+        product.id,
+        1,
+        variant?.id,
+        variant
+          ? { name: variant.name, sku: variant.sku, price: variant.final_price }
+          : undefined,
+      );
       if (result) {
         result.subscribe(() => {
           this.router.navigate(['/checkout']);
@@ -413,9 +454,7 @@ export class BookingComponent implements OnInit {
   }
 
   goToLogin(): void {
-    this.router.navigate(['/auth/login'], {
-      queryParams: { returnUrl: `/book/${this.productId()}` },
-    });
+    this.storeUiService.openLoginModal();
   }
 
   // --- Helpers ---

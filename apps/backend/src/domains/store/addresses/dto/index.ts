@@ -57,7 +57,10 @@ export class CreateAddressDto {
   @MaxLength(100)
   state: string;
 
-  @ApiPropertyOptional({ example: '01234', description: 'Código postal (opcional)' })
+  @ApiPropertyOptional({
+    example: '01234',
+    description: 'Código postal (opcional)',
+  })
   @IsString()
   @IsOptional()
   @MaxLength(20)

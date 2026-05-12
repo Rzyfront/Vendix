@@ -1,0 +1,30 @@
+meta {
+  name: Superadmin Events By Subscription
+  type: http
+  seq: 37
+}
+
+# Requires {{subscription_id}} from environment (any subscription with logged events).
+
+get {
+  url: {{url}}/superadmin/subscriptions/events/{{subscription_id}}?page=1&limit=20
+  body: none
+  auth: inherit
+}
+
+params:query {
+  page: 1
+  limit: 20
+}
+
+tests {
+  test("Subscription events returned", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an("array");
+  });
+
+  test("Pagination meta present", function() {
+    expect(res.body.meta).to.have.property("total");
+  });
+}

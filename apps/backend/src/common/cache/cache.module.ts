@@ -12,7 +12,8 @@ import { redisStore } from 'cache-manager-ioredis-yet';
         store: await redisStore({
           host: configService.get<string>('REDIS_HOST', 'localhost'),
           port: configService.get<number>('REDIS_PORT', 6379),
-          password: configService.get<string>('REDIS_PASSWORD', '') || undefined,
+          password:
+            configService.get<string>('REDIS_PASSWORD', '') || undefined,
           ttl: 60 * 1000, // default TTL 60 seconds (in ms)
         }),
       }),

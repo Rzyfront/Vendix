@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateTransactionDto,
   TransactionQueryDto,
@@ -26,8 +27,14 @@ export class InventoryTransactionsService {
   ): Promise<InventoryTransaction> {
     const prisma = tx || this.prisma;
     try {
+      const organization_id = await this.resolveOrganizationId(
+        data,
+        prisma as any,
+      );
+
       return await prisma.inventory_transactions.create({
         data: {
+          organization_id,
           product_id: data.productId,
           product_variant_id: data.variantId,
           type: data.type,
@@ -281,6 +288,46 @@ export class InventoryTransactionsService {
     });
 
     return result.count;
+  }
+
+  /**
+   * Resuelve el organization_id requerido para tenant isolation en inventory_transactions.
+   * Orden de prioridad:
+   *   1. Parámetro explícito en el DTO (organizationId)
+   *   2. RequestContextService.getOrganizationId() — request HTTP autenticado
+   *   3. Lookup vía product → store → organization (fallback para flujos sin contexto)
+   * Lanza BadRequestException si no se puede resolver.
+   */
+  private async resolveOrganizationId(
+    data: CreateTransactionDto,
+    prismaClient: any,
+  ): Promise<number> {
+    if (data.organizationId) {
+      return data.organizationId;
+    }
+
+    const ctxOrgId = RequestContextService.getOrganizationId();
+    if (ctxOrgId) {
+      return ctxOrgId;
+    }
+
+    const product = await prismaClient.products.findUnique({
+      where: { id: data.productId },
+      select: {
+        stores: {
+          select: { organization_id: true },
+        },
+      },
+    });
+
+    const fallbackOrgId = product?.stores?.organization_id;
+    if (!fallbackOrgId) {
+      throw new BadRequestException(
+        'inventory_transactions.create requires organization_id from RequestContext, an explicit organizationId parameter, or a resolvable product/store relationship',
+      );
+    }
+
+    return fallbackOrgId;
   }
 
   /**

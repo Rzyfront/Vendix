@@ -112,7 +112,11 @@ export class BulkEmployeeItemDto {
   @IsBoolean()
   @Transform(({ value }) => {
     if (typeof value === 'string') {
-      return value.toLowerCase() === 'si' || value.toLowerCase() === 'yes' || value.toLowerCase() === 'true';
+      return (
+        value.toLowerCase() === 'si' ||
+        value.toLowerCase() === 'yes' ||
+        value.toLowerCase() === 'true'
+      );
     }
     return !!value;
   })

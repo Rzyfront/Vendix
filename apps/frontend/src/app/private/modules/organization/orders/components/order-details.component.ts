@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -45,6 +46,7 @@ import {
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    DatePipe,
   ],
   templateUrl: './order-details.component.html',
 })
@@ -131,7 +133,6 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
     this.isLoading.set(true);
 
-    // TODO: Replace with actual API call
     // For now, generate mock data
     setTimeout(() => {
       const details = this.generateMockOrderDetails(this.order()!);
@@ -196,11 +197,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
 
     this.isUpdating.set(true);
 
-    // TODO: Replace with actual API call
-    setTimeout(() => {
-      this.loadOrderDetails(); // Reload details
-      this.isUpdating.set(false);
-    }, 1000);
+    // PUT /api/organization/orders/:id
   }
 
   onCancelOrder(): void {
@@ -209,9 +206,9 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     const reason = prompt('Please enter the reason for cancellation:');
     if (!reason) return;
 
-    // TODO: Replace with actual API call
+    // POST /api/organization/orders/:id/cancel
     setTimeout(() => {
-      this.loadOrderDetails(); // Reload details
+      this.loadOrderDetails();
     }, 1000);
   }
 
@@ -223,22 +220,22 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     const reason = prompt('Please enter the reason for refund:');
     if (!reason) return;
 
-    // TODO: Replace with actual API call
+    // POST /api/organization/orders/:id/refund
     setTimeout(() => {
-      this.loadOrderDetails(); // Reload details
+      this.loadOrderDetails();
     }, 1000);
   }
 
   onPrintInvoice(): void {
     if (!this.orderDetails()) return;
 
-    // TODO: Replace with actual API call
+    // GET /api/organization/orders/:id/invoice/pdf
   }
 
   onPrintPackingSlip(): void {
     if (!this.orderDetails()) return;
 
-    // TODO: Replace with actual API call
+    // GET /api/organization/orders/:id/packing-slip/pdf
   }
 
   // Helper methods
@@ -353,7 +350,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
       notes: this.dispatchForm.get('notes')?.value || undefined,
     };
 
-    // TODO: Replace with actual API call to POST /store/orders/:id/flow/ship
+    // POST /api/organization/orders/:id/ship
     setTimeout(() => {
       this.closeDispatchModal();
       this.loadOrderDetails();

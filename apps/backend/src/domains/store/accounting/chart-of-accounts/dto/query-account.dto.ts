@@ -1,4 +1,12 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+  MaxLength,
+  Min,
+  Max,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class QueryAccountDto {
@@ -36,4 +44,17 @@ export class QueryAccountDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   tree?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(1000)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  offset?: number;
 }

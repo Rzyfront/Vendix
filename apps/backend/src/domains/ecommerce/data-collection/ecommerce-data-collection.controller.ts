@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Param, Body, ParseIntPipe, UseInterceptors, UploadedFile, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  ParseIntPipe,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Public } from '@common/decorators/public.decorator';
 import { SubmissionsService } from '../../store/data-collection/submissions.service';
@@ -34,7 +45,11 @@ export class EcommerceDataCollectionController {
     @Param('stepIndex', ParseIntPipe) stepIndex: number,
     @Body() dto: SubmitStepResponseDto,
   ) {
-    const result = await this.submissionsService.saveStepResponses(token, stepIndex, dto.responses);
+    const result = await this.submissionsService.saveStepResponses(
+      token,
+      stepIndex,
+      dto.responses,
+    );
     return this.responseService.success(result, 'Paso guardado correctamente');
   }
 
@@ -42,16 +57,16 @@ export class EcommerceDataCollectionController {
   @Post(':token/submit')
   async submitFinal(@Param('token') token: string) {
     const result = await this.submissionsService.submitFinal(token);
-    return this.responseService.success(result, 'Formulario enviado correctamente');
+    return this.responseService.success(
+      result,
+      'Formulario enviado correctamente',
+    );
   }
 
   @Public()
   @Post(':token/upload')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadFile(
-    @Param('token') token: string,
-    @UploadedFile() file: any,
-  ) {
+  async uploadFile(@Param('token') token: string, @UploadedFile() file: any) {
     if (!file) {
       throw new BadRequestException('No file provided');
     }
@@ -83,12 +98,18 @@ export class EcommerceDataCollectionController {
       const result = await this.s3Service.uploadImage(file.buffer, key);
       uploadedKey = result.key;
     } else {
-      uploadedKey = await this.s3Service.uploadFile(file.buffer, key, file.mimetype);
+      uploadedKey = await this.s3Service.uploadFile(
+        file.buffer,
+        key,
+        file.mimetype,
+      );
     }
 
     const url = await this.s3Service.signUrl(uploadedKey);
 
-    this.logger.log(`Public file uploaded for submission ${submission.id}: ${uploadedKey}`);
+    this.logger.log(
+      `Public file uploaded for submission ${submission.id}: ${uploadedKey}`,
+    );
 
     return this.responseService.success(
       { key: uploadedKey, url, originalName: file.originalname },

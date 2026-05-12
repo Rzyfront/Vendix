@@ -14,7 +14,10 @@ import { FixedAssetCategoriesService } from './fixed-asset-categories.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { CreateFixedAssetCategoryDto } from './dto/create-category.dto';
 import { UpdateFixedAssetCategoryDto } from './dto/update-category.dto';
 
@@ -46,14 +49,23 @@ export class FixedAssetCategoriesController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreateFixedAssetCategoryDto) {
     const result = await this.categories_service.create(dto);
-    return this.response_service.success(result, 'Category created successfully');
+    return this.response_service.success(
+      result,
+      'Category created successfully',
+    );
   }
 
   @Patch(':id')
   @Permissions('store:accounting:fixed_assets:write')
-  async update(@Param('id') id: string, @Body() dto: UpdateFixedAssetCategoryDto) {
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateFixedAssetCategoryDto,
+  ) {
     const result = await this.categories_service.update(+id, dto);
-    return this.response_service.success(result, 'Category updated successfully');
+    return this.response_service.success(
+      result,
+      'Category updated successfully',
+    );
   }
 
   @Delete(':id')

@@ -2,12 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 export interface AutoEntryEventData {
   source_type: string;
   source_id: number;
   organization_id: number;
   store_id?: number;
+  accounting_entity_id?: number;
   entry_date: Date;
   description: string;
   lines: (AutoEntryLine | null)[];
@@ -38,6 +40,7 @@ export class AutoEntryService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly account_mapping_service: AccountMappingService,
+    private readonly fiscal_scope_service: FiscalScopeService,
   ) {}
 
   /**
@@ -76,11 +79,42 @@ export class AutoEntryService {
       source_id,
       organization_id,
       store_id,
+      accounting_entity_id,
       entry_date,
       description,
       lines,
       user_id,
     } = event_data;
+
+    const accounting_entity = accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: {
+            id: accounting_entity_id,
+            organization_id,
+            ...(store_id ? { store_id } : {}),
+            is_active: true,
+          },
+        })
+      : await this.fiscal_scope_service.resolveAccountingEntityForFiscal({
+          organization_id,
+          store_id,
+        });
+
+    if (!accounting_entity) {
+      throw new Error(
+        `Unable to resolve accounting entity for organization #${organization_id}`,
+      );
+    }
+
+    if (
+      store_id &&
+      accounting_entity.scope === 'STORE' &&
+      accounting_entity.store_id !== store_id
+    ) {
+      throw new Error(
+        `Accounting entity #${accounting_entity.id} does not belong to store #${store_id}`,
+      );
+    }
 
     // Filter out null lines (from unconfigured mappings)
     const valid_lines = lines.filter(Boolean) as AutoEntryLine[];
@@ -117,10 +151,15 @@ export class AutoEntryService {
     const fiscal_period = await this.prisma.fiscal_periods.findFirst({
       where: {
         organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
         status: 'open',
         start_date: { lte: entry_date },
         end_date: { gte: entry_date },
       },
+      orderBy: { accounting_entity_id: 'desc' },
     });
 
     if (!fiscal_period) {
@@ -138,11 +177,22 @@ export class AutoEntryService {
     const accounts = await this.prisma.chart_of_accounts.findMany({
       where: {
         organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
         code: { in: account_codes },
       },
+      orderBy: { accounting_entity_id: 'desc' },
     });
 
-    const account_map = new Map(accounts.map((a: any) => [a.code, a]));
+    const account_map = new Map<string, any>();
+    for (const account of accounts as any[]) {
+      const current = account_map.get(account.code);
+      if (!current || account.accounting_entity_id === accounting_entity.id) {
+        account_map.set(account.code, account);
+      }
+    }
 
     // Validate all account codes exist
     for (const code of account_codes) {
@@ -183,6 +233,8 @@ export class AutoEntryService {
       ap_write_off: 'adjustment',
       commission: 'auto_expense',
       stock_transfer: 'auto_inventory',
+      'intercompany_transfer.shipped': 'auto_inventory',
+      'intercompany_transfer.received': 'auto_inventory',
       cash_register_opened: 'adjustment',
       cash_register_closed: 'adjustment',
       cash_register_movement: 'adjustment',
@@ -197,6 +249,7 @@ export class AutoEntryService {
     const latest = await this.prisma.accounting_entries.findFirst({
       where: {
         organization_id,
+        accounting_entity_id: accounting_entity.id,
         entry_number: { startsWith: prefix },
       },
       orderBy: { entry_number: 'desc' },
@@ -217,6 +270,7 @@ export class AutoEntryService {
         data: {
           organization_id,
           store_id: store_id || null,
+          accounting_entity_id: accounting_entity.id,
           entry_number,
           entry_type: entry_type as any,
           status: 'posted',
@@ -2416,12 +2470,32 @@ export class AutoEntryService {
     transfer_id: number;
     transfer_number: string;
     organization_id: number;
+    store_id?: number;
+    from_store_id?: number;
+    to_store_id?: number;
     from_location_id: number;
     to_location_id: number;
     total_cost: number;
     user_id?: number;
   }) {
     if (data.total_cost <= 0) return; // Skip zero-cost transfers
+
+    const isIntercompany =
+      await this.fiscal_scope_service.isIntercompanyTransfer({
+        organization_id: data.organization_id,
+        from_store_id: data.from_store_id,
+        to_store_id: data.to_store_id,
+      });
+    if (isIntercompany) {
+      return this.onIntercompanyStockTransferCompleted(data);
+    }
+
+    const fiscalScope = await this.fiscal_scope_service.getFiscalScope(
+      data.organization_id,
+    );
+    this.logger.debug(
+      `Stock transfer #${data.transfer_id} is not intercompany (fiscal_scope=${fiscalScope}, from_store=${data.from_store_id ?? 'n/a'}, to_store=${data.to_store_id ?? 'n/a'})`,
+    );
 
     const lines = await Promise.all([
       this.resolveAccountLine(
@@ -2430,6 +2504,7 @@ export class AutoEntryService {
         `Inventario destino (transferencia ${data.transfer_number})`,
         data.total_cost,
         0,
+        data.store_id,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -2437,6 +2512,7 @@ export class AutoEntryService {
         `Inventario origen (transferencia ${data.transfer_number})`,
         0,
         data.total_cost,
+        data.store_id,
       ),
     ]);
 
@@ -2444,11 +2520,140 @@ export class AutoEntryService {
       source_type: 'stock_transfer',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
+      store_id: data.store_id,
       entry_date: new Date(),
       description: `Transferencia de inventario ${data.transfer_number}`,
       lines,
       user_id: data.user_id,
     });
+  }
+
+  private async onIntercompanyStockTransferCompleted(data: {
+    transfer_id: number;
+    transfer_number: string;
+    organization_id: number;
+    from_store_id?: number;
+    to_store_id?: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    if (!data.from_store_id || !data.to_store_id) {
+      throw new Error(
+        'Intercompany transfer requires source and destination store ids',
+      );
+    }
+
+    const shipped_lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'intercompany_transfer.shipped.receivable',
+        `Cuenta por cobrar intercompany (${data.transfer_number})`,
+        data.total_cost,
+        0,
+        data.from_store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'intercompany_transfer.shipped.inventory',
+        `Inventario transferido (${data.transfer_number})`,
+        0,
+        data.total_cost,
+        data.from_store_id,
+      ),
+    ]);
+
+    const received_lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'intercompany_transfer.received.inventory',
+        `Inventario recibido (${data.transfer_number})`,
+        data.total_cost,
+        0,
+        data.to_store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'intercompany_transfer.received.payable',
+        `Cuenta por pagar intercompany (${data.transfer_number})`,
+        0,
+        data.total_cost,
+        data.to_store_id,
+      ),
+    ]);
+
+    const shipped_entry = await this.createAutoEntry({
+      source_type: 'intercompany_transfer.shipped',
+      source_id: data.transfer_id,
+      organization_id: data.organization_id,
+      store_id: data.from_store_id,
+      entry_date: new Date(),
+      description: `Transferencia intercompany enviada ${data.transfer_number}`,
+      lines: shipped_lines,
+      user_id: data.user_id,
+    });
+
+    const received_entry = await this.createAutoEntry({
+      source_type: 'intercompany_transfer.received',
+      source_id: data.transfer_id,
+      organization_id: data.organization_id,
+      store_id: data.to_store_id,
+      entry_date: new Date(),
+      description: `Transferencia intercompany recibida ${data.transfer_number}`,
+      lines: received_lines,
+      user_id: data.user_id,
+    });
+
+    if (!shipped_entry || !received_entry) return null;
+
+    const receivableMapping = await this.account_mapping_service.getMapping(
+      data.organization_id,
+      'intercompany_transfer.shipped.receivable',
+      data.from_store_id,
+    );
+    if (!receivableMapping) {
+      throw new Error('Missing intercompany receivable mapping');
+    }
+
+    const receivableAccount =
+      await this.prisma.withoutScope().chart_of_accounts.findFirst({
+        where: {
+          organization_id: data.organization_id,
+          code: receivableMapping.account_code,
+          OR: [
+            { accounting_entity_id: shipped_entry.accounting_entity_id },
+            { accounting_entity_id: null },
+          ],
+        },
+        orderBy: { accounting_entity_id: 'desc' },
+      });
+    if (!receivableAccount) {
+      throw new Error(
+        `Intercompany account ${receivableMapping.account_code} not found`,
+      );
+    }
+
+    const intercompany_transaction =
+      await this.prisma.withoutScope().intercompany_transactions.create({
+        data: {
+          organization_id: data.organization_id,
+          origin: 'stock_transfer',
+          source_type: 'stock_transfer',
+          source_id: data.transfer_id,
+          status: 'open',
+          from_store_id: data.from_store_id,
+          to_store_id: data.to_store_id,
+          entry_id: shipped_entry.id,
+          counterpart_entry_id: received_entry.id,
+          account_id: receivableAccount.id,
+          amount: new Prisma.Decimal(data.total_cost),
+        },
+      });
+
+    return {
+      shipped_entry,
+      received_entry,
+      intercompany_transaction,
+    };
   }
 
   async onExpenseRefunded(data: {

@@ -121,15 +121,16 @@ export class EmailTemplates {
                     <span class="login-label">📧 Tu correo:</span>
                     <span class="login-value">${data.email}</span>
                   </div>
-                  ${data.password
-          ? `
+                  ${
+                    data.password
+                      ? `
                   <div class="login-item">
                     <span class="login-label">🔑 Tu contraseña:</span>
                     <span class="login-value">${'•'.repeat(data.password.length)}</span>
                   </div>
                   `
-          : ''
-        }
+                      : ''
+                  }
                 </div>
                 <div style="color: #92400E; font-size: 14px; margin-top: 15px;">
                   💡 <strong>Consejo:</strong> Guarda esta información en un lugar seguro.
@@ -405,7 +406,11 @@ El equipo de ${this.COMPANY_NAME}
       : this.BASE_URL;
 
     // Dynamic branding with fallback to Vendix defaults
-    const companyName = data.organizationName || data.storeName || data.companyName || this.COMPANY_NAME;
+    const companyName =
+      data.organizationName ||
+      data.storeName ||
+      data.companyName ||
+      this.COMPANY_NAME;
     const primaryColor = data.branding?.primary_color || '#7ED7A5';
     const secondaryColor = data.branding?.secondary_color || '#2F6F4E';
     const accentColor = data.branding?.accent_color || '#FFFFFF';
@@ -657,13 +662,17 @@ El equipo de ${this.COMPANY_NAME}
         <body>
           <div class="container">
             <div class="header">
-              ${logoUrl ? `
+              ${
+                logoUrl
+                  ? `
                 <div class="logo-container">
                   <img src="${logoUrl}" alt="${companyName}" class="logo-image">
                 </div>
-              ` : `
+              `
+                  : `
                 <h1>${getWelcomeEmoji()} ${companyName}</h1>
-              `}
+              `
+              }
               <div class="subtitle">${getSubtitle()}</div>
             </div>
             <div class="content">
@@ -721,9 +730,13 @@ El equipo de ${this.COMPANY_NAME}
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.<br>
-                ${userType === 'owner' ? '¡Estás listo para transformar tu negocio! 🚀' :
-          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-            '¡Gracias por elegirnos! 🛍️'}
+                ${
+                  userType === 'owner'
+                    ? '¡Estás listo para transformar tu negocio! 🚀'
+                    : userType === 'staff'
+                      ? '¡Bienvenido al equipo! 🎉'
+                      : '¡Gracias por elegirnos! 🛍️'
+                }
               </div>
             </div>
           </div>
@@ -746,24 +759,36 @@ ${dashboardUrl}
 📧 Correo: ${data.email}
 
 ✨ ¿QUÉ PUEDES HACER AHORA?
-${userType === 'staff' ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas' :
-          userType === 'customer' ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas' :
-            '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'}
+${
+  userType === 'staff'
+    ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas'
+    : userType === 'customer'
+      ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas'
+      : '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'
+}
 
-${userType !== 'customer' ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
+${
+  userType !== 'customer'
+    ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
 1. ${userType === 'staff' ? 'Explora el panel de staff' : 'Completa tu perfil de organización'}
 2. ${userType === 'staff' ? 'Familiarízate con el inventario' : 'Configura tu primera tienda'}
 3. ${userType === 'staff' ? 'Comienza a gestionar ventas' : 'Agrega tus primeros productos'}
 4. ${userType === 'staff' ? 'Explora los reportes' : 'Explora el dashboard y reportes'}
 
-` : ''}¿NECESITAS AYUDA?
+`
+    : ''
+}¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
 🌐 Ayuda: https://help.${DomainConfigService.getBaseDomain()}
 ${userType !== 'customer' ? '💬 Chat: https://' + DomainConfigService.getBaseDomain() + '/chat' : ''}
 
-${userType === 'owner' ? '¡Bienvenido al futuro del comercio! 🚀' :
-          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-            '¡Gracias por elegirnos! 🛍️'}
+${
+  userType === 'owner'
+    ? '¡Bienvenido al futuro del comercio! 🚀'
+    : userType === 'staff'
+      ? '¡Bienvenido al equipo! 🎉'
+      : '¡Gracias por elegirnos! 🛍️'
+}
 
 El equipo de ${companyName}
       `,
@@ -918,15 +943,15 @@ El equipo de ${companyName}
               <div class="benefits">
                 <div class="benefits-title">✨ Beneficios de completar este paso</div>
                 ${stepInfo.benefits
-          .map(
-            (benefit) => `
+                  .map(
+                    (benefit) => `
                   <div class="benefit-item">
                     <span class="benefit-icon">✓</span>
                     <span>${benefit}</span>
                   </div>
                 `,
-          )
-          .join('')}
+                  )
+                  .join('')}
               </div>
 
               <div class="timeline">
@@ -1018,6 +1043,237 @@ Tu progreso se guarda automáticamente. ¡Sigue así! 🚀
 
 El equipo de ${this.COMPANY_NAME}
       `,
+    };
+  }
+
+  static getInvitationTemplate(data: EmailTemplateData) {
+    const invitationUrl = `${this.BASE_URL}/auth/verify-invitation?token=${data.token}`;
+    const loginUrl = data.vlink
+      ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
+      : this.BASE_URL;
+
+    return {
+      subject: `📨 Te han invitado a ${this.COMPANY_NAME}!`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Invitación - Vendix</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 50px 30px; text-align: center; position: relative; }
+            .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" stroke-width="0.5" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>') repeat; opacity: 0.1; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 32px; font-weight: 700; position: relative; z-index: 1; }
+            .header .subtitle { color: rgba(255, 255, 255, 0.9); margin: 10px 0 0 0; font-size: 16px; position: relative; z-index: 1; }
+            .content { padding: 50px 30px; }
+            .invitation-icon { font-size: 64px; text-align: center; margin-bottom: 30px; }
+            .invitation-title { font-size: 24px; color: #1F2937; margin-bottom: 20px; text-align: center; font-weight: 700; }
+            .invitation-message { color: #4B5563; line-height: 1.7; margin-bottom: 30px; font-size: 16px; text-align: center; }
+            .invitation-card { background: linear-gradient(135deg, #F0FDF4 0%, #DCFCE7 100%); border: 2px solid #BBF7D0; border-radius: 12px; padding: 30px; margin: 30px 0; text-align: center; }
+            .invitation-title-card { color: #166534; font-size: 18px; font-weight: 600; margin-bottom: 15px; }
+            .invitation-message-card { color: #15803D; margin-bottom: 25px; line-height: 1.6; }
+            .button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 18px 36px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; font-size: 16px; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(47, 111, 78, 0.2); }
+            .button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(47, 111, 78, 0.3); }
+            .user-info { background-color: #F8FAFC; border-radius: 12px; padding: 25px; margin: 30px 0; border: 1px solid #E2E8F0; }
+            .info-item { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #E5E7EB; }
+            .info-item:last-child { border-bottom: none; }
+            .info-label { color: #6B7280; font-size: 14px; font-weight: 500; }
+            .info-value { color: #1F2937; font-weight: 600; }
+            .footer { background-color: #1F2937; padding: 30px; text-align: center; color: #D1D5DB; font-size: 14px; }
+            .footer-logo { font-size: 24px; font-weight: 700; color: #7ED7A5; margin-bottom: 15px; }
+            .footer-links { margin: 20px 0; }
+            .footer-links a { color: #7ED7A5; text-decoration: none; margin: 0 10px; }
+            .footer-links a:hover { text-decoration: underline; }
+            .copyright { margin-top: 20px; color: #9CA3AF; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>📨 ${this.COMPANY_NAME}</h1>
+              <div class="subtitle">Has recibido una invitación</div>
+            </div>
+            <div class="content">
+              <div class="invitation-icon">🎉</div>
+              <div class="invitation-title">¡Hola ${data.username}!</div>
+              <div class="invitation-message">
+                Has sido invitado/a a unirte a ${this.COMPANY_NAME}.
+                Completa tu registro haciendo clic en el botón de abajo.
+              </div>
+
+              <div class="invitation-card">
+                <div class="invitation-title-card">🎯 Completa tu registro</div>
+                <div class="invitation-message-card">
+                  Haz clic en el siguiente botón para verificar tu correo y crear tu contraseña.
+                </div>
+                <div style="text-align: center;">
+                  <a href="${invitationUrl}" class="button">✅ Completar Registro</a>
+                </div>
+              </div>
+
+              <div class="user-info">
+                <div class="info-item">
+                  <span class="info-label">📧 Tu correo:</span>
+                  <span class="info-value">${data.email}</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">🌐 Tu organización:</span>
+                  <span class="info-value">${data.vlink || 'Por definir'}</span>
+                </div>
+              </div>
+
+              <div style="text-align: center; margin: 30px 0;">
+                <div style="color: #6B7280; font-size: 14px; margin-bottom: 15px;">
+                  Si el botón no funciona, copia y pega este enlace en tu navegador:
+                </div>
+                <a href="${invitationUrl}" style="color: #2F6F4E; word-break: break-all; font-family: 'Courier New', monospace; font-size: 12px; background-color: #F3F4F6; padding: 10px; border-radius: 4px; display: inline-block;">
+                  ${invitationUrl}
+                </a>
+              </div>
+            </div>
+            <div class="footer">
+              <div class="footer-logo">${this.COMPANY_NAME}</div>
+              <div class="footer-links">
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
+                <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
+                <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
+              </div>
+              <div class="copyright">
+                © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
+                Este enlace de invitación expirará en 7 días.
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+📨 Invitación a ${this.COMPANY_NAME}
+
+¡Hola ${data.username}!
+
+Has sido invitado/a a unirte a ${this.COMPANY_NAME}.
+Completa tu registro haciendo clic en el siguiente enlace:
+
+${invitationUrl}
+
+📧 Tu correo: ${data.email}
+🌐 Tu organización: ${data.vlink || 'Por definir'}
+
+Este enlace de invitación expirará en 7 días.
+
+El equipo de ${this.COMPANY_NAME}
+      `,
+    };
+  }
+
+  static getPaymentConfirmedTemplate(data: {
+    invoiceNumber: string;
+    amount: string;
+    currency: string;
+    planName: string;
+    periodStart: string;
+    periodEnd: string;
+    storeName?: string;
+    organizationName?: string;
+    paymentMethod?: string;
+  }) {
+    const companyName = this.COMPANY_NAME;
+    const supportEmail = this.SUPPORT_EMAIL;
+
+    return {
+      subject: `✅ Pago confirmado – Factura ${data.invoiceNumber}`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Pago confirmado</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 30px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 700; }
+            .content { padding: 40px 30px; }
+            .title { font-size: 22px; color: #1F2937; margin-bottom: 15px; font-weight: 700; }
+            .message { color: #4B5563; line-height: 1.7; margin-bottom: 25px; font-size: 16px; }
+            .details { background-color: #F8FAFC; border-radius: 12px; padding: 25px; margin: 25px 0; border: 1px solid #E2E8F0; }
+            .detail-item { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #E5E7EB; }
+            .detail-item:last-child { border-bottom: none; }
+            .detail-label { color: #6B7280; font-size: 14px; font-weight: 500; }
+            .detail-value { color: #1F2937; font-weight: 600; }
+            .total { font-size: 18px; color: #166534; font-weight: 700; }
+            .divider { border-top: 2px solid #E5E7EB; margin: 30px 0; }
+            .footer { background-color: #1F2937; padding: 30px; text-align: center; color: #D1D5DB; font-size: 14px; }
+            .footer-logo { font-size: 24px; font-weight: 700; color: #7ED7A5; margin-bottom: 15px; }
+            .footer-links a { color: #7ED7A5; text-decoration: none; margin: 0 10px; }
+            .copyright { margin-top: 20px; color: #9CA3AF; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Pago Confirmado</h1>
+            </div>
+            <div class="content">
+              <div class="title">¡Gracias por tu pago!</div>
+              <div class="message">
+                Hemos recibido y confirmado el pago de tu suscripción en <strong>${companyName}</strong>.
+                A continuación encontrarás los detalles de tu factura:
+              </div>
+
+              <div class="details">
+                <div class="detail-item">
+                  <span class="detail-label">📄 Número de factura</span>
+                  <span class="detail-value">${data.invoiceNumber}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">🏪 Tienda</span>
+                  <span class="detail-value">${data.storeName || 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">📅 Período</span>
+                  <span class="detail-value">${data.periodStart} – ${data.periodEnd}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">💳 Método de pago</span>
+                  <span class="detail-value">${data.paymentMethod || 'Wompi'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">📋 Plan</span>
+                  <span class="detail-value">${data.planName}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label total">💰 Total pagado</span>
+                  <span class="detail-value total">${data.amount} ${data.currency}</span>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div style="text-align: center; color: #6B7280; font-size: 14px;">
+                Si tienes alguna duda, escríbenos a <a href="mailto:${supportEmail}" style="color: #2F6F4E;">${supportEmail}</a>.
+              </div>
+            </div>
+            <div class="footer">
+              <div class="footer-logo">${companyName}</div>
+              <div class="footer-links">
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
+                <a href="mailto:${supportEmail}">Soporte</a>
+              </div>
+              <div class="copyright">
+                © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Pago confirmado – Factura ${data.invoiceNumber}\n\nGracias por tu pago en ${companyName}.\n\nDetalles:\n- Factura: ${data.invoiceNumber}\n- Tienda: ${data.storeName || 'N/A'}\n- Período: ${data.periodStart} – ${data.periodEnd}\n- Plan: ${data.planName}\n- Total: ${data.amount} ${data.currency}\n\nSi tienes dudas, escríbenos a ${supportEmail}.`,
     };
   }
 }

@@ -14,7 +14,12 @@ import { AdvancesService } from './advances.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { CreateAdvanceDto, ApproveAdvanceDto, QueryAdvanceDto, RegisterAdvancePaymentDto } from './dto';
+import {
+  CreateAdvanceDto,
+  ApproveAdvanceDto,
+  QueryAdvanceDto,
+  RegisterAdvancePaymentDto,
+} from './dto';
 
 @Controller('store/payroll/advances')
 @UseGuards(PermissionsGuard)
@@ -48,7 +53,8 @@ export class AdvancesController {
   @Get('employee/:employeeId/summary')
   @Permissions('store:payroll:advances:read')
   async getEmployeeAdvanceSummary(@Param('employeeId') employeeId: string) {
-    const result = await this.advances_service.getEmployeeAdvanceSummary(+employeeId);
+    const result =
+      await this.advances_service.getEmployeeAdvanceSummary(+employeeId);
     return this.response_service.success(result);
   }
 
@@ -66,14 +72,20 @@ export class AdvancesController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateAdvanceDto) {
     const result = await this.advances_service.create(create_dto);
-    return this.response_service.created(result, 'Advance created successfully');
+    return this.response_service.created(
+      result,
+      'Advance created successfully',
+    );
   }
 
   @Patch(':id/approve')
   @Permissions('store:payroll:advances:approve')
   async approve(@Param('id') id: string, @Body() dto: ApproveAdvanceDto) {
     const result = await this.advances_service.approve(+id, dto);
-    return this.response_service.success(result, 'Advance approved successfully');
+    return this.response_service.success(
+      result,
+      'Advance approved successfully',
+    );
   }
 
   @Patch(':id/reject')
@@ -98,7 +110,10 @@ export class AdvancesController {
     @Body() dto: RegisterAdvancePaymentDto,
   ) {
     const result = await this.advances_service.registerManualPayment(+id, dto);
-    return this.response_service.success(result, 'Payment registered successfully');
+    return this.response_service.success(
+      result,
+      'Payment registered successfully',
+    );
   }
 
   @Patch(':id/installments/:installmentId/pay')
@@ -108,7 +123,14 @@ export class AdvancesController {
     @Param('installmentId') installmentId: string,
     @Body() dto: RegisterAdvancePaymentDto,
   ) {
-    const result = await this.advances_service.payInstallment(+id, +installmentId, dto);
-    return this.response_service.success(result, 'Installment payment registered');
+    const result = await this.advances_service.payInstallment(
+      +id,
+      +installmentId,
+      dto,
+    );
+    return this.response_service.success(
+      result,
+      'Installment payment registered',
+    );
   }
 }

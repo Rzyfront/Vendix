@@ -1,6 +1,14 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
-import { CreateQuotationDto, UpdateQuotationDto, QuotationQueryDto } from './dto';
+import {
+  CreateQuotationDto,
+  UpdateQuotationDto,
+  QuotationQueryDto,
+} from './dto';
 import { quotation_status_enum, Prisma } from '@prisma/client';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -71,9 +79,18 @@ export class QuotationsService {
 
     // Calculate totals from items
     const items = createQuotationDto.items || [];
-    const subtotal = items.reduce((sum, item) => sum + Number(item.total_price), 0);
-    const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
-    const totalTax = items.reduce((sum, item) => sum + Number(item.tax_amount_item || 0), 0);
+    const subtotal = items.reduce(
+      (sum, item) => sum + Number(item.total_price),
+      0,
+    );
+    const totalDiscount = items.reduce(
+      (sum, item) => sum + Number(item.discount_amount || 0),
+      0,
+    );
+    const totalTax = items.reduce(
+      (sum, item) => sum + Number(item.tax_amount_item || 0),
+      0,
+    );
     const grand_total = subtotal - totalDiscount + totalTax;
 
     const quotation = await this.prisma.quotations.create({
@@ -82,12 +99,14 @@ export class QuotationsService {
         customer_id: createQuotationDto.customer_id,
         quotation_number,
         status: quotation_status_enum.draft,
-        channel: createQuotationDto.channel as any || 'pos',
+        channel: (createQuotationDto.channel as any) || 'pos',
         subtotal_amount: subtotal,
         discount_amount: totalDiscount,
         tax_amount: totalTax,
         grand_total,
-        valid_until: createQuotationDto.valid_until ? new Date(createQuotationDto.valid_until) : null,
+        valid_until: createQuotationDto.valid_until
+          ? new Date(createQuotationDto.valid_until)
+          : null,
         notes: createQuotationDto.notes,
         internal_notes: createQuotationDto.internal_notes,
         terms_and_conditions: createQuotationDto.terms_and_conditions,
@@ -123,24 +142,37 @@ export class QuotationsService {
   }
 
   async findAll(query: QuotationQueryDto) {
-    const { page = 1, limit = 10, search, status, customer_id, date_from, date_to, sort_by, sort_order } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      status,
+      customer_id,
+      date_from,
+      date_to,
+      sort_by,
+      sort_order,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.quotationsWhereInput = {
       ...(search && {
         OR: [
-          { quotation_number: { contains: search, mode: 'insensitive' as any } },
+          {
+            quotation_number: { contains: search, mode: 'insensitive' as any },
+          },
           { notes: { contains: search, mode: 'insensitive' as any } },
         ],
       }),
       ...(status && { status: status as quotation_status_enum }),
       ...(customer_id && { customer_id }),
-      ...(date_from && date_to && {
-        created_at: {
-          gte: new Date(date_from),
-          lte: new Date(date_to),
-        },
-      }),
+      ...(date_from &&
+        date_to && {
+          created_at: {
+            gte: new Date(date_from),
+            lte: new Date(date_to),
+          },
+        }),
     };
 
     const orderBy: any = {};
@@ -179,7 +211,9 @@ export class QuotationsService {
   async update(id: number, updateQuotationDto: UpdateQuotationDto) {
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.draft) {
-      throw new BadRequestException('Solo se pueden editar cotizaciones en estado borrador');
+      throw new BadRequestException(
+        'Solo se pueden editar cotizaciones en estado borrador',
+      );
     }
 
     // If items are provided, delete and recreate
@@ -188,20 +222,35 @@ export class QuotationsService {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
 
         const items = updateQuotationDto.items!;
-        const subtotal = items.reduce((sum, item) => sum + Number(item.total_price), 0);
-        const totalDiscount = items.reduce((sum, item) => sum + Number(item.discount_amount || 0), 0);
-        const totalTax = items.reduce((sum, item) => sum + Number(item.tax_amount_item || 0), 0);
+        const subtotal = items.reduce(
+          (sum, item) => sum + Number(item.total_price),
+          0,
+        );
+        const totalDiscount = items.reduce(
+          (sum, item) => sum + Number(item.discount_amount || 0),
+          0,
+        );
+        const totalTax = items.reduce(
+          (sum, item) => sum + Number(item.tax_amount_item || 0),
+          0,
+        );
         const grand_total = subtotal - totalDiscount + totalTax;
 
         return tx.quotations.update({
           where: { id },
           data: {
-            customer_id: updateQuotationDto.customer_id ?? quotation.customer_id,
+            customer_id:
+              updateQuotationDto.customer_id ?? quotation.customer_id,
             channel: (updateQuotationDto.channel as any) ?? quotation.channel,
-            valid_until: updateQuotationDto.valid_until ? new Date(updateQuotationDto.valid_until) : quotation.valid_until,
+            valid_until: updateQuotationDto.valid_until
+              ? new Date(updateQuotationDto.valid_until)
+              : quotation.valid_until,
             notes: updateQuotationDto.notes ?? quotation.notes,
-            internal_notes: updateQuotationDto.internal_notes ?? quotation.internal_notes,
-            terms_and_conditions: updateQuotationDto.terms_and_conditions ?? quotation.terms_and_conditions,
+            internal_notes:
+              updateQuotationDto.internal_notes ?? quotation.internal_notes,
+            terms_and_conditions:
+              updateQuotationDto.terms_and_conditions ??
+              quotation.terms_and_conditions,
             subtotal_amount: subtotal,
             discount_amount: totalDiscount,
             tax_amount: totalTax,
@@ -235,7 +284,9 @@ export class QuotationsService {
       where: { id },
       data: {
         ...updateData,
-        valid_until: updateData.valid_until ? new Date(updateData.valid_until) : undefined,
+        valid_until: updateData.valid_until
+          ? new Date(updateData.valid_until)
+          : undefined,
         updated_at: new Date(),
       },
       include: this.QUOTATION_INCLUDE,
@@ -245,20 +296,27 @@ export class QuotationsService {
   async remove(id: number) {
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.draft) {
-      throw new BadRequestException('Solo se pueden eliminar cotizaciones en estado borrador');
+      throw new BadRequestException(
+        'Solo se pueden eliminar cotizaciones en estado borrador',
+      );
     }
     return this.prisma.quotations.delete({ where: { id } });
   }
 
   // State transition methods
   async send(id: number) {
-    const quotation = await this.transition(id, 'sent', { sent_at: new Date() });
+    const quotation = await this.transition(id, 'sent', {
+      sent_at: new Date(),
+    });
 
     // Send email if customer has email (fire-and-forget)
     if (quotation.customer?.email) {
       this.sendQuotationEmail(quotation).catch((err) => {
         // Log but don't throw - the status change already succeeded
-        console.error(`Failed to send quotation email for ${quotation.quotation_number}:`, err);
+        console.error(
+          `Failed to send quotation email for ${quotation.quotation_number}:`,
+          err,
+        );
       });
     }
 
@@ -277,7 +335,9 @@ export class QuotationsService {
     const quotation = await this.findOne(id);
     const allowed = this.VALID_TRANSITIONS[quotation.status] || [];
     if (!allowed.includes('cancelled')) {
-      throw new BadRequestException(`No se puede cancelar una cotización en estado "${quotation.status}"`);
+      throw new BadRequestException(
+        `No se puede cancelar una cotización en estado "${quotation.status}"`,
+      );
     }
     return this.prisma.quotations.update({
       where: { id },
@@ -289,7 +349,9 @@ export class QuotationsService {
   async convertToOrder(id: number) {
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.accepted) {
-      throw new BadRequestException('Solo se pueden convertir cotizaciones aceptadas');
+      throw new BadRequestException(
+        'Solo se pueden convertir cotizaciones aceptadas',
+      );
     }
 
     if (!quotation.customer_id) {
@@ -310,7 +372,9 @@ export class QuotationsService {
       unit_price: Number(item.unit_price),
       total_price: Number(item.total_price),
       tax_rate: item.tax_rate ? Number(item.tax_rate) : undefined,
-      tax_amount_item: item.tax_amount_item ? Number(item.tax_amount_item) : undefined,
+      tax_amount_item: item.tax_amount_item
+        ? Number(item.tax_amount_item)
+        : undefined,
     }));
 
     // Create order using OrdersService
@@ -323,7 +387,7 @@ export class QuotationsService {
         discount_amount: Number(quotation.discount_amount),
         total_amount: Number(quotation.grand_total),
         internal_notes: `Convertida desde cotización ${quotation.quotation_number}`,
-        channel: quotation.channel as any,
+        channel: quotation.channel,
       } as any,
       context?.user_id,
     );
@@ -398,20 +462,23 @@ export class QuotationsService {
   }
 
   async getStats() {
-    const [total, draft, sent, accepted, converted, totalValue] = await Promise.all([
-      this.prisma.quotations.count(),
-      this.prisma.quotations.count({ where: { status: 'draft' } }),
-      this.prisma.quotations.count({ where: { status: 'sent' } }),
-      this.prisma.quotations.count({ where: { status: 'accepted' } }),
-      this.prisma.quotations.count({ where: { status: 'converted' } }),
-      this.prisma.quotations.aggregate({ _sum: { grand_total: true } }),
-    ]);
+    const [total, draft, sent, accepted, converted, totalValue] =
+      await Promise.all([
+        this.prisma.quotations.count(),
+        this.prisma.quotations.count({ where: { status: 'draft' } }),
+        this.prisma.quotations.count({ where: { status: 'sent' } }),
+        this.prisma.quotations.count({ where: { status: 'accepted' } }),
+        this.prisma.quotations.count({ where: { status: 'converted' } }),
+        this.prisma.quotations.aggregate({ _sum: { grand_total: true } }),
+      ]);
 
     const pending = draft + sent;
-    const conversionRate = (accepted + converted) > 0 && total > 0
-      ? ((accepted + converted) / total) * 100
-      : 0;
-    const averageValue = total > 0 ? Number(totalValue._sum.grand_total || 0) / total : 0;
+    const conversionRate =
+      accepted + converted > 0 && total > 0
+        ? ((accepted + converted) / total) * 100
+        : 0;
+    const averageValue =
+      total > 0 ? Number(totalValue._sum.grand_total || 0) / total : 0;
 
     return {
       total,
@@ -431,7 +498,11 @@ export class QuotationsService {
     const html = generateQuotationEmailHtml({
       quotation_number: quotation.quotation_number,
       customer_name: `${quotation.customer.first_name} ${quotation.customer.last_name}`,
-      valid_until: quotation.valid_until ? new Date(quotation.valid_until).toLocaleDateString('es-CO', { timeZone: 'UTC' }) : null,
+      valid_until: quotation.valid_until
+        ? new Date(quotation.valid_until).toLocaleDateString('es-CO', {
+            timeZone: 'UTC',
+          })
+        : null,
       items: quotation.quotation_items.map((item: any) => ({
         product_name: item.product_name,
         variant_sku: item.variant_sku,
@@ -469,7 +540,11 @@ export class QuotationsService {
     return 'Vendix';
   }
 
-  private async transition(id: number, newStatus: string, extraData: Record<string, any> = {}) {
+  private async transition(
+    id: number,
+    newStatus: string,
+    extraData: Record<string, any> = {},
+  ) {
     const quotation = await this.findOne(id);
     const allowed = this.VALID_TRANSITIONS[quotation.status] || [];
     if (!allowed.includes(newStatus)) {

@@ -28,7 +28,7 @@ import { CreatePaymentMethodDto, UpdatePaymentMethodDto } from '../dto';
 @Roles(UserRole.SUPER_ADMIN)
 @ApiBearerAuth()
 export class PaymentMethodsController {
-  constructor(private readonly paymentMethodsService: PaymentMethodsService) { }
+  constructor(private readonly paymentMethodsService: PaymentMethodsService) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new payment method' })

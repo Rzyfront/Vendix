@@ -31,7 +31,8 @@ export class ApAgingUpdateJob {
       let updated = 0;
       for (const record of overdue_records) {
         const days_overdue = Math.floor(
-          (now.getTime() - new Date(record.due_date).getTime()) / (1000 * 60 * 60 * 24),
+          (now.getTime() - new Date(record.due_date).getTime()) /
+            (1000 * 60 * 60 * 24),
         );
 
         await this.prisma.accounts_payable.update({
@@ -41,7 +42,9 @@ export class ApAgingUpdateJob {
         updated++;
       }
 
-      this.logger.log(`AP aging update complete: ${updated} records marked as overdue`);
+      this.logger.log(
+        `AP aging update complete: ${updated} records marked as overdue`,
+      );
 
       await this.prisma.accounts_payable.updateMany({
         where: {
@@ -52,7 +55,10 @@ export class ApAgingUpdateJob {
         data: { days_overdue: 0, updated_at: now },
       });
     } catch (error) {
-      this.logger.error(`AP aging update failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `AP aging update failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

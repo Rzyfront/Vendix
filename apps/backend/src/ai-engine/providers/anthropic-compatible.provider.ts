@@ -20,7 +20,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
     });
   }
 
-  private transformContentForAnthropic(content: string | AIMessageContentPart[]): string | any[] {
+  private transformContentForAnthropic(
+    content: string | AIMessageContentPart[],
+  ): string | any[] {
     if (typeof content === 'string') {
       return content;
     }
@@ -63,7 +65,11 @@ export class AnthropicCompatibleProvider implements AIProvider {
       const systemMsg = messages.find((m) => m.role === 'system');
       const systemPrompt =
         options?.systemPrompt ||
-        (systemMsg ? (typeof systemMsg.content === 'string' ? systemMsg.content : undefined) : undefined);
+        (systemMsg
+          ? typeof systemMsg.content === 'string'
+            ? systemMsg.content
+            : undefined
+          : undefined);
       const userMessages = messages.filter((m) => m.role !== 'system');
 
       const transformedMessages = userMessages.map((m) => ({
@@ -89,7 +95,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
         temperature:
-          options?.temperature ?? this.config.settings?.temperature ?? undefined,
+          options?.temperature ??
+          this.config.settings?.temperature ??
+          undefined,
         ...(options?.tools?.length && {
           tools: options.tools.map((t) => ({
             name: t.function.name,
@@ -138,7 +146,7 @@ export class AnthropicCompatibleProvider implements AIProvider {
           : undefined,
         model: response.model,
         tool_calls: toolCalls.length ? toolCalls : undefined,
-        finish_reason: finishReason as 'stop' | 'tool_calls' | 'length',
+        finish_reason: finishReason,
       };
     } catch (error: any) {
       return {
@@ -157,10 +165,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await this.chat(
-        [{ role: 'user', content: 'Say OK' }],
-        { maxTokens: 5 },
-      );
+      const response = await this.chat([{ role: 'user', content: 'Say OK' }], {
+        maxTokens: 5,
+      });
       if (response.success) {
         return {
           success: true,
@@ -181,7 +188,11 @@ export class AnthropicCompatibleProvider implements AIProvider {
       const systemMsgStream = messages.find((m) => m.role === 'system');
       const systemPrompt =
         options?.systemPrompt ||
-        (systemMsgStream ? (typeof systemMsgStream.content === 'string' ? systemMsgStream.content : undefined) : undefined);
+        (systemMsgStream
+          ? typeof systemMsgStream.content === 'string'
+            ? systemMsgStream.content
+            : undefined
+          : undefined);
       const userMessages = messages.filter((m) => m.role !== 'system');
 
       const stream = this.client.messages.stream({
@@ -194,7 +205,9 @@ export class AnthropicCompatibleProvider implements AIProvider {
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? 1024,
         temperature:
-          options?.temperature ?? this.config.settings?.temperature ?? undefined,
+          options?.temperature ??
+          this.config.settings?.temperature ??
+          undefined,
         ...(options?.tools?.length && {
           tools: options.tools.map((t) => ({
             name: t.function.name,

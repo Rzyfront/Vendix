@@ -2,6 +2,7 @@ import {
   Component,
   signal,
   computed,
+  effect,
   HostListener,
   inject,
   DestroyRef,
@@ -121,11 +122,11 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       >
         <!-- Header -->
         <div
-          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header relative z-30"
+          class="flex-none px-4 lg:px-6 py-2 lg:py-2.5 border-b border-border pos-header relative z-30"
         >
-          <div class="flex justify-between items-center gap-3">
+          <div class="flex justify-between items-center" style="gap: 0.75rem;">
             <!-- Left: Logo + Title -->
-            <div class="flex items-center gap-2 lg:gap-3">
+            <div class="flex items-center" style="gap: 0.5rem;">
               <div
                 class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
               >
@@ -135,9 +136,10 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   class="text-primary"
                 ></app-icon>
               </div>
-              <div class="flex flex-col">
+              <div class="flex flex-col leading-none" style="gap: 0;">
                 <h1
-                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
+                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center mb-0"
+                  style="gap: 0.5rem;"
                 >
                   @if (isQuotationMode()) {
                     <span>Modo Cotización</span>
@@ -149,7 +151,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                     <span class="hidden sm:inline">Vendix</span> POS
                   }
                 </h1>
-                <span class="hidden sm:inline">
+                <span class="hidden sm:block leading-none">
                   @if (isQuotationMode()) {
                     <app-badge variant="primary" size="xs"
                       >Crear cotización</app-badge
@@ -198,33 +200,33 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 <!-- Customer Badge -->
                 @if (selectedCustomer()) {
                   <div
-                    class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                    class="group flex items-center gap-2 px-2.5 py-1.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
                     (click)="onOpenCustomerModal()"
                   >
                     <div
-                      class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                      class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
                     >
-                      <app-icon name="user" [size]="16"></app-icon>
+                      <app-icon name="user" [size]="14"></app-icon>
                     </div>
-                    <div class="flex flex-col min-w-0 flex-1">
+                    <div class="flex flex-col min-w-0">
                       <span
-                        class="font-semibold text-text-primary text-sm leading-tight truncate"
+                        class="font-semibold text-text-primary text-sm leading-none truncate"
                         [title]="selectedCustomer()?.name"
                         >{{ selectedCustomer()?.name }}</span
                       >
                       <span
-                        class="text-xs text-text-secondary leading-tight truncate"
+                        class="text-xs text-text-secondary leading-none truncate mt-0.5"
                         [title]="selectedCustomer()?.email"
                         >{{ selectedCustomer()?.email }}</span
                       >
                     </div>
                     <div
-                      class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
+                      class="w-5 h-5 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
                       (click)="$event.stopPropagation(); onClearCustomer()"
                     >
                       <app-icon
                         name="x"
-                        [size]="14"
+                        [size]="12"
                         class="text-text-secondary group-hover:text-destructive transition-colors"
                       ></app-icon>
                     </div>
@@ -257,6 +259,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
             </div>
           </div>
         </div>
+
+        @if (activeSession()?.register?.location) {
+          <div class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600">
+            Descontando de: {{ activeSession()!.register!.location!.name }}
+          </div>
+        }
 
         <!-- Main Content Grid -->
         <div
@@ -729,6 +737,7 @@ export class PosComponent {
   // Booking desde POS
   showReservationModal = signal(false);
   pendingBookingProduct = signal<any>(null);
+  pendingBookingVariant = signal<any>(null);
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -802,6 +811,13 @@ export class PosComponent {
       .subscribe(() => {
         this.showSessionOpenModal.set(true);
       });
+
+    effect(() => {
+      const serviceSession = this.cashRegisterService.activeSession();
+      if (serviceSession !== null) {
+        this.activeSession.set(serviceSession);
+      }
+    });
   }
 
   @HostListener('window:resize')
@@ -1248,8 +1264,13 @@ export class PosComponent {
     this.onClearCart();
   }
 
-  onBookingRequired(product: any): void {
-    this.pendingBookingProduct.set(product);
+  onBookingRequired(event: any): void {
+    const product = event?.product ?? event;
+    const variant = event?.variant ?? null;
+    this.pendingBookingProduct.set(
+      variant ? { ...product, selected_variant: variant } : product,
+    );
+    this.pendingBookingVariant.set(variant);
     this.showReservationModal.set(true);
   }
 
@@ -1287,6 +1308,10 @@ export class PosComponent {
             booking.product?.name ||
             this.pendingBookingProduct()?.name ||
             'Servicio',
+          product_variant_id:
+            booking.product_variant_id || this.pendingBookingVariant()?.id,
+          variant_name:
+            booking.product_variant?.name || this.pendingBookingVariant()?.name,
           customer_id: booking.customer_id || booking.customer?.id,
           date: booking.date,
           start_time: booking.start_time,
@@ -1299,7 +1324,11 @@ export class PosComponent {
 
     if (this.pendingBookingProduct()) {
       this.cartService
-        .addToCart({ product: this.pendingBookingProduct(), quantity: 1 })
+        .addToCart({
+          product: this.pendingBookingProduct(),
+          quantity: 1,
+          variant: this.pendingBookingVariant() ?? undefined,
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
@@ -1307,12 +1336,14 @@ export class PosComponent {
               'Reserva creada y servicio agregado al carrito',
             );
             this.pendingBookingProduct.set(null);
+            this.pendingBookingVariant.set(null);
           },
           error: () => {
             this.toastService.error(
               'Reserva creada, pero no se pudo agregar al carrito',
             );
             this.pendingBookingProduct.set(null);
+            this.pendingBookingVariant.set(null);
           },
         });
     }
@@ -1321,6 +1352,7 @@ export class PosComponent {
   onBookingModalClosed(): void {
     this.showReservationModal.set(false);
     this.pendingBookingProduct.set(null);
+    this.pendingBookingVariant.set(null);
   }
 
   onViewOrderDetail(orderId: string): void {
@@ -1899,18 +1931,20 @@ export class PosComponent {
       .fetchActiveSession()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((session) => {
-        this.activeSession.set(session);
+        if (session !== null) {
+          this.cashRegisterService.activeSession.set(session);
+        }
       });
   }
 
   onSessionOpened(session: CashRegisterSession): void {
-    this.activeSession.set(session);
+    this.cashRegisterService.activeSession.set(session);
     this.showSessionOpenModal.set(false);
     this.toastService.success(`Caja "${session.register?.name}" abierta`);
   }
 
   onSessionClosed(session: CashRegisterSession): void {
-    this.activeSession.set(null);
+    this.cashRegisterService.activeSession.set(null);
     this.showSessionCloseModal.set(false);
 
     this.closedSessionIdForSummary.set(session.id);

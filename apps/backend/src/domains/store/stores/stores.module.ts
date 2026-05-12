@@ -5,11 +5,18 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { StoreEcommerceModule } from '../ecommerce/ecommerce.module';
 import { LocationsModule } from '../inventory/locations/locations.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, StoreEcommerceModule, LocationsModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    StoreEcommerceModule,
+    LocationsModule,
+    SettingsModule,
+  ],
   controllers: [StoresController],
   providers: [StoresService],
   exports: [StoresService],
 })
-export class StoresModule { }
+export class StoresModule {}

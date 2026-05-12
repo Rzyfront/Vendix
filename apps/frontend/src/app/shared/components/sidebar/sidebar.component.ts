@@ -13,6 +13,14 @@ import {
 import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
+import { BadgeComponent } from '../badge/badge.component';
+import { ToastService } from '../toast/toast.service';
+
+const DEFAULT_LOCKED_BADGE = 'ORG';
+const DEFAULT_LOCKED_TOOLTIP = 'Disponible en modo ORGANIZATION';
+const LOCKED_REDIRECT_ROUTE = '/admin/stores';
+const DEFAULT_LOCKED_TOAST_MESSAGE =
+  'Selecciona una tienda para administrar inventario en modo STORE.';
 
 export interface MenuItem {
   label: string;
@@ -23,13 +31,43 @@ export interface MenuItem {
   children?: MenuItem[];
   badge?: string;
   action?: (item: MenuItem) => void;
-  alwaysVisible?: boolean; // If true, skip panel_ui filtering (for dynamic data like stores)
+  alwaysVisible?: boolean;
+  requiresFeature?: string;
+  /**
+   * Restricts this menu item to organizations operating under the given scope.
+   * - 'STORE': only visible when the org operates per-store.
+   * - 'ORGANIZATION': only visible when the org operates consolidated at org level.
+   * Omitted ⇒ visible regardless of operating_scope.
+   */
+  requiredOperatingScope?: 'STORE' | 'ORGANIZATION';
+  /**
+   * When true and the current operating scope does NOT match `requiredOperatingScope`,
+   * the item is shown as disabled/locked instead of being filtered out.
+   * Defaults to false (item is hidden when scope mismatches).
+   */
+  showLocked?: boolean;
+  /**
+   * Optional badge text shown next to the label when the item is locked.
+   * Defaults visually to 'ORG' when omitted.
+   */
+  lockedBadge?: string;
+  /**
+   * Optional tooltip copy displayed when hovering a locked item.
+   * Defaults visually to 'Disponible en modo ORGANIZATION' when omitted.
+   */
+  lockedTooltip?: string;
+  /**
+   * Internal metadata flag set by `MenuFilterService` when the item is rendered
+   * in locked state (scope mismatch + showLocked === true). Consumers should
+   * treat this as read-only — it is not meant to be set by config sites.
+   */
+  _locked?: boolean;
 }
 
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterModule, IconComponent, TooltipComponent],
+  imports: [RouterModule, IconComponent, TooltipComponent, BadgeComponent],
   template: `
     <!-- Mobile Backdrop -->
     @if (isMobile() && isMobileOpen()) {
@@ -109,7 +147,26 @@ export interface MenuItem {
         <ul class="menu-list">
           @for (item of menuItems(); track item.label) {
             <li>
-              @if (!item.children) {
+              @if (item._locked) {
+                <!-- Locked item: render as a button that redirects to the
+                     operating-scope settings page; visually disabled -->
+                <button
+                  type="button"
+                  class="menu-item menu-item-locked opacity-60 cursor-not-allowed"
+                  [title]="item.lockedTooltip || defaultLockedTooltip"
+                  (click)="onLockedItemClick(item)"
+                >
+                  <app-icon
+                    [name]="item.icon"
+                    [size]="item.iconSize || 18"
+                    class="flex-shrink-0"
+                  ></app-icon>
+                  <span class="menu-text">{{ item.label }}</span>
+                  <app-badge variant="info" size="xs" badgeStyle="outline">
+                    {{ item.lockedBadge || defaultLockedBadge }}
+                  </app-badge>
+                </button>
+              } @else if (!item.children) {
                 <a
                   [routerLink]="item.route"
                   [queryParams]="item.queryParams || null"
@@ -137,6 +194,9 @@ export interface MenuItem {
                     class="flex-shrink-0"
                   ></app-icon>
                   <span class="menu-text">{{ item.label }}</span>
+                  @if (item.badge) {
+                    <span class="badge">{{ item.badge }}</span>
+                  }
                   <app-icon
                     name="chevron-right"
                     [size]="14"
@@ -147,12 +207,27 @@ export interface MenuItem {
                 <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
                   @for (child of item.children; track child.label) {
                     <li class="submenu-item">
-                      @if (child.action) {
+                      @if (child._locked) {
+                        <button
+                          type="button"
+                          class="submenu-item-button menu-item-locked opacity-60 cursor-not-allowed"
+                          [title]="child.lockedTooltip || defaultLockedTooltip"
+                          (click)="onLockedItemClick(child)"
+                        >
+                          <span>{{ child.label }}</span>
+                          <app-badge variant="info" size="xs" badgeStyle="outline">
+                            {{ child.lockedBadge || defaultLockedBadge }}
+                          </app-badge>
+                        </button>
+                      } @else if (child.action) {
                         <button
                           (click)="child.action(child); onMenuItemClick()"
                           class="submenu-item-button"
                         >
                           <span>{{ child.label }}</span>
+                          @if (child.badge) {
+                            <span class="badge">{{ child.badge }}</span>
+                          }
                         </button>
                       } @else {
                         <a
@@ -164,6 +239,9 @@ export interface MenuItem {
                           (click)="onMenuItemClick()"
                         >
                           <span>{{ child.label }}</span>
+                          @if (child.badge) {
+                            <span class="badge">{{ child.badge }}</span>
+                          }
                         </a>
                       }
                     </li>
@@ -206,11 +284,16 @@ export class SidebarComponent implements AfterViewInit {
   private readonly elementRef = inject(ElementRef);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly toastService = inject(ToastService);
 
   // --- State signals ---
   readonly isMobile = signal(false);
   readonly isMobileOpen = signal(false);
   readonly showPromoTooltip = signal(false);
+
+  // --- Locked-item defaults exposed to template ---
+  protected readonly defaultLockedBadge = DEFAULT_LOCKED_BADGE;
+  protected readonly defaultLockedTooltip = DEFAULT_LOCKED_TOOLTIP;
 
   // --- Private state ---
   private promoTooltipTimeout: any;
@@ -469,6 +552,13 @@ export class SidebarComponent implements AfterViewInit {
         this.closeMobileSidebar();
       }, 150); // Small delay to allow navigation to start
     }
+  }
+
+  onLockedItemClick(item?: MenuItem): void {
+    const message = item?.lockedTooltip || DEFAULT_LOCKED_TOAST_MESSAGE;
+    this.toastService.info(message);
+    this.router.navigateByUrl(LOCKED_REDIRECT_ROUTE);
+    this.onMenuItemClick();
   }
 
   toggleSubmenu(menuLabel: string): void {

@@ -120,13 +120,66 @@ export interface WompiCreateTransactionRequest {
   currency: string;
   customer_email: string;
   reference: string;
-  payment_method: WompiPaymentMethodData;
+  /** Inline tokenized method (one-shot widget flow). Mutually exclusive with
+   *  `payment_source_id` — exactly one of the two MUST be present. */
+  payment_method?: WompiPaymentMethodData;
   redirect_url?: string;
   signature?: string;
   customer_data?: {
     phone_number?: string;
     full_name?: string;
   };
+  /** Charge against a stored payment_source (Card-On-File). Mutually exclusive
+   *  with passing a fresh `payment_method.token`. */
+  payment_source_id?: number;
+  /** Marks this charge as MIT (Merchant-Initiated Transaction). Wompi requires
+   *  `recurrent: true` for COF charges that bypass SCA / 3DS. */
+  recurrent?: boolean;
+}
+
+// ── Payment Sources (Card-On-File) ───────────
+
+export interface WompiCreatePaymentSourceRequest {
+  type: 'CARD';
+  /** tok_* received from the Wompi widget after card tokenization.
+   *  This is NOT a transaction.id — it is the single-use card token. */
+  token: string;
+  customer_email: string;
+  /** MUST be the exact acceptance_token shown to the user in the widget
+   *  (legal trail). Do NOT re-fetch a fresh one. */
+  acceptance_token: string;
+  accept_personal_auth: string;
+}
+
+export interface WompiPaymentSourceExtra {
+  bin?: string;
+  name?: string;
+  brand?: string;
+  exp_year?: string;
+  exp_month?: string;
+  last_four?: string;
+  card_holder?: string;
+  is_three_ds?: boolean;
+  three_ds_auth_type?: string | null;
+  external_identifier?: string | null;
+}
+
+export interface WompiPaymentSourceData {
+  /** payment_sources.id — Wompi returns this as a number */
+  id: number;
+  public_data: {
+    type: 'CARD';
+    extra: WompiPaymentSourceExtra;
+  };
+  status: 'AVAILABLE' | 'ERROR' | 'PENDING';
+  customer_email: string;
+  /** The original tok_* consumed (informational, single-use) */
+  token: string;
+  type: 'CARD';
+}
+
+export interface WompiPaymentSourceResponse {
+  data: WompiPaymentSourceData;
 }
 
 export interface WompiTransactionData {

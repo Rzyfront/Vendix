@@ -1,4 +1,9 @@
-import { IsString, IsOptional, ValidateNested, IsObject } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  ValidateNested,
+  IsObject,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class PushSubscriptionKeys {

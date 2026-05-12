@@ -1,0 +1,41 @@
+meta {
+  name: 04 POST pos payment without store_id - 201
+  type: http
+  seq: 4
+}
+
+# Body omits store_id → derived from RequestContext.
+
+post {
+  url: http://{{url}}/store/payments/pos
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "customer_id": {{testCustomerId}},
+    "items": [
+      {
+        "product_id": {{testProductId}},
+        "product_name": "Bruno POS smoke item",
+        "quantity": 1,
+        "unit_price": 100.00,
+        "total_price": 100.00
+      }
+    ],
+    "subtotal": 100.00,
+    "total_amount": 100.00,
+    "store_payment_method_id": {{testStorePaymentMethodId}}
+  }
+}
+
+tests {
+  test("201 Created (or 200 if controller returns success body)", function () {
+    expect([200, 201]).to.include(res.status);
+  });
+}

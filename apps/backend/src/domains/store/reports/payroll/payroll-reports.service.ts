@@ -167,7 +167,7 @@ export class PayrollReportsService {
     }
 
     return employees.map((emp) => {
-      const prov = (provisionsByEmployee.get(emp.id) || {}) as any;
+      const prov = provisionsByEmployee.get(emp.id) || {};
       const severance = Number(prov.severance || 0);
       const severanceInterest = Number(prov.severance_interest || 0);
       const bonus = Number(prov.bonus || 0);

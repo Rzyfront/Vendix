@@ -240,7 +240,7 @@ import {
         />
       }
 
-      @defer (when show_rate_wizard() && rate_wizard_method_id()) {
+      @if (show_rate_wizard() && rate_wizard_method_id()) {
         <app-add-rate-wizard-modal
           [method_id]="rate_wizard_method_id()!"
           [existing_zones]="store_zones()"

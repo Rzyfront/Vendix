@@ -49,22 +49,24 @@ export class Mt940StatementParser {
       }
 
       // Extract opening balance from :60F:
-      const opening_match = /:60F:([CD])(\d{6})([A-Z]{3})([\d,]+)/m.exec(content);
+      const opening_match = /:60F:([CD])(\d{6})([A-Z]{3})([\d,]+)/m.exec(
+        content,
+      );
       if (opening_match) {
         const amount = this.parseAmount(opening_match[4]);
-        result.opening_balance =
-          opening_match[1] === 'D' ? -amount : amount;
+        result.opening_balance = opening_match[1] === 'D' ? -amount : amount;
 
         // Extract statement date from the opening balance date
         result.statement_date = this.parseMt940Date(opening_match[2]);
       }
 
       // Extract closing balance from :62F:
-      const closing_match = /:62F:([CD])(\d{6})([A-Z]{3})([\d,]+)/m.exec(content);
+      const closing_match = /:62F:([CD])(\d{6})([A-Z]{3})([\d,]+)/m.exec(
+        content,
+      );
       if (closing_match) {
         const amount = this.parseAmount(closing_match[4]);
-        result.closing_balance =
-          closing_match[1] === 'D' ? -amount : amount;
+        result.closing_balance = closing_match[1] === 'D' ? -amount : amount;
       }
 
       // Parse transactions — each :61: line followed optionally by :86:
@@ -80,8 +82,7 @@ export class Mt940StatementParser {
             result.transactions.push(transaction);
           }
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Unknown error';
+          const message = err instanceof Error ? err.message : 'Unknown error';
           result.errors.push(`Transaction ${i + 1}: ${message}`);
           this.logger.warn(
             `Error parsing MT940 transaction ${i + 1}: ${message}`,
@@ -193,7 +194,10 @@ export class Mt940StatementParser {
 
     // Parse D/C indicator (D, C, RD, RC)
     let dc_mark: string;
-    if (line61.substring(pos, pos + 2) === 'RD' || line61.substring(pos, pos + 2) === 'RC') {
+    if (
+      line61.substring(pos, pos + 2) === 'RD' ||
+      line61.substring(pos, pos + 2) === 'RC'
+    ) {
       dc_mark = line61.substring(pos, pos + 2);
       pos += 2;
     } else {
@@ -202,7 +206,10 @@ export class Mt940StatementParser {
     }
 
     // Optional: currency letter (third character of currency)
-    if (/^[A-Z]/.test(line61.substring(pos, pos + 1)) && !/^\d/.test(line61.substring(pos, pos + 1))) {
+    if (
+      /^[A-Z]/.test(line61.substring(pos, pos + 1)) &&
+      !/^\d/.test(line61.substring(pos, pos + 1))
+    ) {
       pos += 1; // skip currency letter
     }
 

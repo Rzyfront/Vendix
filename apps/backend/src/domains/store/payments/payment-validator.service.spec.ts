@@ -1,11 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentValidatorService } from './services/payment-validator.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrderValidationResult } from './interfaces';
 
 describe('PaymentValidatorService', () => {
   let service: PaymentValidatorService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   beforeEach(async () => {
     const mockPrismaService = {
@@ -33,14 +33,14 @@ describe('PaymentValidatorService', () => {
       providers: [
         PaymentValidatorService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
     }).compile();
 
     service = module.get<PaymentValidatorService>(PaymentValidatorService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {
@@ -289,7 +289,9 @@ describe('PaymentValidatorService', () => {
         id: 1,
       };
 
-      jest.spyOn(prisma.stores, 'findUnique').mockResolvedValue(mockStore);
+      jest
+        .spyOn(prisma.stores, 'findUnique')
+        .mockResolvedValue(mockStore as any);
 
       const result = await service.validateCurrency('USD', 1);
 
@@ -301,7 +303,9 @@ describe('PaymentValidatorService', () => {
         id: 1,
       };
 
-      jest.spyOn(prisma.stores, 'findUnique').mockResolvedValue(mockStore);
+      jest
+        .spyOn(prisma.stores, 'findUnique')
+        .mockResolvedValue(mockStore as any);
 
       const result = await service.validateCurrency('', 1);
 
@@ -313,7 +317,9 @@ describe('PaymentValidatorService', () => {
         id: 1,
       };
 
-      jest.spyOn(prisma.stores, 'findUnique').mockResolvedValue(mockStore);
+      jest
+        .spyOn(prisma.stores, 'findUnique')
+        .mockResolvedValue(mockStore as any);
 
       const result = await service.validateCurrency('VERYLONGCURRENCY', 1);
 
@@ -336,7 +342,9 @@ describe('PaymentValidatorService', () => {
         organization_id: 1,
       };
 
-      jest.spyOn(prisma.users, 'findFirst').mockResolvedValue(mockCustomer);
+      jest
+        .spyOn(prisma.users, 'findFirst')
+        .mockResolvedValue(mockCustomer as any);
 
       const result = await service.validateCustomer(1, 1);
 

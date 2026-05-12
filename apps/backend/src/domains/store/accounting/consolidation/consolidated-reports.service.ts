@@ -39,15 +39,18 @@ export class ConsolidatedReportsService {
    * Apply consolidation adjustments to a trial balance.
    * For each adjustment, add debit/subtract credit from the matching account balance.
    */
-  private applyAdjustments(
-    accounts: any[],
-    adjustments: any[],
-  ) {
+  private applyAdjustments(accounts: any[], adjustments: any[]) {
     // Build a map of adjustments by account_id
-    const adj_map = new Map<number, { total_debit: number; total_credit: number }>();
+    const adj_map = new Map<
+      number,
+      { total_debit: number; total_credit: number }
+    >();
 
     for (const adj of adjustments) {
-      const existing = adj_map.get(adj.account_id) || { total_debit: 0, total_credit: 0 };
+      const existing = adj_map.get(adj.account_id) || {
+        total_debit: 0,
+        total_credit: 0,
+      };
       existing.total_debit += Number(adj.debit_amount);
       existing.total_credit += Number(adj.credit_amount);
       adj_map.set(adj.account_id, existing);
@@ -85,7 +88,10 @@ export class ConsolidatedReportsService {
     });
 
     // Apply adjustments
-    const consolidated_accounts = this.applyAdjustments(combined.accounts, adjustments);
+    const consolidated_accounts = this.applyAdjustments(
+      combined.accounts,
+      adjustments,
+    );
 
     const consolidated_totals = consolidated_accounts.reduce(
       (acc: any, item: any) => ({
@@ -146,15 +152,33 @@ export class ConsolidatedReportsService {
     const combined_trial = await this.accounting_reports.getTrialBalance({
       fiscal_period_id: session.fiscal_period_id,
     });
-    const consolidated_accounts = this.applyAdjustments(combined_trial.accounts, adjustments);
+    const consolidated_accounts = this.applyAdjustments(
+      combined_trial.accounts,
+      adjustments,
+    );
 
-    const assets = consolidated_accounts.filter((a: any) => a.account_type === 'asset');
-    const liabilities = consolidated_accounts.filter((a: any) => a.account_type === 'liability');
-    const equity = consolidated_accounts.filter((a: any) => a.account_type === 'equity');
+    const assets = consolidated_accounts.filter(
+      (a: any) => a.account_type === 'asset',
+    );
+    const liabilities = consolidated_accounts.filter(
+      (a: any) => a.account_type === 'liability',
+    );
+    const equity = consolidated_accounts.filter(
+      (a: any) => a.account_type === 'equity',
+    );
 
-    const total_assets = assets.reduce((sum: number, a: any) => sum + a.balance, 0);
-    const total_liabilities = liabilities.reduce((sum: number, a: any) => sum + Math.abs(a.balance), 0);
-    const total_equity = equity.reduce((sum: number, a: any) => sum + Math.abs(a.balance), 0);
+    const total_assets = assets.reduce(
+      (sum: number, a: any) => sum + a.balance,
+      0,
+    );
+    const total_liabilities = liabilities.reduce(
+      (sum: number, a: any) => sum + Math.abs(a.balance),
+      0,
+    );
+    const total_equity = equity.reduce(
+      (sum: number, a: any) => sum + Math.abs(a.balance),
+      0,
+    );
 
     return {
       session,
@@ -168,7 +192,8 @@ export class ConsolidatedReportsService {
         balance_check: {
           total_assets,
           total_liabilities_and_equity: total_liabilities + total_equity,
-          is_balanced: Math.abs(total_assets - (total_liabilities + total_equity)) < 0.01,
+          is_balanced:
+            Math.abs(total_assets - (total_liabilities + total_equity)) < 0.01,
         },
       },
     };
@@ -210,13 +235,26 @@ export class ConsolidatedReportsService {
     const combined_trial = await this.accounting_reports.getTrialBalance({
       fiscal_period_id: session.fiscal_period_id,
     });
-    const consolidated_accounts = this.applyAdjustments(combined_trial.accounts, adjustments);
+    const consolidated_accounts = this.applyAdjustments(
+      combined_trial.accounts,
+      adjustments,
+    );
 
-    const revenue_accounts = consolidated_accounts.filter((a: any) => a.account_type === 'revenue');
-    const expense_accounts = consolidated_accounts.filter((a: any) => a.account_type === 'expense');
+    const revenue_accounts = consolidated_accounts.filter(
+      (a: any) => a.account_type === 'revenue',
+    );
+    const expense_accounts = consolidated_accounts.filter(
+      (a: any) => a.account_type === 'expense',
+    );
 
-    const total_revenue = revenue_accounts.reduce((sum: number, a: any) => sum + Math.abs(a.balance), 0);
-    const total_expenses = expense_accounts.reduce((sum: number, a: any) => sum + Math.abs(a.balance), 0);
+    const total_revenue = revenue_accounts.reduce(
+      (sum: number, a: any) => sum + Math.abs(a.balance),
+      0,
+    );
+    const total_expenses = expense_accounts.reduce(
+      (sum: number, a: any) => sum + Math.abs(a.balance),
+      0,
+    );
 
     return {
       session,
@@ -238,24 +276,26 @@ export class ConsolidatedReportsService {
   async getEliminationDetail(session_id: number) {
     const session = await this.getSessionWithPeriod(session_id);
 
-    const ic_transactions = await this.prisma.intercompany_transactions.findMany({
-      where: { session_id, eliminated: true },
-      include: {
-        from_store: { select: { id: true, name: true } },
-        to_store: { select: { id: true, name: true } },
-        account: { select: { id: true, code: true, name: true } },
-      },
-      orderBy: { eliminated_at: 'desc' },
-    });
+    const ic_transactions =
+      await this.prisma.intercompany_transactions.findMany({
+        where: { session_id, eliminated: true },
+        include: {
+          from_store: { select: { id: true, name: true } },
+          to_store: { select: { id: true, name: true } },
+          account: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { eliminated_at: 'desc' },
+      });
 
-    const elimination_adjustments = await this.prisma.consolidation_adjustments.findMany({
-      where: { session_id, type: 'elimination' },
-      include: {
-        account: { select: { id: true, code: true, name: true } },
-        store: { select: { id: true, name: true } },
-      },
-      orderBy: { created_at: 'desc' },
-    });
+    const elimination_adjustments =
+      await this.prisma.consolidation_adjustments.findMany({
+        where: { session_id, type: 'elimination' },
+        include: {
+          account: { select: { id: true, code: true, name: true } },
+          store: { select: { id: true, name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+      });
 
     const total_eliminated = ic_transactions.reduce(
       (sum: number, txn: any) => sum + Number(txn.amount),

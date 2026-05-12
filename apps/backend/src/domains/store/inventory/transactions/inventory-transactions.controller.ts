@@ -30,7 +30,7 @@ import { RequirePermissions } from '../../../auth/decorators/permissions.decorat
 export class InventoryTransactionsController {
   constructor(
     private readonly transactionsService: InventoryTransactionsService,
-  ) { }
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)

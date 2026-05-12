@@ -1,7 +1,12 @@
 import { StoreSettings } from '../interfaces/store-settings.interface';
+import { CURRENT_SCHEMA_VERSION } from '../migrations/settings-migrator.service';
+import { createDefaultFiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
 
 export function getDefaultStoreSettings(): StoreSettings {
   return {
+    // Schema version stamp — used by SettingsMigratorService for lazy migrations.
+    _schema_version: CURRENT_SCHEMA_VERSION,
+
     // ============================================================================
     // NUEVAS SECCIONES - Única fuente de verdad
     // ============================================================================
@@ -73,8 +78,8 @@ export function getDefaultStoreSettings(): StoreSettings {
       new_order_alerts_phone: null,
     },
     pos: {
-      allow_anonymous_sales: false,
-      anonymous_sales_as_default: false,
+      allow_anonymous_sales: true,
+      anonymous_sales_as_default: true,
       business_hours: getDefaultBusinessHours(),
       enable_schedule_validation: false,
       offline_mode_enabled: false,
@@ -177,6 +182,9 @@ export function getDefaultStoreSettings(): StoreSettings {
 
         // Facturación
         invoicing: true,
+        invoicing_invoices: true,
+        invoicing_resolutions: true,
+        invoicing_dian_config: true,
 
         // Contabilidad
         accounting: true,
@@ -214,7 +222,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: true,
-        settings_habeas_data: true,
+        settings_fiscal_management: true,
 
         // Ayuda
         help: true,
@@ -284,6 +292,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    fiscal_status: createDefaultFiscalStatusBlock(),
+
+    // Fiscal data - legal/tax identity (empty defaults; populated by wizard)
+    fiscal_data: {},
+
     // Reservations - Booking reminders, confirmation, and check-in
     reservations: {
       reminders: [
@@ -303,6 +316,11 @@ export function getDefaultStoreSettings(): StoreSettings {
         allow_staff_check_in: true,
         notify_provider_on_check_in: true,
       },
+    },
+
+    // Operations - Preparation and delivery defaults
+    operations: {
+      default_preparation_time_minutes: 15,
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

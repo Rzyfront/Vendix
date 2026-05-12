@@ -23,6 +23,8 @@ import { BrandingGeneratorHelper } from '../../../common/helpers/branding-genera
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
+import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 
 @Injectable()
 export class StoresService {
@@ -30,23 +32,37 @@ export class StoresService {
     private prisma: OrganizationPrismaService,
     private domainGeneratorHelper: DomainGeneratorHelper,
     private brandingGeneratorHelper: BrandingGeneratorHelper,
+    private storeBootstrapHelper: StoreBootstrapHelper,
+    private readonly subscriptionTrialService: SubscriptionTrialService,
   ) {}
 
   // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
 
+  async checkCode(code: string): Promise<boolean> {
+    const organization_id = RequestContextService.getOrganizationId();
+    if (!code) return false;
+    const store = await this.prisma.stores.findFirst({
+      where: { store_code: code, organization_id },
+    });
+    return !!store;
+  }
+
   async create(createStoreDto: CreateStoreDto) {
     // Obtener organization_id del contexto
     const organization_id = RequestContextService.getOrganizationId();
+    const user_id = RequestContextService.getContext()?.user_id;
 
     if (!organization_id) {
       throw new BadRequestException('Organization context is required');
     }
 
     const slug = slugify(createStoreDto.name, { lower: true, strict: true });
+
+    // Pre-check for slug conflict so we surface a clear error before the
+    // transaction opens. The helper also re-checks via P2002 as a safety
+    // net inside the atomic section.
     const existingStore = await this.prisma.stores.findFirst({
-      where: {
-        slug,
-      },
+      where: { slug },
     });
     if (existingStore) {
       throw new ConflictException(
@@ -54,18 +70,96 @@ export class StoresService {
       );
     }
 
-    // Extract settings from DTO and remove from main store data
-    const { settings, ...storeData } = createStoreDto;
+    // Extract settings, address and operating_hours from DTO and remove from main store data
+    const {
+      settings,
+      address,
+      operating_hours,
+      organization_id: _ignored,
+      ...storeData
+    } = createStoreDto as any;
 
-    const store = await this.prisma.stores.create({
-      data: {
-        ...storeData,
-        slug,
-        updated_at: new Date(),
-        organizations: {
-          connect: { id: organization_id },
-        },
+    // Atomic store bootstrap:
+    //  1. stores + optional addresses + inventory_locations (via helper)
+    //  2. default domain_settings (STORE_ADMIN landing)
+    //  3. optional store_settings
+    // If any step fails the whole transaction rolls back — no orphan stores,
+    // no orphan domains, no stores with default_location_id = NULL.
+    const storeId: number = await (this.prisma as any).$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // 1) store + default inventory_location (atomic within this tx)
+        const { store } =
+          await this.storeBootstrapHelper.createStoreWithDefaultLocation(
+            {
+              organization_id,
+              store_data: {
+                name: storeData.name,
+                slug,
+                store_type: storeData.store_type,
+                timezone: storeData.timezone ?? null,
+                manager_user_id: storeData.manager_user_id ?? null,
+                store_code: storeData.store_code ?? null,
+                logo_url: storeData.logo_url ?? null,
+                is_active: storeData.is_active ?? true,
+              },
+              address_data: address
+                ? {
+                    address_line1: address.address_line1,
+                    address_line2: address.address_line2 ?? null,
+                    city: address.city,
+                    state_province: address.state_province ?? null,
+                    postal_code: address.postal_code ?? null,
+                    country_code: address.country_code,
+                    phone_number: address.phone_number ?? null,
+                    type: 'store_physical',
+                    is_primary: true,
+                  }
+                : undefined,
+            },
+            tx,
+          );
+
+        // 2) domain_settings (STORE_ADMIN: {slug}-store.vendix.com)
+        await this.createStoreDomain(store.id, store.slug, tx);
+
+        // 3) optional store_settings from DTO
+        if (settings && Object.keys(settings).length > 0) {
+          await tx.store_settings.create({
+            data: {
+              store_id: store.id,
+              settings,
+            },
+          });
+        }
+
+        // 4) optional operating_hours — update store record directly
+        if (operating_hours) {
+          await tx.stores.update({
+            where: { id: store.id },
+            data: { operating_hours: operating_hours },
+          });
+        }
+
+        // 5) auto-trial bootstrap (one-shot per organization). Runs INSIDE
+        //    this tx so the FOR UPDATE lock on organizations and the
+        //    has_consumed_trial flip commit atomically with the store. If
+        //    the org has already consumed its trial or no default plan is
+        //    configured, the service returns null silently and the store
+        //    creation continues without a subscription.
+        await this.subscriptionTrialService.createTrialForStore(
+          store.id,
+          organization_id,
+          tx,
+        );
+
+        return store.id;
       },
+    );
+
+    // Final fetch AFTER the transaction so the response includes all
+    // side-effects (settings, addresses, domain-derived counts, etc.).
+    return this.prisma.stores.findUnique({
+      where: { id: storeId },
       include: {
         organizations: { select: { id: true, name: true, slug: true } },
         addresses: true,
@@ -73,34 +167,6 @@ export class StoresService {
         _count: { select: { products: true, orders: true, store_users: true } },
       },
     });
-
-    // Create store domain (STORE_ADMIN context: {slug}-store.vendix.com)
-    await this.createStoreDomain(store.id, store.slug);
-
-    // Create store settings if provided
-    if (settings && Object.keys(settings).length > 0) {
-      await this.prisma.store_settings.create({
-        data: {
-          store_id: store.id,
-          settings,
-        },
-      });
-
-      // Refetch to include settings
-      return this.prisma.stores.findUnique({
-        where: { id: store.id },
-        include: {
-          organizations: { select: { id: true, name: true, slug: true } },
-          addresses: true,
-          store_settings: true,
-          _count: {
-            select: { products: true, orders: true, store_users: true },
-          },
-        },
-      });
-    }
-
-    return store;
   }
 
   async findAll(query: StoreQueryDto) {
@@ -168,10 +234,11 @@ export class StoresService {
   }
 
   async update(id: number, updateStoreDto: UpdateStoreDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
 
-    // Extract settings from DTO and remove from main store data
-    const { settings, ...storeData } = updateStoreDto;
+    // Extract settings, address and operating_hours from DTO
+    const { settings, address, operating_hours, ...storeData } =
+      updateStoreDto as any;
 
     // Update store settings if provided
     if (settings) {
@@ -180,6 +247,50 @@ export class StoresService {
         update: { settings },
         create: { store_id: id, settings },
       });
+    }
+
+    // Handle address: upsert primary address for the store
+    if (address) {
+      const orgId = existing.organization_id;
+      const existingPrimary = await this.prisma.addresses.findFirst({
+        where: { store_id: id, is_primary: true },
+      });
+
+      if (existingPrimary) {
+        await this.prisma.addresses.update({
+          where: { id: existingPrimary.id },
+          data: {
+            address_line1: address.address_line1,
+            address_line2: address.address_line2 ?? null,
+            city: address.city,
+            state_province: address.state_province ?? null,
+            postal_code: address.postal_code ?? null,
+            country_code: address.country_code,
+            phone_number: address.phone_number ?? null,
+          },
+        });
+      } else {
+        await this.prisma.addresses.create({
+          data: {
+            store_id: id,
+            organization_id: orgId,
+            address_line1: address.address_line1,
+            address_line2: address.address_line2 ?? null,
+            city: address.city,
+            state_province: address.state_province ?? null,
+            postal_code: address.postal_code ?? null,
+            country_code: address.country_code,
+            phone_number: address.phone_number ?? null,
+            type: 'store_physical',
+            is_primary: true,
+          },
+        });
+      }
+    }
+
+    // Handle operating_hours: update store.operating_hours
+    if (operating_hours !== undefined) {
+      storeData.operating_hours = operating_hours;
     }
 
     return this.prisma.stores.update({
@@ -243,7 +354,7 @@ export class StoresService {
       throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
-    let storeSettings = await this.prisma.store_settings.findUnique({
+    const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id: storeId },
     });
 
@@ -266,7 +377,7 @@ export class StoresService {
           ...getDefaultStoreSettings().general,
           name: store?.name,
           logo_url: store?.logo_url,
-          store_type: store?.store_type as any,
+          store_type: store?.store_type,
           timezone:
             store?.timezone || getDefaultStoreSettings().general.timezone,
         },
@@ -290,7 +401,7 @@ export class StoresService {
         ...settings.general,
         name: store?.name,
         logo_url: store?.logo_url,
-        store_type: store?.store_type as any,
+        store_type: store?.store_type,
         timezone: store?.timezone || settings.general?.timezone,
       },
       app: {
@@ -597,17 +708,24 @@ export class StoresService {
   /**
    * Create a domain for a store
    * Generates hostname: {slug}-store.vendix.com
+   *
+   * Accepts an optional Prisma TransactionClient so the caller can
+   * atomically create the domain alongside the store row. When omitted
+   * the scoped OrganizationPrismaService is used directly.
    */
   private async createStoreDomain(
     storeId: number,
     storeSlug: string,
+    tx?: Prisma.TransactionClient,
   ): Promise<void> {
+    const client: any = tx ?? this.prisma;
+
     // Get all existing hostnames to check for uniqueness
-    const existingDomains = await this.prisma.domain_settings.findMany({
+    const existingDomains = await client.domain_settings.findMany({
       select: { hostname: true, config: true },
     });
     const existingHostnames: Set<string> = new Set(
-      existingDomains.map((d) => d.hostname as string),
+      existingDomains.map((d: any) => d.hostname as string),
     );
 
     // Generate unique hostname for store
@@ -619,12 +737,10 @@ export class StoresService {
 
     // Get branding config from organization domain if exists
     const orgDomain = existingDomains.find(
-      (d) =>
-        d.config &&
-        typeof d.config === 'object' &&
-        'branding' in (d.config as any),
+      (d: any) =>
+        d.config && typeof d.config === 'object' && 'branding' in d.config,
     );
-    const orgBranding = (orgDomain?.config as any)?.branding || null;
+    const orgBranding = orgDomain?.config?.branding || null;
 
     // Generate standardized branding
     const branding = this.brandingGeneratorHelper.generateBranding({
@@ -637,7 +753,7 @@ export class StoresService {
     });
 
     // Create domain settings for the store with standardized branding
-    await this.prisma.domain_settings.create({
+    await client.domain_settings.create({
       data: {
         hostname,
         store_id: storeId,
@@ -697,7 +813,7 @@ export class StoresService {
       },
     });
 
-    const orgBranding = (orgDomain?.config as any)?.branding || null;
+    const orgBranding = orgDomain?.config?.branding || null;
 
     // Generate standardized branding for ecommerce
     const branding = this.brandingGeneratorHelper.generateBranding({

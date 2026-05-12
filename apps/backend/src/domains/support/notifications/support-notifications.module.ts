@@ -5,10 +5,7 @@ import { EmailModule } from '../../../email/email.module';
 
 @Module({
   imports: [EmailModule],
-  providers: [
-    SupportNotificationsService,
-    GlobalPrismaService,
-  ],
+  providers: [SupportNotificationsService, GlobalPrismaService],
   exports: [SupportNotificationsService],
 })
 export class SupportNotificationsModule {}

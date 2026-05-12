@@ -9,7 +9,6 @@ import {
   IconComponent,
   ToastService,
 } from '../../../../../../../shared/components';
-import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import {
   StepsLineComponent,
   StepsLineItem,
@@ -29,7 +28,6 @@ import {
     ButtonComponent,
     IconComponent,
     StepsLineComponent,
-    SpinnerComponent,
   ],
   template: `
     <app-modal
@@ -358,12 +356,12 @@ import {
           <div class="space-y-3">
             <!-- Loading state -->
             @if (isAnalyzing()) {
-              <div class="py-8 flex flex-col items-center justify-center">
-                <app-spinner
-                  size="lg"
-                  [center]="true"
-                  class="mb-3"
-                ></app-spinner>
+              <div class="flex flex-col items-center justify-center py-8 gap-3">
+                <app-icon
+                  name="loader"
+                  [size]="36"
+                  class="text-primary animate-spin"
+                ></app-icon>
                 <p class="text-sm text-gray-900 font-medium">
                   Analizando archivo...
                 </p>
@@ -660,12 +658,12 @@ import {
           <div class="space-y-3">
             <!-- Loading state -->
             @if (isUploading()) {
-              <div class="py-8 flex flex-col items-center justify-center">
-                <app-spinner
-                  size="lg"
-                  [center]="true"
-                  class="mb-3"
-                ></app-spinner>
+              <div class="flex flex-col items-center justify-center py-8 gap-3">
+                <app-icon
+                  name="loader"
+                  [size]="36"
+                  class="text-primary animate-spin"
+                ></app-icon>
                 <p class="text-sm text-gray-900 font-medium">
                   Cargando empleados...
                 </p>

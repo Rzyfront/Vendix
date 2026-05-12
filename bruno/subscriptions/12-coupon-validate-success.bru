@@ -1,0 +1,39 @@
+meta {
+  name: Coupon Validate Success
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/validate-coupon
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "code": "{{coupon_code_valid}}"
+  }
+}
+
+vars:post-response {
+  coupon_plan_id: res.body.data.plan ? res.body.data.plan.id : null
+  coupon_overlay_features: res.body.data.overlay_features ? JSON.stringify(res.body.data.overlay_features) : null
+}
+
+tests {
+  test("Validation succeeded HTTP-wise", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Coupon valid", function() {
+    expect(res.body.data.valid).to.be.true;
+    expect(res.body.data.plan).to.not.be.undefined;
+    expect(res.body.data.plan.plan_type).to.equal('promotional');
+  });
+
+  test("Overlay features present", function() {
+    expect(res.body.data.overlay_features).to.not.be.undefined;
+  });
+}

@@ -17,6 +17,8 @@ import {
 
 import { FormStyleVariant } from '../../types/form.types';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
+import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 
 export type InputType =
   | 'text'
@@ -28,13 +30,14 @@ export type InputType =
   | 'search'
   | 'date'
   | 'time'
-  | 'datetime-local';
+  | 'datetime-local'
+  | 'color';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({
   selector: 'app-input',
   standalone: true,
-  imports: [],
+  imports: [IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -53,21 +56,15 @@ export type InputSize = 'sm' | 'md' | 'lg';
         >
           <span>{{ label() }}</span>
           @if (tooltipText()) {
-            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
-              <svg
-                class="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </span>
+            <app-tooltip
+              [content]="tooltipText()"
+              [position]="tooltipPosition()"
+              [visible]="tooltipVisible()"
+            >
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
           }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1">*</span>
@@ -219,42 +216,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       }
 
       .help-icon:hover {
-        color: var(--color-warning);
-      }
-
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.375rem 0.5rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        border-radius: var(--radius-sm);
-        white-space: normal;
-        box-shadow: var(--shadow-md);
-        z-index: 50;
-        margin-bottom: 0.375rem;
-        pointer-events: none;
-        max-width: 300px;
-        width: max-content;
-        text-align: center;
-        line-height: 1.4;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 4px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.125rem;
-        z-index: 50;
-        pointer-events: none;
+        color: var(--color-primary);
       }
     `,
   ],
@@ -266,7 +228,7 @@ export class InputComponent implements ControlValueAccessor {
   readonly size = input<InputSize>('md');
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly disabled = input<boolean>(false);
-  private disabledState = false;
+  private disabledState = signal(false);
   readonly readonly = input(false);
   readonly required = input(false);
   readonly error = input<string>();
@@ -286,6 +248,8 @@ export class InputComponent implements ControlValueAccessor {
   readonly customInputClass = input('');
   readonly customClasses = input('');
   readonly tooltipText = input<string>('');
+  readonly tooltipPosition = input<'top' | 'bottom' | 'left' | 'right'>('top');
+  readonly tooltipVisible = input<boolean | undefined>(undefined);
   readonly currency = input(false);
   readonly currencyDecimals = input<number>();
   readonly allowNegative = input(false);
@@ -330,11 +294,11 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabledState = isDisabled;
+    this.disabledState.set(isDisabled);
   }
 
   isDisabled(): boolean {
-    return this.disabled() || this.disabledState;
+    return this.disabled() || this.disabledState();
   }
 
   get labelClasses(): string {

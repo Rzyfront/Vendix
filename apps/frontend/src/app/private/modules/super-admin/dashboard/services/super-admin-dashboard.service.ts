@@ -3,29 +3,18 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError, tap, shareReplay } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 
-export interface SuperAdminStats {
-  totalOrganizations: number;
-  totalUsers: number;
-  activeStores: number;
-  platformGrowth: number;
-  organizationGrowth: number;
-  userGrowth: number;
-  storeGrowth: number;
-  weeklyData: WeeklyData[];
-  recentActivities: RecentActivity[];
-  topOrganizations: TopOrganization[];
-}
-
-export interface WeeklyData {
-  week: string;
-  organizations: number;
-  users: number;
-  stores: number;
+export interface MonthlyTrendItem {
+  month: string;
+  revenue: number;
+  newOrganizations: number;
+  newUsers: number;
+  newStores: number;
+  newSubscriptions: number;
 }
 
 export interface RecentActivity {
   id: string;
-  type: 'organization' | 'user' | 'store' | 'domain';
+  type: 'organization' | 'user' | 'store' | 'subscription' | 'payment';
   action: string;
   description: string;
   timestamp: Date;
@@ -39,6 +28,43 @@ export interface TopOrganization {
   users: number;
   revenue: number;
   growth: number;
+  isPartner: boolean;
+  subscriptionState: string | null;
+}
+
+export interface SuperAdminStats {
+  totalOrganizations: number;
+  totalUsers: number;
+  activeStores: number;
+  platformGrowth: number;
+  organizationGrowth: number;
+  userGrowth: number;
+  storeGrowth: number;
+
+  currentMonthRevenue: number;
+  lastMonthRevenue: number;
+  revenueGrowth: number;
+  mrr: number;
+
+  totalSubscriptions: number;
+  activeSubscriptions: number;
+  graceSubscriptions: number;
+  suspendedSubscriptions: number;
+  pendingInvoices: number;
+  overdueInvoices: number;
+  churnRate: number;
+
+  weeklyData: WeeklyData[];
+  monthlyTrend: MonthlyTrendItem[];
+  recentActivities: RecentActivity[];
+  topOrganizations: TopOrganization[];
+}
+
+export interface WeeklyData {
+  week: string;
+  organizations: number;
+  users: number;
+  stores: number;
 }
 
 @Injectable({
@@ -46,9 +72,8 @@ export interface TopOrganization {
 })
 export class SuperAdminDashboardService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly CACHE_TTL = 30000; // 30 segundos
+  private readonly CACHE_TTL = 30000;
 
-  // Caché para endpoints de stats
   private dashboardStatsCache$: Observable<SuperAdminStats> | undefined;
   private dashboardStatsLastFetch = 0;
 
@@ -104,9 +129,7 @@ export class SuperAdminDashboardService {
         shareReplay({ bufferSize: 1, refCount: true }),
         catchError((error) => {
           console.error('Error fetching organizations stats:', error);
-          return throwError(
-            () => new Error('Failed to fetch organizations stats'),
-          );
+          return throwError(() => new Error('Failed to fetch organizations stats'));
         }),
       );
 
@@ -189,30 +212,6 @@ export class SuperAdminDashboardService {
     return this.rolesStatsCache$;
   }
 
-  // No cachear - datos en tiempo real
-  getPlatformHealth(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/health`).pipe(
-      catchError((error) => {
-        console.error('Error fetching platform health:', error);
-        return throwError(() => new Error('Failed to fetch platform health'));
-      }),
-    );
-  }
-
-  // No cachear - datos en tiempo real
-  getSystemMetrics(): Observable<any> {
-    return this.http.get(`${this.apiUrl}/admin/metrics`).pipe(
-      catchError((error) => {
-        console.error('Error fetching system metrics:', error);
-        return throwError(() => new Error('Failed to fetch system metrics'));
-      }),
-    );
-  }
-
-  /**
-   * Invalida todo el caché de estadísticas
-   * Útil después de crear/editar/eliminar entidades
-   */
   invalidateAllStatsCache(): void {
     this.dashboardStatsCache$ = undefined;
     this.dashboardStatsLastFetch = 0;

@@ -1,6 +1,13 @@
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateOrderDto } from './create-order.dto';
-import { IsOptional, IsDateString, IsString, MaxLength, IsInt, IsEnum } from 'class-validator';
+import {
+  IsOptional,
+  IsDateString,
+  IsString,
+  MaxLength,
+  IsInt,
+  IsEnum,
+} from 'class-validator';
 import { order_delivery_type_enum } from '@prisma/client';
 
 /**

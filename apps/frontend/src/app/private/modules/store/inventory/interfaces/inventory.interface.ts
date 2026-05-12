@@ -79,6 +79,8 @@ export interface InventoryLocation {
   code: string;
   type?: LocationType;
   is_active: boolean;
+  is_default?: boolean;
+  is_central_warehouse: boolean;
   address_id?: number;
   address?: Address;
   created_at?: string;
@@ -92,6 +94,7 @@ export interface CreateLocationDto {
   code: string;
   type?: LocationType;
   is_active?: boolean;
+  is_default?: boolean;
   address_id?: number;
   address?: Omit<Address, 'id'>;
 }

@@ -1,0 +1,35 @@
+meta {
+  name: Checkout Commit
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/commit
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "planId": {{plan_id}},
+    "returnUrl": "http://localhost:4200/admin/subscription"
+  }
+}
+
+vars:post-response {
+  subscription_id: res.body.data.subscription ? res.body.data.subscription.id : res.body.data.id
+  invoice_id: res.body.data.invoiceId ? res.body.data.invoiceId : null
+}
+
+tests {
+  test("Checkout commit successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.not.be.undefined;
+  });
+
+  test("Captured subscription ID", function() {
+    expect(bru.getVar("subscription_id")).to.not.be.undefined;
+  });
+}

@@ -1,4 +1,10 @@
-import { IsOptional, IsEnum, IsDateString, IsString, MaxLength } from 'class-validator';
+import {
+  IsOptional,
+  IsEnum,
+  IsDateString,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 
 export class UpdatePayrollRunDto {
   @IsOptional()

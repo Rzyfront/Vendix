@@ -2,10 +2,12 @@ import {
   Component,
   input,
   output,
+  model,
   inject,
   effect,
   DestroyRef,
   signal,
+  computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
@@ -17,7 +19,6 @@ import {
   IconComponent,
   ToastService,
 } from '../../../../../../shared/components';
-import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 import {
   StepsLineComponent,
   StepsLineItem,
@@ -61,12 +62,10 @@ interface AnalysisResult {
     ButtonComponent,
     IconComponent,
     StepsLineComponent,
-    SpinnerComponent,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [(isOpen)]="isOpen"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Carga Masiva al Pedido"
@@ -216,7 +215,7 @@ interface AnalysisResult {
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
-                [checked]="dontShowIntroAgain"
+                [checked]="dontShowIntroAgain()"
                 (change)="toggleDontShowAgain()"
                 class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
               />
@@ -356,8 +355,8 @@ interface AnalysisResult {
                 (dragleave)="onDragLeave($event)"
                 (drop)="onDrop($event)"
                 (click)="fileInput.click()"
-                [class.border-blue-500]="isDragging"
-                [class.bg-blue-50]="isDragging"
+                [class.border-blue-500]="isDragging()"
+                [class.bg-blue-50]="isDragging()"
               >
                 <input
                   #fileInput
@@ -367,12 +366,12 @@ interface AnalysisResult {
                   (change)="onFileSelected($event)"
                 />
 
-                @if (!selectedFile) {
+                @if (!selectedFile()) {
                   <app-icon
                     name="upload-cloud"
                     [size]="36"
                     class="mx-auto text-gray-400 mb-2"
-                    [class.text-blue-500]="isDragging"
+                    [class.text-blue-500]="isDragging()"
                   ></app-icon>
                   <p class="text-sm text-gray-900 font-medium">
                     Arrastra tu archivo Excel aquí
@@ -383,23 +382,23 @@ interface AnalysisResult {
                   </p>
                 }
 
-                @if (selectedFile) {
+                @if (selectedFile(); as file) {
                   <app-icon
                     name="file-spreadsheet"
                     [size]="36"
                     class="mx-auto text-green-500 mb-2"
                   ></app-icon>
                   <p class="text-sm text-gray-900 font-medium">
-                    {{ selectedFile.name }}
+                    {{ file.name }}
                   </p>
                   <p class="text-xs text-gray-500 mt-0.5">
-                    {{ formatFileSize(selectedFile.size) }}
+                    {{ formatFileSize(file.size) }}
                   </p>
                 }
               </div>
             </div>
 
-            @if (uploadError) {
+            @if (uploadError()) {
               <div
                 class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
               >
@@ -408,7 +407,7 @@ interface AnalysisResult {
                   [size]="14"
                   class="shrink-0 mt-0.5"
                 ></app-icon>
-                <p>{{ uploadError }}</p>
+                <p>{{ uploadError() }}</p>
               </div>
             }
           </div>
@@ -418,270 +417,272 @@ interface AnalysisResult {
         @if (currentStep() === 1) {
           <div class="space-y-3">
             @if (isProcessing()) {
-              <div class="py-8 flex flex-col items-center justify-center">
-                <app-spinner
-                  size="lg"
-                  [center]="true"
-                  class="mb-3"
-                ></app-spinner>
+              <div class="flex flex-col items-center justify-center py-8 gap-3">
+                <app-icon
+                  name="loader"
+                  [size]="36"
+                  class="text-primary animate-spin"
+                ></app-icon>
                 <p class="text-sm text-gray-900 font-medium">
                   Procesando archivo...
                 </p>
-                <p class="text-xs text-gray-500 mt-1">
+                <p class="text-xs text-gray-500">
                   Verificando productos y datos
                 </p>
               </div>
             }
 
-            @if (analysisResult && !isProcessing()) {
-              <div
-                class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible"
-              >
+            @if (analysisResult(); as result) {
+              @if (!isProcessing()) {
                 <div
-                  class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0"
+                  class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible"
                 >
-                  <div class="text-[10px] text-blue-600 font-medium">Total</div>
-                  <div class="text-xl font-bold text-blue-700">
-                    {{ analysisResult.total }}
+                  <div
+                    class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0"
+                  >
+                    <div class="text-[10px] text-blue-600 font-medium">Total</div>
+                    <div class="text-xl font-bold text-blue-700">
+                      {{ result.total }}
+                    </div>
+                  </div>
+                  <div
+                    class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0"
+                  >
+                    <div class="text-[10px] text-green-600 font-medium">
+                      Listos
+                    </div>
+                    <div class="text-xl font-bold text-green-700">
+                      {{ result.valid }}
+                    </div>
+                  </div>
+                  <div
+                    class="min-w-[100px] bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 shrink-0"
+                  >
+                    <div class="text-[10px] text-amber-600 font-medium">
+                      Advertencias
+                    </div>
+                    <div class="text-xl font-bold text-amber-700">
+                      {{ result.warnings }}
+                    </div>
+                  </div>
+                  <div
+                    class="min-w-[100px] bg-red-50 px-3 py-2 rounded-lg border border-red-100 shrink-0"
+                  >
+                    <div class="text-[10px] text-red-600 font-medium">
+                      Errores
+                    </div>
+                    <div class="text-xl font-bold text-red-700">
+                      {{ result.errors }}
+                    </div>
                   </div>
                 </div>
-                <div
-                  class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0"
-                >
-                  <div class="text-[10px] text-green-600 font-medium">
-                    Listos
-                  </div>
-                  <div class="text-xl font-bold text-green-700">
-                    {{ analysisResult.valid }}
-                  </div>
-                </div>
-                <div
-                  class="min-w-[100px] bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 shrink-0"
-                >
-                  <div class="text-[10px] text-amber-600 font-medium">
-                    Advertencias
-                  </div>
-                  <div class="text-xl font-bold text-amber-700">
-                    {{ analysisResult.warnings }}
-                  </div>
-                </div>
-                <div
-                  class="min-w-[100px] bg-red-50 px-3 py-2 rounded-lg border border-red-100 shrink-0"
-                >
-                  <div class="text-[10px] text-red-600 font-medium">
-                    Errores
-                  </div>
-                  <div class="text-xl font-bold text-red-700">
-                    {{ analysisResult.errors }}
-                  </div>
-                </div>
-              </div>
 
-              <!-- Detail table (desktop) -->
-              <div
-                class="hidden md:block border rounded-lg overflow-hidden mt-3"
-              >
-                <div class="max-h-52 overflow-y-auto">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50 sticky top-0">
-                      <tr>
-                        <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                        >
-                          Producto
-                        </th>
-                        <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                        >
-                          SKU
-                        </th>
-                        <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
-                        >
-                          Cantidad
-                        </th>
-                        <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
-                        >
-                          P. Compra
-                        </th>
-                        <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
-                        >
-                          P. Venta
-                        </th>
-                        <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                        >
-                          Estado
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-                      @for (item of analysisResult.items; track $index) {
+                <!-- Detail table (desktop) -->
+                <div
+                  class="hidden md:block border rounded-lg overflow-hidden mt-3"
+                >
+                  <div class="max-h-52 overflow-y-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                      <thead class="bg-gray-50 sticky top-0">
                         <tr>
-                          <td
-                            class="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate"
+                          <th
+                            class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                           >
-                            {{ item.name || '—' }}
-                          </td>
-                          <td
-                            class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
+                            Producto
+                          </th>
+                          <th
+                            class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                           >
-                            {{ item.sku || '—' }}
-                          </td>
-                          <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
+                            SKU
+                          </th>
+                          <th
+                            class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
                           >
-                            {{ item.quantity }}
-                          </td>
-                          <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
+                            Cantidad
+                          </th>
+                          <th
+                            class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
                           >
-                            {{
-                              item.cost_price
-                                | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                            }}
-                          </td>
-                          <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
+                            P. Compra
+                          </th>
+                          <th
+                            class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
                           >
-                            {{
-                              item.base_price
-                                | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                            }}
-                          </td>
-                          <td class="px-3 py-2 text-sm">
-                            <span
-                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
-                              [ngClass]="{
-                                'bg-green-100 text-green-800':
-                                  item.status === 'ready',
-                                'bg-amber-100 text-amber-800':
-                                  item.status === 'warning',
-                                'bg-red-100 text-red-800':
-                                  item.status === 'error',
-                              }"
+                            P. Venta
+                          </th>
+                          <th
+                            class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          >
+                            Estado
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody class="bg-white divide-y divide-gray-200">
+                        @for (item of result.items; track $index) {
+                          <tr>
+                            <td
+                              class="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate"
+                            >
+                              {{ item.name || '—' }}
+                            </td>
+                            <td
+                              class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
+                            >
+                              {{ item.sku || '—' }}
+                            </td>
+                            <td
+                              class="px-3 py-2 text-sm text-right text-gray-700"
+                            >
+                              {{ item.quantity }}
+                            </td>
+                            <td
+                              class="px-3 py-2 text-sm text-right text-gray-700"
                             >
                               {{
-                                item.status === 'ready'
-                                  ? 'Listo'
-                                  : item.status === 'warning'
-                                    ? 'Advertencia'
-                                    : 'Error'
+                                item.cost_price
+                                  | currency: 'COP' : 'symbol-narrow' : '1.0-0'
                               }}
-                            </span>
-                          </td>
-                        </tr>
-                        @if (
-                          item.warnings.length > 0 || item.errors.length > 0
-                        ) {
-                          <tr class="bg-gray-50">
-                            <td colspan="6" class="px-3 py-2">
-                              @for (warning of item.warnings; track warning) {
-                                <p
-                                  class="text-xs text-amber-700 flex items-start gap-1"
-                                >
-                                  <app-icon
-                                    name="alert-triangle"
-                                    [size]="12"
-                                    class="shrink-0 mt-0.5"
-                                  ></app-icon>
-                                  {{ warning }}
-                                </p>
-                              }
-                              @for (error of item.errors; track error) {
-                                <p
-                                  class="text-xs text-red-700 flex items-start gap-1"
-                                >
-                                  <app-icon
-                                    name="x-circle"
-                                    [size]="12"
-                                    class="shrink-0 mt-0.5"
-                                  ></app-icon>
-                                  {{ error }}
-                                </p>
-                              }
+                            </td>
+                            <td
+                              class="px-3 py-2 text-sm text-right text-gray-700"
+                            >
+                              {{
+                                item.base_price
+                                  | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                              }}
+                            </td>
+                            <td class="px-3 py-2 text-sm">
+                              <span
+                                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                                [ngClass]="{
+                                  'bg-green-100 text-green-800':
+                                    item.status === 'ready',
+                                  'bg-amber-100 text-amber-800':
+                                    item.status === 'warning',
+                                  'bg-red-100 text-red-800':
+                                    item.status === 'error',
+                                }"
+                              >
+                                {{
+                                  item.status === 'ready'
+                                    ? 'Listo'
+                                    : item.status === 'warning'
+                                      ? 'Advertencia'
+                                      : 'Error'
+                                }}
+                              </span>
                             </td>
                           </tr>
+                          @if (
+                            item.warnings.length > 0 || item.errors.length > 0
+                          ) {
+                            <tr class="bg-gray-50">
+                              <td colspan="6" class="px-3 py-2">
+                                @for (warning of item.warnings; track warning) {
+                                  <p
+                                    class="text-xs text-amber-700 flex items-start gap-1"
+                                  >
+                                    <app-icon
+                                      name="alert-triangle"
+                                      [size]="12"
+                                      class="shrink-0 mt-0.5"
+                                    ></app-icon>
+                                    {{ warning }}
+                                  </p>
+                                }
+                                @for (error of item.errors; track error) {
+                                  <p
+                                    class="text-xs text-red-700 flex items-start gap-1"
+                                  >
+                                    <app-icon
+                                      name="x-circle"
+                                      [size]="12"
+                                      class="shrink-0 mt-0.5"
+                                    ></app-icon>
+                                    {{ error }}
+                                  </p>
+                                }
+                              </td>
+                            </tr>
+                          }
                         }
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <!-- Mobile cards -->
-              <div
-                class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto"
-              >
-                @for (item of analysisResult.items; track $index) {
-                  <div class="border rounded-lg p-3 bg-white">
-                    <div class="flex items-center justify-between mb-2">
-                      <span
-                        class="text-sm font-medium text-gray-900 truncate mr-2"
-                        >{{ item.name || '—' }}</span
-                      >
-                      <span
-                        class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
-                        [ngClass]="{
-                          'bg-green-100 text-green-800':
-                            item.status === 'ready',
-                          'bg-amber-100 text-amber-800':
-                            item.status === 'warning',
-                          'bg-red-100 text-red-800': item.status === 'error',
-                        }"
-                      >
-                        {{
-                          item.status === 'ready'
-                            ? 'Listo'
-                            : item.status === 'warning'
-                              ? 'Advertencia'
-                              : 'Error'
-                        }}
-                      </span>
-                    </div>
-                    <p class="text-xs text-gray-500 font-mono mb-2">
-                      {{ item.sku || '—' }}
-                    </p>
-                    <div class="flex gap-3 text-xs text-gray-600">
-                      <span>Cant: {{ item.quantity }}</span>
-                      <span
-                        >Compra:
-                        {{
-                          item.cost_price
-                            | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                        }}</span
-                      >
-                      <span
-                        >Venta:
-                        {{
-                          item.base_price
-                            | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                        }}</span
-                      >
-                    </div>
-                    @if (item.warnings.length > 0 || item.errors.length > 0) {
-                      <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">
-                        @for (warning of item.warnings; track warning) {
-                          <p
-                            class="text-[11px] text-amber-700 flex items-start gap-1"
-                          >
-                            <span class="shrink-0">⚠</span> {{ warning }}
-                          </p>
-                        }
-                        @for (error of item.errors; track error) {
-                          <p
-                            class="text-[11px] text-red-700 flex items-start gap-1"
-                          >
-                            <span class="shrink-0">✗</span> {{ error }}
-                          </p>
-                        }
-                      </div>
-                    }
+                      </tbody>
+                    </table>
                   </div>
-                }
-              </div>
+                </div>
+
+                <!-- Mobile cards -->
+                <div
+                  class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto"
+                >
+                  @for (item of result.items; track $index) {
+                    <div class="border rounded-lg p-3 bg-white">
+                      <div class="flex items-center justify-between mb-2">
+                        <span
+                          class="text-sm font-medium text-gray-900 truncate mr-2"
+                          >{{ item.name || '—' }}</span
+                        >
+                        <span
+                          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+                          [ngClass]="{
+                            'bg-green-100 text-green-800':
+                              item.status === 'ready',
+                            'bg-amber-100 text-amber-800':
+                              item.status === 'warning',
+                            'bg-red-100 text-red-800': item.status === 'error',
+                          }"
+                        >
+                          {{
+                            item.status === 'ready'
+                              ? 'Listo'
+                              : item.status === 'warning'
+                                ? 'Advertencia'
+                                : 'Error'
+                          }}
+                        </span>
+                      </div>
+                      <p class="text-xs text-gray-500 font-mono mb-2">
+                        {{ item.sku || '—' }}
+                      </p>
+                      <div class="flex gap-3 text-xs text-gray-600">
+                        <span>Cant: {{ item.quantity }}</span>
+                        <span
+                          >Compra:
+                          {{
+                            item.cost_price
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}</span
+                        >
+                        <span
+                          >Venta:
+                          {{
+                            item.base_price
+                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                          }}</span
+                        >
+                      </div>
+                      @if (item.warnings.length > 0 || item.errors.length > 0) {
+                        <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                          @for (warning of item.warnings; track warning) {
+                            <p
+                              class="text-[11px] text-amber-700 flex items-start gap-1"
+                            >
+                              <span class="shrink-0">⚠</span> {{ warning }}
+                            </p>
+                          }
+                          @for (error of item.errors; track error) {
+                            <p
+                              class="text-[11px] text-red-700 flex items-start gap-1"
+                            >
+                              <span class="shrink-0">✗</span> {{ error }}
+                            </p>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+                </div>
+              }
             }
           </div>
         }
@@ -697,10 +698,10 @@ interface AnalysisResult {
                   Resumen de Importación
                 </h4>
                 <span class="text-xs text-gray-500"
-                  >{{ importedItems.length }} productos</span
+                  >{{ importedItems().length }} productos</span
                 >
               </div>
-              <div class="p-3">
+              <div class="p-3 space-y-3">
                 <div
                   class="bg-green-50 px-4 py-3 rounded-lg border border-green-100 flex items-center gap-3"
                 >
@@ -714,8 +715,19 @@ interface AnalysisResult {
                       Productos importados al pedido
                     </h4>
                     <p class="text-xs text-green-700">
-                      Se agregaron {{ importedItems.length }} productos al
+                      Se agregaron {{ importedItems().length }} productos al
                       pedido de compra.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-start gap-3">
+                  <app-icon name="package-plus" [size]="20" class="text-green-600 shrink-0 mt-0.5"></app-icon>
+                  <div class="flex-1 text-sm text-green-800">
+                    <p class="font-medium mb-1">Productos nuevos serán creados en el catálogo</p>
+                    <p class="text-xs text-green-700">
+                      Los productos que no existan en el catálogo se crearán automáticamente.
+                      Los productos existentes recibirán stock con costo trazable y respaldo contable.
                     </p>
                   </div>
                 </div>
@@ -756,7 +768,7 @@ interface AnalysisResult {
                     </tr>
                   </thead>
                   <tbody class="bg-white divide-y divide-gray-200">
-                    @for (item of importedItems; track $index) {
+                    @for (item of importedItems(); track $index) {
                       <tr>
                         <td
                           class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
@@ -805,7 +817,7 @@ interface AnalysisResult {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
-          @if (selectedFile) {
+          @if (selectedFile()) {
             <app-button variant="primary" (clicked)="analyzeFile()">
               <app-icon name="search" [size]="16" slot="icon"></app-icon>
               Analizar Archivo
@@ -817,10 +829,10 @@ interface AnalysisResult {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
-          @if (analysisResult && totalValidItems > 0) {
+          @if (analysisResult() && totalValidItems() > 0) {
             <app-button variant="primary" (clicked)="confirmImport()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Importar {{ totalValidItems }} Productos al Pedido
+              <app-icon name="package-plus" [size]="16" slot="icon"></app-icon>
+              Crear catálogo + ingresar mercancía ({{ totalValidItems() }})
             </app-button>
           }
         }
@@ -842,8 +854,7 @@ interface AnalysisResult {
 })
 export class PopBulkDataModalComponent {
   private destroyRef = inject(DestroyRef);
-  readonly isOpen = input(false);
-  readonly isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
   readonly dataLoaded = output<any[]>();
 
@@ -852,42 +863,43 @@ export class PopBulkDataModalComponent {
   private static readonly INTRO_TICK = 100;
 
   // Intro state
-  showingIntro = signal(false);
-  dontShowIntroAgain = false;
-  introProgress = signal(0);
-  introCountdown = signal(20);
+  readonly showingIntro = signal(false);
+  readonly dontShowIntroAgain = signal(false);
+  readonly introProgress = signal(0);
+  readonly introCountdown = signal(20);
   private introTimerId: ReturnType<typeof setInterval> | null = null;
   private introElapsed = 0;
 
   // Wizard state
-  steps: StepsLineItem[] = [
+  readonly steps: StepsLineItem[] = [
     { label: 'Preparar' },
     { label: 'Revisar' },
     { label: 'Confirmar' },
   ];
-  currentStep = signal(0);
+  readonly currentStep = signal(0);
 
   // File state
-  selectedFile: File | null = null;
-  isDragging = false;
+  readonly selectedFile = signal<File | null>(null);
+  readonly isDragging = signal(false);
 
   // Analysis state (client-side)
-  isProcessing = signal(false);
-  analysisResult: AnalysisResult | null = null;
+  readonly isProcessing = signal(false);
+  readonly analysisResult = signal<AnalysisResult | null>(null);
 
   // Import state
-  importedItems: any[] = [];
+  readonly importedItems = signal<any[]>([]);
 
   // Error state
-  uploadError: string | null = null;
+  readonly uploadError = signal<string | null>(null);
+
+  readonly totalValidItems = computed(() => {
+    const result = this.analysisResult();
+    if (!result) return 0;
+    return result.items.filter((i) => i.status !== 'error').length;
+  });
 
   private productsService = inject(ProductsService);
   private toastService = inject(ToastService);
-
-  get totalValidItems(): number {
-    if (!this.analysisResult) return 0;
-    return this.analysisResult.items.filter((i) => i.status !== 'error').length;
-  }
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.clearIntroTimer());
@@ -953,14 +965,14 @@ export class PopBulkDataModalComponent {
 
   skipIntro() {
     this.clearIntroTimer();
-    if (this.dontShowIntroAgain) {
+    if (this.dontShowIntroAgain()) {
       localStorage.setItem(PopBulkDataModalComponent.INTRO_CACHE_KEY, 'true');
     }
     this.showingIntro.set(false);
   }
 
   toggleDontShowAgain() {
-    this.dontShowIntroAgain = !this.dontShowIntroAgain;
+    this.dontShowIntroAgain.update((v) => !v);
   }
 
   // Navigation
@@ -970,7 +982,7 @@ export class PopBulkDataModalComponent {
 
   onCancel() {
     this.close.emit();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.resetState();
   }
 
@@ -980,12 +992,12 @@ export class PopBulkDataModalComponent {
     this.introProgress.set(0);
     this.introElapsed = 0;
     this.currentStep.set(0);
-    this.selectedFile = null;
-    this.isDragging = false;
+    this.selectedFile.set(null);
+    this.isDragging.set(false);
     this.isProcessing.set(false);
-    this.analysisResult = null;
-    this.importedItems = [];
-    this.uploadError = null;
+    this.analysisResult.set(null);
+    this.importedItems.set([]);
+    this.uploadError.set(null);
   }
 
   // Step 0: File operations
@@ -1011,19 +1023,19 @@ export class PopBulkDataModalComponent {
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = true;
+    this.isDragging.set(true);
   }
 
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
   }
 
   onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
       this.validateAndSetFile(files[0]);
@@ -1050,8 +1062,8 @@ export class PopBulkDataModalComponent {
       this.toastService.error('El archivo excede el límite de 5 MB');
       return;
     }
-    this.selectedFile = file;
-    this.uploadError = null;
+    this.selectedFile.set(file);
+    this.uploadError.set(null);
   }
 
   formatFileSize(bytes: number): string {
@@ -1064,10 +1076,11 @@ export class PopBulkDataModalComponent {
 
   // Step 0 -> 1: Analyze file client-side
   analyzeFile() {
-    if (!this.selectedFile) return;
+    const file = this.selectedFile();
+    if (!file) return;
 
     this.isProcessing.set(true);
-    this.uploadError = null;
+    this.uploadError.set(null);
     this.currentStep.set(1);
 
     const reader = new FileReader();
@@ -1183,13 +1196,13 @@ export class PopBulkDataModalComponent {
         const withWarnings = items.filter((i) => i.status === 'warning').length;
         const withErrors = items.filter((i) => i.status === 'error').length;
 
-        this.analysisResult = {
+        this.analysisResult.set({
           total: items.length,
           valid,
           warnings: withWarnings,
           errors: withErrors,
           items,
-        };
+        });
 
         this.isProcessing.set(false);
 
@@ -1200,24 +1213,27 @@ export class PopBulkDataModalComponent {
         }
       } catch (err) {
         console.error('Error parsing file:', err);
-        this.uploadError = 'Error al procesar el archivo. Verifica el formato.';
+        this.uploadError.set(
+          'Error al procesar el archivo. Verifica el formato.',
+        );
         this.toastService.error('Error al procesar el archivo');
         this.isProcessing.set(false);
         this.currentStep.set(0);
       }
     };
 
-    reader.readAsBinaryString(this.selectedFile);
+    reader.readAsBinaryString(file);
   }
 
   confirmImport() {
-    if (!this.analysisResult) return;
+    const result = this.analysisResult();
+    if (!result) return;
 
-    const validItems = this.analysisResult.items
+    const validItems = result.items
       .filter((i) => i.status !== 'error')
       .map(({ status, warnings, errors, ...item }) => item);
 
-    this.importedItems = validItems;
+    this.importedItems.set(validItems);
     this.currentStep.set(2);
     this.dataLoaded.emit(validItems);
     this.toastService.success(

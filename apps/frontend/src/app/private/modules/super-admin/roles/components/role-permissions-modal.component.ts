@@ -283,7 +283,7 @@ export class RolePermissionsModalComponent implements OnInit, OnChanges {
   });
   selectedPermissions = signal<number[]>([]);
   isLoading = signal(false);
-  searchSubject = new Subject<string>();
+  searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
   private rolesService = inject(RolesService);
 
   availableModules: SelectorOption[] = [

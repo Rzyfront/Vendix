@@ -1,0 +1,61 @@
+meta {
+  name: Get Dunning State
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{url}}/store/subscriptions/current/dunning-state
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Returns 200 with dunning snapshot", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an("object");
+  });
+
+  test("Snapshot has expected shape", function() {
+    const data = res.body.data;
+    expect(data).to.have.property("state");
+    expect(data).to.have.property("deadlines");
+    expect(data.deadlines).to.have.all.keys(
+      "grace_hard_at",
+      "suspend_at",
+      "cancel_at",
+    );
+    expect(data).to.have.property("invoices_overdue");
+    expect(data.invoices_overdue).to.be.an("array");
+    expect(data).to.have.property("total_due");
+    expect(data.total_due).to.be.a("number");
+    expect(data).to.have.property("features_lost");
+    expect(data.features_lost).to.be.an("array");
+    expect(data).to.have.property("features_kept");
+    expect(data.features_kept).to.be.an("array");
+  });
+
+  test("Active or trial states return null deadlines", function() {
+    const data = res.body.data;
+    if (data.state === "active" || data.state === "trial") {
+      expect(data.deadlines.grace_hard_at).to.be.null;
+      expect(data.deadlines.suspend_at).to.be.null;
+      expect(data.deadlines.cancel_at).to.be.null;
+      expect(data.total_due).to.equal(0);
+    }
+  });
+
+  test("Dunning states surface deadlines and overdue invoices", function() {
+    const data = res.body.data;
+    const dunning = ["grace_soft", "grace_hard", "suspended", "blocked"];
+    if (dunning.includes(data.state)) {
+      expect(data.deadlines.grace_hard_at).to.be.a("string");
+      expect(data.deadlines.suspend_at).to.be.a("string");
+      expect(data.deadlines.cancel_at).to.be.a("string");
+      // total_due is the sum of pending invoices; allow zero only when no
+      // invoice has been issued yet.
+      expect(data.total_due).to.be.at.least(0);
+    }
+  });
+}

@@ -7,7 +7,7 @@ import { payment_methods_type_enum, fee_type_enum } from '@prisma/client';
 
 describe('SystemPaymentMethodsService', () => {
   let service: SystemPaymentMethodsService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   const mockSystemPaymentMethod = {
     id: 1,
@@ -61,7 +61,7 @@ describe('SystemPaymentMethodsService', () => {
       providers: [
         SystemPaymentMethodsService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
@@ -70,7 +70,7 @@ describe('SystemPaymentMethodsService', () => {
     service = module.get<SystemPaymentMethodsService>(
       SystemPaymentMethodsService,
     );
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {

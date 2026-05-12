@@ -5,3 +5,4 @@ export * from './cancel-order.dto';
 export * from './refund-order.dto';
 export * from './create-refund.dto';
 export * from './cancel-payment.dto';
+export * from './fast-track-order.dto';

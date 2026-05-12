@@ -31,7 +31,7 @@ export class OrganizationsController {
   constructor(
     private readonly adminOrganizationsService: OrganizationsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new organization' })

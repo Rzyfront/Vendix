@@ -1,0 +1,32 @@
+meta {
+  name: 06 POST deactivate invoicing
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/deactivate
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("returns INACTIVE or DEACTIVATION_BLOCKED", function () {
+    expect(res.status).to.be.oneOf([200, 201, 409]);
+    if (res.status === 200 || res.status === 201) {
+      const body = res.body.data || res.body;
+      expect(body.fiscal_status.invoicing.state).to.be.oneOf(['INACTIVE', 'LOCKED']);
+    } else {
+      const body = res.body;
+      expect(body.error?.code || body.code).to.equal('FISCAL_STATUS_DEACTIVATION_BLOCKED');
+    }
+  });
+}

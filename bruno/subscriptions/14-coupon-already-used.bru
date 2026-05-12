@@ -1,0 +1,32 @@
+meta {
+  name: Coupon Already Used
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/validate-coupon
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "code": "{{coupon_code_valid}}"
+  }
+}
+
+tests {
+  test("Validation HTTP succeeded", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Coupon flagged as already_used", function() {
+    // Run AFTER 13-coupon-redeem-checkout so the coupon is already applied
+    // to this store. The validator should detect the existing
+    // promotional_plan_id and short-circuit.
+    expect(res.body.data.valid).to.be.false;
+    expect(res.body.data.reason).to.equal('already_used');
+  });
+}

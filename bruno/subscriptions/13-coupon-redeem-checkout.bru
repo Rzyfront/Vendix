@@ -1,0 +1,46 @@
+meta {
+  name: Coupon Redeem at Checkout Commit
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/commit
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "planId": {{plan_id}},
+    "coupon_code": "{{coupon_code_valid}}",
+    "no_refund_acknowledged": true,
+    "returnUrl": "http://localhost:4200/admin/subscription"
+  }
+}
+
+vars:post-response {
+  subscription_id: res.body.data.subscription ? res.body.data.subscription.id : res.body.data.id
+}
+
+tests {
+  test("Commit successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Subscription captured", function() {
+    expect(bru.getVar("subscription_id")).to.not.be.undefined;
+  });
+
+  test("Coupon overlay applied (resolved_features non-empty)", function() {
+    // For free plans the apply runs synchronously so resolved_features is
+    // already enriched. For paid plans the listener applies it after the
+    // webhook lands; this assertion only fires when the response includes
+    // the activated subscription (free plan path).
+    const sub = res.body.data.subscription || res.body.data;
+    if (sub && sub.state === 'active' && sub.resolved_features) {
+      expect(Object.keys(sub.resolved_features).length).to.be.greaterThan(0);
+    }
+  });
+}

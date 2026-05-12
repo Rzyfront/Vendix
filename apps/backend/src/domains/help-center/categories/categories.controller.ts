@@ -10,7 +10,9 @@ export class CategoriesController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'List active help article categories with article count' })
+  @ApiOperation({
+    summary: 'List active help article categories with article count',
+  })
   async findAll() {
     return this.categories_service.findAll();
   }

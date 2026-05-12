@@ -22,9 +22,15 @@ export interface PosShippingAddress {
 
 export interface PosShippingOption {
   id: number;
+  /** Rate identifier — semantic alias of `id`, returned by backend calculator. */
+  rate_id?: number;
   method_id: number;
   method_name: string;
   method_type: string;
+  /** Optional human-readable rate name (often same as method_name). */
+  rate_name?: string;
+  /** Optional zone label resolved by the calculator. */
+  zone_name?: string;
   cost: number;
   currency: string;
   estimated_days?: { min: number; max: number };

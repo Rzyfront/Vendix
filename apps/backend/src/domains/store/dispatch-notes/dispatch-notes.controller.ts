@@ -47,10 +47,7 @@ export class DispatchNotesController {
   @Permissions('store:dispatch_notes:create')
   async create(@Body() dto: CreateDispatchNoteDto) {
     const result = await this.dispatchNotesService.create(dto);
-    return this.responseService.created(
-      result,
-      'Remisión creada exitosamente',
-    );
+    return this.responseService.created(result, 'Remisión creada exitosamente');
   }
 
   @Get('stats')
@@ -115,7 +112,8 @@ export class DispatchNotesController {
   @Get('reports/profitability')
   @Permissions('store:dispatch_notes:read')
   async getProfitabilityReport(@Query() query: DispatchNoteQueryDto) {
-    const result = await this.dispatchNotesService.getProfitabilityReport(query);
+    const result =
+      await this.dispatchNotesService.getProfitabilityReport(query);
     return this.responseService.success(
       result,
       'Reporte de rentabilidad obtenido',

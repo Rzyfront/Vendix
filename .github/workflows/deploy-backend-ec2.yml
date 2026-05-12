@@ -121,6 +121,33 @@ jobs:
           CORS_ORIGIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('CORS_ORIGIN', ''))")
           ADDITIONAL_CORS_ORIGINS=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('ADDITIONAL_CORS_ORIGINS', ''))")
 
+          echo "🔧 Ensuring Redis env vars are in /opt/vendix/.env..."
+          sudo grep -q '^REDIS_HOST=' /opt/vendix/.env || echo 'REDIS_HOST=vendix-redis' | sudo tee -a /opt/vendix/.env > /dev/null
+          sudo grep -q '^REDIS_PORT=' /opt/vendix/.env || echo 'REDIS_PORT=6379' | sudo tee -a /opt/vendix/.env > /dev/null
+
+          echo "🌐 Ensuring vendix-net network exists..."
+          sudo docker network inspect vendix-net >/dev/null 2>&1 || sudo docker network create vendix-net
+
+          echo "🧬 Running Prisma migrations before app start..."
+          sudo docker run --rm \
+            --memory=768m \
+            --network=host \
+            --env-file /opt/vendix/.env \
+            -e DATABASE_URL="\$DATABASE_URL" \
+            $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            sh -c "npx prisma migrate deploy && node -e \"const {Prisma}=require('@prisma/client'); const models=Prisma.dmmf.datamodel.models; const has=(model,field)=>models.find(m=>m.name===model)?.fields.some(f=>f.name===field); const hasModel=(model)=>models.some(m=>m.name===model); const missing=[]; if(!has('organizations','fiscal_scope')) missing.push('organizations.fiscal_scope'); if(!has('accounting_entities','fiscal_scope')) missing.push('accounting_entities.fiscal_scope'); if(!has('dian_configurations','accounting_entity_id')) missing.push('dian_configurations.accounting_entity_id'); if(!hasModel('fiscal_scope_audit_log')) missing.push('fiscal_scope_audit_log'); if(missing.length){throw new Error('Generated Prisma Client is missing fiscal-scope schema: '+missing.join(', '));}\""
+          echo "✅ Migrations and Prisma Client smoke-check completed!"
+
+          echo "🗄️  Ensuring vendix-redis container is running..."
+          if ! sudo docker ps --filter name=^/vendix-redis$ --filter status=running -q | grep -q .; then
+            sudo docker rm -f vendix-redis 2>/dev/null || true
+            sudo docker run -d --name vendix-redis \\
+              --network vendix-net \\
+              --restart unless-stopped \\
+              -v vendix-redis-data:/data \\
+              redis:7-alpine redis-server --appendonly yes --save 60 1000
+          fi
+
           echo "🛑 Stopping current container..."
           sudo docker stop vendix-backend || true
           sudo docker rm vendix-backend || true
@@ -128,6 +155,7 @@ jobs:
           echo "🚀 Starting new container..."
           sudo docker run -d \\
             --name vendix-backend \\
+            --network vendix-net \\
             --restart unless-stopped \\
             -p 3000:3000 \\
             --env-file /opt/vendix/.env \\
@@ -139,7 +167,7 @@ jobs:
             -e ADDITIONAL_CORS_ORIGINS="\$ADDITIONAL_CORS_ORIGINS" \\
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-          echo "⏳ Waiting for container to start and run migrations (40s)..."
+          echo "⏳ Waiting for container to start (40s)..."
           sleep 40
 
           echo "🔍 Checking if container is running..."

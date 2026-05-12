@@ -1,0 +1,50 @@
+meta {
+  name: Retry Payment
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{url}}/store/subscriptions/retry-payment
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Returns 200 or 400 (no payable invoice)", function() {
+    expect(res.status).to.be.oneOf([200, 400, 402, 403, 404]);
+  });
+
+  test("On success, response carries payment_id and invoice_id", function() {
+    if (res.status === 200) {
+      expect(res.body.success).to.be.true;
+      expect(res.body.data).to.have.property("payment_id");
+      expect(res.body.data).to.have.property("invoice_id");
+      expect(res.body.data).to.have.property("state");
+    }
+  });
+
+  test("On 400 the error code is DUNNING_001", function() {
+    if (res.status === 400) {
+      const code =
+        res.body?.error_code ||
+        res.body?.error?.code ||
+        res.body?.code;
+      expect(code).to.equal("DUNNING_001");
+    }
+  });
+
+  test("On 404 the error relates to subscription", function() {
+    if (res.status === 404) {
+      const code =
+        res.body?.error_code ||
+        res.body?.error?.code ||
+        res.body?.code;
+      expect(code).to.match(/^SUBSCRIPTION_/);
+    }
+  });
+}

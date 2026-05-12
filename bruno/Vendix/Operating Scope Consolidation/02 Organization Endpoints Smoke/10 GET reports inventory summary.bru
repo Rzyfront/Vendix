@@ -1,0 +1,23 @@
+meta {
+  name: 10 GET reports inventory summary
+  type: http
+  seq: 10
+}
+
+# /organization/reports/inventory does not have a root GET; closest is /summary.
+
+get {
+  url: http://{{url}}/organization/reports/inventory/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

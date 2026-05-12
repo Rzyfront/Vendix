@@ -212,16 +212,27 @@ export class ProductsService {
       // Consultation validation
       if (createProductDto.is_consultation) {
         if (createProductDto.product_type !== ProductType.SERVICE) {
-          throw new BadRequestException('Solo los servicios pueden ser consultas');
+          throw new BadRequestException(
+            'Solo los servicios pueden ser consultas',
+          );
         }
         if (!createProductDto.requires_booking) {
-          throw new BadRequestException('Las consultas requieren reserva previa');
+          throw new BadRequestException(
+            'Las consultas requieren reserva previa',
+          );
         }
         if (!createProductDto.consultation_template_id) {
-          throw new BadRequestException('Las consultas requieren una plantilla de consulta');
+          throw new BadRequestException(
+            'Las consultas requieren una plantilla de consulta',
+          );
         }
-        if (createProductDto.send_preconsultation && !createProductDto.preconsultation_template_id) {
-          throw new BadRequestException('Si se envía preconsulta, se requiere una plantilla de preconsulta');
+        if (
+          createProductDto.send_preconsultation &&
+          !createProductDto.preconsultation_template_id
+        ) {
+          throw new BadRequestException(
+            'Si se envía preconsulta, se requiere una plantilla de preconsulta',
+          );
         }
       }
       if (createProductDto.is_consultation === false) {
@@ -267,8 +278,7 @@ export class ProductsService {
           // Crear variantes si se proporcionan
           if (variants && variants.length > 0) {
             for (const variantData of variants) {
-              const { variant_image_url, ...variantFields } =
-                variantData as CreateVariantWithStockDto;
+              const { variant_image_url, ...variantFields } = variantData;
               const createdVariant =
                 await this.productVariantService.createVariant(
                   product.id,
@@ -660,6 +670,7 @@ export class ProductsService {
           ...(include_stock && {
             stock_levels: {
               select: {
+                product_variant_id: true,
                 quantity_available: true,
                 quantity_reserved: true,
                 inventory_locations: {
@@ -679,7 +690,15 @@ export class ProductsService {
                 sku: true,
                 price_override: true,
                 cost_price: true,
+                profit_margin: true,
+                is_on_sale: true,
+                sale_price: true,
                 stock_quantity: true,
+                track_inventory_override: true,
+                service_duration_minutes: true,
+                service_pricing_type: true,
+                buffer_minutes: true,
+                preparation_time_minutes: true,
                 attributes: true,
                 name: true,
                 stock_levels: {
@@ -725,11 +744,8 @@ export class ProductsService {
 
           // Map variant data for POS
           const product_variants =
-            (product as any).product_variants?.map((variant: any) => {
-              const variantStock =
-                variant.stock_levels?.[0]?.quantity_available ??
-                variant.stock_quantity ??
-                0;
+            product.product_variants?.map((variant: any) => {
+              const variantStock = this.sumVariantStock(variant);
               const variantImageUrl = variant.product_images?.image_url || null;
 
               return {
@@ -742,8 +758,18 @@ export class ProductsService {
                 cost_price: variant.cost_price
                   ? Number(variant.cost_price)
                   : null,
+                profit_margin: variant.profit_margin
+                  ? Number(variant.profit_margin)
+                  : null,
+                is_on_sale: variant.is_on_sale,
+                sale_price: variant.sale_price ? Number(variant.sale_price) : null,
                 stock: variantStock,
                 stock_quantity: variantStock,
+                track_inventory_override: variant.track_inventory_override,
+                service_duration_minutes: variant.service_duration_minutes,
+                service_pricing_type: variant.service_pricing_type,
+                buffer_minutes: variant.buffer_minutes,
+                preparation_time_minutes: variant.preparation_time_minutes,
                 image_url: variantImageUrl,
                 attributes: this.parseVariantAttributes(variant.attributes),
               };
@@ -812,26 +838,34 @@ export class ProductsService {
       };
     }
 
-    // Calcular stock totals dinámicamente para cada producto
+    // Calcular stock totals dinámicamente para cada producto.
+    // Cuando el producto tiene variantes, excluir filas base para no duplicar stock.
     const productsWithStock = await Promise.all(
       products.map(async (product) => {
-        const totalStockAvailable =
-          product.stock_levels?.reduce(
-            (sum, stock) => sum + stock.quantity_available,
-            0,
-          ) || 0;
-        const totalStockReserved =
-          product.stock_levels?.reduce(
-            (sum, stock) => sum + stock.quantity_reserved,
-            0,
-          ) || 0;
+        const hasVariants =
+          (product._count?.product_variants ??
+            product.product_variants?.length ??
+            0) > 0;
+        const stockLevelsForTotals = hasVariants
+          ? product.stock_levels?.filter(
+              (sl: any) => sl.product_variant_id !== null,
+            ) || []
+          : product.stock_levels || [];
+        const totalStockAvailable = stockLevelsForTotals.reduce(
+          (sum: number, stock: any) => sum + stock.quantity_available,
+          0,
+        );
+        const totalStockReserved = stockLevelsForTotals.reduce(
+          (sum: number, stock: any) => sum + stock.quantity_reserved,
+          0,
+        );
 
         const raw_image_url = product.product_images?.[0]?.image_url || null;
         const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
         // Map variant data when requested
         const mapped_variants = include_variants
-          ? (product as any).product_variants?.map((variant: any) => ({
+          ? product.product_variants?.map((variant: any) => ({
               id: variant.id,
               name: variant.name,
               sku: variant.sku,
@@ -841,10 +875,17 @@ export class ProductsService {
               cost_price: variant.cost_price
                 ? Number(variant.cost_price)
                 : null,
-              stock_quantity:
-                variant.stock_levels?.[0]?.quantity_available ??
-                variant.stock_quantity ??
-                0,
+              profit_margin: variant.profit_margin
+                ? Number(variant.profit_margin)
+                : null,
+              is_on_sale: variant.is_on_sale,
+              sale_price: variant.sale_price ? Number(variant.sale_price) : null,
+              stock_quantity: this.sumVariantStock(variant),
+              track_inventory_override: variant.track_inventory_override,
+              service_duration_minutes: variant.service_duration_minutes,
+              service_pricing_type: variant.service_pricing_type,
+              buffer_minutes: variant.buffer_minutes,
+              preparation_time_minutes: variant.preparation_time_minutes,
               attributes: this.parseVariantAttributes(variant.attributes),
             })) || []
           : undefined;
@@ -975,6 +1016,7 @@ export class ProductsService {
         },
         stock_levels: {
           select: {
+            product_variant_id: true,
             quantity_available: true,
             quantity_reserved: true,
             reorder_point: true,
@@ -1006,12 +1048,21 @@ export class ProductsService {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
-    // Calcular stock totals dinámicamente
-    const totalStockAvailable = product.stock_levels.reduce(
+    // Calcular stock totals dinámicamente.
+    // Si el producto tiene variantes, sumar solo filas de variantes (excluir base)
+    // para evitar contar stock base huérfano dos veces.
+    const hasVariants =
+      (product._count?.product_variants ??
+        product.product_variants?.length ??
+        0) > 0;
+    const stockLevelsForTotals = hasVariants
+      ? product.stock_levels.filter((sl: any) => sl.product_variant_id !== null)
+      : product.stock_levels;
+    const totalStockAvailable = stockLevelsForTotals.reduce(
       (sum, stock) => sum + stock.quantity_available,
       0,
     );
-    const totalStockReserved = product.stock_levels.reduce(
+    const totalStockReserved = stockLevelsForTotals.reduce(
       (sum, stock) => sum + stock.quantity_reserved,
       0,
     );
@@ -1125,6 +1176,22 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
+      // BLOCK: Check for active stock reservations on the product itself
+      const hasActiveReservations =
+        await this.prisma.stock_reservations.findFirst({
+          where: {
+            product_id: id,
+            product_variant_id: null,
+            status: 'active',
+          },
+        });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot modify product with active stock reservations. Release reservations first.',
+        );
+      }
+
       // Si se actualiza el slug, verificar que sea único dentro de la tienda
       if (updateProductDto.slug) {
         const existingSlug = await this.prisma.products.findFirst({
@@ -1162,6 +1229,22 @@ export class ProductsService {
         }
       }
 
+      // BLOCK: cannot change to SERVICE if existing variants present
+      if (
+        updateProductDto.product_type === ProductType.SERVICE &&
+        existingProduct.product_type !== ProductType.SERVICE
+      ) {
+        const existingVariantCount = await this.prisma.product_variants.count({
+          where: { product_id: id },
+        });
+        if (existingVariantCount > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_SVC_HAS_VARIANTS_001,
+            'No se puede cambiar a SERVICE un producto con variantes existentes',
+          );
+        }
+      }
+
       // Obtener contexto al inicio
       const context = RequestContextService.getContext();
       const user_id = context?.user_id;
@@ -1177,22 +1260,41 @@ export class ProductsService {
 
       // Consultation validation (only when explicitly setting is_consultation)
       if (updateProductDto.is_consultation === true) {
-        const effectiveProductType = updateProductDto.product_type ?? (existingProduct as any).product_type;
+        const effectiveProductType =
+          updateProductDto.product_type ?? existingProduct.product_type;
         if (effectiveProductType !== ProductType.SERVICE) {
-          throw new BadRequestException('Solo los servicios pueden ser consultas');
+          throw new BadRequestException(
+            'Solo los servicios pueden ser consultas',
+          );
         }
-        const effectiveRequiresBooking = updateProductDto.requires_booking ?? (existingProduct as any).requires_booking;
+        const effectiveRequiresBooking =
+          updateProductDto.requires_booking ?? existingProduct.requires_booking;
         if (!effectiveRequiresBooking) {
-          throw new BadRequestException('Las consultas requieren reserva previa');
+          throw new BadRequestException(
+            'Las consultas requieren reserva previa',
+          );
         }
-        const effectiveTemplateId = updateProductDto.consultation_template_id ?? (existingProduct as any).consultation_template_id;
+        const effectiveTemplateId =
+          updateProductDto.consultation_template_id ??
+          existingProduct.consultation_template_id;
         if (!effectiveTemplateId) {
-          throw new BadRequestException('Las consultas requieren una plantilla de consulta');
+          throw new BadRequestException(
+            'Las consultas requieren una plantilla de consulta',
+          );
         }
-        const effectiveSendPreconsultation = updateProductDto.send_preconsultation ?? (existingProduct as any).send_preconsultation;
-        const effectivePreconsultationTemplateId = updateProductDto.preconsultation_template_id ?? (existingProduct as any).preconsultation_template_id;
-        if (effectiveSendPreconsultation && !effectivePreconsultationTemplateId) {
-          throw new BadRequestException('Si se envía preconsulta, se requiere una plantilla de preconsulta');
+        const effectiveSendPreconsultation =
+          updateProductDto.send_preconsultation ??
+          existingProduct.send_preconsultation;
+        const effectivePreconsultationTemplateId =
+          updateProductDto.preconsultation_template_id ??
+          existingProduct.preconsultation_template_id;
+        if (
+          effectiveSendPreconsultation &&
+          !effectivePreconsultationTemplateId
+        ) {
+          throw new BadRequestException(
+            'Si se envía preconsulta, se requiere una plantilla de preconsulta',
+          );
         }
       }
       if (updateProductDto.is_consultation === false) {
@@ -1210,9 +1312,10 @@ export class ProductsService {
         stock_by_location,
         variants,
         stock_transfer_mode,
+        variant_removal_stock_mode,
         price, // Exclude as it's not in DB
         ...productData
-      } = updateProductDto;
+      } = updateProductDto as UpdateProductDto & { price?: number };
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -1354,6 +1457,24 @@ export class ProductsService {
             const isTransitionToVariants =
               allExistingVariants.length === 0 && variants.length > 0;
 
+            // BLOCK: Actually CHANGING track_inventory value (not just echoing it) when
+            // variants exist requires explicit stock_transfer_mode. Comparing against
+            // existingProduct avoids false positives when the frontend always sends the
+            // current value in the payload.
+            if (
+              updateProductDto.track_inventory !== undefined &&
+              updateProductDto.track_inventory !==
+                existingProduct.track_inventory &&
+              allExistingVariants.length > 0
+            ) {
+              if (!updateProductDto.stock_transfer_mode) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_VALIDATE_001,
+                  'Changing track_inventory with existing variants requires explicit stock_transfer_mode',
+                );
+              }
+            }
+
             // If transitioning, transfer/distribute base stock to variants
             let inheritedLocationIds: number[] = [];
             if (isTransitionToVariants) {
@@ -1379,6 +1500,29 @@ export class ProductsService {
 
                 if (existingVariant) {
                   tempVariantIds.push(existingVariant.id);
+                }
+              }
+
+              // BLOCK: Transitioning simple→variants with existing base stock requires
+              // explicit stock_transfer_mode. 'reset' is forbidden (would wipe stock);
+              // only 'first' or 'distribute' actually transfer the base stock to variants.
+              const baseStockSum = await prisma.stock_levels.aggregate({
+                where: { product_id: id, product_variant_id: null },
+                _sum: { quantity_on_hand: true },
+              });
+              const baseStockTotal = baseStockSum._sum.quantity_on_hand ?? 0;
+              if (baseStockTotal > 0) {
+                if (!updateProductDto.stock_transfer_mode) {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    'El producto tiene stock base. Elige cómo distribuirlo entre las variantes (first | distribute).',
+                  );
+                }
+                if (updateProductDto.stock_transfer_mode === 'reset') {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    "No puedes descartar stock al activar variantes. Usa 'first' o 'distribute' para transferirlo.",
+                  );
                 }
               }
 
@@ -1498,11 +1642,39 @@ export class ProductsService {
               }
             }
 
-            // Before deleting variants: transfer their stock to base product
+            // Before deleting variants: check for active reservations and stock
             const variantsToDelete = allExistingVariants.filter(
               (ev) => !keptVariantIds.has(ev.id),
             );
             if (variantsToDelete.length > 0 && allExistingVariants.length > 0) {
+              // BLOCK: Deleting variants with stock requires explicit variant_removal_stock_mode
+              for (const vt of variantsToDelete) {
+                const variantStock = await prisma.stock_levels.aggregate({
+                  where: { product_variant_id: vt.id },
+                  _sum: { quantity_on_hand: true },
+                });
+                const hasStock = (variantStock._sum.quantity_on_hand ?? 0) > 0;
+
+                // Check for active reservations
+                const hasActiveReservations =
+                  await prisma.stock_reservations.findFirst({
+                    where: {
+                      product_variant_id: vt.id,
+                      status: 'active',
+                    },
+                  });
+
+                if (
+                  (hasStock || hasActiveReservations) &&
+                  !updateProductDto.variant_removal_stock_mode
+                ) {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    'Deleting variants with stock or active reservations requires explicit variant_removal_stock_mode',
+                  );
+                }
+              }
+
               const allVariantsDeleting =
                 variantsToDelete.length === allExistingVariants.length;
               if (allVariantsDeleting) {
@@ -1579,8 +1751,9 @@ export class ProductsService {
               }
             }
 
-            // Sync product stock from remaining variants
-            await this.stockLevelManager.syncProductStock(prisma, id);
+            // Enforce stock_levels mode: eliminar filas base huérfanas si hay variantes.
+            // Invariante: producto con variantes no mantiene filas (product_variant_id IS NULL).
+            await this.stockLevelManager.enforceStockLevelsMode(prisma, id);
           }
 
           // Guard: skip base stock updates when product has variants
@@ -2011,6 +2184,19 @@ export class ProductsService {
       attribute_name: key,
       attribute_value: String(value),
     }));
+  }
+
+  private sumVariantStock(variant: any): number {
+    if (
+      Array.isArray(variant?.stock_levels) &&
+      variant.stock_levels.length > 0
+    ) {
+      return variant.stock_levels.reduce(
+        (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
+        0,
+      );
+    }
+    return variant?.stock_quantity ?? 0;
   }
 
   private async signProductImage(

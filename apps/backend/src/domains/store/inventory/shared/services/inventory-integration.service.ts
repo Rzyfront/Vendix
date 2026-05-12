@@ -143,6 +143,7 @@ export class InventoryIntegrationService {
               0,
               stockLevel.quantity_reserved - releaseQuantity,
             ),
+            quantity_available: stockLevel.quantity_available + releaseQuantity,
             last_updated: new Date(),
           },
         });
@@ -243,41 +244,59 @@ export class InventoryIntegrationService {
     locationId?: number,
     productVariantId?: number,
   ): Promise<number> {
-    const where: any = {
-      organization_id: organizationId,
+    const stockWhere: any = {
       product_id: productId,
-      product_variant_id: productVariantId,
-      movement_type: 'stock_in',
+      product_variant_id: productVariantId ?? null,
+      quantity_on_hand: { gt: 0 },
+      inventory_locations: { organization_id: organizationId },
     };
 
-    if (locationId) {
-      where.to_location_id = locationId;
-    }
+    if (locationId) stockWhere.location_id = locationId;
 
-    const movements = await this.prisma.inventory_movements.findMany({
-      where,
-      orderBy: {
-        created_at: 'desc',
-      },
-      take: 100, // Consider last 100 movements for calculation
+    const stockLevels = await this.prisma.stock_levels.findMany({
+      where: stockWhere,
+      select: { quantity_on_hand: true, cost_per_unit: true },
     });
 
-    if (movements.length === 0) {
-      return 0;
+    const stockValue = stockLevels.reduce(
+      (sum, stock) =>
+        sum + Number(stock.quantity_on_hand || 0) * Number(stock.cost_per_unit || 0),
+      0,
+    );
+    const stockQty = stockLevels.reduce(
+      (sum, stock) => sum + Number(stock.quantity_on_hand || 0),
+      0,
+    );
+
+    if (stockQty > 0 && stockValue > 0) {
+      return stockValue / stockQty;
     }
 
-    let totalCost = 0;
-    let totalQuantity = 0;
+    const layerWhere: any = {
+      organization_id: organizationId,
+      product_id: productId,
+      product_variant_id: productVariantId ?? null,
+      quantity_remaining: { gt: 0 },
+    };
 
-    for (const movement of movements) {
-      // This would need to be enhanced to track actual costs
-      // For now, using a simple average
-      const cost = 10; // Placeholder - should come from movement data
-      totalCost += cost * movement.quantity;
-      totalQuantity += movement.quantity;
-    }
+    if (locationId) layerWhere.location_id = locationId;
 
-    return totalQuantity > 0 ? totalCost / totalQuantity : 0;
+    const layers = await this.prisma.inventory_cost_layers.findMany({
+      where: layerWhere,
+      select: { quantity_remaining: true, unit_cost: true },
+    });
+
+    const layerValue = layers.reduce(
+      (sum, layer) =>
+        sum + Number(layer.quantity_remaining || 0) * Number(layer.unit_cost || 0),
+      0,
+    );
+    const layerQty = layers.reduce(
+      (sum, layer) => sum + Number(layer.quantity_remaining || 0),
+      0,
+    );
+
+    return layerQty > 0 ? layerValue / layerQty : 0;
   }
 
   /**

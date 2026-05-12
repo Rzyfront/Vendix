@@ -23,6 +23,7 @@ import {
 export type { ProcessPaymentRequest, PosOrder } from '../models/order.model';
 import { CartState, CartDiscount } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
+import { PosCashRegisterService } from './pos-cash-register.service';
 
 @Injectable({
   providedIn: 'root',
@@ -36,6 +37,7 @@ export class PosOrderService {
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
+    private posCashRegisterService: PosCashRegisterService,
   ) {
     this.initializeMockData();
   }
@@ -71,6 +73,8 @@ export class PosOrderService {
       );
     }
 
+    const activeSession = this.posCashRegisterService.getActiveSessionSnapshot();
+
     // Build POS payment request for credit sale (no payment)
     const posPaymentRequest = {
       customer_id: cartState.customer?.id || 1,
@@ -96,8 +100,8 @@ export class PosOrderService {
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       total_amount: Number(cartState.summary.total.toFixed(2)),
-      requires_payment: false, // Credit sale
-      register_id: 'POS_REGISTER_001',
+      requires_payment: false,
+      cash_register_session_id: activeSession?.id ?? undefined,
       seller_user_id: createdBy,
       internal_notes: cartState.notes,
       update_inventory: true,
@@ -215,6 +219,8 @@ export class PosOrderService {
   ): Observable<ProcessPaymentResponse> {
     this.loading.set(true);
 
+    const activeSession = this.posCashRegisterService.getActiveSessionSnapshot();
+
     // Build POS payment request for cash sale
     const posPaymentRequest = {
       customer_id: request.customer?.id || 1,
@@ -240,13 +246,13 @@ export class PosOrderService {
       tax_amount: Number((request.taxAmount || 0).toFixed(2)),
       discount_amount: Number((request.discountAmount || 0).toFixed(2)),
       total_amount: Number(request.amount.toFixed(2)),
-      requires_payment: true, // Cash sale
+      requires_payment: true,
       store_payment_method_id: parseInt(request.paymentMethod.id),
       amount_received: request.cashReceived
         ? Number(request.cashReceived.toFixed(2))
         : undefined,
       payment_reference: request.reference,
-      register_id: 'POS_REGISTER_001',
+      cash_register_session_id: activeSession?.id ?? undefined,
       seller_user_id: request.sellerUserId || 'current_user',
       internal_notes: request.notes || '',
       update_inventory: true,

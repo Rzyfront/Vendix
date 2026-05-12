@@ -1,37 +1,40 @@
-import {Component,
-  OnInit,
-  inject,
-  OnChanges,
-  input,
-  output,
-  model,
-  DestroyRef} from '@angular/core';
+import { Component, OnInit, inject, OnChanges, input, output, model, signal, DestroyRef, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { FormsModule } from '@angular/forms';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators} from '@angular/forms';
+  Validators,
+} from '@angular/forms';
 import {
   ButtonComponent,
   ModalComponent,
-  InputComponent,
-  TextareaComponent} from '../../../../../shared/components/index';
+  TextareaComponent,
+  MultiSelectorComponent,
+  MultiSelectorOption,
+} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-
+import { OrgRolesService } from '../../roles/services/org-roles.service';
+import { OrganizationStoresService } from '../../stores/services/organization-stores.service';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { Role } from '../../roles/interfaces/role.interface';
+import { StoreListItem } from '../../stores/interfaces/store.interface';
 
 @Component({
   selector: 'app-user-config-modal',
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    FormsModule,
     ButtonComponent,
     ModalComponent,
-    InputComponent,
     TextareaComponent,
+    MultiSelectorComponent,
   ],
   template: `
     <app-modal
@@ -44,7 +47,6 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
     >
       @if (user()) {
         <form [formGroup]="configForm" (ngSubmit)="onSubmit()">
-          <!-- Tabs -->
           <div class="flex border-b border-gray-200 dark:border-gray-700 mb-6">
             <button
               type="button"
@@ -91,16 +93,13 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
               Panel UI
             </button>
           </div>
-          <!-- Content -->
+
           <div>
             @switch (activeTab) {
-              <!-- General Tab -->
               @case ('general') {
                 <div class="space-y-4">
                   <div class="space-y-2">
-                    <label
-                      class="block text-sm font-medium text-[var(--color-text-primary)]"
-                    >
+                    <label class="block text-sm font-medium text-[var(--color-text-primary)]">
                       Aplicación Asignada
                     </label>
                     <select
@@ -113,51 +112,45 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
                       <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
                     </select>
                     <p class="text-xs text-gray-500">
-                      Selecciona la aplicación principal a la que tendrá acceso
-                      el usuario.
+                      Selecciona la aplicación principal a la que tendrá acceso el usuario.
                     </p>
                   </div>
                 </div>
               }
-              <!-- Roles Tab -->
               @case ('roles') {
                 <div class="space-y-4">
-                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
-                    <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-                      <p class="text-sm text-gray-500 italic">
-                        La gestión dinámica de roles se implementará conectando
-                        con el servicio de roles. Por ahora, puedes ingresar IDs
-                        de roles manualmente (separados por coma).
-                      </p>
-                      <app-input
-                        styleVariant="modern"
-                        formControlName="rolesInput"
-                        [label]="'Role IDs'"
-                        placeholder="Ej: 1, 2, 3"
-                      ></app-input>
-                    </div>
-                  </div>
+                  <app-multi-selector
+                    [options]="roleOptions()"
+                    [label]="'Roles Asignados'"
+                    [placeholder]="'Seleccionar roles...'"
+                    [helpText]="'Selecciona los roles que tendrá el usuario'"
+                    formControlName="roles"
+                  ></app-multi-selector>
+                  @if (isLoadingRoles()) {
+                    <p class="text-sm text-[var(--color-text-secondary)]">
+                      <span class="inline-block animate-spin mr-1">⟳</span>
+                      Cargando roles...
+                    </p>
+                  }
                 </div>
               }
-              <!-- Stores Tab -->
               @case ('stores') {
                 <div class="space-y-4">
-                  <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-                    <p class="text-sm text-gray-500 italic">
-                      La selección de tiendas se conectará con el servicio de
-                      tiendas. Por ahora, ingresa IDs de tiendas manualmente.
+                  <app-multi-selector
+                    [options]="storeOptions()"
+                    [label]="'Tiendas Asignadas'"
+                    [placeholder]="'Seleccionar tiendas...'"
+                    [helpText]="'Selecciona las tiendas a las que tendrá acceso el usuario'"
+                    formControlName="store_ids"
+                  ></app-multi-selector>
+                  @if (isLoadingStores()) {
+                    <p class="text-sm text-[var(--color-text-secondary)]">
+                      <span class="inline-block animate-spin mr-1">⟳</span>
+                      Cargando tiendas...
                     </p>
-                    <app-input
-                      styleVariant="modern"
-                      formControlName="storesInput"
-                      [label]="'Store IDs'"
-                      placeholder="Ej: 10, 20"
-                    ></app-input>
-                  </div>
+                  }
                 </div>
               }
-              <!-- Panel UI Tab -->
               @case ('panel_ui') {
                 <div class="space-y-4">
                   <div class="space-y-2">
@@ -169,10 +162,8 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
                       placeholder='{"dashboard": true, "settings": false}'
                       customClass="font-mono"
                     ></app-textarea>
-                    @if (jsonError) {
-                      <p class="text-xs text-red-500">
-                        {{ jsonError }}
-                      </p>
+                    @if (jsonError()) {
+                      <p class="text-xs text-red-500">{{ jsonError() }}</p>
                     }
                   </div>
                 </div>
@@ -189,7 +180,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
         <app-button
           variant="outline-danger"
           (clicked)="onCancel()"
-          [disabled]="isSaving"
+          [disabled]="isSaving()"
           size="sm"
         >
           Cancelar
@@ -197,8 +188,8 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="configForm.invalid || isSaving || !!jsonError"
-          [loading]="isSaving"
+          [disabled]="configForm.invalid || isSaving() || !!jsonError()"
+          [loading]="isSaving()"
           size="sm"
         >
           Guardar Configuración
@@ -212,48 +203,72 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
         display: block;
       }
     `,
-  ]})
+  ],
+})
 export class UserConfigModalComponent implements OnInit, OnChanges {
   private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
+  private usersService = inject(UsersService);
+  private authFacade = inject(AuthFacade);
+  private rolesService = inject(OrgRolesService);
+  private storesService = inject(OrganizationStoresService);
+  private toastService = inject(ToastService);
+
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onSaved = output<void>();
 
-  configForm: FormGroup;
-  isSaving: boolean = false;
+  configForm!: FormGroup;
+  readonly isSaving = signal(false);
+  readonly isLoadingRoles = signal(false);
+  readonly isLoadingStores = signal(false);
   activeTab: 'general' | 'roles' | 'stores' | 'panel_ui' = 'general';
-  jsonError: string | null = null;
-constructor(
-    private fb: FormBuilder,
-    private usersService: UsersService,
-    private authFacade: AuthFacade,
-  ) {
+  readonly jsonError = signal<string | null>(null);
+
+  readonly roles = signal<Role[]>([]);
+  readonly stores = signal<StoreListItem[]>([]);
+
+  readonly roleOptions = computed<MultiSelectorOption[]>(() =>
+    this.roles().map((r) => ({
+      value: r.id,
+      label: r.name,
+      description: r.description || undefined,
+    }))
+  );
+
+  readonly storeOptions = computed<MultiSelectorOption[]>(() =>
+    this.stores().map((s) => ({
+      value: s.id,
+      label: s.name,
+      description: s.store_code ? `Código: ${s.store_code}` : undefined,
+    }))
+  );
+
+  constructor() {
     this.configForm = this.fb.group({
       app: ['VENDIX_LANDING'],
-      rolesInput: [''],
-      storesInput: [''],
-      panelUiInput: ['{}']});
+      roles: [[] as number[]],
+      store_ids: [[] as number[]],
+      panelUiInput: ['{}'],
+    });
 
-    // Validate JSON on change
     this.configForm
       .get('panelUiInput')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => {
         try {
           JSON.parse(value);
-          this.jsonError = null;
-        } catch (e) {
-          this.jsonError = 'Invalid JSON format';
+          this.jsonError.set(null);
+        } catch {
+          this.jsonError.set('Formato JSON inválido');
         }
       });
   }
 
-  ngOnInit(): void {}
-
-  onCancel(): void {
-    this.isOpen.set(false);
-    this.isOpenChange.emit(false);
+  ngOnInit(): void {
+    this.loadRoles();
+    this.loadStores();
   }
 
   ngOnChanges(): void {
@@ -261,22 +276,50 @@ constructor(
       this.loadConfiguration();
     }
   }
-loadConfiguration(): void {
+
+  private loadRoles(): void {
+    this.isLoadingRoles.set(true);
+    this.rolesService.getRoles({ limit: 100 }).pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe({
+      next: (response) => {
+        this.roles.set(response.data);
+        this.isLoadingRoles.set(false);
+      },
+      error: () => {
+        this.isLoadingRoles.set(false);
+        this.toastService.error('Error cargando roles');
+      }
+    });
+  }
+
+  private loadStores(): void {
+    this.isLoadingStores.set(true);
+    this.storesService.getStores({ limit: 100 }).pipe(
+      takeUntilDestroyed(this.destroyRef)
+    ).subscribe({
+      next: (response) => {
+        this.stores.set(response.data?.flat() || []);
+        this.isLoadingStores.set(false);
+      },
+      error: () => {
+        this.isLoadingStores.set(false);
+        this.toastService.error('Error cargando tiendas');
+      }
+    });
+  }
+
+  loadConfiguration(): void {
     const user = this.user();
     if (!user) return;
 
-    // Default panel_ui structure with all submodules
     const defaultPanelUi = {
       ORG_ADMIN: {
-        dashboard: true,
-        stores: true,
-        users: true,
-        domains: true,
-        audit: true,
-        settings: true,
-        accounting: true,
-        payroll: true},
+        dashboard: true, stores: true, users: true, domains: true, audit: true,
+        settings: true, accounting: true, payroll: true,
+      },
       STORE_ADMIN: {
+<<<<<<< HEAD
         dashboard: true,
         pos: true,
         products: true,
@@ -351,71 +394,76 @@ loadConfiguration(): void {
         settings_roles: true,
         settings_cash_registers: false,
         settings_habeas_data: true},
+=======
+        dashboard: true, pos: true, products: true, ecommerce: true, orders: true,
+        inventory: true, customers: true, marketing: true, analytics: true,
+        expenses: true, invoicing: true, accounting: true, payroll: true, help: true, settings: true,
+      },
+>>>>>>> origin/dev
       STORE_ECOMMERCE: {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true}};
+        profile: true, history: true, dashboard: true, favorites: true, orders: true, settings: true,
+      },
+    };
 
-    // Reset form first
     this.configForm.reset({
       app: 'VENDIX_LANDING',
-      rolesInput: '',
-      storesInput: '',
-      panelUiInput: JSON.stringify(defaultPanelUi, null, 2)});
+      roles: [],
+      store_ids: [],
+      panelUiInput: JSON.stringify(defaultPanelUi, null, 2),
+    });
 
     this.usersService
       .getUserConfiguration(user.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (config: any) => {
-          // Merge with defaults to ensure all keys exist
           const mergedPanelUi = {
             ...defaultPanelUi,
-            ...(config.panel_ui || {})};
+            ...(config.panel_ui || {}),
+          };
 
           this.configForm.patchValue({
-            app: config.app,
-            rolesInput: (config.roles || []).join(', '),
-            storesInput: (config.store_ids || []).join(', '),
-            panelUiInput: JSON.stringify(mergedPanelUi, null, 2)});
+            app: config.app || 'VENDIX_LANDING',
+            roles: config.roles || [],
+            store_ids: config.store_ids || [],
+            panelUiInput: JSON.stringify(mergedPanelUi, null, 2),
+          });
         },
-        error: (err: any) => console.error(err)});
+        error: (err: unknown) => {
+          console.error('Failed to load configuration', err);
+          const message = extractApiErrorMessage(err);
+          this.toastService.error(message);
+        },
+      });
+  }
+
+  onCancel(): void {
+    this.isOpen.set(false);
+    this.isOpenChange.emit(false);
   }
 
   onSubmit(): void {
     const user = this.user();
-    if (this.configForm.invalid || this.jsonError || !user) return;
+    if (this.configForm.invalid || this.jsonError() || !user) return;
 
-    this.isSaving = true;
+    this.isSaving.set(true);
     const formVal = this.configForm.value;
-
-    const roles = formVal.rolesInput
-      .split(',')
-      .map((s: string) => parseInt(s.trim()))
-      .filter((n: number) => !isNaN(n));
-
-    const store_ids = formVal.storesInput
-      .split(',')
-      .map((s: string) => parseInt(s.trim()))
-      .filter((n: number) => !isNaN(n));
 
     const payload = {
       app: formVal.app,
-      roles,
-      store_ids,
-      panel_ui: JSON.parse(formVal.panelUiInput)};
+      roles: formVal.roles as number[],
+      store_ids: formVal.store_ids as number[],
+      panel_ui: JSON.parse(formVal.panelUiInput),
+    };
 
     this.usersService
       .updateUserConfiguration(user.id, payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isSaving = false;
+          this.isSaving.set(false);
+          this.toastService.success('Configuración actualizada exitosamente');
 
-          // Update auth state if editing current user's configuration
           const currentUserId = this.authFacade.getUserId();
           const userValue = this.user();
           if (userValue && currentUserId === userValue.id) {
@@ -426,20 +474,21 @@ loadConfiguration(): void {
                 ...currentUserSettings?.config,
                 panel_ui: {
                   ...currentUserSettings?.config?.panel_ui,
-                  [payload.app]: payload.panel_ui}}};
+                  [payload.app]: payload.panel_ui,
+                },
+              },
+            };
             this.authFacade.updateUserSettings(updatedSettings);
           }
 
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.onSaved.emit();
           this.isOpenChange.emit(false);
         },
-        error: (err: any) => {
-          console.error('Failed to save config', err);
-          this.isSaving = false;
-        }});
+        error: (err: unknown) => {
+          this.isSaving.set(false);
+          const message = extractApiErrorMessage(err);
+          this.toastService.error(message);
+        },
+      });
   }
 }

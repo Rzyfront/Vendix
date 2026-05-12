@@ -1,7 +1,8 @@
-import { Component, forwardRef, input, output } from '@angular/core';
+import { Component, forwardRef, input, output, signal } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 
 export interface InputButtonOption {
   value: string;
@@ -11,7 +12,7 @@ export interface InputButtonOption {
 @Component({
   selector: 'app-input-buttons',
   standalone: true,
-  imports: [],
+  imports: [TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -26,21 +27,23 @@ export interface InputButtonOption {
         <label [class]="labelClasses" class="label-with-tooltip">
           <span>{{ label() }}</span>
           @if (tooltipText()) {
-            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
-              <svg
-                class="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="2"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-            </span>
+            <app-tooltip [content]="tooltipText()" position="top">
+              <span class="help-icon">
+                <svg
+                  class="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </span>
+            </app-tooltip>
           }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1">*</span>
@@ -91,42 +94,7 @@ export interface InputButtonOption {
       }
 
       .help-icon:hover {
-        color: var(--color-warning);
-      }
-
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.375rem 0.5rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        border-radius: var(--radius-sm);
-        white-space: normal;
-        box-shadow: var(--shadow-md);
-        z-index: 50;
-        margin-bottom: 0.375rem;
-        pointer-events: none;
-        max-width: 300px;
-        width: max-content;
-        text-align: center;
-        line-height: 1.4;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 4px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.125rem;
-        z-index: 50;
-        pointer-events: none;
+        color: var(--color-primary);
       }
     `,
   ],
@@ -135,7 +103,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   readonly label = input<string>('');
   readonly options = input<InputButtonOption[]>([]);
   readonly disabled = input<boolean>(false);
-  private disabledState = false;
+  readonly disabledState = signal(false);
   readonly helperText = input<string>('');
   readonly tooltipText = input<string>('');
   readonly required = input(false);
@@ -145,13 +113,13 @@ export class InputButtonsComponent implements ControlValueAccessor {
 
   readonly valueChange = output<string>();
 
-  value = '';
+  readonly value = signal('');
 
   private onChange = (_: string) => {};
   private onTouched = () => {};
 
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -163,16 +131,16 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabledState = isDisabled;
+    this.disabledState.set(isDisabled);
   }
 
   isDisabled(): boolean {
-    return this.disabled() || this.disabledState;
+    return this.disabled() || this.disabledState();
   }
 
   selectOption(optionValue: string): void {
     if (this.isDisabled()) return;
-    this.value = optionValue;
+    this.value.set(optionValue);
     this.onChange(optionValue);
     this.onTouched();
     this.valueChange.emit(optionValue);
@@ -210,7 +178,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   getButtonClasses(optionValue: string): string {
-    const isSelected = this.value === optionValue;
+    const isSelected = this.value() === optionValue;
     const base = [
       'flex-1',
       'h-full',
