@@ -13,23 +13,40 @@ export class ExogenousGeneratorService {
    * Formato 1001: Retenciones practicadas a terceros
    * Agrupa withholding_calculations por NIT de proveedor
    */
-  async generateFormat1001(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1001(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const where_clause: any = {
       organization_id,
       year,
     };
     if (store_id) where_clause.store_id = store_id;
 
-    const calculations = await (this.prisma as any).client.withholding_calculations.findMany({
+    const calculations = await (
+      this.prisma as any
+    ).client.withholding_calculations.findMany({
       where: where_clause,
       include: {
-        supplier: { select: { name: true, tax_id: true, verification_digit: true } },
+        supplier: {
+          select: { name: true, tax_id: true, verification_digit: true },
+        },
         concept: { select: { code: true, name: true } },
       },
     });
 
     // Group by supplier NIT
-    const grouped = new Map<string, { name: string; dv?: string; base: number; withholding: number; concept: string }>();
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        dv?: string;
+        base: number;
+        withholding: number;
+        concept: string;
+      }
+    >();
 
     for (const calc of calculations) {
       const nit = calc.supplier?.tax_id || 'SIN_NIT';
@@ -65,10 +82,16 @@ export class ExogenousGeneratorService {
    * Formato 1005: IVA descontable y generado
    * Agrupa invoice_taxes con IVA por NIT
    */
-  async generateFormat1005(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1005(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const store_filter = store_id ? { store_id } : {};
 
-    const invoices_with_iva = await (this.prisma as any).client.invoices.findMany({
+    const invoices_with_iva = await (
+      this.prisma as any
+    ).client.invoices.findMany({
       where: {
         organization_id,
         ...store_filter,
@@ -84,13 +107,22 @@ export class ExogenousGeneratorService {
       },
     });
 
-    const grouped = new Map<string, { name: string; iva_generated: number; taxable: number }>();
+    const grouped = new Map<
+      string,
+      { name: string; iva_generated: number; taxable: number }
+    >();
 
     for (const inv of invoices_with_iva) {
       const nit = inv.customer_tax_id || 'SIN_NIT';
       const existing = grouped.get(nit);
-      const iva_total = inv.invoice_taxes.reduce((sum: number, t: any) => sum + Number(t.tax_amount), 0);
-      const taxable_total = inv.invoice_taxes.reduce((sum: number, t: any) => sum + Number(t.taxable_amount), 0);
+      const iva_total = inv.invoice_taxes.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount),
+        0,
+      );
+      const taxable_total = inv.invoice_taxes.reduce(
+        (sum: number, t: any) => sum + Number(t.taxable_amount),
+        0,
+      );
 
       if (existing) {
         existing.iva_generated += iva_total;
@@ -118,7 +150,11 @@ export class ExogenousGeneratorService {
    * Formato 1007: Ingresos recibidos de terceros
    * Agrupa facturas de venta por NIT de cliente
    */
-  async generateFormat1007(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1007(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const store_filter = store_id ? { store_id } : {};
 
     const invoices = await (this.prisma as any).client.invoices.findMany({
@@ -140,7 +176,10 @@ export class ExogenousGeneratorService {
       },
     });
 
-    const grouped = new Map<string, { name: string; subtotal: number; tax: number }>();
+    const grouped = new Map<
+      string,
+      { name: string; subtotal: number; tax: number }
+    >();
 
     for (const inv of invoices) {
       const nit = inv.customer_tax_id || 'SIN_NIT';
@@ -172,10 +211,16 @@ export class ExogenousGeneratorService {
    * Formato 1008: Saldos cuentas por cobrar al cierre
    * Query accounting_entry_lines en cuentas 13xx
    */
-  async generateFormat1008(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1008(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const year_end = new Date(`${year}-12-31T23:59:59`);
 
-    const entries = await (this.prisma as any).client.accounting_entry_lines.findMany({
+    const entries = await (
+      this.prisma as any
+    ).client.accounting_entry_lines.findMany({
       where: {
         entry: {
           organization_id,
@@ -187,13 +232,18 @@ export class ExogenousGeneratorService {
         },
       },
       include: {
-        entry: { select: { source_type: true, source_id: true, description: true } },
+        entry: {
+          select: { source_type: true, source_id: true, description: true },
+        },
         account: { select: { code: true, name: true } },
       },
     });
 
     // Aggregate by account code
-    const grouped = new Map<string, { account_name: string; debit: number; credit: number }>();
+    const grouped = new Map<
+      string,
+      { account_name: string; debit: number; credit: number }
+    >();
 
     for (const line of entries) {
       const code = line.account.code;
@@ -221,7 +271,7 @@ export class ExogenousGeneratorService {
         withholding_amount: 0,
         line_data: { account_code: code, account_name: data.account_name },
       }))
-      .filter(line => line.payment_amount !== 0);
+      .filter((line) => line.payment_amount !== 0);
   }
 
   /**
@@ -233,23 +283,40 @@ export class ExogenousGeneratorService {
    * Agrupa withholding_calculations donde la empresa es el sujeto retenido,
    * agrupando por NIT del agente retenedor (supplier)
    */
-  async generateFormat1003(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1003(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const where_clause: any = {
       organization_id,
       year,
     };
     if (store_id) where_clause.store_id = store_id;
 
-    const calculations = await (this.prisma as any).client.withholding_calculations.findMany({
+    const calculations = await (
+      this.prisma as any
+    ).client.withholding_calculations.findMany({
       where: where_clause,
       include: {
-        supplier: { select: { name: true, tax_id: true, verification_digit: true } },
+        supplier: {
+          select: { name: true, tax_id: true, verification_digit: true },
+        },
         concept: { select: { code: true, name: true } },
       },
     });
 
     // Group by supplier NIT (agente retenedor)
-    const grouped = new Map<string, { name: string; dv?: string; base: number; withholding: number; concept: string }>();
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        dv?: string;
+        base: number;
+        withholding: number;
+        concept: string;
+      }
+    >();
 
     for (const calc of calculations) {
       const nit = calc.supplier?.tax_id || 'SIN_NIT';
@@ -287,7 +354,11 @@ export class ExogenousGeneratorService {
    * Filtra facturas de compra cuyo proveedor pertenece al régimen simple,
    * agrupa IVA asumido por NIT del proveedor
    */
-  async generateFormat1006(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1006(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const store_filter = store_id ? { store_id } : {};
 
     // Facturas de compra con proveedores en régimen simple
@@ -306,18 +377,34 @@ export class ExogenousGeneratorService {
         },
       },
       include: {
-        supplier: { select: { name: true, tax_id: true, verification_digit: true, tax_regime: true } },
+        supplier: {
+          select: {
+            name: true,
+            tax_id: true,
+            verification_digit: true,
+            tax_regime: true,
+          },
+        },
         invoice_taxes: { where: { tax_name: { contains: 'IVA' } } },
       },
     });
 
-    const grouped = new Map<string, { name: string; dv?: string; iva_assumed: number; taxable: number }>();
+    const grouped = new Map<
+      string,
+      { name: string; dv?: string; iva_assumed: number; taxable: number }
+    >();
 
     for (const inv of invoices) {
       const nit = inv.supplier?.tax_id || inv.customer_tax_id || 'SIN_NIT';
       const existing = grouped.get(nit);
-      const iva_total = inv.invoice_taxes.reduce((sum: number, t: any) => sum + Number(t.tax_amount), 0);
-      const taxable_total = inv.invoice_taxes.reduce((sum: number, t: any) => sum + Number(t.taxable_amount), 0);
+      const iva_total = inv.invoice_taxes.reduce(
+        (sum: number, t: any) => sum + Number(t.tax_amount),
+        0,
+      );
+      const taxable_total = inv.invoice_taxes.reduce(
+        (sum: number, t: any) => sum + Number(t.taxable_amount),
+        0,
+      );
 
       if (existing) {
         existing.iva_assumed += iva_total;
@@ -347,10 +434,16 @@ export class ExogenousGeneratorService {
    * Formato 1009: Saldos cuentas por pagar al cierre
    * Query accounting_entry_lines en cuentas 22xx
    */
-  async generateFormat1009(organization_id: number, store_id: number | null, year: number): Promise<ExogenousLineData[]> {
+  async generateFormat1009(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
     const year_end = new Date(`${year}-12-31T23:59:59`);
 
-    const entries = await (this.prisma as any).client.accounting_entry_lines.findMany({
+    const entries = await (
+      this.prisma as any
+    ).client.accounting_entry_lines.findMany({
       where: {
         entry: {
           organization_id,
@@ -366,7 +459,10 @@ export class ExogenousGeneratorService {
       },
     });
 
-    const grouped = new Map<string, { account_name: string; debit: number; credit: number }>();
+    const grouped = new Map<
+      string,
+      { account_name: string; debit: number; credit: number }
+    >();
 
     for (const line of entries) {
       const code = line.account.code;
@@ -394,6 +490,6 @@ export class ExogenousGeneratorService {
         withholding_amount: 0,
         line_data: { account_code: code, account_name: data.account_name },
       }))
-      .filter(line => line.payment_amount !== 0);
+      .filter((line) => line.payment_amount !== 0);
   }
 }

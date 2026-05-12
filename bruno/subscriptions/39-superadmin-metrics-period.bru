@@ -1,0 +1,55 @@
+meta {
+  name: Superadmin Subscriptions Metrics (Period)
+  type: http
+  seq: 39
+}
+
+get {
+  url: {{url}}/superadmin/subscriptions/metrics?period=last_30
+  body: none
+  auth: inherit
+}
+
+params:query {
+  period: last_30
+}
+
+tests {
+  test("Metrics endpoint returns 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Response includes period boundaries", function() {
+    expect(res.body.data).to.have.property("period");
+    expect(res.body.data.period).to.have.property("start");
+    expect(res.body.data.period).to.have.property("end");
+  });
+
+  test("Response includes MRR with value and currency", function() {
+    expect(res.body.data).to.have.property("mrr");
+    expect(res.body.data.mrr).to.have.property("value");
+    expect(res.body.data.mrr).to.have.property("currency");
+    expect(res.body.data.mrr).to.have.property("monthly_avg");
+  });
+
+  test("Response includes churn with rate_pct and counts", function() {
+    expect(res.body.data).to.have.property("churn");
+    expect(res.body.data.churn).to.have.property("rate_pct");
+    expect(res.body.data.churn).to.have.property("cancelled_count");
+    expect(res.body.data.churn).to.have.property("active_at_start");
+  });
+
+  test("Response includes ARPU and LTV", function() {
+    expect(res.body.data).to.have.property("arpu");
+    expect(res.body.data.arpu).to.have.property("active_subs");
+    expect(res.body.data).to.have.property("ltv");
+  });
+
+  test("Response includes active_breakdown and mrr_evolution", function() {
+    expect(res.body.data).to.have.property("active_breakdown");
+    expect(res.body.data.active_breakdown).to.have.property("by_state");
+    expect(res.body.data.active_breakdown).to.have.property("by_plan");
+    expect(res.body.data).to.have.property("mrr_evolution");
+    expect(res.body.data.mrr_evolution).to.be.an("array");
+  });
+}

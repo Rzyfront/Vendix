@@ -342,6 +342,32 @@ export class AuthEffects {
       }),
     ),
   );
+
+  refreshUser$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.refreshUser),
+      mergeMap(() =>
+        this.authService.getCurrentUser().pipe(
+          map((response) => {
+            const user = response?.data ?? response;
+            if (!user) {
+              return AuthActions.refreshUserFailure({
+                error: 'Invalid response from /auth/me',
+              });
+            }
+            return AuthActions.refreshUserSuccess({ user });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.refreshUserFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
   checkAuthStatus$ = createEffect(() =>
     this.actions$.pipe(
       ofType(AuthActions.checkAuthStatus),

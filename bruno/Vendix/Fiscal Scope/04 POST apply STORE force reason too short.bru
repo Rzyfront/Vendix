@@ -1,0 +1,31 @@
+meta {
+  name: 04 POST apply STORE force reason too short
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/organization/settings/fiscal-scope/apply
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+body:json {
+  {
+    "target_scope": "STORE",
+    "force": true,
+    "reason": "short"
+  }
+}
+
+tests {
+  test("force requires reason length", function () {
+    expect([400, 422]).to.include(res.status);
+    const text = JSON.stringify(res.body || {});
+    expect(text.includes("reason") || text.includes("Force")).to.equal(true);
+  });
+}

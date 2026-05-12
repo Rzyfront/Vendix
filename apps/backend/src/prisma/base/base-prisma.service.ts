@@ -22,13 +22,10 @@ export abstract class BasePrismaService implements OnModuleInit {
       adapter,
       log: ['error', 'warn'],
     });
-
-
   }
 
   async onModuleInit() {
     await this.baseClient.$connect();
-
   }
 
   async enableShutdownHooks(app: INestApplication) {

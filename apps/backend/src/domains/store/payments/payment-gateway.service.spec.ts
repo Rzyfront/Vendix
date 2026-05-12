@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { PaymentValidatorService } from './services/payment-validator.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import {
   PaymentData,
   PaymentResult,
@@ -13,7 +13,7 @@ import { payments_state_enum } from '@prisma/client';
 
 describe('PaymentGatewayService', () => {
   let service: PaymentGatewayService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
   let validator: PaymentValidatorService;
 
   const mockPaymentData: PaymentData = {
@@ -23,6 +23,7 @@ describe('PaymentGatewayService', () => {
     currency: 'USD',
     storePaymentMethodId: 1,
     storeId: 1,
+    idempotencyKey: 'idem-gateway-1',
   };
 
   const mockPaymentResult: PaymentResult = {
@@ -69,7 +70,7 @@ describe('PaymentGatewayService', () => {
       providers: [
         PaymentGatewayService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -80,7 +81,7 @@ describe('PaymentGatewayService', () => {
     }).compile();
 
     service = module.get<PaymentGatewayService>(PaymentGatewayService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
     validator = module.get<PaymentValidatorService>(PaymentValidatorService);
   });
 

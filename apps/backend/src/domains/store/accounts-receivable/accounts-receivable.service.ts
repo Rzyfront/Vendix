@@ -154,9 +154,7 @@ export class AccountsReceivableService {
   async getDashboard() {
     const now = new Date();
     const start_of_month = new Date(now.getFullYear(), now.getMonth(), 1);
-    const seven_days_ahead = new Date(
-      now.getTime() + 7 * 24 * 60 * 60 * 1000,
-    );
+    const seven_days_ahead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
     const [total_pending, total_overdue, due_soon, collected_month] =
       await Promise.all([
@@ -290,7 +288,8 @@ export class AccountsReceivableService {
       where: { id: ar_id },
       data: {
         status: 'written_off',
-        notes: `${ar.notes || ''}\n[Castigada por usuario #${user_id} el ${new Date().toISOString()}]`.trim(),
+        notes:
+          `${ar.notes || ''}\n[Castigada por usuario #${user_id} el ${new Date().toISOString()}]`.trim(),
       },
     });
 

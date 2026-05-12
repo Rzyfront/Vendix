@@ -53,7 +53,8 @@ export class FixedAssetCategoriesService {
         organization_id: context.organization_id,
         name: dto.name,
         default_useful_life_months: dto.default_useful_life_months ?? 60,
-        default_depreciation_method: (dto.default_depreciation_method as any) ?? 'straight_line',
+        default_depreciation_method:
+          (dto.default_depreciation_method as any) ?? 'straight_line',
         default_salvage_percentage: dto.default_salvage_percentage ?? 0,
         depreciation_account_code: dto.depreciation_account_code || null,
         expense_account_code: dto.expense_account_code || null,

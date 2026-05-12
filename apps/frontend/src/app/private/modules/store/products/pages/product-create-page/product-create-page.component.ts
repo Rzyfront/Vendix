@@ -90,7 +90,7 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
-  track_inventory_override?: boolean;
+  track_inventory_override?: boolean | null;
 }
 
 export type { GeneratedVariant };
@@ -588,6 +588,7 @@ export class ProductCreatePageComponent {
         if (next !== this.requiresBookingSig()) {
           this.requiresBookingSig.set(next);
         }
+        this.normalizeVariantTrackingForParent();
       });
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
@@ -952,6 +953,7 @@ export class ProductCreatePageComponent {
       );
 
       this.removedVariantKeys.clear();
+      this.normalizeVariantTrackingForParent();
     }
   }
 
@@ -1233,8 +1235,8 @@ export class ProductCreatePageComponent {
         continue;
       }
 
-      // New variant — defaults to track_inventory_override=true
-      // (la variante maneja su propio stock, no hereda del producto base).
+      // New stock-tracked product variants manage their own stock. Variants for
+      // products sold on demand inherit the parent availability instead.
       newVariants.push({
         name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : '',
@@ -1245,11 +1247,36 @@ export class ProductCreatePageComponent {
         sale_price: 0,
         stock: 0,
         attributes,
-        track_inventory_override: true,
+        track_inventory_override: this.getDefaultVariantTrackInventoryOverride(),
       });
     }
 
     this.generatedVariants = newVariants;
+  }
+
+  private getDefaultVariantTrackInventoryOverride(): boolean | undefined {
+    return this.productForm.get('track_inventory')?.value === true
+      ? true
+      : undefined;
+  }
+
+  private normalizeVariantTrackingForParent(): void {
+    if (this.productForm.get('track_inventory')?.value === true) return;
+
+    let changed = false;
+    this.generatedVariants = this.generatedVariants.map((variant) => {
+      if (variant.track_inventory_override !== true) return variant;
+
+      changed = true;
+      return {
+        ...variant,
+        track_inventory_override: undefined,
+      };
+    });
+
+    if (changed) {
+      this.formUpdateTrigger.update((value) => value + 1);
+    }
   }
 
   onAttributeNameBlur(attrIndex: number): void {
@@ -1773,18 +1800,6 @@ export class ProductCreatePageComponent {
       return;
     }
 
-    // Block SERVICE products from having variants
-    if (
-      this.productForm.get('product_type')?.value === 'service' &&
-      this.hasVariants
-    ) {
-      this.toastService.error(
-        'Los productos tipo SERVICIO no pueden tener variantes. Desactiva las variantes o cambia el tipo de producto.',
-        'Configuración inválida',
-      );
-      return;
-    }
-
     // Variant-specific validations
     if (this.hasVariants) {
       // Must have at least one variant
@@ -1856,6 +1871,20 @@ export class ProductCreatePageComponent {
           );
           return;
         }
+      }
+
+      const invalidSaleVariant = this.generatedVariants.find((v) => {
+        if (!v.is_on_sale) return false;
+        const salePrice = Number(v.sale_price || 0);
+        const regularPrice = Number(v.price || 0);
+        return salePrice <= 0 || salePrice >= regularPrice;
+      });
+      if (invalidSaleVariant) {
+        this.toastService.error(
+          `La oferta de la variante ${invalidSaleVariant.sku} debe ser mayor a 0 y menor que su precio regular.`,
+          'Precio de oferta inválido',
+        );
+        return;
       }
     }
 

@@ -1,0 +1,21 @@
+meta {
+  name: 08 GET inventory transfers
+  type: http
+  seq: 8
+}
+
+get {
+  url: http://{{url}}/organization/inventory/transfers
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

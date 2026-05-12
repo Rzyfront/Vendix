@@ -32,7 +32,8 @@ import {
   StoreDomain,
   CreateStoreDomainDto,
   UpdateStoreDomainDto,
-  StoreDomainQueryDto} from './domain.interface';
+  StoreDomainQueryDto,
+  DnsInstructions} from './domain.interface';
 import { environment } from '../../../../../../environments/environment';
 import { DomainFormModalComponent } from './components/domain-form-modal.component';
 
@@ -194,8 +195,10 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <app-domain-form-modal
           [(isOpen)]="is_modal_open"
           [domain]="editing_domain"
+          [dnsInstructions]="dns_instructions()"
           [isSaving]="is_saving()"
           (save)="onSaveDomain($event)"
+          (verify)="verifyDomain($event)"
         ></app-domain-form-modal>
       }
 
@@ -231,6 +234,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit {
 
   protected readonly environment = environment;
 readonly domains = signal<StoreDomain[]>([]);
+  readonly dns_instructions = signal<DnsInstructions | null>(null);
   readonly is_loading = signal(false);
   is_modal_open = false;
   is_delete_modal_open = false;
@@ -244,8 +248,8 @@ readonly domains = signal<StoreDomain[]>([]);
   // Card Config for mobile
   card_config: ItemListCardConfig = {
     titleKey: 'hostname',
-    subtitleKey: 'domain_type',
-    subtitleTransform: (item: any) => this.getDomainTypeLabel(item.domain_type),
+    subtitleKey: 'app_type',
+    subtitleTransform: (item: any) => this.getAppTypeLabel(item.app_type),
     badgeKey: 'status',
     badgeConfig: { type: 'status' },
     badgeTransform: (val: string) => this.getStatusLabel(val),
@@ -275,18 +279,27 @@ readonly domains = signal<StoreDomain[]>([]);
         { value: '', label: 'Todos' },
         { value: 'active', label: 'Activo' },
         { value: 'pending_dns', label: 'Pendiente DNS' },
+        { value: 'pending_ownership', label: 'Pendiente propiedad' },
+        { value: 'verifying_ownership', label: 'Verificando propiedad' },
         { value: 'pending_ssl', label: 'Pendiente SSL' },
+        { value: 'pending_certificate', label: 'Pendiente certificado' },
+        { value: 'issuing_certificate', label: 'Emitiendo certificado' },
+        { value: 'pending_alias', label: 'Pendiente alias' },
+        { value: 'propagating', label: 'Propagando' },
+        { value: 'failed_ownership', label: 'Falló propiedad' },
+        { value: 'failed_certificate', label: 'Falló certificado' },
+        { value: 'failed_alias', label: 'Falló alias' },
         { value: 'disabled', label: 'Deshabilitado' },
       ]},
     {
-      key: 'domain_type',
-      label: 'Tipo',
+      key: 'app_type',
+      label: 'Aplicación',
       type: 'select',
       options: [
         { value: '', label: 'Todos' },
-        { value: 'store', label: 'Tienda' },
-        { value: 'ecommerce', label: 'E-commerce' },
-        { value: 'organization', label: 'Organización' },
+        { value: 'STORE_ECOMMERCE', label: 'E-commerce' },
+        { value: 'STORE_LANDING', label: 'Landing tienda' },
+        { value: 'STORE_ADMIN', label: 'Admin tienda' },
       ]},
   ];
 
@@ -306,10 +319,10 @@ readonly domains = signal<StoreDomain[]>([]);
       label: 'Hostname',
       sortable: true},
     {
-      key: 'domain_type',
-      label: 'Tipo',
+      key: 'app_type',
+      label: 'Aplicación',
       sortable: true,
-      transform: (value: string) => this.getDomainTypeLabel(value)},
+      transform: (value: string) => this.getAppTypeLabel(value)},
     {
       key: 'status',
       label: 'Estado',
@@ -341,6 +354,18 @@ readonly domains = signal<StoreDomain[]>([]);
       icon: 'edit',
       variant: 'info',
       action: (item: StoreDomain) => this.openEditModal(item)},
+    {
+      label: 'Verificar DNS',
+      icon: 'shield-check',
+      variant: 'success',
+      action: (item: StoreDomain) => this.verifyDomain(item),
+      disabled: (row: StoreDomain) => !this.isCustomDomain(row) || row.status === 'active'},
+    {
+      label: 'Provisionar',
+      icon: 'refresh-cw',
+      variant: 'warning',
+      action: (item: StoreDomain) => this.provisionDomain(item),
+      disabled: (row: StoreDomain) => !this.canProvisionDomain(row)},
     {
       label: 'Establecer Principal',
       icon: 'star',
@@ -400,7 +425,15 @@ loadDomains(query?: StoreDomainQueryDto): void {
     const total = domains.length;
     const active = domains.filter((d) => d.status === 'active').length;
     const pending = domains.filter(
-      (d) => d.status === 'pending_dns' || d.status === 'pending_ssl',
+      (d) =>
+        d.status === 'pending_dns' ||
+        d.status === 'pending_ssl' ||
+        d.status === 'pending_ownership' ||
+        d.status === 'verifying_ownership' ||
+        d.status === 'pending_certificate' ||
+        d.status === 'issuing_certificate' ||
+        d.status === 'pending_alias' ||
+        d.status === 'propagating',
     ).length;
     const primaryDomain = domains.find((d) => d.is_primary);
 
@@ -423,7 +456,7 @@ loadDomains(query?: StoreDomainQueryDto): void {
     this.filterValues = values;
     const query: StoreDomainQueryDto = {};
     if (values['status']) query.status = values['status'] as any;
-    if (values['domain_type']) query.domain_type = values['domain_type'] as any;
+    if (values['app_type']) query.app_type = values['app_type'] as any;
     this.loadDomains(query);
   }
 
@@ -438,17 +471,23 @@ loadDomains(query?: StoreDomainQueryDto): void {
 
   openCreateModal(): void {
     this.editing_domain = null;
+    this.dns_instructions.set(null);
     this.is_modal_open = true;
   }
 
   openEditModal(domain: StoreDomain): void {
     this.editing_domain = domain;
+    this.dns_instructions.set(null);
     this.is_modal_open = true;
+    if (this.isCustomDomain(domain)) {
+      this.loadDnsInstructions(domain);
+    }
   }
 
   closeModal(): void {
     this.is_modal_open = false;
     this.editing_domain = null;
+    this.dns_instructions.set(null);
   }
 
   onSaveDomain(dto: CreateStoreDomainDto): void {
@@ -503,6 +542,65 @@ loadDomains(query?: StoreDomainQueryDto): void {
         }});
   }
 
+  loadDnsInstructions(domain: StoreDomain): void {
+    this.domains_service
+      .getDnsInstructions(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.dns_instructions.set(response.data);
+          }
+        },
+        error: () => {
+          this.toast_service.error('Error al cargar instrucciones DNS');
+        }});
+  }
+
+  verifyDomain(domain: StoreDomain): void {
+    this.is_saving.set(true);
+    this.domains_service
+      .verifyDomain(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data.verified) {
+            this.toast_service.success(
+              'Propiedad verificada. Certificado pendiente de emisión.',
+            );
+            this.closeModal();
+          } else {
+            this.toast_service.warning('No se encontró el TXT de verificación');
+          }
+          this.loadDomains();
+          this.is_saving.set(false);
+        },
+        error: () => {
+          this.toast_service.error('Error al verificar el dominio');
+          this.is_saving.set(false);
+        }});
+  }
+
+  provisionDomain(domain: StoreDomain): void {
+    this.is_saving.set(true);
+    this.domains_service
+      .provisionNext(domain.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast_service.success('Provisioning actualizado');
+          this.loadDomains();
+          if (this.editing_domain?.id === domain.id) {
+            this.loadDnsInstructions(domain);
+          }
+          this.is_saving.set(false);
+        },
+        error: () => {
+          this.toast_service.error('Error al provisionar el dominio');
+          this.is_saving.set(false);
+        }});
+  }
+
   openDeleteModal(domain: StoreDomain): void {
     this.domain_to_delete = domain;
     this.is_delete_modal_open = true;
@@ -543,10 +641,27 @@ loadDomains(query?: StoreDomainQueryDto): void {
     return labels[type] || type;
   }
 
+  getAppTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      STORE_ECOMMERCE: 'E-commerce',
+      STORE_LANDING: 'Landing tienda',
+      STORE_ADMIN: 'Admin tienda'};
+    return labels[type] || type;
+  }
+
   getStatusLabel(status: string): string {
     const labels: Record<string, string> = {
       pending_dns: 'Pendiente DNS',
+      pending_ownership: 'Pendiente propiedad',
+      verifying_ownership: 'Verificando propiedad',
       pending_ssl: 'Pendiente SSL',
+      pending_certificate: 'Pendiente certificado',
+      issuing_certificate: 'Emitiendo certificado',
+      pending_alias: 'Pendiente alias',
+      propagating: 'Propagando',
+      failed_ownership: 'Falló propiedad',
+      failed_certificate: 'Falló certificado',
+      failed_alias: 'Falló alias',
       active: 'Activo',
       disabled: 'Deshabilitado'};
     return labels[status] || status;
@@ -555,7 +670,16 @@ loadDomains(query?: StoreDomainQueryDto): void {
   getStatusColor(status: string): string {
     const colors: Record<string, string> = {
       pending_dns: 'yellow',
+      pending_ownership: 'yellow',
+      verifying_ownership: 'yellow',
       pending_ssl: 'yellow',
+      pending_certificate: 'yellow',
+      issuing_certificate: 'yellow',
+      pending_alias: 'yellow',
+      propagating: 'yellow',
+      failed_ownership: 'red',
+      failed_certificate: 'red',
+      failed_alias: 'red',
       active: 'green',
       disabled: 'red'};
     return colors[status] || 'gray';
@@ -569,5 +693,21 @@ loadDomains(query?: StoreDomainQueryDto): void {
       vendix_core: 'Vendix Core',
       third_party_subdomain: 'Subdominio Terceros'};
     return labels[ownership] || ownership;
+  }
+
+  isCustomDomain(domain: StoreDomain): boolean {
+    return (
+      domain.ownership === 'custom_domain' ||
+      domain.ownership === 'custom_subdomain'
+    );
+  }
+
+  canProvisionDomain(domain: StoreDomain): boolean {
+    return (
+      this.isCustomDomain(domain) &&
+      domain.last_verified_at != null &&
+      domain.status !== 'active' &&
+      domain.status !== 'failed_ownership'
+    );
   }
 }

@@ -6,14 +6,14 @@ import { PaymentGatewayService, PaymentValidatorService } from './services';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { PaymentError, PaymentErrorCodes } from './utils';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { payments_state_enum } from '@prisma/client';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 
 describe('PaymentsService', () => {
   let service: PaymentsService;
   let paymentGateway: PaymentGatewayService;
-  let prisma: PrismaService;
+  let prisma: StorePrismaService;
 
   const mockUser = {
     id: 1,
@@ -70,7 +70,7 @@ describe('PaymentsService', () => {
           useValue: mockPaymentGateway,
         },
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -92,7 +92,7 @@ describe('PaymentsService', () => {
 
     service = module.get<PaymentsService>(PaymentsService);
     paymentGateway = module.get<PaymentGatewayService>(PaymentGatewayService);
-    prisma = module.get<PrismaService>(PrismaService);
+    prisma = module.get<StorePrismaService>(StorePrismaService);
   });
 
   it('should be defined', () => {
@@ -121,9 +121,14 @@ describe('PaymentsService', () => {
 
       const result = await service.processPayment(createPaymentDto, mockUser);
 
-      expect(paymentGateway.processPayment).toHaveBeenCalledWith(
-        createPaymentDto,
-      );
+      // payments.service injects an `idempotencyKey` UUID for back-compat,
+      // so we assert each known field individually rather than the whole object.
+      const callArg = (paymentGateway.processPayment as jest.Mock).mock
+        .calls[0][0];
+      Object.entries(createPaymentDto).forEach(([key, value]) => {
+        expect(callArg[key]).toEqual(value);
+      });
+      expect(typeof callArg.idempotencyKey).toBe('string');
       expect(result).toEqual({
         success: true,
         data: mockPaymentResult,
@@ -226,9 +231,14 @@ describe('PaymentsService', () => {
         mockUser,
       );
 
-      expect(paymentGateway.processPaymentWithNewOrder).toHaveBeenCalledWith(
-        createOrderPaymentDto,
-      );
+      // payments.service injects an `idempotencyKey` UUID for back-compat,
+      // so we assert each known field individually rather than the whole object.
+      const callArg = (paymentGateway.processPaymentWithNewOrder as jest.Mock)
+        .mock.calls[0][0];
+      Object.entries(createOrderPaymentDto).forEach(([key, value]) => {
+        expect(callArg[key]).toEqual(value);
+      });
+      expect(typeof callArg.idempotencyKey).toBe('string');
       expect(result).toEqual({
         success: true,
         data: mockPaymentResult,

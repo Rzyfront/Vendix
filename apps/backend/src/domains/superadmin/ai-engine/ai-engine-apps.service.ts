@@ -192,7 +192,10 @@ export class AIEngineAppsService {
     const app = await this.findOne(id);
 
     // Build a minimal test using the app's template
-    const testVars: Record<string, string> = { name: 'Test', context: 'Testing' };
+    const testVars: Record<string, string> = {
+      name: 'Test',
+      context: 'Testing',
+    };
 
     const response = await this.aiEngine.run(app.key, testVars);
     return {
@@ -231,8 +234,10 @@ export class AIEngineAppsService {
         },
         {} as Record<string, number>,
       ),
-      usingDefaultConfig: appsByConfig.find((c) => c.config_id === null)?._count || 0,
-      usingCustomConfig: appsByConfig.filter((c) => c.config_id !== null)
+      usingDefaultConfig:
+        appsByConfig.find((c) => c.config_id === null)?._count || 0,
+      usingCustomConfig: appsByConfig
+        .filter((c) => c.config_id !== null)
         .reduce((sum, c) => sum + c._count, 0),
     };
   }

@@ -1,0 +1,24 @@
+meta {
+  name: 05 GET irreversibility check invoicing
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/irreversibility-check
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("returns locked flag and reasons array", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(body).to.have.property('locked');
+    expect(body.reasons).to.be.an('array');
+  });
+}

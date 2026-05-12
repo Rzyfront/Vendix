@@ -2,6 +2,7 @@ import {
   Invoice,
   InvoiceResolution,
   InvoiceStats,
+  DianConfig,
 } from '../interfaces/invoice.interface';
 
 export interface InvoicingState {
@@ -22,6 +23,11 @@ export interface InvoicingState {
   // Stats from backend
   stats: InvoiceStats | null;
   loadingStats: boolean;
+
+  // DIAN configs (gate pre-factura)
+  dianConfigs: DianConfig[];
+  dianConfigsLoading: boolean;
+  dianConfigsError: string | null;
 
   // Filter-as-state
   search: string;
@@ -47,6 +53,10 @@ export const initialInvoicingState: InvoicingState = {
 
   stats: null,
   loadingStats: false,
+
+  dianConfigs: [],
+  dianConfigsLoading: false,
+  dianConfigsError: null,
 
   search: '',
   page: 1,

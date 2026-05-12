@@ -1,0 +1,12 @@
+meta {
+  name: 03 Operating Scope Wizard
+  seq: 4
+}
+
+docs {
+  Phase 4 wizard endpoints under /api/organization/settings/operating-scope.
+
+  - 01 Preview ORGANIZATION → returns blockers/warnings.
+  - 02 Apply STORE on partner → 403 (partner is locked to STORE).
+  - 03 Verify audit log → after a successful apply, GET shows new entry.
+}

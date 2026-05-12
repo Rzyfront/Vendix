@@ -5,12 +5,14 @@ import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prism
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
+import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 
 @Injectable()
 export class CatalogService {
   constructor(
     private readonly prisma: EcommercePrismaService,
     private readonly s3Service: S3Service,
+    private readonly priceResolverService: PriceResolverService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
@@ -172,7 +174,7 @@ export class CatalogService {
 
       // Ordenar manualmente según el array de IDs
       const sortedBestSelling = bestSellingProducts.sort((a, b) => {
-        return explicitIds!.indexOf(a.id) - explicitIds!.indexOf(b.id);
+        return explicitIds.indexOf(a.id) - explicitIds.indexOf(b.id);
       });
 
       let finalData = sortedBestSelling;
@@ -307,7 +309,6 @@ export class CatalogService {
           },
         },
         product_variants: {
-          where: { stock_quantity: { gt: 0 } },
           include: { product_images: true },
         },
         product_tax_assignments: {
@@ -541,10 +542,14 @@ export class CatalogService {
 
     return Promise.all(
       variants.map(async (variant: any) => {
-        const effectiveBasePrice = this.getEffectiveBasePrice(product, variant);
+        const priceResult = this.resolvePrice(product, variant);
         const signedImageUrl = variant.product_images?.image_url
           ? await this.s3Service.signUrl(variant.product_images.image_url)
           : null;
+        const effectiveTrackInventory = this.resolveEffectiveTracking(
+          product,
+          variant,
+        );
 
         return {
           id: variant.id,
@@ -554,27 +559,22 @@ export class CatalogService {
           price_override: variant.price_override
             ? Number(variant.price_override)
             : null,
-          effective_base_price: effectiveBasePrice,
-          final_price: this.calculateFinalPrice(product, variant),
+          effective_base_price: priceResult.unitBasePrice,
+          final_price: Math.round(priceResult.unitPriceWithTax * 100) / 100,
           stock_quantity: variant.stock_quantity,
+          track_inventory_override: variant.track_inventory_override,
+          effective_track_inventory: effectiveTrackInventory,
+          is_available: !effectiveTrackInventory || variant.stock_quantity > 0,
           image_url: signedImageUrl,
           is_on_sale: variant.is_on_sale,
           sale_price: variant.sale_price ? Number(variant.sale_price) : null,
+          service_duration_minutes: variant.service_duration_minutes,
+          service_pricing_type: variant.service_pricing_type,
+          buffer_minutes: variant.buffer_minutes,
+          preparation_time_minutes: variant.preparation_time_minutes,
         };
       }),
     );
-  }
-
-  /**
-   * Calculates the effective base price, considering variant overrides.
-   */
-  private getEffectiveBasePrice(product: any, variant?: any): number {
-    if (variant?.price_override) {
-      return Number(variant.price_override);
-    }
-    return product.is_on_sale && product.sale_price
-      ? Number(product.sale_price)
-      : Number(product.base_price);
   }
 
   /**
@@ -582,10 +582,14 @@ export class CatalogService {
    * Supports variant price overrides.
    */
   private calculateFinalPrice(product: any, variant?: any): number {
-    const basePrice = this.getEffectiveBasePrice(product, variant);
+    const totalTaxRate = this.getTotalTaxRate(product);
+    const priceResult = this.resolvePrice(product, variant, totalTaxRate);
+    const finalPrice = priceResult.unitPriceWithTax;
+    return Math.round(finalPrice * 100) / 100;
+  }
 
+  private getTotalTaxRate(product: any): number {
     let totalTaxRate = 0;
-
     if (product.product_tax_assignments) {
       for (const assignment of product.product_tax_assignments) {
         if (assignment.tax_categories?.tax_rates) {
@@ -595,8 +599,37 @@ export class CatalogService {
         }
       }
     }
+    return totalTaxRate;
+  }
 
-    const finalPrice = basePrice * (1 + totalTaxRate);
-    return Math.round(finalPrice * 100) / 100;
+  private resolvePrice(product: any, variant?: any, taxRate?: number) {
+    return this.priceResolverService.resolvePrice(
+      {
+        product: {
+          base_price: Number(product.base_price),
+          is_on_sale: product.is_on_sale,
+          sale_price:
+            product.sale_price != null ? Number(product.sale_price) : null,
+          track_inventory: product.track_inventory,
+        },
+        variant: variant
+          ? {
+              price_override:
+                variant.price_override != null
+                  ? Number(variant.price_override)
+                  : null,
+              is_on_sale: variant.is_on_sale,
+              sale_price:
+                variant.sale_price != null ? Number(variant.sale_price) : null,
+              track_inventory_override: variant.track_inventory_override,
+            }
+          : undefined,
+      },
+      taxRate ?? this.getTotalTaxRate(product),
+    );
+  }
+
+  private resolveEffectiveTracking(product: any, variant?: any): boolean {
+    return variant?.track_inventory_override ?? product.track_inventory;
   }
 }

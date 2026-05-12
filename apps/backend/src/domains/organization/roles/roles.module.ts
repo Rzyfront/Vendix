@@ -11,4 +11,4 @@ import { ResponseModule } from '@common/responses/response.module';
   providers: [RolesService],
   exports: [RolesService],
 })
-export class RolesModule { }
+export class RolesModule {}

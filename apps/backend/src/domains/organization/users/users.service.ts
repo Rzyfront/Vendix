@@ -11,6 +11,7 @@ import {
   UserQueryDto,
   UsersDashboardDto,
   UserConfigDto,
+  InviteUserDto,
 } from './dto';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
@@ -503,7 +504,7 @@ export class UsersService {
       app: user.user_settings[0]?.app_type || 'VENDIX_LANDING',
       roles: user.user_roles.map((ur) => ur.role_id),
       store_ids: user.store_users.map((su) => su.store_id),
-      panel_ui: (user.user_settings[0]?.config as any)?.panel_ui || {},
+      panel_ui: user.user_settings[0]?.config?.panel_ui || {},
     };
 
     return config;
@@ -518,7 +519,7 @@ export class UsersService {
       });
 
       if (existingSettings) {
-        const existingConfig = (existingSettings.config as any) || {};
+        const existingConfig = existingSettings.config || {};
 
         await tx.user_settings.update({
           where: { id: existingSettings.id },
@@ -595,5 +596,100 @@ export class UsersService {
 
       return this.findConfiguration(id);
     });
+  }
+
+  async invite(inviteDto: InviteUserDto) {
+    const { first_name, last_name, email, app = 'VENDIX_LANDING' } = inviteDto;
+
+    const context = RequestContextService.getContext();
+    const organization_id = context?.organization_id;
+
+    if (!organization_id && !context?.is_super_admin) {
+      throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
+    }
+
+    const existing_user = await this.prisma.users.findFirst({
+      where: { email },
+    });
+    if (existing_user) {
+      throw new VendixHttpException(ErrorCodes.ORG_USER_002);
+    }
+
+    const formatted_first_name = toTitleCase(first_name || '');
+    const formatted_last_name = toTitleCase(last_name || '');
+
+    const tempPassword = crypto.randomBytes(16).toString('hex');
+    const hashed_password = await bcrypt.hash(tempPassword, 10);
+
+    const user = await this.prisma.users.create({
+      data: {
+        first_name: formatted_first_name,
+        last_name: formatted_last_name,
+        username:
+          email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + Date.now(),
+        email,
+        password: hashed_password,
+        state: 'pending_verification',
+        ...(organization_id && {
+          organizations: { connect: { id: organization_id } },
+        }),
+        updated_at: new Date(),
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        username: true,
+        email: true,
+        state: true,
+      },
+    });
+
+    const config = await this.defaultPanelUIService.generatePanelUI(app);
+    await this.prisma.user_settings.create({
+      data: {
+        user_id: user.id,
+        app_type: app,
+        config: config,
+      },
+    });
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires_at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await this.prisma.email_verification_tokens.create({
+      data: {
+        user_id: user.id,
+        token,
+        expires_at: expires_at,
+      },
+    });
+
+    let organization_slug: string | undefined;
+    try {
+      if (user.organization_id) {
+        const organization = await this.prisma.organizations.findUnique({
+          where: { id: user.organization_id },
+          select: { slug: true },
+        });
+        organization_slug = organization?.slug;
+      }
+    } catch {
+      // Continue without slug
+    }
+
+    const full_name = `${user.first_name} ${user.last_name}`.trim();
+    await this.emailService.sendInvitationEmail(
+      user.email,
+      token,
+      full_name,
+      organization_slug,
+      app,
+    );
+
+    return {
+      user_id: user.id,
+      token,
+    };
   }
 }

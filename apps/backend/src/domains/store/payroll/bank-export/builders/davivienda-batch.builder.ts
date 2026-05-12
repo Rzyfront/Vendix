@@ -16,7 +16,7 @@ const BANK_NAME_TO_CODE: Record<string, string> = {
   'banco de bogota': '000001',
   'banco de bogotá': '000001',
   bogota: '000001',
-  'bogotá': '000001',
+  bogotá: '000001',
   'banco popular': '000002',
   popular: '000002',
   bancolombia: '000007',
@@ -74,7 +74,10 @@ export class DaviviendaBatchBuilder implements BankBatchBuilder {
   bankCode = 'davivienda';
   bankName = 'Davivienda';
 
-  build(metadata: BankBatchMetadata, employees: BankBatchEmployee[]): BankBatchResult {
+  build(
+    metadata: BankBatchMetadata,
+    employees: BankBatchEmployee[],
+  ): BankBatchResult {
     const lines: string[] = [];
 
     // Control record (RC)
@@ -145,46 +148,63 @@ export class DaviviendaBatchBuilder implements BankBatchBuilder {
 
   // --- Control Record (RC - 90 chars) ---
 
-  private buildControlRecord(metadata: BankBatchMetadata, employees: BankBatchEmployee[]): string {
+  private buildControlRecord(
+    metadata: BankBatchMetadata,
+    employees: BankBatchEmployee[],
+  ): string {
     const nit = metadata.company_nit.replace(/[^0-9]/g, '');
     const total = employees.reduce((sum, e) => sum + e.net_pay, 0);
     const date_str = this.formatDate(metadata.payment_date);
 
     let line = '';
-    line += 'RC';                                                          // Pos 1-2: Record Type
-    line += this.padLeft(nit, 16);                                         // Pos 3-18: Company NIT
-    line += this.padRight(this.stripAccents(metadata.company_name).substring(0, 16), 16); // Pos 19-34: Company Name
-    line += this.mapAccountType(metadata.source_account_type);             // Pos 35-36: Source Account Type
+    line += 'RC'; // Pos 1-2: Record Type
+    line += this.padLeft(nit, 16); // Pos 3-18: Company NIT
+    line += this.padRight(
+      this.stripAccents(metadata.company_name).substring(0, 16),
+      16,
+    ); // Pos 19-34: Company Name
+    line += this.mapAccountType(metadata.source_account_type); // Pos 35-36: Source Account Type
     line += this.padLeft(metadata.source_account.replace(/[^0-9]/g, ''), 16); // Pos 37-52: Source Account Number
-    line += this.padLeft(String(employees.length), 6);                     // Pos 53-58: Record Count
-    line += this.formatAmount(total, 18);                                  // Pos 59-76: Total Amount
-    line += date_str;                                                      // Pos 77-84: Payment Date
-    line += this.padLeft('1', 6);                                          // Pos 85-90: File Sequence
+    line += this.padLeft(String(employees.length), 6); // Pos 53-58: Record Count
+    line += this.formatAmount(total, 18); // Pos 59-76: Total Amount
+    line += date_str; // Pos 77-84: Payment Date
+    line += this.padLeft('1', 6); // Pos 85-90: File Sequence
 
     return line;
   }
 
   // --- Transfer Record (TR - 160 chars) ---
 
-  private buildTransferRecord(employee: BankBatchEmployee, metadata: BankBatchMetadata): string {
+  private buildTransferRecord(
+    employee: BankBatchEmployee,
+    metadata: BankBatchMetadata,
+  ): string {
     const doc_number = employee.document_number.replace(/[^0-9]/g, '');
     const bank_code = this.mapBankCode(employee.bank_name) || '000000';
     const doc_type = this.mapDocumentType(employee.document_type) || '01';
-    const full_name = this.stripAccents(`${employee.first_name} ${employee.last_name}`);
+    const full_name = this.stripAccents(
+      `${employee.first_name} ${employee.last_name}`,
+    );
 
     let line = '';
-    line += 'TR';                                                          // Pos 1-2: Record Type
-    line += this.padLeft(doc_number, 16);                                  // Pos 3-18: Beneficiary NIT
-    line += this.padLeft('0', 16);                                         // Pos 19-34: Reference (zeros)
-    line += this.padLeft(employee.bank_account_number.replace(/[^0-9]/g, ''), 16); // Pos 35-50: Dest Account
-    line += this.mapAccountType(employee.bank_account_type);               // Pos 51-52: Dest Account Type
-    line += bank_code;                                                     // Pos 53-58: Bank Code
-    line += this.formatAmount(employee.net_pay, 18);                       // Pos 59-76: Amount
-    line += this.padLeft('0', 6);                                          // Pos 77-82: Voucher (zeros)
-    line += doc_type;                                                      // Pos 83-84: Doc Type
-    line += this.padLeft(doc_number, 16);                                  // Pos 85-100: Doc Number
-    line += this.padRight(full_name.substring(0, 30), 30);                 // Pos 101-130: Beneficiary Name
-    line += this.padRight(this.stripAccents(`NOMINA ${metadata.payroll_number}`).substring(0, 30), 30); // Pos 131-160: Concept
+    line += 'TR'; // Pos 1-2: Record Type
+    line += this.padLeft(doc_number, 16); // Pos 3-18: Beneficiary NIT
+    line += this.padLeft('0', 16); // Pos 19-34: Reference (zeros)
+    line += this.padLeft(
+      employee.bank_account_number.replace(/[^0-9]/g, ''),
+      16,
+    ); // Pos 35-50: Dest Account
+    line += this.mapAccountType(employee.bank_account_type); // Pos 51-52: Dest Account Type
+    line += bank_code; // Pos 53-58: Bank Code
+    line += this.formatAmount(employee.net_pay, 18); // Pos 59-76: Amount
+    line += this.padLeft('0', 6); // Pos 77-82: Voucher (zeros)
+    line += doc_type; // Pos 83-84: Doc Type
+    line += this.padLeft(doc_number, 16); // Pos 85-100: Doc Number
+    line += this.padRight(full_name.substring(0, 30), 30); // Pos 101-130: Beneficiary Name
+    line += this.padRight(
+      this.stripAccents(`NOMINA ${metadata.payroll_number}`).substring(0, 30),
+      30,
+    ); // Pos 131-160: Concept
 
     return line;
   }

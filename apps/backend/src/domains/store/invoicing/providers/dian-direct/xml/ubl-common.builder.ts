@@ -6,7 +6,10 @@ import {
   DianCustomerData,
   DianSoftwareSecurity,
 } from '../interfaces/dian-config.interface';
-import { ProviderInvoiceTax, ProviderInvoiceItem } from '../../invoice-provider.interface';
+import {
+  ProviderInvoiceTax,
+  ProviderInvoiceItem,
+} from '../../invoice-provider.interface';
 import { createHash } from 'crypto';
 
 /**
@@ -27,28 +30,34 @@ export class UblCommonBuilder {
       .ele(UBL_NAMESPACES.EXT, 'ExtensionContent')
       .ele(UBL_NAMESPACES.STS, 'DianExtensions');
 
-    const invoice_control = ext.ele(
-      UBL_NAMESPACES.STS,
-      'InvoiceControl',
-    );
+    const invoice_control = ext.ele(UBL_NAMESPACES.STS, 'InvoiceControl');
 
     const software = ext.ele(UBL_NAMESPACES.STS, 'SoftwareProvider');
     software
       .ele(UBL_NAMESPACES.STS, 'ProviderID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .txt(software_security.software_id);
 
     software
       .ele(UBL_NAMESPACES.STS, 'SoftwareID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .txt(software_security.software_id);
 
     ext
       .ele(UBL_NAMESPACES.STS, 'SoftwareSecurityCode')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .txt(software_security.software_security_code);
 
     // Navigate back to UBLExtensions and add second UBLExtension (placeholder for digital signature)
@@ -85,23 +94,23 @@ export class UblCommonBuilder {
     );
 
     // Tax scheme
-    const tax_scheme = party
-      .ele(UBL_NAMESPACES.CAC, 'PartyTaxScheme');
+    const tax_scheme = party.ele(UBL_NAMESPACES.CAC, 'PartyTaxScheme');
     tax_scheme
       .ele(UBL_NAMESPACES.CBC, 'RegistrationName')
       .txt(issuer.legal_name);
     tax_scheme
       .ele(UBL_NAMESPACES.CBC, 'CompanyID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .att('schemeID', issuer.nit_dv)
       .att('schemeName', '31') // NIT
       .txt(issuer.nit);
 
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxLevelCode');
-    tax_level
-      .att('listName', 'No aplica')
-      .txt(issuer.tax_scheme);
+    tax_level.att('listName', 'No aplica').txt(issuer.tax_scheme);
 
     UblCommonBuilder.buildAddress(
       tax_scheme.ele(UBL_NAMESPACES.CAC, 'RegistrationAddress'),
@@ -115,13 +124,14 @@ export class UblCommonBuilder {
 
     // Party legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
-    legal
-      .ele(UBL_NAMESPACES.CBC, 'RegistrationName')
-      .txt(issuer.legal_name);
+    legal.ele(UBL_NAMESPACES.CBC, 'RegistrationName').txt(issuer.legal_name);
     legal
       .ele(UBL_NAMESPACES.CBC, 'CompanyID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .att('schemeID', issuer.nit_dv)
       .att('schemeName', '31')
       .txt(issuer.nit);
@@ -133,9 +143,7 @@ export class UblCommonBuilder {
         contact.ele(UBL_NAMESPACES.CBC, 'Telephone').txt(issuer.phone);
       }
       if (issuer.email) {
-        contact
-          .ele(UBL_NAMESPACES.CBC, 'ElectronicMail')
-          .txt(issuer.email);
+        contact.ele(UBL_NAMESPACES.CBC, 'ElectronicMail').txt(issuer.email);
       }
     }
   }
@@ -143,10 +151,7 @@ export class UblCommonBuilder {
   /**
    * Builds the customer (adquirente) party element.
    */
-  static buildCustomerParty(
-    parent: any,
-    customer: DianCustomerData,
-  ): void {
+  static buildCustomerParty(parent: any, customer: DianCustomerData): void {
     const customer_party = parent.ele(
       UBL_NAMESPACES.CAC,
       'AccountingCustomerParty',
@@ -179,7 +184,10 @@ export class UblCommonBuilder {
     tax_scheme
       .ele(UBL_NAMESPACES.CBC, 'CompanyID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .att('schemeID', customer.document_dv || '')
       .att('schemeName', customer.document_type)
       .txt(customer.document_number);
@@ -203,13 +211,14 @@ export class UblCommonBuilder {
 
     // Legal entity
     const legal = party.ele(UBL_NAMESPACES.CAC, 'PartyLegalEntity');
-    legal
-      .ele(UBL_NAMESPACES.CBC, 'RegistrationName')
-      .txt(customer.legal_name);
+    legal.ele(UBL_NAMESPACES.CBC, 'RegistrationName').txt(customer.legal_name);
     legal
       .ele(UBL_NAMESPACES.CBC, 'CompanyID')
       .att('schemeAgencyID', '195')
-      .att('schemeAgencyName', 'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)')
+      .att(
+        'schemeAgencyName',
+        'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
+      )
       .att('schemeID', customer.document_dv || '')
       .att('schemeName', customer.document_type)
       .txt(customer.document_number);
@@ -221,9 +230,7 @@ export class UblCommonBuilder {
         contact.ele(UBL_NAMESPACES.CBC, 'Telephone').txt(customer.phone);
       }
       if (customer.email) {
-        contact
-          .ele(UBL_NAMESPACES.CBC, 'ElectronicMail')
-          .txt(customer.email);
+        contact.ele(UBL_NAMESPACES.CBC, 'ElectronicMail').txt(customer.email);
       }
     }
   }
@@ -245,12 +252,8 @@ export class UblCommonBuilder {
   ): void {
     const addr = parent.ele(UBL_NAMESPACES.CAC, 'Address');
 
-    addr
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(address.city_code || '11001');
-    addr
-      .ele(UBL_NAMESPACES.CBC, 'CityName')
-      .txt(address.city_name || 'Bogotá');
+    addr.ele(UBL_NAMESPACES.CBC, 'ID').txt(address.city_code || '11001');
+    addr.ele(UBL_NAMESPACES.CBC, 'CityName').txt(address.city_name || 'Bogotá');
     addr
       .ele(UBL_NAMESPACES.CBC, 'PostalZone')
       .txt(address.postal_code || '110111');
@@ -333,15 +336,11 @@ export class UblCommonBuilder {
         code === DIAN_TAX_CODES.ICA
           ? (parseFloat(group_taxes[0].tax_rate) / 10).toFixed(4)
           : group_taxes[0].tax_rate;
-      tax_category
-        .ele(UBL_NAMESPACES.CBC, 'Percent')
-        .txt(tax_percent);
+      tax_category.ele(UBL_NAMESPACES.CBC, 'Percent').txt(tax_percent);
 
       const scheme = tax_category.ele(UBL_NAMESPACES.CAC, 'TaxScheme');
       scheme.ele(UBL_NAMESPACES.CBC, 'ID').txt(code);
-      scheme
-        .ele(UBL_NAMESPACES.CBC, 'Name')
-        .txt(DIAN_TAX_NAMES[code] || code);
+      scheme.ele(UBL_NAMESPACES.CBC, 'Name').txt(DIAN_TAX_NAMES[code] || code);
     }
   }
 
@@ -376,9 +375,7 @@ export class UblCommonBuilder {
       // Allowance/charge for discount
       if (parseFloat(item.discount_amount) > 0) {
         const allowance = line.ele(UBL_NAMESPACES.CAC, 'AllowanceCharge');
-        allowance
-          .ele(UBL_NAMESPACES.CBC, 'ChargeIndicator')
-          .txt('false');
+        allowance.ele(UBL_NAMESPACES.CBC, 'ChargeIndicator').txt('false');
         allowance
           .ele(UBL_NAMESPACES.CBC, 'Amount')
           .att('currencyID', currency)
@@ -400,10 +397,7 @@ export class UblCommonBuilder {
           ? UblCommonBuilder.resolveTaxCode(taxes[0].tax_name)
           : DIAN_TAX_CODES.IVA;
 
-      const subtotal = line_tax_total.ele(
-        UBL_NAMESPACES.CAC,
-        'TaxSubtotal',
-      );
+      const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
       subtotal
         .ele(UBL_NAMESPACES.CBC, 'TaxableAmount')
         .att('currencyID', currency)
@@ -427,9 +421,7 @@ export class UblCommonBuilder {
 
       // Item description
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
-      ubl_item
-        .ele(UBL_NAMESPACES.CBC, 'Description')
-        .txt(item.description);
+      ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
 
       // Price
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');

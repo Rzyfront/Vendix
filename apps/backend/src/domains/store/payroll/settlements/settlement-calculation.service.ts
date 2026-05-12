@@ -18,7 +18,9 @@ export class SettlementCalculationService {
   /**
    * Calculate full settlement for an employee based on Colombian labor law.
    */
-  calculateSettlement(params: SettlementCalculationParams): SettlementCalculation {
+  calculateSettlement(
+    params: SettlementCalculationParams,
+  ): SettlementCalculation {
     const {
       base_salary,
       hire_date,
@@ -30,7 +32,10 @@ export class SettlementCalculationService {
       contract_end_date,
     } = params;
 
-    const days_worked = this.calculateWorkedDays360(hire_date, termination_date);
+    const days_worked = this.calculateWorkedDays360(
+      hire_date,
+      termination_date,
+    );
 
     // Cesantias = (salario x dias_trabajados) / 360
     const severance = this.round((base_salary * days_worked) / 360);
@@ -39,14 +44,20 @@ export class SettlementCalculationService {
     // dias_en_anio = days from Jan 1 (or hire_date if hired this year) to termination_date
     const year_start = new Date(termination_date.getFullYear(), 0, 1);
     const interest_start = hire_date > year_start ? hire_date : year_start;
-    const days_in_year = this.calculateWorkedDays360(interest_start, termination_date);
+    const days_in_year = this.calculateWorkedDays360(
+      interest_start,
+      termination_date,
+    );
     const severance_interest = this.round(
       (severance * rules.severance_interest_rate * days_in_year) / 360,
     );
 
     // Prima proporcional = (salario x dias_semestre) / 360
     // dias_semestre = days from Jan 1 or Jul 1 to termination_date
-    const days_in_semester = this.calculateDaysInSemester(hire_date, termination_date);
+    const days_in_semester = this.calculateDaysInSemester(
+      hire_date,
+      termination_date,
+    );
     const bonus = this.round((base_salary * days_in_semester) / 360);
 
     // Vacaciones proporcionales = (salario_base x dias_trabajados) / 720
@@ -67,15 +78,24 @@ export class SettlementCalculationService {
     );
 
     const gross_settlement = this.round(
-      severance + severance_interest + bonus + vacation + pending_salary + indemnification,
+      severance +
+        severance_interest +
+        bonus +
+        vacation +
+        pending_salary +
+        indemnification,
     );
 
     // Deductions on gross (excluding indemnification for social security)
     const deductible_base = this.round(
       severance + severance_interest + bonus + vacation + pending_salary,
     );
-    const health_deduction = this.round(deductible_base * rules.health_employee_rate);
-    const pension_deduction = this.round(deductible_base * rules.pension_employee_rate);
+    const health_deduction = this.round(
+      deductible_base * rules.health_employee_rate,
+    );
+    const pension_deduction = this.round(
+      deductible_base * rules.pension_employee_rate,
+    );
     const total_deductions = this.round(health_deduction + pension_deduction);
 
     const net_settlement = this.round(gross_settlement - total_deductions);
@@ -131,12 +151,18 @@ export class SettlementCalculationService {
 
     // Fixed term: salary for remaining contract days
     if (contract_type === 'fixed_term' && contract_end_date) {
-      const remaining_days = this.calculateWorkedDays360(termination_date, contract_end_date);
+      const remaining_days = this.calculateWorkedDays360(
+        termination_date,
+        contract_end_date,
+      );
       return this.round(daily_salary * remaining_days);
     }
 
     // Indefinite contract
-    const total_days_worked = this.calculateWorkedDays360(hire_date, termination_date);
+    const total_days_worked = this.calculateWorkedDays360(
+      hire_date,
+      termination_date,
+    );
     const years_worked = total_days_worked / 360;
     const is_high_salary = base_salary > rules.minimum_wage * 10;
 
@@ -160,14 +186,19 @@ export class SettlementCalculationService {
    * Semester 1: Jan 1 - Jun 30, Semester 2: Jul 1 - Dec 31.
    * If employee was hired mid-semester, use hire_date as start.
    */
-  private calculateDaysInSemester(hire_date: Date, termination_date: Date): number {
+  private calculateDaysInSemester(
+    hire_date: Date,
+    termination_date: Date,
+  ): number {
     const month = termination_date.getMonth();
     const year = termination_date.getFullYear();
-    const semester_start = month < 6
-      ? new Date(year, 0, 1)   // Jan 1
-      : new Date(year, 6, 1);  // Jul 1
+    const semester_start =
+      month < 6
+        ? new Date(year, 0, 1) // Jan 1
+        : new Date(year, 6, 1); // Jul 1
 
-    const effective_start = hire_date > semester_start ? hire_date : semester_start;
+    const effective_start =
+      hire_date > semester_start ? hire_date : semester_start;
     return this.calculateWorkedDays360(effective_start, termination_date);
   }
 

@@ -1,0 +1,40 @@
+meta {
+  name: Superadmin Create Partner Override
+  type: http
+  seq: 25
+}
+
+# Requires {{partner_organization_id}} (org flagged is_partner=true) and {{partner_base_plan_id}}
+# in the environment. Margin must be <= plan.max_partner_margin_pct.
+
+post {
+  url: {{url}}/superadmin/subscriptions/partners/overrides
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "organization_id": {{partner_organization_id}},
+    "base_plan_id": {{partner_base_plan_id}},
+    "margin_pct": 15,
+    "fixed_surcharge": 0,
+    "is_active": true
+  }
+}
+
+vars:post-response {
+  partner_override_id: res.body.data.id
+}
+
+tests {
+  test("Override created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Margin pct reflected", function() {
+    expect(Number(res.body.data.margin_pct)).to.equal(15);
+  });
+}

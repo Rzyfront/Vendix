@@ -104,7 +104,8 @@ export class SendGridProvider implements EmailProvider {
       this.logger.error('SendGrid send error (with attachments):', error);
       return {
         success: false,
-        error: error.message || 'Failed to send email with attachments via SendGrid',
+        error:
+          error.message || 'Failed to send email with attachments via SendGrid',
       };
     }
   }
@@ -184,6 +185,27 @@ export class SendGridProvider implements EmailProvider {
     };
 
     const template = EmailTemplates.getOnboardingTemplate(templateData);
+    return this.sendEmail(to, template.subject, template.html, template.text);
+  }
+
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    const templateData: EmailTemplateData = {
+      username,
+      email: to,
+      token,
+      vlink: organizationSlug,
+      companyName: 'Vendix',
+      supportEmail: this.config.fromEmail,
+      year: new Date().getFullYear(),
+    };
+
+    const template = EmailTemplates.getInvitationTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
 }

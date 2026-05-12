@@ -5,21 +5,48 @@ import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { SupplierQueryDto } from './dto/supplier-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BadRequestException } from '@nestjs/common';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly operatingScopeService: OperatingScopeService,
+  ) {}
 
-  create(createSupplierDto: CreateInventorySupplierDto) {
+  private async getSupplierScopeWhere() {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new BadRequestException('Organization context is missing');
     }
 
+    const scope = await this.operatingScopeService.getOperatingScope(
+      context.organization_id,
+    );
+
+    if (scope === 'ORGANIZATION') {
+      return { organization_id: context.organization_id, store_id: null };
+    }
+
+    if (!context.store_id) {
+      throw new BadRequestException('Store context is required for suppliers');
+    }
+
+    return { organization_id: context.organization_id, store_id: context.store_id };
+  }
+
+  async create(createSupplierDto: CreateInventorySupplierDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id) {
+      throw new BadRequestException('Organization context is missing');
+    }
+    const scopeWhere = await this.getSupplierScopeWhere();
+
     return this.prisma.suppliers.create({
       data: {
         ...createSupplierDto,
         organization_id: context.organization_id,
+        store_id: scopeWhere.store_id,
       },
       include: {
         addresses: true,
@@ -33,7 +60,9 @@ export class SuppliersService {
   }
 
   async findAll(query: SupplierQueryDto) {
+    const scopeWhere = await this.getSupplierScopeWhere();
     const where: any = {
+      ...scopeWhere,
       is_active: query.is_active,
       email: query.email,
       phone: query.phone,
@@ -95,9 +124,10 @@ export class SuppliersService {
     });
   }
 
-  findOne(id: number) {
-    return this.prisma.suppliers.findUnique({
-      where: { id },
+  async findOne(id: number) {
+    const scopeWhere = await this.getSupplierScopeWhere();
+    return this.prisma.suppliers.findFirst({
+      where: { id, ...scopeWhere },
       include: {
         addresses: true,
         supplier_products: {
@@ -109,10 +139,12 @@ export class SuppliersService {
     });
   }
 
-  findSupplierProducts(supplierId: number) {
+  async findSupplierProducts(supplierId: number) {
+    const scopeWhere = await this.getSupplierScopeWhere();
     return this.prisma.supplier_products.findMany({
       where: {
         supplier_id: supplierId,
+        suppliers: { is: scopeWhere },
       },
       include: {
         products: true,
@@ -124,7 +156,8 @@ export class SuppliersService {
     });
   }
 
-  update(id: number, updateSupplierDto: UpdateSupplierDto) {
+  async update(id: number, updateSupplierDto: UpdateSupplierDto) {
+    await this.findOne(id);
     return this.prisma.suppliers.update({
       where: { id },
       data: updateSupplierDto,
@@ -139,7 +172,8 @@ export class SuppliersService {
     });
   }
 
-  remove(id: number) {
+  async remove(id: number) {
+    await this.findOne(id);
     return this.prisma.suppliers.update({
       where: { id },
       data: { is_active: false },
@@ -147,6 +181,7 @@ export class SuppliersService {
   }
 
   async addProductToSupplier(supplierId: number, productId: number, data: any) {
+    await this.findOne(supplierId);
     return this.prisma.supplier_products.create({
       data: {
         supplier_id: supplierId,

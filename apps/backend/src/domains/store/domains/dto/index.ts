@@ -1,93 +1,119 @@
 import {
-    IsString,
-    IsNotEmpty,
-    IsOptional,
-    IsBoolean,
-    IsObject,
-    IsIn,
-    IsNumber,
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsBoolean,
+  IsObject,
+  IsIn,
+  IsNumber,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
+const DOMAIN_STATUSES = [
+  'pending_dns',
+  'pending_ssl',
+  'active',
+  'disabled',
+  'pending_ownership',
+  'verifying_ownership',
+  'pending_certificate',
+  'issuing_certificate',
+  'pending_alias',
+  'propagating',
+  'failed_ownership',
+  'failed_certificate',
+  'failed_alias',
+];
+
+const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
+
 export class CreateStoreDomainDto {
-    @IsString()
-    @IsNotEmpty()
-    hostname: string;
+  @IsString()
+  @IsNotEmpty()
+  hostname: string;
 
-    @IsOptional()
-    @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
-    domain_type?: string;
+  @IsOptional()
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
+  domain_type?: string;
 
-    @IsOptional()
-    @IsBoolean()
-    is_primary?: boolean;
+  @IsOptional()
+  @IsIn(STORE_APP_TYPES)
+  app_type?: string;
 
-    @IsOptional()
-    @IsIn([
-        'vendix_subdomain',
-        'custom_domain',
-        'custom_subdomain',
-        'vendix_core',
-        'third_party_subdomain',
-    ])
-    ownership?: string;
+  @IsOptional()
+  @IsBoolean()
+  is_primary?: boolean;
 
-    @IsObject()
-    config: Record<string, any>;
+  @IsOptional()
+  @IsIn([
+    'vendix_subdomain',
+    'custom_domain',
+    'custom_subdomain',
+    'vendix_core',
+    'third_party_subdomain',
+  ])
+  ownership?: string;
+
+  @IsObject()
+  config: Record<string, any>;
 }
 
 export class UpdateStoreDomainDto {
-    @IsOptional()
-    @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
-    domain_type?: string;
+  @IsOptional()
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
+  domain_type?: string;
 
-    @IsOptional()
-    @IsBoolean()
-    is_primary?: boolean;
+  @IsOptional()
+  @IsIn(STORE_APP_TYPES)
+  app_type?: string;
 
-    @IsOptional()
-    @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
-    status?: string;
+  @IsOptional()
+  @IsBoolean()
+  is_primary?: boolean;
 
-    @IsOptional()
-    @IsIn(['none', 'pending', 'issued', 'error', 'revoked'])
-    ssl_status?: string;
+  @IsOptional()
+  @IsIn(DOMAIN_STATUSES)
+  status?: string;
 
-    @IsOptional()
-    @IsIn([
-        'vendix_subdomain',
-        'custom_domain',
-        'custom_subdomain',
-        'vendix_core',
-        'third_party_subdomain',
-    ])
-    ownership?: string;
+  @IsOptional()
+  @IsIn(['none', 'pending', 'issued', 'error', 'revoked'])
+  ssl_status?: string;
 
-    @IsOptional()
-    @IsObject()
-    config?: Record<string, any>;
+  @IsOptional()
+  @IsIn([
+    'vendix_subdomain',
+    'custom_domain',
+    'custom_subdomain',
+    'vendix_core',
+    'third_party_subdomain',
+  ])
+  ownership?: string;
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, any>;
 }
 
 export class StoreDomainQueryDto {
-    @IsOptional()
-    @Transform(({ value }) => parseInt(value, 10))
-    @IsNumber()
-    page?: number;
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value, 10))
+  @IsNumber()
+  page?: number;
 
-    @IsOptional()
-    @Transform(({ value }) => parseInt(value, 10))
-    @IsNumber()
-    limit?: number;
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value, 10))
+  @IsNumber()
+  limit?: number;
 
-    @IsOptional()
-    @IsString()
-    search?: string;
+  @IsOptional()
+  @IsString()
+  search?: string;
 
-    @IsOptional()
-    @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
-    domain_type?: string;
+  @IsOptional()
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
+  domain_type?: string;
 
-    @IsOptional()
-    @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
-    status?: string;
+  @IsOptional()
+  @IsIn(DOMAIN_STATUSES)
+  status?: string;
 }

@@ -20,6 +20,12 @@ export interface CashRegister {
   description?: string;
   is_active: boolean;
   default_opening_amount?: number;
+  /**
+   * Override opcional de bodega. Si es null, la caja hereda
+   * stores.default_location_id al momento de descontar stock.
+   */
+  location_id?: number | null;
+  location?: { id: number; name: string } | null;
   sessions?: CashRegisterSession[];
 }
 
@@ -127,11 +133,12 @@ export class PosCashRegisterService {
       .get<any>(`${this.baseUrl}/sessions/active`)
       .pipe(
         map((res) => res.data || null),
-        tap((session) => this.activeSession.set(session)),
-        catchError(() => {
-          this.activeSession.set(null);
-          return of(null);
+        tap((session) => {
+          if (session) {
+            this.activeSession.set(session);
+          }
         }),
+        catchError(() => of(null)),
       );
   }
 

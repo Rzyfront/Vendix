@@ -15,8 +15,11 @@ import { seedTestOrders } from './seeds/test-orders.seed';
 import { seedHelpArticles } from './seeds/help-articles.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
+import { seedWithholdingTax } from './seeds/withholding-tax.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
+import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
+import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
 
 /**
  * Seed modules registry
@@ -122,6 +125,11 @@ const seedModules = [
     description: 'ICA tax rates for Colombian municipalities',
   },
   {
+    name: 'Withholding Tax',
+    fn: seedWithholdingTax,
+    description: 'UVT values and withholding concepts for Colombian tax compliance',
+  },
+  {
     name: 'AI Engine Applications',
     fn: seedAIEngineApps,
     description: 'Default AI application definitions (invoice OCR, etc.)',
@@ -130,6 +138,17 @@ const seedModules = [
     name: 'Payroll System Defaults',
     fn: seedPayrollSystemDefaults,
     description: 'Colombian payroll parameters baseline (2026)',
+  },
+  {
+    name: 'Subscription Plans (Default Trial)',
+    fn: seedSubscriptionPlans,
+    description: 'Default trial plan for the auto-trial flow (is_default=true)',
+  },
+  {
+    name: 'Subscription Plans (Canonical Production)',
+    fn: seedSubscriptionPlansProduction,
+    description:
+      'Canonical SaaS plans (starter / pro / enterprise) — idempotent across all environments',
   },
 ];
 
@@ -235,5 +254,8 @@ export * from './seeds/test-orders.seed';
 export * from './seeds/help-articles.seed';
 export * from './seeds/default-payroll-rules.seed';
 export * from './seeds/ica-municipal-rates.seed';
+export * from './seeds/withholding-tax.seed';
 export * from './seeds/ai-engine-apps.seed';
 export * from './seeds/payroll-system-defaults.seed';
+export * from './seeds/subscription-plans.seed';
+export * from './seeds/subscription-plans-production.seed';

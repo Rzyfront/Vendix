@@ -24,18 +24,17 @@ export const POS_TOUR_CONFIG: TourConfig = {
   steps: [
     {
       id: 'welcome',
-      title: '¡Bienvenido a Vendix! 🚀',
+      title: 'Bienvenido a Vendix',
       description:
-        'Estás a punto de comenzar el proceso para llevar tu negocio al siguiente nivel. Este tutorial te ayudará a realizar tus primeras ventas de prueba.',
-      action: 'Haz clic en "Comenzar" para iniciar',
+        'Crea un producto, véndelo en POS y completa tu primera prueba.',
       // No target - centered tooltip
     },
     {
       id: 'go-to-products',
-      title: 'Gestiona tus Productos',
+      title: 'Productos',
       description:
-        'Estoy seguro que tu negocio maneja productos. Vamos a crear algunos para que puedas empezar a vender.',
-      action: 'Haz clic en "Productos" en el menú lateral',
+        'Primero crea un producto para vender.',
+      action: 'Abre Productos',
       target: 'app-sidebar a[href="/admin/products"]',
       beforeNext: async () => {
         const currentPath = window.location.pathname;
@@ -44,10 +43,10 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'click-new-product',
-      title: 'Crea tu Primer Producto',
+      title: 'Primer producto',
       description:
-        'Haz clic en el botón "Crear Primer Producto" o "Nuevo Producto" para agregar tu primer item al inventario.',
-      action: 'Busca y haz clic en el botón de crear producto',
+        'Usa "Crear Primer Producto" o "Nuevo Producto".',
+      action: 'Crea el producto',
       // Try to find the "Crear Primer Producto" button in empty state first,
       // otherwise fall back to the dropdown action
       target:
@@ -64,10 +63,10 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'fill-product-form',
-      title: 'Configura tu Producto',
+      title: 'Configura el producto',
       description:
-        'Completa los campos requeridos: nombre del producto, precio y cantidad en stock. También puedes usar "Configuración Avanzada" para más opciones.',
-      action: 'Llena el formulario y haz clic en "Siguiente" cuando termines',
+        'Completa nombre, precio y stock. Agrega más datos si lo necesitas.',
+      action: 'Luego continúa',
       // No target - the user fills the form and clicks next manually
       beforeNext: async () => {
         // Allow proceeding - user will click next manually
@@ -77,10 +76,10 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'go-to-pos',
-      title: 'Punto de Venta',
+      title: 'Punto de venta',
       description:
-        'El Punto de Venta (POS) es donde procesas todas tus transacciones. Es rápido, intuitivo y te ayuda a vender más.',
-      action: 'Haz clic en "Punto de Venta" en el menú lateral',
+        'Ahora procesa la venta desde el POS.',
+      action: 'Abre Punto de Venta',
       target: 'app-sidebar a[href="/admin/pos"]',
       beforeNext: async () => {
         const currentPath = window.location.pathname;
@@ -89,10 +88,10 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'add-product-to-cart',
-      title: 'Agrega Productos al Carrito',
+      title: 'Agrega al carrito',
       description:
-        'Haz clic en cualquier producto de la lista para agregarlo al carrito. Verás cómo se actualiza el total automáticamente.',
-      action: 'Haz clic en un producto para agregarlo',
+        'Toca un producto y el total se actualizará.',
+      action: 'Selecciona un producto',
       // Desktop: Target the first product card in the POS product selection
       targetDesktop: 'app-pos-product-selection .product-card:first-of-type',
       // Mobile: Precise selectors based on actual component structure
@@ -158,10 +157,10 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'checkout',
-      title: 'Procesa el Pago',
+      title: 'Procesa el pago',
       description:
-        'Cuando estés listo, haz clic en el botón "Cobrar" para procesar el pago y completar la venta.',
-      action: 'Haz clic en el botón "Cobrar"',
+        'Usa "Cobrar" para abrir el pago y cerrar la venta.',
+      action: 'Cobra la venta',
       // Desktop: Target the "Cobrar" button in the cart component
       targetDesktop: 'app-pos-cart button.checkout-btn',
       // Mobile: Target the "Cobrar" button in the mobile footer
@@ -179,10 +178,9 @@ export const POS_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'congratulations',
-      title: '¡Excelente! 🎉',
+      title: 'Excelente',
       description:
-        'Aquí podrás completar tu venta y luego podrás revisar en el apartado de órdenes, para ver como tu negocio crece exponencialmente.',
-      action: '¡Excelente trabajo! Tu negocio está en marcha.',
+        'Completa el pago y revisa tus órdenes cuando quieras.',
       // No target - centered
     },
   ],

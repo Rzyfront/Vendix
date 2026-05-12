@@ -2,12 +2,12 @@ import {
   IsInt,
   IsOptional,
   IsString,
-  IsObject,
   IsArray,
   ValidateNested,
   Min,
   IsDateString,
   Matches,
+  IsEmail,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -24,6 +24,59 @@ class CheckoutCartItemDto {
   @IsInt()
   @Min(1)
   quantity: number;
+}
+
+export class GuestCheckoutCustomerDto {
+  @IsOptional()
+  @IsString()
+  first_name?: string;
+
+  @IsOptional()
+  @IsString()
+  last_name?: string;
+
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  document_type?: string;
+
+  @IsOptional()
+  @IsString()
+  document_number?: string;
+}
+
+export class CheckoutShippingAddressDto {
+  @IsString()
+  address_line1: string;
+
+  @IsOptional()
+  @IsString()
+  address_line2?: string;
+
+  @IsString()
+  city: string;
+
+  @IsOptional()
+  @IsString()
+  state_province?: string;
+
+  @IsString()
+  country_code: string;
+
+  @IsOptional()
+  @IsString()
+  postal_code?: string;
+
+  @IsOptional()
+  @IsString()
+  phone_number?: string;
 }
 
 export class CheckoutDto {
@@ -50,16 +103,14 @@ export class CheckoutDto {
   shipping_address_id?: number;
 
   @IsOptional()
-  @IsObject()
-  shipping_address?: {
-    address_line1: string;
-    address_line2?: string;
-    city: string;
-    state_province?: string;
-    country_code: string;
-    postal_code?: string;
-    phone_number?: string;
-  };
+  @ValidateNested()
+  @Type(() => CheckoutShippingAddressDto)
+  shipping_address?: CheckoutShippingAddressDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GuestCheckoutCustomerDto)
+  guest_customer?: GuestCheckoutCustomerDto;
 
   @IsInt()
   @Min(1)
@@ -80,6 +131,11 @@ class CheckoutBookingDto {
   @IsInt()
   @Min(1)
   product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  product_variant_id?: number;
 
   @IsDateString()
   date: string;

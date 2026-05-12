@@ -37,7 +37,8 @@ export class ArAgingUpdateJob {
       let updated = 0;
       for (const record of overdue_records) {
         const days_overdue = Math.floor(
-          (now.getTime() - new Date(record.due_date).getTime()) / (1000 * 60 * 60 * 24),
+          (now.getTime() - new Date(record.due_date).getTime()) /
+            (1000 * 60 * 60 * 24),
         );
 
         await this.prisma.accounts_receivable.update({
@@ -51,7 +52,9 @@ export class ArAgingUpdateJob {
         updated++;
       }
 
-      this.logger.log(`AR aging update complete: ${updated} records marked as overdue`);
+      this.logger.log(
+        `AR aging update complete: ${updated} records marked as overdue`,
+      );
 
       // 3. Reset days_overdue for records that are current (not overdue)
       await this.prisma.accounts_receivable.updateMany({
@@ -66,7 +69,10 @@ export class ArAgingUpdateJob {
         },
       });
     } catch (error) {
-      this.logger.error(`AR aging update failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `AR aging update failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

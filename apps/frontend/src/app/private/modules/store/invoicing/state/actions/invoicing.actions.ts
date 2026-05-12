@@ -9,6 +9,7 @@ import {
   CreateDebitNoteDto,
   CreateResolutionDto,
   UpdateResolutionDto,
+  DianConfig,
 } from '../../interfaces/invoice.interface';
 
 // ── Load Invoices ───────────────────────────────────────────
@@ -319,6 +320,18 @@ export const setDateRange = createAction(
   props<{ dateFrom: string; dateTo: string }>(),
 );
 export const clearFilters = createAction('[Invoicing] Clear Filters');
+
+// ── DIAN Configs (gate pre-factura) ─────────────────────────
+
+export const loadDianConfigs = createAction('[Invoicing] Load DIAN Configs');
+export const loadDianConfigsSuccess = createAction(
+  '[Invoicing] Load DIAN Configs Success',
+  props<{ configs: DianConfig[] }>(),
+);
+export const loadDianConfigsFailure = createAction(
+  '[Invoicing] Load DIAN Configs Failure',
+  props<{ error: string }>(),
+);
 
 // ── Clear State ─────────────────────────────────────────────
 

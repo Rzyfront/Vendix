@@ -10,9 +10,14 @@ export class MetadataValuesService {
 
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async setValues(entityType: string, entityId: number, values: SetMetadataValueDto[]) {
+  async setValues(
+    entityType: string,
+    entityId: number,
+    values: SetMetadataValueDto[],
+  ) {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) throw new ForbiddenException('Store context required');
+    if (!context?.store_id)
+      throw new ForbiddenException('Store context required');
     const results: any[] = [];
 
     for (const val of values) {
@@ -58,7 +63,12 @@ export class MetadataValuesService {
     return results;
   }
 
-  async setValuesUnscoped(storeId: number, entityType: string, entityId: number, values: SetMetadataValueDto[]) {
+  async setValuesUnscoped(
+    storeId: number,
+    entityType: string,
+    entityId: number,
+    values: SetMetadataValueDto[],
+  ) {
     const results: any[] = [];
     const unscoped = this.prisma.withoutScope();
 
@@ -105,7 +115,9 @@ export class MetadataValuesService {
     return results;
   }
 
-  async getValuesForEntities(queries: Array<{ entityType: string; entityId: number }>) {
+  async getValuesForEntities(
+    queries: Array<{ entityType: string; entityId: number }>,
+  ) {
     if (!queries.length) return [];
 
     const orConditions = queries.map((q) => ({
@@ -131,7 +143,11 @@ export class MetadataValuesService {
     });
   }
 
-  async getValuesByStoreAndEntity(storeId: number, entityType: string, entityId: number) {
+  async getValuesByStoreAndEntity(
+    storeId: number,
+    entityType: string,
+    entityId: number,
+  ) {
     return this.prisma.withoutScope().entity_metadata_values.findMany({
       where: {
         store_id: storeId,

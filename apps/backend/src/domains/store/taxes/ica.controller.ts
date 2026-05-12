@@ -1,17 +1,6 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
 import { IcaService } from './ica.service';
-import {
-  IcaRatesQueryDto,
-  IcaCalculateDto,
-  IcaReportQueryDto,
-} from './dto';
+import { IcaRatesQueryDto, IcaCalculateDto, IcaReportQueryDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';

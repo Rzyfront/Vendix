@@ -1,4 +1,11 @@
-import { IsInt, IsEnum, IsOptional, IsNumber, Min, IsString } from 'class-validator';
+import {
+  IsInt,
+  IsEnum,
+  IsOptional,
+  IsNumber,
+  Min,
+  IsString,
+} from 'class-validator';
 
 export enum PaymentType {
   DIRECT = 'direct',

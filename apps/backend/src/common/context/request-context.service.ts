@@ -1,15 +1,26 @@
 import { Injectable } from '@nestjs/common';
 import { AsyncLocalStorage } from 'async_hooks';
 
+export type AppTypeScope =
+  | 'VENDIX_LANDING'
+  | 'VENDIX_ADMIN'
+  | 'ORG_LANDING'
+  | 'ORG_ADMIN'
+  | 'STORE_LANDING'
+  | 'STORE_ADMIN'
+  | 'STORE_ECOMMERCE';
+
 export interface RequestContext {
   user_id?: number;
   organization_id?: number;
   store_id?: number;
+  app_type?: AppTypeScope; // ✅ Scope de dominio del JWT (DomainScopeGuard)
   roles?: string[];
   permissions?: string[];
   is_super_admin: boolean;
   is_owner: boolean;
   email?: string;
+  request_id?: string;
 }
 
 @Injectable()
@@ -62,6 +73,13 @@ export class RequestContextService {
    */
   static getUserId(): number | undefined {
     return this.getContext()?.user_id;
+  }
+
+  /**
+   * Obtiene el request_id actual (X-Request-Id)
+   */
+  static getRequestId(): string | undefined {
+    return this.getContext()?.request_id;
   }
 
   /**

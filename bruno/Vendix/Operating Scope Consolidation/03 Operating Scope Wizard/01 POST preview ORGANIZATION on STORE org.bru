@@ -1,0 +1,39 @@
+meta {
+  name: 01 POST preview ORGANIZATION on STORE org
+  type: http
+  seq: 1
+}
+
+# Pre-condition: the org of orgAdminToken is currently operating_scope=STORE
+# (or any non-ORGANIZATION). The migration service returns blockers/warnings.
+
+post {
+  url: http://{{url}}/organization/settings/operating-scope/preview
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+body:json {
+  {
+    "target_scope": "ORGANIZATION",
+    "reason": "Smoke preview from Bruno"
+  }
+}
+
+tests {
+  test("200 (preview is dry-run, even with blockers)", function () {
+    expect(res.status).to.equal(200);
+  });
+  test("payload includes blockers and warnings arrays", function () {
+    expect(res.body).to.satisfy(function (b) {
+      // Tolerate ResponseService envelope or raw shape.
+      const target = b && b.data ? b.data : b;
+      return Object.prototype.hasOwnProperty.call(target, "blockers") &&
+             Object.prototype.hasOwnProperty.call(target, "warnings");
+    });
+  });
+}

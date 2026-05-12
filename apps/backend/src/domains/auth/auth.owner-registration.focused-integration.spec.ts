@@ -86,7 +86,7 @@ describe('Owner Registration Flow - Focused Integration Tests', () => {
 
       // Verify user has owner role
       const hasOwnerRole = user!.user_roles.some(
-        (ur) => ur.roles.name === 'owner',
+        (ur) => ur.roles!.name === 'owner',
       );
       expect(hasOwnerRole).toBe(true);
 

@@ -66,4 +66,40 @@ export class CreateUserDto {
   @IsOptional()
   @IsEnum(user_state_enum)
   state?: user_state_enum;
+
+  @ApiPropertyOptional({
+    example: '+573001234567',
+    description: 'Teléfono del usuario',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
+
+  @ApiPropertyOptional({ example: 'CC', description: 'Tipo de documento' })
+  @IsOptional()
+  @IsString()
+  document_type?: string;
+
+  @ApiPropertyOptional({
+    example: '1234567890',
+    description: 'Número de documento',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  document_number?: string;
+
+  @ApiPropertyOptional({
+    example: 'avatars/user-123.jpg',
+    description: 'URL del avatar en S3',
+  })
+  @IsOptional()
+  @IsString()
+  avatar_url?: string;
+
+  @ApiPropertyOptional({ example: 1, description: 'ID de la tienda principal' })
+  @IsOptional()
+  @IsInt()
+  main_store_id?: number;
 }

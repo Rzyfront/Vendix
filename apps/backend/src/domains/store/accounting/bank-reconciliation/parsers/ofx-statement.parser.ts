@@ -18,14 +18,9 @@ export class OfxStatementParser {
     try {
       const content = buffer.toString('utf-8');
 
-      result.account_number =
-        this.extractTag(content, 'ACCTID') ?? undefined;
+      result.account_number = this.extractTag(content, 'ACCTID') ?? undefined;
 
-      const balAmtStr = this.extractNestedTag(
-        content,
-        'LEDGERBAL',
-        'BALAMT',
-      );
+      const balAmtStr = this.extractNestedTag(content, 'LEDGERBAL', 'BALAMT');
       if (balAmtStr) {
         const balAmt = parseFloat(balAmtStr);
         if (!isNaN(balAmt)) {
@@ -42,8 +37,7 @@ export class OfxStatementParser {
             result.transactions.push(transaction);
           }
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Unknown error';
+          const message = err instanceof Error ? err.message : 'Unknown error';
           result.errors.push(`Transaction ${i + 1}: ${message}`);
           this.logger.warn(
             `Error parsing OFX transaction ${i + 1}: ${message}`,
@@ -123,20 +117,14 @@ export class OfxStatementParser {
 
   private extractTag(content: string, tag: string): string | null {
     // OFX SGML-style: <TAG>value or <TAG>value</TAG>
-    const closingTagRegex = new RegExp(
-      `<${tag}>([^<]*)</${tag}>`,
-      'i',
-    );
+    const closingTagRegex = new RegExp(`<${tag}>([^<]*)</${tag}>`, 'i');
     const closingMatch = closingTagRegex.exec(content);
     if (closingMatch) {
       return closingMatch[1].trim();
     }
 
     // SGML style without closing tag: <TAG>value\n
-    const sgmlRegex = new RegExp(
-      `<${tag}>([^\\n<]+)`,
-      'i',
-    );
+    const sgmlRegex = new RegExp(`<${tag}>([^\\n<]+)`, 'i');
     const sgmlMatch = sgmlRegex.exec(content);
     if (sgmlMatch) {
       return sgmlMatch[1].trim();
@@ -163,10 +151,7 @@ export class OfxStatementParser {
 
   private extractBlocks(content: string, tag: string): string[] {
     const blocks: string[] = [];
-    const regex = new RegExp(
-      `<${tag}>([\\s\\S]*?)</${tag}>`,
-      'gi',
-    );
+    const regex = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, 'gi');
 
     let match: RegExpExecArray | null;
     while ((match = regex.exec(content)) !== null) {

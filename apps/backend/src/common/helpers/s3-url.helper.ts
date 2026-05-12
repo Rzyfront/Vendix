@@ -58,7 +58,9 @@ const S3_HOSTNAME_PATTERN = /^(?:[\w-]+\.)?s3(?:\.[\w-]+)?\.amazonaws\.com$/i;
  * extractS3KeyFromUrl(null)
  * // Returns: null
  */
-export function extractS3KeyFromUrl(urlOrKey: string | null | undefined): string | null {
+export function extractS3KeyFromUrl(
+  urlOrKey: string | null | undefined,
+): string | null {
   // Handle null, undefined, or empty strings
   if (!urlOrKey || urlOrKey.trim() === '') {
     return null;
@@ -110,7 +112,9 @@ export function extractS3KeyFromUrl(urlOrKey: string | null | undefined): string
   // Handle path-style URLs: s3.region.amazonaws.com/bucket-name/key
   // In this case, the first segment is the bucket name, not part of the key
   // We detect this by checking if the hostname is exactly s3.*.amazonaws.com (no bucket prefix)
-  const isPathStyleUrl = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i.test(url.hostname);
+  const isPathStyleUrl = /^s3(?:\.[\w-]+)?\.amazonaws\.com$/i.test(
+    url.hostname,
+  );
   if (isPathStyleUrl) {
     // Remove the bucket name (first segment)
     const slashIndex = key.indexOf('/');
@@ -167,7 +171,12 @@ export function isSafeS3Key(key: string): boolean {
   }
 
   if (decoded.includes('\0') || key.includes('%00')) return false;
-  if (decoded.includes('..\\') || decoded.includes('../') || key.includes('../')) return false;
+  if (
+    decoded.includes('..\\') ||
+    decoded.includes('../') ||
+    key.includes('../')
+  )
+    return false;
   if (decoded.split('/').some((s) => s === '..')) return false;
 
   return true;

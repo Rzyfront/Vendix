@@ -1,0 +1,29 @@
+meta {
+  name: Superadmin Revoke Promotional from Store
+  type: http
+  seq: 36
+}
+
+# NOTE: Endpoint POST /superadmin/subscriptions/promotional/:id/revoke is NOT implemented
+# as of Sprint 4. There is no superadmin-driven revoke route — overlays are removed when
+# a coupon expires/exhausts via the redemption pipeline. Re-enable when the route lands.
+
+post {
+  url: {{url}}/superadmin/subscriptions/promotional/{{superadmin_promo_id}}/revoke
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": {{store_id}}
+  }
+}
+
+tests {
+  test("Promotional overlay revoked (DISABLED — endpoint missing)", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property("removed");
+  });
+}

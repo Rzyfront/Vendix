@@ -9,7 +9,12 @@ import {
   ParseIntPipe,
   Request,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { StoreRolesService } from './store-roles.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import {
@@ -34,9 +39,15 @@ export class StoreRolesController {
   async findAll() {
     try {
       const result = await this.store_roles_service.findAll();
-      return this.response_service.success(result, 'Roles retrieved successfully');
+      return this.response_service.success(
+        result,
+        'Roles retrieved successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error retrieving roles', error.message);
+      return this.response_service.error(
+        'Error retrieving roles',
+        error.message,
+      );
     }
   }
 
@@ -46,21 +57,36 @@ export class StoreRolesController {
   async getStats() {
     try {
       const result = await this.store_roles_service.getStats();
-      return this.response_service.success(result, 'Stats retrieved successfully');
+      return this.response_service.success(
+        result,
+        'Stats retrieved successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error retrieving stats', error.message);
+      return this.response_service.error(
+        'Error retrieving stats',
+        error.message,
+      );
     }
   }
 
   @Get('permissions/available')
   @ApiOperation({ summary: 'List available store:* permissions' })
-  @ApiResponse({ status: 200, description: 'Permissions retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Permissions retrieved successfully',
+  })
   async getAvailablePermissions() {
     try {
       const result = await this.store_roles_service.getAvailablePermissions();
-      return this.response_service.success(result, 'Permissions retrieved successfully');
+      return this.response_service.success(
+        result,
+        'Permissions retrieved successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error retrieving permissions', error.message);
+      return this.response_service.error(
+        'Error retrieving permissions',
+        error.message,
+      );
     }
   }
 
@@ -73,20 +99,32 @@ export class StoreRolesController {
       const result = await this.store_roles_service.findOne(id);
       return this.response_service.success(result, 'Role found');
     } catch (error) {
-      return this.response_service.error('Error retrieving role', error.message);
+      return this.response_service.error(
+        'Error retrieving role',
+        error.message,
+      );
     }
   }
 
   @Get(':id/permissions')
   @ApiOperation({ summary: 'Get permission IDs of a role' })
-  @ApiResponse({ status: 200, description: 'Permission IDs retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Permission IDs retrieved successfully',
+  })
   @ApiResponse({ status: 404, description: 'Role not found' })
   async getRolePermissions(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.store_roles_service.getRolePermissions(id);
-      return this.response_service.success(result, 'Permission IDs retrieved successfully');
+      return this.response_service.success(
+        result,
+        'Permission IDs retrieved successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error retrieving role permissions', error.message);
+      return this.response_service.error(
+        'Error retrieving role permissions',
+        error.message,
+      );
     }
   }
 
@@ -136,8 +174,14 @@ export class StoreRolesController {
 
   @Post(':id/permissions')
   @ApiOperation({ summary: 'Assign store:* permissions to a role' })
-  @ApiResponse({ status: 200, description: 'Permissions assigned successfully' })
-  @ApiResponse({ status: 403, description: 'Cannot modify system role permissions' })
+  @ApiResponse({
+    status: 200,
+    description: 'Permissions assigned successfully',
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Cannot modify system role permissions',
+  })
   @ApiResponse({ status: 404, description: 'Role not found' })
   async assignPermissions(
     @Param('id', ParseIntPipe) id: number,
@@ -145,16 +189,25 @@ export class StoreRolesController {
   ) {
     try {
       const result = await this.store_roles_service.assignPermissions(id, dto);
-      return this.response_service.success(result, 'Permissions assigned successfully');
+      return this.response_service.success(
+        result,
+        'Permissions assigned successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error assigning permissions', error.message);
+      return this.response_service.error(
+        'Error assigning permissions',
+        error.message,
+      );
     }
   }
 
   @Delete(':id/permissions')
   @ApiOperation({ summary: 'Remove permissions from a role' })
   @ApiResponse({ status: 200, description: 'Permissions removed successfully' })
-  @ApiResponse({ status: 403, description: 'Cannot modify system role permissions' })
+  @ApiResponse({
+    status: 403,
+    description: 'Cannot modify system role permissions',
+  })
   @ApiResponse({ status: 404, description: 'Role not found' })
   async removePermissions(
     @Param('id', ParseIntPipe) id: number,
@@ -162,9 +215,15 @@ export class StoreRolesController {
   ) {
     try {
       const result = await this.store_roles_service.removePermissions(id, dto);
-      return this.response_service.success(result, 'Permissions removed successfully');
+      return this.response_service.success(
+        result,
+        'Permissions removed successfully',
+      );
     } catch (error) {
-      return this.response_service.error('Error removing permissions', error.message);
+      return this.response_service.error(
+        'Error removing permissions',
+        error.message,
+      );
     }
   }
 }

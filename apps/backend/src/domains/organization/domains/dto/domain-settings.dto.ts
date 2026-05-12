@@ -437,9 +437,36 @@ export class CreateDomainSettingDto {
   @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
   domain_type?: string;
 
+  @ApiPropertyOptional({ example: 'STORE_ECOMMERCE' })
+  @IsOptional()
+  @IsIn([
+    'VENDIX_LANDING',
+    'VENDIX_ADMIN',
+    'ORG_LANDING',
+    'ORG_ADMIN',
+    'STORE_LANDING',
+    'STORE_ADMIN',
+    'STORE_ECOMMERCE',
+  ])
+  app_type?: string;
+
   @ApiPropertyOptional({ example: 'pending_dns' })
   @IsOptional()
-  @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
+  @IsIn([
+    'pending_dns',
+    'pending_ssl',
+    'active',
+    'disabled',
+    'pending_ownership',
+    'verifying_ownership',
+    'pending_certificate',
+    'issuing_certificate',
+    'pending_alias',
+    'propagating',
+    'failed_ownership',
+    'failed_certificate',
+    'failed_alias',
+  ])
   status?: string;
 
   @ApiPropertyOptional({ example: 'none' })
@@ -495,7 +522,34 @@ export class UpdateDomainSettingDto {
 
   @ApiPropertyOptional()
   @IsOptional()
-  @IsIn(['pending_dns', 'pending_ssl', 'active', 'disabled'])
+  @IsIn([
+    'VENDIX_LANDING',
+    'VENDIX_ADMIN',
+    'ORG_LANDING',
+    'ORG_ADMIN',
+    'STORE_LANDING',
+    'STORE_ADMIN',
+    'STORE_ECOMMERCE',
+  ])
+  app_type?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsIn([
+    'pending_dns',
+    'pending_ssl',
+    'active',
+    'disabled',
+    'pending_ownership',
+    'verifying_ownership',
+    'pending_certificate',
+    'issuing_certificate',
+    'pending_alias',
+    'propagating',
+    'failed_ownership',
+    'failed_certificate',
+    'failed_alias',
+  ])
   status?: string;
 
   @ApiPropertyOptional()

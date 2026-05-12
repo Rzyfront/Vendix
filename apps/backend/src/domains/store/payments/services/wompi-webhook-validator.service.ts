@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { WompiClient } from '../processors/wompi/wompi.client';
 import { PaymentEncryptionService } from './payment-encryption.service';
+import { WompiClientFactory } from '../processors/wompi/wompi.factory';
 import {
   WompiWebhookEvent,
   WompiEnvironment,
@@ -13,7 +13,7 @@ export class WompiWebhookValidatorService {
 
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly encryptionService: PaymentEncryptionService,
   ) {}
 
@@ -37,7 +37,7 @@ export class WompiWebhookValidatorService {
    * 1. Extracting storeId from the transaction reference
    * 2. Looking up the store's Wompi credentials (unscoped)
    * 3. Decrypting the events_secret
-   * 4. Verifying the webhook signature using WompiClient
+   * 4. Verifying the webhook signature using an isolated WompiClient from the factory
    */
   async validate(
     body: any,
@@ -59,15 +59,16 @@ export class WompiWebhookValidatorService {
 
       // Unscoped query — webhooks arrive without tenant context
       const baseClient = this.prisma.withoutScope();
-      const storePaymentMethod =
-        await (baseClient as any).store_payment_methods.findFirst({
-          where: {
-            store_id: storeId,
-            state: 'enabled',
-            system_payment_method: { type: 'wompi' },
-          },
-          include: { system_payment_method: true },
-        });
+      const storePaymentMethod = await (
+        baseClient as any
+      ).store_payment_methods.findFirst({
+        where: {
+          store_id: storeId,
+          state: 'enabled',
+          system_payment_method: { type: 'wompi' },
+        },
+        include: { system_payment_method: true },
+      });
 
       if (!storePaymentMethod?.custom_config) {
         this.logger.warn(`No Wompi config found for store ${storeId}`);
@@ -75,10 +76,7 @@ export class WompiWebhookValidatorService {
       }
 
       // Decrypt sensitive fields (events_secret, private_key, etc.)
-      const rawConfig = storePaymentMethod.custom_config as Record<
-        string,
-        any
-      >;
+      const rawConfig = storePaymentMethod.custom_config as Record<string, any>;
       const config = this.encryptionService.decryptConfig(rawConfig, 'wompi');
 
       const eventsSecret = config.events_secret;
@@ -89,17 +87,21 @@ export class WompiWebhookValidatorService {
         return { valid: false, storeId };
       }
 
-      // Configure client with the store's decrypted credentials
-      this.wompiClient.configure({
+      const wompiConfig = {
         public_key: config.public_key || '',
         private_key: config.private_key || '',
         events_secret: eventsSecret,
         integrity_secret: config.integrity_secret || '',
         environment:
           (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
-      });
+      };
 
-      const isValid = this.wompiClient.validateWebhookSignature(
+      const client = this.wompiClientFactory.getClient(
+        `store-${storeId}`,
+        wompiConfig,
+      );
+
+      const isValid = client.validateWebhookSignature(
         body as WompiWebhookEvent,
       );
       this.logger.log(

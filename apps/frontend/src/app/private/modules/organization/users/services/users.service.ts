@@ -302,4 +302,60 @@ export class UsersService {
   invalidateCache(): void {
     orgUsersStatsCache = null;
   }
+
+  /**
+   * Enviar invitación de usuario (crea usuario PENDING con token)
+   */
+  inviteUser(inviteData: {
+    first_name: string;
+    last_name: string;
+    email: string;
+    app?: string;
+  }): Observable<{ user_id: number; token: string }> {
+    return this.http
+      .post<{ user_id: number; token: string }>(
+        `${this.apiUrl}/organization/users/invite`,
+        inviteData,
+      )
+      .pipe(
+        catchError((error) => {
+          console.error('Error inviting user:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  /**
+   * Verificar email de usuario (admin)
+   */
+  verifyEmail(id: number): Observable<User> {
+    return this.http
+      .post<User>(`${this.apiUrl}/organization/users/${id}/verify-email`, {})
+      .pipe(
+        catchError((error) => {
+          console.error('Error verifying email:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
+
+  /**
+   * Restablecer contraseña de usuario (admin)
+   */
+  resetPassword(id: number, passwords: {
+    new_password: string;
+    confirm_password: string;
+  }): Observable<User> {
+    return this.http
+      .post<User>(
+        `${this.apiUrl}/organization/users/${id}/reset-password`,
+        passwords,
+      )
+      .pipe(
+        catchError((error) => {
+          console.error('Error resetting password:', error);
+          return throwError(() => error);
+        }),
+      );
+  }
 }

@@ -35,20 +35,37 @@ export class LocationsService {
     }
 
     createLocation(data: CreateLocationDto): Observable<ApiResponse<InventoryLocation>> {
+        const payload = this.sanitizeLocationPayload(data);
         return this.http
-            .post<ApiResponse<InventoryLocation>>(this.api_url, data)
+            .post<ApiResponse<InventoryLocation>>(this.api_url, payload)
             .pipe(catchError(this.handleError));
     }
 
     updateLocation(id: number, data: UpdateLocationDto): Observable<ApiResponse<InventoryLocation>> {
+        const payload = this.sanitizeLocationPayload(data);
         return this.http
-            .patch<ApiResponse<InventoryLocation>>(`${this.api_url}/${id}`, data)
+            .patch<ApiResponse<InventoryLocation>>(`${this.api_url}/${id}`, payload)
             .pipe(catchError(this.handleError));
     }
 
     deleteLocation(id: number): Observable<ApiResponse<void>> {
         return this.http
             .delete<ApiResponse<void>>(`${this.api_url}/${id}`)
+            .pipe(catchError(this.handleError));
+    }
+
+    /**
+     * Marca una ubicación como la bodega principal (default) del store.
+     * El backend desmarcará automáticamente la ubicación previa.
+     *
+     * Requiere permiso: `store:inventory:set-default-location`.
+     */
+    setAsDefault(id: number): Observable<ApiResponse<InventoryLocation>> {
+        return this.http
+            .patch<ApiResponse<InventoryLocation>>(
+                `${this.api_url}/${id}/set-default`,
+                {},
+            )
             .pipe(catchError(this.handleError));
     }
 
@@ -65,6 +82,11 @@ export class LocationsService {
             }
         });
         return params;
+    }
+
+    private sanitizeLocationPayload<T extends CreateLocationDto | UpdateLocationDto>(data: T): Omit<T, 'is_default'> {
+        const { is_default: _is_default, ...payload } = data;
+        return payload;
     }
 
     private handleError(error: any): Observable<never> {

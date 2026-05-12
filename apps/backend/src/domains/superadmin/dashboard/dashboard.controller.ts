@@ -10,7 +10,7 @@ import { DashboardService } from './dashboard.service';
 @UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class DashboardController {
-  constructor(private readonly adminDashboardService: DashboardService) { }
+  constructor(private readonly adminDashboardService: DashboardService) {}
 
   @Get('stats')
   @ApiOperation({ summary: 'Get super admin dashboard stats' })

@@ -13,7 +13,10 @@ export class NotificationsSseService {
       this.subjects.set(store_id, new Subject());
       this.subscriberCounts.set(store_id, 0);
     }
-    this.subscriberCounts.set(store_id, (this.subscriberCounts.get(store_id) || 0) + 1);
+    this.subscriberCounts.set(
+      store_id,
+      (this.subscriberCounts.get(store_id) || 0) + 1,
+    );
     return this.subjects.get(store_id)!;
   }
 
@@ -27,7 +30,9 @@ export class NotificationsSseService {
   unsubscribe(store_id: number): void {
     const count = (this.subscriberCounts.get(store_id) || 1) - 1;
     if (count <= 0) {
-      this.logger.log(`All subscribers disconnected for store ${store_id}, cleaning up Subject`);
+      this.logger.log(
+        `All subscribers disconnected for store ${store_id}, cleaning up Subject`,
+      );
       this.removeStore(store_id);
       this.subscriberCounts.delete(store_id);
     } else {

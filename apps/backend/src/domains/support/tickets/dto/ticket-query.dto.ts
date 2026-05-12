@@ -15,17 +15,29 @@ import {
 } from '@prisma/client';
 
 export class TicketQueryDto {
-  @ApiProperty({ description: 'Filter by status', enum: ticket_status_enum, required: false })
+  @ApiProperty({
+    description: 'Filter by status',
+    enum: ticket_status_enum,
+    required: false,
+  })
   @IsEnum(ticket_status_enum)
   @IsOptional()
   status?: ticket_status_enum;
 
-  @ApiProperty({ description: 'Filter by priority', enum: ticket_priority_enum, required: false })
+  @ApiProperty({
+    description: 'Filter by priority',
+    enum: ticket_priority_enum,
+    required: false,
+  })
   @IsEnum(ticket_priority_enum)
   @IsOptional()
   priority?: ticket_priority_enum;
 
-  @ApiProperty({ description: 'Filter by category', enum: ticket_category_enum, required: false })
+  @ApiProperty({
+    description: 'Filter by category',
+    enum: ticket_category_enum,
+    required: false,
+  })
   @IsEnum(ticket_category_enum)
   @IsOptional()
   category?: ticket_category_enum;
@@ -40,7 +52,10 @@ export class TicketQueryDto {
   @IsOptional()
   customer_id?: number;
 
-  @ApiProperty({ description: 'Search in title and description', required: false })
+  @ApiProperty({
+    description: 'Search in title and description',
+    required: false,
+  })
   @IsString()
   @IsOptional()
   search?: string;
@@ -50,7 +65,10 @@ export class TicketQueryDto {
   @IsOptional()
   tag?: string;
 
-  @ApiProperty({ description: 'Filter by date from (ISO date)', required: false })
+  @ApiProperty({
+    description: 'Filter by date from (ISO date)',
+    required: false,
+  })
   @IsDateString()
   @IsOptional()
   date_from?: string;

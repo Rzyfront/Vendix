@@ -14,4 +14,4 @@ import { S3PathHelper } from './s3-path.helper';
   providers: [DomainGeneratorHelper, S3PathHelper],
   exports: [DomainGeneratorHelper, S3PathHelper],
 })
-export class HelpersModule { }
+export class HelpersModule {}

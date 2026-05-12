@@ -26,7 +26,14 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-selector
-          label="Tipo de Dominio"
+          label="Aplicación destino"
+          formControlName="app_type"
+          [options]="appTypeOptions"
+          [required]="true"
+        ></app-selector>
+
+        <app-selector
+          label="Tipo de dominio"
           formControlName="domain_type"
           [options]="domainTypeOptions"
           [required]="true"
@@ -59,6 +66,67 @@
           </label>
         </div>
       </div>
+
+      @if (isEditing && isCustomDomain) {
+        <div class="space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4">
+          <div class="flex items-start gap-2">
+            <app-icon name="shield-check" [size]="18" class="mt-0.5 text-amber-600"></app-icon>
+            <div>
+              <h3 class="text-sm font-semibold text-amber-950">Verificación de propiedad</h3>
+              <p class="text-xs text-amber-800">
+                Agrega estos registros DNS en tu proveedor y luego ejecuta la verificación.
+              </p>
+            </div>
+          </div>
+
+          @if (dnsInstructions(); as dns) {
+            <div class="space-y-2">
+              @for (record of dns.instructions; track record.record_type + record.name) {
+                <div class="rounded-md border border-amber-200 bg-white/80 p-3 text-xs">
+                  <div class="mb-2 flex items-center justify-between gap-2">
+                    <span class="font-semibold text-amber-950">
+                      {{ record.record_type }} {{ record.purpose === 'ownership' ? '(propiedad)' : record.purpose === 'certificate' ? '(certificado ACM)' : '(routing)' }}
+                    </span>
+                    <span class="text-amber-700">TTL {{ record.ttl }}</span>
+                  </div>
+                  <div class="grid gap-2 md:grid-cols-2">
+                    <div>
+                      <span class="block text-amber-700">Nombre</span>
+                      <button type="button" class="w-full truncate rounded bg-amber-100 px-2 py-1 text-left font-mono text-amber-950" (click)="copyToClipboard(record.name)">
+                        {{ record.name }}
+                      </button>
+                    </div>
+                    <div>
+                      <span class="block text-amber-700">Valor</span>
+                      <button type="button" class="w-full truncate rounded bg-amber-100 px-2 py-1 text-left font-mono text-amber-950" (click)="copyToClipboard(record.value)">
+                        {{ record.value }}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              }
+            </div>
+            @if (dns.requires_alias) {
+              <p class="text-xs text-amber-800">
+                Este dominio raíz requiere ALIAS/ANAME o CNAME flattening hacia {{ dns.target }}.
+              </p>
+            }
+          } @else {
+            <p class="text-xs text-amber-800">Cargando instrucciones DNS...</p>
+          }
+
+          <div class="flex items-center justify-between gap-3">
+            @if (copied()) {
+              <span class="text-xs font-medium text-emerald-700">Copiado</span>
+            } @else {
+              <span class="text-xs text-amber-700">Haz clic sobre nombre o valor para copiar.</span>
+            }
+            <app-button variant="primary" size="sm" type="button" (clicked)="onVerify()" [disabled]="isSaving()">
+              Verificar DNS
+            </app-button>
+          </div>
+        </div>
+      }
     </form>
   </div>
 

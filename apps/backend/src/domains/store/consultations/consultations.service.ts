@@ -9,7 +9,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { ReservationsService } from '../reservations/reservations.service';
 import { SubmissionsService } from '../data-collection/submissions.service';
 import { MetadataValuesService } from '../metadata/metadata-values.service';
-import { resolveEntityId, EntityContext } from '../data-collection/utils/entity-resolver.util';
+import {
+  resolveEntityId,
+  EntityContext,
+} from '../data-collection/utils/entity-resolver.util';
 
 @Injectable()
 export class ConsultationsService {
@@ -125,50 +128,69 @@ export class ConsultationsService {
     }
 
     // Load preconsultation submission (patient data)
-    const submission = await this.submissionsService.getSubmissionByBooking(bookingId);
+    const submission =
+      await this.submissionsService.getSubmissionByBooking(bookingId);
 
     // Load the consultation template (provider's template) separately from product
     let consultationTemplate: any = null;
-    if ((booking.product as any).consultation_template_id) {
-      consultationTemplate = await this.prisma.data_collection_templates.findUnique({
-        where: { id: (booking.product as any).consultation_template_id },
-        include: {
-          tabs: {
-            include: {
-              sections: {
-                include: {
-                  items: { include: { metadata_field: true }, orderBy: { sort_order: 'asc' as const } },
-                  child_sections: {
-                    include: { items: { include: { metadata_field: true }, orderBy: { sort_order: 'asc' as const } } },
-                    orderBy: { sort_order: 'asc' as const },
+    if (booking.product.consultation_template_id) {
+      consultationTemplate =
+        await this.prisma.data_collection_templates.findUnique({
+          where: { id: booking.product.consultation_template_id },
+          include: {
+            tabs: {
+              include: {
+                sections: {
+                  include: {
+                    items: {
+                      include: { metadata_field: true },
+                      orderBy: { sort_order: 'asc' as const },
+                    },
+                    child_sections: {
+                      include: {
+                        items: {
+                          include: { metadata_field: true },
+                          orderBy: { sort_order: 'asc' as const },
+                        },
+                      },
+                      orderBy: { sort_order: 'asc' as const },
+                    },
                   },
+                  where: { parent_section_id: null },
+                  orderBy: { sort_order: 'asc' as const },
                 },
-                where: { parent_section_id: null },
-                orderBy: { sort_order: 'asc' as const },
               },
+              orderBy: { sort_order: 'asc' as const },
             },
-            orderBy: { sort_order: 'asc' as const },
-          },
-          sections: {
-            include: {
-              items: { include: { metadata_field: true }, orderBy: { sort_order: 'asc' as const } },
-              child_sections: {
-                include: { items: { include: { metadata_field: true }, orderBy: { sort_order: 'asc' as const } } },
-                orderBy: { sort_order: 'asc' as const },
+            sections: {
+              include: {
+                items: {
+                  include: { metadata_field: true },
+                  orderBy: { sort_order: 'asc' as const },
+                },
+                child_sections: {
+                  include: {
+                    items: {
+                      include: { metadata_field: true },
+                      orderBy: { sort_order: 'asc' as const },
+                    },
+                  },
+                  orderBy: { sort_order: 'asc' as const },
+                },
               },
+              where: { tab_id: null, parent_section_id: null },
+              orderBy: { sort_order: 'asc' as const },
             },
-            where: { tab_id: null, parent_section_id: null },
-            orderBy: { sort_order: 'asc' as const },
           },
-        },
-      });
+        });
     }
 
     // Load existing consultation notes for this booking
-    const consultationNotes = await this.prisma.customer_consultation_notes.findMany({
-      where: { booking_id: bookingId },
-      orderBy: { created_at: 'asc' },
-    });
+    const consultationNotes =
+      await this.prisma.customer_consultation_notes.findMany({
+        where: { booking_id: bookingId },
+        orderBy: { created_at: 'asc' },
+      });
 
     // Load existing consultation responses from metadata_values
     let consultationResponses: any[] = [];
@@ -184,7 +206,7 @@ export class ConsultationsService {
         }
       };
       collectFields(consultationTemplate.sections || []);
-      for (const tab of (consultationTemplate as any).tabs || []) {
+      for (const tab of consultationTemplate.tabs || []) {
         collectFields(tab.sections || []);
       }
 
@@ -192,13 +214,18 @@ export class ConsultationsService {
       const customerValues = booking.customer_id
         ? await this.metadataValues.getValues('customer', booking.customer_id)
         : [];
-      const bookingValues = await this.metadataValues.getValues('booking', bookingId);
+      const bookingValues = await this.metadataValues.getValues(
+        'booking',
+        bookingId,
+      );
       const orderValues = booking.order_id
         ? await this.metadataValues.getValues('order', booking.order_id)
         : [];
 
       const allValues = [...customerValues, ...bookingValues, ...orderValues];
-      consultationResponses = allValues.filter((v: any) => fieldIds.has(v.field_id));
+      consultationResponses = allValues.filter((v: any) =>
+        fieldIds.has(v.field_id),
+      );
     }
 
     // Load customer history
@@ -233,7 +260,10 @@ export class ConsultationsService {
         document_number: booking.customer.document_number,
       },
       provider: booking.provider
-        ? { id: booking.provider.id, display_name: booking.provider.display_name }
+        ? {
+            id: booking.provider.id,
+            display_name: booking.provider.display_name,
+          }
         : null,
       consultation_template: consultationTemplate,
       preconsultation_template: submission?.template ?? null,
@@ -256,7 +286,11 @@ export class ConsultationsService {
    */
   async saveConsultationNotes(
     bookingId: number,
-    notes: { note_key: string; note_value: string; include_in_summary?: boolean }[],
+    notes: {
+      note_key: string;
+      note_value: string;
+      include_in_summary?: boolean;
+    }[],
   ) {
     const context = RequestContextService.getContext();
     const booking = await this.prisma.bookings.findFirst({
@@ -281,7 +315,8 @@ export class ConsultationsService {
           where: { id: existing.id },
           data: {
             note_value: note.note_value,
-            include_in_summary: note.include_in_summary ?? existing.include_in_summary,
+            include_in_summary:
+              note.include_in_summary ?? existing.include_in_summary,
             updated_at: new Date(),
           },
         });
@@ -338,7 +373,10 @@ export class ConsultationsService {
     };
 
     // Group responses by entity_type and write to metadata_values
-    const byEntity = new Map<string, { entityType: string; entityId: number; values: any[] }>();
+    const byEntity = new Map<
+      string,
+      { entityType: string; entityId: number; values: any[] }
+    >();
 
     for (const resp of responses) {
       const field = await this.prisma.entity_metadata_fields.findUnique({
@@ -352,7 +390,11 @@ export class ConsultationsService {
 
       const key = `${field.entity_type}:${entityId}`;
       if (!byEntity.has(key)) {
-        byEntity.set(key, { entityType: field.entity_type, entityId, values: [] });
+        byEntity.set(key, {
+          entityType: field.entity_type,
+          entityId,
+          values: [],
+        });
       }
       byEntity.get(key)!.values.push({
         field_id: resp.field_id,
@@ -365,11 +407,16 @@ export class ConsultationsService {
     }
 
     for (const [, group] of byEntity) {
-      await this.metadataValues.setValues(group.entityType, group.entityId, group.values);
+      await this.metadataValues.setValues(
+        group.entityType,
+        group.entityId,
+        group.values,
+      );
     }
 
     // Ensure a submission exists for tracking (but don't write responses to it)
-    let submission = await this.submissionsService.getSubmissionByBooking(bookingId);
+    let submission =
+      await this.submissionsService.getSubmissionByBooking(bookingId);
     if (!submission && booking.product?.consultation_template_id) {
       submission = await this.submissionsService.createSubmission({
         template_id: booking.product.consultation_template_id,
@@ -378,7 +425,11 @@ export class ConsultationsService {
       });
     }
 
-    return { success: true, submission_id: submission?.id, responses_saved: responses.length };
+    return {
+      success: true,
+      submission_id: submission?.id,
+      responses_saved: responses.length,
+    };
   }
 
   /**
@@ -405,7 +456,10 @@ export class ConsultationsService {
   /**
    * Get customer history: previous completed bookings + important notes
    */
-  private async getCustomerHistory(customerId: number, currentBookingId: number) {
+  private async getCustomerHistory(
+    customerId: number,
+    currentBookingId: number,
+  ) {
     const previousBookings = await this.prisma.bookings.findMany({
       where: {
         customer_id: customerId,
@@ -420,15 +474,16 @@ export class ConsultationsService {
       take: 10,
     });
 
-    const importantNotes = await this.prisma.customer_consultation_notes.findMany({
-      where: {
-        customer_id: customerId,
-        include_in_summary: true,
-        booking_id: { not: currentBookingId },
-      },
-      orderBy: { created_at: 'desc' },
-      take: 20,
-    });
+    const importantNotes =
+      await this.prisma.customer_consultation_notes.findMany({
+        where: {
+          customer_id: customerId,
+          include_in_summary: true,
+          booking_id: { not: currentBookingId },
+        },
+        orderBy: { created_at: 'desc' },
+        take: 20,
+      });
 
     return {
       previous_bookings: previousBookings.map((b: any) => ({

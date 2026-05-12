@@ -35,17 +35,15 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 @Component({
   selector: 'app-expenses-list',
   standalone: true,
-  imports: [
+imports: [
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
     PaginationComponent,
     EmptyStateComponent,
     CardComponent
-],
+  ],
   templateUrl: './expenses-list.component.html',
 })
 export class ExpensesListComponent {

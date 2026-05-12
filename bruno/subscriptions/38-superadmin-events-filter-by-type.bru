@@ -1,0 +1,33 @@
+meta {
+  name: Superadmin Events Filter By Type
+  type: http
+  seq: 38
+}
+
+get {
+  url: {{url}}/superadmin/subscriptions/events?type=payment_succeeded&page=1&limit=20
+  body: none
+  auth: inherit
+}
+
+params:query {
+  type: payment_succeeded
+  page: 1
+  limit: 20
+}
+
+tests {
+  test("Filtered events returned", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an("array");
+  });
+
+  test("All returned events match the requested type", function() {
+    if (res.body.data.length > 0) {
+      res.body.data.forEach(function(ev) {
+        expect(ev.event_type || ev.type).to.equal("payment_succeeded");
+      });
+    }
+  });
+}

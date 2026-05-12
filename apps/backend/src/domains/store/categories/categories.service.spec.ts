@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CategoriesService } from './categories.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import {
   CreateCategoryDto,
@@ -23,7 +23,7 @@ jest.mock('slugify', () => ({
 
 describe('CategoriesService', () => {
   let service: CategoriesService;
-  let prismaService: PrismaService;
+  let prismaService: StorePrismaService;
   let accessValidationService: AccessValidationService;
 
   const mockPrismaService = {
@@ -48,7 +48,7 @@ describe('CategoriesService', () => {
       providers: [
         CategoriesService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -59,7 +59,7 @@ describe('CategoriesService', () => {
     }).compile();
 
     service = module.get<CategoriesService>(CategoriesService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<StorePrismaService>(StorePrismaService);
     accessValidationService = module.get<AccessValidationService>(
       AccessValidationService,
     );

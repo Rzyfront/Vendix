@@ -33,7 +33,7 @@ export class StorePaymentMethodsController {
   constructor(
     private readonly storePaymentMethodsService: StorePaymentMethodsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Patch(':methodId/enable')
   @ApiOperation({ summary: 'Re-enable payment method for store' })
@@ -50,7 +50,8 @@ export class StorePaymentMethodsController {
         return this.responseService.error('Invalid payment method ID', '', 400);
       }
 
-      const result = await this.storePaymentMethodsService.reEnableForStore(method_id_num);
+      const result =
+        await this.storePaymentMethodsService.reEnableForStore(method_id_num);
       return this.responseService.success(
         result,
         'Payment method enabled successfully',
@@ -71,7 +72,8 @@ export class StorePaymentMethodsController {
   })
   async getAvailable() {
     try {
-      const result = await this.storePaymentMethodsService.getAvailableForStore();
+      const result =
+        await this.storePaymentMethodsService.getAvailableForStore();
       return this.responseService.success(
         result,
         'Available payment methods retrieved successfully',
@@ -140,7 +142,8 @@ export class StorePaymentMethodsController {
         return this.responseService.error('Invalid payment method ID', '', 400);
       }
 
-      const result = await this.storePaymentMethodsService.findOne(method_id_num);
+      const result =
+        await this.storePaymentMethodsService.findOne(method_id_num);
       return this.responseService.success(
         result,
         'Payment method retrieved successfully',
@@ -168,7 +171,11 @@ export class StorePaymentMethodsController {
     try {
       const system_method_id_num = parseInt(systemMethodId);
       if (!system_method_id_num || isNaN(system_method_id_num)) {
-        return this.responseService.error('Invalid system payment method ID', '', 400);
+        return this.responseService.error(
+          'Invalid system payment method ID',
+          '',
+          400,
+        );
       }
 
       const result = await this.storePaymentMethodsService.enableForStore(
@@ -221,7 +228,6 @@ export class StorePaymentMethodsController {
     }
   }
 
-
   @Patch(':methodId/disable')
   @ApiOperation({ summary: 'Disable payment method for store' })
   @ApiResponse({
@@ -237,7 +243,8 @@ export class StorePaymentMethodsController {
         return this.responseService.error('Invalid payment method ID', '', 400);
       }
 
-      const result = await this.storePaymentMethodsService.disableForStore(method_id_num);
+      const result =
+        await this.storePaymentMethodsService.disableForStore(method_id_num);
       return this.responseService.success(
         result,
         'Payment method disabled successfully',
@@ -289,7 +296,8 @@ export class StorePaymentMethodsController {
   @ApiResponse({ status: 403, description: 'Access denied' })
   async reorder(@Body() reorderDto: ReorderPaymentMethodsDto) {
     try {
-      const result = await this.storePaymentMethodsService.reorderMethods(reorderDto);
+      const result =
+        await this.storePaymentMethodsService.reorderMethods(reorderDto);
       return this.responseService.success(
         result,
         'Payment methods reordered successfully',

@@ -11,7 +11,12 @@ import { ExogenousFileBuilderService } from './exogenous-file-builder.service';
 @Module({
   imports: [PrismaModule, ResponseModule, S3Module],
   controllers: [ExogenousController],
-  providers: [ExogenousService, ExogenousGeneratorService, ExogenousValidatorService, ExogenousFileBuilderService],
+  providers: [
+    ExogenousService,
+    ExogenousGeneratorService,
+    ExogenousValidatorService,
+    ExogenousFileBuilderService,
+  ],
   exports: [ExogenousService],
 })
 export class ExogenousModule {}

@@ -66,9 +66,13 @@ export class CostingService {
         quantity_on_hand: { gt: 0 },
       },
     });
-    const globalQty = allStockLevels.reduce((sum, sl) => sum + (sl.quantity_on_hand ?? 0), 0);
+    const globalQty = allStockLevels.reduce(
+      (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
+      0,
+    );
     const globalValue = allStockLevels.reduce(
-      (sum, sl) => sum + ((sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0)),
+      (sum, sl) =>
+        sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
       0,
     );
     const globalCost = globalQty > 0 ? globalValue / globalQty : 0;
@@ -180,8 +184,7 @@ export class CostingService {
     }
 
     // FIFO or LIFO: consume layers in order
-    const orderDirection =
-      params.costing_method === 'fifo' ? 'asc' : 'desc';
+    const orderDirection = params.costing_method === 'fifo' ? 'asc' : 'desc';
 
     const layers = await prisma.inventory_cost_layers.findMany({
       where: {
@@ -228,10 +231,7 @@ export class CostingService {
   /**
    * Initialize cost layers for existing stock (migration utility).
    */
-  async initializeCostLayers(
-    organizationId: number,
-    tx?: any,
-  ): Promise<void> {
+  async initializeCostLayers(organizationId: number, tx?: any): Promise<void> {
     const prisma = tx || this.prisma;
 
     const stockLevels = await prisma.stock_levels.findMany({
@@ -303,8 +303,7 @@ export class CostingService {
     const totalQty = existingQty + receivedQty;
     if (totalQty <= 0) return receivedCost;
 
-    const totalValue =
-      existingQty * existingCost + receivedQty * receivedCost;
+    const totalValue = existingQty * existingCost + receivedQty * receivedCost;
     return totalValue / totalQty;
   }
 

@@ -1,0 +1,40 @@
+meta {
+  name: Superadmin Gateway PATCH Invalid Public Key Prefix
+  type: http
+  seq: 46
+}
+
+# Validates that the @Matches regex on public_key still fires on a
+# present-but-malformed value (transform only normalizes "" -> undefined,
+# not arbitrary strings). Other 3 credentials are valid so the only
+# rejection cause is the public_key prefix.
+
+patch {
+  url: {{url}}/superadmin/subscriptions/gateway/wompi
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "public_key": "pub_xxx_invalid",
+    "private_key": "prv_test_bbb",
+    "events_secret": "events_secret_xxx",
+    "integrity_secret": "integrity_secret_yyy",
+    "environment": "sandbox",
+    "is_active": false
+  }
+}
+
+tests {
+  test("Malformed public_key is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body.success).to.be.false;
+  });
+
+  test("Validation message mentions accepted public_key prefixes", function() {
+    const raw = res.body.message ?? res.body.error?.message ?? res.body;
+    const flat = typeof raw === 'string' ? raw : JSON.stringify(raw);
+    expect(flat.includes("pub_test_") && flat.includes("pub_prod_")).to.be.true;
+  });
+}

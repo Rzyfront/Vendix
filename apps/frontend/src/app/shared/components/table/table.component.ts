@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
+import { DropdownComponent } from '../dropdown/dropdown.component';
 
 export interface TableColumn {
   key: string;
@@ -27,10 +28,17 @@ export interface TableColumn {
     type?: 'status' | 'custom';
     colorKey?: string; // For status type, maps to predefined colors
     colorMap?: Record<string, string>; // For custom mapping of values to colors
+    /**
+     * Custom resolver that returns a color string (named CSS color, hex, or
+     * rgb) for the given value. Takes precedence over `colorMap` when present.
+     * Used for threshold-style coloring (e.g. "0 → red, >0 → green").
+     */
+    colorFn?: (value: any, item?: any) => string | null | undefined;
     size?: 'sm' | 'md' | 'lg';
   };
   priority?: number; // Priority for responsiveness: 0 (high) to infinite (low). Default logic applies if not set.
   type?: 'text' | 'image'; // Type of content to display
+  badgeTransform?: (value: any) => string; // Transform value for badge display
 }
 
 export interface TableAction {
@@ -46,12 +54,13 @@ export interface TableAction {
 
 export type TableSize = 'sm' | 'md' | 'lg';
 export type SortDirection = 'asc' | 'desc' | null;
+export type TableActionsDisplay = 'buttons' | 'dropdown';
 
 @Component({
   selector: 'app-table',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, DropdownComponent],
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss',
 })
@@ -69,6 +78,7 @@ export class TableComponent {
   readonly bordered = input<boolean>(false);
   readonly compact = input<boolean>(false);
   readonly sortable = input<boolean>(false);
+  readonly actionsDisplay = input<TableActionsDisplay>('buttons');
   readonly customClasses = input<string>('');
 
   // --- Outputs ---
@@ -301,6 +311,21 @@ export class TableComponent {
     return `action-${variant}${disabled ? ' action-disabled' : ''}`;
   }
 
+  getVisibleActions(item: any): TableAction[] {
+    const actions = this.actions();
+    if (!actions) return [];
+    return actions.filter((action) => this.isActionVisible(action, item));
+  }
+
+  getActionMenuItemClasses(action: TableAction, item: any): string {
+    const variant =
+      typeof action.variant === 'function'
+        ? action.variant(item)
+        : action.variant || 'ghost';
+    const disabled = this.isActionDisabled(action, item);
+    return `table-action-menu-item table-action-menu-item-${variant}${disabled ? ' table-action-menu-item-disabled' : ''}`;
+  }
+
   /**
    * Get nested value from object using dot notation
    */
@@ -374,7 +399,7 @@ export class TableComponent {
       return `${baseClass} ${colorClass} ${sizeClass}`;
     } else if (
       column.badgeConfig.type === 'custom' &&
-      column.badgeConfig.colorMap
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
     ) {
       // For custom type, we'll use inline styles instead of CSS classes
       return `${baseClass} ${sizeClass} status-badge-custom`;
@@ -387,7 +412,10 @@ export class TableComponent {
    * Get background color for custom badges
    */
   getBadgeBackgroundColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       const color = this.getBadgeColorFromMap(column, value);
       if (color) {
         // Convert the color to a soft/transparent version for background
@@ -401,7 +429,10 @@ export class TableComponent {
    * Get text color for custom badges
    */
   getBadgeTextColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       return this.getBadgeColorFromMap(column, value);
     }
     return null;
@@ -411,7 +442,10 @@ export class TableComponent {
    * Get border color for custom badges
    */
   getBadgeBorderColor(column: TableColumn, value: any): string | null {
-    if (column.badgeConfig?.type === 'custom' && column.badgeConfig.colorMap) {
+    if (
+      column.badgeConfig?.type === 'custom' &&
+      (column.badgeConfig.colorMap || column.badgeConfig.colorFn)
+    ) {
       const color = this.getBadgeColorFromMap(column, value);
       if (color) {
         // Make border slightly more transparent than text
@@ -426,6 +460,11 @@ export class TableComponent {
    * This method applies the column transform function if it exists before looking up the color
    */
   private getBadgeColorFromMap(column: TableColumn, value: any): string | null {
+    // colorFn wins over colorMap when both are provided
+    if (column.badgeConfig?.colorFn) {
+      const fnColor = column.badgeConfig.colorFn(value, undefined);
+      if (fnColor) return fnColor;
+    }
     if (column.badgeConfig?.colorMap) {
       // Apply transform function to get display value if exists
       const displayValue = column.transform

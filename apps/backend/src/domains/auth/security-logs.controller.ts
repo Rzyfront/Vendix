@@ -16,7 +16,7 @@ export class SecurityLogsController {
   constructor(
     private readonly auditService: SuperAdminAuditService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('failed-logins')
   @ApiOperation({

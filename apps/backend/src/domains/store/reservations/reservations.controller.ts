@@ -40,28 +40,40 @@ export class ReservationsController {
   @Permissions('store:reservations:read')
   async findAll(@Query() query: BookingQueryDto) {
     const result = await this.reservationsService.findAll(query);
-    return this.responseService.success(result, 'Reservas obtenidas exitosamente');
+    return this.responseService.success(
+      result,
+      'Reservas obtenidas exitosamente',
+    );
   }
 
   @Get('stats')
   @Permissions('store:reservations:read')
   async getStats() {
     const result = await this.reservationsService.getStats();
-    return this.responseService.success(result, 'Estadisticas de reservas obtenidas exitosamente');
+    return this.responseService.success(
+      result,
+      'Estadisticas de reservas obtenidas exitosamente',
+    );
   }
 
   @Get('today')
   @Permissions('store:reservations:read')
   async getToday() {
     const result = await this.reservationsService.getToday();
-    return this.responseService.success(result, 'Reservas de hoy obtenidas exitosamente');
+    return this.responseService.success(
+      result,
+      'Reservas de hoy obtenidas exitosamente',
+    );
   }
 
   @Get('calendar')
   @Permissions('store:reservations:read')
   async getCalendar(@Query() query: CalendarQueryDto) {
     const result = await this.reservationsService.getCalendar(query);
-    return this.responseService.success(result, 'Calendario de reservas obtenido exitosamente');
+    return this.responseService.success(
+      result,
+      'Calendario de reservas obtenido exitosamente',
+    );
   }
 
   @Get('availability/:productId')
@@ -75,9 +87,15 @@ export class ReservationsController {
       productId,
       query.date_from,
       query.date_to,
-      providerId ? parseInt(providerId, 10) : undefined,
+      {
+        provider_id: providerId ? parseInt(providerId, 10) : undefined,
+        product_variant_id: query.product_variant_id,
+      },
     );
-    return this.responseService.success(result, 'Disponibilidad obtenida exitosamente');
+    return this.responseService.success(
+      result,
+      'Disponibilidad obtenida exitosamente',
+    );
   }
 
   @Public()
@@ -91,7 +109,10 @@ export class ReservationsController {
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.findOne(id);
-    return this.responseService.success(result, 'Reserva obtenida exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva obtenida exitosamente',
+    );
   }
 
   @Post()
@@ -105,42 +126,60 @@ export class ReservationsController {
   @Permissions('store:reservations:update')
   async confirm(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.confirm(id);
-    return this.responseService.success(result, 'Reserva confirmada exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva confirmada exitosamente',
+    );
   }
 
   @Patch(':id/start')
   @Permissions('store:reservations:update')
   async start(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.start(id);
-    return this.responseService.success(result, 'Reserva iniciada exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva iniciada exitosamente',
+    );
   }
 
   @Patch(':id/cancel')
   @Permissions('store:reservations:update')
   async cancel(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.cancel(id);
-    return this.responseService.success(result, 'Reserva cancelada exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva cancelada exitosamente',
+    );
   }
 
   @Patch(':id/complete')
   @Permissions('store:reservations:update')
   async complete(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.complete(id);
-    return this.responseService.success(result, 'Reserva completada exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva completada exitosamente',
+    );
   }
 
   @Patch(':id/no-show')
   @Permissions('store:reservations:update')
   async noShow(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.noShow(id);
-    return this.responseService.success(result, 'Reserva marcada como no-show exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva marcada como no-show exitosamente',
+    );
   }
 
   @Patch(':id/check-in')
   @Permissions('store:reservations:write')
   async checkIn(@Param('id', ParseIntPipe) id: number) {
     const result = await this.reservationsService.checkIn(id, 'staff');
-    return this.responseService.success(result, 'Check-in registrado correctamente');
+    return this.responseService.success(
+      result,
+      'Check-in registrado correctamente',
+    );
   }
 
   @Patch(':id/reschedule')
@@ -150,7 +189,10 @@ export class ReservationsController {
     @Body() dto: RescheduleBookingDto,
   ) {
     const result = await this.reservationsService.reschedule(id, dto);
-    return this.responseService.success(result, 'Reserva reprogramada exitosamente');
+    return this.responseService.success(
+      result,
+      'Reserva reprogramada exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -164,12 +206,17 @@ export class ReservationsController {
       where: { id },
       data: {
         ...(dto.notes !== undefined && { notes: dto.notes }),
-        ...(dto.internal_notes !== undefined && { internal_notes: dto.internal_notes }),
+        ...(dto.internal_notes !== undefined && {
+          internal_notes: dto.internal_notes,
+        }),
         updated_at: new Date(),
       },
       include: this.reservationsService['BOOKING_INCLUDE'],
     });
-    return this.responseService.success(updated, 'Reserva actualizada exitosamente');
+    return this.responseService.success(
+      updated,
+      'Reserva actualizada exitosamente',
+    );
   }
 
   @Delete(':id')
@@ -177,7 +224,9 @@ export class ReservationsController {
   async remove(@Param('id', ParseIntPipe) id: number) {
     const booking = await this.reservationsService.findOne(id);
     if (booking.status !== 'pending') {
-      throw new BadRequestException('Solo se pueden eliminar reservas en estado pendiente');
+      throw new BadRequestException(
+        'Solo se pueden eliminar reservas en estado pendiente',
+      );
     }
     await this.reservationsService['prisma'].bookings.delete({ where: { id } });
     return this.responseService.success(null, 'Reserva eliminada exitosamente');

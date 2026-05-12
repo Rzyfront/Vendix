@@ -42,20 +42,57 @@ export class Ec2MetricsService {
     const endTime = new Date();
     const periodSeconds = periodToSeconds(granularity);
 
-    const dimensions = [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }];
+    const dimensions = [
+      { Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId },
+    ];
     const namespace = 'AWS/EC2';
 
     const queries: MetricQuery[] = [
-      { id: 'cpu_utilization', metricName: 'CPUUtilization', namespace, dimensions },
-      { id: 'cpu_credit_balance', metricName: 'CPUCreditBalance', namespace, dimensions },
-      { id: 'cpu_credit_usage', metricName: 'CPUCreditUsage', namespace, dimensions },
+      {
+        id: 'cpu_utilization',
+        metricName: 'CPUUtilization',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'cpu_credit_balance',
+        metricName: 'CPUCreditBalance',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'cpu_credit_usage',
+        metricName: 'CPUCreditUsage',
+        namespace,
+        dimensions,
+      },
       { id: 'network_in', metricName: 'NetworkIn', namespace, dimensions },
       { id: 'network_out', metricName: 'NetworkOut', namespace, dimensions },
       { id: 'disk_read_ops', metricName: 'EBSReadOps', namespace, dimensions },
-      { id: 'disk_write_ops', metricName: 'EBSWriteOps', namespace, dimensions },
-      { id: 'disk_read_bytes', metricName: 'EBSReadBytes', namespace, dimensions },
-      { id: 'disk_write_bytes', metricName: 'EBSWriteBytes', namespace, dimensions },
-      { id: 'status_check_failed', metricName: 'StatusCheckFailed', namespace, dimensions },
+      {
+        id: 'disk_write_ops',
+        metricName: 'EBSWriteOps',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'disk_read_bytes',
+        metricName: 'EBSReadBytes',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'disk_write_bytes',
+        metricName: 'EBSWriteBytes',
+        namespace,
+        dimensions,
+      },
+      {
+        id: 'status_check_failed',
+        metricName: 'StatusCheckFailed',
+        namespace,
+        dimensions,
+      },
     ];
 
     const resultsMap = await this.cloudWatchService.getMultipleMetrics(

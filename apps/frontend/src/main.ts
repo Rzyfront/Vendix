@@ -1,6 +1,14 @@
 import { bootstrapApplication } from '@angular/platform-browser';
+import { registerLocaleData } from '@angular/common';
+import localeEsCO from '@angular/common/locales/es-CO';
+import localeEsCOExtra from '@angular/common/locales/extra/es-CO';
 import { appConfig } from './app/app.config';
 import { AppComponent } from './app/app.component';
+
+// Register es-CO locale globally so DatePipe / CurrencyPipe with 'es-CO'
+// (used across the admin panels — checkout, invoices, accounting reports)
+// don't throw NG0701 "Missing locale data".
+registerLocaleData(localeEsCO, 'es-CO', localeEsCOExtra);
 
 if (typeof window !== 'undefined') {
   const originalConsoleError = console.error.bind(console);

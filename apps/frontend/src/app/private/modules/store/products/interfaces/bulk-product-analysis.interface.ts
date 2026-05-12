@@ -1,3 +1,9 @@
+export interface BulkValidationMessage {
+  code: string;
+  message: string;
+  field?: string;
+}
+
 export interface BulkProductAnalysisItem {
   row_number: number;
   name: string;
@@ -13,10 +19,16 @@ export interface BulkProductAnalysisItem {
   warehouse_code?: string;
   warehouse_name?: string;
   track_inventory?: boolean;
+  service_duration_minutes?: number;
+  service_modality?: string;
+  service_pricing_type?: string;
+  requires_booking?: boolean;
   action: 'create' | 'update';
   status: 'ready' | 'warning' | 'error';
-  warnings: string[];
-  errors: string[];
+  warnings: (string | BulkValidationMessage)[];
+  errors: (string | BulkValidationMessage)[];
+  modified_fields?: string[];
+  nulled_fields?: string[];
 }
 
 export interface BulkProductAnalysisResult {

@@ -1,0 +1,35 @@
+meta {
+  name: 05 POST mark-step-completed dian_config
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/mark-step-completed
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "step": "dian_config",
+    "ref": {
+      "scope": "STORE",
+      "dian_config_id": 1
+    }
+  }
+}
+
+tests {
+  test("records dian_config step in completed_steps", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    const completed = body.fiscal_status.invoicing.wizard.completed_steps || [];
+    const steps = completed.map(s => s.step || s);
+    expect(steps).to.include('dian_config');
+  });
+}

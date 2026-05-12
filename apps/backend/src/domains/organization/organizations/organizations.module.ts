@@ -4,9 +4,10 @@ import { OrganizationsService } from './organizations.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { DefaultPanelUIModule } from '@common/services/default-panel-ui.module';
+import { OrgInventoryModule } from '../inventory/inventory.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, DefaultPanelUIModule],
+  imports: [PrismaModule, ResponseModule, DefaultPanelUIModule, OrgInventoryModule],
   controllers: [OrganizationsController],
   providers: [OrganizationsService],
   exports: [OrganizationsService],

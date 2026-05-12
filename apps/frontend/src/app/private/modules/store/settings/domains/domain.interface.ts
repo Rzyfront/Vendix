@@ -1,6 +1,7 @@
 export interface StoreDomain {
     id: number;
     hostname: string;
+    app_type: StoreDomainAppType;
     domain_type: StoreDomainType;
     status: StoreDomainStatus;
     ssl_status: StoreDomainSSLStatus;
@@ -9,6 +10,14 @@ export interface StoreDomain {
     config: StoreDomainConfig;
     verification_token?: string;
     last_verified_at?: string;
+    validation_cname_name?: string;
+    validation_cname_value?: string;
+    acm_certificate_arn?: string;
+    certificate_requested_at?: string;
+    certificate_issued_at?: string;
+    cloudfront_distribution_id?: string;
+    cloudfront_alias_added_at?: string;
+    cloudfront_deployed_at?: string;
     last_error?: string;
     created_at: string;
     updated_at: string;
@@ -16,7 +25,22 @@ export interface StoreDomain {
 
 export type StoreDomainType = 'vendix_core' | 'organization' | 'store' | 'ecommerce';
 
-export type StoreDomainStatus = 'pending_dns' | 'pending_ssl' | 'active' | 'disabled';
+export type StoreDomainAppType = 'STORE_ECOMMERCE' | 'STORE_LANDING' | 'STORE_ADMIN';
+
+export type StoreDomainStatus =
+    | 'pending_dns'
+    | 'pending_ssl'
+    | 'active'
+    | 'disabled'
+    | 'pending_ownership'
+    | 'verifying_ownership'
+    | 'pending_certificate'
+    | 'issuing_certificate'
+    | 'pending_alias'
+    | 'propagating'
+    | 'failed_ownership'
+    | 'failed_certificate'
+    | 'failed_alias';
 
 export type StoreDomainSSLStatus = 'none' | 'pending' | 'issued' | 'error' | 'revoked';
 
@@ -53,6 +77,7 @@ export interface StoreDomainConfig {
 export interface CreateStoreDomainDto {
     hostname: string;
     domain_type?: StoreDomainType;
+    app_type?: StoreDomainAppType;
     is_primary?: boolean;
     ownership?: StoreDomainOwnership;
     config: StoreDomainConfig;
@@ -60,6 +85,7 @@ export interface CreateStoreDomainDto {
 
 export interface UpdateStoreDomainDto {
     domain_type?: StoreDomainType;
+    app_type?: StoreDomainAppType;
     status?: StoreDomainStatus;
     ssl_status?: StoreDomainSSLStatus;
     ownership?: StoreDomainOwnership;
@@ -72,7 +98,36 @@ export interface StoreDomainQueryDto {
     limit?: number;
     search?: string;
     domain_type?: StoreDomainType;
+    app_type?: StoreDomainAppType;
     status?: StoreDomainStatus;
+}
+
+export interface DnsInstructionRecord {
+    record_type: string;
+    name: string;
+    value: string;
+    ttl: number;
+    purpose?: 'ownership' | 'routing' | 'certificate' | string;
+}
+
+export interface DnsInstructions {
+    hostname: string;
+    ownership: StoreDomainOwnership;
+    dns_type: 'CNAME' | 'A';
+    target: string;
+    requires_alias?: boolean;
+    instructions: DnsInstructionRecord[];
+}
+
+export interface VerifyDomainResult {
+    hostname: string;
+    status_before: StoreDomainStatus;
+    status_after: StoreDomainStatus;
+    ssl_status: StoreDomainSSLStatus;
+    verified: boolean;
+    checks: Record<string, { valid: boolean; reason?: string; records?: string[]; name?: string; expected?: string }>;
+    suggested_fixes?: string[];
+    timestamp: string;
 }
 
 export interface PaginatedDomainsResponse {
@@ -89,5 +144,17 @@ export interface PaginatedDomainsResponse {
 export interface SingleDomainResponse {
     success: boolean;
     data: StoreDomain;
+    message?: string;
+}
+
+export interface DnsInstructionsResponse {
+    success: boolean;
+    data: DnsInstructions;
+    message?: string;
+}
+
+export interface VerifyDomainResponse {
+    success: boolean;
+    data: VerifyDomainResult;
     message?: string;
 }

@@ -11,11 +11,7 @@ export class PaymentAgreementService {
   constructor(private readonly prisma: StorePrismaService) {}
 
   // ─── CREATE AGREEMENT ──────────────────────────────────────
-  async create(
-    ar_id: number,
-    dto: CreatePaymentAgreementDto,
-    user_id: number,
-  ) {
+  async create(ar_id: number, dto: CreatePaymentAgreementDto, user_id: number) {
     const ar = await this.prisma.accounts_receivable.findFirst({
       where: { id: ar_id },
     });
@@ -33,9 +29,8 @@ export class PaymentAgreementService {
     const balance = Number(ar.balance);
     const interest_rate = dto.interest_rate || 0;
     const total_with_interest = balance * (1 + interest_rate / 100);
-    const installment_amount = Math.round(
-      (total_with_interest / dto.num_installments) * 100,
-    ) / 100;
+    const installment_amount =
+      Math.round((total_with_interest / dto.num_installments) * 100) / 100;
 
     // Generate agreement number
     const year = new Date().getFullYear();
@@ -69,7 +64,9 @@ export class PaymentAgreementService {
       const amount =
         i === dto.num_installments - 1
           ? Math.round(
-              (total_with_interest - installment_amount * (dto.num_installments - 1)) * 100,
+              (total_with_interest -
+                installment_amount * (dto.num_installments - 1)) *
+                100,
             ) / 100
           : installment_amount;
 
@@ -140,16 +137,15 @@ export class PaymentAgreementService {
     });
 
     if (!installment) {
-      throw new NotFoundException(
-        `Cuota #${installment_id} no encontrada`,
-      );
+      throw new NotFoundException(`Cuota #${installment_id} no encontrada`);
     }
 
     if (installment.state === 'paid') {
       throw new BadRequestException('Esta cuota ya fue pagada');
     }
 
-    const remaining = Number(installment.amount) - Number(installment.paid_amount);
+    const remaining =
+      Number(installment.amount) - Number(installment.paid_amount);
 
     if (amount > remaining) {
       throw new BadRequestException(

@@ -1,5 +1,6 @@
-import {Component, input, output, effect, signal, DestroyRef, inject} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {Component, input, output, effect, signal, computed, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs/operators';
 
 import {
   FormBuilder,
@@ -103,6 +104,31 @@ import {
                 description="Desactiva para ocultar esta ubicación"
               ></app-setting-toggle>
             </div>
+          </div>
+
+          <!-- Default (Principal) Toggle -->
+          <div>
+            <app-setting-toggle
+              formControlName="is_default"
+              label="Bodega principal"
+              description="Define esta ubicación como la bodega por defecto del store para ventas y operaciones."
+            ></app-setting-toggle>
+
+            @if (showDefaultWarning()) {
+              <div
+                class="mt-2 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+              >
+                <app-icon
+                  name="alert-triangle"
+                  size="16"
+                  class="mt-0.5 shrink-0 text-amber-600"
+                ></app-icon>
+                <span>
+                  Si marcas esta como principal, la bodega principal anterior se
+                  desmarcará automáticamente.
+                </span>
+              </div>
+            }
           </div>
 
           <!-- Address Section Toggle (PRO UI) -->
@@ -283,6 +309,7 @@ export class LocationFormModalComponent {
 
   form: FormGroup;
   showAddress = signal(false);
+  readonly showDefaultWarning = computed(() => !!this.form.get('is_default')?.value);
   countries: Country[] = [];
   departments = signal<Department[]>([]);
   cities = signal<City[]>([]);
@@ -301,7 +328,7 @@ export class LocationFormModalComponent {
       if (loc) {
         this.patchForm(loc);
       } else if (isOpen && !loc) {
-        this.form.reset({ is_active: true, type: 'warehouse' });
+        this.form.reset({ is_active: true, is_default: false, type: 'warehouse' });
         this.showAddress.set(false);
       }
     });
@@ -313,6 +340,7 @@ export class LocationFormModalComponent {
       code: ['', [Validators.required, Validators.maxLength(50)]],
       type: ['warehouse', [Validators.required]],
       is_active: [true],
+      is_default: [false],
       address: this.fb.group({
         address_line_1: [''],
         address_line_2: [''],
@@ -425,6 +453,7 @@ export class LocationFormModalComponent {
       code: location.code,
       type: location.type || 'warehouse',
       is_active: location.is_active,
+      is_default: !!location.is_default,
     });
 
     if (location.address) {

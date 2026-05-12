@@ -173,7 +173,11 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
-  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)'};
+  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)',
+  'intercompany_transfer.shipped.receivable': 'CxC Intercompany',
+  'intercompany_transfer.shipped.inventory': 'Inventario Enviado Intercompany',
+  'intercompany_transfer.received.inventory': 'Inventario Recibido Intercompany',
+  'intercompany_transfer.received.payable': 'CxP Intercompany'};
 
 const GROUP_DEFINITIONS: Array<{
   key: string;
@@ -261,7 +265,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'stock_transfers',
     label: 'Transferencias de Stock',
     icon: 'repeat',
-    prefixes: ['stock_transfer.completed.']},
+    prefixes: ['stock_transfer.completed.', 'intercompany_transfer.']},
   {
     key: 'commissions',
     label: 'Comisiones',
@@ -384,7 +388,7 @@ export class AccountMappingsComponent {
       case AppType.STORE_ADMIN:
         return '/store/settings';
       case AppType.ORG_ADMIN:
-        return '/organization/settings';
+        return '/organization/settings'; // domain-isolation-ok: AppType branch routes ORG_ADMIN context to /organization/* explicitly
       default:
         return null;
     }

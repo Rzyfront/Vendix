@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Post,
-  Body,
-  UseGuards,
-  Req,
-} from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { Public } from '../../../common/decorators/public.decorator';
 import { McpAuthGuard } from './guards/mcp-auth.guard';
 import { McpAuditService } from './mcp-audit.service';
@@ -53,7 +47,13 @@ export class McpController {
       await this.audit(req, 'resources/list', startTime, 'success');
       return { resources };
     } catch (error: any) {
-      await this.audit(req, 'resources/list', startTime, 'error', error.message);
+      await this.audit(
+        req,
+        'resources/list',
+        startTime,
+        'error',
+        error.message,
+      );
       throw error;
     }
   }
@@ -62,7 +62,10 @@ export class McpController {
   async readResource(@Body() body: { uri: string }, @Req() req: any) {
     const startTime = Date.now();
     if (!body.uri) {
-      throw new VendixHttpException(ErrorCodes.AI_MCP_004, 'Resource URI is required');
+      throw new VendixHttpException(
+        ErrorCodes.AI_MCP_004,
+        'Resource URI is required',
+      );
     }
 
     try {
@@ -72,7 +75,13 @@ export class McpController {
       });
       return { contents: [content] };
     } catch (error: any) {
-      await this.audit(req, 'resources/read', startTime, 'error', error.message);
+      await this.audit(
+        req,
+        'resources/read',
+        startTime,
+        'error',
+        error.message,
+      );
       throw error;
     }
   }
@@ -97,7 +106,10 @@ export class McpController {
   ) {
     const startTime = Date.now();
     if (!body.name) {
-      throw new VendixHttpException(ErrorCodes.AI_MCP_004, 'Tool name is required');
+      throw new VendixHttpException(
+        ErrorCodes.AI_MCP_004,
+        'Tool name is required',
+      );
     }
 
     try {
@@ -105,10 +117,17 @@ export class McpController {
         body.name,
         body.arguments || {},
       );
-      await this.audit(req, 'tools/call', startTime, result.isError ? 'error' : 'success', undefined, {
-        tool_name: body.name,
-        params: body.arguments,
-      });
+      await this.audit(
+        req,
+        'tools/call',
+        startTime,
+        result.isError ? 'error' : 'success',
+        undefined,
+        {
+          tool_name: body.name,
+          params: body.arguments,
+        },
+      );
       return result;
     } catch (error: any) {
       await this.audit(req, 'tools/call', startTime, 'error', error.message, {
@@ -138,7 +157,10 @@ export class McpController {
   ) {
     const startTime = Date.now();
     if (!body.name) {
-      throw new VendixHttpException(ErrorCodes.AI_MCP_004, 'Prompt name is required');
+      throw new VendixHttpException(
+        ErrorCodes.AI_MCP_004,
+        'Prompt name is required',
+      );
     }
 
     try {
@@ -164,7 +186,12 @@ export class McpController {
     startTime: number,
     status: 'success' | 'error',
     errorMessage?: string,
-    extra?: { resource_uri?: string; tool_name?: string; prompt_name?: string; params?: any },
+    extra?: {
+      resource_uri?: string;
+      tool_name?: string;
+      prompt_name?: string;
+      params?: any;
+    },
   ): Promise<void> {
     const auth = req.mcpAuth;
     await this.auditService.logInvocation({

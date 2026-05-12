@@ -130,7 +130,7 @@
             <h2 class="section-title">Punto de Venta (POS)</h2>
           </div>
           <div class="section-body">
-            <app-pos-settings-form [settings]="settings().pos" (settingsChange)="onSectionChange('pos', $event)" />
+            <app-pos-settings-form [settings]="settings().pos" [settingsLoaded]="settingsLoaded()" (settingsChange)="onSectionChange('pos', $event)" />
           </div>
         </section>
 

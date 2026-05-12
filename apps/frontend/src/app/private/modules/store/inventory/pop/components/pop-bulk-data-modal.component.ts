@@ -701,7 +701,7 @@ interface AnalysisResult {
                   >{{ importedItems().length }} productos</span
                 >
               </div>
-              <div class="p-3">
+              <div class="p-3 space-y-3">
                 <div
                   class="bg-green-50 px-4 py-3 rounded-lg border border-green-100 flex items-center gap-3"
                 >
@@ -717,6 +717,17 @@ interface AnalysisResult {
                     <p class="text-xs text-green-700">
                       Se agregaron {{ importedItems().length }} productos al
                       pedido de compra.
+                    </p>
+                  </div>
+                </div>
+
+                <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-start gap-3">
+                  <app-icon name="package-plus" [size]="20" class="text-green-600 shrink-0 mt-0.5"></app-icon>
+                  <div class="flex-1 text-sm text-green-800">
+                    <p class="font-medium mb-1">Productos nuevos serán creados en el catálogo</p>
+                    <p class="text-xs text-green-700">
+                      Los productos que no existan en el catálogo se crearán automáticamente.
+                      Los productos existentes recibirán stock con costo trazable y respaldo contable.
                     </p>
                   </div>
                 </div>
@@ -820,8 +831,8 @@ interface AnalysisResult {
           >
           @if (analysisResult() && totalValidItems() > 0) {
             <app-button variant="primary" (clicked)="confirmImport()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Importar {{ totalValidItems() }} Productos al Pedido
+              <app-icon name="package-plus" [size]="16" slot="icon"></app-icon>
+              Crear catálogo + ingresar mercancía ({{ totalValidItems() }})
             </app-button>
           }
         }

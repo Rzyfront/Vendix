@@ -113,7 +113,7 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                       </span>
                     }
                   }
-                  @if (product().track_inventory !== false) {
+                  @if (doesVariantTrackInventory(variant)) {
                     @if (variant.stock > 0) {
                       <span class="text-xs mt-0.5"
                         [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
@@ -170,8 +170,12 @@ export class PosVariantSelectorComponent {
 
   /** Check if a variant is available considering track_inventory */
   isVariantAvailable(variant: PosProductVariant): boolean {
-    if (this.product().track_inventory === false) return true;
+    if (!this.doesVariantTrackInventory(variant)) return true;
     return variant.stock > 0;
+  }
+
+  doesVariantTrackInventory(variant: PosProductVariant): boolean {
+    return variant.track_inventory_override ?? this.product().track_inventory ?? true;
   }
 
   /** Check if a specific variant is on sale */
@@ -234,7 +238,7 @@ export class PosVariantSelectorComponent {
       price_override: variant.price_override ?? null,
       is_on_sale: variant.is_on_sale ?? false,
       sale_price: variant.sale_price ?? null,
-      track_inventory_override: null,
+      track_inventory_override: variant.track_inventory_override ?? null,
     };
   }
 }

@@ -1,6 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -56,7 +59,10 @@ export class JournalEntriesController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateJournalEntryDto) {
     const result = await this.journal_entries_service.create(create_dto);
-    return this.response_service.success(result, 'Journal entry created successfully');
+    return this.response_service.success(
+      result,
+      'Journal entry created successfully',
+    );
   }
 
   @Put(':id')
@@ -66,7 +72,10 @@ export class JournalEntriesController {
     @Body() update_dto: UpdateJournalEntryDto,
   ) {
     const result = await this.journal_entries_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Journal entry updated successfully');
+    return this.response_service.success(
+      result,
+      'Journal entry updated successfully',
+    );
   }
 
   @Patch(':id/post')
@@ -74,7 +83,10 @@ export class JournalEntriesController {
   @HttpCode(HttpStatus.OK)
   async postEntry(@Param('id') id: string) {
     const result = await this.journal_entry_flow_service.post(+id);
-    return this.response_service.success(result, 'Journal entry posted successfully');
+    return this.response_service.success(
+      result,
+      'Journal entry posted successfully',
+    );
   }
 
   @Patch(':id/void')
@@ -82,7 +94,10 @@ export class JournalEntriesController {
   @HttpCode(HttpStatus.OK)
   async voidEntry(@Param('id') id: string) {
     const result = await this.journal_entry_flow_service.void(+id);
-    return this.response_service.success(result, 'Journal entry voided successfully');
+    return this.response_service.success(
+      result,
+      'Journal entry voided successfully',
+    );
   }
 
   @Delete(':id')
@@ -90,6 +105,9 @@ export class JournalEntriesController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.journal_entries_service.remove(+id);
-    return this.response_service.success(null, 'Journal entry deleted successfully');
+    return this.response_service.success(
+      null,
+      'Journal entry deleted successfully',
+    );
   }
 }

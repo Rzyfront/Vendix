@@ -1,0 +1,81 @@
+meta {
+  name: Wompi Recurrent Revoked PM (Failover)
+  type: http
+  seq: 49
+  skip: true
+  # Wompi Phase 8 — INVALID_PAYMENT_SOURCE failover
+  #
+  # SKIPPED — REASON:
+  # Triggering a real `INVALID_PAYMENT_SOURCE` from Wompi sandbox requires
+  # either:
+  #   (a) a payment source the merchant has manually revoked via Wompi
+  #       merchant dashboard (cannot script), or
+  #   (b) a backend test-only header like `X-Test-Force-Wompi-Error:
+  #       PAYMENT_SOURCE_REVOKED` injected into WompiClient.processPayment.
+  #
+  # Option (b) was deliberately NOT added in Phase 8 to avoid shipping a
+  # production attack surface (a header that lets external callers force
+  # arbitrary errors in the payment processor). The behavior is fully
+  # covered in unit tests:
+  #
+  #   apps/backend/src/domains/store/subscriptions/services/
+  #     subscription-payment.service.spec.ts
+  #       describe('chargeInvoice — Wompi Phase 6')
+  #         > 'INVALID_PAYMENT_SOURCE marks PM invalid + does NOT bump counter'
+  #         > 'INVALID_PAYMENT_SOURCE failover to second active PM with PSID'
+  #         > 'consecutive_failures stays at 0 on issuer revocation'
+  #
+  # To run THIS .bru locally end-to-end:
+  #   1. Set up two PMs in subscription_payment_methods, both state='active'.
+  #   2. Manually revoke the default PM via Wompi merchant dashboard.
+  #   3. Set meta.skip = false.
+  #   4. POST /store/subscriptions/retry-payment.
+  #   5. Assert:
+  #        • Default PM transitions to state='invalid'
+  #        • consecutive_failures stays at 0 (NOT bumped — issuer revocation)
+  #        • replaced_at is set (now())
+  #        • Second PM is used; charge completes 200
+  #        • Backend logs `WOMPI_CHARGE_PATH path=recurrent_failover`
+}
+
+post {
+  url: {{url}}/store/subscriptions/retry-payment
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {}
+}
+
+tests {
+  test("Charge succeeds via failover PM", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Default PM marked invalid (revoked)", function() {
+    // Verified by side-channel — see follow-up request below.
+    expect(res.body.data).to.have.property("payment_id");
+  });
+}
+
+# Follow-up — assert PM state transitions:
+#
+#   GET {{url}}/store/subscriptions/payment-methods
+#   Asserts:
+#     • Default PM (the revoked one): state='invalid', consecutive_failures=0
+#     • Fallback PM (used for charge): state='active', is_default may flip
+#       to true if the failover handler promoted it.
+#
+# Reference impl:
+#   subscription-payment.service.ts → handleRevokedPaymentSource()
+#     - state = 'invalid'
+#     - consecutive_failures = 0   (NOT bumped — issuer revocation, not user fail)
+#     - replaced_at = now()
+#     - emits subscription_event 'payment_method_revoked'
+#     - tries fallback PM with provider_payment_source_id IS NOT NULL

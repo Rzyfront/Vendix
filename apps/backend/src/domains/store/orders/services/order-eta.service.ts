@@ -16,14 +16,11 @@ export class OrderEtaService {
     storeSettings: OperationsSettings | undefined,
     paidAt: Date,
   ): EtaResult {
-    const defaultPrep =
-      storeSettings?.default_preparation_time_minutes ?? 15;
+    const defaultPrep = storeSettings?.default_preparation_time_minutes ?? 15;
 
     const prepMinutes = items.length
       ? Math.max(
-          ...items.map(
-            (item) => item.preparation_time_minutes ?? defaultPrep,
-          ),
+          ...items.map((item) => item.preparation_time_minutes ?? defaultPrep),
         )
       : defaultPrep;
 

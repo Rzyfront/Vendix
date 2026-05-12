@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ProductsService } from './products.service';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { InventoryIntegrationService } from '../inventory/shared/services/inventory-integration.service';
@@ -25,7 +25,7 @@ import {
 
 describe('ProductsService', () => {
   let service: ProductsService;
-  let prismaService: PrismaService;
+  let prismaService: StorePrismaService;
   let variantService: ProductVariantService;
 
   const mockPrismaService = {
@@ -112,7 +112,7 @@ describe('ProductsService', () => {
       providers: [
         ProductsService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -151,7 +151,7 @@ describe('ProductsService', () => {
     }).compile();
 
     service = module.get<ProductsService>(ProductsService);
-    prismaService = module.get<PrismaService>(PrismaService);
+    prismaService = module.get<StorePrismaService>(StorePrismaService);
     variantService = module.get<ProductVariantService>(ProductVariantService);
   });
 

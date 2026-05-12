@@ -100,10 +100,7 @@ export class WalletPaymentProcessor extends BasePaymentProcessor {
     };
   }
 
-  async validateWebhook(
-    _signature: string,
-    _body: string,
-  ): Promise<boolean> {
+  async validateWebhook(_signature: string, _body: string): Promise<boolean> {
     return true; // Wallet doesn't use external webhooks
   }
 }

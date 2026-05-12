@@ -6,7 +6,7 @@ import { ValidateMultipleConsolidatedStockDto } from '../dto/validate-multiple-c
 
 describe('InventoryValidationService', () => {
   let service: InventoryValidationService;
-  let prismaService: jest.Mocked<PrismaService>;
+  let prismaService: jest.Mocked<StorePrismaService>;
 
   const mockStockLevels = [
     {
@@ -89,7 +89,7 @@ describe('InventoryValidationService', () => {
       providers: [
         InventoryValidationService,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
       ],
@@ -98,7 +98,7 @@ describe('InventoryValidationService', () => {
     service = module.get<InventoryValidationService>(
       InventoryValidationService,
     );
-    prismaService = module.get(PrismaService);
+    prismaService = module.get(StorePrismaService);
   });
 
   afterEach(() => {

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
-import { MessagingProvider, MessageResult, SendMessageOptions } from './interfaces/messaging.interface';
+import {
+  MessagingProvider,
+  MessageResult,
+  SendMessageOptions,
+} from './interfaces/messaging.interface';
 import { ConsoleMessagingProvider } from './providers/console.provider';
 
 @Injectable()
@@ -23,15 +27,22 @@ export class MessagingService {
       });
 
       if (!channelConfig) {
-        this.logger.debug(`No ${channel} channel configured for store ${storeId}, using console`);
+        this.logger.debug(
+          `No ${channel} channel configured for store ${storeId}, using console`,
+        );
         return this.consoleProvider.send(phone, body, options);
       }
 
-      const provider = this.resolveProvider(channelConfig.provider, channelConfig.config as Record<string, any>);
+      const provider = this.resolveProvider(
+        channelConfig.provider,
+        channelConfig.config as Record<string, any>,
+      );
       const result = await provider.send(phone, body, options);
 
       if (!result.success) {
-        this.logger.warn(`Failed to send ${channel} to ${phone} via ${channelConfig.provider}: ${result.error}`);
+        this.logger.warn(
+          `Failed to send ${channel} to ${phone} via ${channelConfig.provider}: ${result.error}`,
+        );
       }
 
       return result;
@@ -41,17 +52,26 @@ export class MessagingService {
     }
   }
 
-  private resolveProvider(providerName: string, config: Record<string, any>): MessagingProvider {
+  private resolveProvider(
+    providerName: string,
+    config: Record<string, any>,
+  ): MessagingProvider {
     switch (providerName) {
       case 'twilio':
         // Lazy import to avoid loading unused providers
-        const { TwilioMessagingProvider } = require('./providers/twilio.provider');
+        const {
+          TwilioMessagingProvider,
+        } = require('./providers/twilio.provider');
         return new TwilioMessagingProvider(config);
       case 'meta_cloud':
-        const { MetaCloudMessagingProvider } = require('./providers/meta-cloud.provider');
+        const {
+          MetaCloudMessagingProvider,
+        } = require('./providers/meta-cloud.provider');
         return new MetaCloudMessagingProvider(config);
       default:
-        this.logger.warn(`Unknown provider: ${providerName}, falling back to console`);
+        this.logger.warn(
+          `Unknown provider: ${providerName}, falling back to console`,
+        );
         return this.consoleProvider;
     }
   }

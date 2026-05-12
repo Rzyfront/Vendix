@@ -21,29 +21,27 @@ import { RouterModule } from '@angular/router';
         </a>
 
         <a
+          routerLink="/organization/audit/login-attempts"
+          class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+        >
+          <h3 class="text-lg font-semibold mb-2">Intentos de Login</h3>
+          <p class="text-gray-600">Monitoreo de intentos de inicio de sesión</p>
+        </a>
+
+        <a
+          routerLink="/organization/audit/sessions"
+          class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
+        >
+          <h3 class="text-lg font-semibold mb-2">Sesiones</h3>
+          <p class="text-gray-600">Gestión de sesiones de usuarios</p>
+        </a>
+
+        <a
           routerLink="/organization/audit/compliance"
           class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
         >
           <h3 class="text-lg font-semibold mb-2">Informes de cumplimiento</h3>
           <p class="text-gray-600">Monitoreo de cumplimiento</p>
-        </a>
-
-        <a
-          routerLink="/organization/audit/legal-docs"
-          class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
-        >
-          <h3 class="text-lg font-semibold mb-2">Documentos Legales</h3>
-          <p class="text-gray-600">Gestionar documentos legales</p>
-        </a>
-
-        <a
-          routerLink="/organization/audit/backup"
-          class="block p-6 bg-white rounded-lg shadow hover:shadow-md transition-shadow"
-        >
-          <h3 class="text-lg font-semibold mb-2">
-            Copia de seguridad y recuperación
-          </h3>
-          <p class="text-gray-600">Gestión de copias de seguridad de datos</p>
         </a>
       </div>
     </div>

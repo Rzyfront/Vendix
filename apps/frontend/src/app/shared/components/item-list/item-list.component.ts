@@ -7,6 +7,8 @@ import {
   TableAction,
 } from './item-list.interfaces';
 
+export type ItemListActionsDisplay = 'buttons' | 'dropdown';
+
 @Component({
   selector: 'app-item-list',
   standalone: true,
@@ -24,6 +26,7 @@ export class ItemListComponent {
   readonly emptyMessage = input('No hay datos disponibles');
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');
+  readonly actionsDisplay = input<ItemListActionsDisplay>('buttons');
 
   readonly itemClick = output<any>();
   readonly actionClick = output<{
@@ -136,18 +139,24 @@ export class ItemListComponent {
   getBadgeStyle(item: any): { [key: string]: string } {
     const config = this.cardConfig();
     const badgeConfig = config.badgeConfig;
-    if (!badgeConfig?.colorMap) {
+    if (!badgeConfig?.colorMap && !badgeConfig?.colorFn) {
       return {};
     }
-    const value = this.getBadgeValue(item);
-    const strValue = String(value);
-    let lookupValue = strValue;
-    if (typeof value === 'boolean') {
-      lookupValue = value ? 'active' : 'inactive';
+    const rawValue = this.getRawBadgeValue(item);
+    let color: string | null | undefined;
+    // colorFn wins over colorMap when both are provided
+    if (badgeConfig.colorFn) {
+      color = badgeConfig.colorFn(rawValue, item);
     }
-    let color = badgeConfig.colorMap[lookupValue];
-    if (!color) {
-      color = badgeConfig.colorMap[lookupValue.toLowerCase()];
+    if (!color && badgeConfig.colorMap) {
+      const strValue = String(rawValue);
+      let lookupValue = strValue;
+      if (typeof rawValue === 'boolean') {
+        lookupValue = rawValue ? 'active' : 'inactive';
+      }
+      color =
+        badgeConfig.colorMap[lookupValue] ??
+        badgeConfig.colorMap[lookupValue.toLowerCase()];
     }
     if (color) {
       let bg = color;
@@ -161,6 +170,23 @@ export class ItemListComponent {
       };
     }
     return {};
+  }
+
+  /**
+   * Returns the raw (untransformed) badge value from the item, so colorFn /
+   * colorMap can decide based on the underlying number/boolean rather than
+   * the formatted display string.
+   */
+  private getRawBadgeValue(item: any): any {
+    const config = this.cardConfig();
+    if (!config.badgeKey) return undefined;
+    const keys = config.badgeKey.split('.');
+    let current = item;
+    for (const k of keys) {
+      if (current == null) return undefined;
+      current = current[k];
+    }
+    return current;
   }
 
   getDetailValue(item: any, field: any): string {
@@ -273,6 +299,13 @@ export class ItemListComponent {
     const acts = this.actions();
     if (!acts) return [];
     return acts.filter((action) => this.isActionVisible(action, item));
+  }
+
+  getMenuActions(item: any): TableAction[] {
+    const visibleActions = this.getVisibleActions(item);
+    return this.actionsDisplay() === 'dropdown'
+      ? visibleActions
+      : visibleActions.slice(2);
   }
 
   getSizeClasses(): string {

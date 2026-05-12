@@ -82,8 +82,8 @@ export class EmailService implements OnModuleInit {
           '',
         port: parseInt(
           process.env.SMTP_PORT ||
-          this.configService.get<string>('SMTP_PORT') ||
-          '587',
+            this.configService.get<string>('SMTP_PORT') ||
+            '587',
         ),
         secure:
           (process.env.SMTP_SECURE ||
@@ -253,7 +253,9 @@ export class EmailService implements OnModuleInit {
           `Email with ${attachments.length} attachment(s) sent successfully to ${to} using ${this.config.provider}`,
         );
       } else {
-        this.logger.error(`Failed to send email with attachments to ${to}: ${result.error}`);
+        this.logger.error(
+          `Failed to send email with attachments to ${to}: ${result.error}`,
+        );
       }
 
       return result;
@@ -306,6 +308,23 @@ export class EmailService implements OnModuleInit {
   ): Promise<EmailResult> {
     this.logger.log(`Sending onboarding email to ${to} for step: ${step}`);
     return this.provider.sendOnboardingEmail(to, username, step);
+  }
+
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    this.logger.log(`Sending invitation email to ${to}`);
+    return this.provider.sendInvitationEmail(
+      to,
+      token,
+      username,
+      organizationSlug,
+      app,
+    );
   }
 
   // Métodos de utilidad

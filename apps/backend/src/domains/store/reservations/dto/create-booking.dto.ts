@@ -23,11 +23,15 @@ export class CreateBookingDto {
   date: string;
 
   @IsString()
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'start_time debe tener formato HH:mm' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'start_time debe tener formato HH:mm',
+  })
   start_time: string;
 
   @IsString()
-  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, { message: 'end_time debe tener formato HH:mm' })
+  @Matches(/^([01]\d|2[0-3]):[0-5]\d$/, {
+    message: 'end_time debe tener formato HH:mm',
+  })
   end_time: string;
 
   @IsOptional()
@@ -37,6 +41,11 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_variant_id?: number;
 
   @IsOptional()
   @IsInt()

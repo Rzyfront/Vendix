@@ -1,0 +1,45 @@
+meta {
+  name: 01 POST orders without store_id - 201
+  type: http
+  seq: 1
+}
+
+# Body omits store_id → service must derive it from RequestContext.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "customer_id": {{testCustomerId}},
+    "subtotal": 100.00,
+    "total_amount": 100.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{testProductId}},
+        "product_name": "Bruno smoke item",
+        "quantity": 1,
+        "unit_price": 100.00,
+        "total_price": 100.00
+      }
+    ]
+  }
+}
+
+tests {
+  test("201 Created", function () {
+    expect(res.status).to.equal(201);
+  });
+  test("response carries the contextual store_id", function () {
+    const body = res.body && res.body.data ? res.body.data : res.body;
+    expect(String(body.store_id)).to.equal(String(bru.getEnvVar("storeAdminStoreId")));
+  });
+}

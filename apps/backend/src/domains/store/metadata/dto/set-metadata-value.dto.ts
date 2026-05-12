@@ -1,4 +1,12 @@
-import { IsInt, IsOptional, IsString, IsNumber, IsBoolean, IsObject, IsDateString } from 'class-validator';
+import {
+  IsInt,
+  IsOptional,
+  IsString,
+  IsNumber,
+  IsBoolean,
+  IsObject,
+  IsDateString,
+} from 'class-validator';
 
 export class SetMetadataValueDto {
   @IsInt()

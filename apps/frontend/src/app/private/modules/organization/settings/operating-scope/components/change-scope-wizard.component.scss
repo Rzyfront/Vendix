@@ -1,0 +1,5 @@
+// Wizard-specific overrides. Most styles come from Tailwind utilities + the
+// global design tokens (var(--color-...)). Keep this file slim.
+:host {
+  display: contents;
+}

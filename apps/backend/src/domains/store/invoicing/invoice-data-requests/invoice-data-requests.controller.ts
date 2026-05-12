@@ -1,4 +1,13 @@
-import { Controller, Get, Post, Param, Query, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { InvoiceDataRequestsService } from './invoice-data-requests.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -30,6 +39,9 @@ export class InvoiceDataRequestsController {
   ) {
     if (!req.user.store_id) throw new Error('Store context required');
     const result = await this.service.processRequest(id, req.user.store_id);
-    return this.responseService.success(result, 'Solicitud procesada correctamente');
+    return this.responseService.success(
+      result,
+      'Solicitud procesada correctamente',
+    );
   }
 }

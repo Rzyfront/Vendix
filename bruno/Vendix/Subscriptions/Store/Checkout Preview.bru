@@ -1,0 +1,29 @@
+meta {
+  name: Checkout Preview
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/store/subscriptions/checkout/preview
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "planId": 2
+  }
+}
+
+tests {
+  test("Checkout preview successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property('proration');
+  });
+}

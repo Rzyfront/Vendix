@@ -25,16 +25,13 @@ export class DianResponseParserService {
 
       let app_response_xml = '';
       if (xml_bytes_match?.[1]) {
-        app_response_xml = Buffer.from(
-          xml_bytes_match[1],
-          'base64',
-        ).toString('utf-8');
+        app_response_xml = Buffer.from(xml_bytes_match[1], 'base64').toString(
+          'utf-8',
+        );
       }
 
       // Extract IsValid
-      const is_valid_match = soap_xml.match(
-        /<b:IsValid>(.*?)<\/b:IsValid>/,
-      );
+      const is_valid_match = soap_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
       const is_valid = is_valid_match?.[1]?.toLowerCase() === 'true';
 
       // Extract StatusCode
@@ -47,13 +44,10 @@ export class DianResponseParserService {
       const status_desc_match = soap_xml.match(
         /<b:StatusDescription>(.*?)<\/b:StatusDescription>/s,
       );
-      const status_description =
-        status_desc_match?.[1] || 'No description';
+      const status_description = status_desc_match?.[1] || 'No description';
 
       // Parse validation errors from ApplicationResponse or StatusDescription
-      const errors = this.extractErrors(
-        app_response_xml || status_description,
-      );
+      const errors = this.extractErrors(app_response_xml || status_description);
 
       // Extract document key (CUFE/CUDE) from response
       const document_key = this.extractDocumentKey(
@@ -69,9 +63,7 @@ export class DianResponseParserService {
         raw_xml: app_response_xml || soap_xml,
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to parse DIAN response: ${error.message}`,
-      );
+      this.logger.error(`Failed to parse DIAN response: ${error.message}`);
       return {
         is_valid: false,
         status_code: 'PARSE_ERROR',
@@ -108,8 +100,7 @@ export class DianResponseParserService {
     }
 
     // Also look for structured error responses
-    const error_message_pattern =
-      /<cbc:Description>(.*?)<\/cbc:Description>/g;
+    const error_message_pattern = /<cbc:Description>(.*?)<\/cbc:Description>/g;
     while ((match = error_message_pattern.exec(xml)) !== null) {
       const msg = this.cleanHtmlEntities(match[1]);
       if (msg && !errors.some((e) => e.message === msg)) {

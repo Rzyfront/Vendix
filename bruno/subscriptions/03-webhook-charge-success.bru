@@ -1,0 +1,42 @@
+meta {
+  name: Webhook Charge Success
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/platform/webhooks/wompi
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "event": "transaction.updated",
+    "data": {
+      "transaction": {
+        "id": "txn-saas-success-001",
+        "reference": "vendix_saas_{{subscription_id}}_{{invoice_id}}_1234567890",
+        "status": "APPROVED",
+        "amount_in_cents": 100000,
+        "status_message": "Payment approved"
+      }
+    }
+  }
+}
+
+tests {
+  test("Webhook returns valid response", function() {
+    expect(res.status).to.be.oneOf([200, 400]);
+    expect(res.body).to.be.an("object");
+  });
+
+  test("Response structure is valid", function() {
+    if (res.status === 200) {
+      expect(res.body.received).to.be.true;
+    } else {
+      expect(res.body).to.have.property("message");
+      expect(res.body.message).to.have.property("reason");
+    }
+  });
+}

@@ -1,10 +1,14 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class StoreUsersService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
 
   async create(data: any) {
     const context = RequestContextService.getContext();
@@ -18,8 +22,8 @@ export class StoreUsersService {
     return this.prisma.store_users.create({
       data: {
         ...data,
-        store_id: store_id
-      }
+        store_id: store_id,
+      },
     });
   }
 
@@ -39,7 +43,7 @@ export class StoreUsersService {
     const where: any = {
       user: {
         state: 'active', // Only show active users by default
-      }
+      },
     };
 
     if (search) {
@@ -59,10 +63,10 @@ export class StoreUsersService {
         user_roles: {
           some: {
             roles: {
-              name: role
-            }
-          }
-        }
+              name: role,
+            },
+          },
+        },
       };
     }
 
@@ -83,7 +87,7 @@ export class StoreUsersService {
               phone: true,
               state: true,
               last_login: true,
-            }
+            },
           },
         },
         skip,
@@ -94,11 +98,10 @@ export class StoreUsersService {
       }),
     ]);
 
-
     // Transform result to match expected frontend format if needed
     // The frontend expects a flat structure compatible with PosCustomer interface
     return {
-      data: data.map(item => ({
+      data: data.map((item) => ({
         id: item.user.id, // Use user ID as the main ID for the customer
         email: item.user.email,
         first_name: item.user.first_name,
@@ -125,8 +128,8 @@ export class StoreUsersService {
       where: { id },
       include: {
         users: true,
-        roles: true
-      }
+        roles: true,
+      },
     });
 
     if (!user) throw new NotFoundException('Store user not found');
@@ -137,14 +140,14 @@ export class StoreUsersService {
     await this.findOne(id);
     return this.prisma.store_users.update({
       where: { id },
-      data
+      data,
     });
   }
 
   async remove(id: number) {
     await this.findOne(id);
     return this.prisma.store_users.delete({
-      where: { id }
+      where: { id },
     });
   }
 }

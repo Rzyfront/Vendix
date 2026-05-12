@@ -1,0 +1,58 @@
+meta {
+  name: Re-subscribe State Transitions Audit
+  type: http
+  seq: 42
+}
+
+get {
+  url: {{url}}/superadmin/subscriptions/events?subscriptionId={{resubscribed_subscription_id}}&limit=20
+  body: none
+  auth: inherit
+}
+
+params:query {
+  subscriptionId: {{resubscribed_subscription_id}}
+  limit: 20
+}
+
+docs {
+  Validates the subscription_events trail after a re-subscribe commit.
+  Required environment variable: `resubscribed_subscription_id` — the id
+  of the subscription that was just re-subscribed (carry-over from #41).
+
+  Expected events (most recent first):
+    - state_transition: cancelled/expired -> pending_payment (reason='re_subscribe_checkout')
+    - reactivated: payload.mode='re_subscribe', from_plan_id, to_plan_id
+    - (after webhook APPROVED) state_transition: pending_payment -> active
+    - (after webhook APPROVED) payment_succeeded
+}
+
+tests {
+  test("Events endpoint returns 200", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an("array");
+  });
+
+  test("Trail contains a 'reactivated' event with mode=re_subscribe", function() {
+    const reactivated = res.body.data.find(
+      (e) => e.type === "reactivated" &&
+             e.payload &&
+             e.payload.mode === "re_subscribe",
+    );
+    expect(reactivated).to.not.equal(undefined);
+    expect(reactivated.payload).to.have.property("from_plan_id");
+    expect(reactivated.payload).to.have.property("to_plan_id");
+  });
+
+  test("Trail contains state_transition cancelled/expired -> pending_payment", function() {
+    const transition = res.body.data.find(
+      (e) =>
+        e.type === "state_transition" &&
+        (e.from_state === "cancelled" || e.from_state === "expired") &&
+        e.to_state === "pending_payment",
+    );
+    expect(transition).to.not.equal(undefined);
+    expect(transition.payload.reason).to.equal("re_subscribe_checkout");
+  });
+}

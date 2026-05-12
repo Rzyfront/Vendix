@@ -61,9 +61,9 @@ export class BankTransferProcessor extends BasePaymentProcessor {
     try {
       return Boolean(
         paymentData.amount > 0 &&
-          paymentData.currency &&
-          paymentData.orderId &&
-          paymentData.storeId,
+        paymentData.currency &&
+        paymentData.orderId &&
+        paymentData.storeId,
       );
     } catch (error) {
       return false;

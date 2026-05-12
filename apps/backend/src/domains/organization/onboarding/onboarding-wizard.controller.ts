@@ -30,7 +30,7 @@ export class OnboardingWizardController {
   constructor(
     private readonly wizardService: OnboardingWizardService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('status')
   @HttpCode(HttpStatus.OK)
@@ -281,7 +281,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resend verification email (authenticated)',
-    description: 'Resends the verification email for the authenticated user during onboarding',
+    description:
+      'Resends the verification email for the authenticated user during onboarding',
   })
   @ApiResponse({
     status: 200,
@@ -289,11 +290,101 @@ export class OnboardingWizardController {
   })
   async resendVerificationEmail(@Req() req: AuthenticatedRequest) {
     try {
-      const result = await this.wizardService.resendVerificationEmail(req.user.id);
+      const result = await this.wizardService.resendVerificationEmail(
+        req.user.id,
+      );
       return this.responseService.success(result, result.message);
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al reenviar email',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('save-draft')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Save wizard draft data',
+    description: 'Saves draft data for a specific wizard step',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Draft saved successfully',
+  })
+  async saveWizardDraft(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { step: string; data: any },
+  ) {
+    try {
+      await this.wizardService.saveWizardDraft(
+        req.user.id,
+        body.step,
+        body.data,
+      );
+      return this.responseService.success(null, 'Draft saved successfully');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error saving draft',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('get-draft/:step')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Get wizard draft data',
+    description: 'Retrieves draft data for a specific wizard step',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Draft retrieved successfully',
+  })
+  async getWizardDraft(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { step: string },
+  ) {
+    try {
+      const draft = await this.wizardService.getWizardDraft(
+        req.user.id,
+        body.step,
+      );
+      return this.responseService.success(
+        draft,
+        'Draft retrieved successfully',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error retrieving draft',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('update-step')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Update current wizard step',
+    description: 'Updates the current step in the wizard state',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Step updated successfully',
+  })
+  async updateWizardStep(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: { step: number },
+  ) {
+    try {
+      await this.wizardService.updateWizardStep(req.user.id, body.step);
+      return this.responseService.success(null, 'Step updated successfully');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error updating step',
         error.response?.message || error.message,
         error.status || 400,
       );

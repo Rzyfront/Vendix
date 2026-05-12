@@ -5,7 +5,10 @@ import { EncryptionService } from '../../../../common/services/encryption.servic
 import { S3Service } from '../../../../common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { RequestContextService } from '../../../../common/context/request-context.service';
-import { DianSoapClient, WsSecurityCredentials } from '../providers/dian-direct/dian-soap.client';
+import {
+  DianSoapClient,
+  WsSecurityCredentials,
+} from '../providers/dian-direct/dian-soap.client';
 import { DianResponseParserService } from '../providers/dian-direct/dian-response-parser.service';
 import { DianXmlSignerService } from '../providers/dian-direct/dian-xml-signer.service';
 import { UblInvoiceBuilder } from '../providers/dian-direct/xml/ubl-invoice.builder';
@@ -55,15 +58,24 @@ export class DianTestService {
     let ws_credentials: WsSecurityCredentials | undefined;
     if (config.certificate_s3_key && config.certificate_password_encrypted) {
       try {
-        const cert_password = this.encryption.decrypt(config.certificate_password_encrypted);
-        const p12_buffer = await this.s3_service.downloadImage(config.certificate_s3_key);
-        const creds = this.xml_signer.extractCredentials(p12_buffer, cert_password);
+        const cert_password = this.encryption.decrypt(
+          config.certificate_password_encrypted,
+        );
+        const p12_buffer = await this.s3_service.downloadImage(
+          config.certificate_s3_key,
+        );
+        const creds = this.xml_signer.extractCredentials(
+          p12_buffer,
+          cert_password,
+        );
         ws_credentials = {
           private_key_pem: creds.private_key_pem,
           certificate_der_base64: creds.certificate_der_base64,
         };
       } catch (error) {
-        this.logger.warn(`Failed to extract WS-Security credentials for connection test, continuing without: ${error.message}`);
+        this.logger.warn(
+          `Failed to extract WS-Security credentials for connection test, continuing without: ${error.message}`,
+        );
       }
     }
 
@@ -77,14 +89,16 @@ export class DianTestService {
       // Connection is successful if DIAN responded with valid SOAP.
       // A SOAP Fault (e.g., InvalidSecurity) means DIAN is reachable but rejected auth.
       // Both valid responses and SOAP faults confirm connectivity.
-      const is_connected = response.success
-        || response.is_soap_fault === true
-        || (response.status_code !== 'NETWORK_ERROR'
-            && response.status_code !== 'TIMEOUT'
-            && response.raw_response.includes('Envelope'));
+      const is_connected =
+        response.success ||
+        response.is_soap_fault === true ||
+        (response.status_code !== 'NETWORK_ERROR' &&
+          response.status_code !== 'TIMEOUT' &&
+          response.raw_response.includes('Envelope'));
 
-      const is_security_error = response.is_soap_fault
-        && response.raw_response.includes('InvalidSecurity');
+      const is_security_error =
+        response.is_soap_fault &&
+        response.raw_response.includes('InvalidSecurity');
 
       await this.createAuditLog(config.id, {
         action: 'test_connection',
@@ -105,9 +119,7 @@ export class DianTestService {
         dian_status: response.status_code,
       };
     } catch (error) {
-      this.logger.error(
-        `DIAN connection test failed: ${error.message}`,
-      );
+      this.logger.error(`DIAN connection test failed: ${error.message}`);
 
       await this.createAuditLog(config.id, {
         action: 'test_connection',
@@ -148,13 +160,19 @@ export class DianTestService {
       where: { id: resolution_id },
     });
     if (!resolution) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001, 'Resolution not found');
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'Resolution not found',
+      );
     }
 
     // 3. Build issuer data from config + organization
     const context = RequestContextService.getContext();
     if (!context) {
-      throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001, 'No request context');
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CONFIG_001,
+        'No request context',
+      );
     }
     const organization = await this.prisma.organizations.findFirst({
       where: { id: context.organization_id },
@@ -192,20 +210,27 @@ export class DianTestService {
     // 4. Download certificate from S3
     let p12_buffer: Buffer | null = null;
     if (config.certificate_s3_key && cert_password) {
-      p12_buffer = await this.s3_service.downloadImage(config.certificate_s3_key);
+      p12_buffer = await this.s3_service.downloadImage(
+        config.certificate_s3_key,
+      );
     }
 
     // 4b. Extract WS-Security credentials from certificate
     let ws_credentials: WsSecurityCredentials | undefined;
     if (p12_buffer && cert_password) {
       try {
-        const creds = this.xml_signer.extractCredentials(p12_buffer, cert_password);
+        const creds = this.xml_signer.extractCredentials(
+          p12_buffer,
+          cert_password,
+        );
         ws_credentials = {
           private_key_pem: creds.private_key_pem,
           certificate_der_base64: creds.certificate_der_base64,
         };
       } catch (error) {
-        this.logger.warn(`Failed to extract WS-Security credentials, continuing without: ${error.message}`);
+        this.logger.warn(
+          `Failed to extract WS-Security credentials, continuing without: ${error.message}`,
+        );
       }
     }
 
@@ -228,9 +253,12 @@ export class DianTestService {
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
 
-      const software_security_code = UblCommonBuilder.generateSoftwareSecurityCode(
-        config.software_id, software_pin, invoice_number,
-      );
+      const software_security_code =
+        UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          software_pin,
+          invoice_number,
+        );
 
       const cufe = CufeCalculator.generate({
         invoice_number,
@@ -256,20 +284,24 @@ export class DianTestService {
         total_amount: total,
         payment_means: '10',
         payment_form: '1',
-        items: [{
-          description: `Producto de prueba ${i + 1}`,
-          quantity: '1.00',
-          unit_price: subtotal,
-          discount_amount: '0.00',
-          tax_amount: tax,
-          total_amount: total,
-        }],
-        taxes: [{
-          tax_name: 'IVA',
-          tax_rate: '19.00',
-          taxable_amount: subtotal,
-          tax_amount: tax,
-        }],
+        items: [
+          {
+            description: `Producto de prueba ${i + 1}`,
+            quantity: '1.00',
+            unit_price: subtotal,
+            discount_amount: '0.00',
+            tax_amount: tax,
+            total_amount: total,
+          },
+        ],
+        taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: '19.00',
+            taxable_amount: subtotal,
+            tax_amount: tax,
+          },
+        ],
       };
 
       let xml = UblInvoiceBuilder.build({
@@ -302,9 +334,12 @@ export class DianTestService {
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
 
-      const software_security_code = UblCommonBuilder.generateSoftwareSecurityCode(
-        config.software_id, software_pin, note_number,
-      );
+      const software_security_code =
+        UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          software_pin,
+          note_number,
+        );
 
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
@@ -331,20 +366,24 @@ export class DianTestService {
         payment_means: '10',
         payment_form: '1',
         notes: 'Intereses',
-        items: [{
-          description: `Ajuste débito prueba ${i + 1}`,
-          quantity: '1.00',
-          unit_price: subtotal,
-          discount_amount: '0.00',
-          tax_amount: tax,
-          total_amount: total,
-        }],
-        taxes: [{
-          tax_name: 'IVA',
-          tax_rate: '19.00',
-          taxable_amount: subtotal,
-          tax_amount: tax,
-        }],
+        items: [
+          {
+            description: `Ajuste débito prueba ${i + 1}`,
+            quantity: '1.00',
+            unit_price: subtotal,
+            discount_amount: '0.00',
+            tax_amount: tax,
+            total_amount: total,
+          },
+        ],
+        taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: '19.00',
+            taxable_amount: subtotal,
+            tax_amount: tax,
+          },
+        ],
       };
 
       let xml = UblDebitNoteBuilder.build({
@@ -378,9 +417,12 @@ export class DianTestService {
       const tax = (parseFloat(subtotal) * 0.19).toFixed(2);
       const total = (parseFloat(subtotal) + parseFloat(tax)).toFixed(2);
 
-      const software_security_code = UblCommonBuilder.generateSoftwareSecurityCode(
-        config.software_id, software_pin, note_number,
-      );
+      const software_security_code =
+        UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          software_pin,
+          note_number,
+        );
 
       const cude = CufeCalculator.generate({
         invoice_number: note_number,
@@ -407,20 +449,24 @@ export class DianTestService {
         payment_means: '10',
         payment_form: '1',
         notes: 'Devolución de bienes',
-        items: [{
-          description: `Devolución prueba ${i + 1}`,
-          quantity: '1.00',
-          unit_price: subtotal,
-          discount_amount: '0.00',
-          tax_amount: tax,
-          total_amount: total,
-        }],
-        taxes: [{
-          tax_name: 'IVA',
-          tax_rate: '19.00',
-          taxable_amount: subtotal,
-          tax_amount: tax,
-        }],
+        items: [
+          {
+            description: `Devolución prueba ${i + 1}`,
+            quantity: '1.00',
+            unit_price: subtotal,
+            discount_amount: '0.00',
+            tax_amount: tax,
+            total_amount: total,
+          },
+        ],
+        taxes: [
+          {
+            tax_name: 'IVA',
+            tax_rate: '19.00',
+            taxable_amount: subtotal,
+            tax_amount: tax,
+          },
+        ],
       };
 
       let xml = UblCreditNoteBuilder.build({
@@ -488,8 +534,9 @@ export class DianTestService {
       duration_ms: response.duration_ms,
     });
 
-    const is_ws_security_error = response.is_soap_fault === true
-      && response.raw_response?.includes('InvalidSecurity');
+    const is_ws_security_error =
+      response.is_soap_fault === true &&
+      response.raw_response?.includes('InvalidSecurity');
 
     return {
       success: response.success,
@@ -540,7 +587,9 @@ export class DianTestService {
    * Builds a multi-file ZIP archive and returns its base64 representation.
    * Uses adm-zip for reliable ZIP format compatibility with DIAN.
    */
-  private buildMultiFileZip(files: { name: string; content: string }[]): string {
+  private buildMultiFileZip(
+    files: { name: string; content: string }[],
+  ): string {
     const zip = new AdmZip();
     for (const file of files) {
       zip.addFile(file.name, Buffer.from(file.content, 'utf-8'));
@@ -565,9 +614,7 @@ export class DianTestService {
         },
       });
     } catch (error) {
-      this.logger.error(
-        `Failed to create DIAN audit log: ${error.message}`,
-      );
+      this.logger.error(`Failed to create DIAN audit log: ${error.message}`);
     }
   }
 }

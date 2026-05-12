@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
@@ -20,6 +21,10 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
+import { OrgLocationsService } from '../inventory/locations/org-locations.service';
+import { SettingsService } from '../../store/settings/settings.service';
 
 interface WizardValidation {
   isValid: boolean;
@@ -28,6 +33,8 @@ interface WizardValidation {
 
 @Injectable()
 export class OnboardingWizardService {
+  private readonly logger = new Logger(OnboardingWizardService.name);
+
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
@@ -35,7 +42,11 @@ export class OnboardingWizardService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
-  ) { }
+    private readonly storeBootstrapHelper: StoreBootstrapHelper,
+    private readonly subscriptionTrialService: SubscriptionTrialService,
+    private readonly orgLocationsService: OrgLocationsService,
+    private readonly settingsService: SettingsService,
+  ) {}
 
   /**
    * Get wizard status for a user
@@ -64,7 +75,7 @@ export class OnboardingWizardService {
       throw new BadRequestException('User not found');
     }
 
-    const userConfig = user.user_settings?.config as any;
+    const userConfig = user.user_settings?.config;
 
     return {
       user_id: userId,
@@ -130,14 +141,31 @@ export class OnboardingWizardService {
       selectAppTypeDto.app_type === 'ORG_ADMIN'
         ? 'MULTI_STORE_ORG'
         : 'SINGLE_STORE';
+    const operatingScope =
+      selectAppTypeDto.app_type === 'ORG_ADMIN' ? 'ORGANIZATION' : 'STORE';
+    const fiscalScope =
+      selectAppTypeDto.app_type === 'ORG_ADMIN'
+        ? (selectAppTypeDto.fiscal_scope ?? 'ORGANIZATION')
+        : 'STORE';
+
+    if (operatingScope === 'STORE' && fiscalScope === 'ORGANIZATION') {
+      throw new BadRequestException(
+        'Invalid scope combination: STORE operation cannot use consolidated fiscal scope.',
+      );
+    }
 
     // Check if already selected the same type
-    const userConfig = user.user_settings?.config as any;
-    if (userConfig?.selected_app_type === selectAppTypeDto.app_type) {
+    const userConfig = user.user_settings?.config;
+    if (
+      userConfig?.selected_app_type === selectAppTypeDto.app_type &&
+      (userConfig?.selected_fiscal_scope ?? fiscalScope) === fiscalScope
+    ) {
       return {
         success: true,
         app_type: selectAppTypeDto.app_type,
         account_type: accountType,
+        operating_scope: operatingScope,
+        fiscal_scope: fiscalScope,
         message: 'Application type already selected',
         already_completed: true,
       };
@@ -145,24 +173,64 @@ export class OnboardingWizardService {
 
     // Update organization's account_type if user has an organization
     if (user.organization_id) {
+      const organization = await this.prismaService.organizations.findUnique({
+        where: { id: user.organization_id },
+        select: { account_type: true, operating_scope: true, fiscal_scope: true },
+      });
+
+      if (
+        organization &&
+        selectAppTypeDto.app_type !== 'ORG_ADMIN' &&
+        (organization.account_type === 'MULTI_STORE_ORG' ||
+          organization.operating_scope === 'ORGANIZATION')
+      ) {
+        throw new BadRequestException(
+          'Changing from consolidated organization to single-store operation requires manual review.',
+        );
+      }
+
       await this.prismaService.organizations.update({
         where: { id: user.organization_id },
         data: {
           account_type: accountType,
+          operating_scope: operatingScope as any,
+          fiscal_scope: fiscalScope as any,
           updated_at: new Date(),
         },
       });
+
+      // Auto-provision central warehouse when the org becomes ORGANIZATION-scoped.
+      // Idempotent: safe to call repeatedly; reactivates a previously
+      // deactivated central if one exists.
+      if (operatingScope === 'ORGANIZATION') {
+        try {
+          await this.orgLocationsService.ensureCentralWarehouse(
+            user.organization_id,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `selectAppType: ensureCentralWarehouse failed for org=${user.organization_id}: ${err?.message ?? err}`,
+          );
+        }
+      }
     }
 
     // Update or create user_settings with selected app type
     const config = {
       selected_app_type: selectAppTypeDto.app_type,
+      selected_fiscal_scope: fiscalScope,
+      selected_business_model:
+        selectAppTypeDto.app_type === 'STORE_ADMIN'
+          ? 'SINGLE_STORE'
+          : fiscalScope === 'ORGANIZATION'
+            ? 'ORG_CONSOLIDATED'
+            : 'ORG_FISCAL_SEPARATED',
       selection_notes: selectAppTypeDto.notes || '',
       selected_at: new Date().toISOString(),
     };
 
     if (user.user_settings) {
-      const existingConfig = (user.user_settings.config as any) || {};
+      const existingConfig = user.user_settings.config || {};
 
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
@@ -189,6 +257,8 @@ export class OnboardingWizardService {
       success: true,
       app_type: selectAppTypeDto.app_type,
       account_type: accountType,
+      operating_scope: operatingScope,
+      fiscal_scope: fiscalScope,
       message: 'Application type selected successfully',
     };
   }
@@ -347,9 +417,23 @@ export class OnboardingWizardService {
           website: setupOrgDto.website,
           tax_id: setupOrgDto.tax_id,
           account_type: 'MULTI_STORE_ORG', // Ensure multi-store for organization flow
+          operating_scope: 'ORGANIZATION' as any,
           updated_at: new Date(),
         },
       });
+
+      // Auto-provision central warehouse for the ORGANIZATION-scoped org.
+      // Idempotent: a previous wizard step (selectAppType) may already have
+      // created/reactivated it.
+      try {
+        await this.orgLocationsService.ensureCentralWarehouse(
+          user.organization_id,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `setupOrganization: ensureCentralWarehouse failed for org=${user.organization_id}: ${err?.message ?? err}`,
+        );
+      }
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         // Handle unique constraint violations
@@ -472,6 +556,17 @@ export class OnboardingWizardService {
 
   /**
    * Setup store with address
+   *
+   * Atomic flow for the FIRST store of an organization (onboarding wizard):
+   *   1. stores + optional addresses + inventory_locations (via StoreBootstrapHelper)
+   *   2. store_settings with wizard-provided currency/timezone
+   *   3. auto-trial bootstrap (one-shot per organization)
+   *
+   * If any step fails the whole transaction rolls back — no orphan stores,
+   * no stores with default_location_id = NULL, no half-consumed trials.
+   *
+   * NOTE: Store domain is NOT created here because we need branding info
+   * (colors, app_type) which is provided later in setupAppConfig.
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
     const user = await this.prismaService.users.findUnique({
@@ -483,9 +578,11 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
+    const organization_id = user.organization_id;
+
     // Check if store already exists for this organization
     const existingStore = await this.prismaService.stores.findFirst({
-      where: { organization_id: user.organization_id },
+      where: { organization_id },
       include: { addresses: { where: { type: 'store_physical' } } },
     });
 
@@ -494,10 +591,15 @@ export class OnboardingWizardService {
       // You might want more strict check here, but name is the main one in DTO
 
       if (isSameStoreData) {
+        // Store already created in a previous wizard step — do NOT re-trigger
+        // trial bootstrap (it was already attempted when this store was first
+        // created, and trial is one-shot per organization anyway).
         return { ...existingStore, already_completed: true };
       }
 
-      // If name changed, update it
+      // If name changed, update it. Trial is NOT re-triggered: the store
+      // already existed, so any trial that was going to be created has
+      // already been handled in the first creation path.
       const updatedStore = await this.prismaService.stores.update({
         where: { id: existingStore.id },
         data: {
@@ -509,9 +611,10 @@ export class OnboardingWizardService {
 
       // Update currency in store_settings if provided
       if (setupStoreDto.currency) {
-        const storeSettings = await this.prismaService.store_settings.findUnique({
-          where: { store_id: existingStore.id },
-        });
+        const storeSettings =
+          await this.prismaService.store_settings.findUnique({
+            where: { store_id: existingStore.id },
+          });
         if (storeSettings) {
           const settings = storeSettings.settings as any;
           settings.general = settings.general || {};
@@ -526,29 +629,16 @@ export class OnboardingWizardService {
       return { ...updatedStore, updated: true };
     }
 
-    // Generate unique slug from name
+    // Generate unique slug from name (resolved BEFORE the transaction so a
+    // slug collision pre-empts opening tx work — the helper still validates
+    // uniqueness via P2002 inside the tx as a safety net).
     const slug = await this.generateUniqueStoreSlug(
       setupStoreDto.name,
-      user.organization_id,
+      organization_id,
     );
 
-    // Create store
-    const store = await this.prismaService.stores.create({
-      data: {
-        name: setupStoreDto.name,
-        slug: slug,
-        store_type: setupStoreDto.store_type || 'physical',
-        timezone: setupStoreDto.timezone || 'America/Mexico_City',
-        organization_id: user.organization_id,
-        created_at: new Date(),
-        updated_at: new Date(),
-      },
-    });
-
-    // NOTE: Store domain is NOT created here because we need branding info (colors, app_type)
-    // which is provided later in setupAppConfig. The domain will be created there.
-
-    // Create initial store_settings with currency and timezone from wizard
+    // Compose default store_settings with wizard-provided currency/timezone
+    // up-front so the JSON value is ready to insert inside the transaction.
     const defaultSettings = getDefaultStoreSettings();
     if (setupStoreDto.currency) {
       defaultSettings.general.currency = setupStoreDto.currency;
@@ -556,62 +646,89 @@ export class OnboardingWizardService {
     if (setupStoreDto.timezone) {
       defaultSettings.general.timezone = setupStoreDto.timezone;
     }
-    await this.prismaService.store_settings.upsert({
-      where: { store_id: store.id },
-      create: { store_id: store.id, settings: defaultSettings as any },
-      update: { settings: defaultSettings as any, updated_at: new Date() },
-    });
 
-    // Create store address if provided
-    let address = null;
-    if (setupStoreDto.address_line1) {
-      address = await this.prismaService.addresses.create({
-        data: {
-          store_id: store.id,
-          address_line1: setupStoreDto.address_line1,
-          address_line2: setupStoreDto.address_line2,
-          city: setupStoreDto.city,
-          state_province: setupStoreDto.state_province,
-          postal_code: setupStoreDto.postal_code,
-          country_code: setupStoreDto.country_code || 'MX',
-          type: 'store_physical',
-          is_primary: true,
-        },
-      });
-    }
+    // Atomic store bootstrap (matches the pattern used by StoresService.create
+    // in the organization domain). All writes commit together or roll back
+    // together — including the trial subscription and has_consumed_trial flip.
+    const storeId: number = await (this.prismaService as any).$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // 1) store + optional addresses + inventory_locations (atomic).
+        //    The helper guarantees default_location_id is wired on the store.
+        const { store } =
+          await this.storeBootstrapHelper.createStoreWithDefaultLocation(
+            {
+              organization_id,
+              store_data: {
+                name: setupStoreDto.name,
+                slug,
+                store_type: (setupStoreDto.store_type as any) || 'physical',
+                timezone: setupStoreDto.timezone || 'America/Mexico_City',
+              },
+              address_data: setupStoreDto.address_line1
+                ? {
+                    address_line1: setupStoreDto.address_line1,
+                    address_line2: setupStoreDto.address_line2 ?? null,
+                    city: setupStoreDto.city ?? '',
+                    state_province: setupStoreDto.state_province ?? null,
+                    postal_code: setupStoreDto.postal_code ?? null,
+                    country_code: setupStoreDto.country_code || 'MX',
+                    type: 'store_physical',
+                    is_primary: true,
+                  }
+                : undefined,
+            },
+            tx,
+          );
 
-    // Create default location automatically
-    await this.createDefaultLocationForStore(store, user.organization_id, address);
+        // 2) store_settings — currency/timezone come from wizard input.
+        //    Use upsert in case a previous partial run left a row behind.
+        await tx.store_settings.upsert({
+          where: { store_id: store.id },
+          create: { store_id: store.id, settings: defaultSettings as any },
+          update: {
+            settings: defaultSettings as any,
+            updated_at: new Date(),
+          },
+        });
 
-    // Associate user with store - Note: store_users association may not be needed for owners during onboarding
-
-    return store;
-  }
-
-  /**
-   * Create a default location for a store automatically
-   */
-  private async createDefaultLocationForStore(
-    store: any,
-    organization_id: number,
-    address: any = null,
-  ) {
-    try {
-      await this.prismaService.inventory_locations.create({
-        data: {
-          name: store.name,
-          code: `STORE-${store.slug}`,
-          type: 'store',
-          is_active: true,
+        // 3) auto-trial bootstrap (one-shot per organization). Runs INSIDE
+        //    this tx so the FOR UPDATE lock on organizations and the
+        //    has_consumed_trial flip commit atomically with the store.
+        //    Returns null silently if the org already consumed its trial
+        //    or no default plan is configured — store creation continues.
+        await this.subscriptionTrialService.createTrialForStore(
+          store.id,
           organization_id,
-          store_id: store.id,
-          address_id: address?.id || null,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to create default location for store during onboarding:', error);
-      // Fallback: don't fail store creation if location creation fails
+          tx,
+        );
+
+        this.logger.log(
+          `onboarding setupStore: created store ${store.id} (slug=${store.slug}) for org ${organization_id}`,
+        );
+
+        return store.id;
+      },
+    );
+
+    // Idempotent safety net: guarantees a store_settings row exists with the
+    // current default schema version stamped. Cheap upsert with `update: {}`.
+    try {
+      await this.settingsService.ensureDefaults(storeId);
+    } catch (err: any) {
+      this.logger.warn(
+        `setupStore: ensureDefaults failed for store=${storeId}: ${err?.message ?? err}`,
+      );
     }
+
+    // Final fetch AFTER the transaction so the response reflects all
+    // committed side-effects (default_location_id, address, settings).
+    return this.prismaService.stores.findUnique({
+      where: { id: storeId },
+      include: {
+        addresses: { where: { type: 'store_physical' } },
+        store_settings: true,
+      },
+    });
   }
 
   /**
@@ -784,9 +901,12 @@ export class OnboardingWizardService {
         settings: {
           branding: {
             name: user.organizations?.name || 'Organization',
-            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            primary_color:
+              setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color:
+              setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color:
+              setupAppConfigDto.accent_color || branding.accent_color,
             background_color: branding.background_color,
             surface_color: branding.surface_color,
             text_color: branding.text_color,
@@ -806,9 +926,12 @@ export class OnboardingWizardService {
         settings: {
           branding: {
             name: user.organizations?.name || 'Organization',
-            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            primary_color:
+              setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color:
+              setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color:
+              setupAppConfigDto.accent_color || branding.accent_color,
             background_color: branding.background_color,
             surface_color: branding.surface_color,
             text_color: branding.text_color,
@@ -849,9 +972,10 @@ export class OnboardingWizardService {
       });
 
       // Read existing store_settings to preserve currency/timezone set during setupStore
-      const existingStoreSettings = await this.prismaService.store_settings.findUnique({
-        where: { store_id: store.id },
-      });
+      const existingStoreSettings =
+        await this.prismaService.store_settings.findUnique({
+          where: { store_id: store.id },
+        });
       const existing = (existingStoreSettings?.settings as any) || {};
 
       // Create/Update store_settings with branding and default settings
@@ -860,14 +984,19 @@ export class OnboardingWizardService {
         ...defaultSettings,
         general: {
           ...defaultSettings.general,
-          currency: existing?.general?.currency || defaultSettings.general.currency,
-          timezone: existing?.general?.timezone || defaultSettings.general.timezone,
+          currency:
+            existing?.general?.currency || defaultSettings.general.currency,
+          timezone:
+            existing?.general?.timezone || defaultSettings.general.timezone,
         },
         branding: {
           name: store.name,
-          primary_color: setupAppConfigDto.primary_color || storeBranding.primary_color,
-          secondary_color: setupAppConfigDto.secondary_color || storeBranding.secondary_color,
-          accent_color: setupAppConfigDto.accent_color || storeBranding.accent_color,
+          primary_color:
+            setupAppConfigDto.primary_color || storeBranding.primary_color,
+          secondary_color:
+            setupAppConfigDto.secondary_color || storeBranding.secondary_color,
+          accent_color:
+            setupAppConfigDto.accent_color || storeBranding.accent_color,
           background_color: storeBranding.background_color,
           surface_color: storeBranding.surface_color,
           text_color: storeBranding.text_color,
@@ -936,8 +1065,18 @@ export class OnboardingWizardService {
         // Create new store domain with branding config
         // Check if hostname already exists (to handle retries/back navigation)
         const collidingDomain =
-          await this.prismaService.domain_settings.findUnique({
-            where: { hostname: storeHostname },
+          await this.prismaService.domain_settings.findFirst({
+            where: {
+              hostname: storeHostname,
+              status: {
+                notIn: [
+                  'disabled',
+                  'failed_ownership',
+                  'failed_certificate',
+                  'failed_alias',
+                ],
+              },
+            },
           });
 
         if (collidingDomain && collidingDomain.store_id === store.id) {
@@ -1002,10 +1141,21 @@ export class OnboardingWizardService {
       const customDomain = setupAppConfigDto.custom_domain.toLowerCase().trim();
 
       // Check for ownership conflict
-      const existingCustom =
-        await this.prismaService.domain_settings.findUnique({
-          where: { hostname: customDomain },
-        });
+      const existingCustom = await this.prismaService.domain_settings.findFirst(
+        {
+          where: {
+            hostname: customDomain,
+            status: {
+              notIn: [
+                'disabled',
+                'failed_ownership',
+                'failed_certificate',
+                'failed_alias',
+              ],
+            },
+          },
+        },
+      );
 
       if (
         existingCustom &&
@@ -1062,7 +1212,7 @@ export class OnboardingWizardService {
       setupAppConfigDto.app_type,
     );
 
-    const existingConfig = (existingSettings?.config as any) || {};
+    const existingConfig = existingSettings?.config || {};
 
     const updatedConfig = {
       ...existingConfig,
@@ -1149,6 +1299,13 @@ export class OnboardingWizardService {
       select: { organization_id: true },
     });
 
+    // Get app type to determine if we need to create ORG_ADMIN role
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+    const config = userSettings?.config || {};
+    const selectedAppType = config.selected_app_type;
+
     // Mark organization as onboarded and activate it
     if (user?.organization_id) {
       await this.prismaService.organizations.update({
@@ -1159,6 +1316,11 @@ export class OnboardingWizardService {
           updated_at: new Date(),
         },
       });
+
+      // Create default ORG_ADMIN role for the creator if this is ORG_ADMIN flow
+      if (selectedAppType === 'ORG_ADMIN') {
+        await this.createDefaultOrgAdminRole(user.organization_id, userId);
+      }
 
       // Mark first store as onboarded
       const store = await this.prismaService.stores.findFirst({
@@ -1574,10 +1736,12 @@ export class OnboardingWizardService {
   /**
    * Resend verification email for authenticated user
    * This method uses the authenticated user's ID instead of requiring email in body
+   * Implements 60-second cooldown to prevent spam
    */
   async resendVerificationEmail(userId: number): Promise<{
     message: string;
     alreadyVerified?: boolean;
+    cooldownRemaining?: number;
   }> {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
@@ -1592,6 +1756,28 @@ export class OnboardingWizardService {
         message: 'Este email ya ha sido verificado anteriormente.',
         alreadyVerified: true,
       };
+    }
+
+    // Check cooldown using onboarding state table
+    const COOLDOWN_SECONDS = 60;
+    if (user.organization_id) {
+      const onboardingState =
+        await this.prismaService.organization_onboarding_state.findUnique({
+          where: { organization_id: user.organization_id },
+        });
+
+      if (onboardingState?.last_resend_at) {
+        const lastResend = new Date(onboardingState.last_resend_at).getTime();
+        const now = Date.now();
+        const elapsed = Math.floor((now - lastResend) / 1000);
+
+        if (elapsed < COOLDOWN_SECONDS) {
+          return {
+            message: `Por favor espera ${COOLDOWN_SECONDS - elapsed} segundos antes de reenviar`,
+            cooldownRemaining: COOLDOWN_SECONDS - elapsed,
+          };
+        }
+      }
     }
 
     // Invalidar tokens anteriores
@@ -1621,6 +1807,20 @@ export class OnboardingWizardService {
         select: { slug: true },
       });
       organizationSlug = organization?.slug;
+
+      // Update last_resend_at in onboarding state
+      await this.prismaService.organization_onboarding_state.upsert({
+        where: { organization_id: user.organization_id },
+        create: {
+          organization_id: user.organization_id,
+          last_resend_at: new Date(),
+          email_verification_sent_at: new Date(),
+        },
+        update: {
+          last_resend_at: new Date(),
+          email_verification_sent_at: new Date(),
+        },
+      });
     }
 
     // Enviar email usando EmailService
@@ -1642,5 +1842,191 @@ export class OnboardingWizardService {
    */
   private generateRandomToken(): string {
     return require('crypto').randomBytes(32).toString('hex');
+  }
+
+  /**
+   * Save wizard draft data for a specific step
+   * Called on each step navigation to persist state
+   */
+  async saveWizardDraft(
+    userId: number,
+    step: string,
+    data: any,
+  ): Promise<void> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      throw new BadRequestException('User has no organization');
+    }
+
+    const updateData: any = {
+      updated_at: new Date(),
+    };
+
+    switch (step) {
+      case 'user':
+        updateData.user_data_draft = data;
+        break;
+      case 'organization':
+        updateData.organization_data_draft = data;
+        break;
+      case 'store':
+        updateData.store_data_draft = data;
+        break;
+      case 'app_config':
+        updateData.app_config_draft = data;
+        break;
+    }
+
+    await this.prismaService.organization_onboarding_state.upsert({
+      where: { organization_id: user.organization_id },
+      create: {
+        organization_id: user.organization_id,
+        current_step: 1,
+        ...updateData,
+      },
+      update: updateData,
+    });
+  }
+
+  /**
+   * Get wizard draft data for a specific step
+   */
+  async getWizardDraft(userId: number, step: string): Promise<any> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      return null;
+    }
+
+    const state =
+      await this.prismaService.organization_onboarding_state.findUnique({
+        where: { organization_id: user.organization_id },
+      });
+
+    if (!state) return null;
+
+    switch (step) {
+      case 'user':
+        return state.user_data_draft;
+      case 'organization':
+        return state.organization_data_draft;
+      case 'store':
+        return state.store_data_draft;
+      case 'app_config':
+        return state.app_config_draft;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Update current step in wizard state
+   */
+  async updateWizardStep(userId: number, step: number): Promise<void> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      return;
+    }
+
+    await this.prismaService.organization_onboarding_state.upsert({
+      where: { organization_id: user.organization_id },
+      create: {
+        organization_id: user.organization_id,
+        current_step: step,
+      },
+      update: {
+        current_step: step,
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Create default ORG_ADMIN role for the organization creator
+   * Assigns full org-level permissions
+   */
+  async createDefaultOrgAdminRole(
+    organizationId: number,
+    creatorUserId: number,
+  ): Promise<void> {
+    // Check if role already exists
+    const existingRole = await this.prismaService.roles.findFirst({
+      where: {
+        name: 'ORG_ADMIN',
+        organization_id: organizationId,
+      },
+    });
+
+    if (existingRole) {
+      // Role already exists, just assign it to the user
+      await this.assignRoleToUser(creatorUserId, existingRole.id);
+      return;
+    }
+
+    // Get all system permissions for org-level access
+    const allPermissions = await this.prismaService.permissions.findMany({
+      where: { is_system_permission: true },
+    });
+
+    // Create the ORG_ADMIN role
+    const orgAdminRole = await this.prismaService.roles.create({
+      data: {
+        name: 'ORG_ADMIN',
+        description: 'Administrador de Organización con permisos completos',
+        is_system_role: false,
+        organization_id: organizationId,
+      },
+    });
+
+    // Create role permissions for all system permissions
+    if (allPermissions.length > 0) {
+      await this.prismaService.role_permissions.createMany({
+        data: allPermissions.map((perm) => ({
+          role_id: orgAdminRole.id,
+          permission_id: perm.id,
+          granted: true,
+        })),
+      });
+    }
+
+    // Assign the role to the creator user
+    await this.assignRoleToUser(creatorUserId, orgAdminRole.id);
+  }
+
+  /**
+   * Assign a role to a user
+   */
+  private async assignRoleToUser(
+    userId: number,
+    roleId: number,
+  ): Promise<void> {
+    const existingAssignment = await this.prismaService.user_roles.findUnique({
+      where: {
+        user_id_role_id: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      },
+    });
+
+    if (!existingAssignment) {
+      await this.prismaService.user_roles.create({
+        data: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      });
+    }
   }
 }

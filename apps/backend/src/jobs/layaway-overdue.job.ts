@@ -25,18 +25,19 @@ export class LayawayOverdueJob {
       const now = new Date();
 
       // 1. Find pending installments that are past due
-      const overdue_installments = await this.prisma.layaway_installments.findMany({
-        where: {
-          state: 'pending',
-          due_date: { lt: now },
-          layaway_plan: { state: { in: ['active'] } },
-        },
-        include: {
-          layaway_plan: {
-            select: { id: true, store_id: true, plan_number: true },
+      const overdue_installments =
+        await this.prisma.layaway_installments.findMany({
+          where: {
+            state: 'pending',
+            due_date: { lt: now },
+            layaway_plan: { state: { in: ['active'] } },
           },
-        },
-      });
+          include: {
+            layaway_plan: {
+              select: { id: true, store_id: true, plan_number: true },
+            },
+          },
+        });
 
       if (overdue_installments.length === 0) {
         this.logger.debug('No overdue installments found');
@@ -51,10 +52,14 @@ export class LayawayOverdueJob {
         data: { state: 'overdue', updated_at: now },
       });
 
-      this.logger.log(`Marked ${overdue_installments.length} installments as overdue`);
+      this.logger.log(
+        `Marked ${overdue_installments.length} installments as overdue`,
+      );
 
       // 3. Check if plans should be marked overdue
-      const plan_ids = [...new Set(overdue_installments.map((i) => i.layaway_plan_id))];
+      const plan_ids = [
+        ...new Set(overdue_installments.map((i) => i.layaway_plan_id)),
+      ];
 
       for (const plan_id of plan_ids) {
         const pending_count = await this.prisma.layaway_installments.count({
@@ -73,7 +78,9 @@ export class LayawayOverdueJob {
               data: { state: 'overdue', updated_at: now },
             });
 
-            const plan = overdue_installments.find((i) => i.layaway_plan_id === plan_id)?.layaway_plan;
+            const plan = overdue_installments.find(
+              (i) => i.layaway_plan_id === plan_id,
+            )?.layaway_plan;
             if (plan) {
               this.eventEmitter.emit('layaway.overdue', {
                 store_id: plan.store_id,
@@ -86,7 +93,10 @@ export class LayawayOverdueJob {
         }
       }
     } catch (error) {
-      this.logger.error(`Layaway overdue detection failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Layaway overdue detection failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

@@ -2,7 +2,6 @@ import {
   Component,
   ElementRef,
   HostListener,
-  TemplateRef,
   output,
   signal,
   viewChild,
@@ -17,7 +16,7 @@ import {
       <button
         type="button"
         class="inline-flex w-full justify-center gap-x-1.5 rounded-md bg-[var(--color-background)] px-3 py-2 text-sm font-semibold text-[var(--color-text-primary)] shadow-sm ring-1 ring-inset ring-[var(--color-border)] hover:bg-[var(--color-surface)]"
-        (click)="toggle()"
+        (click)="toggle($event)"
       >
         <ng-content select="[dropdown-trigger]"></ng-content>
       </button>
@@ -40,7 +39,8 @@ export class DropdownComponent {
   readonly isOpenChange = output<boolean>();
   readonly rootRef = viewChild.required<ElementRef<HTMLElement>>('root');
 
-  toggle() {
+  toggle(event?: MouseEvent) {
+    event?.stopPropagation();
     this.open.set(!this.open());
     this.isOpenChange.emit(this.open());
   }

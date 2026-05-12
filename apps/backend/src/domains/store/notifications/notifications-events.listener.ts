@@ -209,7 +209,11 @@ export class NotificationsEventsListener {
       'installment_paid',
       'Pago de Cuota Recibido',
       `Pago de $${event.amount} recibido - Cuota #${event.installment_number} - Crédito ${event.credit_number}`,
-      { credit_id: event.credit_id, installment_id: event.installment_id, payment_id: event.payment_id },
+      {
+        credit_id: event.credit_id,
+        installment_id: event.installment_id,
+        payment_id: event.payment_id,
+      },
     );
   }
 
@@ -245,7 +249,11 @@ export class NotificationsEventsListener {
       'installment_reminder',
       'Recordatorio de Cuota',
       `Cuota #${event.installment_number} vence en 3 días ($${event.amount}) - Crédito ${event.credit_number}`,
-      { credit_id: event.credit_id, installment_id: event.installment_id, due_date: event.due_date },
+      {
+        credit_id: event.credit_id,
+        installment_id: event.installment_id,
+        due_date: event.due_date,
+      },
     );
   }
 
@@ -265,7 +273,11 @@ export class NotificationsEventsListener {
       'installment_overdue',
       'Cuota Vencida',
       `Cuota #${event.installment_number} vencida - Crédito ${event.credit_number} ($${event.amount})`,
-      { credit_id: event.credit_id, installment_id: event.installment_id, due_date: event.due_date },
+      {
+        credit_id: event.credit_id,
+        installment_id: event.installment_id,
+        due_date: event.due_date,
+      },
     );
   }
 
@@ -431,20 +443,21 @@ export class NotificationsEventsListener {
       }
 
       // 8. Send email
-      const result = attachments.length > 0
-        ? await this.email_service.sendEmailWithAttachments(
-            customer_email,
-            subject,
-            html,
-            attachments,
-            text,
-          )
-        : await this.email_service.sendEmail(
-            customer_email,
-            subject,
-            html,
-            text,
-          );
+      const result =
+        attachments.length > 0
+          ? await this.email_service.sendEmailWithAttachments(
+              customer_email,
+              subject,
+              html,
+              attachments,
+              text,
+            )
+          : await this.email_service.sendEmail(
+              customer_email,
+              subject,
+              html,
+              text,
+            );
 
       if (result.success) {
         // 9. Update invoice: mark email as sent
@@ -633,7 +646,11 @@ export class NotificationsEventsListener {
       'customer_queue_new',
       'Nuevo cliente en cola',
       `${event.first_name} ${event.last_name} se registró en la cola (posición #${event.position})`,
-      { entry_id: event.entry_id, token: event.token, position: event.position },
+      {
+        entry_id: event.entry_id,
+        token: event.token,
+        position: event.position,
+      },
     );
   }
 
@@ -690,7 +707,11 @@ export class NotificationsEventsListener {
       'invoice_data_request_submitted',
       'Solicitud de factura recibida',
       `${event.customer_name || 'Un cliente'} (${event.document_number || 'S/D'}) envió datos para facturación de la orden #${event.order_id}`,
-      { request_id: event.request_id, order_id: event.order_id, token: event.token },
+      {
+        request_id: event.request_id,
+        order_id: event.order_id,
+        token: event.token,
+      },
     );
   }
 
@@ -724,8 +745,13 @@ export class NotificationsEventsListener {
         });
 
         if (customer?.email) {
-          const formUrl = await this.buildPublicFormUrl(event.store_id, event.token);
-          const customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'cliente';
+          const formUrl = await this.buildPublicFormUrl(
+            event.store_id,
+            event.token,
+          );
+          const customerName =
+            `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+            'cliente';
 
           // Look up store name for branding
           const store = await this.global_prisma.stores.findUnique({
@@ -764,7 +790,9 @@ export class NotificationsEventsListener {
               </div>
             `,
           );
-          this.logger.log(`Preconsulta email sent to ${customer.email} for submission ${event.submission_id}`);
+          this.logger.log(
+            `Preconsulta email sent to ${customer.email} for submission ${event.submission_id}`,
+          );
         }
       } catch (error) {
         this.logger.error(`Failed to send preconsulta email: ${error.message}`);
@@ -818,7 +846,11 @@ export class NotificationsEventsListener {
       'booking_check_in',
       'Check-in Registrado',
       `${event.customer_name} llegó para ${event.service_name} (${event.booking_number})`,
-      { booking_id: event.booking_id, provider_id: event.provider_id, source: event.source },
+      {
+        booking_id: event.booking_id,
+        provider_id: event.provider_id,
+        source: event.source,
+      },
     );
   }
 
@@ -873,13 +905,17 @@ export class NotificationsEventsListener {
    * Build public form URL using the store's ecommerce domain.
    * Pattern from customer-queue QR generation.
    */
-  private async buildPublicFormUrl(storeId: number, token: string): Promise<string> {
+  private async buildPublicFormUrl(
+    storeId: number,
+    token: string,
+  ): Promise<string> {
     try {
       // Prefer STORE_ECOMMERCE domain
-      const ecommerceDomain = await this.global_prisma.domain_settings.findFirst({
-        where: { store_id: storeId, app_type: 'STORE_ECOMMERCE' },
-        select: { hostname: true },
-      });
+      const ecommerceDomain =
+        await this.global_prisma.domain_settings.findFirst({
+          where: { store_id: storeId, app_type: 'STORE_ECOMMERCE' },
+          select: { hostname: true },
+        });
       if (ecommerceDomain?.hostname) {
         return `https://${ecommerceDomain.hostname}/preconsulta/${token}`;
       }

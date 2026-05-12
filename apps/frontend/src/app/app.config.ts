@@ -16,6 +16,7 @@ import { provideEffects } from '@ngrx/effects';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
 import { authInterceptorFn } from './core/interceptors/auth.interceptor';
+import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
 import { authReducer, AuthEffects } from './core/store/auth';
@@ -27,6 +28,7 @@ import {
 } from './core/store/notifications';
 import { aiChatReducer } from './core/store/ai-chat/ai-chat.reducer';
 import { AIChatEffects } from './core/store/ai-chat/ai-chat.effects';
+import { subscriptionReducer, SubscriptionEffects } from './core/store/subscription';
 import { hydrateAuthState } from './core/store/persistence';
 import * as ConfigActions from './core/store/config/config.actions';
 import { ThemeService } from './core/services/theme.service';
@@ -75,7 +77,13 @@ export const appConfig: ApplicationConfig = {
     provideZonelessChangeDetection(),
     provideRouter(routes),
     provideClientHydration(),
-    provideHttpClient(withFetch(), withInterceptors([authInterceptorFn])),
+    provideHttpClient(
+      withFetch(),
+      // Order matters: auth runs first (handles 401 + token refresh) and
+      // the paywall interceptor runs last so it can react to the final
+      // 402/403 response after retries.
+      withInterceptors([authInterceptorFn, subscriptionPaywallInterceptor]),
+    ),
 
     // NgRx Store Configuration
     provideStore(
@@ -96,7 +104,8 @@ export const appConfig: ApplicationConfig = {
     provideState('config', configReducer),
     provideState('notifications', notificationsReducer),
     provideState('aiChat', aiChatReducer),
-    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects, AIChatEffects]),
+    provideState('subscription', subscriptionReducer),
+    provideEffects([TenantEffects, AuthEffects, ConfigEffects, NotificationsEffects, AIChatEffects, SubscriptionEffects]),
     provideStoreDevtools({
       maxAge: 25,
       logOnly: !isDevMode(),

@@ -1,0 +1,31 @@
+meta {
+  name: Coupon Expired
+  type: http
+  seq: 15
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/validate-coupon
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "code": "{{coupon_code_expired}}"
+  }
+}
+
+tests {
+  test("Validation HTTP succeeded", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Coupon flagged as expired", function() {
+    // Pre-condition: super-admin seeded a promotional plan with
+    // promo_rules.ends_at in the past and redemption_code = coupon_code_expired.
+    expect(res.body.data.valid).to.be.false;
+    expect(res.body.data.reason).to.equal('expired');
+  });
+}

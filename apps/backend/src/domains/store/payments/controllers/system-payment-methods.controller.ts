@@ -30,7 +30,7 @@ import {
 export class SystemPaymentMethodsController {
   constructor(
     private readonly systemPaymentMethodsService: SystemPaymentMethodsService,
-  ) { }
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get all system payment methods' })

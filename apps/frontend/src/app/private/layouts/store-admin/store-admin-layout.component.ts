@@ -23,6 +23,10 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
 import { map, distinctUntilChanged, skip } from 'rxjs/operators';
 
@@ -36,6 +40,9 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     IconComponent,
     OnboardingModalComponent,
     TourModalComponent,
+    SubscriptionBannerComponent,
+    FiscalObligationBannerComponent,
+    PaywallOutletComponent,
   ],
   template: `
     <div class="flex">
@@ -56,31 +63,53 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
       >
         <!-- Footer Content -->
         <div slot="footer" class="sidebar-footer-content">
-          <div class="footer-info-item">
+          <a
+            class="footer-info-item footer-info-item--clickable"
+            routerLink="/admin/subscription"
+            role="button"
+            [attr.aria-label]="'Ir al módulo de suscripción · ' + planDisplayName()"
+          >
             <div class="footer-info-row">
               <div class="footer-info-block footer-block-gradient-primary">
-                <div class="footer-info-content">
-                  <div class="footer-info-header">
-                    <app-icon name="store" [size]="9"></app-icon>
-                    <span class="footer-info-label">Type</span>
+                <div class="footer-plan-content">
+                  @if (cyclePercent() !== null) {
+                    <div
+                      class="footer-progress-ring"
+                      role="img"
+                      [attr.aria-label]="'Consumo del ciclo: ' + cyclePercent() + ' por ciento'"
+                    >
+                      <svg viewBox="0 0 36 36" class="ring-svg" aria-hidden="true">
+                        <circle class="ring-bg" cx="18" cy="18" r="15.915"></circle>
+                        <circle
+                          class="ring-fg"
+                          cx="18"
+                          cy="18"
+                          r="15.915"
+                          [attr.stroke-dasharray]="cyclePercent() + ', 100'"
+                        ></circle>
+                      </svg>
+                      <span class="ring-percent">{{ cyclePercent() }}%</span>
+                    </div>
+                  }
+                  <div class="footer-plan-info">
+                    <div class="footer-info-header">
+                      <app-icon name="tag" [size]="9"></app-icon>
+                      <span class="footer-info-label">Plan</span>
+                      @if (hasPendingChange()) {
+                        <span class="pending-plan-badge" title="Cambio de plan pendiente de pago">
+                          <app-icon name="clock" [size]="9"></app-icon>
+                        </span>
+                      }
+                    </div>
+                    <span class="footer-info-value">{{ planDisplayName() }}</span>
+                    @if (hasPendingChange()) {
+                      <span class="pending-plan-label">Cambio pendiente</span>
+                    }
                   </div>
-                  <span class="footer-info-value">{{
-                    formatStoreType(storeType())
-                  }}</span>
-                </div>
-              </div>
-              <div class="footer-divider"></div>
-              <div class="footer-info-block footer-block-gradient-secondary">
-                <div class="footer-info-content">
-                  <div class="footer-info-header">
-                    <app-icon name="tag" [size]="9"></app-icon>
-                    <span class="footer-info-label">Plan</span>
-                  </div>
-                  <span class="footer-info-value">Early Access Free Plan</span>
                 </div>
               </div>
             </div>
-          </div>
+          </a>
         </div>
       </app-sidebar>
 
@@ -98,6 +127,9 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
           (toggleSidebar)="toggleSidebar()"
         >
         </app-header>
+
+        <app-subscription-banner />
+        <app-fiscal-obligation-banner />
 
         <!-- Page Content -->
         <main
@@ -120,6 +152,9 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     <!-- Tour Modal -->
     <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
     </app-tour-modal>
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -131,6 +166,7 @@ export class StoreAdminLayoutComponent {
   private onboardingWizardService = inject(OnboardingWizardService);
   private tourService = inject(TourService);
   private menuFilterService = inject(MenuFilterService);
+  private subscriptionFacade = inject(SubscriptionFacade);
   private destroyRef = inject(DestroyRef);
 
   // --- UI state signals ---
@@ -144,7 +180,6 @@ export class StoreAdminLayoutComponent {
   // --- Facade data as signals ---
   readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
   readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
-  readonly storeType = toSignal(this.authFacade.userStoreType$, { initialValue: null });
   readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
 
   // --- isVendixDomain: resolved once from config ---
@@ -160,6 +195,72 @@ export class StoreAdminLayoutComponent {
     const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
     if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
     return store?.logo_url || null;
+  });
+
+  readonly planDisplayName = computed(() => {
+    const sub: any = this.subscriptionFacade.current();
+    // RNC-39 — `no_plan` stores must NOT show the placeholder plan name in
+    // the sidebar footer. Backend strips `plan` from the `current` payload
+    // when state='no_plan' so this fallback is the canonical render.
+    if (!sub || sub.state === 'no_plan') return 'Sin plan activo';
+    // Trial subscriptions are granted by `plan_id`; `paid_plan_id` is null by
+    // design until a real payment clears. Show the trial plan instead of the
+    // paid-plan fallback.
+    if (sub.state === 'trial' || sub.state === 'trialing') {
+      return sub.plan?.name ?? sub.paid_plan?.name ?? 'Plan de prueba';
+    }
+    if (sub.state === 'active' && sub.plan_id != null && sub.paid_plan_id == null) {
+      return sub.plan?.name ?? 'Plan activo';
+    }
+    // RNC-PaidPlan — Always reflect the PAID plan; never the pending one.
+    // `paid_plan_id == null` means the user is mid initial-purchase, so
+    // there is no plan to display.
+    if (sub.paid_plan_id == null) return 'Sin plan activo';
+    return sub.paid_plan?.name ?? sub.plan?.name ?? 'Sin plan activo';
+  });
+
+  /**
+   * RNC-PaidPlan — Drives the "CAMBIO PENDIENTE" sidebar badge. Reads from
+   * the unified subscription selector so it stays in lockstep with the
+   * banners on the subscription page.
+   */
+  readonly hasPendingChange = computed(() => {
+    const kind = this.subscriptionFacade.subscriptionUiState().kind;
+    return kind === 'pending_initial_payment' || kind === 'pending_change_abandoned';
+  });
+
+  /**
+   * Cycle consumption % for the sidebar footer ring. Returns `null` when no
+   * meaningful cycle exists (no plan / mid-purchase) so the template can hide
+   * the ring entirely. Logic mirrors `MySubscriptionComponent.cycleProgress`
+   * (current_period_end-driven) so the sidebar and the page never disagree.
+   */
+  readonly cyclePercent = computed<number | null>(() => {
+    const sub: any = this.subscriptionFacade.current();
+    if (!sub || sub.state === 'no_plan') return null;
+
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const state = sub.state;
+
+    if (state === 'trialing' || state === 'trial') {
+      const start = sub.current_period_start;
+      const trialEnd = sub.trial_ends_at;
+      if (!start || !trialEnd) return null;
+      const total = new Date(trialEnd).getTime() - new Date(start).getTime();
+      if (total <= 0) return 0;
+      const elapsed = Date.now() - new Date(start).getTime();
+      return Math.round(Math.min(100, Math.max(0, (elapsed / total) * 100)));
+    }
+
+    if (sub.paid_plan_id == null && sub.plan_id == null) return null;
+
+    const start = sub.current_period_start;
+    const end = sub.current_period_end;
+    if (!start || !end) return null;
+    const totalMs = new Date(end).getTime() - new Date(start).getTime();
+    if (totalMs <= 0) return 0;
+    const elapsedMs = Date.now() - new Date(start).getTime();
+    return Math.round(Math.min(100, Math.max(0, (elapsedMs / totalMs) * 100)));
   });
 
   // --- Panel UI menu items ---
@@ -343,7 +444,23 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Facturación',
       icon: 'file-text',
-      route: '/admin/invoicing',
+      children: [
+        {
+          label: 'Facturas',
+          icon: 'receipt',
+          route: '/admin/invoicing/invoices',
+        },
+        {
+          label: 'Resoluciones',
+          icon: 'file-check',
+          route: '/admin/invoicing/resolutions',
+        },
+        {
+          label: 'Configuración DIAN',
+          icon: 'shield',
+          route: '/admin/invoicing/dian-config',
+        },
+      ],
     },
     {
       label: 'Contabilidad',
@@ -509,6 +626,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/security',
         },
         {
+          label: 'Manejo fiscal',
+          icon: 'circle',
+          route: '/admin/settings/fiscal',
+        },
+        {
           label: 'Dominios',
           icon: 'circle',
           route: '/admin/settings/domains',
@@ -571,6 +693,20 @@ export class StoreAdminLayoutComponent {
 
     this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
+
+    // S1.2 — Notify the subscription feature about store-context changes
+    // (including initial). This wipes any stale data from the previous
+    // store and triggers a fresh `loadCurrent()` via the effect — so the
+    // sidebar plan name and banner cannot show the previous store's data.
+    this.authFacade.userStore$
+      .pipe(
+        map((s: any) => (s?.id ?? null) as number | null),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((storeId) => {
+        this.subscriptionFacade.contextChanged(storeId);
+      });
   }
 
   /**
@@ -610,18 +746,6 @@ export class StoreAdminLayoutComponent {
     const actuallyNeedsOnboarding = !storeOnboarding;
 
     this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
-  }
-
-  formatStoreType(type: string | null): string {
-    if (!type) return 'N/A';
-
-    const typeMap: Record<string, string> = {
-      physical: 'Física',
-      online: 'Online',
-      hybrid: 'Híbrida',
-    };
-
-    return typeMap[type] || type;
   }
 
   toggleSidebar() {

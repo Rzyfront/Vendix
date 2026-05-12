@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef } from '@angular/core';
+import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -37,17 +37,17 @@ import {
           style="color: var(--color-text-primary);"
         >
           Performance
-          @if (performanceSnapshot) {
+          @if (performanceSnapshot()) {
             <span
               class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
               style="background: var(--color-surface); color: var(--color-text-muted);"
             >
-              {{ performanceSnapshot.totalRecorded }} requests tracked
+              {{ performanceSnapshot()!.totalRecorded }} requests tracked
             </span>
           }
         </h3>
         <app-time-range-selector
-          [selected]="performanceTimeRange"
+          [selected]="performanceTimeRange()"
           (rangeChange)="onTimeRangeChange($event)"
         ></app-time-range-selector>
       </div>
@@ -56,58 +56,58 @@ import {
       <div class="stats-container">
         <app-stats
           title="Avg Response"
-          [value]="avgResponseTime"
+          [value]="avgResponseTime()"
           [smallText]="
-            performanceSnapshot
-              ? 'p95: ' + performanceSnapshot.responseTime.p95.toFixed(0) + 'ms'
+            performanceSnapshot()
+              ? 'p95: ' + performanceSnapshot()!.responseTime.p95.toFixed(0) + 'ms'
               : ''
           "
           iconName="timer"
-          [iconBgColor]="avgResponseTimeIconBg"
-          [iconColor]="avgResponseTimeIconColor"
-          [loading]="loadingPerformance"
+          [iconBgColor]="avgResponseTimeIconBg()"
+          [iconColor]="avgResponseTimeIconColor()"
+          [loading]="loadingPerformance()"
           />
         <app-stats
           title="Requests/seg"
-          [value]="reqPerSec"
+          [value]="reqPerSec()"
           [smallText]="
-            performanceSnapshot
-              ? performanceSnapshot.activeRequests + ' activos'
+            performanceSnapshot()
+              ? performanceSnapshot()!.activeRequests + ' activos'
               : ''
           "
           iconName="activity"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="loadingPerformance"
+          [loading]="loadingPerformance()"
           />
         <app-stats
           title="Error Rate (5m)"
-          [value]="errorRate"
+          [value]="errorRate()"
           [smallText]="
-            performanceSnapshot
-              ? performanceSnapshot.errors.last5min.errors5xx + ' errores 5xx'
+            performanceSnapshot()
+              ? performanceSnapshot()!.errors.last5min.errors5xx + ' errores 5xx'
               : ''
           "
           iconName="alert-triangle"
-          [iconBgColor]="errorRateIconBg"
-          [iconColor]="errorRateIconColor"
-          [loading]="loadingPerformance"
+          [iconBgColor]="errorRateIconBg()"
+          [iconColor]="errorRateIconColor()"
+          [loading]="loadingPerformance()"
           />
         <app-stats
           title="Event Loop p99"
-          [value]="eventLoopP99"
+          [value]="eventLoopP99()"
           [smallText]="
-            performanceSnapshot?.eventLoop?.current?.mean != null
+            performanceSnapshot()?.eventLoop?.current?.mean != null
               ? 'mean: ' +
-                (performanceSnapshot?.eventLoop?.current?.mean?.toFixed(1) ??
+                (performanceSnapshot()?.eventLoop?.current?.mean?.toFixed(1) ??
                   '0') +
                 'ms'
               : ''
           "
           iconName="cpu"
-          [iconBgColor]="eventLoopIconBg"
-          [iconColor]="eventLoopIconColor"
-          [loading]="loadingPerformance"
+          [iconBgColor]="eventLoopIconBg()"
+          [iconColor]="eventLoopIconColor()"
+          [loading]="loadingPerformance()"
           />
       </div>
 
@@ -115,50 +115,50 @@ import {
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
           label="Response Time (ms)"
-          [datapoints]="rtP50Points"
+          [datapoints]="rtP50Points()"
           unit="ms"
           color="#22c55e"
-          [secondaryDatapoints]="rtP95Points"
+          [secondaryDatapoints]="rtP95Points()"
           secondaryLabel="p95"
           secondaryColor="#eab308"
-          [tertiaryDatapoints]="rtP99Points"
+          [tertiaryDatapoints]="rtP99Points()"
           tertiaryLabel="p99"
           tertiaryColor="#ef4444"
-          [loading]="loadingPerformance"
+          [loading]="loadingPerformance()"
         ></app-metric-chart>
         <app-metric-chart
           label="Throughput (req/s)"
-          [datapoints]="throughputPoints"
+          [datapoints]="throughputPoints()"
           unit=""
           color="#3b82f6"
-          [loading]="loadingPerformance"
+          [loading]="loadingPerformance()"
         ></app-metric-chart>
       </div>
 
       <!-- Slow Endpoints - Own section -->
       <app-slow-endpoints
-        [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
-        [loading]="loadingPerformance"
+        [endpoints]="performanceSnapshot()?.slowestEndpoints ?? null"
+        [loading]="loadingPerformance()"
       ></app-slow-endpoints>
 
       <!-- Error & Event Loop Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
           label="Errores por minuto"
-          [datapoints]="errors4xxPoints"
+          [datapoints]="errors4xxPoints()"
           unit=""
           color="#eab308"
-          [secondaryDatapoints]="errors5xxPoints"
+          [secondaryDatapoints]="errors5xxPoints()"
           secondaryLabel="5xx"
           secondaryColor="#ef4444"
-          [loading]="loadingPerformance"
+          [loading]="loadingPerformance()"
         ></app-metric-chart>
         <app-metric-chart
           label="Event Loop Lag p99 (ms)"
-          [datapoints]="eventLoopLagPoints"
+          [datapoints]="eventLoopLagPoints()"
           unit="ms"
           color="#a855f7"
-          [loading]="loadingPerformance"
+          [loading]="loadingPerformance()"
         ></app-metric-chart>
       </div>
     </div>
@@ -168,31 +168,118 @@ export class MonitoringPerformancePage {
   private readonly monitoringService = inject(MonitoringService);
   private readonly destroyRef = inject(DestroyRef);
 
-  performanceSnapshot: PerformanceSnapshot | null = null;
-  performanceHistory: PerformanceHistory | null = null;
-  loadingPerformance = true;
-  performanceTimeRange: TimeRange = '1h';
+  readonly performanceSnapshot = signal<PerformanceSnapshot | null>(null);
+  readonly performanceHistory = signal<PerformanceHistory | null>(null);
+  readonly loadingPerformance = signal(true);
+  readonly performanceTimeRange = signal<TimeRange>('1h');
 
-  // Pre-computed stats
-  avgResponseTime = '--';
-  avgResponseTimeIconBg = 'bg-emerald-100';
-  avgResponseTimeIconColor = 'text-emerald-500';
-  reqPerSec = '--';
-  errorRate = '--';
-  errorRateIconBg = 'bg-emerald-100';
-  errorRateIconColor = 'text-emerald-500';
-  eventLoopP99 = '--';
-  eventLoopIconBg = 'bg-emerald-100';
-  eventLoopIconColor = 'text-emerald-500';
+  readonly avgResponseTime = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return '--';
+    return `${s.responseTime.mean.toFixed(0)}ms`;
+  });
 
-  // Pre-computed chart data (NOT getters!)
-  rtP50Points: TimeSeriesPoint[] = [];
-  rtP95Points: TimeSeriesPoint[] = [];
-  rtP99Points: TimeSeriesPoint[] = [];
-  throughputPoints: TimeSeriesPoint[] = [];
-  errors4xxPoints: TimeSeriesPoint[] = [];
-  errors5xxPoints: TimeSeriesPoint[] = [];
-  eventLoopLagPoints: TimeSeriesPoint[] = [];
+  readonly avgResponseTimeIconBg = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return 'bg-emerald-100';
+    const ms = s.responseTime.mean;
+    return ms >= 500 ? 'bg-red-100' : ms >= 200 ? 'bg-amber-100' : 'bg-emerald-100';
+  });
+
+  readonly avgResponseTimeIconColor = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return 'text-emerald-500';
+    const ms = s.responseTime.mean;
+    return ms >= 500 ? 'text-red-500' : ms >= 200 ? 'text-amber-500' : 'text-emerald-500';
+  });
+
+  readonly reqPerSec = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return '--';
+    return `${s.throughput.current.toFixed(1)}`;
+  });
+
+  readonly errorRate = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return '--';
+    const e = s.errors.last5min;
+    if (e.total === 0) return '0%';
+    return `${(((e.errors4xx + e.errors5xx) / e.total) * 100).toFixed(1)}%`;
+  });
+
+  readonly errorRateIconBg = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return 'bg-emerald-100';
+    const e = s.errors.last5min;
+    const rate = e.total > 0 ? ((e.errors4xx + e.errors5xx) / e.total) * 100 : 0;
+    return rate >= 5 ? 'bg-red-100' : rate >= 1 ? 'bg-amber-100' : 'bg-emerald-100';
+  });
+
+  readonly errorRateIconColor = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s) return 'text-emerald-500';
+    const e = s.errors.last5min;
+    const rate = e.total > 0 ? ((e.errors4xx + e.errors5xx) / e.total) * 100 : 0;
+    return rate >= 5 ? 'text-red-500' : rate >= 1 ? 'text-amber-500' : 'text-emerald-500';
+  });
+
+  readonly eventLoopP99 = computed(() => {
+    const s = this.performanceSnapshot();
+    if (!s?.eventLoop?.current) return '--';
+    return `${s.eventLoop.current.p99.toFixed(1)}ms`;
+  });
+
+  readonly eventLoopIconBg = computed(() => {
+    const s = this.performanceSnapshot();
+    const elMs = s?.eventLoop?.current?.p99 ?? 0;
+    return elMs >= 100 ? 'bg-red-100' : elMs >= 50 ? 'bg-amber-100' : 'bg-emerald-100';
+  });
+
+  readonly eventLoopIconColor = computed(() => {
+    const s = this.performanceSnapshot();
+    const elMs = s?.eventLoop?.current?.p99 ?? 0;
+    return elMs >= 100 ? 'text-red-500' : elMs >= 50 ? 'text-amber-500' : 'text-emerald-500';
+  });
+
+  readonly rtP50Points = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p50 })) ?? [];
+  });
+
+  readonly rtP95Points = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p95 })) ?? [];
+  });
+
+  readonly rtP99Points = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p99 })) ?? [];
+  });
+
+  readonly throughputPoints = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return (
+      h?.throughput?.map((t) => ({
+        timestamp: t.timestamp,
+        value: t.requestsPerSecond,
+      })) ?? []
+    );
+  });
+
+  readonly errors4xxPoints = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.errors?.map((e) => ({ timestamp: e.timestamp, value: e.errors4xx })) ?? [];
+  });
+
+  readonly errors5xxPoints = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.errors?.map((e) => ({ timestamp: e.timestamp, value: e.errors5xx })) ?? [];
+  });
+
+  readonly eventLoopLagPoints = computed<TimeSeriesPoint[]>(() => {
+    const h = this.performanceHistory();
+    return h?.eventLoopLag?.map((e) => ({ timestamp: e.timestamp, value: e.p99 })) ?? [];
+  });
 
   private paused = false;
   private visibilityHandler = () => {
@@ -218,7 +305,7 @@ export class MonitoringPerformancePage {
   }
 
   onTimeRangeChange(range: TimeRange): void {
-    this.performanceTimeRange = range;
+    this.performanceTimeRange.set(range);
     this.fetchPerformanceHistory();
   }
 
@@ -231,104 +318,21 @@ export class MonitoringPerformancePage {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.performanceSnapshot = data;
-        this.loadingPerformance = false;
-        this.computeSnapshotValues();
+        this.performanceSnapshot.set(data);
+        this.loadingPerformance.set(false);
       });
   }
 
   private fetchPerformanceHistory(): void {
     this.monitoringService
-      .getPerformanceHistory(this.performanceTimeRange)
+      .getPerformanceHistory(this.performanceTimeRange())
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.performanceHistory = data;
-        this.computeHistoryPoints();
+        this.performanceHistory.set(data);
       });
-  }
-
-  private computeSnapshotValues(): void {
-    if (!this.performanceSnapshot) return;
-    const s = this.performanceSnapshot;
-
-    this.avgResponseTime = `${s.responseTime.mean.toFixed(0)}ms`;
-    const ms = s.responseTime.mean;
-    this.avgResponseTimeIconBg =
-      ms >= 500 ? 'bg-red-100' : ms >= 200 ? 'bg-amber-100' : 'bg-emerald-100';
-    this.avgResponseTimeIconColor =
-      ms >= 500
-        ? 'text-red-500'
-        : ms >= 200
-          ? 'text-amber-500'
-          : 'text-emerald-500';
-
-    this.reqPerSec = `${s.throughput.current.toFixed(1)}`;
-
-    const e = s.errors.last5min;
-    if (e.total === 0) {
-      this.errorRate = '0%';
-    } else {
-      this.errorRate = `${(((e.errors4xx + e.errors5xx) / e.total) * 100).toFixed(1)}%`;
-    }
-    const rate =
-      e.total > 0 ? ((e.errors4xx + e.errors5xx) / e.total) * 100 : 0;
-    this.errorRateIconBg =
-      rate >= 5 ? 'bg-red-100' : rate >= 1 ? 'bg-amber-100' : 'bg-emerald-100';
-    this.errorRateIconColor =
-      rate >= 5
-        ? 'text-red-500'
-        : rate >= 1
-          ? 'text-amber-500'
-          : 'text-emerald-500';
-
-    this.eventLoopP99 = s.eventLoop?.current
-      ? `${s.eventLoop.current.p99.toFixed(1)}ms`
-      : '--';
-    const elMs = s.eventLoop?.current?.p99 ?? 0;
-    this.eventLoopIconBg =
-      elMs >= 100
-        ? 'bg-red-100'
-        : elMs >= 50
-          ? 'bg-amber-100'
-          : 'bg-emerald-100';
-    this.eventLoopIconColor =
-      elMs >= 100
-        ? 'text-red-500'
-        : elMs >= 50
-          ? 'text-amber-500'
-          : 'text-emerald-500';
-  }
-
-  private computeHistoryPoints(): void {
-    if (!this.performanceHistory) return;
-    const h = this.performanceHistory;
-
-    this.rtP50Points =
-      h.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p50 })) ||
-      [];
-    this.rtP95Points =
-      h.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p95 })) ||
-      [];
-    this.rtP99Points =
-      h.responseTimes?.map((r) => ({ timestamp: r.timestamp, value: r.p99 })) ||
-      [];
-    this.throughputPoints =
-      h.throughput?.map((t) => ({
-        timestamp: t.timestamp,
-        value: t.requestsPerSecond,
-      })) || [];
-    this.errors4xxPoints =
-      h.errors?.map((e) => ({ timestamp: e.timestamp, value: e.errors4xx })) ||
-      [];
-    this.errors5xxPoints =
-      h.errors?.map((e) => ({ timestamp: e.timestamp, value: e.errors5xx })) ||
-      [];
-    this.eventLoopLagPoints =
-      h.eventLoopLag?.map((e) => ({ timestamp: e.timestamp, value: e.p99 })) ||
-      [];
   }
 }

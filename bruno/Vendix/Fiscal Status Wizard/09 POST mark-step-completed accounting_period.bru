@@ -1,0 +1,35 @@
+meta {
+  name: 09 POST mark-step-completed accounting_period
+  type: http
+  seq: 9
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/accounting/mark-step-completed
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "step": "accounting_period",
+    "ref": {
+      "scope": "STORE",
+      "fiscal_period_id": 1
+    }
+  }
+}
+
+tests {
+  test("records accounting_period step in accounting completed_steps", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    const completed = body.fiscal_status.accounting.wizard.completed_steps || [];
+    const steps = completed.map(s => s.step || s);
+    expect(steps).to.include('accounting_period');
+  });
+}

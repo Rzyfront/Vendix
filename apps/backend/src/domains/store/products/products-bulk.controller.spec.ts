@@ -330,7 +330,7 @@ describe('ProductsBulkController', () => {
       );
       mockResponseService.success.mockReturnValue(expectedResponse);
 
-      const result = await controller.validateProducts(
+      const result = await (controller as any).validateProducts(
         bulkUploadDto,
         mockRequest as any,
       );
@@ -373,7 +373,7 @@ describe('ProductsBulkController', () => {
       );
       mockResponseService.success.mockReturnValue(expectedResponse);
 
-      const result = await controller.validateProducts(
+      const result = await (controller as any).validateProducts(
         bulkUploadDto,
         mockRequest as any,
       );
@@ -406,7 +406,7 @@ describe('ProductsBulkController', () => {
       mockProductsBulkService.validateBulkProducts.mockRejectedValue(error);
       mockResponseService.error.mockReturnValue(expectedErrorResponse);
 
-      const result = await controller.validateProducts(
+      const result = await (controller as any).validateProducts(
         bulkUploadDto,
         mockRequest as any,
       );
@@ -456,7 +456,7 @@ describe('ProductsBulkController', () => {
       );
       mockResponseService.success.mockReturnValue(expectedResponse);
 
-      const result = await controller.getTemplate();
+      const result = await (controller as any).getTemplate();
 
       expect(result).toEqual(expectedResponse);
       expect(mockProductsBulkService.getBulkUploadTemplate).toHaveBeenCalled();
@@ -477,7 +477,7 @@ describe('ProductsBulkController', () => {
       mockProductsBulkService.getBulkUploadTemplate.mockRejectedValue(error);
       mockResponseService.error.mockReturnValue(expectedErrorResponse);
 
-      const result = await controller.getTemplate();
+      const result = await (controller as any).getTemplate();
 
       expect(result).toEqual(expectedErrorResponse);
       expect(mockResponseService.error).toHaveBeenCalledWith(
@@ -508,7 +508,7 @@ describe('ProductsBulkController', () => {
         templateData,
       );
 
-      const result = await controller.downloadTemplate();
+      const result = await (controller as any).downloadTemplate();
 
       expect(result).toHaveProperty('csv');
       expect((result as any).csv).toContain('name,base_price,sku');
@@ -528,7 +528,7 @@ describe('ProductsBulkController', () => {
       mockProductsBulkService.getBulkUploadTemplate.mockRejectedValue(error);
       mockResponseService.error.mockReturnValue(expectedErrorResponse);
 
-      const result = await controller.downloadTemplate();
+      const result = await (controller as any).downloadTemplate();
 
       expect(result).toEqual(expectedErrorResponse);
       expect(mockResponseService.error).toHaveBeenCalledWith(

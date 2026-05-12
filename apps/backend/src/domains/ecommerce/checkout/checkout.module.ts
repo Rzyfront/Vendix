@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CheckoutController } from './checkout.controller';
 import { CheckoutService } from './checkout.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -10,13 +10,31 @@ import { InventoryModule } from '../../store/inventory/inventory.module';
 import { ProductsModule } from '../../store/products/products.module';
 import { WompiModule } from '../../store/payments/processors/wompi/wompi.module';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import { PaymentsModule } from '../../store/payments/payments.module';
 import { ReservationsModule } from '../../store/reservations/reservations.module';
+import { InvoicingModule } from '../../store/invoicing/invoicing.module';
+import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
 
 @Module({
-    imports: [PrismaModule, CartModule, ShippingModule, TaxesModule, SettingsModule, InventoryModule, ProductsModule, WompiModule, ReservationsModule],
-    controllers: [CheckoutController],
-    providers: [CheckoutService, PaymentEncryptionService],
-    exports: [CheckoutService],
+  imports: [
+    PrismaModule,
+    CartModule,
+    ShippingModule,
+    TaxesModule,
+    SettingsModule,
+    InventoryModule,
+    ProductsModule,
+    WompiModule,
+    // PaymentsModule provides WebhookHandlerService (used by confirm-wompi-payment).
+    // Wrapped in forwardRef defensively because PaymentsModule already pulls in
+    // OrderFlow/Orders/PaymentLinks via forwardRef.
+    forwardRef(() => PaymentsModule),
+    ReservationsModule,
+    InvoicingModule,
+    InvoiceDataRequestsModule,
+  ],
+  controllers: [CheckoutController],
+  providers: [CheckoutService, PaymentEncryptionService],
+  exports: [CheckoutService],
 })
-export class CheckoutModule { }
-
+export class CheckoutModule {}

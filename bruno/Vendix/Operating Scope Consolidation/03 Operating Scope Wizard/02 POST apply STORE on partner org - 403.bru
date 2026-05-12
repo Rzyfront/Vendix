@@ -1,0 +1,32 @@
+meta {
+  name: 02 POST apply STORE on partner org - 403
+  type: http
+  seq: 2
+}
+
+# Pre-condition: partnerOrgAdminToken belongs to an organization with
+# is_partner=true. Partners are locked to STORE; any apply attempt must
+# return 403.
+
+post {
+  url: http://{{url}}/organization/settings/operating-scope/apply
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{partnerOrgAdminToken}}
+}
+
+body:json {
+  {
+    "target_scope": "STORE",
+    "reason": "Smoke apply by partner — should be blocked"
+  }
+}
+
+tests {
+  test("Partner cannot apply scope changes → 403", function () {
+    expect(res.status).to.equal(403);
+  });
+}

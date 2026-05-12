@@ -42,7 +42,10 @@ export class CurrenciesController {
   }
 
   @Patch(':code')
-  update(@Param('code') code: string, @Body() updateCurrencyDto: UpdateCurrencyDto) {
+  update(
+    @Param('code') code: string,
+    @Body() updateCurrencyDto: UpdateCurrencyDto,
+  ) {
     return this.currenciesService.update(code, updateCurrencyDto);
   }
 

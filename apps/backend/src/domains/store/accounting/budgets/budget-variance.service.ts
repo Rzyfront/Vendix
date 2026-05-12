@@ -131,7 +131,11 @@ export class BudgetVarianceService {
 
     const actual_map = this.buildActualMap(actuals);
 
-    const trend: Array<{ month: number; budgeted_total: number; actual_total: number }> = [];
+    const trend: Array<{
+      month: number;
+      budgeted_total: number;
+      actual_total: number;
+    }> = [];
     for (let m = 1; m <= 12; m++) {
       const month_key = `month_${String(m).padStart(2, '0')}`;
 

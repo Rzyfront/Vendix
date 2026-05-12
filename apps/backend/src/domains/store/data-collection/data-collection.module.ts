@@ -12,7 +12,12 @@ import { MetadataModule } from '../metadata/metadata.module';
 @Module({
   imports: [ResponseModule, PrismaModule, MetadataModule],
   controllers: [TemplatesController, SubmissionsController],
-  providers: [TemplatesService, SubmissionsService, BookingDataCollectionListener, BookingSnapshotListener],
+  providers: [
+    TemplatesService,
+    SubmissionsService,
+    BookingDataCollectionListener,
+    BookingSnapshotListener,
+  ],
   exports: [TemplatesService, SubmissionsService],
 })
 export class DataCollectionModule {}

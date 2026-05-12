@@ -11,6 +11,7 @@ import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   string,
@@ -300,6 +301,22 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '1435',
     description: 'Inventario (tienda destino)',
   },
+  'intercompany_transfer.shipped.receivable': {
+    code: '1365',
+    description: 'Cuentas por cobrar a vinculados',
+  },
+  'intercompany_transfer.shipped.inventory': {
+    code: '1435',
+    description: 'Inventario transferido a vinculada',
+  },
+  'intercompany_transfer.received.inventory': {
+    code: '1435',
+    description: 'Inventario recibido de vinculada',
+  },
+  'intercompany_transfer.received.payable': {
+    code: '2355',
+    description: 'Cuentas por pagar a vinculados',
+  },
   // Comisiones (Pasarelas de Pago)
   'commission.calculated.commission_expense': {
     code: '5295',
@@ -443,6 +460,7 @@ export class AccountMappingService {
     private readonly prisma: StorePrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly fiscalScopeService: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -470,6 +488,42 @@ export class AccountMappingService {
     }
   }
 
+  private async resolveEffectiveMappingStoreId(
+    org_id: number,
+    store_id?: number,
+  ): Promise<number | undefined> {
+    const fiscalScope = await this.fiscalScopeService.requireFiscalScope(org_id);
+    if (fiscalScope === 'ORGANIZATION') {
+      return undefined;
+    }
+
+    const contextStoreId = RequestContextService.getStoreId();
+    const requestedStoreId = store_id ?? contextStoreId;
+    if (requestedStoreId) {
+      const store = await this.prisma.withoutScope().stores.findFirst({
+        where: { id: requestedStoreId, organization_id: org_id, is_active: true },
+        select: { id: true },
+      });
+      if (!store) {
+        throw new BadRequestException(
+          'Store does not belong to the current organization',
+        );
+      }
+      return store.id;
+    }
+
+    const stores = await this.prisma.withoutScope().stores.findMany({
+      where: { organization_id: org_id, is_active: true },
+      select: { id: true },
+      take: 2,
+    });
+    if (stores.length === 1) return stores[0].id;
+
+    throw new BadRequestException(
+      'store_id is required when fiscal_scope is STORE',
+    );
+  }
+
   /**
    * Get a single mapping with cascade resolution:
    * 1. Store override (if store_id provided)
@@ -485,7 +539,11 @@ export class AccountMappingService {
     account_id?: number;
     source: 'store' | 'organization' | 'default';
   } | null> {
-    const cacheKey = `acctmap:${org_id}:${store_id || 'org'}:${mapping_key}`;
+    const effective_store_id = await this.resolveEffectiveMappingStoreId(
+      org_id,
+      store_id,
+    );
+    const cacheKey = `acctmap:${org_id}:${effective_store_id || 'org'}:${mapping_key}`;
     const cached = await this.cache.get<{
       account_code: string;
       account_id?: number;
@@ -502,12 +560,12 @@ export class AccountMappingService {
     } | null = null;
 
     // 1. Check store override
-    if (store_id) {
+    if (effective_store_id) {
       const store_mapping =
         await base_client.accounting_account_mappings.findFirst({
           where: {
             organization_id: org_id,
-            store_id: store_id,
+            store_id: effective_store_id,
             mapping_key: mapping_key,
             is_active: true,
           },
@@ -524,7 +582,7 @@ export class AccountMappingService {
     }
 
     // 2. Check org base (store_id = null)
-    if (!result) {
+    if (!result && !effective_store_id) {
       const org_mapping =
         await base_client.accounting_account_mappings.findFirst({
           where: {
@@ -584,27 +642,35 @@ export class AccountMappingService {
     }>
   > {
     const base_client = this.prisma.withoutScope();
-
-    // Fetch org-level mappings
-    const org_mappings = await base_client.accounting_account_mappings.findMany(
-      {
-        where: {
-          organization_id: org_id,
-          store_id: null,
-          is_active: true,
-          ...(prefix && { mapping_key: { startsWith: prefix } }),
-        },
-        include: { account: { select: { id: true, code: true, name: true } } },
-      },
+    const effective_store_id = await this.resolveEffectiveMappingStoreId(
+      org_id,
+      store_id,
     );
+
+    // Fetch org-level mappings only when they are the current fiscal source of
+    // truth. In fiscal STORE mode, store mappings fall back directly to
+    // defaults instead of inheriting stale org-level mappings.
+    const org_mappings = effective_store_id
+      ? []
+      : await base_client.accounting_account_mappings.findMany({
+          where: {
+            organization_id: org_id,
+            store_id: null,
+            is_active: true,
+            ...(prefix && { mapping_key: { startsWith: prefix } }),
+          },
+          include: {
+            account: { select: { id: true, code: true, name: true } },
+          },
+        });
 
     // Fetch store-level mappings if store_id provided
     let store_mappings: typeof org_mappings = [];
-    if (store_id) {
+    if (effective_store_id) {
       store_mappings = await base_client.accounting_account_mappings.findMany({
         where: {
           organization_id: org_id,
-          store_id: store_id,
+          store_id: effective_store_id,
           is_active: true,
           ...(prefix && { mapping_key: { startsWith: prefix } }),
         },
@@ -643,6 +709,49 @@ export class AccountMappingService {
       (key) => !prefix || key.startsWith(prefix),
     );
 
+    // Resolve account_id for the `default` cascade branch in a single query.
+    // Without this, `default` entries return `account_code` but no `account_id`,
+    // which breaks the frontend mapping selector (it binds by numeric id).
+    //
+    // We scope the lookup to the accounting_entity that the cascade would
+    // target if the user actually persisted a default value. This matches
+    // ORG vs STORE operating_scope behavior in `chart_of_accounts`.
+    let default_account_id_by_code = new Map<string, number>();
+    try {
+      const accountingEntity =
+        await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+          organization_id: org_id,
+          store_id: effective_store_id ?? null,
+        });
+
+      const default_codes = Array.from(
+        new Set(
+          all_keys.map((key) => DEFAULT_ACCOUNT_MAPPINGS[key].code),
+        ),
+      );
+
+      if (default_codes.length > 0) {
+        const default_accounts = await base_client.chart_of_accounts.findMany({
+          where: {
+            accounting_entity_id: accountingEntity.id,
+            code: { in: default_codes },
+          },
+          select: { id: true, code: true },
+        });
+
+        for (const acc of default_accounts) {
+          default_account_id_by_code.set(acc.code, acc.id);
+        }
+      }
+    } catch (err) {
+      // If accounting entity is not yet materialised (e.g. wizard still in
+      // progress before COA seed), fall back to undefined `account_id` on
+      // default entries — the frontend tolerates that.
+      this.logger.debug(
+        `Could not prefetch default chart_of_accounts ids for org=${org_id} store=${effective_store_id ?? 'org'}: ${(err as Error).message}`,
+      );
+    }
+
     const result = all_keys.map((mapping_key) => {
       // Store override takes priority
       if (store_map.has(mapping_key)) {
@@ -668,11 +777,17 @@ export class AccountMappingService {
         };
       }
 
-      // Fallback to default
+      // Fallback to default — resolve account_id from prefetched map when the
+      // PUC code already exists in chart_of_accounts; otherwise leave it
+      // undefined (frontend will handle missing id).
       const default_entry = DEFAULT_ACCOUNT_MAPPINGS[mapping_key];
+      const default_account_id = default_account_id_by_code.get(
+        default_entry.code,
+      );
       return {
         mapping_key,
         account_code: default_entry.code,
+        account_id: default_account_id,
         description: default_entry.description,
         source: 'default' as const,
       };
@@ -692,6 +807,15 @@ export class AccountMappingService {
     account_id: number,
     store_id?: number,
   ) {
+    const effective_store_id = await this.resolveEffectiveMappingStoreId(
+      org_id,
+      store_id,
+    );
+    const accountingEntity =
+      await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+        organization_id: org_id,
+        store_id: effective_store_id ?? null,
+      });
     // Validate mapping_key
     if (!DEFAULT_ACCOUNT_MAPPINGS[mapping_key]) {
       throw new BadRequestException(
@@ -701,7 +825,7 @@ export class AccountMappingService {
 
     // Validate account_id exists in chart_of_accounts
     const account = await this.prisma.chart_of_accounts.findFirst({
-      where: { id: account_id },
+      where: { id: account_id, accounting_entity_id: accountingEntity.id },
     });
 
     if (!account) {
@@ -717,7 +841,7 @@ export class AccountMappingService {
     const existing = await base_client.accounting_account_mappings.findFirst({
       where: {
         organization_id: org_id,
-        store_id: store_id ?? null,
+        store_id: effective_store_id ?? null,
         mapping_key: mapping_key,
       },
     });
@@ -736,14 +860,14 @@ export class AccountMappingService {
       result = await base_client.accounting_account_mappings.create({
         data: {
           organization_id: org_id,
-          store_id: store_id ?? null,
+          store_id: effective_store_id ?? null,
           mapping_key: mapping_key,
           account_id: account_id,
         },
       });
     }
 
-    await this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, effective_store_id);
 
     return result;
   }
@@ -756,6 +880,15 @@ export class AccountMappingService {
     mappings: Array<{ mapping_key: string; account_id: number }>,
     store_id?: number,
   ) {
+    const effective_store_id = await this.resolveEffectiveMappingStoreId(
+      org_id,
+      store_id,
+    );
+    const accountingEntity =
+      await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+        organization_id: org_id,
+        store_id: effective_store_id ?? null,
+      });
     // Validate all mapping_keys
     const invalid_keys = mappings.filter(
       (m) => !DEFAULT_ACCOUNT_MAPPINGS[m.mapping_key],
@@ -769,7 +902,10 @@ export class AccountMappingService {
     // Validate all account_ids exist
     const account_ids = [...new Set(mappings.map((m) => m.account_id))];
     const existing_accounts = await this.prisma.chart_of_accounts.findMany({
-      where: { id: { in: account_ids } },
+      where: {
+        id: { in: account_ids },
+        accounting_entity_id: accountingEntity.id,
+      },
       select: { id: true },
     });
 
@@ -789,7 +925,7 @@ export class AccountMappingService {
       await base_client.accounting_account_mappings.findMany({
         where: {
           organization_id: org_id,
-          store_id: store_id ?? null,
+          store_id: effective_store_id ?? null,
           mapping_key: { in: mappings.map((m) => m.mapping_key) },
         },
       });
@@ -814,7 +950,7 @@ export class AccountMappingService {
       return base_client.accounting_account_mappings.create({
         data: {
           organization_id: org_id,
-          store_id: store_id ?? null,
+          store_id: effective_store_id ?? null,
           mapping_key: m.mapping_key,
           account_id: m.account_id,
         },
@@ -823,7 +959,7 @@ export class AccountMappingService {
 
     const results = await base_client.$transaction(operations);
 
-    await this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, effective_store_id);
 
     return results;
   }
@@ -833,24 +969,29 @@ export class AccountMappingService {
    */
   async resetToDefaults(org_id: number, store_id?: number) {
     const base_client = this.prisma.withoutScope();
+    const effective_store_id = await this.resolveEffectiveMappingStoreId(
+      org_id,
+      store_id,
+    );
 
-    if (store_id) {
+    if (effective_store_id) {
       // Delete only store-level overrides
       await base_client.accounting_account_mappings.deleteMany({
         where: {
           organization_id: org_id,
-          store_id: store_id,
+          store_id: effective_store_id,
         },
       });
     } else {
-      // Delete all custom mappings for the organization (both org-level and all store overrides)
+      // Delete the current organization-level mapping source of truth.
       await base_client.accounting_account_mappings.deleteMany({
         where: {
           organization_id: org_id,
+          store_id: null,
         },
       });
     }
 
-    await this.invalidateCache(org_id, store_id);
+    await this.invalidateCache(org_id, effective_store_id);
   }
 }

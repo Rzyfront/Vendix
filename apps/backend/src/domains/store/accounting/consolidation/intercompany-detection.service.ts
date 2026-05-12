@@ -96,9 +96,10 @@ export class IntercompanyDetectionService {
     const transactions_to_create: any[] = [];
 
     for (const line of ic_lines) {
-      const line_amount = Number(line.debit_amount) || Number(line.credit_amount);
-      const line_store_id = (line.entry as any).store_id;
-      const line_entry_date = new Date((line.entry as any).entry_date);
+      const line_amount =
+        Number(line.debit_amount) || Number(line.credit_amount);
+      const line_store_id = line.entry.store_id;
+      const line_entry_date = new Date(line.entry.entry_date);
 
       if (!line_store_id || line_amount === 0) continue;
 
@@ -108,11 +109,14 @@ export class IntercompanyDetectionService {
         const other_store_id = other.entry.store_id;
         if (!other_store_id || other_store_id === line_store_id) return false;
 
-        const other_amount = Number(other.debit_amount) || Number(other.credit_amount);
+        const other_amount =
+          Number(other.debit_amount) || Number(other.credit_amount);
         if (Math.abs(other_amount - line_amount) > 0.01) return false;
 
         const other_date = new Date(other.entry.entry_date);
-        const day_diff = Math.abs(line_entry_date.getTime() - other_date.getTime()) / (1000 * 60 * 60 * 24);
+        const day_diff =
+          Math.abs(line_entry_date.getTime() - other_date.getTime()) /
+          (1000 * 60 * 60 * 24);
         if (day_diff > 3) return false;
 
         // Avoid duplicate pairs
@@ -127,10 +131,10 @@ export class IntercompanyDetectionService {
       });
 
       if (counterpart) {
-        const counterpart_store_id = (counterpart as any).entry.store_id;
+        const counterpart_store_id = counterpart.entry.store_id;
         const pair_key = [
-          Math.min(line.entry_id, (counterpart as any).entry_id),
-          Math.max(line.entry_id, (counterpart as any).entry_id),
+          Math.min(line.entry_id, counterpart.entry_id),
+          Math.max(line.entry_id, counterpart.entry_id),
           line.account_id,
         ].join('-');
         matched_pairs.add(pair_key);
@@ -141,7 +145,7 @@ export class IntercompanyDetectionService {
           from_store_id: line_store_id,
           to_store_id: counterpart_store_id,
           entry_id: line.entry_id,
-          counterpart_entry_id: (counterpart as any).entry_id,
+          counterpart_entry_id: counterpart.entry_id,
           account_id: line.account_id,
           amount: line_amount,
           eliminated: false,
@@ -180,11 +184,15 @@ export class IntercompanyDetectionService {
     });
 
     if (!txn) {
-      throw new VendixHttpException(ErrorCodes.INTERCOMPANY_TRANSACTION_NOT_FOUND);
+      throw new VendixHttpException(
+        ErrorCodes.INTERCOMPANY_TRANSACTION_NOT_FOUND,
+      );
     }
 
     if (txn.session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     const context = this.getContext();
@@ -222,7 +230,9 @@ export class IntercompanyDetectionService {
     const session = await this.getSessionWithPeriod(session_id);
 
     if (session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     const uneliminated = await this.prisma.intercompany_transactions.findMany({
@@ -282,11 +292,15 @@ export class IntercompanyDetectionService {
     const session = await this.getSessionWithPeriod(session_id);
 
     if (session.status === 'completed') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     if (session.status === 'cancelled') {
-      throw new VendixHttpException(ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.CONSOLIDATION_SESSION_ALREADY_COMPLETED,
+      );
     }
 
     // 1. Get all uneliminated transactions for this session

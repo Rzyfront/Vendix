@@ -12,7 +12,21 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 @Module({
   imports: [ResponseModule, PrismaModule],
   controllers: [AnalyticsController],
-  providers: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService, FinancialAnalyticsService],
-  exports: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService, FinancialAnalyticsService],
+  providers: [
+    SalesAnalyticsService,
+    InventoryAnalyticsService,
+    ProductsAnalyticsService,
+    OverviewAnalyticsService,
+    CustomersAnalyticsService,
+    FinancialAnalyticsService,
+  ],
+  exports: [
+    SalesAnalyticsService,
+    InventoryAnalyticsService,
+    ProductsAnalyticsService,
+    OverviewAnalyticsService,
+    CustomersAnalyticsService,
+    FinancialAnalyticsService,
+  ],
 })
 export class AnalyticsModule {}

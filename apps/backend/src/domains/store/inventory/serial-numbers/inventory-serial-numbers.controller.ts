@@ -23,12 +23,7 @@ import {
   GetSerialNumbersDto,
   GetAvailableSerialNumbersDto,
 } from '../dto/create-inventory-serial-number.dto';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiParam,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 
 // Using local enum definition until Prisma client is regenerated
 enum SerialNumberStatus {
@@ -47,7 +42,7 @@ enum SerialNumberStatus {
 export class InventorySerialNumbersController {
   constructor(
     private readonly serialNumbersService: InventorySerialNumbersService,
-  ) { }
+  ) {}
 
   @Post('batch')
   @Permissions('store:inventory:serial_numbers:create')

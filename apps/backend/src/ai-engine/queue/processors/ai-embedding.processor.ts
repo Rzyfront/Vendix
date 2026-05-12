@@ -14,7 +14,8 @@ export class AIEmbeddingProcessor extends WorkerHost {
 
   async process(
     job: Job<
-      AIEmbeddingJob | { store_id: number; entity_type: string; entity_id: number }
+      | AIEmbeddingJob
+      | { store_id: number; entity_type: string; entity_id: number }
     >,
   ): Promise<void> {
     const jobName = job.name;

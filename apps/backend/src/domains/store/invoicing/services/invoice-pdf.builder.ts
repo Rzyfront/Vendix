@@ -234,13 +234,10 @@ export class InvoicePdfBuilder {
 
     const title = type_labels[data.invoice_type] || 'FACTURA';
 
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(14)
-      .text(title, MARGIN, doc.y, {
-        align: 'center',
-        width: CONTENT_WIDTH,
-      });
+    doc.font('Helvetica-Bold').fontSize(14).text(title, MARGIN, doc.y, {
+      align: 'center',
+      width: CONTENT_WIDTH,
+    });
 
     doc
       .font('Helvetica-Bold')
@@ -270,9 +267,7 @@ export class InvoicePdfBuilder {
   ): void {
     doc.moveDown(0.3);
 
-    const parts: string[] = [
-      `Resolucion DIAN No. ${data.resolution_number}`,
-    ];
+    const parts: string[] = [`Resolucion DIAN No. ${data.resolution_number}`];
 
     if (data.resolution_date) {
       parts[0] += ` del ${data.resolution_date}`;
@@ -323,9 +318,7 @@ export class InvoicePdfBuilder {
 
     if (data.customer_address) {
       const addr =
-        typeof data.customer_address === 'string'
-          ? data.customer_address
-          : '';
+        typeof data.customer_address === 'string' ? data.customer_address : '';
       if (addr) {
         const y2 = doc.y + 2;
         doc.text(`Direccion: ${addr}`, MARGIN, y2);
@@ -406,9 +399,7 @@ export class InvoicePdfBuilder {
         align: 'right',
       });
       doc.text(
-        item.discount_amount > 0
-          ? COP.format(item.discount_amount)
-          : '-',
+        item.discount_amount > 0 ? COP.format(item.discount_amount) : '-',
         col_x.discount,
         current_y,
         { width: 55, align: 'right' },
@@ -419,15 +410,10 @@ export class InvoicePdfBuilder {
         current_y,
         { width: 45, align: 'right' },
       );
-      doc.text(
-        COP.format(item.total_amount),
-        col_x.total,
-        current_y,
-        {
-          width: MARGIN + CONTENT_WIDTH - col_x.total,
-          align: 'right',
-        },
-      );
+      doc.text(COP.format(item.total_amount), col_x.total, current_y, {
+        width: MARGIN + CONTENT_WIDTH - col_x.total,
+        align: 'right',
+      });
 
       doc.moveDown(0.4);
     }
@@ -443,11 +429,7 @@ export class InvoicePdfBuilder {
 
     for (const tax of taxes) {
       const y = doc.y;
-      doc.text(
-        `${tax.tax_name} (${tax.tax_rate}%)`,
-        MARGIN + 10,
-        y,
-      );
+      doc.text(`${tax.tax_name} (${tax.tax_rate}%)`, MARGIN + 10, y);
       doc.text(`Base: ${COP.format(tax.taxable_amount)}`, MARGIN + 200, y);
       doc.text(COP.format(tax.tax_amount), MARGIN, y, {
         width: CONTENT_WIDTH - 10,
@@ -546,8 +528,7 @@ export class InvoicePdfBuilder {
         bank_transfer: 'Transferencia Bancaria',
         electronic: 'Pago Electronico',
       };
-      const label =
-        payment_labels[data.payment_form] || data.payment_form;
+      const label = payment_labels[data.payment_form] || data.payment_form;
       doc.text(`Forma de pago: ${label}`, MARGIN, doc.y);
     }
 
@@ -568,10 +549,7 @@ export class InvoicePdfBuilder {
     }
   }
 
-  private static drawCufe(
-    doc: PDFKit.PDFDocument,
-    cufe: string,
-  ): void {
+  private static drawCufe(doc: PDFKit.PDFDocument, cufe: string): void {
     this.drawSectionTitle(doc, 'CUFE');
 
     doc
@@ -586,10 +564,7 @@ export class InvoicePdfBuilder {
     doc.fillColor('#000000');
   }
 
-  private static drawQrSection(
-    doc: PDFKit.PDFDocument,
-    qr_url: string,
-  ): void {
+  private static drawQrSection(doc: PDFKit.PDFDocument, qr_url: string): void {
     // Show QR verification URL as text
     doc
       .font('Helvetica')
@@ -616,10 +591,7 @@ export class InvoicePdfBuilder {
     doc: PDFKit.PDFDocument,
     title: string,
   ): void {
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(10)
-      .text(title, MARGIN, doc.y);
+    doc.font('Helvetica-Bold').fontSize(10).text(title, MARGIN, doc.y);
     doc.moveDown(0.3);
   }
 

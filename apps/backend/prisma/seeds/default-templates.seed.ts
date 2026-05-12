@@ -215,8 +215,32 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             users: true,
             domains: true,
             audit: true,
+            roles: true,
+            settings_roles: true,
             settings: true,
+            settings_operations: true,
+            settings_application: true,
+            settings_payment_methods: true,
+            settings_operating_scope: true,
+            settings_fiscal_scope: true,
+            settings_fiscal_management: true,
             accounting: true,
+            accounting_chart_of_accounts: true,
+            accounting_journal_entries: true,
+            accounting_fiscal_periods: true,
+            accounting_account_mappings: true,
+            inventory: true,
+            inventory_locations: true,
+            inventory_movements: true,
+            inventory_suppliers: true,
+            inventory_transfers: true,
+            inventory_adjustments: true,
+            inventory_stock_levels: true,
+            reports: true,
+            reports_sales: true,
+            reports_inventory: true,
+            reports_financial: true,
+            purchase_orders: true,
             payroll: true,
           },
           STORE_ADMIN: {
@@ -256,6 +280,9 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             analytics_financial: true,
             expenses: true,
             invoicing: true,
+            invoicing_invoices: true,
+            invoicing_resolutions: true,
+            invoicing_dian_config: true,
             accounting: true,
             accounting_journal_entries: true,
             accounting_fiscal_periods: true,
@@ -285,6 +312,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             settings_users: true,
             settings_roles: true,
             settings_cash_registers: true,
+            settings_fiscal_management: true,
             accounting_withholding_tax: true,
             accounting_exogenous: true,
             taxes_ica: true,
@@ -313,22 +341,23 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
     },
   ];
 
-  // Crear o actualizar templates
+  // Create-only: never overwrite an existing template (user edits preserved).
   let created = 0;
-  let updated = 0;
+  let skipped = 0;
 
   for (const template of templates) {
-    const result = await client.default_templates.upsert({
+    const existing = await client.default_templates.findUnique({
       where: { template_name: template.template_name },
-      update: {
-        configuration_type: template.configuration_type as any,
-        template_data: template.template_data as any,
-        description: template.description,
-        is_active: true,
-        is_system: template.is_system,
-        updated_at: new Date(),
-      },
-      create: {
+      select: { id: true },
+    });
+
+    if (existing) {
+      skipped++;
+      continue;
+    }
+
+    await client.default_templates.create({
+      data: {
         template_name: template.template_name,
         configuration_type: template.configuration_type as any,
         template_data: template.template_data as any,
@@ -337,17 +366,12 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
         is_system: template.is_system,
       },
     });
-
-    if (result.created_at === result.updated_at) {
-      created++;
-    } else {
-      updated++;
-    }
+    created++;
   }
 
   console.log(
-    `✅ Default templates seeded: ${created} created, ${updated} updated`,
+    `✅ Default templates seeded: ${created} created, ${skipped} skipped (preserved user config)`,
   );
 
-  return { created, updated };
+  return { created, skipped };
 }

@@ -62,15 +62,22 @@ export class SettlementsController {
   @Permissions('store:payroll:settlements:create')
   @HttpCode(HttpStatus.CREATED)
   async createAndCalculate(@Body() create_dto: CreateSettlementDto) {
-    const result = await this.settlement_flow_service.createAndCalculate(create_dto);
-    return this.response_service.success(result, 'Settlement created and calculated successfully');
+    const result =
+      await this.settlement_flow_service.createAndCalculate(create_dto);
+    return this.response_service.success(
+      result,
+      'Settlement created and calculated successfully',
+    );
   }
 
   @Post(':id/recalculate')
   @Permissions('store:payroll:settlements:manage')
   async recalculate(@Param('id') id: string) {
     const result = await this.settlement_flow_service.recalculate(+id);
-    return this.response_service.success(result, 'Settlement recalculated successfully');
+    return this.response_service.success(
+      result,
+      'Settlement recalculated successfully',
+    );
   }
 
   @Patch(':id/approve')
@@ -80,20 +87,29 @@ export class SettlementsController {
     @Body() approve_dto: ApproveSettlementDto,
   ) {
     const result = await this.settlement_flow_service.approve(+id, approve_dto);
-    return this.response_service.success(result, 'Settlement approved successfully');
+    return this.response_service.success(
+      result,
+      'Settlement approved successfully',
+    );
   }
 
   @Patch(':id/pay')
   @Permissions('store:payroll:settlements:manage')
   async pay(@Param('id') id: string) {
     const result = await this.settlement_flow_service.pay(+id);
-    return this.response_service.success(result, 'Settlement paid successfully');
+    return this.response_service.success(
+      result,
+      'Settlement paid successfully',
+    );
   }
 
   @Patch(':id/cancel')
   @Permissions('store:payroll:settlements:manage')
   async cancel(@Param('id') id: string) {
     const result = await this.settlement_flow_service.cancel(+id);
-    return this.response_service.success(result, 'Settlement cancelled successfully');
+    return this.response_service.success(
+      result,
+      'Settlement cancelled successfully',
+    );
   }
 }

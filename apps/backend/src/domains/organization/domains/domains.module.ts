@@ -4,6 +4,7 @@ import { DomainsController } from './domains.controller';
 import { DomainsService } from './domains.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '@common/responses';
+import { AwsModule } from '../../../common/services/aws/aws.module';
 
 /**
  * Módulo de Dominios
@@ -19,6 +20,7 @@ import { ResponseModule } from '@common/responses';
     PrismaModule,
     EventEmitterModule, // Registered globally in AppModule
     ResponseModule,
+    AwsModule,
   ],
   controllers: [DomainsController],
   providers: [DomainsService],

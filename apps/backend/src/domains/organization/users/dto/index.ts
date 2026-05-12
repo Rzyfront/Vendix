@@ -4,3 +4,4 @@ export * from './user-query.dto';
 export * from './users-dashboard.dto';
 export * from './user-admin.dto';
 export * from './user-config.dto';
+export * from './invite-user.dto';

@@ -10,4 +10,4 @@ import { ResponseModule } from '@common/responses/response.module';
   providers: [SuperAdminAuditService],
   exports: [SuperAdminAuditService],
 })
-export class AuditModule { }
+export class AuditModule {}

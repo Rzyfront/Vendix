@@ -968,6 +968,43 @@ export class PosPaymentService {
   }
 
   /**
+   * Force-confirm a POS Wompi payment.
+   *
+   * Calls the backend confirm endpoint which polls Wompi for the canonical
+   * transaction state and applies it through the shared webhook handler.
+   * The endpoint is idempotent: terminal-state payments return immediately
+   * with `alreadyConfirmed: true`.
+   *
+   * Used by:
+   *  - The POS polling loop (every 5s while payment is pending).
+   *  - The "Verificar pago ahora" manual button.
+   */
+  confirmWompiPayment(paymentId: number): Observable<{
+    state: string;
+    transactionId: string | null;
+    alreadyConfirmed: boolean;
+    message?: string;
+  }> {
+    return this.http
+      .post<any>(
+        `${environment.apiUrl}/store/payments/pos/confirm-wompi-payment/${paymentId}`,
+        {},
+      )
+      .pipe(
+        map((res) => {
+          // Backend ResponseService.success wraps payload in { success, data, message }.
+          const inner = res?.data ?? res;
+          return {
+            state: inner?.state ?? 'pending',
+            transactionId: inner?.transactionId ?? null,
+            alreadyConfirmed: !!inner?.alreadyConfirmed,
+            message: inner?.message,
+          };
+        }),
+      );
+  }
+
+  /**
    * Get current store ID
    */
   private getStoreId(): number {

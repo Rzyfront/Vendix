@@ -5,7 +5,11 @@
 export interface DianConfigDecrypted {
   id: number;
   organization_id: number;
-  store_id: number;
+  /**
+   * Null when organizations.fiscal_scope=ORGANIZATION (config is org-wide).
+   * Non-null when fiscal_scope=STORE (config is per-store).
+   */
+  store_id: number | null;
   nit: string;
   nit_dv: string | null;
   software_id: string;

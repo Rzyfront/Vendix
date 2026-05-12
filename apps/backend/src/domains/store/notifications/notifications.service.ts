@@ -64,12 +64,16 @@ export class NotificationsService {
       });
 
       // Fire-and-forget web push — non-blocking, non-throwing
-      this.push_service.sendToStore(store_id, type as string, title, body, data).catch(() => {});
+      this.push_service
+        .sendToStore(store_id, type, title, body, data)
+        .catch(() => {});
 
       return notification;
     } catch (error) {
       // Log but don't throw - notifications should never break the main flow
-      console.error(`[NotificationsService] Failed to create notification: ${error.message}`);
+      console.error(
+        `[NotificationsService] Failed to create notification: ${error.message}`,
+      );
       return null;
     }
   }

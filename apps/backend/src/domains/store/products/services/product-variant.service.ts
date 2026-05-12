@@ -91,11 +91,18 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // BLOCK: Services cannot have variants
-      if (product.product_type === 'service') {
+      // Cross-validation: service-specific fields only for service products
+      const isService = product.product_type === 'service';
+      const hasServiceFields =
+        createVariantDto.service_duration_minutes !== undefined ||
+        createVariantDto.service_pricing_type !== undefined ||
+        createVariantDto.buffer_minutes !== undefined ||
+        createVariantDto.preparation_time_minutes !== undefined;
+
+      if (!isService && hasServiceFields) {
         throw new VendixHttpException(
-          ErrorCodes.PROD_SVC_001,
-          'Services cannot have variants',
+          ErrorCodes.PROD_VALIDATE_004,
+          'Service-specific fields can only be set on service product variants',
         );
       }
 
@@ -159,8 +166,15 @@ export class ProductVariantService {
     createVariantDto: CreateProductVariantDto,
     user_id?: number,
   ) {
+    const priceOverride =
+      createVariantDto.price_override ?? createVariantDto.price;
+
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
-    if (createVariantDto.price_override !== null && createVariantDto.price_override !== undefined && createVariantDto.price_override <= 0) {
+    if (
+      priceOverride !== null &&
+      priceOverride !== undefined &&
+      priceOverride <= 0
+    ) {
       throw new VendixHttpException(
         ErrorCodes.PROD_VAR_PRICE_001,
         'price_override de variante debe ser null o mayor que 0',
@@ -171,24 +185,13 @@ export class ProductVariantService {
     if (createVariantDto.is_on_sale) {
       const basePrice = Number(product.base_price);
       const salePrice = createVariantDto.sale_price;
-      const priceOverride = createVariantDto.price_override;
+      const referencePrice = priceOverride ?? basePrice;
 
-      // If variant has price_override, the check is against the override
-      // If no override, sale_price must be > 0 and < basePrice
-      if (priceOverride != null) {
-        if (salePrice != null && salePrice <= 0) {
-          throw new VendixHttpException(
-            ErrorCodes.PROD_VAR_SALE_PRICE_001,
-            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
-          );
-        }
-      } else {
-        if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
-          throw new VendixHttpException(
-            ErrorCodes.PROD_VAR_SALE_PRICE_001,
-            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
-          );
-        }
+      if (salePrice == null || salePrice <= 0 || salePrice >= referencePrice) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VAR_SALE_PRICE_001,
+          'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+        );
       }
     }
 
@@ -199,13 +202,17 @@ export class ProductVariantService {
         sku: createVariantDto.sku,
         name: createVariantDto.name,
         attributes: createVariantDto.attributes,
-        // Use ?? instead of || to properly handle 0 as a valid price_override
-        price_override:
-          createVariantDto.price_override ?? createVariantDto.price,
+        price_override: priceOverride,
         cost_price: createVariantDto.cost_price,
         profit_margin: createVariantDto.profit_margin,
         is_on_sale: createVariantDto.is_on_sale,
         sale_price: createVariantDto.sale_price,
+        image_id: createVariantDto.image_id,
+        track_inventory_override: createVariantDto.track_inventory_override,
+        service_duration_minutes: createVariantDto.service_duration_minutes,
+        service_pricing_type: createVariantDto.service_pricing_type,
+        buffer_minutes: createVariantDto.buffer_minutes,
+        preparation_time_minutes: createVariantDto.preparation_time_minutes,
         created_at: new Date(),
         updated_at: new Date(),
       } as any,
@@ -332,10 +339,44 @@ export class ProductVariantService {
     existingVariant: any,
     user_id?: number,
   ) {
-    const { stock_quantity, ...variantData } = updateVariantDto;
+    const {
+      stock_quantity,
+      price,
+      available_for_ecommerce: _availableForEcommerce,
+      variant_removal_stock_mode: _variantRemovalStockMode,
+      stock_by_location: _stockByLocation,
+      variant_image_url: _variantImageUrl,
+      ...variantData
+    } = updateVariantDto as UpdateProductVariantDto & {
+      stock_by_location?: unknown;
+      variant_image_url?: string;
+    };
+    const priceOverride =
+      variantData.price_override !== undefined
+        ? variantData.price_override
+        : price !== undefined
+          ? price
+          : undefined;
+
+    const hasServiceFields =
+      variantData.service_duration_minutes !== undefined ||
+      variantData.service_pricing_type !== undefined ||
+      variantData.buffer_minutes !== undefined ||
+      variantData.preparation_time_minutes !== undefined;
+
+    if (existingVariant.products?.product_type !== 'service' && hasServiceFields) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_004,
+        'Service-specific fields can only be set on service product variants',
+      );
+    }
 
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
-    if (variantData.price_override !== null && variantData.price_override !== undefined && variantData.price_override <= 0) {
+    if (
+      priceOverride !== null &&
+      priceOverride !== undefined &&
+      priceOverride <= 0
+    ) {
       throw new VendixHttpException(
         ErrorCodes.PROD_VAR_PRICE_001,
         'price_override de variante debe ser null o mayor que 0',
@@ -343,25 +384,20 @@ export class ProductVariantService {
     }
 
     // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
-    if (variantData.is_on_sale) {
+    const nextIsOnSale = variantData.is_on_sale ?? existingVariant.is_on_sale;
+    if (nextIsOnSale) {
       const basePrice = Number(existingVariant.products?.base_price || 0);
-      const salePrice = variantData.sale_price;
-      const priceOverride = variantData.price_override;
+      const salePrice = variantData.sale_price ?? existingVariant.sale_price;
+      const nextPriceOverride =
+        priceOverride !== undefined ? priceOverride : existingVariant.price_override;
+      const referencePrice =
+        nextPriceOverride ?? basePrice;
 
-      if (priceOverride != null) {
-        if (salePrice != null && salePrice <= 0) {
-          throw new VendixHttpException(
-            ErrorCodes.PROD_VAR_SALE_PRICE_001,
-            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
-          );
-        }
-      } else {
-        if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
-          throw new VendixHttpException(
-            ErrorCodes.PROD_VAR_SALE_PRICE_001,
-            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
-          );
-        }
+      if (salePrice == null || salePrice <= 0 || salePrice >= referencePrice) {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_VAR_SALE_PRICE_001,
+          'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+        );
       }
     }
 
@@ -370,8 +406,7 @@ export class ProductVariantService {
       where: { id: variantId },
       data: {
         ...variantData,
-        price_override:
-          variantData.price_override ?? variantData.price ?? undefined,
+        price_override: priceOverride,
         updated_at: new Date(),
       } as any,
     });

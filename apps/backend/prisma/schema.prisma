@@ -55,6 +55,8 @@ model users {
   stock_reservations         stock_reservations[]
   stock_transfers1           stock_transfers[]            @relation("stock_transfers_approved_by")
   stock_transfers            stock_transfers[]            @relation("stock_transfers_created_by")
+  stock_transfers_dispatched stock_transfers[]            @relation("stock_transfers_dispatched_by")
+  stock_transfers_cancelled  stock_transfers[]            @relation("stock_transfers_cancelled_by")
   store_users                store_users[]
   user_roles                 user_roles[]
   user_sessions              user_sessions[]
@@ -151,6 +153,11 @@ model users {
   metadata_snapshots             booking_metadata_snapshots[]  @relation("metadata_snapshot_customer")
   consultation_notes_as_customer customer_consultation_notes[] @relation("consultation_notes_customer")
   consultation_notes_created     customer_consultation_notes[] @relation("consultation_notes_created_by")
+
+  // Operating scope audit trail (Phase 4 wizard)
+  operating_scope_audit_changes operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
+  fiscal_scope_audit_changes    fiscal_scope_audit_log[]    @relation("fiscal_scope_audit_changed_by")
+  fiscal_status_audit_changes   fiscal_status_audit_log[]   @relation("fiscal_status_audit_changed_by")
 
   @@index([email_verified])
   @@index([state])
@@ -327,28 +334,42 @@ model audit_logs {
 }
 
 model organizations {
-  id                            Int                            @id @default(autoincrement())
-  name                          String                         @db.VarChar(255)
-  slug                          String                         @unique @db.VarChar(255)
-  legal_name                    String?                        @db.VarChar(255)
-  tax_id                        String?                        @unique @db.VarChar(50)
-  email                         String                         @db.VarChar(255)
-  phone                         String?                        @db.VarChar(50)
-  website                       String?                        @db.VarChar(255)
+  id                            Int                               @id @default(autoincrement())
+  name                          String                            @db.VarChar(255)
+  slug                          String                            @unique @db.VarChar(255)
+  legal_name                    String?                           @db.VarChar(255)
+  tax_id                        String?                           @unique @db.VarChar(50)
+  email                         String                            @db.VarChar(255)
+  phone                         String?                           @db.VarChar(50)
+  website                       String?                           @db.VarChar(255)
   description                   String?
-  logo_url                      String?                        @db.Text
-  state                         organization_state_enum        @default(draft)
-  account_type                  organization_account_type_enum @default(SINGLE_STORE)
-  created_at                    DateTime?                      @default(now()) @db.Timestamp(6)
-  updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
-  onboarding                    Boolean                        @default(false)
-  mode                          organization_mode_enum         @default(production)
+  logo_url                      String?                           @db.Text
+  state                         organization_state_enum           @default(draft)
+  account_type                  organization_account_type_enum    @default(SINGLE_STORE)
+  operating_scope               organization_operating_scope_enum @default(STORE)
+  fiscal_scope                  fiscal_scope_enum                 @default(STORE)
+  created_at                    DateTime?                         @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                         @default(now()) @db.Timestamp(6)
+  onboarding                    Boolean                           @default(false)
+  mode                          organization_mode_enum            @default(production)
+  is_partner                    Boolean                           @default(false)
+  partner_settings              Json?
+  partner_since                 DateTime?                         @db.Timestamp(6)
+  has_consumed_trial            Boolean                           @default(false)
+  trial_consumed_at             DateTime?                         @db.Timestamp(6)
+  fraud_blocked                 Boolean                           @default(false)
+  fraud_blocked_at              DateTime?                         @db.Timestamp(6)
+  fraud_blocked_reason          String?                           @db.Text
+  chargeback_count              Int                               @default(0)
+  acm_certificate_arn           String?                           @db.VarChar(2048)
+  acm_cert_revision             Int                               @default(0)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
   inventory_adjustments         inventory_adjustments[]
   inventory_locations           inventory_locations[]
   inventory_movements           inventory_movements[]
+  inventory_transactions        inventory_transactions[]
   organization_settings         organization_settings?
   organization_payment_policies organization_payment_policies?
   purchase_orders               purchase_orders[]
@@ -368,11 +389,13 @@ model organizations {
   chart_of_accounts             chart_of_accounts[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
+  accounting_entities           accounting_entities[]
   employees                     employees[]
   payroll_runs                  payroll_runs[]
   dian_configurations           dian_configurations[]
   accounting_account_mappings   accounting_account_mappings[]
   inventory_cost_layers         inventory_cost_layers[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
 
   // Bank Reconciliation & Advanced Accounting
   bank_accounts             bank_accounts[]
@@ -402,9 +425,107 @@ model organizations {
   // Accounts Payable
   accounts_payable accounts_payable[] @relation("org_accounts_payable")
 
+  // SaaS Subscriptions (Partner program)
+  partner_overrides   partner_plan_overrides[]
+  partner_commissions partner_commissions[]    @relation("partner_commissions")
+  partner_payouts     partner_payout_batches[] @relation("partner_payouts")
+
+  // Trial consumption audit (one-shot per org, replaces has_consumed_trial flag)
+  organization_trial_consumption organization_trial_consumptions?
+  redemption_consumptions        redemption_consumptions[]
+
+  // Onboarding State
+  onboarding_state organization_onboarding_state?
+
+  // Operating scope audit trail (configurability — Phase 4 wizard)
+  operating_scope_audit_log operating_scope_audit_log[]
+  fiscal_scope_audit_log    fiscal_scope_audit_log[]
+  fiscal_status_audit_log   fiscal_status_audit_log[]
+
+  // Org-scoped tax catalogue
+  tax_categories tax_categories[]
+
   @@index([onboarding])
   @@index([account_type])
+  @@index([operating_scope])
+  @@index([fiscal_scope])
   @@index([mode])
+  @@index([is_partner])
+}
+
+model operating_scope_audit_log {
+  id                 Int                               @id @default(autoincrement())
+  organization_id    Int
+  previous_value     organization_operating_scope_enum
+  new_value          organization_operating_scope_enum
+  changed_by_user_id Int
+  changed_at         DateTime                          @default(now()) @db.Timestamp(6)
+  reason             String?                           @db.Text
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users         @relation("operating_scope_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@map("operating_scope_audit_log")
+}
+
+model fiscal_scope_audit_log {
+  id                 Int               @id @default(autoincrement())
+  organization_id    Int
+  previous_value     fiscal_scope_enum
+  new_value          fiscal_scope_enum
+  changed_by_user_id Int
+  changed_at         DateTime          @default(now()) @db.Timestamp(6)
+  reason             String?           @db.Text
+  blocker_snapshot   Json?
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users         @relation("fiscal_scope_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@map("fiscal_scope_audit_log")
+}
+
+model fiscal_status_audit_log {
+  id                 Int                        @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int?
+  feature            fiscal_status_feature_enum
+  from_state         fiscal_status_state_enum?
+  to_state           fiscal_status_state_enum
+  source             fiscal_status_source_enum  @default(manual)
+  before_json        Json?
+  after_json         Json?
+  changed_by_user_id Int?
+  changed_at         DateTime                   @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  store        stores?       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  changed_by   users?        @relation("fiscal_status_audit_changed_by", fields: [changed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id, changed_at(sort: Desc)])
+  @@index([organization_id, feature, changed_at(sort: Desc)])
+  @@index([store_id, changed_at(sort: Desc)])
+  @@map("fiscal_status_audit_log")
+}
+
+model organization_onboarding_state {
+  id                         Int           @id @default(autoincrement())
+  organization_id            Int           @unique
+  current_step               Int           @default(1)
+  selected_app_type          String?       @db.VarChar(50)
+  step_data                  Json?         @default("{}")
+  user_data_draft            Json?         @default("{}")
+  organization_data_draft    Json?         @default("{}")
+  store_data_draft           Json?         @default("{}")
+  app_config_draft           Json?         @default("{}")
+  email_verification_sent_at DateTime?     @db.Timestamp(6)
+  last_resend_at             DateTime?     @db.Timestamp(6)
+  created_at                 DateTime?     @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?     @default(now()) @db.Timestamp(6)
+  organization               organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
 }
 
 model organization_settings {
@@ -461,6 +582,10 @@ model stores {
   id                          Int                           @id @default(autoincrement())
   name                        String                        @db.VarChar(255)
   slug                        String                        @db.VarChar(255)
+  legal_name                  String?                       @db.VarChar(255)
+  tax_id                      String?                       @db.VarChar(50)
+  tax_id_dv                   String?                       @db.VarChar(2)
+  nit_type                    dian_nit_type_enum?
   created_at                  DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at                  DateTime?                     @default(now()) @db.Timestamp(6)
   is_active                   Boolean                       @default(true)
@@ -470,7 +595,10 @@ model stores {
   store_code                  String?                       @unique @db.VarChar(20)
   store_type                  store_type_enum               @default(physical)
   timezone                    String?                       @db.VarChar(50)
+  operating_hours             Json?
   onboarding                  Boolean                       @default(false)
+  default_location_id         Int?                          @unique
+  default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
   audit_logs                  audit_logs[]
   brands                      brands[]
@@ -493,12 +621,14 @@ model stores {
   shipping_methods            shipping_methods[]
   expenses                    expenses[]
   notifications               notifications[]
+  suppliers                   suppliers[]
   notification_subscriptions  notification_subscriptions[]
   push_subscriptions          push_subscriptions[]
   support_tickets             support_tickets[]
   invoices                    invoices[]
   invoice_resolutions         invoice_resolutions[]
   accounting_entries          accounting_entries[]
+  accounting_entities         accounting_entities[]
   employee_stores             employee_stores[]
   payroll_runs                payroll_runs[]
   dian_configurations         dian_configurations[]
@@ -572,6 +702,12 @@ model stores {
   email_templates             email_templates[]
   messaging_channels          messaging_channels[]
 
+  // SaaS Subscription (one per store)
+  subscription                  store_subscriptions?
+  subscription_payment_methods  subscription_payment_methods[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
+  fiscal_status_audit_log       fiscal_status_audit_log[]
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -587,7 +723,7 @@ model store_settings {
 
 model domain_settings {
   id              Int    @id @default(autoincrement())
-  hostname        String @unique @db.VarChar(255)
+  hostname        String @db.VarChar(255)
   organization_id Int?
   store_id        Int?
 
@@ -607,8 +743,25 @@ model domain_settings {
   status             domain_status_enum    @default(pending_dns)
   verification_token String?               @unique @db.VarChar(100)
   ownership          domain_ownership_enum @default(vendix_subdomain)
-  organization       organizations?        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store              stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  // Domain Provisioning v2 (custom domains workflow)
+  validation_cname_name      String?   @db.VarChar(255)
+  validation_cname_value     String?   @db.VarChar(255)
+  validation_dns_missing_at  DateTime? @db.Timestamptz(6)
+  acm_certificate_arn        String?   @db.VarChar(2048)
+  certificate_requested_at   DateTime? @db.Timestamptz(6)
+  certificate_issued_at      DateTime? @db.Timestamptz(6)
+  cloudfront_distribution_id String?   @db.VarChar(80)
+  cloudfront_alias_added_at  DateTime? @db.Timestamptz(6)
+  cloudfront_deployed_at     DateTime? @db.Timestamptz(6)
+  cert_expires_at            DateTime? @db.Timestamptz(6)
+  cloudfront_snapshot_before Json?
+  last_error_code            String?   @db.VarChar(80)
+  retry_count                Int       @default(0)
+  expires_token_at           DateTime? @db.Timestamptz(6)
+
+  organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?        @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([hostname])
   @@index([organization_id])
@@ -617,6 +770,16 @@ model domain_settings {
   @@index([domain_type])
   @@index([ownership])
   @@index([app_type])
+}
+
+model domain_blocklist {
+  id         Int      @id @default(autoincrement())
+  pattern    String   @unique @db.VarChar(255)
+  match_type String   @db.VarChar(20)
+  reason     String?  @db.Text
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("domain_blocklist")
 }
 
 model addresses {
@@ -692,6 +855,7 @@ model currencies {
 
 model inventory_transactions {
   id                 Int                             @id @default(autoincrement())
+  organization_id    Int
   product_id         Int
   product_variant_id Int?
   user_id            Int?
@@ -702,9 +866,12 @@ model inventory_transactions {
   quantity_change    Int
   created_at         DateTime?                       @default(now()) @db.Timestamp(6)
   order_items        order_items?                    @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations      organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   products           products                        @relation(fields: [product_id], references: [id], onUpdate: NoAction)
   product_variants   product_variants?               @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users              users?                          @relation(fields: [user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([organization_id, created_at(sort: Desc)])
 }
 
 model order_item_taxes {
@@ -890,6 +1057,7 @@ model payments {
   currency                String?                   @db.VarChar(10)
   state                   payments_state_enum
   transaction_id          String?                   @unique @db.VarChar(255)
+  gateway_reference       String?                   @db.VarChar(255)
   gateway_response        Json?
   paid_at                 DateTime?                 @db.Timestamp(6)
   created_at              DateTime?                 @default(now()) @db.Timestamp(6)
@@ -899,6 +1067,8 @@ model payments {
   store_payment_method    store_payment_methods?    @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
+
+  @@index([gateway_reference])
 }
 
 model product_categories {
@@ -932,119 +1102,127 @@ model product_tax_assignments {
 }
 
 model product_variants {
-  id                       Int                        @id @default(autoincrement())
-  product_id               Int
-  sku                      String                     @db.VarChar(100)
-  name                     String?                    @db.VarChar(255)
-  price_override           Decimal?                   @db.Decimal(12, 2)
-  cost_price               Decimal?                   @db.Decimal(12, 2)
-  profit_margin            Decimal?                   @db.Decimal(5, 2)
-  is_on_sale               Boolean                    @default(false)
-  sale_price               Decimal?                   @db.Decimal(12, 2)
-  stock_quantity           Int                        @default(0)
-  track_inventory_override Boolean?
-  attributes               Json?
-  image_id                 Int?
-  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  inventory_adjustments    inventory_adjustments[]
-  inventory_batches        inventory_batches[]
-  inventory_movements      inventory_movements[]
-  inventory_serial_numbers inventory_serial_numbers[]
-  inventory_transactions   inventory_transactions[]
-  order_items              order_items[]
-  product_images           product_images?            @relation(fields: [image_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  products                 products                   @relation(fields: [product_id], references: [id], onUpdate: NoAction)
-  purchase_order_items     purchase_order_items[]
-  return_order_items       return_order_items[]
-  sales_order_items        sales_order_items[]
-  stock_levels             stock_levels[]
-  stock_reservations       stock_reservations[]
-  stock_transfer_items     stock_transfer_items[]
-  supplier_products        supplier_products[]        @relation("product_variantsTosupplier_products")
-  cart_items               cart_items[]
-  wishlist_items           wishlist_items[]
-  invoice_items            invoice_items[]
-  quotation_items          quotation_items[]
-  inventory_cost_layers    inventory_cost_layers[]
-  layaway_items            layaway_items[]
-  dispatch_note_items      dispatch_note_items[]
+  id                            Int                             @id @default(autoincrement())
+  product_id                    Int
+  sku                           String                          @db.VarChar(100)
+  name                          String?                         @db.VarChar(255)
+  price_override                Decimal?                        @db.Decimal(12, 2)
+  cost_price                    Decimal?                        @db.Decimal(12, 2)
+  profit_margin                 Decimal?                        @db.Decimal(5, 2)
+  is_on_sale                    Boolean                         @default(false)
+  sale_price                    Decimal?                        @db.Decimal(12, 2)
+  stock_quantity                Int                             @default(0)
+  track_inventory_override      Boolean?
+  // Service-specific overrides (null = inherit from parent product)
+  service_duration_minutes      Int?
+  service_pricing_type          service_pricing_type_enum?
+  buffer_minutes                Int?
+  preparation_time_minutes      Int?
+  attributes                    Json?
+  image_id                      Int?
+  created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  bookings                      bookings[]
+  inventory_adjustments         inventory_adjustments[]
+  inventory_batches             inventory_batches[]
+  inventory_movements           inventory_movements[]
+  inventory_serial_numbers      inventory_serial_numbers[]
+  inventory_transactions        inventory_transactions[]
+  order_items                   order_items[]
+  product_images                product_images?                 @relation(fields: [image_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  products                      products                        @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  purchase_order_items          purchase_order_items[]
+  return_order_items            return_order_items[]
+  sales_order_items             sales_order_items[]
+  stock_levels                  stock_levels[]
+  stock_reservations            stock_reservations[]
+  stock_transfer_items          stock_transfer_items[]
+  supplier_products             supplier_products[]             @relation("product_variantsTosupplier_products")
+  cart_items                    cart_items[]
+  wishlist_items                wishlist_items[]
+  invoice_items                 invoice_items[]
+  quotation_items               quotation_items[]
+  inventory_cost_layers         inventory_cost_layers[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
+  layaway_items                 layaway_items[]
+  dispatch_note_items           dispatch_note_items[]
 
   @@unique([product_id, sku])
 }
 
 model products {
-  id                          Int                        @id @default(autoincrement())
-  store_id                    Int
-  brand_id                    Int?
-  name                        String                     @db.VarChar(255)
-  slug                        String                     @db.VarChar(255)
-  description                 String?
-  base_price                  Decimal                    @db.Decimal(12, 2)
-  cost_price                  Decimal?                   @db.Decimal(12, 2)
-  profit_margin               Decimal?                   @db.Decimal(5, 2)
-  sku                         String?                    @db.VarChar(100)
-  stock_quantity              Int?                       @default(0)
-  state                       product_state_enum         @default(inactive)
-  pricing_type                pricing_type_enum          @default(unit)
-  product_type                product_type_enum          @default(physical)
-  service_duration_minutes    Int?
-  service_modality            service_modality_enum?
-  service_pricing_type        service_pricing_type_enum?
-  requires_booking            Boolean                    @default(false)
-  booking_mode                booking_mode_enum          @default(provider_required)
-  buffer_minutes              Int?                       @default(0)
-  is_recurring                Boolean                    @default(false)
-  service_instructions        String?                    @db.Text
-  preparation_time_minutes    Int?
-  is_consultation             Boolean                    @default(false)
-  send_preconsultation        Boolean                    @default(false)
-  consultation_template_id    Int?
-  consultation_template       data_collection_templates? @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
-  preconsultation_template_id Int?
-  preconsultation_template    data_collection_templates? @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
-  available_for_ecommerce     Boolean                    @default(false)
-  is_on_sale                  Boolean                    @default(false)
-  sale_price                  Decimal?                   @db.Decimal(12, 2)
-  weight                      Decimal?                   @db.Decimal(12, 3)
-  dimensions                  Json?
-  track_inventory             Boolean                    @default(true)
-  min_stock_level             Int?                       @default(0)
-  max_stock_level             Int?                       @default(0)
-  reorder_point               Int?                       @default(0)
-  reorder_quantity            Int?                       @default(0)
-  requires_serial_numbers     Boolean                    @default(false)
-  requires_batch_tracking     Boolean                    @default(false)
-  created_at                  DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at                  DateTime?                  @default(now()) @db.Timestamp(6)
-  inventory_adjustments       inventory_adjustments[]
-  inventory_batches           inventory_batches[]
-  inventory_movements         inventory_movements[]
-  inventory_serial_numbers    inventory_serial_numbers[]
-  inventory_transactions      inventory_transactions[]
-  order_items                 order_items[]
-  product_categories          product_categories[]
-  product_images              product_images[]
-  product_tax_assignments     product_tax_assignments[]
-  product_variants            product_variants[]
-  brands                      brands?                    @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                      stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  purchase_order_items        purchase_order_items[]
-  return_order_items          return_order_items[]
-  reviews                     reviews[]
-  sales_order_items           sales_order_items[]
-  stock_levels                stock_levels[]
-  stock_reservations          stock_reservations[]
-  stock_transfer_items        stock_transfer_items[]
-  supplier_products           supplier_products[]
-  cart_items                  cart_items[]
-  wishlist_items              wishlist_items[]
-  invoice_items               invoice_items[]
-  quotation_items             quotation_items[]
-  promotion_products          promotion_products[]
-  coupon_products             coupon_products[]
-  inventory_cost_layers       inventory_cost_layers[]
-  layaway_items               layaway_items[]
+  id                            Int                             @id @default(autoincrement())
+  store_id                      Int
+  brand_id                      Int?
+  name                          String                          @db.VarChar(255)
+  slug                          String                          @db.VarChar(255)
+  description                   String?
+  base_price                    Decimal                         @db.Decimal(12, 2)
+  cost_price                    Decimal?                        @db.Decimal(12, 2)
+  profit_margin                 Decimal?                        @db.Decimal(5, 2)
+  sku                           String?                         @db.VarChar(100)
+  stock_quantity                Int?                            @default(0)
+  state                         product_state_enum              @default(inactive)
+  pricing_type                  pricing_type_enum               @default(unit)
+  product_type                  product_type_enum               @default(physical)
+  service_duration_minutes      Int?
+  service_modality              service_modality_enum?
+  service_pricing_type          service_pricing_type_enum?
+  requires_booking              Boolean                         @default(false)
+  booking_mode                  booking_mode_enum               @default(provider_required)
+  buffer_minutes                Int?                            @default(0)
+  is_recurring                  Boolean                         @default(false)
+  service_instructions          String?                         @db.Text
+  preparation_time_minutes      Int?
+  is_consultation               Boolean                         @default(false)
+  send_preconsultation          Boolean                         @default(false)
+  consultation_template_id      Int?
+  consultation_template         data_collection_templates?      @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
+  preconsultation_template_id   Int?
+  preconsultation_template      data_collection_templates?      @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
+  available_for_ecommerce       Boolean                         @default(false)
+  is_on_sale                    Boolean                         @default(false)
+  sale_price                    Decimal?                        @db.Decimal(12, 2)
+  weight                        Decimal?                        @db.Decimal(12, 3)
+  dimensions                    Json?
+  track_inventory               Boolean                         @default(true)
+  min_stock_level               Int?                            @default(0)
+  max_stock_level               Int?                            @default(0)
+  reorder_point                 Int?                            @default(0)
+  reorder_quantity              Int?                            @default(0)
+  requires_serial_numbers       Boolean                         @default(false)
+  requires_batch_tracking       Boolean                         @default(false)
+  created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  inventory_adjustments         inventory_adjustments[]
+  inventory_batches             inventory_batches[]
+  inventory_movements           inventory_movements[]
+  inventory_serial_numbers      inventory_serial_numbers[]
+  inventory_transactions        inventory_transactions[]
+  order_items                   order_items[]
+  product_categories            product_categories[]
+  product_images                product_images[]
+  product_tax_assignments       product_tax_assignments[]
+  product_variants              product_variants[]
+  brands                        brands?                         @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                        stores                          @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  purchase_order_items          purchase_order_items[]
+  return_order_items            return_order_items[]
+  reviews                       reviews[]
+  sales_order_items             sales_order_items[]
+  stock_levels                  stock_levels[]
+  stock_reservations            stock_reservations[]
+  stock_transfer_items          stock_transfer_items[]
+  supplier_products             supplier_products[]
+  cart_items                    cart_items[]
+  wishlist_items                wishlist_items[]
+  invoice_items                 invoice_items[]
+  quotation_items               quotation_items[]
+  promotion_products            promotion_products[]
+  coupon_products               coupon_products[]
+  inventory_cost_layers         inventory_cost_layers[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
+  layaway_items                 layaway_items[]
 
   // Bookings
   bookings          bookings[]
@@ -1174,13 +1352,15 @@ model review_reports {
 model tax_categories {
   id                      Int                       @id @default(autoincrement())
   store_id                Int?
+  organization_id         Int?
   name                    String                    @db.VarChar(100)
   description             String?
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   tax_rates               tax_rates[]
 
-  @@unique([store_id, name], name: "store_id_name")
+  @@index([organization_id])
 }
 
 model tax_rates {
@@ -1215,34 +1395,40 @@ model api_keys {
 }
 
 model inventory_locations {
-  id                       Int                        @id @default(autoincrement())
-  organization_id          Int
-  store_id                 Int?
-  name                     String                     @db.VarChar(255)
-  code                     String                     @db.VarChar(50)
-  type                     location_type_enum         @default(warehouse)
-  is_active                Boolean                    @default(true)
-  address_id               Int?
-  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  inventory_adjustments    inventory_adjustments[]
-  inventory_batches        inventory_batches[]
-  addresses                addresses?                 @relation("inventory_location_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  stores                   stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  movements_from           inventory_movements[]      @relation("from_location")
-  movements_to             inventory_movements[]      @relation("to_location")
-  inventory_serial_numbers inventory_serial_numbers[]
-  purchase_orders          purchase_orders[]
-  stock_levels             stock_levels[]
-  stock_reservations       stock_reservations[]
-  transfers_from           stock_transfers[]          @relation("from_location")
-  transfers_to             stock_transfers[]          @relation("to_location")
-  inventory_cost_layers    inventory_cost_layers[]
-  refund_items             refund_items[]
-  layaway_items            layaway_items[]
-  dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_location")
-  dispatch_note_items      dispatch_note_items[]      @relation("dispatch_note_items_location")
+  id                            Int                             @id @default(autoincrement())
+  organization_id               Int
+  store_id                      Int?
+  name                          String                          @db.VarChar(255)
+  code                          String                          @db.VarChar(50)
+  type                          location_type_enum              @default(warehouse)
+  is_active                     Boolean                         @default(true)
+  is_default                    Boolean                         @default(false)
+  is_central_warehouse          Boolean                         @default(false)
+  address_id                    Int?
+  created_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at                    DateTime?                       @default(now()) @db.Timestamp(6)
+  inventory_adjustments         inventory_adjustments[]
+  inventory_batches             inventory_batches[]
+  addresses                     addresses?                      @relation("inventory_location_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organizations                 organizations                   @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  stores                        stores?                         @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  default_for_store             stores?                         @relation("StoreDefaultLocation")
+  movements_from                inventory_movements[]           @relation("from_location")
+  movements_to                  inventory_movements[]           @relation("to_location")
+  inventory_serial_numbers      inventory_serial_numbers[]
+  purchase_orders               purchase_orders[]
+  stock_levels                  stock_levels[]
+  stock_reservations            stock_reservations[]
+  transfers_from                stock_transfers[]               @relation("from_location")
+  transfers_to                  stock_transfers[]               @relation("to_location")
+  inventory_cost_layers         inventory_cost_layers[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
+  refund_items                  refund_items[]
+  layaway_items                 layaway_items[]
+  dispatch_notes                dispatch_notes[]                @relation("dispatch_notes_location")
+  dispatch_note_items           dispatch_note_items[]           @relation("dispatch_note_items_location")
+  // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
+  // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
 
   @@unique([store_id, code])
   @@index([organization_id, store_id])
@@ -1285,6 +1471,7 @@ model inventory_movements {
   movement_type      movement_type_enum
   source_order_type  source_order_type_enum?
   source_order_id    Int?
+  source_module      String?
   reason             String?
   notes              String?
   user_id            Int?
@@ -1346,6 +1533,7 @@ model inventory_serial_numbers {
 model suppliers {
   id                       Int                        @id @default(autoincrement())
   organization_id          Int
+  store_id                 Int?
   name                     String                     @db.VarChar(255)
   code                     String                     @db.VarChar(50)
   contact_person           String?                    @db.VarChar(255)
@@ -1368,13 +1556,14 @@ model suppliers {
   purchase_orders          purchase_orders[]
   supplier_products        supplier_products[]
   organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store                    stores?                    @relation(fields: [store_id], references: [id], onDelete: SetNull)
   addresses                addresses?                 @relation("supplier_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoices                 invoices[]
   withholding_calculations withholding_calculations[]
   accounts_payable         accounts_payable[]         @relation("supplier_accounts_payable")
 
-  @@unique([organization_id, code])
   @@index([organization_id, name])
+  @@index([organization_id, store_id, code])
 }
 
 model supplier_products {
@@ -1669,28 +1858,40 @@ model sales_order_items {
 }
 
 model stock_transfers {
-  id                   Int                    @id @default(autoincrement())
-  transfer_number      String                 @db.VarChar(50)
-  organization_id      Int
-  from_location_id     Int
-  to_location_id       Int
-  status               transfer_status_enum   @default(draft)
-  transfer_date        DateTime?              @default(now()) @db.Timestamp(6)
-  expected_date        DateTime?              @db.Timestamp(6)
-  completed_date       DateTime?              @db.Timestamp(6)
-  notes                String?
-  created_by_user_id   Int?
-  approved_by_user_id  Int?
-  created_at           DateTime?              @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?              @default(now()) @db.Timestamp(6)
-  stock_transfer_items stock_transfer_items[]
-  users                users?                 @relation("stock_transfers_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  users1               users?                 @relation("stock_transfers_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  from_location        inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
-  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  to_location          inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
+  id                    Int                    @id @default(autoincrement())
+  transfer_number       String                 @db.VarChar(50)
+  organization_id       Int
+  from_location_id      Int
+  to_location_id        Int
+  status                transfer_status_enum   @default(pending)
+  transfer_date         DateTime?              @default(now()) @db.Timestamp(6)
+  expected_date         DateTime?              @db.Timestamp(6)
+  completed_date        DateTime?              @db.Timestamp(6)
+  notes                 String?
+  created_by_user_id    Int?
+  approved_by_user_id   Int?
+  approved_at           DateTime?              @db.Timestamp(6)
+  dispatched_by_user_id Int?
+  dispatched_at         DateTime?              @db.Timestamp(6)
+  cancelled_by_user_id  Int?
+  cancelled_at          DateTime?              @db.Timestamp(6)
+  cancellation_reason   String?
+  source_order_id       Int?
+  source_order_type     String?                @db.VarChar(50)
+  created_at            DateTime?              @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?              @default(now()) @db.Timestamp(6)
+  stock_transfer_items  stock_transfer_items[]
+  users                 users?                 @relation("stock_transfers_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  users1                users?                 @relation("stock_transfers_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatcher            users?                 @relation("stock_transfers_dispatched_by", fields: [dispatched_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  canceller             users?                 @relation("stock_transfers_cancelled_by", fields: [cancelled_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  from_location         inventory_locations    @relation("from_location", fields: [from_location_id], references: [id], onUpdate: NoAction)
+  organizations         organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  to_location           inventory_locations    @relation("to_location", fields: [to_location_id], references: [id], onUpdate: NoAction)
 
   @@unique([organization_id, transfer_number])
+  @@index([source_order_type, source_order_id], map: "stock_transfers_source_order_idx")
+  @@index([status], map: "stock_transfers_status_idx")
 }
 
 model stock_transfer_items {
@@ -2059,23 +2260,34 @@ enum notification_type_enum {
   data_collection_created
   data_collection_submitted
   data_collection_prediagnosis_ready
+  subscription_payment_reminder_soft
+  subscription_payment_reminder_hard
+  subscription_suspended
+  subscription_blocked
+  subscription_reactivated
+  fiscal_scope_changed
+  subscription_promo_applied
+  subscription_renewal_upcoming
+  partner_commission_available
 }
 
 model notifications {
-  id         Int                    @id @default(autoincrement())
+  id         Int                        @id @default(autoincrement())
   store_id   Int
   type       notification_type_enum
-  title      String                 @db.VarChar(255)
-  body       String                 @db.Text
+  severity   notification_severity_enum @default(info)
+  title      String                     @db.VarChar(255)
+  body       String                     @db.Text
   data       Json?
-  is_read    Boolean                @default(false)
-  created_at DateTime               @default(now()) @db.Timestamp(6)
-  updated_at DateTime               @default(now()) @db.Timestamp(6)
-  stores     stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  is_read    Boolean                    @default(false)
+  created_at DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at DateTime                   @default(now()) @db.Timestamp(6)
+  stores     stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([store_id])
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
+  @@index([store_id, severity, is_read])
 }
 
 model notification_subscriptions {
@@ -2328,6 +2540,37 @@ enum organization_account_type_enum {
   MULTI_STORE_ORG
 }
 
+enum organization_operating_scope_enum {
+  STORE
+  ORGANIZATION
+}
+
+enum fiscal_scope_enum {
+  STORE
+  ORGANIZATION
+}
+
+enum fiscal_status_feature_enum {
+  invoicing
+  accounting
+  payroll
+}
+
+enum fiscal_status_state_enum {
+  INACTIVE
+  WIP
+  ACTIVE
+  LOCKED
+}
+
+enum fiscal_status_source_enum {
+  manual
+  wizard
+  migration_v1
+  detector
+  event
+}
+
 enum organization_mode_enum {
   production
   demo
@@ -2377,6 +2620,15 @@ enum domain_status_enum {
   pending_ssl
   active
   disabled
+  pending_ownership
+  verifying_ownership
+  pending_certificate
+  issuing_certificate
+  pending_alias
+  propagating
+  failed_ownership
+  failed_certificate
+  failed_alias
 }
 
 enum ssl_status_enum {
@@ -2485,9 +2737,12 @@ enum sales_order_status_enum {
 }
 
 enum transfer_status_enum {
-  draft
+  draft // legacy, deferred drop per Plan §13#2
+  pending
+  approved
   in_transit
-  completed
+  received
+  completed // legacy, deferred drop per Plan §13#2
   cancelled
 }
 
@@ -3035,26 +3290,28 @@ model ai_engine_configs {
 }
 
 model ai_engine_applications {
-  id              Int       @id @default(autoincrement())
-  key             String    @unique @db.VarChar(100)
-  name            String    @db.VarChar(255)
-  description     String?   @db.Text
-  config_id       Int?
-  system_prompt   String?   @db.Text
-  prompt_template String?   @db.Text
-  temperature     Decimal?  @db.Decimal(3, 2)
-  max_tokens      Int?
-  output_format   String    @default("text") @db.VarChar(50)
-  rate_limit      Json?
-  retry_config    Json?
-  is_active       Boolean   @default(true)
-  metadata        Json?
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                  Int       @id @default(autoincrement())
+  key                 String    @unique @db.VarChar(100)
+  name                String    @db.VarChar(255)
+  description         String?   @db.Text
+  config_id           Int?
+  system_prompt       String?   @db.Text
+  prompt_template     String?   @db.Text
+  temperature         Decimal?  @db.Decimal(3, 2)
+  max_tokens          Int?
+  output_format       String    @default("text") @db.VarChar(50)
+  rate_limit          Json?
+  retry_config        Json?
+  is_active           Boolean   @default(true)
+  metadata            Json?
+  ai_feature_category String?   @db.VarChar(32)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+  @@index([ai_feature_category])
 }
 
 model ai_engine_logs {
@@ -3324,48 +3581,90 @@ model invoice_taxes {
 }
 
 model invoice_resolutions {
-  id                Int       @id @default(autoincrement())
-  organization_id   Int
-  store_id          Int
-  resolution_number String    @db.VarChar(100)
-  resolution_date   DateTime  @db.Timestamp(6)
-  prefix            String    @db.VarChar(10)
-  range_from        Int
-  range_to          Int
-  current_number    Int       @default(0)
-  valid_from        DateTime  @db.Timestamp(6)
-  valid_to          DateTime  @db.Timestamp(6)
-  is_active         Boolean   @default(true)
-  technical_key     String?   @db.VarChar(255)
-  created_at        DateTime? @default(now()) @db.Timestamp(6)
-  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  resolution_number    String    @db.VarChar(100)
+  resolution_date      DateTime  @db.Timestamp(6)
+  prefix               String    @db.VarChar(10)
+  range_from           Int
+  range_to             Int
+  current_number       Int       @default(0)
+  valid_from           DateTime  @db.Timestamp(6)
+  valid_to             DateTime  @db.Timestamp(6)
+  is_active            Boolean   @default(true)
+  technical_key        String?   @db.VarChar(255)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores        @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  invoices     invoices[]
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  invoices          invoices[]
 
-  @@unique([organization_id, store_id, prefix])
   @@index([store_id, is_active])
+  @@index([accounting_entity_id, is_active])
+  @@index([organization_id, accounting_entity_id])
 }
 
 // ===== ACCOUNTING DOMAIN =====
 
-model chart_of_accounts {
-  id              Int                 @id @default(autoincrement())
+model accounting_entities {
+  id              Int                               @id @default(autoincrement())
   organization_id Int
-  code            String              @db.VarChar(20)
-  name            String              @db.VarChar(255)
-  account_type    account_type_enum
-  nature          account_nature_enum
-  parent_id       Int?
-  level           Int                 @default(1)
-  is_active       Boolean             @default(true)
-  accepts_entries Boolean             @default(false)
-  is_intercompany Boolean             @default(false)
-  created_at      DateTime?           @default(now()) @db.Timestamp(6)
-  updated_at      DateTime?           @default(now()) @db.Timestamp(6)
+  store_id        Int?
+  scope           organization_operating_scope_enum
+  fiscal_scope    fiscal_scope_enum                 @default(STORE)
+  name            String                            @db.VarChar(255)
+  legal_name      String?                           @db.VarChar(255)
+  tax_id          String?                           @db.VarChar(50)
+  is_active       Boolean                           @default(true)
+  created_at      DateTime?                         @default(now()) @db.Timestamp(6)
+  updated_at      DateTime?                         @default(now()) @db.Timestamp(6)
+
+  organization                  organizations                   @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store                         stores?                         @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  chart_of_accounts             chart_of_accounts[]
+  accounting_account_mappings   accounting_account_mappings[]
+  dian_configurations           dian_configurations[]
+  invoice_resolutions           invoice_resolutions[]
+  fiscal_periods                fiscal_periods[]
+  accounting_entries            accounting_entries[]
+  payroll_runs                  payroll_runs[]
+  payroll_items                 payroll_items[]
+  payroll_settlements           payroll_settlements[]
+  uvt_values                    uvt_values[]
+  withholding_concepts          withholding_concepts[]
+  withholding_calculations      withholding_calculations[]
+  inventory_valuation_snapshots inventory_valuation_snapshots[]
+
+  @@unique([organization_id, store_id, scope, fiscal_scope], map: "accounting_entities_org_store_scope_fiscal_scope_key")
+  @@index([organization_id, scope], map: "accounting_entities_organization_scope_idx")
+  @@index([organization_id, fiscal_scope], map: "accounting_entities_organization_fiscal_scope_idx")
+  @@index([store_id], map: "accounting_entities_store_id_idx")
+  @@index([organization_id, is_active], map: "accounting_entities_organization_active_idx")
+}
+
+/// @prisma-ignore: per-entity uniqueness via partial unique indexes (see migration 20260511170000_chart_of_accounts_per_entity_uniqueness)
+model chart_of_accounts {
+  id                   Int                 @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int?
+  code                 String              @db.VarChar(20)
+  name                 String              @db.VarChar(255)
+  account_type         account_type_enum
+  nature               account_nature_enum
+  parent_id            Int?
+  level                Int                 @default(1)
+  is_active            Boolean             @default(true)
+  accepts_entries      Boolean             @default(false)
+  is_intercompany      Boolean             @default(false)
+  created_at           DateTime?           @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?           @default(now()) @db.Timestamp(6)
 
   organization                organizations                 @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity           accounting_entities?          @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   parent                      chart_of_accounts?            @relation("chart_of_accounts_parent", fields: [parent_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   children                    chart_of_accounts[]           @relation("chart_of_accounts_parent")
   accounting_entry_lines      accounting_entry_lines[]
@@ -3375,72 +3674,82 @@ model chart_of_accounts {
   intercompany_transactions   intercompany_transactions[]
   consolidation_adjustments   consolidation_adjustments[]
 
-  @@unique([organization_id, code])
   @@index([organization_id, parent_id])
   @@index([organization_id, account_type])
+  @@index([accounting_entity_id, code])
+  @@index([accounting_entity_id])
 }
 
 model accounting_account_mappings {
-  id              Int       @id @default(autoincrement())
-  organization_id Int
-  store_id        Int?
-  mapping_key     String    @db.VarChar(100)
-  account_id      Int
-  is_active       Boolean   @default(true)
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  mapping_key          String    @db.VarChar(100)
+  account_id           Int
+  is_active            Boolean   @default(true)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores?           @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  account      chart_of_accounts @relation(fields: [account_id], references: [id], onDelete: Restrict)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  account           chart_of_accounts    @relation(fields: [account_id], references: [id], onDelete: Restrict)
 
   @@unique([organization_id, store_id, mapping_key])
   @@index([organization_id, store_id])
+  @@index([accounting_entity_id])
 }
 
 model fiscal_periods {
-  id                Int                       @id @default(autoincrement())
-  organization_id   Int
-  name              String                    @db.VarChar(50)
-  start_date        DateTime                  @db.Timestamp(6)
-  end_date          DateTime                  @db.Timestamp(6)
-  status            fiscal_period_status_enum @default(open)
-  closed_by_user_id Int?
-  closed_at         DateTime?                 @db.Timestamp(6)
-  created_at        DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at        DateTime?                 @default(now()) @db.Timestamp(6)
+  id                   Int                       @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int?
+  name                 String                    @db.VarChar(50)
+  start_date           DateTime                  @db.Timestamp(6)
+  end_date             DateTime                  @db.Timestamp(6)
+  status               fiscal_period_status_enum @default(open)
+  closed_by_user_id    Int?
+  closed_at            DateTime?                 @db.Timestamp(6)
+  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
   organization           organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity      accounting_entities?     @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   closed_by_user         users?                   @relation("fiscal_periods_closed_by", fields: [closed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   accounting_entries     accounting_entries[]
   budgets                budgets[]
   consolidation_sessions consolidation_sessions[]
 
-  @@unique([organization_id, name])
+  @@index([organization_id, name])
+  @@index([accounting_entity_id])
 }
 
 model accounting_entries {
-  id                 Int                          @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  entry_number       String                       @db.VarChar(50)
-  entry_type         accounting_entry_type_enum   @default(manual)
-  status             accounting_entry_status_enum @default(draft)
-  fiscal_period_id   Int
-  entry_date         DateTime                     @db.Timestamp(6)
-  description        String?                      @db.VarChar(500)
-  source_type        String?                      @db.VarChar(50)
-  source_id          Int?
-  total_debit        Decimal                      @default(0) @db.Decimal(12, 2)
-  total_credit       Decimal                      @default(0) @db.Decimal(12, 2)
-  created_by_user_id Int?
-  posted_by_user_id  Int?
-  posted_at          DateTime?                    @db.Timestamp(6)
-  created_at         DateTime?                    @default(now()) @db.Timestamp(6)
-  updated_at         DateTime?                    @default(now()) @db.Timestamp(6)
+  id                         Int                          @id @default(autoincrement())
+  organization_id            Int
+  store_id                   Int?
+  accounting_entity_id       Int?
+  entry_number               String                       @db.VarChar(50)
+  entry_type                 accounting_entry_type_enum   @default(manual)
+  status                     accounting_entry_status_enum @default(draft)
+  fiscal_period_id           Int
+  entry_date                 DateTime                     @db.Timestamp(6)
+  description                String?                      @db.VarChar(500)
+  source_type                String?                      @db.VarChar(50)
+  source_id                  Int?
+  total_debit                Decimal                      @default(0) @db.Decimal(12, 2)
+  total_credit               Decimal                      @default(0) @db.Decimal(12, 2)
+  created_by_user_id         Int?
+  posted_by_user_id          Int?
+  posted_at                  DateTime?                    @db.Timestamp(6)
+  created_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamp(6)
+  is_historical_consolidated Boolean                      @default(false)
 
   organization                organizations                 @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                       stores?                       @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity           accounting_entities?          @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   fiscal_period               fiscal_periods                @relation(fields: [fiscal_period_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user             users?                        @relation("accounting_entries_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   posted_by_user              users?                        @relation("accounting_entries_posted_by", fields: [posted_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -3453,10 +3762,12 @@ model accounting_entries {
   intercompany_counterparts   intercompany_transactions[]   @relation("ic_counterpart")
   payroll_settlements         payroll_settlements[]
 
-  @@unique([organization_id, entry_number])
   @@index([organization_id, entry_date])
   @@index([organization_id, fiscal_period_id])
+  @@index([accounting_entity_id, entry_number])
+  @@index([accounting_entity_id])
   @@index([source_type, source_id])
+  @@index([organization_id, is_historical_consolidated])
 }
 
 model accounting_entry_lines {
@@ -3541,6 +3852,7 @@ model payroll_runs {
   id                   Int                       @id @default(autoincrement())
   organization_id      Int
   store_id             Int?
+  accounting_entity_id Int?
   payroll_number       String                    @db.VarChar(50)
   status               payroll_status_enum       @default(draft)
   frequency            payroll_frequency_enum
@@ -3564,15 +3876,17 @@ model payroll_runs {
   created_at           DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
-  organization     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store            stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entry accounting_entries? @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user users?              @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user  users?              @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  payroll_items    payroll_items[]
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entry  accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user  users?               @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?               @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  payroll_items     payroll_items[]
 
   @@unique([organization_id, payroll_number])
   @@index([organization_id, status])
+  @@index([accounting_entity_id])
   @@index([store_id])
 }
 
@@ -3580,6 +3894,7 @@ model payroll_items {
   id                   Int       @id @default(autoincrement())
   payroll_run_id       Int
   employee_id          Int
+  accounting_entity_id Int?
   base_salary          Decimal   @db.Decimal(12, 2)
   worked_days          Int
   earnings             Json?
@@ -3595,11 +3910,13 @@ model payroll_items {
 
   payroll_run          payroll_runs                    @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
   employee             employees                       @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity    accounting_entities?            @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   advance_payments     employee_advance_payments[]
   advance_installments employee_advance_installments[]
 
   @@index([payroll_run_id])
   @@index([employee_id])
+  @@index([accounting_entity_id])
 }
 
 // ===== DIAN ELECTRONIC INVOICING =====
@@ -3618,10 +3935,21 @@ enum dian_configuration_type_enum {
   payroll
 }
 
+/// store_id is nullable to support organizations.fiscal_scope=ORGANIZATION,
+/// where the DIAN config is anchored to the organization only (store_id IS NULL).
+/// When fiscal_scope=STORE, store_id is required. The DB enforces:
+///   - CHECK dian_configurations_scope_org_chk (organization_id NOT NULL)
+///   - partial unique idx dian_configurations_store_scope_uq (store_id, nit)
+///     WHERE store_id IS NOT NULL
+///   - partial unique idx dian_configurations_org_scope_uq (organization_id, nit)
+///     WHERE store_id IS NULL
+/// These partial unique indexes cannot be represented as @@unique in Prisma,
+/// so they live in migration 20260511160000_relax_dian_store_id_for_org_scope.
 model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
-  store_id                       Int
+  store_id                       Int?
+  accounting_entity_id           Int?
   name                           String                       @db.VarChar(100)
   nit                            String                       @db.VarChar(20)
   nit_type                       dian_nit_type_enum           @default(NIT)
@@ -3640,13 +3968,14 @@ model dian_configurations {
   created_at                     DateTime?                    @default(now()) @db.Timestamp(6)
   updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
 
-  organization    organizations     @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  dian_audit_logs dian_audit_logs[]
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dian_audit_logs   dian_audit_logs[]
 
-  @@unique([store_id, nit])
   @@index([store_id])
   @@index([organization_id])
+  @@index([accounting_entity_id])
 }
 
 model dian_audit_logs {
@@ -3850,6 +4179,42 @@ model inventory_cost_layers {
 
   @@index([product_id, product_variant_id, location_id, received_at])
   @@index([organization_id])
+}
+
+model inventory_valuation_snapshots {
+  id                   Int                               @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  location_id          Int
+  product_id           Int
+  product_variant_id   Int?
+  snapshot_at          DateTime                          @db.Timestamp(6)
+  quantity_on_hand     Decimal                           @db.Decimal(18, 4)
+  quantity_reserved    Decimal                           @db.Decimal(18, 4)
+  quantity_available   Decimal                           @db.Decimal(18, 4)
+  unit_cost            Decimal                           @db.Decimal(12, 4)
+  total_value          Decimal                           @db.Decimal(18, 4)
+  costing_method       costing_method_enum
+  operating_scope      organization_operating_scope_enum
+  source_type          String?                           @db.VarChar(50)
+  source_id            Int?
+  created_at           DateTime?                         @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                         @default(now()) @db.Timestamp(6)
+
+  organization       organizations        @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store              stores?              @relation(fields: [store_id], references: [id], onDelete: SetNull)
+  accounting_entity  accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  inventory_location inventory_locations  @relation(fields: [location_id], references: [id], onDelete: Restrict)
+  product            products             @relation(fields: [product_id], references: [id], onDelete: Restrict)
+  product_variant    product_variants?    @relation(fields: [product_variant_id], references: [id], onDelete: Restrict)
+
+  @@index([organization_id, snapshot_at], map: "inventory_valuation_snapshots_org_snapshot_idx")
+  @@index([organization_id, store_id, snapshot_at], map: "inventory_valuation_snapshots_org_store_snapshot_idx")
+  @@index([accounting_entity_id, snapshot_at], map: "inventory_valuation_snapshots_entity_snapshot_idx")
+  @@index([location_id, product_id, product_variant_id], map: "inventory_valuation_snapshots_location_product_idx")
+  @@index([product_id, product_variant_id, snapshot_at], map: "inventory_valuation_snapshots_product_snapshot_idx")
+  @@index([source_type, source_id], map: "inventory_valuation_snapshots_source_idx")
 }
 
 // ============================================================================
@@ -4396,7 +4761,11 @@ model consolidation_sessions {
 model intercompany_transactions {
   id                   Int       @id @default(autoincrement())
   organization_id      Int
-  session_id           Int
+  session_id           Int?
+  origin               String    @default("consolidation") @db.VarChar(50)
+  source_type          String?   @db.VarChar(50)
+  source_id            Int?
+  status               String    @default("open") @db.VarChar(30)
   from_store_id        Int
   to_store_id          Int
   entry_id             Int
@@ -4407,16 +4776,18 @@ model intercompany_transactions {
   eliminated_at        DateTime? @db.Timestamp(6)
   created_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  session      consolidation_sessions @relation(fields: [session_id], references: [id], onDelete: Cascade)
-  from_store   stores                 @relation("ic_from_store", fields: [from_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  to_store     stores                 @relation("ic_to_store", fields: [to_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  entry        accounting_entries     @relation("ic_entry", fields: [entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  counterpart  accounting_entries?    @relation("ic_counterpart", fields: [counterpart_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  account      chart_of_accounts      @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  session      consolidation_sessions? @relation(fields: [session_id], references: [id], onDelete: Cascade)
+  from_store   stores                  @relation("ic_from_store", fields: [from_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  to_store     stores                  @relation("ic_to_store", fields: [to_store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  entry        accounting_entries      @relation("ic_entry", fields: [entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  counterpart  accounting_entries?     @relation("ic_counterpart", fields: [counterpart_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  account      chart_of_accounts       @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([session_id])
   @@index([organization_id, from_store_id, to_store_id])
+  @@index([organization_id, source_type, source_id])
+  @@index([organization_id, status])
 }
 
 model consolidation_adjustments {
@@ -4442,18 +4813,19 @@ model consolidation_adjustments {
 // ===== PAYROLL SETTLEMENTS =====
 
 model payroll_settlements {
-  id                 Int                     @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  employee_id        Int
-  settlement_number  String                  @db.VarChar(50)
-  status             settlement_status_enum  @default(draft)
-  termination_date   DateTime                @db.Timestamp(6)
-  termination_reason termination_reason_enum
-  hire_date          DateTime                @db.Timestamp(6)
-  days_worked        Int
-  base_salary        Decimal                 @db.Decimal(12, 2)
-  contract_type      contract_type_enum
+  id                   Int                     @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  employee_id          Int
+  settlement_number    String                  @db.VarChar(50)
+  status               settlement_status_enum  @default(draft)
+  termination_date     DateTime                @db.Timestamp(6)
+  termination_reason   termination_reason_enum
+  hire_date            DateTime                @db.Timestamp(6)
+  days_worked          Int
+  base_salary          Decimal                 @db.Decimal(12, 2)
+  contract_type        contract_type_enum
 
   // Prestaciones sociales
   severance          Decimal @default(0) @db.Decimal(12, 2)
@@ -4484,15 +4856,17 @@ model payroll_settlements {
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
-  organization     organizations       @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store            stores?             @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  employee         employees           @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entry accounting_entries? @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user users?              @relation("settlements_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user  users?              @relation("settlements_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  employee          employees            @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entry  accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user  users?               @relation("settlements_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user   users?               @relation("settlements_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@unique([organization_id, settlement_number])
   @@index([organization_id, status])
+  @@index([accounting_entity_id])
   @@index([employee_id])
   @@index([store_id])
 }
@@ -4579,22 +4953,26 @@ model employee_advance_installments {
 // ── Retención en Fuente ───────────────────────────────────
 
 model uvt_values {
-  id              Int       @id @default(autoincrement())
-  organization_id Int
-  year            Int
-  value_cop       Decimal   @db.Decimal(12, 2)
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int?
+  year                 Int
+  value_cop            Decimal   @db.Decimal(12, 2)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
 
-  @@unique([organization_id, year])
+  @@unique([organization_id, accounting_entity_id, year])
   @@index([organization_id])
+  @@index([accounting_entity_id])
 }
 
 model withholding_concepts {
   id                   Int                            @id @default(autoincrement())
   organization_id      Int
+  accounting_entity_id Int?
   code                 String                         @db.VarChar(30)
   name                 String                         @db.VarChar(150)
   rate                 Decimal                        @db.Decimal(7, 4)
@@ -4606,34 +4984,39 @@ model withholding_concepts {
   updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  accounting_entity        accounting_entities?       @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   withholding_calculations withholding_calculations[]
 
-  @@unique([organization_id, code])
+  @@unique([organization_id, accounting_entity_id, code])
   @@index([organization_id, is_active])
+  @@index([accounting_entity_id])
 }
 
 model withholding_calculations {
-  id                 Int       @id @default(autoincrement())
-  organization_id    Int
-  store_id           Int?
-  invoice_id         Int?
-  supplier_id        Int?
-  concept_id         Int
-  base_amount        Decimal   @db.Decimal(12, 2)
-  withholding_rate   Decimal   @db.Decimal(7, 4)
-  withholding_amount Decimal   @db.Decimal(12, 2)
-  uvt_value_used     Decimal   @db.Decimal(12, 2)
-  year               Int
-  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  id                   Int       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int?
+  accounting_entity_id Int?
+  invoice_id           Int?
+  supplier_id          Int?
+  concept_id           Int
+  base_amount          Decimal   @db.Decimal(12, 2)
+  withholding_rate     Decimal   @db.Decimal(7, 4)
+  withholding_amount   Decimal   @db.Decimal(12, 2)
+  uvt_value_used       Decimal   @db.Decimal(12, 2)
+  year                 Int
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
 
-  organization organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
-  store        stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  invoice      invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  supplier     suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  concept      withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  invoice           invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  supplier          suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  concept           withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([organization_id, invoice_id])
   @@index([organization_id, supplier_id, year])
+  @@index([accounting_entity_id])
   @@index([store_id])
 }
 
@@ -4732,6 +5115,7 @@ model bookings {
   store_id                  Int
   customer_id               Int
   product_id                Int
+  product_variant_id        Int?
   booking_number            String              @db.VarChar(50)
   date                      DateTime            @db.Date
   start_time                String              @db.VarChar(5)
@@ -4750,12 +5134,13 @@ model bookings {
   created_at                DateTime?           @default(now()) @db.Timestamp(6)
   updated_at                DateTime?           @default(now()) @db.Timestamp(6)
 
-  store      stores             @relation(fields: [store_id], references: [id])
-  customer   users              @relation("bookings_customer", fields: [customer_id], references: [id])
-  product    products           @relation(fields: [product_id], references: [id])
-  order      orders?            @relation(fields: [order_id], references: [id])
-  created_by users?             @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
-  provider   service_providers? @relation(fields: [provider_id], references: [id])
+  store            stores             @relation(fields: [store_id], references: [id])
+  customer         users              @relation("bookings_customer", fields: [customer_id], references: [id])
+  product          products           @relation(fields: [product_id], references: [id])
+  product_variants product_variants?  @relation(fields: [product_variant_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  order            orders?            @relation(fields: [order_id], references: [id])
+  created_by       users?             @relation("bookings_created_by", fields: [created_by_user_id], references: [id])
+  provider         service_providers? @relation(fields: [provider_id], references: [id])
 
   data_collection_submissions data_collection_submissions[]
   metadata_snapshot           booking_metadata_snapshots?
@@ -4766,7 +5151,7 @@ model bookings {
   @@unique([store_id, booking_number])
   @@index([store_id, date])
   @@index([store_id, status])
-  @@index([store_id, product_id, date])
+  @@index([store_id, product_id, product_variant_id, date])
   @@index([customer_id])
   @@index([provider_id])
   @@index([order_id])
@@ -5583,4 +5968,509 @@ model messaging_channels {
   store stores @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@unique([store_id, channel_type])
+}
+
+// ============================================
+// SAAS SUBSCRIPTIONS (Phase A - schema + migration + seeds + backfill)
+// ============================================
+
+enum subscription_plan_type_enum {
+  base
+  partner_custom
+  promotional
+}
+
+enum subscription_plan_state_enum {
+  draft
+  active
+  archived
+}
+
+enum subscription_billing_cycle_enum {
+  monthly
+  quarterly
+  semiannual
+  annual
+  lifetime
+}
+
+enum store_subscription_state_enum {
+  draft
+  trial
+  active
+  grace_soft
+  grace_hard
+  suspended
+  blocked
+  cancelled
+  expired
+  pending_payment
+  no_plan
+}
+
+enum subscription_invoice_state_enum {
+  draft
+  issued
+  paid
+  overdue
+  void
+  refunded
+  refunded_chargeback
+}
+
+enum subscription_payment_state_enum {
+  pending
+  succeeded
+  failed
+  refunded
+  partial_refund
+}
+
+enum subscription_event_type_enum {
+  created
+  activated
+  renewed
+  trial_started
+  trial_ended
+  payment_succeeded
+  payment_failed
+  state_transition
+  plan_changed
+  cancelled
+  reactivated
+  promotional_applied
+  partner_override_applied
+  partner_commission_accrued
+  partner_commission_paid
+  scheduled_cancel
+  chargeback_received
+  manual_payment
+}
+
+enum partner_payout_batch_state_enum {
+  draft
+  approved
+  sent
+  paid
+  rejected
+}
+
+enum subscription_payment_method_state_enum {
+  active
+  invalid
+  removed
+  replaced
+}
+
+enum partner_commission_state_enum {
+  accrued
+  pending_payout
+  paid
+  reversed
+  reversed_pending_recovery
+}
+
+enum commission_accrual_state_enum {
+  pending
+  processing
+  completed
+  failed
+}
+
+enum notification_severity_enum {
+  info
+  warning
+  critical
+  blocker
+}
+
+enum subscription_change_kind_enum {
+  initial
+  renewal
+  upgrade
+  downgrade
+  resubscribe
+  trial_conversion
+}
+
+model subscription_plans {
+  id                      Int                             @id @default(autoincrement())
+  code                    String                          @unique @db.VarChar(64)
+  name                    String                          @db.VarChar(128)
+  description             String?                         @db.Text
+  plan_type               subscription_plan_type_enum     @default(base)
+  state                   subscription_plan_state_enum    @default(draft)
+  billing_cycle           subscription_billing_cycle_enum @default(monthly)
+  base_price              Decimal                         @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
+  setup_fee               Decimal?                        @db.Decimal(12, 2)
+  grace_period_soft_days  Int                             @default(5)
+  grace_period_hard_days  Int                             @default(10)
+  suspension_day          Int                             @default(14)
+  cancellation_day        Int                             @default(45)
+  feature_matrix          Json
+  ai_feature_flags        Json
+  resellable              Boolean                         @default(false)
+  max_partner_margin_pct  Decimal?                        @db.Decimal(5, 2)
+  is_free                 Boolean                         @default(false)
+  is_promotional          Boolean                         @default(false)
+  promo_rules             Json?
+  promo_priority          Int                             @default(0)
+  redemption_code         String?                         @unique @db.VarChar(64)
+  is_popular              Boolean                         @default(false)
+  sort_order              Int                             @default(0)
+  is_default              Boolean                         @default(false)
+  parent_plan_id          Int?
+  parent_plan             subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
+  child_plans             subscription_plans[]            @relation("plan_lineage")
+  partner_overrides       partner_plan_overrides[]
+  store_subscriptions     store_subscriptions[]           @relation("store_sub_base_plan")
+  promotional_store_subs  store_subscriptions[]           @relation("store_sub_promo_plan")
+  scheduled_store_subs    store_subscriptions[]           @relation("store_sub_scheduled_plan")
+  paid_plan_subs          store_subscriptions[]           @relation("sub_paid_plan")
+  pending_plan_subs       store_subscriptions[]           @relation("sub_pending_plan")
+  invoice_from_subs       subscription_invoices[]         @relation("invoice_from_plan")
+  invoice_to_subs         subscription_invoices[]         @relation("invoice_to_plan")
+  redemption_consumptions redemption_consumptions[]
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
+  created_by              Int?
+  archived_at             DateTime?                       @db.Timestamp(6)
+
+  @@index([plan_type, state])
+  @@index([is_promotional, promo_priority])
+}
+
+model partner_plan_overrides {
+  id                  Int                   @id @default(autoincrement())
+  organization_id     Int
+  base_plan_id        Int
+  custom_code         String?               @db.VarChar(64)
+  custom_name         String?               @db.VarChar(128)
+  custom_description  String?               @db.Text
+  margin_pct          Decimal               @db.Decimal(5, 2)
+  fixed_surcharge     Decimal?              @db.Decimal(12, 2)
+  is_active           Boolean               @default(true)
+  feature_overrides   Json?
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @default(now()) @db.Timestamp(6)
+  organization        organizations         @relation(fields: [organization_id], references: [id])
+  base_plan           subscription_plans    @relation(fields: [base_plan_id], references: [id])
+  store_subscriptions store_subscriptions[]
+
+  @@unique([organization_id, base_plan_id])
+  @@index([organization_id])
+}
+
+model store_subscriptions {
+  id                        Int                            @id @default(autoincrement())
+  store_id                  Int                            @unique
+  // RNC-39: stores in 'no_plan' state have no plan assigned. plan_id is nullable
+  // to allow representing "no plan" without leaking a placeholder plan into reads.
+  plan_id                   Int?
+  partner_override_id       Int?
+  state                     store_subscription_state_enum  @default(draft)
+  started_at                DateTime?                      @db.Timestamp(6)
+  trial_ends_at             DateTime?                      @db.Timestamp(6)
+  current_period_start      DateTime?                      @db.Timestamp(6)
+  current_period_end        DateTime?                      @db.Timestamp(6)
+  next_billing_at           DateTime?                      @db.Timestamp(6)
+  grace_soft_until          DateTime?                      @db.Timestamp(6)
+  grace_hard_until          DateTime?                      @db.Timestamp(6)
+  suspend_at                DateTime?                      @db.Timestamp(6)
+  cancel_at                 DateTime?                      @db.Timestamp(6)
+  scheduled_cancel_at       DateTime?                      @db.Timestamp(6)
+  // RNC-16/17: deferred plan change (downgrade end-of-period). Renewal cron
+  // applies the swap when scheduled_plan_change_at <= now, then clears both.
+  scheduled_plan_change_at  DateTime?                      @db.Timestamptz(6)
+  scheduled_plan_id         Int?
+  paid_plan_id              Int?
+  pending_plan_id           Int?
+  pending_change_invoice_id Int?
+  pending_change_kind       subscription_change_kind_enum?
+  pending_change_started_at DateTime?
+  pending_revert_state      store_subscription_state_enum?
+  cancelled_at              DateTime?                      @db.Timestamp(6)
+  effective_price           Decimal                        @db.Decimal(12, 2)
+  vendix_base_price         Decimal                        @db.Decimal(12, 2)
+  partner_margin_amount     Decimal                        @default(0) @db.Decimal(12, 2)
+  currency                  String                         @default("COP") @db.VarChar(3)
+  auto_renew                Boolean                        @default(true)
+  promotional_plan_id       Int?
+  promotional_applied_at    DateTime?                      @db.Timestamp(6)
+  resolved_features         Json
+  resolved_at               DateTime                       @default(now()) @db.Timestamp(6)
+  lock_reason               String?                        @db.VarChar(64)
+  replaced_by_id            Int?
+  metadata                  Json?
+  created_at                DateTime                       @default(now()) @db.Timestamp(6)
+  updated_at                DateTime                       @default(now()) @db.Timestamp(6)
+
+  store                  stores                         @relation(fields: [store_id], references: [id])
+  plan                   subscription_plans?            @relation("store_sub_base_plan", fields: [plan_id], references: [id])
+  promotional_plan       subscription_plans?            @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
+  scheduled_plan         subscription_plans?            @relation("store_sub_scheduled_plan", fields: [scheduled_plan_id], references: [id], onDelete: SetNull)
+  paid_plan              subscription_plans?            @relation("sub_paid_plan", fields: [paid_plan_id], references: [id], onDelete: SetNull)
+  pending_plan           subscription_plans?            @relation("sub_pending_plan", fields: [pending_plan_id], references: [id], onDelete: SetNull)
+  pending_change_invoice subscription_invoices?         @relation("sub_pending_invoice", fields: [pending_change_invoice_id], references: [id], onDelete: SetNull)
+  partner_override       partner_plan_overrides?        @relation(fields: [partner_override_id], references: [id])
+  replaced_by            store_subscriptions?           @relation("store_sub_lineage", fields: [replaced_by_id], references: [id])
+  replaces               store_subscriptions[]          @relation("store_sub_lineage")
+  invoices               subscription_invoices[]
+  events                 subscription_events[]
+  payment_methods        subscription_payment_methods[]
+
+  // Trial consumption audit rows that point at this subscription as the
+  // originating trial subscription for the parent organization.
+  organization_trial_consumptions organization_trial_consumptions[]
+
+  @@index([state, current_period_end])
+  @@index([plan_id])
+  @@index([next_billing_at])
+  @@index([promotional_plan_id])
+  @@index([scheduled_plan_change_at])
+  @@index([paid_plan_id])
+  @@index([pending_plan_id])
+}
+
+model subscription_invoices {
+  id                      Int                             @id @default(autoincrement())
+  store_subscription_id   Int
+  store_id                Int
+  partner_organization_id Int?
+  invoice_number          String                          @unique @db.VarChar(64)
+  state                   subscription_invoice_state_enum @default(draft)
+  issued_at               DateTime?                       @db.Timestamp(6)
+  due_at                  DateTime                        @db.Timestamp(6)
+  period_start            DateTime                        @db.Timestamp(6)
+  period_end              DateTime                        @db.Timestamp(6)
+  subtotal                Decimal                         @db.Decimal(12, 2)
+  tax_amount              Decimal                         @default(0) @db.Decimal(12, 2)
+  total                   Decimal                         @db.Decimal(12, 2)
+  amount_paid             Decimal                         @default(0) @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
+  line_items              Json
+  split_breakdown         Json
+  metadata                Json?
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
+
+  from_plan_id Int?
+  from_plan    subscription_plans?            @relation("invoice_from_plan", fields: [from_plan_id], references: [id], onDelete: SetNull)
+  to_plan_id   Int?
+  to_plan      subscription_plans?            @relation("invoice_to_plan", fields: [to_plan_id], references: [id], onDelete: SetNull)
+  change_kind  subscription_change_kind_enum?
+
+  store_subscription        store_subscriptions         @relation(fields: [store_subscription_id], references: [id])
+  pending_for_subscriptions store_subscriptions[]       @relation("sub_pending_invoice")
+  payments                  subscription_payments[]
+  commission                partner_commissions?
+  commission_accrual        commission_accrual_pending?
+
+  @@index([state, due_at])
+  @@index([store_id])
+  @@index([partner_organization_id, state])
+  @@index([from_plan_id])
+  @@index([to_plan_id])
+}
+
+model subscription_payments {
+  id                Int                             @id @default(autoincrement())
+  invoice_id        Int
+  state             subscription_payment_state_enum @default(pending)
+  amount            Decimal                         @db.Decimal(12, 2)
+  currency          String                          @default("COP") @db.VarChar(3)
+  payment_method    String?                         @db.VarChar(64)
+  gateway_reference String?                         @db.VarChar(255)
+  paid_at           DateTime?                       @db.Timestamp(6)
+  failure_reason    String?                         @db.Text
+  metadata          Json?
+  created_at        DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                        @default(now()) @db.Timestamp(6)
+
+  invoice subscription_invoices @relation(fields: [invoice_id], references: [id])
+
+  @@index([invoice_id, state])
+}
+
+model partner_commissions {
+  id                      Int                           @id @default(autoincrement())
+  partner_organization_id Int
+  invoice_id              Int                           @unique
+  amount                  Decimal                       @db.Decimal(12, 2)
+  currency                String                        @default("COP") @db.VarChar(3)
+  state                   partner_commission_state_enum @default(accrued)
+  accrued_at              DateTime                      @default(now()) @db.Timestamp(6)
+  paid_at                 DateTime?                     @db.Timestamp(6)
+  payout_reference        String?                       @db.VarChar(255)
+  payout_batch_id         Int?
+
+  invoice      subscription_invoices   @relation(fields: [invoice_id], references: [id])
+  organization organizations           @relation("partner_commissions", fields: [partner_organization_id], references: [id])
+  payout_batch partner_payout_batches? @relation(fields: [payout_batch_id], references: [id])
+
+  @@index([partner_organization_id, state])
+}
+
+model partner_payout_batches {
+  id                      Int                             @id @default(autoincrement())
+  partner_organization_id Int
+  period_start            DateTime                        @db.Timestamp(6)
+  period_end              DateTime                        @db.Timestamp(6)
+  total_amount            Decimal                         @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
+  state                   partner_payout_batch_state_enum @default(draft)
+  sent_at                 DateTime?                       @db.Timestamp(6)
+  paid_at                 DateTime?                       @db.Timestamp(6)
+  payout_method           String                          @db.VarChar(64)
+  reference               String?                         @db.VarChar(255)
+  metadata                Json?
+  commissions             partner_commissions[]
+  organization            organizations                   @relation("partner_payouts", fields: [partner_organization_id], references: [id])
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
+
+  @@index([partner_organization_id, state])
+}
+
+model subscription_payment_methods {
+  id                         Int                                    @id @default(autoincrement())
+  store_id                   Int
+  store_subscription_id      Int
+  type                       String                                 @db.VarChar(32)
+  provider                   String                                 @db.VarChar(32)
+  provider_token             String                                 @db.Text
+  last4                      String?                                @db.VarChar(4)
+  brand                      String?                                @db.VarChar(32)
+  expiry_month               String?                                @db.VarChar(2)
+  expiry_year                String?                                @db.VarChar(4)
+  card_holder                String?                                @db.VarChar(128)
+  is_default                 Boolean                                @default(false)
+  state                      subscription_payment_method_state_enum @default(active)
+  consecutive_failures       Int                                    @default(0)
+  replaced_by_id             Int?
+  replaced_at                DateTime?                              @db.Timestamp(6)
+  metadata                   Json?
+  provider_payment_source_id String?                                @db.VarChar(64)
+  acceptance_token_used      String?                                @db.Text
+  cof_registered_at          DateTime?                              @db.Timestamp(6)
+  created_at                 DateTime                               @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime                               @default(now()) @db.Timestamp(6)
+
+  store              stores                         @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store_subscription store_subscriptions            @relation(fields: [store_subscription_id], references: [id], onDelete: Cascade)
+  replaced_by        subscription_payment_methods?  @relation("subscription_payment_methods_replaced_by", fields: [replaced_by_id], references: [id], onDelete: SetNull)
+  replacements       subscription_payment_methods[] @relation("subscription_payment_methods_replaced_by")
+
+  @@index([store_id, state])
+  @@index([store_subscription_id, is_default])
+  @@index([store_id, provider_payment_source_id], map: "idx_spm_store_psid")
+}
+
+model subscription_events {
+  id                    Int                            @id @default(autoincrement())
+  store_subscription_id Int
+  type                  subscription_event_type_enum
+  from_state            store_subscription_state_enum?
+  to_state              store_subscription_state_enum?
+  payload               Json?
+  triggered_by_user_id  Int?
+  triggered_by_job      String?                        @db.VarChar(64)
+  created_at            DateTime                       @default(now()) @db.Timestamp(6)
+  store_subscription    store_subscriptions            @relation(fields: [store_subscription_id], references: [id])
+
+  @@index([store_subscription_id, created_at(sort: Desc)])
+}
+
+model commission_accrual_pending {
+  invoice_id              Int                           @id @unique
+  partner_organization_id Int
+  amount                  Decimal                       @db.Decimal(12, 2)
+  currency                String                        @default("COP") @db.VarChar(3)
+  state                   commission_accrual_state_enum @default(pending)
+  attempts                Int                           @default(0)
+  error_message           String?                       @db.Text
+  created_at              DateTime                      @default(now()) @db.Timestamp(6)
+  processed_at            DateTime?                     @db.Timestamp(6)
+
+  invoice subscription_invoices @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([state, created_at])
+}
+
+model webhook_event_dedup {
+  id          Int      @id @default(autoincrement())
+  processor   String   @db.VarChar(64)
+  event_id    String   @db.VarChar(255)
+  event_type  String?  @db.VarChar(64)
+  received_at DateTime @default(now()) @db.Timestamp(6)
+
+  @@unique([processor, event_id])
+  @@index([processor, event_id])
+  @@index([received_at])
+}
+
+model platform_settings {
+  id                 Int      @id @default(autoincrement())
+  key                String   @unique @db.VarChar(64)
+  value              Json
+  default_trial_days Int      @default(14)
+  description        String?  @db.Text
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @db.Timestamp(6)
+}
+
+/// Audit row that records when a single organization consumed its
+/// platform-wide auto-trial. The UNIQUE constraint on `organization_id`
+/// is the enforcement primitive that makes "one trial per org, ever"
+/// concurrency-safe — a second concurrent INSERT raises P2002.
+model organization_trial_consumptions {
+  id                    Int      @id @default(autoincrement())
+  organization_id       Int      @unique
+  store_subscription_id Int
+  consumed_at           DateTime @default(now()) @db.Timestamp(6)
+  metadata              Json?
+
+  organization       organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store_subscription store_subscriptions @relation(fields: [store_subscription_id], references: [id], onDelete: Restrict)
+
+  @@index([store_subscription_id])
+}
+
+/// Tracks one-time redemption of promotional plan codes per organization.
+/// UNIQUE(organization_id, plan_id) prevents reusing the same promo twice.
+model redemption_consumptions {
+  id              Int      @id @default(autoincrement())
+  organization_id Int
+  plan_id         Int
+  consumed_at     DateTime @default(now()) @db.Timestamp(6)
+  store_id        Int?
+  metadata        Json?
+
+  organization organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  plan         subscription_plans @relation(fields: [plan_id], references: [id], onDelete: Restrict)
+
+  @@unique([organization_id, plan_id])
+  @@index([organization_id])
+  @@index([plan_id])
+}
+
+/// Monthly materialized snapshot of SaaS metrics (MRR, ARR, churn, etc.).
+/// Populated by cron on the 1st of each month for historical reporting.
+model saas_metrics_snapshot {
+  id                    Int      @id @default(autoincrement())
+  year_month            String   @unique @db.VarChar(7)
+  snapshot_at           DateTime @default(now()) @db.Timestamp(6)
+  mrr                   Decimal  @default(0) @db.Decimal(14, 2)
+  arr                   Decimal  @default(0) @db.Decimal(14, 2)
+  active_subscriptions  Int      @default(0)
+  churn_voluntary       Int      @default(0)
+  churn_involuntary     Int      @default(0)
+  new_subscriptions     Int      @default(0)
+  trial_conversions     Int      @default(0)
+  total_revenue         Decimal  @default(0) @db.Decimal(14, 2)
+  partner_payouts_total Decimal  @default(0) @db.Decimal(14, 2)
+  metadata              Json?
+
+  @@index([year_month])
 }

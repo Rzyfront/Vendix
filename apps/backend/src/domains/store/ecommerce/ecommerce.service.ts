@@ -10,7 +10,10 @@ import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { ImageContext } from '@common/config/image-presets';
-import { StoreSettings, EcommerceSettings } from '../settings/interfaces/store-settings.interface';
+import {
+  StoreSettings,
+  EcommerceSettings,
+} from '../settings/interfaces/store-settings.interface';
 
 @Injectable()
 export class EcommerceService {
@@ -21,7 +24,7 @@ export class EcommerceService {
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
-  ) { }
+  ) {}
 
   /**
    * Get e-commerce settings from store_settings (single source of truth)
@@ -35,7 +38,8 @@ export class EcommerceService {
       where: { store_id },
     });
 
-    const ecommerceConfig = (storeSettings?.settings as StoreSettings)?.ecommerce || null;
+    const ecommerceConfig =
+      (storeSettings?.settings as StoreSettings)?.ecommerce || null;
 
     // 2. Find ecommerce domain to get the URL
     const domain = await this.prisma.domain_settings.findFirst({
@@ -64,11 +68,15 @@ export class EcommerceService {
 
     // 5. Sign logo_url in inicio section
     if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
-      config.inicio.logo_url = await this.s3Service.signUrl(config.inicio.logo_url);
+      config.inicio.logo_url = await this.s3Service.signUrl(
+        config.inicio.logo_url,
+      );
     }
 
     // 6. Build ecommerce URL from domain hostname
-    const ecommerceUrl = domain ? this.buildEcommerceUrl(domain.hostname) : null;
+    const ecommerceUrl = domain
+      ? this.buildEcommerceUrl(domain.hostname)
+      : null;
 
     return {
       config,
@@ -133,7 +141,8 @@ export class EcommerceService {
       where: { store_id },
     });
     const currentSettings = (storeSettings?.settings || {}) as StoreSettings;
-    const existingEcommerce = currentSettings.ecommerce || ({} as Partial<EcommerceSettings>);
+    const existingEcommerce =
+      currentSettings.ecommerce || ({} as Partial<EcommerceSettings>);
 
     // 2. Merge with existing ecommerce config
     const mergedEcommerce: EcommerceSettings = {
@@ -141,8 +150,12 @@ export class EcommerceService {
       ...processedDto,
       enabled: true,
       slider: {
-        enable: existingEcommerce.slider?.enable ?? processedDto.slider?.enable ?? false,
-        photos: processedDto.slider?.photos ?? existingEcommerce.slider?.photos ?? [],
+        enable:
+          existingEcommerce.slider?.enable ??
+          processedDto.slider?.enable ??
+          false,
+        photos:
+          processedDto.slider?.photos ?? existingEcommerce.slider?.photos ?? [],
       },
       inicio: {
         ...existingEcommerce.inicio,
@@ -153,25 +166,32 @@ export class EcommerceService {
     } as EcommerceSettings;
 
     // 3. Sanitize URLs to S3 keys before storage
-    if (mergedEcommerce.slider?.photos && Array.isArray(mergedEcommerce.slider.photos)) {
-      mergedEcommerce.slider.photos = mergedEcommerce.slider.photos.map((photo: any) => {
-        const sanitizedPhoto = { ...photo };
-        const sourceValue = photo.key || photo.url;
-        const sanitizedKey = extractS3KeyFromUrl(sourceValue);
-        if (sanitizedKey) {
-          sanitizedPhoto.url = sanitizedKey;
-          sanitizedPhoto.key = sanitizedKey;
-        }
-        return sanitizedPhoto;
-      });
+    if (
+      mergedEcommerce.slider?.photos &&
+      Array.isArray(mergedEcommerce.slider.photos)
+    ) {
+      mergedEcommerce.slider.photos = mergedEcommerce.slider.photos.map(
+        (photo: any) => {
+          const sanitizedPhoto = { ...photo };
+          const sourceValue = photo.key || photo.url;
+          const sanitizedKey = extractS3KeyFromUrl(sourceValue);
+          if (sanitizedKey) {
+            sanitizedPhoto.url = sanitizedKey;
+            sanitizedPhoto.key = sanitizedKey;
+          }
+          return sanitizedPhoto;
+        },
+      );
     }
 
     if (mergedEcommerce.inicio?.logo_url) {
-      mergedEcommerce.inicio.logo_url = extractS3KeyFromUrl(mergedEcommerce.inicio.logo_url) ?? undefined;
+      mergedEcommerce.inicio.logo_url =
+        extractS3KeyFromUrl(mergedEcommerce.inicio.logo_url) ?? undefined;
     }
 
     // 4. Check if logo changed for favicon generation
-    const logoChanged = mergedEcommerce.inicio?.logo_url &&
+    const logoChanged =
+      mergedEcommerce.inicio?.logo_url &&
       mergedEcommerce.inicio.logo_url !== existingEcommerce.inicio?.logo_url;
 
     // 5. Save to store_settings.settings.ecommerce (single source of truth)
@@ -210,8 +230,9 @@ export class EcommerceService {
 
     // 7. Generate favicon if logo changed
     if (logoChanged && mergedEcommerce.inicio?.logo_url) {
-      this.generateFaviconForEcommerce(mergedEcommerce.inicio.logo_url).catch((error) =>
-        this.logger.warn(`Favicon generation failed: ${error.message}`),
+      this.generateFaviconForEcommerce(mergedEcommerce.inicio.logo_url).catch(
+        (error) =>
+          this.logger.warn(`Favicon generation failed: ${error.message}`),
       );
     }
 
@@ -300,7 +321,9 @@ export class EcommerceService {
 
       // Sanitize logo_url - extract S3 key from any signed URL
       if (settings.inicio.logo_url) {
-        settings.inicio.logo_url = extractS3KeyFromUrl(settings.inicio.logo_url);
+        settings.inicio.logo_url = extractS3KeyFromUrl(
+          settings.inicio.logo_url,
+        );
       }
     }
 
@@ -456,7 +479,9 @@ export class EcommerceService {
           },
         });
 
-        this.logger.log(`Favicon updated in store_settings for store ${store_id}`);
+        this.logger.log(
+          `Favicon updated in store_settings for store ${store_id}`,
+        );
       }
     } catch (error) {
       this.logger.error(

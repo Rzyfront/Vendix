@@ -12,7 +12,10 @@ import {
 } from '@nestjs/common';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { ConsolidationService } from './consolidation.service';
 import { IntercompanyDetectionService } from './intercompany-detection.service';
@@ -112,7 +115,8 @@ export class ConsolidationController {
   @Post('sessions/:id/auto-eliminate')
   @Permissions('store:accounting:consolidation:write')
   async autoEliminateIntercompany(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.intercompany_service.autoEliminateIntercompany(id);
+    const result =
+      await this.intercompany_service.autoEliminateIntercompany(id);
     return this.response_service.success(result);
   }
 
@@ -124,7 +128,10 @@ export class ConsolidationController {
     @Param('id', ParseIntPipe) id: number,
     @Query() query: QueryTransactionsDto,
   ) {
-    const result = await this.consolidation_service.getTransactionsDrilldown(id, query);
+    const result = await this.consolidation_service.getTransactionsDrilldown(
+      id,
+      query,
+    );
     return this.response_service.success(result);
   }
 
@@ -145,7 +152,10 @@ export class ConsolidationController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: CreateAdjustmentDto,
   ) {
-    const result = await this.consolidation_service.addManualAdjustment(id, dto);
+    const result = await this.consolidation_service.addManualAdjustment(
+      id,
+      dto,
+    );
     return this.response_service.success(result);
   }
 
@@ -175,7 +185,8 @@ export class ConsolidationController {
   @Get('sessions/:id/reports/income-statement')
   @Permissions('store:accounting:consolidation:read')
   async getConsolidatedIncomeStatement(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.reports_service.getConsolidatedIncomeStatement(id);
+    const result =
+      await this.reports_service.getConsolidatedIncomeStatement(id);
     return this.response_service.success(result);
   }
 

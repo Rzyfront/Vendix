@@ -9,7 +9,11 @@ import { EncryptionService } from '../../../../../common/services/encryption.ser
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
-import { DianSoapClient, WsSecurityCredentials } from '../../../../store/invoicing/providers/dian-direct/dian-soap.client';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import {
+  DianSoapClient,
+  WsSecurityCredentials,
+} from '../../../../store/invoicing/providers/dian-direct/dian-soap.client';
 import { DianXmlSignerService } from '../../../../store/invoicing/providers/dian-direct/dian-xml-signer.service';
 import { DianConfigDecrypted } from '../../../../store/invoicing/providers/dian-direct/interfaces/dian-config.interface';
 import { NominaIndividualBuilder } from './xml/nomina-individual.builder';
@@ -57,6 +61,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     private readonly s3_service: S3Service,
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async sendPayroll(payroll_data: {
@@ -159,9 +164,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         },
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to send payroll to DIAN: ${error.message}`,
-      );
+      this.logger.error(`Failed to send payroll to DIAN: ${error.message}`);
       throw error;
     }
   }
@@ -178,8 +181,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     );
 
     const is_valid =
-      dian_response.success ||
-      dian_response.status_code === '00';
+      dian_response.success || dian_response.status_code === '00';
 
     return {
       tracking_id,
@@ -283,8 +285,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       payroll_period: '5',
     };
 
-    const environment_code =
-      config.environment === 'production' ? '1' : '2';
+    const environment_code = config.environment === 'production' ? '1' : '2';
 
     // Build adjustment XML (tipo 103)
     const { xml, cune } = NominaAdjustmentBuilder.build(
@@ -294,7 +295,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         software_pin: config.software_pin,
         nit: config.nit,
         nit_dv: config.nit_dv || '0',
-        environment: environment_code as '1' | '2',
+        environment: environment_code,
       },
       predecessor,
     );
@@ -437,8 +438,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       payroll_period: '5', // Default: Mensual
     };
 
-    const environment_code =
-      config.environment === 'production' ? '1' : '2';
+    const environment_code = config.environment === 'production' ? '1' : '2';
 
     // Build XML
     const { xml, cune } = NominaIndividualBuilder.build(nomina_data, {
@@ -446,7 +446,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       software_pin: config.software_pin,
       nit: config.nit,
       nit_dv: config.nit_dv || '0',
-      environment: environment_code as '1' | '2',
+      environment: environment_code,
     });
 
     // Sign XML
@@ -511,22 +511,27 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
    */
   private async loadPayrollConfig(): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
-      throw new Error('Store context required for DIAN payroll operations');
+    if (!context?.organization_id) {
+      throw new Error('Organization context required for DIAN payroll operations');
     }
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id,
+        store_id: context.store_id ?? null,
+      });
 
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        store_id: context.store_id,
+        accounting_entity_id: accounting_entity.id,
         configuration_type: 'payroll',
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      orderBy: { is_default: 'desc' },
+      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
 
     if (!config) {
       throw new Error(
-        `No active DIAN payroll configuration for store ${context.store_id}`,
+        `No active DIAN payroll configuration for fiscal entity ${accounting_entity.id}`,
       );
     }
 
@@ -537,16 +542,14 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
-      software_pin: this.encryption.decrypt(
-        config.software_pin_encrypted,
-      ),
+      software_pin: this.encryption.decrypt(config.software_pin_encrypted),
       certificate_s3_key: config.certificate_s3_key,
       certificate_password: config.certificate_password_encrypted
         ? this.encryption.decrypt(config.certificate_password_encrypted)
         : null,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
-      enablement_status: config.enablement_status as any,
+      enablement_status: config.enablement_status,
       test_set_id: config.test_set_id,
     };
   }
@@ -563,9 +566,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     });
 
     if (!org) {
-      throw new Error(
-        `Organization ${config.organization_id} not found`,
-      );
+      throw new Error(`Organization ${config.organization_id} not found`);
     }
 
     const address = org.addresses?.[0];
@@ -638,8 +639,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       sub_type: earnings.sub_worker_type || '00',
       high_risk_pension: earnings.high_risk_pension || false,
       document_type:
-        DOCUMENT_TYPE_MAP[item.document_type] ||
-        DOCUMENT_TYPE_MAP.CC,
+        DOCUMENT_TYPE_MAP[item.document_type] || DOCUMENT_TYPE_MAP.CC,
       document_number: item.document_number,
       first_name,
       last_name: first_last_name,
@@ -711,17 +711,12 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       result.cesantias = {
         payment: Number(earnings.cesantias.payment || 0),
         percentage: Number(earnings.cesantias.percentage || 8.33),
-        interest_payment: Number(
-          earnings.cesantias.interest_payment || 0,
-        ),
+        interest_payment: Number(earnings.cesantias.interest_payment || 0),
       };
     }
 
     // Vacaciones
-    if (
-      earnings.vacations &&
-      Array.isArray(earnings.vacations)
-    ) {
+    if (earnings.vacations && Array.isArray(earnings.vacations)) {
       result.vacations = earnings.vacations.map((v: any) => ({
         start_date: v.start_date,
         end_date: v.end_date,
@@ -731,10 +726,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     }
 
     // Bonificaciones
-    if (
-      earnings.bonuses &&
-      Array.isArray(earnings.bonuses)
-    ) {
+    if (earnings.bonuses && Array.isArray(earnings.bonuses)) {
       result.bonuses = earnings.bonuses.map((b: any) => ({
         taxable: Number(b.taxable || 0),
         non_taxable: Number(b.non_taxable || 0),
@@ -779,16 +771,13 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
   /**
    * Maps payment method from item's earnings or uses defaults.
    */
-  private mapPayment(item: {
-    earnings: Record<string, any>;
-  }): NominaPagoData {
+  private mapPayment(item: { earnings: Record<string, any> }): NominaPagoData {
     const earnings = item.earnings || {};
 
     return {
       form: earnings.payment_form || '1', // 1 = contado
       method:
-        PAYMENT_METHOD_MAP[earnings.payment_method || 'bank_transfer'] ||
-        '47',
+        PAYMENT_METHOD_MAP[earnings.payment_method || 'bank_transfer'] || '47',
       payment_dates: [this.formatDate(new Date())],
     };
   }
@@ -869,10 +858,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
    * Compresses XML to ZIP and encodes as base64.
    * Reuses the minimal ZIP structure pattern from DianDirectProvider.
    */
-  private compressToZipBase64(
-    xml_content: string,
-    filename: string,
-  ): string {
+  private compressToZipBase64(xml_content: string, filename: string): string {
     const xml_buffer = Buffer.from(xml_content, 'utf-8');
     const compressed = zlib.deflateRawSync(xml_buffer);
     const zip = this.buildMinimalZip(filename, xml_buffer, compressed);

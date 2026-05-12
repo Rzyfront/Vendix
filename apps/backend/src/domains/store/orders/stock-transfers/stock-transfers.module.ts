@@ -8,7 +8,11 @@ import { InventoryTransactionsService } from '../../inventory/transactions/inven
 @Module({
   imports: [PrismaModule],
   controllers: [StockTransfersController],
-  providers: [StockTransfersService, StockLevelManager, InventoryTransactionsService],
+  providers: [
+    StockTransfersService,
+    StockLevelManager,
+    InventoryTransactionsService,
+  ],
   exports: [StockTransfersService],
 })
 export class StockTransfersModule {}

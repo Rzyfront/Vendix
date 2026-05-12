@@ -17,7 +17,11 @@ import {
 import { PromotionsService } from './promotions.service';
 import { PromotionEngineService } from './promotion-engine/promotion-engine.service';
 import { ResponseService } from '../../../common/responses/response.service';
-import { CreatePromotionDto, UpdatePromotionDto, QueryPromotionsDto } from './dto';
+import {
+  CreatePromotionDto,
+  UpdatePromotionDto,
+  QueryPromotionsDto,
+} from './dto';
 
 @Controller('store/promotions')
 @UseGuards(PermissionsGuard)
@@ -59,9 +63,7 @@ export class PromotionsController {
   @Post('check-eligibility')
   @Permissions('store:promotions:create')
   @HttpCode(HttpStatus.OK)
-  async checkEligibility(
-    @Body() body: { items: any[]; customer_id?: number },
-  ) {
+  async checkEligibility(@Body() body: { items: any[]; customer_id?: number }) {
     const result = await this.promotion_engine_service.getEligiblePromotions(
       body.items,
       body.customer_id,
@@ -83,7 +85,10 @@ export class PromotionsController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreatePromotionDto) {
     const result = await this.promotions_service.create(dto);
-    return this.response_service.success(result, 'Promocion creada exitosamente');
+    return this.response_service.success(
+      result,
+      'Promocion creada exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -93,7 +98,10 @@ export class PromotionsController {
     @Body() dto: UpdatePromotionDto,
   ) {
     const result = await this.promotions_service.update(id, dto);
-    return this.response_service.success(result, 'Promocion actualizada exitosamente');
+    return this.response_service.success(
+      result,
+      'Promocion actualizada exitosamente',
+    );
   }
 
   @Post(':id/activate')
@@ -101,7 +109,10 @@ export class PromotionsController {
   @HttpCode(HttpStatus.OK)
   async activate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.promotions_service.activate(id);
-    return this.response_service.success(result, 'Promocion activada exitosamente');
+    return this.response_service.success(
+      result,
+      'Promocion activada exitosamente',
+    );
   }
 
   @Post(':id/pause')
@@ -109,7 +120,10 @@ export class PromotionsController {
   @HttpCode(HttpStatus.OK)
   async pause(@Param('id', ParseIntPipe) id: number) {
     const result = await this.promotions_service.pause(id);
-    return this.response_service.success(result, 'Promocion pausada exitosamente');
+    return this.response_service.success(
+      result,
+      'Promocion pausada exitosamente',
+    );
   }
 
   @Post(':id/cancel')
@@ -117,7 +131,10 @@ export class PromotionsController {
   @HttpCode(HttpStatus.OK)
   async cancel(@Param('id', ParseIntPipe) id: number) {
     const result = await this.promotions_service.cancel(id);
-    return this.response_service.success(result, 'Promocion cancelada exitosamente');
+    return this.response_service.success(
+      result,
+      'Promocion cancelada exitosamente',
+    );
   }
 
   @Delete(':id')
@@ -125,6 +142,9 @@ export class PromotionsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.promotions_service.remove(id);
-    return this.response_service.success(null, 'Promocion eliminada exitosamente');
+    return this.response_service.success(
+      null,
+      'Promocion eliminada exitosamente',
+    );
   }
 }

@@ -1,5 +1,6 @@
 import {Component, inject, OnInit, input, output, model, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 
 import {
   FormsModule,
@@ -608,6 +609,7 @@ import {
 })
 export class OrderCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
   private currencyFormatService = inject(CurrencyFormatService);
   private currencyService = inject(CurrencyService);
   readonly isOpen = model<boolean>(false);
@@ -991,14 +993,14 @@ export class OrderCreateModalComponent implements OnInit {
           location_id: parseInt(formValue.location_id),
           status: formValue.status || 'draft',
           payment_terms: formValue.payment_terms,
-          created_by_user_id: 1, // TODO: Get from auth service
+          created_by_user_id: 1, 
         };
       } else if (orderType === 'TRANSFER') {
-        orderData = {
-          ...orderData,
-          location_id: parseInt(formValue.location_id),
-          status: formValue.status || 'draft',
-        };
+        this.isSubmitting.set(false);
+        this.isOpenChange.emit(false);
+        this.resetForm();
+        this.router.navigate(['/private/store/inventory/transfers'], { queryParams: { create: true } });
+        return;
       } else if (orderType === 'RETURN') {
         orderData = {
           ...orderData,
@@ -1017,16 +1019,23 @@ export class OrderCreateModalComponent implements OnInit {
         };
       }
 
-      // Make API call based on order type
-      let apiUrl = `${environment.apiUrl}/orders`;
+      // Make API call based on order type.
+      // Rule Zero: ORG_ADMIN tokens never call /store/*.
+      // PURCHASE has an org-scoped write endpoint. SALE/RETURN do NOT — only
+      // /organization/orders read-only consolidation exists. Until a write
+      // contract is added (Phase 2 follow-up), creating SALE/RETURN from the
+      // org panel is unsupported and will return 403 via DomainScopeGuard.
+      // TODO(operating-scope Phase 5): backend write endpoints for SALE/RETURN
+      // under /organization/orders/* (sales-orders, return-orders).
+      let apiUrl = `${environment.apiUrl}/organization/orders`;
       if (orderType === 'SALE') {
-        apiUrl = `${environment.apiUrl}/sales-orders`;
+        // TODO: replace once /organization/orders/sales-orders POST exists.
+        apiUrl = `${environment.apiUrl}/organization/orders/sales-orders`;
       } else if (orderType === 'PURCHASE') {
-        apiUrl = `${environment.apiUrl}/purchase-orders`;
-      } else if (orderType === 'TRANSFER') {
-        apiUrl = `${environment.apiUrl}/stock-transfers`;
+        apiUrl = `${environment.apiUrl}/organization/purchase-orders`;
       } else if (orderType === 'RETURN') {
-        apiUrl = `${environment.apiUrl}/return-orders`;
+        // TODO: replace once /organization/orders/return-orders POST exists.
+        apiUrl = `${environment.apiUrl}/organization/orders/return-orders`;
       }
 
       this.http.post(apiUrl, orderData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({

@@ -174,6 +174,66 @@ export class LocationsService {
     });
   }
 
+  async setAsDefault(id: number) {
+    const context = RequestContextService.getContext();
+    if (!context?.organization_id || !context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
+    }
+
+    const location = await this.prisma.inventory_locations.findFirst({
+      where: {
+        id,
+        organization_id: context.organization_id,
+        store_id: context.store_id,
+        is_active: true,
+      },
+      select: { id: true },
+    });
+
+    if (!location) {
+      throw new BadRequestException(
+        'La ubicación no existe, no pertenece a la tienda actual o está inactiva',
+      );
+    }
+
+    const now = new Date();
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.inventory_locations.updateMany({
+        where: {
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          is_default: true,
+        },
+        data: {
+          is_default: false,
+          updated_at: now,
+        },
+      });
+
+      const updatedLocation = await tx.inventory_locations.update({
+        where: { id },
+        data: {
+          is_default: true,
+          updated_at: now,
+        },
+        include: {
+          addresses: true,
+        },
+      });
+
+      await tx.stores.update({
+        where: { id: context.store_id },
+        data: {
+          default_location_id: id,
+          updated_at: now,
+        },
+      });
+
+      return updatedLocation;
+    });
+  }
+
   /**
    * Obtiene la ubicación default para un store
    */

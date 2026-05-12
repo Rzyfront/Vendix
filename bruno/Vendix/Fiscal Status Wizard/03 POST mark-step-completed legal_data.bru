@@ -1,0 +1,35 @@
+meta {
+  name: 03 POST mark-step-completed legal_data
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/store/settings/fiscal-status/invoicing/mark-step-completed
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "step": "legal_data",
+    "ref": {
+      "scope": "STORE",
+      "settings_id": 1
+    }
+  }
+}
+
+tests {
+  test("records legal_data step in completed_steps", function () {
+    expect(res.status).to.be.oneOf([200, 201]);
+    const body = res.body.data || res.body;
+    const completed = body.fiscal_status.invoicing.wizard.completed_steps || [];
+    const steps = completed.map(s => s.step || s);
+    expect(steps).to.include('legal_data');
+  });
+}

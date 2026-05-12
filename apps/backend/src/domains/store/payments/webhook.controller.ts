@@ -93,7 +93,9 @@ export class WebhookController {
   }
 
   @Post('wompi')
-  @ApiOperation({ summary: 'Handle Wompi webhooks (Nequi, PSE, Cards, Bancolombia)' })
+  @ApiOperation({
+    summary: 'Handle Wompi webhooks (Nequi, PSE, Cards, Bancolombia)',
+  })
   @ApiResponse({ status: 200, description: 'Webhook processed successfully' })
   async handleWompiWebhook(@Body() body: any) {
     try {

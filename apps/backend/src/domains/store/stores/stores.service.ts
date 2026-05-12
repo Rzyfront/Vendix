@@ -19,12 +19,16 @@ import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
+import { SettingsService } from '../settings/settings.service';
+import { SubscriptionTrialService } from '../subscriptions/services/subscription-trial.service';
 
 @Injectable()
 export class StoresService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
+    private subscriptionTrialService: SubscriptionTrialService,
+    private settingsService: SettingsService,
   ) {}
 
   async create(createStoreDto: CreateStoreDto) {
@@ -81,6 +85,11 @@ export class StoresService {
       },
     });
 
+    // Idempotent safety net — guarantees a settings row exists for the new
+    // store even if any custom `settings` payload above failed to populate
+    // the row, and stamps current schema version via defaults.
+    await this.settingsService.ensureDefaults(store.id);
+
     // Refetch to include settings
     const refetched = await this.prisma.stores.findUnique({
       where: { id: store.id },
@@ -96,6 +105,13 @@ export class StoresService {
 
     // Create default location automatically
     await this.createDefaultLocationForStore(refetched, organization_id);
+
+    // Create trial subscription for the store (no-op if org already consumed
+    // its one-shot trial or no default plan is configured).
+    await this.subscriptionTrialService.createTrialForStore(
+      store.id,
+      organization_id,
+    );
 
     return {
       ...refetched,
@@ -239,7 +255,7 @@ export class StoresService {
         });
 
         for (const domain of domains) {
-          const config = (domain.config as any) || {};
+          const config = domain.config || {};
           const branding = config.branding || {};
 
           await this.prisma.domain_settings.update({

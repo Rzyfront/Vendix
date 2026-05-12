@@ -22,4 +22,4 @@ import { HelpCenterModule } from './help-center/help-center.module';
     HelpCenterModule,
   ],
 })
-export class DomainsModule { }
+export class DomainsModule {}

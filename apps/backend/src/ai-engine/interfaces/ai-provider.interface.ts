@@ -23,7 +23,10 @@ export interface AIRequestOptions {
   systemPrompt?: string;
   thinking?: boolean;
   tools?: AIToolDefinition[];
-  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+  tool_choice?:
+    | 'auto'
+    | 'none'
+    | { type: 'function'; function: { name: string } };
 }
 
 export interface AIResponse {
@@ -79,10 +82,7 @@ export interface AIProviderConfig {
 }
 
 export interface AIProvider {
-  chat(
-    messages: AIMessage[],
-    options?: AIRequestOptions,
-  ): Promise<AIResponse>;
+  chat(messages: AIMessage[], options?: AIRequestOptions): Promise<AIResponse>;
   complete(prompt: string, options?: AIRequestOptions): Promise<AIResponse>;
   testConnection(): Promise<{ success: boolean; message: string }>;
   chatStream?(

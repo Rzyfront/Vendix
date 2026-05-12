@@ -32,8 +32,11 @@ export function buildEntityQueries(
   ctx: EntityContext,
 ): Array<{ entityType: string; entityId: number }> {
   const queries: Array<{ entityType: string; entityId: number }> = [];
-  if (ctx.customer_id) queries.push({ entityType: 'customer', entityId: ctx.customer_id });
-  if (ctx.booking_id) queries.push({ entityType: 'booking', entityId: ctx.booking_id });
-  if (ctx.order_id) queries.push({ entityType: 'order', entityId: ctx.order_id });
+  if (ctx.customer_id)
+    queries.push({ entityType: 'customer', entityId: ctx.customer_id });
+  if (ctx.booking_id)
+    queries.push({ entityType: 'booking', entityId: ctx.booking_id });
+  if (ctx.order_id)
+    queries.push({ entityType: 'order', entityId: ctx.order_id });
   return queries;
 }

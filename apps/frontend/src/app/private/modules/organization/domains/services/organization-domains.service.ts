@@ -13,6 +13,7 @@ import {
   DomainStatus,
   DomainOwnership,
   AppType,
+  DnsInstructions,
 } from '../interfaces/domain.interface';
 
 export interface ApiResponse<T> {
@@ -161,7 +162,16 @@ export class OrganizationDomainsService {
   getDomainStatusOptions(): Array<{ value: DomainStatus; label: string }> {
     return [
       { value: DomainStatus.PENDING_DNS, label: 'Pendiente DNS' },
+      { value: DomainStatus.PENDING_OWNERSHIP, label: 'Pendiente propiedad' },
+      { value: DomainStatus.VERIFYING_OWNERSHIP, label: 'Verificando propiedad' },
       { value: DomainStatus.PENDING_SSL, label: 'Pendiente SSL' },
+      { value: DomainStatus.PENDING_CERTIFICATE, label: 'Pendiente certificado' },
+      { value: DomainStatus.ISSUING_CERTIFICATE, label: 'Emitiendo certificado' },
+      { value: DomainStatus.PENDING_ALIAS, label: 'Pendiente alias' },
+      { value: DomainStatus.PROPAGATING, label: 'Propagando' },
+      { value: DomainStatus.FAILED_OWNERSHIP, label: 'Falló propiedad' },
+      { value: DomainStatus.FAILED_CERTIFICATE, label: 'Falló certificado' },
+      { value: DomainStatus.FAILED_ALIAS, label: 'Falló alias' },
       { value: DomainStatus.ACTIVE, label: 'Activo' },
       { value: DomainStatus.DISABLED, label: 'Deshabilitado' },
     ];
@@ -181,14 +191,41 @@ export class OrganizationDomainsService {
 
   /**
    * App type options for dropdown
-   * Note: Admin types (VENDIX_ADMIN, ORG_ADMIN, STORE_ADMIN) are system-managed
-   * and not available for user configuration. Only public-facing app types are shown.
+   * Domain app type is the runtime router target for custom domains.
    */
   getAppTypeOptions(): Array<{ value: AppType; label: string }> {
     return [
       { value: AppType.STORE_ECOMMERCE, label: 'E-commerce' },
       { value: AppType.STORE_LANDING, label: 'Landing de Tienda' },
+      { value: AppType.STORE_ADMIN, label: 'Admin de Tienda' },
       { value: AppType.ORG_LANDING, label: 'Landing de Organización' },
+      { value: AppType.ORG_ADMIN, label: 'Admin de Organización' },
     ];
+  }
+
+  /**
+   * Renew SSL certificate for a domain
+   */
+  renewSsl(domainId: number): Observable<ApiResponse<{ renewed: boolean; ssl_status: string; message: string }>> {
+    return this.http.post<ApiResponse<{ renewed: boolean; ssl_status: string; message: string }>>(
+      `${this.apiUrl}/organization/domains/${domainId}/ssl-renew`,
+      {},
+    );
+  }
+
+  provisionNext(domainId: number): Observable<ApiResponse<Domain>> {
+    return this.http.post<ApiResponse<Domain>>(
+      `${this.apiUrl}/organization/domains/${domainId}/provision-next`,
+      {},
+    );
+  }
+
+  /**
+   * Get DNS instructions for a domain
+   */
+  getDnsInstructions(hostname: string): Observable<ApiResponse<DnsInstructions>> {
+    return this.http.get<ApiResponse<DnsInstructions>>(
+      `${this.apiUrl}/organization/domains/dns-instructions/${hostname}`,
+    );
   }
 }

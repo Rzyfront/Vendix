@@ -5,9 +5,9 @@ import { OrganizationPrismaService } from '../../../prisma/services/organization
 import { ResponseModule } from '@common/responses/response.module';
 
 @Module({
-    imports: [ResponseModule],
-    controllers: [AuditController],
-    providers: [OrganizationAuditService, OrganizationPrismaService],
-    exports: [OrganizationAuditService],
+  imports: [ResponseModule],
+  controllers: [AuditController],
+  providers: [OrganizationAuditService, OrganizationPrismaService],
+  exports: [OrganizationAuditService],
 })
-export class AuditModule { }
+export class AuditModule {}

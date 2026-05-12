@@ -1,5 +1,16 @@
-import { IsOptional, IsString, IsArray, ValidateNested, IsInt, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsArray,
+  ValidateNested,
+  IsInt,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  CheckoutShippingAddressDto,
+  GuestCheckoutCustomerDto,
+} from './checkout.dto';
 
 class WhatsappCartItemDto {
   @IsInt()
@@ -34,4 +45,14 @@ export class WhatsappCheckoutDto {
   @IsInt()
   @Min(1)
   shipping_rate_id?: number;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CheckoutShippingAddressDto)
+  shipping_address?: CheckoutShippingAddressDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => GuestCheckoutCustomerDto)
+  guest_customer?: GuestCheckoutCustomerDto;
 }

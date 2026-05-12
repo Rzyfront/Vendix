@@ -124,13 +124,13 @@ Disallow: /
     return this.buildSitemapXml(base_url, urls, now);
   }
 
-  private async buildOrgLandingSitemap(context: DomainContext): Promise<string> {
+  private async buildOrgLandingSitemap(
+    context: DomainContext,
+  ): Promise<string> {
     const now = new Date().toISOString();
 
     // Org landing is a single page, but we can also list its active stores
-    const urls = [
-      { path: '/', priority: '1.0', changefreq: 'weekly' },
-    ];
+    const urls = [{ path: '/', priority: '1.0', changefreq: 'weekly' }];
 
     return this.buildSitemapXml(context.base_url, urls, now);
   }
@@ -193,7 +193,11 @@ ${product_entries}
 
   private buildMinimalSitemap(base_url: string): string {
     const now = new Date().toISOString();
-    return this.buildSitemapXml(base_url, [{ path: '/', priority: '1.0', changefreq: 'monthly' }], now);
+    return this.buildSitemapXml(
+      base_url,
+      [{ path: '/', priority: '1.0', changefreq: 'monthly' }],
+      now,
+    );
   }
 
   // ---------------------------------------------------------------------------

@@ -20,7 +20,7 @@ export class AddressesService {
   constructor(
     private prisma: OrganizationPrismaService,
     private accessValidation: AccessValidationService,
-  ) { }
+  ) {}
 
   async create(createAddressDto: CreateAddressDto, user: any) {
     const context = RequestContextService.getContext();
@@ -52,7 +52,9 @@ export class AddressesService {
     } else if (createAddressDto.organization_id) {
       // Validate that DTO org id matches context
       if (createAddressDto.organization_id !== organization_id) {
-        throw new ForbiddenException('Cannot create address for another organization');
+        throw new ForbiddenException(
+          'Cannot create address for another organization',
+        );
       }
     } else if (createAddressDto.user_id) {
       await this.accessValidation.validateUserAccess(
@@ -187,7 +189,7 @@ export class AddressesService {
       throw new NotFoundException('Address not found');
     }
 
-    // Validar permisos adicionales (store/user) si es necesario, 
+    // Validar permisos adicionales (store/user) si es necesario,
     // pero organization access ya está garantizado por el prisma service.
     if (address.store_id) {
       await this.accessValidation.validateStoreAccess(address.store_id, user);

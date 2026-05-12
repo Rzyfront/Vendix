@@ -16,7 +16,7 @@ export interface ScopeValidationOptions {
 
 @Injectable()
 export class ScopeValidationMiddleware implements NestMiddleware {
-  constructor(private readonly requestContextService: RequestContextService) { }
+  constructor(private readonly requestContextService: RequestContextService) {}
 
   use(
     req: Request,

@@ -1,9 +1,18 @@
-import { Controller, Get, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Body,
+  Query,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import {
   UpdateOrganizationDto,
   OrganizationDashboardDto,
   UpgradeAccountTypeDto,
+  UpdateOperatingScopeDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -20,55 +29,33 @@ export class OrganizationsController {
   @Get('profile')
   @Permissions('organization:organizations:read')
   async getProfile() {
-    try {
-      const result = await this.organizationsService.getProfile();
-      return this.responseService.success(
-        result,
-        'Perfil de organización obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener el perfil de la organización',
-        error.message,
-      );
-    }
+    const result = await this.organizationsService.getProfile();
+    return this.responseService.success(
+      result,
+      'Perfil de organización obtenido exitosamente',
+    );
   }
 
   @Patch('profile')
   @Permissions('organization:organizations:update')
   async updateProfile(@Body() update_organization_dto: UpdateOrganizationDto) {
-    try {
-      const result = await this.organizationsService.updateProfile(
-        update_organization_dto,
-      );
-      return this.responseService.success(
-        result,
-        'Perfil de organización actualizado exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al actualizar el perfil de la organización',
-        error.message,
-      );
-    }
+    const result = await this.organizationsService.updateProfile(
+      update_organization_dto,
+    );
+    return this.responseService.success(
+      result,
+      'Perfil de organización actualizado exitosamente',
+    );
   }
 
   @Get('dashboard')
   @Permissions('organization:organizations:read')
   async getDashboard(@Query() dashboard_query: OrganizationDashboardDto) {
-    try {
-      const result =
-        await this.organizationsService.getDashboard(dashboard_query);
-      return this.responseService.success(
-        result,
-        'Dashboard de organización obtenido exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener el dashboard de la organización',
-        error.message,
-      );
-    }
+    const result = await this.organizationsService.getDashboard(dashboard_query);
+    return this.responseService.success(
+      result,
+      'Dashboard de organización obtenido exitosamente',
+    );
   }
 
   @Patch('upgrade-account-type')
@@ -78,24 +65,41 @@ export class OrganizationsController {
     return this.responseService.success(result, result.message);
   }
 
+  @Get('config')
+  @Permissions('organization:settings:read')
+  async getConfig() {
+    const result = await this.organizationsService.getConfig();
+    return this.responseService.success(
+      result,
+      'Configuración de organización obtenida exitosamente',
+    );
+  }
+
+  @Patch('operating-scope')
+  @Permissions('organization:settings:update')
+  async updateOperatingScope(@Body() dto: UpdateOperatingScopeDto) {
+    const result = await this.organizationsService.updateOperatingScope(dto);
+    return this.responseService.success(
+      result,
+      result.changed
+        ? 'Alcance operativo actualizado exitosamente'
+        : 'El alcance operativo no cambió',
+    );
+  }
+
   @Get(':id/stats')
   @Permissions('organization:organizations:read')
-  async getStats(@Param('id') organizationId: string, @Query() dashboard_query: OrganizationDashboardDto) {
-    try {
-      const result =
-        await this.organizationsService.getOrganizationStats(
-          Number(organizationId),
-          dashboard_query,
-        );
-      return this.responseService.success(
-        result,
-        'Estadísticas de organización obtenidas exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener las estadísticas de la organización',
-        error.message,
-      );
-    }
+  async getStats(
+    @Param('id') organizationId: string,
+    @Query() dashboard_query: OrganizationDashboardDto,
+  ) {
+    const result = await this.organizationsService.getOrganizationStats(
+      Number(organizationId),
+      dashboard_query,
+    );
+    return this.responseService.success(
+      result,
+      'Estadísticas de organización obtenidas exitosamente',
+    );
   }
 }

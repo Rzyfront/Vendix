@@ -1,0 +1,58 @@
+<div class="w-full">
+  <div
+    class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+  >
+    @for (item of statsItems(); track item) {
+      <app-stats
+        [title]="item.title"
+        [value]="item.value"
+        [smallText]="item.smallText"
+        [iconName]="item.iconName"
+        [iconBgColor]="item.iconBgColor"
+        [iconColor]="item.iconColor"
+      ></app-stats>
+    }
+  </div>
+
+  <app-org-roles-list
+    [roles]="filteredRoles()"
+    [loading]="isLoading()"
+    [totalCount]="roles().length"
+    (create)="createRole()"
+    (edit)="editRole($event)"
+    (managePermissions)="openPermissionsModal($event)"
+    (delete)="confirmDelete($event)"
+    (refresh)="refreshRoles()"
+    (searchChange)="onSearchChange($event)"
+    (filterChange)="onFilterChange($event)"
+    (sort)="onSortChange($event)"
+  ></app-org-roles-list>
+
+  @defer (when showCreateModal()) {
+    <app-role-create-modal
+      [(isOpen)]="showCreateModal"
+      (roleCreated)="onRoleCreated($event)"
+      (cancel)="showCreateModal.set(false)"
+    ></app-role-create-modal>
+  }
+
+  @defer (when showEditModal() && currentRole()) {
+    <app-role-edit-modal
+      [role]="currentRole()"
+      [(isOpen)]="showEditModal"
+      (roleUpdated)="onRoleUpdated($event)"
+      (cancel)="showEditModal.set(false); currentRole.set(null)"
+    ></app-role-edit-modal>
+  }
+
+  @defer (when showPermissionsModal() && currentRole()) {
+    <app-permission-tree-selector
+      [roleId]="currentRole()!.id"
+      [roleName]="currentRole()!.name"
+      [(isOpen)]="showPermissionsModal"
+      [isSubmitting]="isSubmitting()"
+      (permissionsChange)="onPermissionsUpdated($event)"
+      (cancel)="showPermissionsModal.set(false); currentRole.set(null)"
+    ></app-permission-tree-selector>
+  }
+</div>

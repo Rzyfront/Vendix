@@ -1,11 +1,9 @@
-import {
-  Injectable,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { QueryJournalEntryDto } from './dto/query-journal-entry.dto';
@@ -14,13 +12,25 @@ const ENTRY_INCLUDE = {
   accounting_entry_lines: {
     include: {
       account: {
-        select: { id: true, code: true, name: true, account_type: true, nature: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          account_type: true,
+          nature: true,
+        },
       },
     },
     orderBy: { id: 'asc' as const },
   },
   fiscal_period: {
-    select: { id: true, name: true, start_date: true, end_date: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      start_date: true,
+      end_date: true,
+      status: true,
+    },
   },
   created_by_user: {
     select: { id: true, first_name: true, last_name: true },
@@ -35,7 +45,10 @@ const ENTRY_INCLUDE = {
 
 @Injectable()
 export class JournalEntriesService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -57,7 +70,6 @@ export class JournalEntriesService {
       status,
       date_from,
       date_to,
-      store_id,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -72,7 +84,7 @@ export class JournalEntriesService {
       ...(fiscal_period_id && { fiscal_period_id }),
       ...(entry_type && { entry_type: entry_type as any }),
       ...(status && { status: status as any }),
-      ...(store_id && { store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
       ...(date_from && {
         entry_date: {
           gte: new Date(date_from),
@@ -118,6 +130,12 @@ export class JournalEntriesService {
 
   async create(create_dto: CreateJournalEntryDto) {
     const context = this.getContext();
+    const store_id = create_dto.store_id || context.store_id || null;
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id,
+      });
 
     // Validate fiscal period exists and is open
     const fiscal_period = await this.prisma.fiscal_periods.findFirst({
@@ -131,6 +149,16 @@ export class JournalEntriesService {
     if (fiscal_period.status !== 'open') {
       throw new ConflictException(
         `Cannot create entries in fiscal period '${fiscal_period.name}' — status is '${fiscal_period.status}'`,
+      );
+    }
+
+    if (
+      fiscal_period.accounting_entity_id &&
+      fiscal_period.accounting_entity_id !== accounting_entity.id
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.ACC_VALIDATE_001,
+        'Fiscal period does not belong to the resolved fiscal accounting entity',
       );
     }
 
@@ -195,10 +223,10 @@ export class JournalEntriesService {
     }
 
     // Generate entry number
-    const entry_number = await this.generateEntryNumber(context.organization_id!);
-
-    // Determine store_id: use DTO value, or context store_id if available
-    const store_id = create_dto.store_id || context.store_id || null;
+    const entry_number = await this.generateEntryNumber(
+      context.organization_id!,
+      accounting_entity.id,
+    );
 
     // Create entry with lines in a transaction
     const entry = await this.prisma.$transaction(async (tx: any) => {
@@ -206,6 +234,7 @@ export class JournalEntriesService {
         data: {
           organization_id: context.organization_id,
           store_id,
+          accounting_entity_id: accounting_entity.id,
           entry_number,
           entry_type: (create_dto.entry_type as any) || 'manual',
           status: 'draft',
@@ -249,7 +278,10 @@ export class JournalEntriesService {
     }
 
     // If changing fiscal period, validate it's open
-    if (update_dto.fiscal_period_id && update_dto.fiscal_period_id !== entry.fiscal_period_id) {
+    if (
+      update_dto.fiscal_period_id &&
+      update_dto.fiscal_period_id !== entry.fiscal_period_id
+    ) {
       const fiscal_period = await this.prisma.fiscal_periods.findFirst({
         where: { id: update_dto.fiscal_period_id },
       });
@@ -261,6 +293,16 @@ export class JournalEntriesService {
       if (fiscal_period.status !== 'open') {
         throw new ConflictException(
           `Cannot move entry to fiscal period '${fiscal_period.name}' — status is '${fiscal_period.status}'`,
+        );
+      }
+
+      if (
+        fiscal_period.accounting_entity_id &&
+        fiscal_period.accounting_entity_id !== entry.accounting_entity_id
+      ) {
+        throw new VendixHttpException(
+          ErrorCodes.ACC_VALIDATE_001,
+          'Fiscal period does not belong to this journal entry fiscal entity',
         );
       }
     }
@@ -313,9 +355,15 @@ export class JournalEntriesService {
         await tx.accounting_entries.update({
           where: { id },
           data: {
-            ...(update_dto.entry_date && { entry_date: new Date(update_dto.entry_date) }),
-            ...(update_dto.description !== undefined && { description: update_dto.description }),
-            ...(update_dto.fiscal_period_id && { fiscal_period_id: update_dto.fiscal_period_id }),
+            ...(update_dto.entry_date && {
+              entry_date: new Date(update_dto.entry_date),
+            }),
+            ...(update_dto.description !== undefined && {
+              description: update_dto.description,
+            }),
+            ...(update_dto.fiscal_period_id && {
+              fiscal_period_id: update_dto.fiscal_period_id,
+            }),
             total_debit: new Prisma.Decimal(total_debit),
             total_credit: new Prisma.Decimal(total_credit),
           },
@@ -336,9 +384,15 @@ export class JournalEntriesService {
       await this.prisma.accounting_entries.update({
         where: { id },
         data: {
-          ...(update_dto.entry_date && { entry_date: new Date(update_dto.entry_date) }),
-          ...(update_dto.description !== undefined && { description: update_dto.description }),
-          ...(update_dto.fiscal_period_id && { fiscal_period_id: update_dto.fiscal_period_id }),
+          ...(update_dto.entry_date && {
+            entry_date: new Date(update_dto.entry_date),
+          }),
+          ...(update_dto.description !== undefined && {
+            description: update_dto.description,
+          }),
+          ...(update_dto.fiscal_period_id && {
+            fiscal_period_id: update_dto.fiscal_period_id,
+          }),
         },
       });
     }
@@ -361,13 +415,18 @@ export class JournalEntriesService {
     });
   }
 
-  private async generateEntryNumber(organization_id: number): Promise<string> {
+  private async generateEntryNumber(
+    organization_id: number,
+    accounting_entity_id: number,
+  ): Promise<string> {
     const year = new Date().getFullYear();
     const prefix = `AE-${year}-`;
 
     // Find the latest entry number for this organization and year
     const latest = await this.prisma.accounting_entries.findFirst({
       where: {
+        organization_id,
+        accounting_entity_id,
         entry_number: { startsWith: prefix },
       },
       orderBy: { entry_number: 'desc' },

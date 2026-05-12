@@ -1,0 +1,67 @@
+meta {
+  name: Re-subscribe From Cancelled — Commit
+  type: http
+  seq: 41
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/commit
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "planId": {{plan_id}},
+    "no_refund_acknowledged": true
+  }
+}
+
+docs {
+  Preconditions:
+    - Active session belongs to a store whose store_subscriptions row is in
+      `cancelled` (or `expired`) state.
+    - `plan_id` is a non-promotional, non-archived target plan.
+
+  Expected flow:
+    - Path D in SubscriptionCheckoutController:
+      1. transition cancelled/expired -> pending_payment
+      2. applyResubscribe() resets period and pricing
+      3. issueInvoice() emits a fresh invoice for the new plan
+      4. prepareWidgetCharge() builds a Wompi widget config
+
+  This test validates the response shape without actually charging.
+}
+
+tests {
+  test("Re-subscribe commit returns 200", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.message).to.match(/Re-subscription committed/i);
+  });
+
+  test("Response includes mode='re_subscribe'", function() {
+    expect(res.body.data.mode).to.equal("re_subscribe");
+  });
+
+  test("Response includes Wompi widget config (paid plan)", function() {
+    expect(res.body.data.widget).to.not.equal(null);
+    expect(res.body.data.widget).to.have.property("public_key");
+    expect(res.body.data.widget).to.have.property("currency");
+    expect(res.body.data.widget).to.have.property("amount_in_cents");
+    expect(res.body.data.widget).to.have.property("reference");
+    expect(res.body.data.widget).to.have.property("signature_integrity");
+    expect(res.body.data.widget.amount_in_cents).to.be.greaterThan(0);
+  });
+
+  test("Subscription state reset to pending_payment", function() {
+    expect(res.body.data.subscription.state).to.equal("pending_payment");
+    expect(res.body.data.subscription.cancelled_at).to.equal(null);
+    expect(res.body.data.subscription.scheduled_cancel_at).to.equal(null);
+    expect(res.body.data.subscription.auto_renew).to.equal(true);
+  });
+
+  test("Invoice id present in response", function() {
+    expect(res.body.data.invoiceId).to.be.a("number");
+  });
+}

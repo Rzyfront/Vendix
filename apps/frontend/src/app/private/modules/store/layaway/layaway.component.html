@@ -59,14 +59,11 @@
           [debounceTime]="300"
           (searchChange)="onSearch($event)"
         ></app-inputsearch>
-        <app-button
-          variant="outline"
-          size="md"
-          customClasses="w-10 sm:w-11 !px-0 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          (clicked)="openCreateModal()"
-        >
-          <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-        </app-button>
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [actions]="dropdownActions"
+          (actionClick)="onActionClick($event)"
+        ></app-options-dropdown>
       </div>
     </div>
   </div>

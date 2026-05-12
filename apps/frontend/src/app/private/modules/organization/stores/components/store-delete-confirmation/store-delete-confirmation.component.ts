@@ -76,10 +76,6 @@ export class StoreDeleteConfirmationComponent {
       return;
     }
 
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.confirm.emit();
     this.slugInput.reset();
     this.showError = false;

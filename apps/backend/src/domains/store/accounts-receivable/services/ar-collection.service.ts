@@ -8,9 +8,7 @@ export class ArCollectionService {
   // ─── UPCOMING DUE ──────────────────────────────────────────
   async getUpcomingDue(days: number = 7) {
     const now = new Date();
-    const future_date = new Date(
-      now.getTime() + days * 24 * 60 * 60 * 1000,
-    );
+    const future_date = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
     const rows = await this.prisma.accounts_receivable.findMany({
       where: {
@@ -19,7 +17,13 @@ export class ArCollectionService {
       },
       include: {
         customer: {
-          select: { id: true, first_name: true, last_name: true, email: true, phone: true },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+          },
         },
       },
       orderBy: { due_date: 'asc' },
@@ -50,7 +54,13 @@ export class ArCollectionService {
         document_number: true,
         customer_id: true,
         customer: {
-          select: { id: true, first_name: true, last_name: true, email: true, phone: true },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+          },
         },
       },
       orderBy: { days_overdue: 'desc' },
@@ -82,7 +92,7 @@ export class ArCollectionService {
     for (const ar of overdue) {
       if (!grouped[ar.customer_id]) {
         grouped[ar.customer_id] = {
-          customer: ar.customer as any,
+          customer: ar.customer,
           total_overdue: 0,
           max_days_overdue: 0,
           records: [],

@@ -30,7 +30,8 @@ export class BookingConfirmationJob {
     });
 
     for (const booking of expiredBookings) {
-      const settings = (booking.store?.store_settings?.settings as any)?.reservations;
+      const settings = (booking.store?.store_settings?.settings as any)
+        ?.reservations;
       if (!settings?.confirmation?.auto_cancel_if_unconfirmed) continue;
 
       await this.prisma.bookings.update({
@@ -51,7 +52,9 @@ export class BookingConfirmationJob {
     }
 
     if (expiredBookings.length > 0) {
-      this.logger.log(`Processed ${expiredBookings.length} expired confirmation(s)`);
+      this.logger.log(
+        `Processed ${expiredBookings.length} expired confirmation(s)`,
+      );
     }
   }
 }

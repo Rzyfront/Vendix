@@ -99,6 +99,25 @@
       <!-- Step 1: Calendar -->
       @if (currentStep() === 0) {
         <div class="step-content">
+          @if (variants().length > 0) {
+            <div class="variant-section">
+              <h2 class="step-title">Selecciona una opción</h2>
+              <div class="variant-list">
+                @for (variant of variants(); track variant.id) {
+                  <button
+                    class="variant-btn"
+                    [class.selected]="selectedVariantId() === variant.id"
+                    (click)="onVariantSelected(variant)"
+                  >
+                    <span class="variant-name">{{ variant.name || variant.sku }}</span>
+                    @if (variant.price_override) {
+                      <span class="variant-price">{{ variant.final_price | currency }}</span>
+                    }
+                  </button>
+                }
+              </div>
+            </div>
+          }
           <h2 class="step-title">Selecciona una fecha</h2>
 
           <!-- Month navigation -->
@@ -315,6 +334,12 @@
               <span class="summary-label">Servicio</span>
               <span class="summary-value">{{ product()?.name }}</span>
             </div>
+            @if (selectedVariant(); as variant) {
+              <div class="summary-row">
+                <span class="summary-label">Opción</span>
+                <span class="summary-value">{{ variant.name || variant.sku }}</span>
+              </div>
+            }
             <div class="summary-row">
               <span class="summary-label">Fecha</span>
               <span class="summary-value">{{

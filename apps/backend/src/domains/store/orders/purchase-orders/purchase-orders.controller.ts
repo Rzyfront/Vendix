@@ -175,12 +175,20 @@ export class PurchaseOrdersController {
       if (!file) {
         throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
       }
-      const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+      const allowedTypes = [
+        'image/jpeg',
+        'image/png',
+        'image/webp',
+        'application/pdf',
+      ];
       if (!allowedTypes.includes(file.mimetype)) {
         throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
       }
       const result = await this.invoiceScannerService.scanInvoice(file);
-      return this.responseService.success(result, 'Factura escaneada exitosamente');
+      return this.responseService.success(
+        result,
+        'Factura escaneada exitosamente',
+      );
     } catch (error) {
       if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
@@ -196,7 +204,10 @@ export class PurchaseOrdersController {
   async matchProducts(@Body() scanResult: any) {
     try {
       const result = await this.invoiceScannerService.matchProducts(scanResult);
-      return this.responseService.success(result, 'Coincidencias de productos encontradas');
+      return this.responseService.success(
+        result,
+        'Coincidencias de productos encontradas',
+      );
     } catch (error) {
       if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
@@ -215,8 +226,14 @@ export class PurchaseOrdersController {
     @Body() confirmDto: ConfirmScannedInvoiceDto,
   ) {
     try {
-      const result = await this.invoiceScannerService.confirmAndCreatePO(confirmDto, file);
-      return this.responseService.created(result, 'Orden de compra creada desde factura escaneada');
+      const result = await this.invoiceScannerService.confirmAndCreatePO(
+        confirmDto,
+        file,
+      );
+      return this.responseService.created(
+        result,
+        'Orden de compra creada desde factura escaneada',
+      );
     } catch (error) {
       if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
@@ -314,7 +331,11 @@ export class PurchaseOrdersController {
           400,
         );
       }
-      const result = await this.purchaseOrdersService.addAttachment(+id, file, dto);
+      const result = await this.purchaseOrdersService.addAttachment(
+        +id,
+        file,
+        dto,
+      );
       return this.responseService.created(
         result,
         'Archivo adjunto agregado exitosamente',
@@ -353,7 +374,8 @@ export class PurchaseOrdersController {
     @Param('attachmentId') attachmentId: string,
   ) {
     try {
-      const result = await this.purchaseOrdersService.removeAttachment(+attachmentId);
+      const result =
+        await this.purchaseOrdersService.removeAttachment(+attachmentId);
       return this.responseService.success(
         result,
         'Archivo adjunto eliminado exitosamente',
@@ -488,10 +510,7 @@ export class PurchaseOrdersController {
 
   @Patch(':id/receive')
   @Permissions('store:orders:purchase_orders:receive')
-  async receive(
-    @Param('id') id: string,
-    @Body() dto: ReceivePurchaseOrderDto,
-  ) {
+  async receive(@Param('id') id: string, @Body() dto: ReceivePurchaseOrderDto) {
     try {
       const result = await this.purchaseOrdersService.receive(+id, dto);
       return this.responseService.success(

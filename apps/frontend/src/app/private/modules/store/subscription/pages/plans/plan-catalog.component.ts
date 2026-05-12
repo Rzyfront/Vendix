@@ -1,0 +1,387 @@
+import { Component, OnInit, computed, inject, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
+import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  ButtonComponent,
+  EmptyStateComponent,
+  IconComponent,
+  PricingCardComponent,
+  ToastService,
+} from '../../../../../../shared/components/index';
+import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
+import { StoreSubscriptionService } from '../../services/store-subscription.service';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { SubscriptionPlan } from '../../interfaces/store-subscription.interface';
+import { WompiCheckoutService } from '../../../../../../core/services/wompi-checkout.service';
+import { PricingCardSelectEvent } from '../../../../../../shared/components/pricing-card/pricing-card.component';
+
+type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
+
+const CYCLE_ORDER: BillingCycle[] = [
+  'monthly', 'quarterly', 'semiannual', 'annual', 'lifetime',
+];
+
+const CYCLE_LABEL: Record<BillingCycle, string> = {
+  monthly: 'Mensual',
+  quarterly: 'Trimestral',
+  semiannual: 'Semestral',
+  annual: 'Anual',
+  lifetime: 'Pago único',
+};
+
+// S2.1 — Same reason → copy mapping as in checkout component.
+const COUPON_REASON_COPY: Record<string, string> = {
+  not_found: 'Cupón no encontrado',
+  expired: 'Cupón expirado o aún no vigente',
+  already_used: 'Este cupón ya fue redimido en esta tienda',
+  not_eligible: 'Tu tienda no cumple los requisitos del cupón',
+  invalid_state: 'El cupón está deshabilitado',
+  network_error: 'Error de red al validar el cupón',
+};
+
+@Component({
+  selector: 'app-plan-catalog',
+  standalone: true,
+  imports: [
+    EmptyStateComponent,
+    PricingCardComponent,
+    ButtonComponent,
+    IconComponent,
+    ReactiveFormsModule,
+  ],
+  template: `
+    <div class="w-full max-w-7xl mx-auto px-4 py-2 lg:py-4 space-y-5">
+      <!-- Hero header -->
+      <header class="text-center space-y-3 max-w-2xl mx-auto">
+        <span class="inline-block bg-primary-100 text-primary-700 text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full">
+          Planes y precios
+        </span>
+        <h1 class="text-3xl md:text-4xl font-extrabold text-text-primary leading-tight">
+          Elige el plan ideal para tu negocio
+        </h1>
+        <p class="text-base text-text-secondary">
+          Escala con confianza. Cambia o cancela cuando quieras.
+        </p>
+      </header>
+
+      <!-- Billing cycle switcher -->
+      @if (!loading() && availableCycles().length > 1) {
+        <div class="flex justify-center">
+          <div
+            role="tablist"
+            aria-label="Ciclo de facturación"
+            class="inline-flex flex-wrap gap-1.5 bg-gray-200/80 rounded-xl p-1.5"
+          >
+            @for (c of availableCycles(); track c) {
+              <button
+                type="button"
+                role="tab"
+                [attr.aria-selected]="selectedCycle() === c"
+                (click)="selectCycle(c)"
+                class="px-5 py-2.5 text-sm font-semibold rounded-lg transition-all duration-200"
+                [class.bg-white]="selectedCycle() === c"
+                [class.shadow-md]="selectedCycle() === c"
+                [class.text-primary-700]="selectedCycle() === c"
+                [class.text-text-secondary]="selectedCycle() !== c"
+                [class.hover:text-text-primary]="selectedCycle() !== c"
+                [class.hover:bg-white/50]="selectedCycle() !== c"
+              >
+                {{ cycleLabel(c) }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Loading: skeletons -->
+      @if (loading()) {
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-6">
+          @for (i of [0, 1, 2]; track i) {
+            <app-pricing-card [plan]="skeletonPlan" [loading]="true"></app-pricing-card>
+          }
+        </div>
+      }
+
+      <!-- Empty -->
+      @if (!loading() && plans().length === 0) {
+        <app-empty-state
+          icon="package"
+          iconColor="primary"
+          title="No hay planes disponibles"
+          description="Contacta a tu partner o al equipo de Vendix para activar planes en tu cuenta."
+          [showActionButton]="false"
+        ></app-empty-state>
+      }
+
+      <!-- Catalog -->
+      @if (!loading() && plans().length > 0) {
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-6 items-stretch pt-2">
+          @for (plan of visiblePlans(); track plan.id) {
+            <app-pricing-card
+              [plan]="plan"
+              [subscriptionStatus]="subscriptionStatus()"
+              ctaLabel="Seleccionar plan"
+              (select)="selectPlan($event)"
+            ></app-pricing-card>
+          }
+        </div>
+      }
+
+      <!-- S2.1 — Coupon entry. Discreet link expands a small input that
+           validates the code against the backend, then routes to the
+           checkout for the matching promotional plan with the code in the
+           query string. -->
+      <div class="text-center mt-8">
+        @if (!couponOpen()) {
+          <button
+            type="button"
+            (click)="couponOpen.set(true)"
+            class="text-sm text-primary hover:underline inline-flex items-center gap-1"
+          >
+            <app-icon name="tag" [size]="14"></app-icon>
+            ¿Tienes un cupón?
+          </button>
+        } @else {
+          <div class="max-w-md mx-auto bg-white border border-border rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-sm font-semibold text-text-primary">Aplicar cupón</h3>
+              <button
+                type="button"
+                (click)="closeCoupon()"
+                class="text-xs text-text-secondary hover:text-text-primary"
+              >
+                Cerrar
+              </button>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input
+                type="text"
+                [formControl]="couponControl"
+                placeholder="Ingresa tu código"
+                class="flex-1 px-3 py-2 border border-border rounded-lg text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-primary"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="64"
+              />
+              <app-button
+                variant="primary"
+                [loading]="couponValidating()"
+                [disabled]="couponValidating() || couponControl.invalid"
+                (clicked)="redeemCoupon()"
+              >
+                Aplicar
+              </app-button>
+            </div>
+            @if (couponErrorCopy(); as err) {
+              <p class="text-xs text-red-700 flex items-center justify-center gap-1">
+                <app-icon name="alert-circle" [size]="14"></app-icon>
+                {{ err }}
+              </p>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  `,
+})
+export class PlanCatalogComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
+  private facade = inject(SubscriptionFacade);
+  private subscriptionService = inject(StoreSubscriptionService);
+  private toastService = inject(ToastService);
+  private wompiCheckoutService = inject(WompiCheckoutService);
+
+  readonly plans = signal<SubscriptionPlan[]>([]);
+  readonly loading = signal(false);
+  /** Phase 4 — Forwarded into each pricing-card so the current plan in
+   * `pending_payment` switches its CTA to "Completar pago" instead of being
+   * disabled with "Plan actual". */
+  readonly subscriptionStatus = this.facade.status;
+  readonly retryingPayment = signal(false);
+
+  readonly selectedCycle = signal<BillingCycle | null>(null);
+
+  readonly availableCycles = computed<BillingCycle[]>(() => {
+    const present = new Set(this.plans().map(p => p.billing_cycle as BillingCycle));
+    return CYCLE_ORDER.filter(c => present.has(c));
+  });
+
+  readonly visiblePlans = computed(() => {
+    const cycle = this.selectedCycle();
+    if (!cycle) return this.plans();
+    return this.plans().filter(p => p.billing_cycle === cycle);
+  });
+
+  cycleLabel(c: BillingCycle): string {
+    return CYCLE_LABEL[c];
+  }
+
+  selectCycle(c: BillingCycle): void {
+    this.selectedCycle.set(c);
+  }
+
+  // S2.1 — Coupon UI state. Local to this component (no NgRx) since the
+  // catalog dispatch only routes to checkout; the checkout page reads the
+  // applied coupon from the facade.
+  readonly couponOpen = signal(false);
+  readonly couponControl = new FormControl<string>('', {
+    nonNullable: true,
+    validators: [Validators.required, Validators.maxLength(64)],
+  });
+  readonly couponValidating = this.facade.couponValidating;
+  readonly couponError = this.facade.couponError;
+  readonly couponErrorCopy = computed(() => {
+    const err = this.couponError();
+    if (!err) return null;
+    return COUPON_REASON_COPY[err as string] ?? `No se pudo aplicar el cupón (${err})`;
+  });
+
+  readonly skeletonPlan = {
+    id: 0,
+    name: '',
+    code: '',
+    description: '',
+    base_price: 0,
+    currency: 'COP',
+    billing_cycle: 'monthly' as const,
+    features: [],
+    is_current: false,
+    is_popular: false,
+    sort_order: 0,
+  };
+
+  ngOnInit(): void {
+    if (!this.facade.isLoaded() && !this.facade.isLoading()) {
+      this.facade.loadCurrent();
+    }
+    this.loadPlans();
+  }
+
+  private loadPlans(): void {
+    this.loading.set(true);
+    this.subscriptionService.getPlans()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res.success && res.data) {
+            this.plans.set(res.data);
+            const cycles = this.availableCycles();
+            if (cycles.length > 0 && !this.selectedCycle()) {
+              this.selectedCycle.set(cycles.includes('monthly') ? 'monthly' : cycles[0]);
+            }
+          }
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.loading.set(false);
+          // S3.7 — Canonical error helper. Reads backend error_code and
+          // resolves to the UX message in core/utils/error-messages.ts.
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  selectPlan(event: PricingCardSelectEvent): void {
+    if (event.retry) {
+      this.retryPayment();
+      return;
+    }
+    this.router.navigate(['/admin/subscription/checkout', event.plan.id]);
+  }
+
+  /**
+   * Phase 4 — Same retry-payment flow as `my-subscription`. Mints a fresh
+   * Wompi widget for the existing pending invoice and reopens it. Surfacing
+   * this in the catalog is convenient when the user navigated here straight
+   * after a closed widget.
+   */
+  retryPayment(): void {
+    if (this.retryingPayment()) return;
+    this.retryingPayment.set(true);
+    const returnUrl = `${window.location.origin}/admin/subscription`;
+    this.subscriptionService
+      .retryPayment({ returnUrl })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.retryingPayment.set(false);
+          const invoiceId =
+            typeof data?.invoice?.id === 'number' ? data.invoice.id : null;
+          this.wompiCheckoutService.openWidget(data.widget, {
+            onApproved: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info('Verificando confirmación de pago…');
+              this.router.navigate(['/admin/subscription']);
+            },
+            onDeclined: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'El pago fue rechazado. Intenta con otro método de pago.',
+              );
+            },
+            onPending: () => {
+              this.facade.loadCurrent();
+              this.facade.pollSubscriptionUntilActive({ invoiceId });
+              this.toastService.info(
+                'Pago pendiente de confirmación. Verificando…',
+              );
+              this.router.navigate(['/admin/subscription']);
+            },
+            onClosed: () => {
+              this.facade.loadCurrent();
+              this.toastService.warning(
+                'El pago fue cancelado. Tu suscripción sigue pendiente.',
+              );
+            },
+            onError: () => {
+              this.facade.loadCurrent();
+              this.toastService.error(
+                'No se pudo abrir el widget de pago. Intenta de nuevo.',
+              );
+            },
+          });
+        },
+        error: (err) => {
+          this.retryingPayment.set(false);
+          this.facade.loadCurrent();
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  /**
+   * S2.1 — Validate the coupon against the backend. On success the facade
+   * stores `appliedCoupon` and we route the user to the checkout for the
+   * promotional plan it resolved to (which the user can still pair with
+   * any base plan). The checkout page picks up the applied coupon from the
+   * facade signal and forwards it to preview/commit.
+   */
+  redeemCoupon(): void {
+    const code = (this.couponControl.value ?? '').trim();
+    if (!code) return;
+
+    this.facade.validateCoupon(code);
+
+    // Subscribe once for the next applied-coupon emission to navigate.
+    const sub = this.facade.appliedCoupon$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((ac) => {
+        if (!ac || ac.code !== code) return;
+        // Route into checkout pre-selecting the promo plan; the checkout
+        // page will read the applied coupon from the facade and forward it.
+        this.router.navigate(['/admin/subscription/checkout', ac.plan.id], {
+          queryParams: { coupon: ac.code },
+        });
+        sub.unsubscribe();
+      });
+  }
+
+  closeCoupon(): void {
+    this.couponOpen.set(false);
+    this.couponControl.reset('');
+    this.facade.clearCoupon();
+  }
+}

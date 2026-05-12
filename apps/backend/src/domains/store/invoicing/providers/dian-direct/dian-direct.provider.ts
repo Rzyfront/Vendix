@@ -11,6 +11,7 @@ import { EncryptionService } from '../../../../../common/services/encryption.ser
 import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CufeCalculator } from '../../utils/cufe-calculator';
 import { DianSoapClient, WsSecurityCredentials } from './dian-soap.client';
 import { DianXmlSignerService } from './dian-xml-signer.service';
@@ -48,6 +49,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
     private readonly response_parser: DianResponseParserService,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async sendInvoice(
@@ -70,52 +72,52 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const software_security = {
         software_id: config.software_id,
         software_pin: config.software_pin,
-        software_security_code:
-          UblCommonBuilder.generateSoftwareSecurityCode(
-            config.software_id,
-            config.software_pin,
-            invoice_data.invoice_number,
-          ),
+        software_security_code: UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          config.software_pin,
+          invoice_data.invoice_number,
+        ),
       };
 
       // Extract IVA and ICA amounts from taxes for CUFE calculation
-      const iva_taxes = invoice_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('IVA') || t.tax_name.toUpperCase().includes('VAT'),
+      const iva_taxes = invoice_data.taxes.filter(
+        (t) =>
+          t.tax_name.toUpperCase().includes('IVA') ||
+          t.tax_name.toUpperCase().includes('VAT'),
       );
       const ica_taxes = invoice_data.taxes.filter((t) =>
         t.tax_name.toUpperCase().includes('ICA'),
       );
-      const inc_taxes = invoice_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('INC') || t.tax_name.toUpperCase().includes('CONSUMO'),
+      const inc_taxes = invoice_data.taxes.filter(
+        (t) =>
+          t.tax_name.toUpperCase().includes('INC') ||
+          t.tax_name.toUpperCase().includes('CONSUMO'),
       );
 
-      const iva_amount = iva_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
-      const ica_amount = ica_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
-      const inc_amount = inc_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
+      const iva_amount = iva_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
+      const ica_amount = ica_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
+      const inc_amount = inc_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
 
       // Calculate CUFE
       const cufe = CufeCalculator.generate({
         invoice_number: invoice_data.invoice_number,
         issue_date: invoice_data.issue_date,
         issue_time:
-          new Date().toISOString().split('T')[1].split('.')[0] +
-          '-05:00',
+          new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
         total_before_tax: invoice_data.subtotal_amount,
         tax_iva: iva_amount,
         tax_inc: inc_amount,
         tax_ica: ica_amount,
         total_amount: invoice_data.total_amount,
         issuer_nit: config.nit,
-        customer_nit:
-          invoice_data.customer_tax_id || '222222222222',
-        technical_key:
-          invoice_data.technical_key || config.software_pin,
+        customer_nit: invoice_data.customer_tax_id || '222222222222',
+        technical_key: invoice_data.technical_key || config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
 
@@ -170,9 +172,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       });
 
       // Build QR URL
-      const qr_code = CufeCalculator.generateQrUrl(
-        parsed.document_key || cufe,
-      );
+      const qr_code = CufeCalculator.generateQrUrl(parsed.document_key || cufe);
 
       return {
         success: parsed.is_valid,
@@ -191,9 +191,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         },
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to send invoice to DIAN: ${error.message}`,
-      );
+      this.logger.error(`Failed to send invoice to DIAN: ${error.message}`);
 
       await this.createAuditLog(config.id, {
         action: 'send_invoice',
@@ -224,50 +222,51 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const software_security = {
         software_id: config.software_id,
         software_pin: config.software_pin,
-        software_security_code:
-          UblCommonBuilder.generateSoftwareSecurityCode(
-            config.software_id,
-            config.software_pin,
-            credit_note_data.invoice_number,
-          ),
+        software_security_code: UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          config.software_pin,
+          credit_note_data.invoice_number,
+        ),
       };
 
       // Extract IVA and ICA amounts from taxes for CUDE calculation
-      const cn_iva_taxes = credit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('IVA') || t.tax_name.toUpperCase().includes('VAT'),
+      const cn_iva_taxes = credit_note_data.taxes.filter(
+        (t) =>
+          t.tax_name.toUpperCase().includes('IVA') ||
+          t.tax_name.toUpperCase().includes('VAT'),
       );
       const cn_ica_taxes = credit_note_data.taxes.filter((t) =>
         t.tax_name.toUpperCase().includes('ICA'),
       );
-      const cn_inc_taxes = credit_note_data.taxes.filter((t) =>
-        t.tax_name.toUpperCase().includes('INC') || t.tax_name.toUpperCase().includes('CONSUMO'),
+      const cn_inc_taxes = credit_note_data.taxes.filter(
+        (t) =>
+          t.tax_name.toUpperCase().includes('INC') ||
+          t.tax_name.toUpperCase().includes('CONSUMO'),
       );
 
-      const cn_iva_amount = cn_iva_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
-      const cn_ica_amount = cn_ica_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
-      const cn_inc_amount = cn_inc_taxes.reduce(
-        (sum, t) => sum + parseFloat(t.tax_amount), 0,
-      ).toFixed(2);
+      const cn_iva_amount = cn_iva_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
+      const cn_ica_amount = cn_ica_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
+      const cn_inc_amount = cn_inc_taxes
+        .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+        .toFixed(2);
 
       // For credit notes, generate CUDE (same algorithm as CUFE)
       const cude = CufeCalculator.generate({
         invoice_number: credit_note_data.invoice_number,
         issue_date: credit_note_data.issue_date,
         issue_time:
-          new Date().toISOString().split('T')[1].split('.')[0] +
-          '-05:00',
+          new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
         total_before_tax: credit_note_data.subtotal_amount,
         tax_iva: cn_iva_amount,
         tax_inc: cn_inc_amount,
         tax_ica: cn_ica_amount,
         total_amount: credit_note_data.total_amount,
         issuer_nit: config.nit,
-        customer_nit:
-          credit_note_data.customer_tax_id || '222222222222',
+        customer_nit: credit_note_data.customer_tax_id || '222222222222',
         technical_key: config.software_pin,
         environment: config.environment === 'production' ? '1' : '2',
       });
@@ -279,8 +278,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cude,
         environment: config.environment,
-        original_invoice_number:
-          credit_note_data.order_reference,
+        original_invoice_number: credit_note_data.order_reference,
         original_invoice_cufe: undefined, // TODO: retrieve from original invoice
       });
 
@@ -322,9 +320,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cude,
         cufe: parsed.document_key || cude,
-        qr_code: CufeCalculator.generateQrUrl(
-          parsed.document_key || cude,
-        ),
+        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
         xml_document: signed_xml,
         message: parsed.is_valid
           ? 'Nota crédito aceptada por la DIAN'
@@ -336,9 +332,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         },
       };
     } catch (error) {
-      this.logger.error(
-        `Failed to send credit note to DIAN: ${error.message}`,
-      );
+      this.logger.error(`Failed to send credit note to DIAN: ${error.message}`);
 
       await this.createAuditLog(config.id, {
         action: 'send_credit_note',
@@ -410,11 +404,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     const now = new Date();
     if (config.certificate_expiry < now) {
-      const expired_date = config.certificate_expiry.toISOString().split('T')[0];
+      const expired_date = config.certificate_expiry
+        .toISOString()
+        .split('T')[0];
       throw new Error(
         `El certificado digital DIAN (NIT: ${config.nit}) expiró el ${expired_date}. ` +
-        `No es posible firmar ni enviar documentos electrónicos. ` +
-        `Por favor renueve el certificado en la configuración DIAN.`,
+          `No es posible firmar ni enviar documentos electrónicos. ` +
+          `Por favor renueve el certificado en la configuración DIAN.`,
       );
     }
   }
@@ -447,21 +443,27 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
    */
   private async loadConfig(): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
-      throw new Error('Store context required for DIAN operations');
+    if (!context?.organization_id) {
+      throw new Error('Organization context required for DIAN operations');
     }
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id,
+        store_id: context.store_id ?? null,
+      });
 
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
-        store_id: context.store_id,
+        accounting_entity_id: accounting_entity.id,
+        configuration_type: 'invoicing',
         enablement_status: { in: ['testing', 'enabled'] },
       },
-      orderBy: { is_default: 'desc' },
+      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
 
     if (!config) {
       throw new Error(
-        `No active DIAN configuration for store ${context.store_id}`,
+        `No active DIAN configuration for fiscal entity ${accounting_entity.id}`,
       );
     }
 
@@ -472,16 +474,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
-      software_pin: this.encryption.decrypt(
-        config.software_pin_encrypted,
-      ),
+      software_pin: this.encryption.decrypt(config.software_pin_encrypted),
       certificate_s3_key: config.certificate_s3_key,
       certificate_password: config.certificate_password_encrypted
         ? this.encryption.decrypt(config.certificate_password_encrypted)
         : null,
       certificate_expiry: config.certificate_expiry,
       environment: config.environment as 'test' | 'production',
-      enablement_status: config.enablement_status as any,
+      enablement_status: config.enablement_status,
       test_set_id: config.test_set_id,
     };
   }
@@ -500,9 +500,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     });
 
     if (!org) {
-      throw new Error(
-        `Organization ${config.organization_id} not found`,
-      );
+      throw new Error(`Organization ${config.organization_id} not found`);
     }
 
     const address = org.addresses?.[0];
@@ -534,10 +532,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   ): DianCustomerData {
     return {
       document_type: invoice_data.customer_document_type || '13', // CC default
-      document_number:
-        invoice_data.customer_tax_id || '222222222222',
-      legal_name:
-        invoice_data.customer_name || 'Consumidor Final',
+      document_number: invoice_data.customer_tax_id || '222222222222',
+      legal_name: invoice_data.customer_name || 'Consumidor Final',
       email: invoice_data.customer_email,
       phone: invoice_data.customer_phone,
       tax_regime: invoice_data.customer_regime || '49', // No responsable
@@ -553,13 +549,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     config: DianConfigDecrypted,
   ): Promise<string> {
     if (!config.certificate_s3_key || !config.certificate_password) {
-      this.logger.warn(
-        'No certificate configured — returning unsigned XML',
-      );
+      this.logger.warn('No certificate configured — returning unsigned XML');
       return xml;
     }
 
-    const p12_buffer = await this.s3_service.downloadImage(config.certificate_s3_key);
+    const p12_buffer = await this.s3_service.downloadImage(
+      config.certificate_s3_key,
+    );
     return this.xml_signer.sign(xml, p12_buffer, config.certificate_password);
   }
 
@@ -642,12 +638,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     eocd.writeUInt32LE(data_offset, 16); // central offset
     eocd.writeUInt16LE(0, 20); // comment length
 
-    return Buffer.concat([
-      local_header,
-      compressed,
-      central,
-      eocd,
-    ]);
+    return Buffer.concat([local_header, compressed, central, eocd]);
   }
 
   /**
@@ -689,9 +680,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         },
       });
     } catch (error) {
-      this.logger.error(
-        `Failed to create DIAN audit log: ${error.message}`,
-      );
+      this.logger.error(`Failed to create DIAN audit log: ${error.message}`);
     }
   }
 }

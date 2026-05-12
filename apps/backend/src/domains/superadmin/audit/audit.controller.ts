@@ -6,7 +6,10 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { SuperAdminAuditService } from './audit.service';
-import { AuditAction, AuditResource } from '../../../common/audit/audit.service';
+import {
+  AuditAction,
+  AuditResource,
+} from '../../../common/audit/audit.service';
 import { ResponseService } from '@common/responses/response.service';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
@@ -25,7 +28,7 @@ export class AuditController {
   constructor(
     private readonly auditService: SuperAdminAuditService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('logs')
   @ApiOperation({

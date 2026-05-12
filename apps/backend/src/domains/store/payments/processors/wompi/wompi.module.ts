@@ -1,16 +1,29 @@
-import { Module } from '@nestjs/common';
-import { WompiClient } from './wompi.client';
+import { Module, forwardRef } from '@nestjs/common';
+import { PrismaModule } from '../../../../../prisma/prisma.module';
+import { PaymentsModule } from '../../payments.module';
+import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
+import { PaymentEncryptionService } from '../../services/payment-encryption.service';
+import { WompiClientFactory } from './wompi.factory';
 import { WompiProcessor } from './wompi.processor';
 
 @Module({
+  imports: [PrismaModule, forwardRef(() => PaymentsModule)],
   providers: [
-    WompiClient,
+    WompiClientFactory,
     {
       provide: WompiProcessor,
-      useFactory: (client: WompiClient) => new WompiProcessor(client),
-      inject: [WompiClient],
+      useFactory: (
+        factory: WompiClientFactory,
+        prisma: StorePrismaService,
+        encryption: PaymentEncryptionService,
+      ) => new WompiProcessor(factory, prisma, encryption),
+      inject: [
+        WompiClientFactory,
+        StorePrismaService,
+        PaymentEncryptionService,
+      ],
     },
   ],
-  exports: [WompiProcessor, WompiClient],
+  exports: [WompiProcessor, WompiClientFactory],
 })
 export class WompiModule {}

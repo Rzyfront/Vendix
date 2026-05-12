@@ -1,0 +1,31 @@
+meta {
+  name: 18 GET fiscal-status final
+  type: http
+  seq: 18
+}
+
+get {
+  url: http://{{url}}/store/settings/fiscal-status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("returns ACTIVE state across the 3 areas with completed_steps recorded", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status.invoicing.state).to.equal('ACTIVE');
+    expect(body.fiscal_status.accounting.state).to.equal('ACTIVE');
+    expect(body.fiscal_status.payroll.state).to.equal('ACTIVE');
+    const invoicingSteps = body.fiscal_status.invoicing.wizard.completed_steps || [];
+    const accountingSteps = body.fiscal_status.accounting.wizard.completed_steps || [];
+    const payrollSteps = body.fiscal_status.payroll.wizard.completed_steps || [];
+    expect(invoicingSteps.length).to.be.at.least(1);
+    expect(accountingSteps.length).to.be.at.least(1);
+    expect(payrollSteps.length).to.be.at.least(1);
+  });
+}

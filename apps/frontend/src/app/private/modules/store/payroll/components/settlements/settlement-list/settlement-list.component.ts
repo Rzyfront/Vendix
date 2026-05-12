@@ -16,6 +16,7 @@ import {
   OptionsDropdownComponent,
   FilterConfig,
   FilterValues,
+  DropdownAction,
   ResponsiveDataViewComponent,
   TableColumn,
   TableAction,
@@ -60,6 +61,14 @@ export class SettlementListComponent {
   // ── Local state ───────────────────────────────────────
   searchTerm = '';
   filterValues: FilterValues = {};
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Liquidación',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // ── Filter configuration ──────────────────────────────
   filterConfigs: FilterConfig[] = [
@@ -206,6 +215,14 @@ export class SettlementListComponent {
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
     this.filter.emit(values);
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.create.emit();
+        break;
+    }
   }
 
   // ── Helpers ───────────────────────────────────────────

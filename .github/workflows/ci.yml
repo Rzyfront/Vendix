@@ -19,3 +19,16 @@ jobs:
       - run: npm ci
       - run: chmod +x scripts/zoneless-audit.sh
       - run: ./scripts/zoneless-audit.sh
+
+  mobile-typecheck:
+    name: Mobile Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
+        working-directory: apps/mobile

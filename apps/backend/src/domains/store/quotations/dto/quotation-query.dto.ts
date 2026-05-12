@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsInt, IsIn, IsDateString } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsInt,
+  IsIn,
+  IsDateString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QuotationQueryDto {

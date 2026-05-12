@@ -5,6 +5,10 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import { ResponsiveDataViewComponent } from '../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  DropdownAction,
+} from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { PaginationComponent } from '../../../../shared/components/pagination/pagination.component';
@@ -33,8 +37,7 @@ import {
     CardComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     CurrencyPipe,
   ],
@@ -51,6 +54,15 @@ export class LayawayComponent {
   loading = this.store.selectSignal(selectLayawaysLoading);
   stats = this.store.selectSignal(selectStats);
   meta = this.store.selectSignal(selectLayawaysMeta);
+
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo Plan',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   columns: TableColumn[] = [
     { key: 'plan_number', label: 'Plan #', sortable: true, priority: 1 },
@@ -194,5 +206,11 @@ export class LayawayComponent {
 
   openCreateModal() {
     this.router.navigate(['/admin/pos'], { queryParams: { mode: 'layaway' } });
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 }

@@ -206,7 +206,7 @@ export async function seedDomains(
 
   for (const domain of domainSettings) {
     // Check if domain already exists
-    const existing = await client.domain_settings.findUnique({
+    const existing = await client.domain_settings.findFirst({
       where: { hostname: domain.hostname },
     });
 

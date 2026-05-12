@@ -74,9 +74,7 @@ export class ApEventsListener {
         notes: event.notes,
       });
 
-      this.logger.log(
-        `AP #${ap.id} created for expense #${event.expense_id}`,
-      );
+      this.logger.log(`AP #${ap.id} created for expense #${event.expense_id}`);
     } catch (error) {
       this.logger.error(
         `Failed to create AP for expense #${event.expense_id}: ${error.message}`,

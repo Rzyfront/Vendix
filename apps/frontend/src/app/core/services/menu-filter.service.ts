@@ -2,7 +2,9 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
+import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
+import type { OrganizationOperatingScope } from '../models/organization.model';
 
 /**
  * Service for filtering menu items based on panel_ui configuration.
@@ -13,6 +15,7 @@ import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 })
 export class MenuFilterService {
   private authFacade = inject(AuthFacade);
+  private subscriptionAccess = inject(SubscriptionAccessService);
 
   /**
    * Modules hidden per store type.
@@ -60,6 +63,9 @@ export class MenuFilterService {
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
 
+    // ORG_ADMIN - Compras (consolidado)
+    Compras: ['purchase_orders', 'orders_purchase_orders', 'orders'],
+
     // STORE_ADMIN - Inventario (padre + submódulos)
     Inventario: 'inventory',
     'Punto de Compra': 'inventory_pop',
@@ -102,6 +108,9 @@ export class MenuFilterService {
 
     // ERP Modules
     Facturación: 'invoicing',
+    Facturas: 'invoicing_invoices',
+    Resoluciones: 'invoicing_resolutions',
+    'Configuración DIAN': 'invoicing_dian_config',
     Contabilidad: 'accounting',
     'Plan de Cuentas': 'accounting_chart_of_accounts',
     'Asientos Contables': 'accounting_journal_entries',
@@ -127,8 +136,13 @@ export class MenuFilterService {
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:
     Configuración: 'settings',
-    General: 'settings_general',
-    'Métodos de Pago': 'settings_payments',
+    Operación: ['settings_operations', 'settings'],
+    'Modo operativo': ['settings_operating_scope', 'settings'],
+    'Modo fiscal': ['settings_fiscal_scope', 'settings'],
+    'Manejo fiscal': ['settings_fiscal_management', 'settings'],
+    'Configuración de Aplicación': ['settings_application', 'settings'],
+    General: ['settings_general', 'settings_application'],
+    'Métodos de Pago': ['settings_payment_methods', 'settings_payments', 'settings'],
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)
@@ -154,8 +168,9 @@ export class MenuFilterService {
       this.authFacade.getVisibleModules$(),
       this.authFacade.userStoreType$,
       this.authFacade.storeSettings$,
+      this.authFacade.userOrganization$,
     ]).pipe(
-      map(([visibleModules, loginStoreType, storeSettings]) => {
+      map(([visibleModules, loginStoreType, storeSettings, organization]) => {
         // Prefer store_settings.general.store_type (updated on save) over user.store.store_type (login snapshot)
         const storeType = storeSettings?.general?.store_type || loginStoreType;
         // Remove modules hidden by store type from visible list
@@ -164,9 +179,40 @@ export class MenuFilterService {
         const effectiveModules = hiddenByStoreType.length > 0
           ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
           : visibleModules;
-        return this.filterItemsRecursive(menuItems, effectiveModules);
+        const operatingScope: OrganizationOperatingScope =
+          (organization?.operating_scope as OrganizationOperatingScope | undefined) ?? 'STORE';
+        return this.filterItemsRecursive(menuItems, effectiveModules, operatingScope);
       }),
     );
+  }
+
+  /**
+   * Predicate: true when an item is allowed under the given operating scope.
+   * Items without `requiredOperatingScope` are always allowed.
+   */
+  private matchesOperatingScope(
+    item: MenuItem,
+    scope: OrganizationOperatingScope,
+  ): boolean {
+    if (!item.requiredOperatingScope) return true;
+    return item.requiredOperatingScope === scope;
+  }
+
+  /**
+   * Resolves how an item should be treated when its `requiredOperatingScope`
+   * does not match the active scope:
+   *  - 'allow'  : item allowed (scope matches or no scope requirement).
+   *  - 'lock'   : keep item visible but mark as `_locked` (showLocked === true).
+   *  - 'hide'   : drop item entirely (default legacy behavior).
+   */
+  private resolveScopeOutcome(
+    item: MenuItem,
+    scope: OrganizationOperatingScope,
+  ): 'allow' | 'lock' | 'hide' {
+    if (this.matchesOperatingScope(item, scope)) {
+      return 'allow';
+    }
+    return item.showLocked ? 'lock' : 'hide';
   }
 
   /**
@@ -194,23 +240,40 @@ export class MenuFilterService {
    *
    * @param items - Menu items to filter
    * @param visibleModules - Array of visible module keys
+   * @param operatingScope - Current organization operating scope
    * @returns Filtered menu items
    */
   private filterItemsRecursive(
     items: MenuItem[],
     visibleModules: string[],
+    operatingScope: OrganizationOperatingScope,
   ): MenuItem[] {
     return items.reduce((filtered: MenuItem[], item) => {
+      // Operating scope guard:
+      //   - 'hide' → drop item (legacy behavior)
+      //   - 'lock' → keep item but mark `_locked` so the sidebar can render
+      //              it disabled and redirect clicks to the operating-scope page
+      //   - 'allow' → continue with normal filtering
+      const scopeOutcome = this.resolveScopeOutcome(item, operatingScope);
+      if (scopeOutcome === 'hide') {
+        return filtered;
+      }
+      const locked = scopeOutcome === 'lock';
+
       // Case 1: Item marked as alwaysVisible (skip panel_ui filtering)
       // Used for dynamic data like stores that should always show if parent is visible
       if (item.alwaysVisible) {
-        const alwaysVisibleItem = { ...item };
+        if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+          return filtered;
+        }
+        const alwaysVisibleItem: MenuItem = { ...item, _locked: locked };
 
         // If it has children, recursively filter them (children can also be alwaysVisible)
         if (item.children && item.children.length > 0) {
           alwaysVisibleItem.children = this.filterItemsRecursive(
             item.children,
             visibleModules,
+            operatingScope,
           );
         }
 
@@ -223,13 +286,17 @@ export class MenuFilterService {
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
         if (this.isModuleKeyVisible(moduleKey, visibleModules)) {
-          const filteredItem = { ...item };
+          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+            return filtered;
+          }
+          const filteredItem: MenuItem = { ...item, _locked: locked };
 
           // Recursively filter children if present
           if (item.children && item.children.length > 0) {
             filteredItem.children = this.filterItemsRecursive(
               item.children,
               visibleModules,
+              operatingScope,
             );
           }
 
@@ -243,10 +310,14 @@ export class MenuFilterService {
         const filteredChildren = this.filterItemsRecursive(
           item.children,
           visibleModules,
+          operatingScope,
         );
 
         if (filteredChildren.length > 0) {
-          const filteredItem = { ...item, children: filteredChildren };
+          const filteredItem: MenuItem = { ...item, children: filteredChildren, _locked: locked };
+          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+            return filtered;
+          }
           filtered.push(filteredItem);
         }
       }
@@ -263,14 +334,32 @@ export class MenuFilterService {
    * @returns true if visible, false otherwise
    */
   isMenuItemVisible(menuItem: MenuItem): boolean {
-    const moduleKey = this.moduleKeyMap[menuItem.label];
-    if (!moduleKey) return true; // Default to visible if no mapping
-
-    // Handle array of keys (check if ANY is visible)
-    if (Array.isArray(moduleKey)) {
-      return moduleKey.some((key) => this.authFacade.isModuleVisible(key));
+    // Operating scope guard short-circuits visibility:
+    //   - if scope mismatches and showLocked is true, the item still renders
+    //     (in locked state) so this method must report it as visible.
+    //   - if scope mismatches and showLocked is falsy, the item is hidden.
+    const scopeOutcome = this.resolveScopeOutcome(
+      menuItem,
+      this.authFacade.operatingScope(),
+    );
+    if (scopeOutcome === 'hide') {
+      return false;
     }
 
-    return this.authFacade.isModuleVisible(moduleKey);
+    const moduleKey = this.moduleKeyMap[menuItem.label];
+    let isVisible = true;
+    if (!moduleKey) {
+      isVisible = true;
+    } else if (Array.isArray(moduleKey)) {
+      isVisible = moduleKey.some((key) => this.authFacade.isModuleVisible(key));
+    } else {
+      isVisible = this.authFacade.isModuleVisible(moduleKey);
+    }
+
+    if (isVisible && menuItem.requiresFeature) {
+      isVisible = this.subscriptionAccess.canUseAI(menuItem.requiresFeature)();
+    }
+
+    return isVisible;
   }
 }

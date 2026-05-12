@@ -181,6 +181,14 @@ export class NotificationsEffects {
     { dispatch: false },
   );
 
+  refreshAuthOnFiscalScopeChange$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(NotificationsActions.receivedNotification),
+      filter(({ notification }) => notification.type === 'fiscal_scope_changed'),
+      map(() => AuthActions.refreshUser()),
+    ),
+  );
+
   markRead$ = createEffect(() =>
     this.actions$.pipe(
       ofType(NotificationsActions.markRead),

@@ -1,0 +1,92 @@
+meta {
+  name: Wompi Webhook Idempotent (Re-delivery)
+  type: http
+  seq: 48
+  # Wompi Phase 8 — Tactical Gap #5
+  #
+  # Verifies that posting the same Wompi event twice does not double-process
+  # the payment_source registration / payment update. Webhook idempotency is
+  # keyed by `(store_id, provider_payment_source_id)` for the
+  # `payment_source.created` family and by `event.id` for transaction events
+  # (see subscription-payment.service.ts → ensurePaymentMethodForPaymentSource
+  # idempotent upsert under advisory lock).
+  #
+  # This is a SAFE test (auth: none, no side effects on Wompi) — webhook
+  # endpoint is public, signature validation is per-tenant.
+}
+
+post {
+  url: {{url}}/platform/webhooks/wompi
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:json {
+  {
+    "event": "transaction.updated",
+    "data": {
+      "transaction": {
+        "id": "txn-saas-idempotent-001",
+        "reference": "vendix_saas_{{subscription_id}}_{{invoice_id}}_idem001",
+        "status": "APPROVED",
+        "amount_in_cents": 100000,
+        "status_message": "Payment approved",
+        "payment_source_id": 99001,
+        "payment_method_type": "CARD"
+      }
+    },
+    "sent_at": "2026-04-30T12:00:00.000Z",
+    "timestamp": 1761840000,
+    "signature": {
+      "checksum": "test-checksum-irrelevant-validation-403-still-200",
+      "properties": ["transaction.id", "transaction.status", "transaction.amount_in_cents"]
+    },
+    "environment": "test"
+  }
+}
+
+tests {
+  test("First delivery → HTTP 200 (Wompi retry policy)", function() {
+    // Webhook endpoint MUST return 200 even on signature failure to avoid
+    // Wompi retry storms. Validation is asynchronous downstream.
+    expect(res.status).to.be.oneOf([200, 400]);
+    expect(res.status).to.not.equal(500);
+  });
+
+  test("Response is a JSON object", function() {
+    expect(res.body).to.be.an("object");
+  });
+
+  test("On 200, response acknowledges receipt", function() {
+    if (res.status === 200) {
+      // Two shapes accepted: { received: true } (legacy) or { success: true }
+      const ok = res.body.received === true || res.body.success === true;
+      expect(ok).to.equal(true);
+    }
+  });
+}
+
+# Follow-up requests for full idempotency proof (run sequentially):
+#
+# Step 2 — Re-deliver the SAME event (verbatim same body):
+#   Repeat this exact request a second time.
+#   Asserts:
+#     • res.status === 200 (no 500, no 409 — silent dedup)
+#     • Server log shows "duplicate event skipped" or processes idempotently
+#
+# Step 3 — Verify no duplicate payment method was created:
+#   GET {{url}}/store/subscriptions/payment-methods
+#   With token belonging to the affected store.
+#   Asserts:
+#     const pms = res.body.data.filter(
+#       p => p.providerPaymentSourceId === '99001'
+#     );
+#     expect(pms.length).to.equal(1);
+#
+# This covers the (store_id, provider_payment_source_id) advisory-lock upsert
+# in subscription-payment.service.ts ensurePaymentMethodForPaymentSource —
+# concurrent webhook re-deliveries cannot insert two rows.

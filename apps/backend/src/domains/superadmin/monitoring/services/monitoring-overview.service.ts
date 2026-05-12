@@ -32,13 +32,23 @@ export class MonitoringOverviewService {
             id: 'ec2_cpu',
             metricName: 'CPUUtilization',
             namespace: 'AWS/EC2',
-            dimensions: [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }],
+            dimensions: [
+              {
+                Name: 'InstanceId',
+                Value: this.cloudWatchService.ec2InstanceId,
+              },
+            ],
           },
           {
             id: 'ec2_status',
             metricName: 'StatusCheckFailed',
             namespace: 'AWS/EC2',
-            dimensions: [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }],
+            dimensions: [
+              {
+                Name: 'InstanceId',
+                Value: this.cloudWatchService.ec2InstanceId,
+              },
+            ],
           },
           // RDS metrics
           {
@@ -46,7 +56,10 @@ export class MonitoringOverviewService {
             metricName: 'CPUUtilization',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
+              {
+                Name: 'DBInstanceIdentifier',
+                Value: this.cloudWatchService.rdsDbIdentifier,
+              },
             ],
           },
           {
@@ -54,7 +67,10 @@ export class MonitoringOverviewService {
             metricName: 'DatabaseConnections',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
+              {
+                Name: 'DBInstanceIdentifier',
+                Value: this.cloudWatchService.rdsDbIdentifier,
+              },
             ],
           },
           {
@@ -62,7 +78,10 @@ export class MonitoringOverviewService {
             metricName: 'FreeStorageSpace',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
+              {
+                Name: 'DBInstanceIdentifier',
+                Value: this.cloudWatchService.rdsDbIdentifier,
+              },
             ],
           },
           {
@@ -70,7 +89,10 @@ export class MonitoringOverviewService {
             metricName: 'FreeableMemory',
             namespace: 'AWS/RDS',
             dimensions: [
-              { Name: 'DBInstanceIdentifier', Value: this.cloudWatchService.rdsDbIdentifier },
+              {
+                Name: 'DBInstanceIdentifier',
+                Value: this.cloudWatchService.rdsDbIdentifier,
+              },
             ],
           },
         ],

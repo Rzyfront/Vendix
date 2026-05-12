@@ -24,14 +24,12 @@ import { EmployeeAdvance } from '../../../interfaces/payroll.interface';
 @Component({
   selector: 'app-advance-list',
   standalone: true,
-  imports: [
+imports: [
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent
-],
+    ResponsiveDataViewComponent
+  ],
   templateUrl: './advance-list.component.html',
 })
 export class AdvanceListComponent {
@@ -185,7 +183,14 @@ export class AdvanceListComponent {
   ];
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [];
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo Adelanto',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   onSearch(term: string): void {
     this.search.emit(term);

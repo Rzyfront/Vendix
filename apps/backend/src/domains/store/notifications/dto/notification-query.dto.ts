@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsNumber, IsBoolean, MaxLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  IsBoolean,
+  MaxLength,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class NotificationQueryDto {

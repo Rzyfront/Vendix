@@ -290,9 +290,15 @@ export class OrganizationsService {
       recentOrganizations,
     ] = await Promise.all([
       this.prisma.organizations.count({ where: productionFilter }),
-      this.prisma.organizations.count({ where: { state: 'active', ...productionFilter } }),
-      this.prisma.organizations.count({ where: { state: 'inactive', ...productionFilter } }),
-      this.prisma.organizations.count({ where: { state: 'suspended', ...productionFilter } }),
+      this.prisma.organizations.count({
+        where: { state: 'active', ...productionFilter },
+      }),
+      this.prisma.organizations.count({
+        where: { state: 'inactive', ...productionFilter },
+      }),
+      this.prisma.organizations.count({
+        where: { state: 'suspended', ...productionFilter },
+      }),
       this.prisma.organizations.count({ where: { mode: 'demo' } }),
       this.prisma.organizations.count({ where: { mode: 'test' } }),
       this.prisma.organizations.findMany({

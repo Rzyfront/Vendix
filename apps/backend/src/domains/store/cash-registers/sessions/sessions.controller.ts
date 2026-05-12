@@ -46,7 +46,10 @@ export class SessionsController {
   @HttpCode(HttpStatus.CREATED)
   async openSession(@Body() dto: OpenSessionDto) {
     const session = await this.sessions_service.openSession(dto);
-    return this.response_service.success(session, 'Session opened successfully');
+    return this.response_service.success(
+      session,
+      'Session opened successfully',
+    );
   }
 
   @Get()
@@ -88,12 +91,12 @@ export class SessionsController {
   @Post(':id/close')
   @Permissions('store:cash_registers:close_session')
   @HttpCode(HttpStatus.OK)
-  async closeSession(
-    @Param('id') id: string,
-    @Body() dto: CloseSessionDto,
-  ) {
+  async closeSession(@Param('id') id: string, @Body() dto: CloseSessionDto) {
     const session = await this.sessions_service.closeSession(+id, dto);
-    return this.response_service.success(session, 'Session closed successfully');
+    return this.response_service.success(
+      session,
+      'Session closed successfully',
+    );
   }
 
   @Post(':id/suspend')

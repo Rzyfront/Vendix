@@ -12,6 +12,7 @@ import {
   BrandingSettingsDto,
   FontsSettingsDto,
   PublicationSettingsDto,
+  OperationsSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
@@ -80,6 +81,12 @@ export class UpdateSettingsDto {
   @Type(() => PublicationSettingsDto)
   publication?: PublicationSettingsDto;
 
+  @ApiProperty({ type: OperationsSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => OperationsSettingsDto)
+  operations?: OperationsSettingsDto;
+
   @ApiProperty({ type: PanelUISettingsDto, required: false })
   @IsOptional()
   @ValidateNested()
@@ -103,4 +110,9 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => ModuleFlowsSettingsDto)
   module_flows?: ModuleFlowsSettingsDto;
+
+  @ApiProperty({ required: false, description: 'Semantic fiscal status block' })
+  @IsOptional()
+  @IsObject()
+  fiscal_status?: Record<string, unknown>;
 }

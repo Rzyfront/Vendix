@@ -13,9 +13,12 @@ import {
   ProductCandidate,
   ConfirmScannedInvoiceDto,
 } from './dto/scan-invoice.dto';
-import { CreatePurchaseOrderDto, PurchaseOrderItemDto } from './dto/create-purchase-order.dto';
+import {
+  CreatePurchaseOrderDto,
+  PurchaseOrderItemDto,
+} from './dto/create-purchase-order.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import * as sharp from 'sharp';
+import sharp from 'sharp';
 
 @Injectable()
 export class InvoiceScannerService {
@@ -58,7 +61,9 @@ export class InvoiceScannerService {
     this.logger.debug(
       `[InvoiceScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,
     );
-    this.logger.debug(`[InvoiceScan] AI content preview: ${response.content?.substring(0, 300)}`);
+    this.logger.debug(
+      `[InvoiceScan] AI content preview: ${response.content?.substring(0, 300)}`,
+    );
 
     if (!response.success || !response.content) {
       this.logger.error(`AI OCR failed: ${response.error}`);
@@ -69,7 +74,9 @@ export class InvoiceScannerService {
       let content = response.content.trim();
       // Strip markdown code fences if present
       if (content.startsWith('```')) {
-        content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+        content = content
+          .replace(/^```(?:json)?\n?/, '')
+          .replace(/\n?```$/, '');
       }
       const parsed = JSON.parse(content);
       return this.normalizeOcrResponse(parsed);
@@ -79,7 +86,9 @@ export class InvoiceScannerService {
     }
   }
 
-  async matchProducts(scanResult: InvoiceScanResult): Promise<InvoiceMatchResult> {
+  async matchProducts(
+    scanResult: InvoiceScanResult,
+  ): Promise<InvoiceMatchResult> {
     const warnings: string[] = [];
     let supplierMatch: SupplierMatch;
 
@@ -87,7 +96,9 @@ export class InvoiceScannerService {
     try {
       supplierMatch = await this.matchSupplier(scanResult);
       if (supplierMatch.is_new) {
-        warnings.push(`Proveedor "${scanResult.supplier?.name || 'Desconocido'}" no encontrado en el sistema. Puedes seleccionarlo manualmente.`);
+        warnings.push(
+          `Proveedor "${scanResult.supplier?.name || 'Desconocido'}" no encontrado en el sistema. Puedes seleccionarlo manualmente.`,
+        );
       }
     } catch (err) {
       this.logger.warn(`Supplier matching failed: ${err.message}`);
@@ -96,7 +107,9 @@ export class InvoiceScannerService {
         confidence: 0,
         is_new: true,
       };
-      warnings.push('No se pudo buscar el proveedor. Puedes seleccionarlo manualmente.');
+      warnings.push(
+        'No se pudo buscar el proveedor. Puedes seleccionarlo manualmente.',
+      );
     }
 
     // Item matching — each item individually wrapped
@@ -104,7 +117,10 @@ export class InvoiceScannerService {
 
     for (const item of scanResult.line_items || []) {
       try {
-        const candidates = await this.findProductCandidates(item, supplierMatch.matched_id);
+        const candidates = await this.findProductCandidates(
+          item,
+          supplierMatch.matched_id,
+        );
         const topCandidate = candidates.length > 0 ? candidates[0] : null;
 
         let matchStatus: 'matched' | 'partial' | 'new' = 'new';
@@ -123,7 +139,9 @@ export class InvoiceScannerService {
         }
 
         if (matchStatus === 'new') {
-          warnings.push(`Producto "${item.description}" sin coincidencias en el catálogo.`);
+          warnings.push(
+            `Producto "${item.description}" sin coincidencias en el catálogo.`,
+          );
         }
 
         matchedItems.push({
@@ -133,7 +151,9 @@ export class InvoiceScannerService {
           candidates: candidates.slice(0, 5),
         });
       } catch (err) {
-        this.logger.warn(`Item matching failed for "${item.description}": ${err.message}`);
+        this.logger.warn(
+          `Item matching failed for "${item.description}": ${err.message}`,
+        );
         warnings.push(`No se pudo buscar "${item.description}".`);
         matchedItems.push({
           ...item,
@@ -191,7 +211,11 @@ export class InvoiceScannerService {
       attachmentDto.supplier_invoice_date = dto.invoice_date;
       attachmentDto.notes = 'Factura escaneada con OCR';
 
-      await this.purchaseOrdersService.addAttachment(po.id, file, attachmentDto);
+      await this.purchaseOrdersService.addAttachment(
+        po.id,
+        file,
+        attachmentDto,
+      );
     }
 
     return po;
@@ -199,7 +223,9 @@ export class InvoiceScannerService {
 
   // --- Private helpers ---
 
-  private async matchSupplier(scanResult: InvoiceScanResult): Promise<SupplierMatch> {
+  private async matchSupplier(
+    scanResult: InvoiceScanResult,
+  ): Promise<SupplierMatch> {
     const { supplier } = scanResult;
 
     try {
@@ -227,14 +253,23 @@ export class InvoiceScannerService {
         });
 
         const extractedLower = supplier.name.toLowerCase().trim();
-        let bestMatch: { id: number; name: string; tax_id: string | null } | null = null;
+        let bestMatch: {
+          id: number;
+          name: string;
+          tax_id: string | null;
+        } | null = null;
         let bestScore = 0;
 
         // Tier 2: Bidirectional contains
         for (const s of allSuppliers) {
           const dbLower = s.name.toLowerCase().trim();
-          if (dbLower.includes(extractedLower) || extractedLower.includes(dbLower)) {
-            const ratio = Math.min(extractedLower.length, dbLower.length) / Math.max(extractedLower.length, dbLower.length);
+          if (
+            dbLower.includes(extractedLower) ||
+            extractedLower.includes(dbLower)
+          ) {
+            const ratio =
+              Math.min(extractedLower.length, dbLower.length) /
+              Math.max(extractedLower.length, dbLower.length);
             const score = 65 + ratio * 20; // 65-85 range
             if (score > bestScore) {
               bestScore = score;
@@ -254,11 +289,16 @@ export class InvoiceScannerService {
         }
 
         // Tier 3: Word-level overlap
-        const extractedWords = extractedLower.split(/\s+/).filter((w) => w.length > 2);
+        const extractedWords = extractedLower
+          .split(/\s+/)
+          .filter((w) => w.length > 2);
 
         if (extractedWords.length > 0) {
           for (const s of allSuppliers) {
-            const dbWords = s.name.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+            const dbWords = s.name
+              .toLowerCase()
+              .split(/\s+/)
+              .filter((w) => w.length > 2);
             if (dbWords.length === 0) continue;
 
             let matches = 0;
@@ -271,7 +311,8 @@ export class InvoiceScannerService {
               }
             }
 
-            const score = (matches / Math.max(extractedWords.length, dbWords.length)) * 60;
+            const score =
+              (matches / Math.max(extractedWords.length, dbWords.length)) * 60;
             if (score > bestScore && score >= 30) {
               bestScore = score;
               bestMatch = s;
@@ -331,7 +372,9 @@ export class InvoiceScannerService {
       const supplierProducts = await this.prisma.supplier_products.findMany({
         where: { supplier_id: supplierId },
         include: {
-          products: { select: { id: true, name: true, sku: true, cost_price: true } },
+          products: {
+            select: { id: true, name: true, sku: true, cost_price: true },
+          },
         },
         take: 20,
       });
@@ -339,9 +382,13 @@ export class InvoiceScannerService {
       for (const sp of supplierProducts) {
         if (seenIds.has(sp.products.id)) continue;
         const nameScore = this.fuzzyScore(item.description, sp.products.name);
-        const skuScore = item.sku_if_visible && sp.supplier_sku
-          ? (sp.supplier_sku.toLowerCase() === item.sku_if_visible.toLowerCase() ? 90 : 0)
-          : 0;
+        const skuScore =
+          item.sku_if_visible && sp.supplier_sku
+            ? sp.supplier_sku.toLowerCase() ===
+              item.sku_if_visible.toLowerCase()
+              ? 90
+              : 0
+            : 0;
         const score = Math.max(nameScore + 10, skuScore); // +10 bonus for being in supplier catalog
         if (score >= 30) {
           seenIds.add(sp.products.id);
@@ -421,14 +468,17 @@ export class InvoiceScannerService {
     return Math.round((matches / qWords.length) * 80);
   }
 
-  private async preprocessImage(file: Express.Multer.File): Promise<{ base64: string; mimeType: string }> {
+  private async preprocessImage(
+    file: Express.Multer.File,
+  ): Promise<{ base64: string; mimeType: string }> {
     const MAX_DIMENSION = 1536;
     const JPEG_QUALITY = 85;
 
     try {
       const metadata = await sharp(file.buffer).metadata();
-      const needsResize = (metadata.width && metadata.width > MAX_DIMENSION) ||
-                          (metadata.height && metadata.height > MAX_DIMENSION);
+      const needsResize =
+        (metadata.width && metadata.width > MAX_DIMENSION) ||
+        (metadata.height && metadata.height > MAX_DIMENSION);
 
       let pipeline = sharp(file.buffer);
 
@@ -452,7 +502,9 @@ export class InvoiceScannerService {
         mimeType: 'image/jpeg',
       };
     } catch (err) {
-      this.logger.warn(`[InvoiceScan] Image preprocessing failed, using raw: ${err.message}`);
+      this.logger.warn(
+        `[InvoiceScan] Image preprocessing failed, using raw: ${err.message}`,
+      );
       return {
         base64: file.buffer.toString('base64'),
         mimeType: file.mimetype,
@@ -461,8 +513,14 @@ export class InvoiceScannerService {
   }
 
   private normalizeOcrResponse(parsed: any): InvoiceScanResult {
-    if (!parsed.supplier || !Array.isArray(parsed.line_items) || parsed.total == null) {
-      throw new Error('AI response missing required fields: supplier, line_items, or total');
+    if (
+      !parsed.supplier ||
+      !Array.isArray(parsed.line_items) ||
+      parsed.total == null
+    ) {
+      throw new Error(
+        'AI response missing required fields: supplier, line_items, or total',
+      );
     }
 
     return {

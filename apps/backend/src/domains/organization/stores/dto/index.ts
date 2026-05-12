@@ -12,7 +12,6 @@ import {
   IsIn,
   IsDecimal,
   IsArray,
-  IsJSON,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -67,7 +66,7 @@ export class CreateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()
@@ -88,7 +87,22 @@ export class CreateStoreDto {
     currency_code?: string;
     color_primary?: string;
     color_secondary?: string;
+    tax_included?: boolean;
+    fiscal_regime?: string;
+    tax_id?: string;
     [key: string]: any;
+  };
+
+  @IsOptional()
+  @IsObject()
+  address?: {
+    address_line1: string;
+    address_line2?: string | null;
+    city: string;
+    state_province?: string | null;
+    postal_code?: string | null;
+    country_code: string;
+    phone_number?: string | null;
   };
 }
 
@@ -125,7 +139,7 @@ export class UpdateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()
@@ -146,7 +160,22 @@ export class UpdateStoreDto {
     currency_code?: string;
     color_primary?: string;
     color_secondary?: string;
+    tax_included?: boolean;
+    fiscal_regime?: string;
+    tax_id?: string;
     [key: string]: any;
+  };
+
+  @IsOptional()
+  @IsObject()
+  address?: {
+    address_line1: string;
+    address_line2?: string | null;
+    city: string;
+    state_province?: string | null;
+    postal_code?: string | null;
+    country_code: string;
+    phone_number?: string | null;
   };
 }
 

@@ -28,18 +28,26 @@ export class SupportNotificationsService {
         where: { id: data.ticket_id },
         include: {
           created_by: {
-            select: { id: true, email: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+            },
           },
         },
       });
 
       if (!ticket || !ticket.created_by) {
-        this.logger.warn('Cannot send notification: ticket or creator not found');
+        this.logger.warn(
+          'Cannot send notification: ticket or creator not found',
+        );
         return;
       }
 
       const creatorEmail = ticket.created_by.email;
-      const creatorName = `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
+      const creatorName =
+        `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
 
       // Send email to ticket creator
       const emailHtml = this.generateTicketCreatedEmail({
@@ -80,7 +88,9 @@ export class SupportNotificationsService {
 
       this.logger.log(`Ticket created notification sent to ${creatorEmail}`);
     } catch (error) {
-      this.logger.error(`Error sending ticket created notification: ${error.message}`);
+      this.logger.error(
+        `Error sending ticket created notification: ${error.message}`,
+      );
     }
   }
 
@@ -96,21 +106,34 @@ export class SupportNotificationsService {
         where: { id: data.ticket_id },
         include: {
           assigned_to: {
-            select: { id: true, email: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+            },
           },
           created_by: {
-            select: { id: true, email: true, first_name: true, last_name: true },
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
+            },
           },
         },
       });
 
       if (!ticket || !ticket.assigned_to) {
-        this.logger.warn('Cannot send notification: ticket or assigned user not found');
+        this.logger.warn(
+          'Cannot send notification: ticket or assigned user not found',
+        );
         return;
       }
 
       const assigneeEmail = ticket.assigned_to.email;
-      const assigneeName = `${ticket.assigned_to.first_name} ${ticket.assigned_to.last_name}`.trim();
+      const assigneeName =
+        `${ticket.assigned_to.first_name} ${ticket.assigned_to.last_name}`.trim();
 
       const emailHtml = this.generateTicketAssignedEmail({
         ticketNumber: data.ticket_number,
@@ -143,7 +166,9 @@ export class SupportNotificationsService {
 
       this.logger.log(`Ticket assigned notification sent to ${assigneeEmail}`);
     } catch (error) {
-      this.logger.error(`Error sending ticket assigned notification: ${error.message}`);
+      this.logger.error(
+        `Error sending ticket assigned notification: ${error.message}`,
+      );
     }
   }
 
@@ -208,9 +233,13 @@ export class SupportNotificationsService {
         });
       }
 
-      this.logger.log(`Status changed notification sent for ticket ${data.ticket_number}`);
+      this.logger.log(
+        `Status changed notification sent for ticket ${data.ticket_number}`,
+      );
     } catch (error) {
-      this.logger.error(`Error sending status changed notification: ${error.message}`);
+      this.logger.error(
+        `Error sending status changed notification: ${error.message}`,
+      );
     }
   }
 
@@ -234,7 +263,8 @@ export class SupportNotificationsService {
       }
 
       const creatorEmail = ticket.created_by.email;
-      const creatorName = `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
+      const creatorName =
+        `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
 
       const emailHtml = this.generateTicketClosedEmail({
         ticketNumber: data.ticket_number,
@@ -268,7 +298,9 @@ export class SupportNotificationsService {
 
       this.logger.log(`Ticket closed notification sent to ${creatorEmail}`);
     } catch (error) {
-      this.logger.error(`Error sending ticket closed notification: ${error.message}`);
+      this.logger.error(
+        `Error sending ticket closed notification: ${error.message}`,
+      );
     }
   }
 
@@ -311,10 +343,14 @@ export class SupportNotificationsService {
           `Se ha creado un ticket de alta prioridad que requiere atención inmediata.`,
         );
 
-        this.logger.log(`Urgent ticket notification sent to admin: ${admin.email}`);
+        this.logger.log(
+          `Urgent ticket notification sent to admin: ${admin.email}`,
+        );
       }
     } catch (error) {
-      this.logger.error(`Error sending urgent ticket notification: ${error.message}`);
+      this.logger.error(
+        `Error sending urgent ticket notification: ${error.message}`,
+      );
     }
   }
 
@@ -352,7 +388,9 @@ export class SupportNotificationsService {
     };
 
     const displayTitle = data.title || 'Ticket creado';
-    const displayCategory = data.category ? categoryLabels[data.category] || data.category : 'General';
+    const displayCategory = data.category
+      ? categoryLabels[data.category] || data.category
+      : 'General';
 
     return `
       <!DOCTYPE html>
@@ -690,12 +728,16 @@ export class SupportNotificationsService {
             <div class="ticket-card">
               <div class="ticket-number">#${data.ticketNumber}</div>
               <div style="color: #047857; font-size: 14px; margin-bottom: 15px;">${displayTitle}</div>
-              ${data.resolutionSummary ? `
+              ${
+                data.resolutionSummary
+                  ? `
               <div class="resolution-box">
                 <div class="resolution-label">📋 Resolución:</div>
                 <div class="resolution-text">${data.resolutionSummary}</div>
               </div>
-              ` : '<div style="color: #047857; font-size: 14px;">Esperamos haber resuelto tu solicitud satisfactoriamente.</div>'}
+              `
+                  : '<div style="color: #047857; font-size: 14px;">Esperamos haber resuelto tu solicitud satisfactoriamente.</div>'
+              }
             </div>
 
             <div style="text-align: center; margin: 30px 0; padding: 25px; background-color: #F8FAFC; border-radius: 12px; border: 1px solid #E2E8F0;">
@@ -736,8 +778,11 @@ export class SupportNotificationsService {
       P1: 'Urgente',
     };
 
-    const headerColor = priorityColors[data.priority as keyof typeof priorityColors] || '#dc2626';
-    const priorityLabel = priorityLabels[data.priority as keyof typeof priorityLabels] || data.priority;
+    const headerColor =
+      priorityColors[data.priority as keyof typeof priorityColors] || '#dc2626';
+    const priorityLabel =
+      priorityLabels[data.priority as keyof typeof priorityLabels] ||
+      data.priority;
 
     return `
       <!DOCTYPE html>

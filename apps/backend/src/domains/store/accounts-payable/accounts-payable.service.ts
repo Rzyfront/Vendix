@@ -263,7 +263,8 @@ export class AccountsPayableService {
       where: { id: ap_id },
       data: {
         status: 'written_off',
-        notes: `${ap.notes || ''}\n[Castigada por usuario #${user_id} el ${new Date().toISOString()}]`.trim(),
+        notes:
+          `${ap.notes || ''}\n[Castigada por usuario #${user_id} el ${new Date().toISOString()}]`.trim(),
       },
     });
 

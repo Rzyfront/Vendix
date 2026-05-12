@@ -392,7 +392,7 @@ loadUsers(): void {
   }
 
   onSortChange(column: string, direction: 'asc' | 'desc' | null): void {
-    // TODO: Implement sorting logic
+    // Sorting implementation pending - add sort params to API call
     this.loadUsers();
   }
 

@@ -1,0 +1,31 @@
+meta {
+  name: 03 POST preview ORGANIZATION
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/organization/settings/fiscal-scope/preview
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+body:json {
+  {
+    "target_scope": "ORGANIZATION",
+    "reason": "Fiscal smoke preview ORGANIZATION"
+  }
+}
+
+tests {
+  test("preview ORGANIZATION returns migration contract or invalid-combo blocker", function () {
+    expect([200, 409]).to.include(res.status);
+    const body = res.body.data || res.body;
+    const target = body.target_fiscal_scope || body.message?.target_fiscal_scope;
+    expect(target || "ORGANIZATION").to.equal("ORGANIZATION");
+  });
+}

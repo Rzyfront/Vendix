@@ -30,7 +30,8 @@ export type InputType =
   | 'search'
   | 'date'
   | 'time'
-  | 'datetime-local';
+  | 'datetime-local'
+  | 'color';
 export type InputSize = 'sm' | 'md' | 'lg';
 
 @Component({

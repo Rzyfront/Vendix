@@ -14,6 +14,11 @@ export interface User {
   organization_id: number;
   app?: 'ORG_ADMIN' | 'STORE_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
   user_roles?: UserRole[];
+  phone?: string;
+  document_type?: string;
+  document_number?: string;
+  avatar_url?: string;
+  main_store_id?: number;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +54,11 @@ export interface CreateUserDto {
   email: string;
   password: string;
   state?: UserState;
+  phone?: string;
+  document_type?: string;
+  document_number?: string;
+  avatar_url?: string;
+  main_store_id?: number;
 }
 
 export interface UpdateUserDto {
@@ -60,6 +70,11 @@ export interface UpdateUserDto {
   email?: string;
   password?: string;
   state?: UserState;
+  phone?: string;
+  document_type?: string;
+  document_number?: string;
+  avatar_url?: string;
+  main_store_id?: number;
   last_login?: string;
   failed_login_attempts?: number;
   locked_until?: string;

@@ -81,4 +81,6 @@ export class CreateReviewResponseDto {
   content: string;
 }
 
-export class UpdateReviewResponseDto extends PartialType(CreateReviewResponseDto) {}
+export class UpdateReviewResponseDto extends PartialType(
+  CreateReviewResponseDto,
+) {}

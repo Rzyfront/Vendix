@@ -9,9 +9,18 @@ import { EmailModule } from '../../../email/email.module';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.helper';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { OrgInventoryModule } from '../inventory/inventory.module';
+import { SettingsModule } from '../../store/settings/settings.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, EmailModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    EmailModule,
+    OrgInventoryModule,
+    SettingsModule,
+  ],
   controllers: [OnboardingController, OnboardingWizardController],
   providers: [
     OnboardingService,
@@ -19,7 +28,10 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
     BrandingGeneratorHelper,
     DomainGeneratorHelper,
     DefaultPanelUIService,
+    StoreBootstrapHelper,
+    // SubscriptionTrialService is exported by SubscriptionsModule (@Global),
+    // so no import is needed here — Nest resolves it globally.
   ],
   exports: [OnboardingService, OnboardingWizardService],
 })
-export class OnboardingModule { }
+export class OnboardingModule {}

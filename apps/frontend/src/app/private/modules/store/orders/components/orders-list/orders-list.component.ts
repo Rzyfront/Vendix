@@ -52,7 +52,6 @@ import { OrderPrintService } from '../../services/order-print.service';
     InputsearchComponent,
     OptionsDropdownComponent,
     EmptyStateComponent,
-    ButtonComponent,
     IconComponent,
     PaginationComponent,
     CardComponent,
@@ -175,7 +174,15 @@ export class OrdersListComponent {
   readonly filterValues = signal<FilterValues>({});
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [];
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Orden',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+    { label: 'Exportar', icon: 'download', action: 'export' },
+  ];
 
   // Table configuration
   columns: TableColumn[] = [

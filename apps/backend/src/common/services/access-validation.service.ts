@@ -7,7 +7,7 @@ import { GlobalPrismaService } from '../../prisma/services/global-prisma.service
 
 @Injectable()
 export class AccessValidationService {
-  constructor(private prisma: GlobalPrismaService) { }
+  constructor(private prisma: GlobalPrismaService) {}
 
   /**
    * Valida si un usuario tiene acceso a una tienda específica
@@ -49,7 +49,7 @@ export class AccessValidationService {
         (userRole: any) =>
           userRole.roles?.name === 'owner' ||
           userRole.roles?.name === 'admin' ||
-          userRole.roles?.name === 'org_admin'
+          userRole.roles?.name === 'org_admin',
       );
 
     if (hasOrgLevelRoleForStoreOrg) {
@@ -63,9 +63,9 @@ export class AccessValidationService {
       where: {
         store_id_user_id: {
           store_id: storeId,
-          user_id: user.id
-        }
-      }
+          user_id: user.id,
+        },
+      },
     });
 
     if (storeUser) {
@@ -118,7 +118,9 @@ export class AccessValidationService {
     // Check if they have an org-admin role (just in case strict role check is needed)
     const hasOrgAdminRole = user.user_roles?.some(
       (ur: any) =>
-        (ur.roles?.name === 'owner' || ur.roles?.name === 'admin' || ur.roles?.name === 'org_admin')
+        ur.roles?.name === 'owner' ||
+        ur.roles?.name === 'admin' ||
+        ur.roles?.name === 'org_admin',
     );
 
     if (hasOrgAdminRole && user.organization_id === organizationId) {

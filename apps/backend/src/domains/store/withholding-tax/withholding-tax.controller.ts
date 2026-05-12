@@ -1,7 +1,20 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+} from '@nestjs/common';
 import { WithholdingTaxService } from './withholding-tax.service';
 import { ResponseService } from '@common/responses/response.service';
-import { CreateWithholdingConceptDto, UpdateWithholdingConceptDto, CalculateWithholdingDto } from './dto';
+import {
+  CreateWithholdingConceptDto,
+  UpdateWithholdingConceptDto,
+  CalculateWithholdingDto,
+} from './dto';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
 @Controller('store/withholding-tax')
@@ -24,21 +37,33 @@ export class WithholdingTaxController {
   @Permissions('withholding:write')
   async createConcept(@Body() dto: CreateWithholdingConceptDto) {
     const result = await this.withholding_tax_service.createConcept(dto);
-    return this.response_service.success(result, 'Withholding concept created successfully');
+    return this.response_service.success(
+      result,
+      'Withholding concept created successfully',
+    );
   }
 
   @Put('concepts/:id')
   @Permissions('withholding:write')
-  async updateConcept(@Param('id') id: string, @Body() dto: UpdateWithholdingConceptDto) {
+  async updateConcept(
+    @Param('id') id: string,
+    @Body() dto: UpdateWithholdingConceptDto,
+  ) {
     const result = await this.withholding_tax_service.updateConcept(+id, dto);
-    return this.response_service.success(result, 'Withholding concept updated successfully');
+    return this.response_service.success(
+      result,
+      'Withholding concept updated successfully',
+    );
   }
 
   @Delete('concepts/:id')
   @Permissions('withholding:delete')
   async deactivateConcept(@Param('id') id: string) {
     const result = await this.withholding_tax_service.deactivateConcept(+id);
-    return this.response_service.success(result, 'Withholding concept deactivated successfully');
+    return this.response_service.success(
+      result,
+      'Withholding concept deactivated successfully',
+    );
   }
 
   // ===== UVT Values =====
@@ -54,7 +79,10 @@ export class WithholdingTaxController {
   @Permissions('withholding:write')
   async createUvt(@Body() body: { year: number; value_cop: number }) {
     const result = await this.withholding_tax_service.createUvt(body);
-    return this.response_service.success(result, 'UVT value saved successfully');
+    return this.response_service.success(
+      result,
+      'UVT value saved successfully',
+    );
   }
 
   // ===== Calculate =====

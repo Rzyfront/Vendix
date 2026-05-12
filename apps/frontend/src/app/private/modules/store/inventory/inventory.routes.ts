@@ -55,6 +55,13 @@ export const INVENTORY_ROUTES: Routes = [
                         (m) => m.MovementsComponent
                     ),
             },
+            {
+                path: 'stock/:productId',
+                loadComponent: () =>
+                    import('./stock/stock-detail.component').then(
+                        (m) => m.StockDetailComponent
+                    ),
+            },
         ],
     },
 ];

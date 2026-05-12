@@ -134,14 +134,10 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/monitoring/monitoring.routes'
           ).then((m) => m.MONITORING_ROUTES),
       },
-      // Placeholder routes - modules under construction
       {
         path: 'billing',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Facturación', description: 'El módulo de facturación está siendo desarrollado.' },
+        redirectTo: 'subscriptions',
+        pathMatch: 'full',
       },
       {
         path: 'support',
@@ -149,46 +145,6 @@ export const superAdminRoutes: Routes = [
           import('../../private/modules/super-admin/support/support.routes').then(
             (m) => m.SUPPORT_ROUTES
           ),
-      },
-      {
-        path: 'analytics/platform',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Analíticas de Plataforma', description: 'Las analíticas de plataforma estarán disponibles próximamente.' },
-      },
-      {
-        path: 'analytics/users',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Analíticas de Usuarios', description: 'Las analíticas de usuarios estarán disponibles próximamente.' },
-      },
-      {
-        path: 'analytics/performance',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Rendimiento', description: 'El módulo de rendimiento está siendo desarrollado.' },
-      },
-      {
-        path: 'system/settings',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Configuración del Sistema', description: 'La configuración del sistema está siendo desarrollada.' },
-      },
-      {
-        path: 'system/logs',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Registros del Sistema', description: 'Los registros del sistema estarán disponibles próximamente.' },
       },
       {
         path: 'system/backups',
@@ -203,6 +159,20 @@ export const superAdminRoutes: Routes = [
           import(
             '../../private/modules/super-admin/payroll-defaults/payroll-defaults.component'
           ).then((c) => c.PayrollDefaultsComponent),
+      },
+      {
+        path: 'system/settings-sync',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/settings-sync/settings-sync.component'
+          ).then((c) => c.SuperAdminSettingsSyncComponent),
+      },
+      {
+        path: 'subscriptions',
+        loadChildren: () =>
+          import(
+            '../../private/modules/super-admin/subscriptions/subscriptions.routes'
+          ).then((m) => m.SUBSCRIPTIONS_ROUTES),
       },
     ],
   },

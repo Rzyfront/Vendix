@@ -26,17 +26,15 @@ import { InventoryAdjustment, AdjustmentType } from '../../../interfaces';
 @Component({
   selector: 'app-adjustment-list',
   standalone: true,
-  imports: [
+imports: [
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    IconComponent,
-    ButtonComponent,
     PaginationComponent,
     EmptyStateComponent,
     CardComponent
-],
+  ],
   templateUrl: './adjustment-list.component.html',
 })
 export class AdjustmentListComponent {

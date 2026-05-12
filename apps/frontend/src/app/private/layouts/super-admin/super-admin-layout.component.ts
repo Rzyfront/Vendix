@@ -12,6 +12,9 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+// S1.2 — SubscriptionBannerComponent removed from SUPER_ADMIN. The banner is
+// store-scoped only and never makes sense in the platform-level layout.
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
 import { timer } from 'rxjs';
@@ -21,7 +24,12 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-super-admin-layout',
   standalone: true,
-  imports: [RouterModule, SidebarComponent, HeaderComponent],
+  imports: [
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    PaywallOutletComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -50,6 +58,8 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
         >
         </app-header>
 
+        <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
+
         <!-- Page Content (Scrollable) -->
         <main
           class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -61,6 +71,9 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
         </main>
       </div>
     </div>
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
@@ -92,11 +105,15 @@ export class SuperAdminLayoutComponent {
   // --- Dynamic menu items with support badge ---
   readonly menuItems = computed<MenuItem[]>(() => {
     const openCount = this.openTicketsCount();
+    const badge = openCount > 0 ? openCount.toString() : undefined;
     return this.baseMenuItems.map((item) => {
-      if (item.label === 'Soporte') {
+      if (item.label === 'Soporte' && item.children) {
         return {
           ...item,
-          badge: openCount > 0 ? openCount.toString() : undefined,
+          badge,
+          children: item.children.map((child) =>
+            child.label === 'Tickets' ? { ...child, badge } : child,
+          ),
         };
       }
       return item;
@@ -124,16 +141,16 @@ export class SuperAdminLayoutComponent {
     '/super-admin/settings/shipping': 'Envíos del Sistema',
     '/super-admin/audit': 'Auditoría',
     '/super-admin/billing': 'Facturación',
-    '/super-admin/support': 'Soporte',
+    '/super-admin/subscriptions': 'Suscripciones',
+    '/super-admin/subscriptions/plans': 'Planes',
+    '/super-admin/subscriptions/active': 'Suscripciones',
+    '/super-admin/subscriptions/metrics': 'Métricas SaaS',
+    '/super-admin/support': 'Tickets',
     '/super-admin/system/ai-engine': 'AI Engine',
     '/super-admin/system/templates': 'Plantillas',
-    '/super-admin/system/settings': 'Configuración del Sistema',
-    '/super-admin/system/logs': 'Registros',
     '/super-admin/system/backups': 'Copias de Seguridad',
     '/super-admin/system/payroll-defaults': 'Parámetros de Nómina',
-    '/super-admin/analytics/platform': 'Analíticas de Plataforma',
-    '/super-admin/analytics/users': 'Analíticas de Usuarios',
-    '/super-admin/analytics/performance': 'Rendimiento',
+    '/super-admin/system/settings-sync': 'Sincronización de Settings',
   };
 
   user = {
@@ -151,98 +168,108 @@ export class SuperAdminLayoutComponent {
         route: '/super-admin/dashboard',
       },
       {
-        label: 'Monitoreo',
-        icon: 'activity',
-        route: '/super-admin/monitoring',
+        label: 'Observabilidad',
+        icon: 'chart-line',
+        children: [
+          {
+            label: 'Monitoreo',
+            icon: 'circle',
+            route: '/super-admin/monitoring',
+          },
+          {
+            label: 'Auditoría',
+            icon: 'circle',
+            route: '/super-admin/audit',
+          },
+          {
+            label: 'Copias de Seguridad',
+            icon: 'circle',
+            route: '/super-admin/system/backups',
+          },
+        ],
+      },
+      {
+        label: 'Cuentas',
+        icon: 'building-2',
+        children: [
+          {
+            label: 'Organizaciones',
+            icon: 'circle',
+            route: '/super-admin/organizations',
+          },
+          {
+            label: 'Tiendas',
+            icon: 'circle',
+            route: '/super-admin/stores',
+          },
+        ],
+      },
+      {
+        label: 'Acceso',
+        icon: 'shield-check',
+        children: [
+          {
+            label: 'Usuarios',
+            icon: 'circle',
+            route: '/super-admin/users',
+          },
+          {
+            label: 'Roles',
+            icon: 'circle',
+            route: '/super-admin/roles',
+          },
+        ],
+      },
+      {
+        label: 'Facturación',
+        icon: 'credit-card',
+        children: [
+          {
+            label: 'Planes',
+            icon: 'circle',
+            route: '/super-admin/subscriptions/plans',
+          },
+          {
+            label: 'Suscripciones',
+            icon: 'circle',
+            route: '/super-admin/subscriptions/active',
+          },
+          {
+            label: 'Métricas SaaS',
+            icon: 'circle',
+            route: '/super-admin/subscriptions/metrics',
+          },
+          {
+            label: 'Métodos de Pago',
+            icon: 'circle',
+            route: '/super-admin/payment-methods',
+          },
+          {
+            label: 'Monedas',
+            icon: 'circle',
+            route: '/super-admin/currencies',
+          },
+        ],
       },
       {
         label: 'AI Engine',
         icon: 'cpu',
         route: '/super-admin/system/ai-engine',
-      },
-      {
-        label: 'Organizaciones',
-        icon: 'building',
-        route: '/super-admin/organizations',
-      },
-      {
-        label: 'Tiendas',
-        icon: 'store',
-        route: '/super-admin/stores',
-      },
-      {
-        label: 'Usuarios',
-        icon: 'users',
-        route: '/super-admin/users',
-      },
-      {
-        label: 'Roles',
-        icon: 'shield',
-        route: '/super-admin/roles',
-      },
-      {
-        label: 'Métodos de Pago',
-        icon: 'credit-card',
-        route: '/super-admin/payment-methods',
-      },
-      {
-        label: 'Dominios',
-        icon: 'globe-2',
-        route: '/super-admin/domains',
-      },
-      {
-        label: 'Documentos Legales',
-        icon: 'file-text',
-        route: '/super-admin/legal-documents',
-      },
-      {
-        label: 'Centro de Ayuda',
-        icon: 'book-open',
-        route: '/super-admin/help-center',
-      },
-      {
-        label: 'Monedas',
-        icon: 'dollar-sign',
-        route: '/super-admin/currencies',
-      },
-      {
-        label: 'Envíos del Sistema',
-        icon: 'truck',
-        route: '/super-admin/settings/shipping',
-      },
-      {
-        label: 'Auditoría',
-        icon: 'eye',
-        route: '/super-admin/audit',
-      },
-      {
-        label: 'Facturación',
-        icon: 'credit-card',
-        route: '/super-admin/billing',
+        requiresFeature: 'ai_engine',
       },
       {
         label: 'Soporte',
         icon: 'headset',
-        route: '/super-admin/support',
-      },
-      {
-        label: 'Analíticas',
-        icon: 'chart-line',
         children: [
           {
-            label: 'Analíticas de Plataforma',
+            label: 'Tickets',
             icon: 'circle',
-            route: '/super-admin/analytics/platform',
+            route: '/super-admin/support',
           },
           {
-            label: 'Analíticas de Usuarios',
+            label: 'Centro de Ayuda',
             icon: 'circle',
-            route: '/super-admin/analytics/users',
-          },
-          {
-            label: 'Rendimiento',
-            icon: 'circle',
-            route: '/super-admin/analytics/performance',
+            route: '/super-admin/help-center',
           },
         ],
       },
@@ -251,9 +278,19 @@ export class SuperAdminLayoutComponent {
         icon: 'settings',
         children: [
           {
-            label: 'Configuración del Sistema',
+            label: 'Dominios',
             icon: 'circle',
-            route: '/super-admin/system/settings',
+            route: '/super-admin/domains',
+          },
+          {
+            label: 'Documentos Legales',
+            icon: 'circle',
+            route: '/super-admin/legal-documents',
+          },
+          {
+            label: 'Envíos del Sistema',
+            icon: 'circle',
+            route: '/super-admin/settings/shipping',
           },
           {
             label: 'Plantillas',
@@ -261,19 +298,14 @@ export class SuperAdminLayoutComponent {
             route: '/super-admin/system/templates',
           },
           {
-            label: 'Registros',
-            icon: 'circle',
-            route: '/super-admin/system/logs',
-          },
-          {
-            label: 'Copias de Seguridad',
-            icon: 'circle',
-            route: '/super-admin/system/backups',
-          },
-          {
             label: 'Parámetros de Nómina',
             icon: 'circle',
             route: '/super-admin/system/payroll-defaults',
+          },
+          {
+            label: 'Sincronización de Settings',
+            icon: 'circle',
+            route: '/super-admin/system/settings-sync',
           },
         ],
       },

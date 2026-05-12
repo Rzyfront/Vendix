@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Post,
-  Body,
-  Get,
-  UseGuards,
-  Res,
-} from '@nestjs/common';
+import { Controller, Post, Body, Get, UseGuards, Res } from '@nestjs/common';
 import { Response } from 'express';
 import { CustomersBulkService } from './customers-bulk.service';
 import { ResponseService } from '@common/responses/response.service';

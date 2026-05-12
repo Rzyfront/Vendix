@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
   WompiConfig,
@@ -10,18 +10,38 @@ import {
   WompiWebhookEvent,
   WompiCreatePaymentLinkRequest,
   WompiPaymentLinkResponse,
+  WompiCreatePaymentSourceRequest,
+  WompiPaymentSourceResponse,
 } from './wompi.types';
 
-@Injectable()
+/**
+ * Thrown when Wompi rejects a /payment_sources call because the
+ * acceptance_token sent does not match the one currently signed by the merchant
+ * (expired, regenerated, or tampered). The frontend MUST re-fetch acceptance
+ * tokens and retry — the same tok_* card token can be reused only if Wompi
+ * has not yet consumed it.
+ */
+export class WompiInvalidAcceptanceTokenError extends Error {
+  readonly code = 'WOMPI_INVALID_ACCEPTANCE_TOKEN';
+  readonly statusCode: number;
+  readonly responseBody: unknown;
+
+  constructor(message: string, statusCode: number, responseBody: unknown) {
+    super(message);
+    this.name = 'WompiInvalidAcceptanceTokenError';
+    this.statusCode = statusCode;
+    this.responseBody = responseBody;
+  }
+}
+
+/**
+ * Immutable Wompi API client. Instances are created via WompiClientFactory
+ * so concurrent requests never race on shared mutable config.
+ */
 export class WompiClient {
   private readonly logger = new Logger(WompiClient.name);
-  private config: WompiConfig;
 
-  // ── Configuración ───────────────────────────
-
-  configure(config: WompiConfig): void {
-    this.config = config;
-  }
+  constructor(readonly config: WompiConfig) {}
 
   private get baseUrl(): string {
     return this.config.environment === WompiEnvironment.PRODUCTION
@@ -31,7 +51,7 @@ export class WompiClient {
 
   private ensureConfigured(): void {
     if (!this.config) {
-      throw new Error('WompiClient not configured. Call configure() first.');
+      throw new Error('WompiClient not configured.');
     }
   }
 
@@ -40,7 +60,15 @@ export class WompiClient {
   private async request<T>(
     method: string,
     path: string,
-    options?: { body?: any; bearerToken?: string },
+    options?: {
+      body?: any;
+      bearerToken?: string;
+      idempotencyKey?: string;
+      /** Header name for the idempotency key. Defaults to `Idempotency-Key`
+       *  (used by /transactions). Wompi's /payment_sources endpoint expects
+       *  the canonical `X-Wompi-Idempotency-Key` header. */
+      idempotencyHeader?: string;
+    },
   ): Promise<T> {
     this.ensureConfigured();
 
@@ -51,6 +79,11 @@ export class WompiClient {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     };
+
+    if (options?.idempotencyKey) {
+      const headerName = options.idempotencyHeader ?? 'Idempotency-Key';
+      headers[headerName] = options.idempotencyKey;
+    }
 
     const fetchOptions: RequestInit = { method, headers };
     if (options?.body) {
@@ -64,6 +97,28 @@ export class WompiClient {
 
     if (!response.ok) {
       this.logger.error(`Wompi API error: ${response.status}`, data);
+
+      // Specific 401 case for /payment_sources: invalid acceptance token.
+      // Wompi returns reason "INVALID_ACCEPTANCE_TOKEN" (or the message contains it).
+      const reason: unknown = data?.error?.reason ?? data?.error?.type;
+      const message: unknown = data?.error?.message ?? data?.error?.messages;
+      const reasonStr = typeof reason === 'string' ? reason : '';
+      const messageStr =
+        typeof message === 'string' ? message : JSON.stringify(message ?? '');
+
+      if (
+        response.status === 401 &&
+        (reasonStr.includes('INVALID_ACCEPTANCE_TOKEN') ||
+          messageStr.includes('INVALID_ACCEPTANCE_TOKEN') ||
+          messageStr.toLowerCase().includes('acceptance_token'))
+      ) {
+        throw new WompiInvalidAcceptanceTokenError(
+          messageStr || 'Invalid acceptance token',
+          response.status,
+          data,
+        );
+      }
+
       throw new Error(
         data?.error?.message ??
           data?.error?.reason ??
@@ -78,9 +133,11 @@ export class WompiClient {
 
   async createTransaction(
     data: WompiCreateTransactionRequest,
+    idempotencyKey?: string,
   ): Promise<WompiTransactionResponse> {
     return this.request<WompiTransactionResponse>('POST', '/transactions', {
       body: data,
+      idempotencyKey,
     });
   }
 
@@ -93,21 +150,74 @@ export class WompiClient {
     );
   }
 
+  async getTransactionsByReference(
+    reference: string,
+  ): Promise<{ data: import('./wompi.types').WompiTransactionData[] }> {
+    const encoded = encodeURIComponent(reference);
+    return this.request<{
+      data: import('./wompi.types').WompiTransactionData[];
+    }>('GET', `/transactions/?reference=${encoded}`);
+  }
+
   async voidTransaction(
     transactionId: string,
+    idempotencyKey?: string,
   ): Promise<WompiTransactionResponse> {
     return this.request<WompiTransactionResponse>(
       'POST',
       `/transactions/${transactionId}/void`,
+      { idempotencyKey },
+    );
+  }
+
+  // ── Payment Sources (Card-On-File) ──────────
+
+  /**
+   * Creates a persistent payment_source from a `tok_*` card token tokenized in
+   * the widget. The `acceptance_token` MUST be EXACTLY the one shown to the
+   * user when they accepted the terms (legal trail) — do NOT re-fetch a fresh
+   * one for this call.
+   *
+   * Idempotent via `X-Wompi-Idempotency-Key` header (Wompi convention).
+   *
+   * @throws {WompiInvalidAcceptanceTokenError} on 401 INVALID_ACCEPTANCE_TOKEN
+   */
+  async createPaymentSource(
+    data: WompiCreatePaymentSourceRequest,
+    idempotencyKey: string,
+  ): Promise<WompiPaymentSourceResponse> {
+    return this.request<WompiPaymentSourceResponse>(
+      'POST',
+      '/payment_sources',
+      {
+        body: data,
+        idempotencyKey,
+        idempotencyHeader: 'X-Wompi-Idempotency-Key',
+      },
+    );
+  }
+
+  /**
+   * Retrieves a payment_source by id. Useful for verifying status
+   * (`AVAILABLE` | `ERROR` | `PENDING`) after creation or before charging.
+   */
+  async getPaymentSource(
+    id: string | number,
+  ): Promise<WompiPaymentSourceResponse> {
+    return this.request<WompiPaymentSourceResponse>(
+      'GET',
+      `/payment_sources/${id}`,
     );
   }
 
   // ── Merchant / Acceptance Token ─────────────
 
-  async getAcceptanceTokens(): Promise<{ acceptance_token: string; personal_auth_token: string }> {
+  async getAcceptanceTokens(): Promise<{
+    acceptance_token: string;
+    personal_auth_token: string;
+  }> {
     this.ensureConfigured();
 
-    // No cache — acceptance tokens are single-use per Wompi docs
     const response = await this.request<WompiMerchantResponse>(
       'GET',
       `/merchants/${this.config.public_key}`,
@@ -115,13 +225,18 @@ export class WompiClient {
 
     return {
       acceptance_token: response.data.presigned_acceptance.acceptance_token,
-      personal_auth_token: response.data.presigned_personal_data_auth.acceptance_token,
+      personal_auth_token:
+        response.data.presigned_personal_data_auth.acceptance_token,
     };
   }
 
   // ── Integrity signature ──────────────────────
 
-  generateIntegritySignature(reference: string, amountInCents: number, currency: string): string {
+  generateIntegritySignature(
+    reference: string,
+    amountInCents: number,
+    currency: string,
+  ): string {
     this.ensureConfigured();
     const concatenated = `${reference}${amountInCents}${currency}${this.config.integrity_secret}`;
     return crypto.createHash('sha256').update(concatenated).digest('hex');
@@ -167,8 +282,6 @@ export class WompiClient {
     try {
       const { properties, checksum } = event.signature;
 
-      // Concatenar los valores de las propiedades indicadas en el orden dado
-      // Las properties vienen como paths e.g. ["transaction.id", "transaction.status", ...]
       const values = properties.map((prop) => {
         const keys = prop.split('.');
         let value: any = event.data;
@@ -178,11 +291,8 @@ export class WompiClient {
         return String(value);
       });
 
-      // Concatenar valores + timestamp + events_secret
       const concatenated =
-        values.join('') +
-        String(event.timestamp) +
-        this.config.events_secret;
+        values.join('') + String(event.timestamp) + this.config.events_secret;
 
       const hash = crypto
         .createHash('sha256')

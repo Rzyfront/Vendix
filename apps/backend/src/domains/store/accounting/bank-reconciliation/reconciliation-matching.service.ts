@@ -52,7 +52,9 @@ export class ReconciliationMatchingService {
     }
 
     if (reconciliation.status === ('completed' as any)) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED,
+      );
     }
 
     const chart_account_id = reconciliation.bank_account.chart_account_id;
@@ -297,7 +299,9 @@ export class ReconciliationMatchingService {
     }
 
     if (reconciliation.status === ('completed' as any)) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED,
+      );
     }
 
     // Validate bank transaction exists
@@ -310,15 +314,18 @@ export class ReconciliationMatchingService {
     }
 
     // Check if already matched in this reconciliation
-    const existing_match = await this.prisma.bank_reconciliation_matches.findFirst({
-      where: {
-        reconciliation_id,
-        bank_transaction_id: dto.bank_transaction_id,
-      },
-    });
+    const existing_match =
+      await this.prisma.bank_reconciliation_matches.findFirst({
+        where: {
+          reconciliation_id,
+          bank_transaction_id: dto.bank_transaction_id,
+        },
+      });
 
     if (existing_match) {
-      throw new VendixHttpException(ErrorCodes.BANK_TRANSACTION_ALREADY_RECONCILED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_TRANSACTION_ALREADY_RECONCILED,
+      );
     }
 
     const match = await this.createMatch(
@@ -347,7 +354,9 @@ export class ReconciliationMatchingService {
     }
 
     if (reconciliation.status === ('completed' as any)) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED,
+      );
     }
 
     const match = await this.prisma.bank_reconciliation_matches.findFirst({

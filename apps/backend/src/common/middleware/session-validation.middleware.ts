@@ -9,7 +9,7 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class SessionValidationMiddleware implements NestMiddleware {
-  constructor(private readonly prismaService: GlobalPrismaService) { }
+  constructor(private readonly prismaService: GlobalPrismaService) {}
 
   async use(req: Request, res: Response, next: NextFunction) {
     // Solo validar para rutas protegidas que usan refresh tokens

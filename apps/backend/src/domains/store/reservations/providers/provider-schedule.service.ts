@@ -95,6 +95,8 @@ export class ProviderScheduleService {
       throw new NotFoundException(`Excepcion #${exceptionId} no encontrada`);
     }
 
-    await this.prisma.provider_exceptions.delete({ where: { id: exceptionId } });
+    await this.prisma.provider_exceptions.delete({
+      where: { id: exceptionId },
+    });
   }
 }

@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+} from '@nestjs/common';
 import { TemplatesService } from './templates.service';
 import { CreateTemplateDto } from './dto/create-template.dto';
 import { UpdateTemplateDto } from './dto/update-template.dto';
@@ -32,7 +43,10 @@ export class TemplatesController {
   @Permissions('store:settings:write')
   async create(@Body() dto: CreateTemplateDto) {
     const result = await this.service.createTemplate(dto);
-    return this.responseService.success(result, 'Plantilla creada correctamente');
+    return this.responseService.success(
+      result,
+      'Plantilla creada correctamente',
+    );
   }
 
   @Patch(':id')
@@ -42,21 +56,30 @@ export class TemplatesController {
     @Body() dto: UpdateTemplateDto,
   ) {
     const result = await this.service.updateTemplate(id, dto);
-    return this.responseService.success(result, 'Plantilla actualizada correctamente');
+    return this.responseService.success(
+      result,
+      'Plantilla actualizada correctamente',
+    );
   }
 
   @Post(':id/duplicate')
   @Permissions('store:settings:write')
   async duplicate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.service.duplicateTemplate(id);
-    return this.responseService.success(result, 'Plantilla duplicada correctamente');
+    return this.responseService.success(
+      result,
+      'Plantilla duplicada correctamente',
+    );
   }
 
   @Delete(':id')
   @Permissions('store:settings:write')
   async delete(@Param('id', ParseIntPipe) id: number) {
     const result = await this.service.deleteTemplate(id);
-    return this.responseService.success(result, 'Plantilla eliminada correctamente');
+    return this.responseService.success(
+      result,
+      'Plantilla eliminada correctamente',
+    );
   }
 
   @Post(':id/products')
@@ -66,6 +89,9 @@ export class TemplatesController {
     @Body('product_ids') productIds: number[],
   ) {
     const result = await this.service.assignProducts(id, productIds);
-    return this.responseService.success(result, 'Productos asignados correctamente');
+    return this.responseService.success(
+      result,
+      'Productos asignados correctamente',
+    );
   }
 }

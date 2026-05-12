@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { pricingRoutes } from '../../public/pricing/pricing.routes';
 
 export const orgLandingPublicRoutes: Routes = [
   {
@@ -7,5 +8,6 @@ export const orgLandingPublicRoutes: Routes = [
       import(
         '../../public/dynamic-landing/components/org-landing/org-landing.component'
       ).then((c) => c.OrgLandingComponent),
-  }
+  },
+  ...pricingRoutes,
 ];

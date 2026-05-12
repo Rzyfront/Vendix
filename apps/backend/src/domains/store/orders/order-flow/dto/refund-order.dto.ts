@@ -1,4 +1,10 @@
-import { IsOptional, IsNumber, IsString, MaxLength, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsNumber,
+  IsString,
+  MaxLength,
+  Min,
+} from 'class-validator';
 
 export class RefundOrderDto {
   @IsOptional()

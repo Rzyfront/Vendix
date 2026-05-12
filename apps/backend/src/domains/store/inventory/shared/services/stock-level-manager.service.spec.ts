@@ -12,7 +12,7 @@ import { InventoryTransaction } from '../../transactions/interfaces/inventory-tr
 
 describe('StockLevelManager', () => {
   let service: StockLevelManager;
-  let prismaService: jest.Mocked<PrismaService>;
+  let prismaService: jest.Mocked<StorePrismaService>;
   let transactionsService: jest.Mocked<InventoryTransactionsService>;
   let eventEmitter: jest.Mocked<EventEmitter2>;
 
@@ -118,7 +118,7 @@ describe('StockLevelManager', () => {
       providers: [
         StockLevelManager,
         {
-          provide: PrismaService,
+          provide: StorePrismaService,
           useValue: mockPrismaService,
         },
         {
@@ -133,7 +133,7 @@ describe('StockLevelManager', () => {
     }).compile();
 
     service = module.get<StockLevelManager>(StockLevelManager);
-    prismaService = module.get(PrismaService);
+    prismaService = module.get(StorePrismaService);
     transactionsService = module.get(InventoryTransactionsService);
     eventEmitter = module.get(EventEmitter2);
 

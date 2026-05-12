@@ -1,26 +1,59 @@
-import { Component, OnInit, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  DestroyRef,
+  inject,
+  signal,
+  ChangeDetectionStrategy,
+  viewChild,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
-import { CheckoutService, WhatsappCheckoutResponse } from '../../services/checkout.service';
+import {
+  CheckoutService,
+  GuestCheckoutCustomer,
+  CheckoutShippingAddress,
+  WhatsappCheckoutResponse,
+} from '../../services/checkout.service';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { StoreUiService } from '../../services/store-ui.service';
-import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
+import {
+  CatalogService,
+  EcommerceProduct,
+} from '../../services/catalog.service';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import {
+  GuestCheckoutData,
+  GuestCheckoutDataModalComponent,
+} from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
 
 @Component({
   selector: 'app-cart',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ButtonComponent, ProductCarouselComponent, ProductQuickViewModalComponent, CurrencyPipe],
+  imports: [
+    CommonModule,
+    RouterModule,
+    IconComponent,
+    QuantityControlComponent,
+    ButtonComponent,
+    ProductCarouselComponent,
+    ProductQuickViewModalComponent,
+    GuestCheckoutDataModalComponent,
+    CurrencyPipe,
+  ],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -37,10 +70,17 @@ export class CartComponent implements OnInit {
   readonly selectedProductSlug = signal<string | null>(null);
 
   readonly is_whatsapp_loading = signal(false);
+  private pending_guest_whatsapp_checkout = false;
+  readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
 
   whatsappEnabled(): boolean {
     const config = this.tenantFacade.getCurrentDomainConfig();
     return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
+  }
+
+  requiresRegistration(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return !!config?.customConfig?.ecommerce?.checkout?.require_registration;
   }
 
   private catalogService = inject(CatalogService);
@@ -55,20 +95,22 @@ export class CartComponent implements OnInit {
     private auth_facade: AuthFacade,
     private router: Router,
     private store_ui_service: StoreUiService,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
 
-    this.auth_facade.isAuthenticated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((is_auth: boolean) => {
-      this.is_authenticated.set(is_auth);
-      if (is_auth) {
-        this.loadCart();
-      } else {
-        this.loadLocalCart();
-      }
-    });
+    this.auth_facade.isAuthenticated$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((is_auth: boolean) => {
+        this.is_authenticated.set(is_auth);
+        if (is_auth) {
+          this.loadCart();
+        } else {
+          this.loadLocalCart();
+        }
+      });
 
     this.loadRecommendations();
   }
@@ -88,35 +130,46 @@ export class CartComponent implements OnInit {
       },
       error: (err) => {
         this.is_loading.set(false);
-        this.toast.error('No pudimos cargar tu carrito. Intenta de nuevo.', 'Error');
+        this.toast.error(
+          'No pudimos cargar tu carrito. Intenta de nuevo.',
+          'Error',
+        );
       },
     });
 
-    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
-      this.cart.set(cart);
-    });
+    this.cart_service.cart$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cart) => {
+        this.cart.set(cart);
+      });
   }
 
   loadLocalCart(): void {
-    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
-      this.cart.set(cart);
-      this.is_loading.set(false);
-    });
+    this.cart_service.cart$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cart) => {
+        this.cart.set(cart);
+        this.is_loading.set(false);
+      });
   }
 
   loadRecommendations(): void {
-    this.catalogService.getProducts({ limit: 10, sort_by: 'newest', has_discount: true }).subscribe({
-      next: (response) => {
-        if (response.data.length > 0) {
-          this.recommendedProducts.set(response.data);
-        } else {
-          // Fallback if no sales
-          this.catalogService.getProducts({ limit: 10, sort_by: 'newest' }).subscribe(res => {
-            this.recommendedProducts.set(res.data);
-          });
-        }
-      }
-    });
+    this.catalogService
+      .getProducts({ limit: 10, sort_by: 'newest', has_discount: true })
+      .subscribe({
+        next: (response) => {
+          if (response.data.length > 0) {
+            this.recommendedProducts.set(response.data);
+          } else {
+            // Fallback if no sales
+            this.catalogService
+              .getProducts({ limit: 10, sort_by: 'newest' })
+              .subscribe((res) => {
+                this.recommendedProducts.set(res.data);
+              });
+          }
+        },
+      });
   }
 
   updateQuantity(item: CartItem, new_quantity: number): void {
@@ -133,17 +186,22 @@ export class CartComponent implements OnInit {
       {
         item_id: item.id,
         product_id: item.product_id,
-        product_variant_id: item.product_variant_id || undefined
+        product_variant_id: item.product_variant_id || undefined,
       },
-      new_quantity
+      new_quantity,
     );
 
     if (result) {
       result.subscribe({
-        next: () => { this.updating_item_id.set(null); },
+        next: () => {
+          this.updating_item_id.set(null);
+        },
         error: (err: any) => {
           this.updating_item_id.set(null);
-          this.toast.error(this.extractErrorMessage(err), 'Error al actualizar');
+          this.toast.error(
+            this.extractErrorMessage(err),
+            'Error al actualizar',
+          );
         },
       });
     } else {
@@ -155,7 +213,7 @@ export class CartComponent implements OnInit {
     const result = this.cart_service.removeCartItem({
       item_id: item.id,
       product_id: item.product_id,
-      product_variant_id: item.product_variant_id || undefined
+      product_variant_id: item.product_variant_id || undefined,
     });
     if (result) {
       result.subscribe();
@@ -170,7 +228,7 @@ export class CartComponent implements OnInit {
   }
 
   proceedToCheckout(): void {
-    if (!this.is_authenticated()) {
+    if (!this.is_authenticated() && this.requiresRegistration()) {
       this.store_ui_service.openLoginModal();
     } else {
       this.router.navigate(['/checkout']);
@@ -182,54 +240,114 @@ export class CartComponent implements OnInit {
   }
 
   whatsappCheckout(): void {
-    const config = this.tenantFacade.getCurrentDomainConfig();
-    const requiresRegistration = !!config?.customConfig?.ecommerce?.checkout?.require_registration;
-
-    if (requiresRegistration && !this.is_authenticated()) {
+    if (this.requiresRegistration() && !this.is_authenticated()) {
       this.store_ui_service.openLoginModal();
       return;
     }
 
+    if (!this.is_authenticated()) {
+      this.pending_guest_whatsapp_checkout = true;
+      this.guestDataModal()?.open();
+      return;
+    }
+
+    this.startWhatsappCheckout(null);
+  }
+
+  onGuestDataCompleted(data: GuestCheckoutData | null): void {
+    if (!this.pending_guest_whatsapp_checkout) return;
+    this.pending_guest_whatsapp_checkout = false;
+    this.startWhatsappCheckout(data);
+  }
+
+  private startWhatsappCheckout(data: GuestCheckoutData | null): void {
     this.is_whatsapp_loading.set(true);
 
     // Always send items from frontend cart (localStorage) so the backend
     // can fallback to them if the backend cart is empty (e.g. user logged
     // in after adding items as guest and cart wasn't synced)
-    const items = this.cart()?.items.map(i => ({
+    const items = this.cart()?.items.map((i) => ({
       product_id: i.product_id,
       product_variant_id: i.product_variant_id ?? undefined,
       quantity: i.quantity,
     }));
 
-    this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        this.is_whatsapp_loading.set(false);
-        // Clear local cart for guests
-        if (!this.is_authenticated()) {
-          this.cart_service.clearAllCart();
-        }
-        this.openWhatsApp(response.data);
-      },
-      error: (err: any) => {
-        this.is_whatsapp_loading.set(false);
-        const msg = this.extractErrorMessage(err);
-        this.toast.error(msg, 'No se pudo procesar tu pedido');
-      },
-    });
+    this.checkoutService
+      .whatsappCheckout(
+        undefined,
+        items,
+        this.toGuestCustomer(data),
+        this.toGuestShippingAddress(data),
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.is_whatsapp_loading.set(false);
+          // Clear local cart for guests
+          if (!this.is_authenticated()) {
+            this.cart_service.clearAllCart();
+          }
+          this.openWhatsApp(response.data);
+          if (!this.is_authenticated() && response.data.public_order_token) {
+            this.router.navigate(['/pedido', response.data.public_order_token]);
+          }
+        },
+        error: (err: any) => {
+          this.is_whatsapp_loading.set(false);
+          const msg = this.extractErrorMessage(err);
+          this.toast.error(msg, 'No se pudo procesar tu pedido');
+        },
+      });
+  }
+
+  private toGuestCustomer(
+    data: GuestCheckoutData | null,
+  ): GuestCheckoutCustomer | null {
+    if (!data) return null;
+    return {
+      first_name: data.first_name,
+      last_name: data.last_name,
+      email: data.email,
+      phone: data.phone,
+      document_type: data.document_type,
+      document_number: data.document_number,
+    };
+  }
+
+  private toGuestShippingAddress(
+    data: GuestCheckoutData | null,
+  ): CheckoutShippingAddress | null {
+    if (!data?.address_line1 || !data.city) return null;
+    return {
+      address_line1: data.address_line1,
+      address_line2: data.address_line2,
+      city: data.city,
+      state_province: data.state_province,
+      country_code: data.country_code || 'CO',
+      postal_code: data.postal_code,
+      phone_number: data.phone,
+    };
   }
 
   private openWhatsApp(order: WhatsappCheckoutResponse): void {
     const config = this.tenantFacade.getCurrentDomainConfig();
-    const phone = (config?.customConfig?.ecommerce?.checkout?.whatsapp_number || '').replace(/\D/g, '');
+    const phone = (
+      config?.customConfig?.ecommerce?.checkout?.whatsapp_number || ''
+    ).replace(/\D/g, '');
     const storeName = config?.customConfig?.branding?.name || 'la tienda';
     const fmt = (v: number) => this.currencyService.format(v);
 
-    const itemLines = order.items.map(i =>
-      `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(i.total_price)}`
-    ).join('\n');
+    const itemLines = order.items
+      .map(
+        (i) =>
+          `  - ${i.name}${i.variant_sku ? ' (' + i.variant_sku + ')' : ''} x${i.quantity} — ${fmt(i.total_price)}`,
+      )
+      .join('\n');
 
     const customer = order.customer;
-    const customerName = customer ? `${customer.first_name} ${customer.last_name}`.trim() : '';
+    const customerName = customer
+      ? `${customer.first_name} ${customer.last_name}`.trim()
+      : '';
 
     let message: string;
 
@@ -241,26 +359,31 @@ export class CartComponent implements OnInit {
       }
       if (customer!.address) {
         const addr = customer!.address;
-        const parts = [addr.address_line1, addr.address_line2, addr.city, addr.state_province].filter(Boolean);
+        const parts = [
+          addr.address_line1,
+          addr.address_line2,
+          addr.city,
+          addr.state_province,
+        ].filter(Boolean);
         contactLines += `\n*Dirección de envío:* ${parts.join(', ')}`;
       }
 
       message = encodeURIComponent(
         `Hola, soy *${customerName}*! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
-        `*Pedido:* ${order.order_number}\n\n` +
-        `*Productos:*\n${itemLines}\n\n` +
-        `*Total:* ${fmt(Number(order.total))}` +
-        (contactLines ? `\n${contactLines}` : '') +
-        `\n\nQuedo atento para coordinar!`
+          `*Pedido:* ${order.order_number}\n\n` +
+          `*Productos:*\n${itemLines}\n\n` +
+          `*Total:* ${fmt(Number(order.total))}` +
+          (contactLines ? `\n${contactLines}` : '') +
+          `\n\nQuedo atento para coordinar!`,
       );
     } else {
       // Guest or user without name — generic message
       message = encodeURIComponent(
         `Hola! Quiero confirmar mi pedido en *${storeName}* 🛒\n\n` +
-        `*Pedido:* ${order.order_number}\n\n` +
-        `*Productos:*\n${itemLines}\n\n` +
-        `*Total:* ${fmt(Number(order.total))}\n\n` +
-        `Quedo atento para coordinar el pago y la entrega!`
+          `*Pedido:* ${order.order_number}\n\n` +
+          `*Productos:*\n${itemLines}\n\n` +
+          `*Total:* ${fmt(Number(order.total))}\n\n` +
+          `Quedo atento para coordinar el pago y la entrega!`,
       );
     }
 

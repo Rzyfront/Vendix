@@ -2,6 +2,10 @@ import { IsBoolean, IsNumber, IsOptional, Min } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class QueryTransactionsDto {
+  // TODO: phase3-round2-keep-justification — store_id used as breakdown filter
+  // for intercompany transactions (matches from_store_id OR to_store_id).
+  // Legitimate filter for cross-store consolidation drilldown, even though
+  // this controller lives under /store/*. Re-evaluate after route migration.
   @IsOptional()
   @IsNumber()
   @Type(() => Number)

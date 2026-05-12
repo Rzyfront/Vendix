@@ -146,14 +146,35 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
   customer_phone?: string;
 
   // Datos de la venta
+  /**
+   * Optional. If provided, must match the store_id derived from RequestContext.
+   * If omitted, the value is taken from the authenticated context.
+   * Kept optional for backward compatibility with clients that still send it in the body.
+   */
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  store_id: number;
+  store_id?: number;
+
+  /**
+   * ID de la sesión de caja abierta bajo la cual se procesa esta venta POS.
+   * Si se proporciona, `StockLevelManager.resolveSaleLocation` usa la location
+   * de la caja para descontar stock. Si se omite, se usa `store.default_location_id`.
+   * Controlado por el setting `pos.cash_register.require_session_for_sales`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  cash_register_session_id?: number;
 
   @IsArray()
   @ValidateNested({ each: true })

@@ -17,7 +17,12 @@ import { toTitleCase } from '@common/utils/format.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
 
-const ELIGIBLE_ROLES = ['super_admin', 'org_admin', 'store_owner', 'store_admin'];
+const ELIGIBLE_ROLES = [
+  'super_admin',
+  'org_admin',
+  'store_owner',
+  'store_admin',
+];
 
 @Injectable()
 export class UsersService {
@@ -86,7 +91,14 @@ export class UsersService {
   }
 
   async findAll(query: UserQueryDto) {
-    const { page = 1, limit = 10, search, state, organization_id, include_non_production } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      organization_id,
+      include_non_production,
+    } = query;
     const skip = (page - 1) * Number(limit);
 
     const where: any = {};
@@ -591,7 +603,8 @@ export class UsersService {
 
   async previewPanelUISync() {
     // 1. Get current defaults from DefaultPanelUIService
-    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const defaults =
+      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
 
     // 2. Count eligible users (those with admin/owner roles)
     const eligible_users = await this.prisma.user_settings.findMany({
@@ -626,14 +639,15 @@ export class UsersService {
       for (const app_type of Object.keys(default_panel_ui)) {
         const default_keys = Object.keys(default_panel_ui[app_type] || {});
         const user_keys = Object.keys(user_panel_ui[app_type] || {});
-        const missing = default_keys.filter(k => !user_keys.includes(k));
+        const missing = default_keys.filter((k) => !user_keys.includes(k));
 
         if (missing.length > 0) {
           has_missing = true;
           if (!sample_diff[app_type]) sample_diff[app_type] = [];
           // Only track unique missing keys
           for (const m of missing) {
-            if (!sample_diff[app_type].includes(m)) sample_diff[app_type].push(m);
+            if (!sample_diff[app_type].includes(m))
+              sample_diff[app_type].push(m);
           }
         }
       }
@@ -649,9 +663,12 @@ export class UsersService {
     };
   }
 
-  async syncPanelUI(dto: SyncPanelUiDto): Promise<{ updated: number; skipped: number; errors: string[] }> {
+  async syncPanelUI(
+    dto: SyncPanelUiDto,
+  ): Promise<{ updated: number; skipped: number; errors: string[] }> {
     const strategy = dto.strategy || 'merge';
-    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const defaults =
+      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
     const default_panel_ui = defaults.panel_ui;
 
     // Build where clause
@@ -685,9 +702,10 @@ export class UsersService {
     const errors: string[] = [];
 
     // Determine which app_types to sync
-    const target_app_types = dto.app_types && dto.app_types.length > 0
-      ? dto.app_types
-      : Object.keys(default_panel_ui);
+    const target_app_types =
+      dto.app_types && dto.app_types.length > 0
+        ? dto.app_types
+        : Object.keys(default_panel_ui);
 
     for (const settings of settings_list) {
       try {
@@ -708,7 +726,9 @@ export class UsersService {
             const current_app = current_panel_ui[app_type] || {};
             const merged = { ...current_app };
 
-            for (const [key, value] of Object.entries(default_panel_ui[app_type])) {
+            for (const [key, value] of Object.entries(
+              default_panel_ui[app_type],
+            )) {
               if (!(key in merged)) {
                 merged[key] = value;
                 changed = true;
@@ -738,11 +758,15 @@ export class UsersService {
 
         updated++;
       } catch (error) {
-        errors.push(`User #${settings.user_id} (${settings.user?.email}): ${error.message}`);
+        errors.push(
+          `User #${settings.user_id} (${settings.user?.email}): ${error.message}`,
+        );
       }
     }
 
-    this.logger.log(`Panel UI sync completed: ${updated} updated, ${skipped} skipped, ${errors.length} errors (strategy: ${strategy})`);
+    this.logger.log(
+      `Panel UI sync completed: ${updated} updated, ${skipped} skipped, ${errors.length} errors (strategy: ${strategy})`,
+    );
 
     return { updated, skipped, errors };
   }

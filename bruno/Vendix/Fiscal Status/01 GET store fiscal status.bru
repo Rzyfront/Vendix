@@ -1,0 +1,26 @@
+meta {
+  name: 01 GET store fiscal status
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/store/settings/fiscal-status
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+tests {
+  test("returns fiscal_status block with 3 areas", function () {
+    expect(res.status).to.equal(200);
+    const body = res.body.data || res.body;
+    expect(body.fiscal_status).to.have.property('invoicing');
+    expect(body.fiscal_status).to.have.property('accounting');
+    expect(body.fiscal_status).to.have.property('payroll');
+    expect(["INACTIVE","WIP","ACTIVE","LOCKED"]).to.include(body.fiscal_status.invoicing.state);
+  });
+}

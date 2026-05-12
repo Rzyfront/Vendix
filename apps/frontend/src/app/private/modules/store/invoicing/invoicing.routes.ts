@@ -15,8 +15,17 @@ export const invoicingRoutes: Routes = [
             {
                 path: '',
                 pathMatch: 'full',
+                redirectTo: 'invoices',
+            },
+            {
+                path: 'invoices',
                 loadComponent: () =>
                     import('./invoicing.component').then((c) => c.InvoicingComponent),
+            },
+            {
+                path: 'resolutions',
+                loadComponent: () =>
+                    import('./components/resolutions/resolutions-page.component').then((c) => c.ResolutionsPageComponent),
             },
             {
                 path: 'dian-config',

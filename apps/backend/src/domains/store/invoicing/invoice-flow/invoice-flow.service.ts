@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -171,11 +168,9 @@ export class InvoiceFlowService {
         invoice.invoice_type === 'credit_note' ||
         invoice.invoice_type === 'debit_note'
       ) {
-        provider_response =
-          await provider.sendCreditNote(provider_data);
+        provider_response = await provider.sendCreditNote(provider_data);
       } else {
-        provider_response =
-          await provider.sendInvoice(provider_data);
+        provider_response = await provider.sendInvoice(provider_data);
       }
     } catch (error) {
       this.logger.error(
@@ -189,7 +184,9 @@ export class InvoiceFlowService {
         this.retry_queue
           .enqueue(id, invoice.organization_id, invoice.store_id, error.message)
           .catch((e) =>
-            this.logger.error(`Failed to enqueue invoice #${id} for retry: ${e.message}`),
+            this.logger.error(
+              `Failed to enqueue invoice #${id} for retry: ${e.message}`,
+            ),
           );
       }
 
@@ -254,9 +251,7 @@ export class InvoiceFlowService {
       user_id: this.getContext().user_id,
     });
 
-    this.logger.log(
-      `Invoice #${id} (${updated.invoice_number}) accepted`,
-    );
+    this.logger.log(`Invoice #${id} (${updated.invoice_number}) accepted`);
     return updated;
   }
 
@@ -273,9 +268,7 @@ export class InvoiceFlowService {
       include: INVOICE_INCLUDE,
     });
 
-    this.logger.log(
-      `Invoice #${id} (${updated.invoice_number}) rejected`,
-    );
+    this.logger.log(`Invoice #${id} (${updated.invoice_number}) rejected`);
     return updated;
   }
 
@@ -289,9 +282,7 @@ export class InvoiceFlowService {
       include: INVOICE_INCLUDE,
     });
 
-    this.logger.log(
-      `Invoice #${id} (${updated.invoice_number}) cancelled`,
-    );
+    this.logger.log(`Invoice #${id} (${updated.invoice_number}) cancelled`);
     return updated;
   }
 
@@ -303,10 +294,7 @@ export class InvoiceFlowService {
     if (invoice.status === 'accepted' || invoice.status === 'rejected') {
       try {
         const provider = await this.resolver.resolve();
-        await provider.cancelInvoice(
-          invoice.invoice_number,
-          'Voided by user',
-        );
+        await provider.cancelInvoice(invoice.invoice_number, 'Voided by user');
       } catch (error) {
         this.logger.warn(
           `Failed to cancel invoice #${id} at provider: ${error.message}`,
@@ -320,9 +308,7 @@ export class InvoiceFlowService {
       include: INVOICE_INCLUDE,
     });
 
-    this.logger.log(
-      `Invoice #${id} (${updated.invoice_number}) voided`,
-    );
+    this.logger.log(`Invoice #${id} (${updated.invoice_number}) voided`);
     return updated;
   }
 

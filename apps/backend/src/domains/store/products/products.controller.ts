@@ -37,12 +37,10 @@ export class ProductsController {
     private readonly productsService: ProductsService,
     private readonly productVariantService: ProductVariantService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
   @Post('generate-description')
   @Permissions('store:products:create')
-  async generateDescription(
-    @Body() dto: GenerateProductDescriptionDto,
-  ) {
+  async generateDescription(@Body() dto: GenerateProductDescriptionDto) {
     try {
       const result = await this.productsService.generateDescription(dto);
       return this.responseService.success(

@@ -27,8 +27,11 @@ export class StorePrismaService extends BasePrismaService {
     'notification_subscriptions',
     'push_subscriptions',
     'invoices',
-    'invoice_resolutions',
-    'dian_configurations',
+    // dian_configurations is intentionally NOT here. Since
+    // organizations.fiscal_scope can be ORGANIZATION (store_id IS NULL on the
+    // row) or STORE (store_id NOT NULL), we apply a relational OR-scope below
+    // so store callers can see both the store-scoped config and the
+    // organization-scoped config that applies to their store.
     'promotions',
     'coupons',
     'quotations',
@@ -60,7 +63,55 @@ export class StorePrismaService extends BasePrismaService {
     'email_templates',
     'messaging_channels',
     'brands',
+    'store_subscriptions',
+    'subscription_invoices',
+    'subscription_payments',
+    'subscription_events',
   ];
+
+  private readonly fiscal_entity_scoped_models = [
+    'invoice_resolutions',
+    'chart_of_accounts',
+    'fiscal_periods',
+    'accounting_entries',
+    'accounting_account_mappings',
+    'payroll_runs',
+    'payroll_settlements',
+    'withholding_concepts',
+    'withholding_calculations',
+    'uvt_values',
+  ];
+
+  private readonly fiscal_entity_models_with_store_id = [
+    'invoice_resolutions',
+    'accounting_entries',
+    'accounting_account_mappings',
+    'payroll_runs',
+    'payroll_settlements',
+    'withholding_calculations',
+  ];
+
+  private readonly fiscal_entity_relational_models: Record<
+    string,
+    { relation: string; target_model: string }
+  > = {
+    accounting_entry_lines: {
+      relation: 'entry',
+      target_model: 'accounting_entries',
+    },
+    payroll_items: {
+      relation: 'payroll_run',
+      target_model: 'payroll_runs',
+    },
+    consolidation_sessions: {
+      relation: 'fiscal_period',
+      target_model: 'fiscal_periods',
+    },
+    intercompany_transactions: {
+      relation: 'entry',
+      target_model: 'accounting_entries',
+    },
+  };
 
   constructor() {
     super();
@@ -115,6 +166,7 @@ export class StorePrismaService extends BasePrismaService {
       'payments', // Relational
       'product_images', // Relational
       'stock_transfers', // Org scoped
+      'stock_transfer_items', // Relational
       'sales_orders', // Org scoped
       'return_orders', // Org scoped
       'sales_order_items', // Relational
@@ -124,10 +176,14 @@ export class StorePrismaService extends BasePrismaService {
       'inventory_movements', // Relational
       'stock_reservations', // Relational
       'inventory_transactions', // Relational
+      'inventory_cost_layers', // Relational
+      'inventory_valuation_snapshots', // Store/org scoped
       'purchase_orders', // Relational
+      'supplier_products', // Relational
       'shipping_rates', // Relational
       'expense_categories', // Org scoped
       'product_tax_assignments', // Relational
+      'invoice_resolutions', // Fiscal entity scoped
       'invoice_items', // Relational
       'invoice_taxes', // Relational
       'dian_audit_logs', // Relational
@@ -143,9 +199,11 @@ export class StorePrismaService extends BasePrismaService {
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
       'accounting_entries', // Org scoped
+      'accounting_account_mappings', // Org/store scoped
       'employees', // Org scoped (multi-store via employee_stores junction)
       'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
+      'payroll_settlements', // Fiscal entity scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
       'layaway_payments', // Relational
@@ -179,12 +237,15 @@ export class StorePrismaService extends BasePrismaService {
       'data_collection_items', // Relational
       'data_collection_template_products', // Relational
       'booking_reminder_logs', // Relational
+      'subscription_invoices', // Store scoped
+      'subscription_payments', // Relational
+      'subscription_events', // Relational
     ];
 
     for (const model of all_scoped_models) {
       extensions[model] = {};
       for (const operation of operations) {
-        extensions[model][operation] = ({ args, query }: any) => {
+        extensions[model][operation] = async ({ args, query }: any) => {
           return this.applyStoreScoping(model, operation, args, query);
         };
       }
@@ -193,7 +254,7 @@ export class StorePrismaService extends BasePrismaService {
     return extensions;
   }
 
-  private applyStoreScoping(
+  private async applyStoreScoping(
     model: string,
     operation: string,
     args: any,
@@ -273,13 +334,40 @@ export class StorePrismaService extends BasePrismaService {
         ],
       },
       inventory_transactions: { products: { store_id: context.store_id } },
+      inventory_cost_layers: {
+        inventory_locations: { store_id: context.store_id },
+      },
+      inventory_valuation_snapshots: { store_id: context.store_id },
       shipping_rates: { shipping_zone: { store_id: context.store_id } },
       product_tax_assignments: { products: { store_id: context.store_id } },
       invoice_items: { invoice: { store_id: context.store_id } },
       invoice_taxes: { invoice: { store_id: context.store_id } },
-      dian_audit_logs: { dian_configuration: { store_id: context.store_id } },
+      // DIAN configs may be store-scoped (store_id = current store) or
+      // organization-scoped (store_id IS NULL, anchored only to organization_id).
+      // From a store context, both are visible: per-store rows for this store,
+      // plus org-wide rows for the same organization.
+      dian_configurations: {
+        organization_id: context.organization_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
+      },
+      dian_audit_logs: {
+        dian_configuration: {
+          organization_id: context.organization_id,
+          OR: [{ store_id: context.store_id }, { store_id: null }],
+        },
+      },
       accounting_entry_lines: {
         entry: { organization_id: context.organization_id },
+      },
+      accounting_account_mappings: {
+        organization_id: context.organization_id,
+        OR: [{ store_id: context.store_id }, { store_id: null }],
+      },
+      supplier_products: {
+        suppliers: { organization_id: context.organization_id },
+      },
+      stock_transfer_items: {
+        stock_transfers: { organization_id: context.organization_id },
       },
       payroll_items: {
         payroll_run: { organization_id: context.organization_id },
@@ -300,27 +388,58 @@ export class StorePrismaService extends BasePrismaService {
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
       layaway_payments: { layaway_plan: { store_id: context.store_id } },
-      bank_transactions: { bank_account: { organization_id: context.organization_id } },
-      bank_reconciliations: { bank_account: { organization_id: context.organization_id } },
-      bank_reconciliation_matches: { reconciliation: { bank_account: { organization_id: context.organization_id } } },
-      depreciation_entries: { fixed_asset: { organization_id: context.organization_id } },
+      bank_transactions: {
+        bank_account: { organization_id: context.organization_id },
+      },
+      bank_reconciliations: {
+        bank_account: { organization_id: context.organization_id },
+      },
+      bank_reconciliation_matches: {
+        reconciliation: {
+          bank_account: { organization_id: context.organization_id },
+        },
+      },
+      depreciation_entries: {
+        fixed_asset: { organization_id: context.organization_id },
+      },
       budget_lines: { budget: { organization_id: context.organization_id } },
-      consolidation_adjustments: { session: { organization_id: context.organization_id } },
+      consolidation_adjustments: {
+        session: { organization_id: context.organization_id },
+      },
       review_responses: { reviews: { store_id: context.store_id } },
       review_votes: { reviews: { store_id: context.store_id } },
       review_reports: { reviews: { store_id: context.store_id } },
-      ai_messages: { conversation: { store_id: context.store_id, organization_id: context.organization_id } },
+      ai_messages: {
+        conversation: {
+          store_id: context.store_id,
+          organization_id: context.organization_id,
+        },
+      },
       dispatch_note_items: { dispatch_note: { store_id: context.store_id } },
       ar_payments: { accounts_receivable: { store_id: context.store_id } },
-      agreement_installments: { payment_agreement: { store_id: context.store_id } },
+      agreement_installments: {
+        payment_agreement: { store_id: context.store_id },
+      },
       wallet_transactions: { wallet: { store_id: context.store_id } },
-      ap_payments: { accounts_payable: { organization_id: context.organization_id } },
-      ap_payment_schedules: { accounts_payable: { organization_id: context.organization_id } },
+      ap_payments: {
+        accounts_payable: { organization_id: context.organization_id },
+      },
+      ap_payment_schedules: {
+        accounts_payable: { organization_id: context.organization_id },
+      },
       data_collection_tabs: { template: { store_id: context.store_id } },
       data_collection_sections: { template: { store_id: context.store_id } },
-      data_collection_items: { section: { template: { store_id: context.store_id } } },
-      data_collection_template_products: { template: { store_id: context.store_id } },
+      data_collection_items: {
+        section: { template: { store_id: context.store_id } },
+      },
+      data_collection_template_products: {
+        template: { store_id: context.store_id },
+      },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
+      subscription_payments: { invoice: { store_id: context.store_id } },
+      subscription_events: {
+        store_subscription: { store_id: context.store_id },
+      },
     };
 
     const security_filter: Record<string, any> = {};
@@ -337,21 +456,52 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries',
       'employees',
       'payroll_runs',
-      'payroll_settlements',
       'employee_advances',
       'bank_accounts',
       'fixed_asset_categories',
       'fixed_assets',
       'budgets',
-      'consolidation_sessions',
-      'intercompany_transactions',
       'withholding_concepts',
       'withholding_calculations',
       'uvt_values',
       'accounts_payable',
+      'accounting_entities',
     ];
 
-    if (this.store_scoped_models.includes(model)) {
+    if (this.fiscal_entity_scoped_models.includes(model)) {
+      if (!context.organization_id) {
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
+      }
+      const fiscal_entity = await this.resolveFiscalEntityForContext(context);
+      Object.assign(
+        security_filter,
+        this.buildFiscalEntityDirectScope(
+          model,
+          context.organization_id,
+          fiscal_entity.id,
+          fiscal_entity.fiscal_scope,
+          context.store_id,
+        ),
+      );
+    } else if (this.fiscal_entity_relational_models[model]) {
+      if (!context.organization_id) {
+        throw new ForbiddenException(
+          'Access denied - organization context required',
+        );
+      }
+      const fiscal_entity = await this.resolveFiscalEntityForContext(context);
+      const relation_scope = this.fiscal_entity_relational_models[model];
+      security_filter[relation_scope.relation] =
+        this.buildFiscalEntityDirectScope(
+          relation_scope.target_model,
+          context.organization_id,
+          fiscal_entity.id,
+          fiscal_entity.fiscal_scope,
+          context.store_id,
+        );
+    } else if (this.store_scoped_models.includes(model)) {
       if (!context.store_id) {
         throw new ForbiddenException('Access denied - store context required');
       }
@@ -371,13 +521,123 @@ export class StorePrismaService extends BasePrismaService {
     }
 
     if (Object.keys(security_filter).length > 0) {
-      scoped_args.where = {
-        ...scoped_args.where,
-        ...security_filter,
-      };
+      scoped_args.where = this.mergeScopedWhere(
+        scoped_args.where,
+        security_filter,
+      );
     }
 
     return query(scoped_args);
+  }
+
+  private async resolveFiscalEntityForContext(
+    context: {
+      organization_id?: number | null;
+      store_id?: number | null;
+    },
+  ): Promise<{
+    id: number | null;
+    fiscal_scope: 'STORE' | 'ORGANIZATION';
+  }> {
+    if (!context.organization_id) {
+      return { id: null, fiscal_scope: 'STORE' };
+    }
+
+    const organization = await this.baseClient.organizations.findUnique({
+      where: { id: context.organization_id },
+      select: {
+        fiscal_scope: true,
+        operating_scope: true,
+        account_type: true,
+      },
+    });
+
+    if (!organization) return { id: null, fiscal_scope: 'STORE' };
+
+    const fiscal_scope =
+      organization.fiscal_scope ||
+      organization.operating_scope ||
+      (organization.account_type === 'MULTI_STORE_ORG'
+        ? 'ORGANIZATION'
+        : 'STORE');
+
+    if (fiscal_scope === 'ORGANIZATION') {
+      const entity = await this.baseClient.accounting_entities.findFirst({
+        where: {
+          organization_id: context.organization_id,
+          store_id: null,
+          scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
+          is_active: true,
+        },
+        select: { id: true },
+      });
+      return { id: entity?.id ?? null, fiscal_scope: 'ORGANIZATION' };
+    }
+
+    if (!context.store_id) {
+      throw new ForbiddenException(
+        'Access denied - store context required for STORE fiscal scope',
+      );
+    }
+
+    const entity = await this.baseClient.accounting_entities.findFirst({
+      where: {
+        organization_id: context.organization_id,
+        store_id: context.store_id,
+        scope: 'STORE',
+        fiscal_scope: 'STORE',
+        is_active: true,
+      },
+      select: { id: true },
+    });
+
+    return { id: entity?.id ?? null, fiscal_scope: 'STORE' };
+  }
+
+  private buildFiscalEntityDirectScope(
+    model: string,
+    organization_id: number,
+    fiscal_entity_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
+    store_id?: number | null,
+  ) {
+    const legacyScope: Record<string, any> = {
+      accounting_entity_id: null,
+    };
+
+    if (this.fiscal_entity_models_with_store_id.includes(model)) {
+      if (fiscal_scope === 'STORE' && store_id) {
+        legacyScope.OR = [{ store_id }, { store_id: null }];
+      } else {
+        legacyScope.store_id = null;
+      }
+    }
+
+    if (!fiscal_entity_id) {
+      return {
+        organization_id,
+        ...legacyScope,
+      };
+    }
+
+    return {
+      organization_id,
+      OR: [
+        { accounting_entity_id: fiscal_entity_id },
+        legacyScope,
+      ],
+    };
+  }
+
+  private mergeScopedWhere(existingWhere: any, securityFilter: any) {
+    if (!existingWhere || Object.keys(existingWhere).length === 0) {
+      return securityFilter;
+    }
+
+    return {
+      AND: [existingWhere, securityFilter],
+    };
   }
 
   private scoped_client: any;
@@ -459,6 +719,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.stock_transfers;
   }
 
+  get stock_transfer_items() {
+    return this.scoped_client.stock_transfer_items;
+  }
+
   get sales_orders() {
     return this.scoped_client.sales_orders;
   }
@@ -509,7 +773,11 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get inventory_cost_layers() {
-    return this.baseClient.inventory_cost_layers;
+    return this.scoped_client.inventory_cost_layers;
+  }
+
+  get inventory_valuation_snapshots() {
+    return this.scoped_client.inventory_valuation_snapshots;
   }
 
   // Global models (no scoping applied)
@@ -540,6 +808,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get stores() {
     return this.baseClient.stores;
+  }
+
+  get accounting_entities() {
+    return this.scoped_client.accounting_entities;
   }
 
   get suppliers() {
@@ -700,7 +972,7 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get accounting_account_mappings() {
-    return this.baseClient.accounting_account_mappings;
+    return this.scoped_client.accounting_account_mappings;
   }
 
   // Bank Reconciliation models
@@ -1041,6 +1313,23 @@ export class StorePrismaService extends BasePrismaService {
   // Messaging Channels
   get messaging_channels() {
     return this.scoped_client.messaging_channels;
+  }
+
+  // Subscription models
+  get store_subscriptions() {
+    return this.scoped_client.store_subscriptions;
+  }
+
+  get subscription_invoices() {
+    return this.scoped_client.subscription_invoices;
+  }
+
+  get subscription_payments() {
+    return this.scoped_client.subscription_payments;
+  }
+
+  get subscription_events() {
+    return this.scoped_client.subscription_events;
   }
 
   // Global tables (no store scoping)

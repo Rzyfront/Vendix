@@ -1,4 +1,8 @@
-export { IcaRatesQueryDto, IcaCalculateDto, IcaReportQueryDto } from './ica-query.dto';
+export {
+  IcaRatesQueryDto,
+  IcaCalculateDto,
+  IcaReportQueryDto,
+} from './ica-query.dto';
 
 import {
   IsString,
@@ -46,9 +50,10 @@ export class CreateTaxCategoryDto {
   @Type(() => Number)
   rate: number;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
-  store_id: number;
+  store_id?: number;
 
   @IsInt()
   @IsOptional()
@@ -146,6 +151,24 @@ export class TaxCategoryQueryDto {
   @Transform(({ value }) => value === 'true')
   @IsBoolean()
   include_inactive?: boolean = false;
+}
+
+// Seed Default Taxes DTO
+export class SeedDefaultTaxesDto {
+  /**
+   * When true, default tax templates are upserted even if the store already
+   * has tax_categories rows. Without this flag, an existing catalogue causes
+   * TAXES_ALREADY_SEEDED (409).
+   */
+  @IsOptional()
+  @IsBoolean()
+  force?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => parseInt(value))
+  @IsInt()
+  @Min(1)
+  store_id?: number;
 }
 
 // Tax Calculation DTO

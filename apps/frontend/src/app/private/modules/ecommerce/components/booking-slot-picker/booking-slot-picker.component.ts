@@ -24,6 +24,7 @@ export interface AvailabilitySlot {
 export class BookingSlotPickerComponent {
   private destroyRef = inject(DestroyRef);
   readonly productId = input.required<number>();
+  readonly productVariantId = input<number | undefined>(undefined);
   readonly productName = input<string>('');
   readonly serviceDuration = input<number>(60);
   readonly bookingMode = input<'provider_required' | 'free_booking'>(
@@ -110,7 +111,13 @@ export class BookingSlotPickerComponent {
       .get<any>(
         `${environment.apiUrl}/ecommerce/reservations/availability/${this.productId()}`,
         {
-          params: { date_from: dateFrom, date_to: dateTo },
+          params: {
+            date_from: dateFrom,
+            date_to: dateTo,
+            ...(this.productVariantId()
+              ? { product_variant_id: String(this.productVariantId()) }
+              : {}),
+          },
           headers: this.getHeaders(),
         },
       )

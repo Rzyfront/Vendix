@@ -1,0 +1,31 @@
+meta {
+  name: Superadmin Reject Payout Batch
+  type: http
+  seq: 29
+}
+
+# Requires a payout batch in 'pending' state. Set {{superadmin_payout_reject_id}}
+# manually in env (run independently from approve test #28 which consumes a batch).
+
+post {
+  url: {{url}}/superadmin/subscriptions/payouts/{{superadmin_payout_reject_id}}/reject
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "reason": "Bruno coverage test rejection"
+  }
+}
+
+tests {
+  test("Payout rejected", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("State transitioned to rejected", function() {
+    expect(res.body.data.state).to.equal("rejected");
+  });
+}

@@ -1,3 +1,5 @@
+import type { FiscalStatusBlock } from './fiscal-status.model';
+
 export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -8,6 +10,7 @@ export interface StoreSettings {
   receipts: ReceiptsSettings;
   app: AppSettings;
   operations?: OperationsSettings;
+  fiscal_status?: FiscalStatusBlock;
 }
 
 export interface AppSettings {

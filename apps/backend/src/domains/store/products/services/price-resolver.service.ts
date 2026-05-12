@@ -29,13 +29,13 @@ export interface PriceResolutionResult {
 
 /**
  * PriceResolverService
- * 
+ *
  * Resolves the effective price for a product or variant following priority rules:
  * 1. variant.is_on_sale && variant.sale_price > 0 → net = variant.sale_price, compareAt = variant.price_override ?? product.base_price
  * 2. variant.price_override != null && variant.price_override > 0 → net = variant.price_override, compareAt = null
  * 3. product.is_on_sale && product.sale_price < product.base_price → net = product.sale_price, compareAt = product.base_price
  * 4. fallback → net = product.base_price, compareAt = null
- * 
+ *
  * CRITICAL: Uses != null && > 0 checks (no falsy coercion like || or ?? default)
  */
 @Injectable()
@@ -50,7 +50,10 @@ export class PriceResolverService {
    */
   private readonly DEFAULT_TAX_RATE = 0;
 
-  resolvePrice(params: PriceResolverParams, taxRate?: number): PriceResolutionResult {
+  resolvePrice(
+    params: PriceResolverParams,
+    taxRate?: number,
+  ): PriceResolutionResult {
     const { product, variant } = params;
     const totalTaxRate = taxRate ?? this.DEFAULT_TAX_RATE;
     const currency = this.DEFAULT_CURRENCY;
@@ -65,17 +68,31 @@ export class PriceResolverService {
 
     // Rule 1: Variant on sale with valid sale_price takes priority
     // variant.is_on_sale && variant.sale_price > 0 → net = variant.sale_price, compareAt = variant.price_override ?? product.base_price
-    if (variant?.is_on_sale && variant.sale_price != null && variant.sale_price > 0) {
+    if (
+      variant?.is_on_sale &&
+      variant.sale_price != null &&
+      variant.sale_price > 0
+    ) {
       unitPrice = variant.sale_price;
       unitBasePrice = variant.price_override ?? product.base_price;
       compareAtPrice = variant.price_override ?? product.base_price;
       isOnSale = true;
       source = 'variant';
-      reason = variant.price_override != null 
-        ? 'Variant sale price with price override' 
-        : 'Variant sale price';
-      
-      return this.buildResult(unitBasePrice, unitPrice, totalTaxRate, currency, compareAtPrice, isOnSale, source, reason);
+      reason =
+        variant.price_override != null
+          ? 'Variant sale price with price override'
+          : 'Variant sale price';
+
+      return this.buildResult(
+        unitBasePrice,
+        unitPrice,
+        totalTaxRate,
+        currency,
+        compareAtPrice,
+        isOnSale,
+        source,
+        reason,
+      );
     }
 
     // Rule 2: Variant has a valid price_override (no sale, just override)
@@ -87,21 +104,44 @@ export class PriceResolverService {
       isOnSale = false;
       source = 'variant';
       reason = 'Variant price override';
-      
-      return this.buildResult(unitBasePrice, unitPrice, totalTaxRate, currency, compareAtPrice, isOnSale, source, reason);
+
+      return this.buildResult(
+        unitBasePrice,
+        unitPrice,
+        totalTaxRate,
+        currency,
+        compareAtPrice,
+        isOnSale,
+        source,
+        reason,
+      );
     }
 
     // Rule 3: Product on sale with valid sale_price
     // product.is_on_sale && product.sale_price < product.base_price → net = product.sale_price, compareAt = product.base_price
-    if (product.is_on_sale && product.sale_price != null && product.sale_price > 0 && product.sale_price < product.base_price) {
+    if (
+      product.is_on_sale &&
+      product.sale_price != null &&
+      product.sale_price > 0 &&
+      product.sale_price < product.base_price
+    ) {
       unitPrice = product.sale_price;
       unitBasePrice = product.base_price;
       compareAtPrice = product.base_price;
       isOnSale = true;
       source = 'product';
       reason = 'Product sale price';
-      
-      return this.buildResult(unitBasePrice, unitPrice, totalTaxRate, currency, compareAtPrice, isOnSale, source, reason);
+
+      return this.buildResult(
+        unitBasePrice,
+        unitPrice,
+        totalTaxRate,
+        currency,
+        compareAtPrice,
+        isOnSale,
+        source,
+        reason,
+      );
     }
 
     // Rule 4: Fallback to base product price
@@ -113,7 +153,16 @@ export class PriceResolverService {
     source = 'base';
     reason = 'Base product price';
 
-    return this.buildResult(unitBasePrice, unitPrice, totalTaxRate, currency, compareAtPrice, isOnSale, source, reason);
+    return this.buildResult(
+      unitBasePrice,
+      unitPrice,
+      totalTaxRate,
+      currency,
+      compareAtPrice,
+      isOnSale,
+      source,
+      reason,
+    );
   }
 
   /**

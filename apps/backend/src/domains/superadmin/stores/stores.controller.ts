@@ -31,7 +31,7 @@ export class StoresController {
   constructor(
     private readonly adminStoresService: StoresService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Permissions('superadmin:stores:create')
   @Post()

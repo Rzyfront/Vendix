@@ -32,16 +32,22 @@ export class CustomerQueueController {
   @Get()
   @Permissions('store:customers:read')
   async getQueue(@Req() req: AuthenticatedRequest) {
-    if (!req.user.store_id) throw new BadRequestException('Store context required');
-    const entries = await this.queueService.getWaitingEntries(req.user.store_id);
+    if (!req.user.store_id)
+      throw new BadRequestException('Store context required');
+    const entries = await this.queueService.getWaitingEntries(
+      req.user.store_id,
+    );
     return this.responseService.success(entries);
   }
 
   @Get('qr')
   @Permissions('store:customers:read')
   async getQrCode(@Req() req: AuthenticatedRequest) {
-    if (!req.user.store_id) throw new BadRequestException('Store context required');
-    const domainHostname = await this.getEcommerceDomainForStore(req.user.store_id);
+    if (!req.user.store_id)
+      throw new BadRequestException('Store context required');
+    const domainHostname = await this.getEcommerceDomainForStore(
+      req.user.store_id,
+    );
     const protocol = req.protocol || 'https';
     const baseUrl = domainHostname
       ? `${protocol}://${domainHostname}`
@@ -75,7 +81,8 @@ export class CustomerQueueController {
     @Param('id', ParseIntPipe) id: number,
     @Body('order_id', ParseIntPipe) orderId: number,
   ) {
-    if (!req.user.store_id) throw new BadRequestException('Store context required');
+    if (!req.user.store_id)
+      throw new BadRequestException('Store context required');
     const result = await this.queueService.consumeEntry(
       id,
       orderId,
@@ -91,7 +98,9 @@ export class CustomerQueueController {
     return this.responseService.success(entry);
   }
 
-  private async getEcommerceDomainForStore(storeId: number): Promise<string | null> {
+  private async getEcommerceDomainForStore(
+    storeId: number,
+  ): Promise<string | null> {
     try {
       // Prefer STORE_ECOMMERCE domain, fallback to primary
       const ecommerceDomain = await this.prisma.domain_settings.findFirst({

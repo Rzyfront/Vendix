@@ -11,9 +11,19 @@ import { ResponseModule } from '../../../common/responses/response.module';
 import { MetadataModule } from '../metadata/metadata.module';
 
 @Module({
-    imports: [ResponseModule, MetadataModule],
-    controllers: [CustomersController, CustomersBulkController, CustomerHistoryController],
-    providers: [CustomersService, CustomerLookupService, CustomersBulkService, CustomerHistoryService, StorePrismaService],
-    exports: [CustomersService, CustomerLookupService, CustomerHistoryService],
+  imports: [ResponseModule, MetadataModule],
+  controllers: [
+    CustomersController,
+    CustomersBulkController,
+    CustomerHistoryController,
+  ],
+  providers: [
+    CustomersService,
+    CustomerLookupService,
+    CustomersBulkService,
+    CustomerHistoryService,
+    StorePrismaService,
+  ],
+  exports: [CustomersService, CustomerLookupService, CustomerHistoryService],
 })
-export class CustomersModule { }
+export class CustomersModule {}

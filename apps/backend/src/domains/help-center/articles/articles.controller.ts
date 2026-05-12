@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Param,
-  Query,
-} from '@nestjs/common';
+import { Controller, Get, Post, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ArticlesService } from './articles.service';
 import { ArticleQueryDto } from './dto/article-query.dto';
@@ -17,18 +11,19 @@ export class ArticlesController {
 
   @Get()
   @Public()
-  @ApiOperation({ summary: 'List published help articles (paginated, filterable)' })
+  @ApiOperation({
+    summary: 'List published help articles (paginated, filterable)',
+  })
   async findAll(@Query() query: ArticleQueryDto) {
     return this.articles_service.findAll(query);
   }
 
   @Get('search')
   @Public()
-  @ApiOperation({ summary: 'Search help articles by title, summary, and content' })
-  async search(
-    @Query('q') q: string,
-    @Query('limit') limit?: string,
-  ) {
+  @ApiOperation({
+    summary: 'Search help articles by title, summary, and content',
+  })
+  async search(@Query('q') q: string, @Query('limit') limit?: string) {
     return this.articles_service.search(q, limit ? +limit : 10);
   }
 

@@ -29,7 +29,7 @@ export class AdminDomainsController {
   constructor(
     private readonly domainsService: DomainsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new domain' })

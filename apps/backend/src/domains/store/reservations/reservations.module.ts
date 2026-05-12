@@ -10,11 +10,23 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { S3Module } from '@common/services/s3.module';
+import { ProductsModule } from '../products/products.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module],
+  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module, ProductsModule],
   controllers: [ProvidersController, ReservationsController],
-  providers: [ReservationsService, AvailabilityService, BookingConfirmationService, ProvidersService, ProviderScheduleService],
-  exports: [ReservationsService, AvailabilityService, BookingConfirmationService, ProvidersService],
+  providers: [
+    ReservationsService,
+    AvailabilityService,
+    BookingConfirmationService,
+    ProvidersService,
+    ProviderScheduleService,
+  ],
+  exports: [
+    ReservationsService,
+    AvailabilityService,
+    BookingConfirmationService,
+    ProvidersService,
+  ],
 })
 export class ReservationsModule {}

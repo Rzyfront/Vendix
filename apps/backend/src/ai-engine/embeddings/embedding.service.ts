@@ -119,7 +119,8 @@ export class EmbeddingService {
       const minSimilarity = params.min_similarity || 0.3;
 
       if (params.entity_types?.length) {
-        const results = await this.prisma.$queryRawUnsafe<SimilarityResult[]>(`
+        const results = await this.prisma.$queryRawUnsafe<SimilarityResult[]>(
+          `
           SELECT
             id,
             entity_type,
@@ -144,7 +145,8 @@ export class EmbeddingService {
         return results;
       }
 
-      const results = await this.prisma.$queryRawUnsafe<SimilarityResult[]>(`
+      const results = await this.prisma.$queryRawUnsafe<SimilarityResult[]>(
+        `
         SELECT
           id,
           entity_type,

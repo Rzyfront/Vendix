@@ -140,6 +140,12 @@ export interface ProductVariant {
   is_on_sale?: boolean;
   sale_price?: number;
   stock_quantity: number;
+  track_inventory_override?: boolean | null;
+  effective_track_inventory?: boolean;
+  service_duration_minutes?: number;
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+  buffer_minutes?: number;
+  preparation_time_minutes?: number;
   image_id?: number;
   created_at: Date;
   updated_at: Date;
@@ -309,6 +315,10 @@ export interface CreateProductVariantDto {
   attributes?: Record<string, any>;
   variant_image_url?: string;
   track_inventory_override?: boolean | null;
+  service_duration_minutes?: number;
+  service_pricing_type?: 'per_session' | 'package' | 'subscription';
+  buffer_minutes?: number;
+  preparation_time_minutes?: number;
 }
 
 export interface CreateProductImageDto {

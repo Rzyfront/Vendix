@@ -8,7 +8,13 @@ import { ReservationsModule } from '../reservations/reservations.module';
 import { MetadataModule } from '../metadata/metadata.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, DataCollectionModule, ReservationsModule, MetadataModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    DataCollectionModule,
+    ReservationsModule,
+    MetadataModule,
+  ],
   controllers: [ConsultationsController],
   providers: [ConsultationsService],
   exports: [ConsultationsService],

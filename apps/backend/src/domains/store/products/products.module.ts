@@ -15,7 +15,11 @@ import { AccessValidationService } from '@common/services/access-validation.serv
 
 @Module({
   imports: [ResponseModule, InventoryModule, PrismaModule, S3Module],
-  controllers: [ProductsController, ProductsBulkController, ProductsBulkImageController],
+  controllers: [
+    ProductsController,
+    ProductsBulkController,
+    ProductsBulkImageController,
+  ],
   providers: [
     ProductsService,
     ProductsBulkService,
@@ -24,6 +28,12 @@ import { AccessValidationService } from '@common/services/access-validation.serv
     PriceResolverService,
     AccessValidationService,
   ],
-  exports: [ProductsService, ProductsBulkService, ProductsBulkImageService, ProductVariantService, PriceResolverService],
+  exports: [
+    ProductsService,
+    ProductsBulkService,
+    ProductsBulkImageService,
+    ProductVariantService,
+    PriceResolverService,
+  ],
 })
 export class ProductsModule {}

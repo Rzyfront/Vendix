@@ -23,6 +23,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.domain_settings;
   }
 
+  get domain_blocklist() {
+    return this.baseClient.domain_blocklist;
+  }
+
   get addresses() {
     return this.baseClient.addresses;
   }
@@ -221,6 +225,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.organizations;
   }
 
+  get subscription_plans() {
+    return this.baseClient.subscription_plans;
+  }
+
   get currencies() {
     return this.baseClient.currencies;
   }
@@ -408,6 +416,26 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.invoices;
   }
 
+  get accounting_entries() {
+    return this.baseClient.accounting_entries;
+  }
+
+  get employees() {
+    return this.baseClient.employees;
+  }
+
+  get payroll_runs() {
+    return this.baseClient.payroll_runs;
+  }
+
+  get uvt_values() {
+    return this.baseClient.uvt_values;
+  }
+
+  get fiscal_status_audit_log() {
+    return (this.baseClient as any).fiscal_status_audit_log;
+  }
+
   get invoice_items() {
     return this.baseClient.invoice_items;
   }
@@ -498,5 +526,64 @@ export class GlobalPrismaService extends BasePrismaService {
   // Messaging channels
   get messaging_channels() {
     return this.baseClient.messaging_channels;
+  }
+
+  // Subscription / SaaS billing models — global access (no tenant scope)
+  // because SaaS billing operations cross stores (cron jobs, listeners,
+  // platform-level webhook reconciliation, etc.).
+  get store_subscriptions() {
+    return this.baseClient.store_subscriptions;
+  }
+
+  get subscription_invoices() {
+    return this.baseClient.subscription_invoices;
+  }
+
+  get subscription_payments() {
+    return this.baseClient.subscription_payments;
+  }
+
+  get subscription_events() {
+    return this.baseClient.subscription_events;
+  }
+
+  get subscription_payment_methods() {
+    return this.baseClient.subscription_payment_methods;
+  }
+
+  get partner_commissions() {
+    return this.baseClient.partner_commissions;
+  }
+
+  get partner_payout_batches() {
+    return this.baseClient.partner_payout_batches;
+  }
+
+  get partner_plan_overrides() {
+    return this.baseClient.partner_plan_overrides;
+  }
+
+  get platform_settings() {
+    return this.baseClient.platform_settings;
+  }
+
+  get commission_accrual_pending() {
+    return this.baseClient.commission_accrual_pending;
+  }
+
+  get webhook_event_dedup() {
+    return this.baseClient.webhook_event_dedup;
+  }
+
+  get redemption_consumptions() {
+    return this.baseClient.redemption_consumptions;
+  }
+
+  get organization_trial_consumptions() {
+    return this.baseClient.organization_trial_consumptions;
+  }
+
+  get saas_metrics_snapshot() {
+    return this.baseClient.saas_metrics_snapshot;
   }
 }

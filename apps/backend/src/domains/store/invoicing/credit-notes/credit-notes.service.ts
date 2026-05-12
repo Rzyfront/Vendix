@@ -1,13 +1,13 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { CreateCreditNoteDto, CreateDebitNoteDto } from './dto/create-credit-note.dto';
+import {
+  CreateCreditNoteDto,
+  CreateDebitNoteDto,
+} from './dto/create-credit-note.dto';
 import { InvoiceNumberGenerator } from '../utils/invoice-number-generator';
 
 const INVOICE_INCLUDE = {
@@ -66,7 +66,10 @@ export class CreditNotesService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     }
 
-    if (related_invoice.status !== 'accepted' && related_invoice.status !== 'sent') {
+    if (
+      related_invoice.status !== 'accepted' &&
+      related_invoice.status !== 'sent'
+    ) {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_002,
         `Cannot create ${type} for invoice in '${related_invoice.status}' status. Invoice must be accepted or sent.`,

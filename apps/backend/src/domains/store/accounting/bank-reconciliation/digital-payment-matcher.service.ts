@@ -76,14 +76,16 @@ export class DigitalPaymentMatcherService {
     for (const payment of payments) {
       if (matched_payment_ids.has(payment.id)) continue;
 
-      const gateway_response = payment.gateway_response as any;
-      const gateway_txn_id = gateway_response?.id || gateway_response?.transaction_id;
+      const gateway_response = payment.gateway_response;
+      const gateway_txn_id =
+        gateway_response?.id || gateway_response?.transaction_id;
 
       if (gateway_txn_id) {
         const matching_txn = bank_transactions.find(
           (txn) =>
             !matched_transaction_ids.has(txn.id) &&
-            (txn.reference?.includes(gateway_txn_id) || txn.description?.includes(gateway_txn_id)),
+            (txn.reference?.includes(gateway_txn_id) ||
+              txn.description?.includes(gateway_txn_id)),
         );
 
         if (matching_txn) {
@@ -108,7 +110,9 @@ export class DigitalPaymentMatcherService {
       if (matched_payment_ids.has(payment.id)) continue;
 
       const payment_amount = Number(payment.amount);
-      const payment_date = payment.paid_at ? new Date(payment.paid_at).getTime() : 0;
+      const payment_date = payment.paid_at
+        ? new Date(payment.paid_at).getTime()
+        : 0;
 
       const matching_txn = bank_transactions.find((txn) => {
         if (matched_transaction_ids.has(txn.id)) return false;
@@ -141,14 +145,20 @@ export class DigitalPaymentMatcherService {
       if (matched_payment_ids.has(payment.id)) continue;
 
       const payment_amount = Number(payment.amount);
-      const payment_date = payment.paid_at ? new Date(payment.paid_at).getTime() : 0;
+      const payment_date = payment.paid_at
+        ? new Date(payment.paid_at).getTime()
+        : 0;
 
       const matching_txn = bank_transactions.find((txn) => {
         if (matched_transaction_ids.has(txn.id)) return false;
         const txn_amount = Number(txn.amount);
         const txn_date = new Date(txn.transaction_date).getTime();
-        const amount_diff_pct = Math.abs(payment_amount - txn_amount) / payment_amount;
-        return amount_diff_pct <= 0.01 && Math.abs(payment_date - txn_date) <= THREE_DAYS_MS;
+        const amount_diff_pct =
+          Math.abs(payment_amount - txn_amount) / payment_amount;
+        return (
+          amount_diff_pct <= 0.01 &&
+          Math.abs(payment_date - txn_date) <= THREE_DAYS_MS
+        );
       });
 
       if (matching_txn) {
@@ -166,7 +176,9 @@ export class DigitalPaymentMatcherService {
       }
     }
 
-    this.logger.log(`Digital payment matching complete: ${matches.length} matches found`);
+    this.logger.log(
+      `Digital payment matching complete: ${matches.length} matches found`,
+    );
     return matches;
   }
 

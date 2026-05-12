@@ -8,7 +8,12 @@ import { AIEmbeddingProcessor } from '../queue/processors/ai-embedding.processor
 
 @Module({
   imports: [PrismaModule, AIQueueModule],
-  providers: [EmbeddingService, RAGService, EmbeddingEventsListener, AIEmbeddingProcessor],
+  providers: [
+    EmbeddingService,
+    RAGService,
+    EmbeddingEventsListener,
+    AIEmbeddingProcessor,
+  ],
   exports: [EmbeddingService, RAGService],
 })
 export class EmbeddingModule {}

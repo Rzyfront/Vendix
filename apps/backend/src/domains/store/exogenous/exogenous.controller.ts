@@ -15,14 +15,22 @@ export class ExogenousController {
   @Permissions('exogenous:read')
   async findAll(@Query() query: QueryReportsDto) {
     const result = await this.exogenous_service.findAll(query);
-    return this.response_service.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Post('reports/generate')
   @Permissions('exogenous:write')
   async generateReport(@Body() dto: GenerateReportDto) {
     const result = await this.exogenous_service.generateReport(dto);
-    return this.response_service.success(result, 'Report generated successfully');
+    return this.response_service.success(
+      result,
+      'Report generated successfully',
+    );
   }
 
   @Get('reports/:id')
@@ -39,8 +47,17 @@ export class ExogenousController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
-    const result = await this.exogenous_service.getReportLines(+id, +(page || 1), +(limit || 50));
-    return this.response_service.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit);
+    const result = await this.exogenous_service.getReportLines(
+      +id,
+      +(page || 1),
+      +(limit || 50),
+    );
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Get('reports/:id/download')
@@ -49,7 +66,10 @@ export class ExogenousController {
     @Param('id') id: string,
     @Query('format') format?: string,
   ) {
-    const result = await this.exogenous_service.downloadReport(+id, format || 'txt');
+    const result = await this.exogenous_service.downloadReport(
+      +id,
+      format || 'txt',
+    );
     return this.response_service.success(result, 'Download URL generated');
   }
 

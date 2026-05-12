@@ -27,12 +27,14 @@ export interface EmailVerificationStatus {
 
 export interface SelectAppTypeData {
   app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  fiscal_scope?: 'STORE' | 'ORGANIZATION';
   notes?: string;
 }
 
 export interface SelectAppTypeResponse {
   success: boolean;
   app_type: 'STORE_ADMIN' | 'ORG_ADMIN';
+  fiscal_scope?: 'STORE' | 'ORGANIZATION';
   message: string;
 }
 
@@ -189,6 +191,7 @@ export class OnboardingWizardService {
             this._app_type = response.app_type;
             this.updateWizardData('app_type', {
               selected_app_type: response.app_type,
+              selected_fiscal_scope: response.fiscal_scope,
               selected_at: new Date().toISOString(),
             });
           }
@@ -289,6 +292,27 @@ export class OnboardingWizardService {
    */
   completeWizard(): Observable<any> {
     return this.http.post(`${this.apiUrl}/complete`, {});
+  }
+
+  /**
+   * Save wizard draft data for a specific step
+   */
+  saveWizardDraft(step: string, data: any): Observable<any> {
+    return this.http.post(`${this.apiUrl}/save-draft`, { step, data });
+  }
+
+  /**
+   * Get wizard draft data for a specific step
+   */
+  getWizardDraft(step: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/get-draft/${step}`);
+  }
+
+  /**
+   * Update current wizard step
+   */
+  updateWizardStep(step: number): Observable<any> {
+    return this.http.post(`${this.apiUrl}/update-step`, { step });
   }
 
   /**

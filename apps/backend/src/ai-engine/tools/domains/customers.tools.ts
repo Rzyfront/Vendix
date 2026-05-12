@@ -28,8 +28,7 @@ export const customerTools: RegisteredTool[] = [
   {
     name: 'get_customer_history',
     domain: 'customers',
-    description:
-      'Get the purchase history and profile of a specific customer',
+    description: 'Get the purchase history and profile of a specific customer',
     parameters: {
       type: 'object',
       properties: {

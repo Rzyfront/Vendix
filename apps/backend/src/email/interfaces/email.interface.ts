@@ -36,6 +36,13 @@ export interface EmailProvider {
     username: string,
     step: string,
   ): Promise<EmailResult>;
+  sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult>;
 }
 
 export interface EmailResult {

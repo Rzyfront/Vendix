@@ -1,0 +1,75 @@
+import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { PrismaModule } from '../../../prisma/prisma.module';
+import { ResponseModule } from '../../../common/responses/response.module';
+import { NotificationsModule } from '../../store/notifications/notifications.module';
+import { PlansController } from './controllers/plans.controller';
+import { PlansService } from './services/plans.service';
+import { PartnersController } from './controllers/partners.controller';
+import { PartnersService } from './services/partners.service';
+import {
+  PromotionalController,
+  OrgPromoAssignController,
+} from './controllers/promotional.controller';
+import { PromotionalService } from './services/promotional.service';
+import { ActiveSubscriptionsController } from './controllers/active-subscriptions.controller';
+import { ActiveSubscriptionsService } from './services/active-subscriptions.service';
+import { DunningController } from './controllers/dunning.controller';
+import { DunningService } from './services/dunning.service';
+import { PayoutsController } from './controllers/payouts.controller';
+import { PayoutsService } from './services/payouts.service';
+import { EventsController } from './controllers/events.controller';
+import { EventsService } from './services/events.service';
+import { SubscriptionsStatsController } from './controllers/stats.controller';
+import { SubscriptionsStatsService } from './services/stats.service';
+import { SubscriptionMetricsController } from './controllers/metrics.controller';
+import { SubscriptionMetricsService } from './services/subscription-metrics.service';
+import { ManualPaymentController } from './controllers/manual-payment.controller';
+import { PlatformGatewayModule } from './gateway/gateway.module';
+
+@Module({
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    NotificationsModule,
+    PlatformGatewayModule,
+    BullModule.registerQueue({ name: 'subscription-payment-retry' }),
+  ],
+  controllers: [
+    PlansController,
+    PartnersController,
+    PromotionalController,
+    OrgPromoAssignController,
+    ActiveSubscriptionsController,
+    DunningController,
+    PayoutsController,
+    EventsController,
+    SubscriptionsStatsController,
+    SubscriptionMetricsController,
+    ManualPaymentController,
+  ],
+  providers: [
+    PlansService,
+    PartnersService,
+    PromotionalService,
+    ActiveSubscriptionsService,
+    DunningService,
+    PayoutsService,
+    EventsService,
+    SubscriptionsStatsService,
+    SubscriptionMetricsService,
+  ],
+  exports: [
+    PlansService,
+    PartnersService,
+    PromotionalService,
+    ActiveSubscriptionsService,
+    DunningService,
+    PayoutsService,
+    EventsService,
+    SubscriptionsStatsService,
+    SubscriptionMetricsService,
+    PlatformGatewayModule,
+  ],
+})
+export class SuperadminSubscriptionsModule {}

@@ -1,0 +1,23 @@
+meta {
+  name: 09 GET reports sales summary
+  type: http
+  seq: 9
+}
+
+# /organization/reports/sales does not have a root GET; closest is /summary.
+
+get {
+  url: http://{{url}}/organization/reports/sales/summary
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{orgAdminToken}}
+}
+
+tests {
+  test("200", function () {
+    expect(res.status).to.equal(200);
+  });
+}

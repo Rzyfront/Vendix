@@ -86,7 +86,8 @@ export class StoreUserManagementService {
     });
 
     // Generate panel UI settings
-    const config = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const config =
+      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
     await this.prisma.user_settings.create({
       data: {
         user_id: user.id,
@@ -242,11 +243,11 @@ export class StoreUserManagementService {
     const roles = user_roles.map((ur: any) => ur.roles);
 
     // Merge user's panel_ui with defaults so the frontend sees ALL available keys
-    const defaults = await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
+    const defaults =
+      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
     const defaultPanelUI = defaults.panel_ui; // { ORG_ADMIN: {...}, STORE_ADMIN: {...}, ... }
-    const userConfig = (user_settings?.config as any) || {};
+    const userConfig = user_settings?.config || {};
     const userPanelUI = userConfig.panel_ui || {};
-
 
     // Merge: default keys as base, user overrides on top
     const mergedPanelUI: Record<string, Record<string, boolean>> = {};
@@ -404,7 +405,7 @@ export class StoreUserManagementService {
       where: { user_id: userId },
     });
 
-    const existingConfig = (existing?.config as any) || {};
+    const existingConfig = existing?.config || {};
     const newConfig = {
       ...existingConfig,
       panel_ui: dto.panel_ui,
@@ -440,13 +441,22 @@ export class StoreUserManagementService {
     const [total, activos, inactivos, pendientes] = await Promise.all([
       this.prisma.store_users.count({ where: excludeCustomers }),
       this.prisma.store_users.count({
-        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'active' } },
+        where: {
+          ...excludeCustomers,
+          user: { ...excludeCustomers.user, state: 'active' },
+        },
       }),
       this.prisma.store_users.count({
-        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'inactive' } },
+        where: {
+          ...excludeCustomers,
+          user: { ...excludeCustomers.user, state: 'inactive' },
+        },
       }),
       this.prisma.store_users.count({
-        where: { ...excludeCustomers, user: { ...excludeCustomers.user, state: 'pending_verification' } },
+        where: {
+          ...excludeCustomers,
+          user: { ...excludeCustomers.user, state: 'pending_verification' },
+        },
       }),
     ]);
 

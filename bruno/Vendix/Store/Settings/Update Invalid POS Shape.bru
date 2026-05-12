@@ -1,0 +1,45 @@
+meta {
+  name: Update Invalid POS Shape
+  type: http
+  seq: 5
+}
+
+patch {
+  url: {{baseUrl}}/store/settings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "pos": {
+      "allow_anonymous_sales": "not-a-bool"
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Real validation errors still raise 422", function() {
+    expect(res.status).to.equal(422);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Validation error code is SYS_VALIDATION_001", function() {
+    // VendixHttpException error_code may live at different paths depending on
+    // the global error filter shape; assert across known locations.
+    const code =
+      res.body.error_code ||
+      (res.body.error && res.body.error.code) ||
+      (res.body.data && res.body.data.error_code);
+    expect(code).to.equal('SYS_VALIDATION_001');
+  });
+
+  test("No data payload on validation error", function() {
+    expect(res.body).to.not.have.property('data');
+  });
+}

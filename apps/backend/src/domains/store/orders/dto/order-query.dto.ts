@@ -7,7 +7,11 @@ import {
   IsDateString,
   IsBoolean,
 } from 'class-validator';
-import { order_state_enum, payments_state_enum, order_channel_enum } from '@prisma/client';
+import {
+  order_state_enum,
+  payments_state_enum,
+  order_channel_enum,
+} from '@prisma/client';
 import { Transform } from 'class-transformer';
 
 export class OrderQueryDto {
@@ -41,11 +45,8 @@ export class OrderQueryDto {
   @Min(1)
   customer_id?: number;
 
-  @IsOptional()
-  @Transform(({ value }) => parseInt(value))
-  @IsInt()
-  @Min(1)
-  store_id?: number;
+  // store_id deprecated (phase3-round2): scope is derived from RequestContextService
+  // for /store/* endpoints. Use /organization/* with breakdown for cross-store views.
 
   @IsOptional()
   @IsString()

@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { monitorEventLoopDelay, IntervalHistogram } from 'perf_hooks';
 
 export interface RequestRecord {
@@ -36,7 +41,9 @@ const MAX_EVENT_LOOP_SAMPLES = 360; // 1 hour at 10s intervals
 const EVICTION_CHECK_INTERVAL = 60; // check every 60 records
 
 @Injectable()
-export class PerformanceCollectorService implements OnModuleInit, OnModuleDestroy {
+export class PerformanceCollectorService
+  implements OnModuleInit, OnModuleDestroy
+{
   private readonly logger = new Logger(PerformanceCollectorService.name);
 
   // Circular buffer for request records
@@ -65,7 +72,9 @@ export class PerformanceCollectorService implements OnModuleInit, OnModuleDestro
         this.sampleEventLoop();
       }, EVENT_LOOP_SAMPLE_INTERVAL);
 
-      this.logger.log('Performance collector initialized with event loop monitoring');
+      this.logger.log(
+        'Performance collector initialized with event loop monitoring',
+      );
     } catch (error) {
       this.logger.warn(`Event loop monitoring not available: ${error.message}`);
     }
@@ -112,8 +121,10 @@ export class PerformanceCollectorService implements OnModuleInit, OnModuleDestro
 
     bucket.count++;
     bucket.totalDuration += entry.duration;
-    if (entry.duration < bucket.minDuration) bucket.minDuration = entry.duration;
-    if (entry.duration > bucket.maxDuration) bucket.maxDuration = entry.duration;
+    if (entry.duration < bucket.minDuration)
+      bucket.minDuration = entry.duration;
+    if (entry.duration > bucket.maxDuration)
+      bucket.maxDuration = entry.duration;
     if (entry.statusCode >= 400 && entry.statusCode < 500) bucket.errors4xx++;
     if (entry.statusCode >= 500) bucket.errors5xx++;
 
@@ -150,7 +161,7 @@ export class PerformanceCollectorService implements OnModuleInit, OnModuleDestro
       // Buffer has wrapped — read from bufferIndex (oldest) to end, then from 0 to bufferIndex-1
       for (let i = 0; i < BUFFER_SIZE; i++) {
         const idx = (this.bufferIndex + i) % BUFFER_SIZE;
-        if (this.buffer[idx]) records.push(this.buffer[idx]!);
+        if (this.buffer[idx]) records.push(this.buffer[idx]);
       }
     }
 
@@ -161,7 +172,9 @@ export class PerformanceCollectorService implements OnModuleInit, OnModuleDestro
    * Get minute buckets sorted by timestamp.
    */
   getMinuteBuckets(): MinuteBucket[] {
-    return Array.from(this.minuteBuckets.values()).sort((a, b) => a.timestamp - b.timestamp);
+    return Array.from(this.minuteBuckets.values()).sort(
+      (a, b) => a.timestamp - b.timestamp,
+    );
   }
 
   getActiveRequests(): number {

@@ -46,8 +46,6 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
     InputsearchComponent,
     OptionsDropdownComponent,
     EmptyStateComponent,
-    ButtonComponent,
-    IconComponent,
     PaginationComponent,
     CardComponent,
   ],
@@ -98,7 +96,14 @@ export class PurchaseOrderListComponent {
   filterValues: FilterValues = {};
 
   // Dropdown actions
-  dropdownActions: DropdownAction[] = [];
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Orden de Compra',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // Table configuration
   table_columns: TableColumn[] = [

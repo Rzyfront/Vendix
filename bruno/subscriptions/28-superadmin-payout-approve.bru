@@ -1,0 +1,31 @@
+meta {
+  name: Superadmin Approve Payout Batch
+  type: http
+  seq: 28
+}
+
+# Depends on 27-superadmin-payouts-list.bru capturing {{superadmin_payout_id}}
+# (or supply manually in env). Batch must be in 'pending' state.
+
+post {
+  url: {{url}}/superadmin/subscriptions/payouts/{{superadmin_payout_id}}/approve
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "notes": "Approved via Bruno superadmin coverage test"
+  }
+}
+
+tests {
+  test("Payout approved", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("State transitioned to approved", function() {
+    expect(res.body.data.state).to.equal("approved");
+  });
+}

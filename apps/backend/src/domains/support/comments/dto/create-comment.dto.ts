@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsString, IsOptional, IsNumber, MaxLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsNumber,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -17,7 +23,7 @@ export class CreateCommentDto {
 
   @ApiProperty({
     description: 'Whether this is an internal note (only visible to admins)',
-    required: false
+    required: false,
   })
   @IsOptional()
   is_internal?: boolean;

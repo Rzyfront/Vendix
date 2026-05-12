@@ -1,0 +1,52 @@
+meta {
+  name: Re-subscribe From Cancelled — Preview
+  type: http
+  seq: 40
+}
+
+post {
+  url: {{url}}/store/subscriptions/checkout/preview
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "planId": {{plan_id}}
+  }
+}
+
+docs {
+  Preconditions:
+    - Active session belongs to a store whose store_subscriptions row is in
+      `cancelled` (or `expired`) state.
+    - `plan_id` is a non-promotional, non-archived target plan.
+
+  Expected flow:
+    - SubscriptionProrationService.preview() detects sub.state in
+      ('cancelled','expired') and returns a re-subscribe preview with
+      proration_amount=0 and full plan price.
+}
+
+tests {
+  test("Re-subscribe preview returns 200", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Proration kind === 're_subscribe' with zero proration", function() {
+    expect(res.body.data.proration).to.not.equal(null);
+    expect(res.body.data.proration.kind).to.equal("re_subscribe");
+    expect(res.body.data.proration.mode).to.equal("re_subscribe");
+    expect(parseFloat(res.body.data.proration.proration_amount)).to.equal(0);
+    expect(parseFloat(res.body.data.proration.credit_to_apply_next_cycle)).to.equal(0);
+    expect(res.body.data.proration.days_remaining).to.equal(0);
+  });
+
+  test("Invoice preview reflects target plan full price (no stale period)", function() {
+    expect(res.body.data.invoice).to.not.equal(null);
+    expect(parseFloat(res.body.data.invoice.total)).to.be.greaterThan(0);
+    expect(res.body.data.invoice.line_items).to.be.an("array");
+    expect(res.body.data.invoice.line_items[0].meta.prorated).to.equal(false);
+  });
+}

@@ -53,10 +53,8 @@ export class AILoggingService {
 
     if (!pricing) return 0;
 
-    const inputCost =
-      (promptTokens / 1000) * (pricing.input_per_1k ?? 0);
-    const outputCost =
-      (completionTokens / 1000) * (pricing.output_per_1k ?? 0);
+    const inputCost = (promptTokens / 1000) * (pricing.input_per_1k ?? 0);
+    const outputCost = (completionTokens / 1000) * (pricing.output_per_1k ?? 0);
 
     return Number((inputCost + outputCost).toFixed(8));
   }

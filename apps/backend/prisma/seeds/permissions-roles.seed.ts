@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
+import { syncRolePermissions } from './shared/sync-role-permissions';
 
 export interface SeedPermissionsResult {
   permissionsCreated: number;
@@ -172,14 +173,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:users:read',
-      description: 'Leer usuarios',
+      description: 'Leer usuarios (listado y detalle)',
       path: '/api/organization/users',
-      method: 'GET',
-    },
-    {
-      name: 'organization:users:read',
-      description: 'Leer usuario específico',
-      path: '/api/organization/users/:id',
       method: 'GET',
     },
     {
@@ -765,18 +760,12 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
-    // Proveedores
+    // Proveedores (legacy domain: store/suppliers)
     {
       name: 'store:suppliers:create',
       description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers/unique-create',
+      path: '/api/store/inventory/suppliers/unique-create/legacy',
       method: 'POST',
-    },
-    {
-      name: 'store:suppliers:read',
-      description: 'Leer proveedores',
-      path: '/api/store/inventory/suppliers/unique-read',
-      method: 'GET',
     },
     {
       name: 'store:suppliers:update',
@@ -848,12 +837,38 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/settings/apply-template',
       method: 'POST',
     },
+    {
+      name: 'store:settings:fiscal_status:read',
+      description: 'Leer estado fiscal de tienda',
+      path: '/api/store/settings/fiscal-status',
+      method: 'GET',
+    },
+    {
+      name: 'store:settings:fiscal_status:write',
+      description: 'Gestionar estado fiscal de tienda',
+      path: '/api/store/settings/fiscal-status',
+      method: 'POST',
+    },
+    {
+      name: 'store:settings:fiscal_data:read',
+      description:
+        'Leer datos legales/fiscales (NIT, régimen, dirección) de tienda',
+      path: '/api/store/settings/fiscal-data',
+      method: 'GET',
+    },
+    {
+      name: 'store:settings:fiscal_data:write',
+      description:
+        'Actualizar datos legales/fiscales (NIT, régimen, dirección) de tienda',
+      path: '/api/store/settings/fiscal-data',
+      method: 'PATCH',
+    },
 
     // Metadata y Recolección de Datos
     {
       name: 'store:settings:write',
       description: 'Escribir configuración de tienda (metadata, templates, email)',
-      path: '/api/store/metadata-fields',
+      path: '/api/store/settings',
       method: 'POST',
     },
     {
@@ -1304,6 +1319,13 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'store:stock-transfers:cross-store',
+      description:
+        'Policy: crear/aprobar transferencias cross-store entre bodegas de distintas tiendas (solo modo organizational). Se evalúa dentro del mismo endpoint POST /api/store/stock-transfers.',
+      path: '/policy/stock-transfers/cross-store',
+      method: 'POST',
+    },
+    {
       name: 'store:stock-transfers:read',
       description: 'Leer transferencias de inventario',
       path: '/api/store/stock-transfers',
@@ -1408,6 +1430,214 @@ export async function seedPermissionsAndRoles(
       description: 'Actualizar configuración de organización',
       path: '/organization/settings',
       method: 'PUT',
+    },
+    {
+      name: 'organization:inventory:set-mode',
+      description:
+        'Cambiar el modo de inventario de la organización (organizational/independent)',
+      path: '/organization/settings/inventory/mode',
+      method: 'PATCH',
+    },
+    // Sección `inventory` de organization_settings (Plan Unificado P3.2)
+    // — `costing_method` con precedencia ORG > STORE > default. LIFO rechazado a
+    // nivel DTO. ORG_ADMIN/owner heredan ambos por el filtro `organization:*`.
+    {
+      name: 'organization:settings:inventory:read',
+      description:
+        'Leer la sección inventory de organization_settings (costing_method, mode, alerts)',
+      path: '/organization/settings/inventory',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:inventory:write',
+      description:
+        'Actualizar la sección inventory de organization_settings (sólo costing_method por ahora; LIFO rechazado)',
+      path: '/organization/settings/inventory',
+      method: 'PUT',
+    },
+    // Inventario org-native (Plan P2 — write parity)
+    // Locaciones de inventario a nivel organización (incluye central warehouses).
+    {
+      name: 'organization:inventory:locations:create',
+      description: 'Crear ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:locations:update',
+      description: 'Actualizar ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:locations:delete',
+      description: 'Eliminar ubicaciones de inventario a nivel organización',
+      path: '/api/organization/inventory/locations/:id',
+      method: 'DELETE',
+    },
+    // Proveedores a nivel organización (CRUD canónico — store mantiene sólo lectura).
+    {
+      name: 'organization:inventory:suppliers:create',
+      description: 'Crear proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:suppliers:update',
+      description: 'Actualizar proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:suppliers:delete',
+      description: 'Soft-delete de proveedores a nivel organización',
+      path: '/api/organization/inventory/suppliers/:id',
+      method: 'DELETE',
+    },
+    // Ajustes de inventario a nivel organización (delegan a la lógica de store).
+    {
+      name: 'organization:inventory:adjustments:read',
+      description: 'Leer ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments',
+      method: 'GET',
+    },
+    {
+      name: 'organization:inventory:adjustments:create',
+      description: 'Crear ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:adjustments:approve',
+      description: 'Aprobar ajustes de inventario a nivel organización',
+      path: '/api/organization/inventory/adjustments/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:adjustments:delete',
+      description: 'Cancelar/eliminar ajustes de inventario pendientes',
+      path: '/api/organization/inventory/adjustments/:id',
+      method: 'DELETE',
+    },
+    // Ledger de transacciones de inventario consolidado por organización.
+    {
+      name: 'organization:inventory:transactions:read',
+      description:
+        'Leer el ledger de transacciones de inventario a nivel organización',
+      path: '/api/organization/inventory/transactions',
+      method: 'GET',
+    },
+    // Listado consolidado de números de serie a nivel organización (read-only).
+    {
+      name: 'organization:inventory:serial-numbers:read',
+      description:
+        'Leer números de serie de inventario consolidados a nivel organización',
+      path: '/api/organization/inventory/serial-numbers',
+      method: 'GET',
+    },
+    // Transferencias de inventario org-native — ciclo completo (TWO-STEP §13#1).
+    {
+      name: 'organization:inventory:transfers:create',
+      description:
+        'Crear transferencias de inventario cross-store / cross-warehouse',
+      path: '/api/organization/inventory/transfers',
+      method: 'POST',
+    },
+    {
+      name: 'organization:inventory:transfers:read',
+      description: 'Leer transferencias de inventario a nivel organización',
+      path: '/api/organization/inventory/transfers',
+      method: 'GET',
+    },
+    {
+      name: 'organization:inventory:transfers:approve',
+      description:
+        'Aprobar una transferencia (no mueve stock — sólo marca aprobada)',
+      path: '/api/organization/inventory/transfers/:id/approve',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:dispatch',
+      description:
+        'Despachar una transferencia (decrementa stock de la ubicación origen)',
+      path: '/api/organization/inventory/transfers/:id/dispatch',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:complete',
+      description:
+        'Completar una transferencia (incrementa stock de la ubicación destino)',
+      path: '/api/organization/inventory/transfers/:id/complete',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:inventory:transfers:cancel',
+      description:
+        'Cancelar una transferencia en cualquier estado previo a completed',
+      path: '/api/organization/inventory/transfers/:id/cancel',
+      method: 'PATCH',
+    },
+    // Lotes de inventario consolidados a nivel organización (read-only, foco en caducidad).
+    {
+      name: 'organization:inventory:batches:read',
+      description: 'Leer lotes de inventario a nivel organización',
+      path: '/api/organization/inventory/batches',
+      method: 'GET',
+    },
+    // Operating Scope wizard (Phase 4)
+    {
+      name: 'organization:settings:operating_scope:read',
+      description:
+        'Leer el operating_scope vigente, partner flag y audit log reciente',
+      path: '/organization/settings/operating-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:operating_scope:write',
+      description:
+        'Migrar operating_scope (STORE ↔ ORGANIZATION) vía wizard con audit log',
+      path: '/organization/settings/operating-scope/apply',
+      method: 'POST',
+    },
+    {
+      name: 'organization:settings:fiscal_scope:read',
+      description:
+        'Leer el fiscal_scope vigente, operating_scope y audit log reciente',
+      path: '/organization/settings/fiscal-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_scope:write',
+      description:
+        'Migrar fiscal_scope (STORE ↔ ORGANIZATION) vía wizard con audit log',
+      path: '/organization/settings/fiscal-scope/apply',
+      method: 'POST',
+    },
+    {
+      name: 'organization:settings:fiscal_status:read',
+      description: 'Leer estado fiscal de organización',
+      path: '/organization/settings/fiscal-status',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_status:write',
+      description: 'Gestionar estado fiscal de organización',
+      path: '/organization/settings/fiscal-status',
+      method: 'POST',
+    },
+    {
+      name: 'organization:settings:fiscal_data:read',
+      description:
+        'Leer datos legales/fiscales (NIT, régimen, dirección) de organización',
+      path: '/organization/settings/fiscal-data',
+      method: 'GET',
+    },
+    {
+      name: 'organization:settings:fiscal_data:write',
+      description:
+        'Actualizar datos legales/fiscales (NIT, régimen, dirección) de organización',
+      path: '/organization/settings/fiscal-data',
+      method: 'PATCH',
     },
 
     // Notificaciones (Tienda)
@@ -1692,6 +1922,12 @@ export async function seedPermissionsAndRoles(
       name: 'store:inventory:locations:update',
       description: 'Update inventory locations',
       path: '/api/store/inventory/locations',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:set-default-location',
+      description: 'Set a specific inventory location as the store default',
+      path: '/api/store/inventory/locations/:id/set-default',
       method: 'PATCH',
     },
     {
@@ -2047,13 +2283,13 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:payroll:advances:approve',
       description: 'Aprobar/rechazar adelantos',
-      path: '/api/store/payroll/advances',
+      path: '/api/store/payroll/advances/:id/approve',
       method: 'PATCH',
     },
     {
       name: 'store:payroll:advances:manage',
       description: 'Gestionar adelantos (cancelar, pagos manuales)',
-      path: '/api/store/payroll/advances',
+      path: '/api/store/payroll/advances/:id/cancel',
       method: 'PATCH',
     },
     // Nómina - Liquidaciones de empleado (prestaciones sociales)
@@ -2075,6 +2311,41 @@ export async function seedPermissionsAndRoles(
         'Gestionar liquidaciones (recalcular, aprobar, pagar, cancelar)',
       path: '/api/store/payroll/settlements',
       method: 'PATCH',
+    },
+    // Nómina - Configuración mínima (wizard PayrollConfigStep)
+    {
+      name: 'store:payroll:settings:read',
+      description:
+        'Leer configuración mínima de nómina (periodicidad, parafiscales, PILA)',
+      path: '/api/store/payroll/settings',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:settings:write',
+      description:
+        'Actualizar configuración mínima de nómina (periodicidad, parafiscales, PILA)',
+      path: '/api/store/payroll/settings',
+      method: 'PUT',
+    },
+    {
+      name: 'organization:payroll:settings:read',
+      description:
+        'Leer configuración mínima de nómina a nivel organización',
+      path: '/api/organization/payroll/settings',
+      method: 'GET',
+    },
+    {
+      name: 'organization:payroll:settings:write',
+      description:
+        'Actualizar configuración mínima de nómina a nivel organización',
+      path: '/api/organization/payroll/settings',
+      method: 'PUT',
+    },
+    {
+      name: 'organization:payroll:reports:read',
+      description: 'Leer reportes de nómina a nivel organización',
+      path: '/api/organization/reports/payroll',
+      method: 'GET',
     },
 
     {
@@ -2356,46 +2627,413 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/accounting/fixed-assets/:id',
       method: 'DELETE',
     },
+
+    // ===== SaaS Subscriptions =====
+    // Store-level: tienda ve/gestiona su propia suscripción
+    {
+      name: 'subscriptions:read',
+      description: 'Ver la suscripción de la tienda',
+      path: '/api/store/subscriptions/*',
+      method: 'GET',
+    },
+    {
+      name: 'subscriptions:write',
+      description: 'Suscribir, cambiar o cancelar plan de la tienda',
+      path: '/api/store/subscriptions/*',
+      method: 'POST',
+    },
+
+    // Reseller (organización partner)
+    {
+      name: 'reseller:plans:read',
+      description: 'Ver overrides de planes del partner',
+      path: '/api/organization/reseller/plans',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:plans:write',
+      description: 'Crear/actualizar/eliminar overrides de planes del partner',
+      path: '/api/organization/reseller/plans',
+      method: 'POST',
+    },
+    {
+      name: 'reseller:commissions:read',
+      description: 'Ver comisiones y payouts del partner',
+      path: '/api/organization/reseller/commissions/*',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:branding:read',
+      description: 'Ver configuración de branding del partner',
+      path: '/api/organization/reseller/branding',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:branding:write',
+      description: 'Actualizar configuración de branding del partner',
+      path: '/api/organization/reseller/branding',
+      method: 'PUT',
+    },
+
+    // Superadmin: gestión global de SaaS
+    {
+      name: 'superadmin:subscriptions:read',
+      description: 'Ver suscripciones activas y dunning',
+      path: '/api/superadmin/subscriptions/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:update',
+      description: 'Acciones de gestión sobre suscripciones (remind, force cancel)',
+      path: '/api/superadmin/subscriptions/dunning/:id/*',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:read',
+      description: 'Ver planes SaaS',
+      path: '/api/superadmin/subscriptions/plans',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:create',
+      description: 'Crear planes SaaS',
+      path: '/api/superadmin/subscriptions/plans',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:update',
+      description: 'Actualizar planes SaaS',
+      path: '/api/superadmin/subscriptions/plans/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:delete',
+      description: 'Archivar/eliminar planes SaaS',
+      path: '/api/superadmin/subscriptions/plans/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:subscriptions:partners:read',
+      description: 'Ver partners y overrides',
+      path: '/api/superadmin/subscriptions/partners',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:partners:update',
+      description: 'Toggle partner, margin cap y overrides',
+      path: '/api/superadmin/subscriptions/partners/*',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:read',
+      description: 'Ver planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:create',
+      description: 'Crear planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:update',
+      description: 'Actualizar planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:delete',
+      description: 'Eliminar planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:subscriptions:payouts:read',
+      description: 'Ver batches de payouts a partners',
+      path: '/api/superadmin/subscriptions/payouts',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:payouts:update',
+      description: 'Aprobar/marcar como pagados los batches',
+      path: '/api/superadmin/subscriptions/payouts/:id/*',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:events:read',
+      description: 'Auditar eventos de suscripciones',
+      path: '/api/superadmin/subscriptions/events',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:gateway:read',
+      description: 'Ver configuración (enmascarada) de la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:gateway:write',
+      description: 'Crear/actualizar credenciales de la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:gateway:test',
+      description: 'Probar conexión con la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor/test',
+      method: 'POST',
+    },
+    {
+      name: 'super_admin.settings.sync_all',
+      description:
+        'Sincronizar (migrar) settings de todas las tiendas desde super-admin',
+      path: '/api/superadmin/settings/sync-all-stores',
+      method: 'POST',
+    },
+
+    // ──── Organization Invoicing — read-only fiscal supervision ────
+    {
+      name: 'organization:invoicing:read',
+      description:
+        'Leer facturas, resoluciones y resumen de facturación a nivel organización',
+      path: '/api/organization/invoicing',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:write',
+      description: 'Escribir configuración de facturación a nivel organización',
+      path: '/api/organization/invoicing',
+      method: 'POST',
+    },
+    {
+      name: 'organization:invoicing:resolutions:read',
+      description: 'Leer resoluciones de facturación a nivel organización',
+      path: '/api/organization/invoicing/resolutions',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:resolutions:write',
+      description: 'Crear/actualizar/eliminar resoluciones a nivel organización',
+      path: '/api/organization/invoicing/resolutions',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:migrate',
+      description: 'Aplicar cambios de fiscal_scope de la organización',
+      path: '/api/organization/fiscal-scope',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:supervise',
+      description: 'Supervisar estado y auditoría fiscal de la organización',
+      path: '/api/organization/fiscal-scope',
+      method: 'GET',
+    },
+    {
+      name: 'organization:withholding:read',
+      description: 'Leer retenciones a nivel organización',
+      path: '/api/organization/withholding-tax',
+      method: 'GET',
+    },
+    {
+      name: 'organization:withholding:write',
+      description: 'Gestionar retenciones a nivel organización',
+      path: '/api/organization/withholding-tax',
+      method: 'POST',
+    },
+    {
+      name: 'organization:payroll:read',
+      description: 'Leer nómina a nivel organización',
+      path: '/api/organization/payroll',
+      method: 'GET',
+    },
+
+    // ──── Organization Invoicing (DIAN) — fiscal wizard twin ────
+    {
+      name: 'organization:invoicing:dian:read',
+      description: 'Leer configuraciones DIAN a nivel organización',
+      path: '/api/organization/invoicing/dian-config',
+      method: 'GET',
+    },
+    {
+      name: 'organization:invoicing:dian:write',
+      description: 'Crear/actualizar/eliminar configuraciones DIAN a nivel organización',
+      path: '/api/organization/invoicing/dian-config',
+      method: 'POST',
+    },
+
+    // ──── Organization Taxes — fiscal wizard twin ────
+    {
+      name: 'organization:taxes:create',
+      description: 'Crear categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes',
+      method: 'POST',
+    },
+    {
+      name: 'organization:taxes:read',
+      description: 'Leer categorías de impuestos a nivel organización',
+      path: '/api/organization/taxes',
+      method: 'GET',
+    },
+    {
+      name: 'organization:taxes:update',
+      description: 'Actualizar categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:taxes:delete',
+      description: 'Eliminar categoría de impuesto a nivel organización',
+      path: '/api/organization/taxes/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Chart of Accounts — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:chart_of_accounts:read',
+      description: 'Leer plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:create',
+      description: 'Crear cuentas en el plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:update',
+      description: 'Actualizar cuentas del plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:chart_of_accounts:delete',
+      description: 'Eliminar cuentas del plan de cuentas a nivel organización',
+      path: '/api/organization/accounting/chart-of-accounts/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Fiscal Periods — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:fiscal_periods:read',
+      description: 'Leer periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:create',
+      description: 'Crear periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:update',
+      description: 'Actualizar/cerrar periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:fiscal_periods:delete',
+      description: 'Eliminar periodos fiscales a nivel organización',
+      path: '/api/organization/accounting/fiscal-periods/:id',
+      method: 'DELETE',
+    },
+
+    // ──── Organization Accounting: Account Mappings — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:account_mappings:read',
+      description: 'Leer mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:account_mappings:create',
+      description: 'Crear mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:account_mappings:update',
+      description: 'Actualizar mapeos contables a nivel organización',
+      path: '/api/organization/accounting/mappings/:id',
+      method: 'PATCH',
+    },
+
+    // ──── Organization Accounting: Journal Entries — fiscal wizard twin ────
+    {
+      name: 'organization:accounting:journal_entries:read',
+      description: 'Leer asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounting:journal_entries:create',
+      description: 'Crear asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:update',
+      description: 'Actualizar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'organization:accounting:journal_entries:post',
+      description: 'Contabilizar/postear asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id/post',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:void',
+      description: 'Anular/reversar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id/void',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounting:journal_entries:delete',
+      description: 'Eliminar asientos contables a nivel organización',
+      path: '/api/organization/accounting/journal-entries/:id',
+      method: 'DELETE',
+    },
   ];
 
-  // Get valid permission names from our list
-  const validPermissionNames = new Set(permissions.map((p) => p.name));
+  // Create-only seed: never delete existing permission rows.
+  // Any conflicting (path, method) on insert raises P2002 and is skipped below.
 
-  // Delete permissions that are not in our list (to avoid conflicts)
-  const deletedCount = await client.permissions.deleteMany({
-    where: {
-      name: {
-        notIn: Array.from(validPermissionNames),
-      },
-    },
-  });
-
-  if (deletedCount.count > 0) {
-    console.log(`   🧹 Cleaned up ${deletedCount.count} old permissions`);
-  }
-
-  // Create permissions
+  // Create-only: never overwrite an existing permission's path/method/description.
   let permissionsCreated = 0;
   let permissionsSkipped = 0;
   for (const permission of permissions) {
     try {
-      await client.permissions.upsert({
+      const existing = await client.permissions.findUnique({
         where: { name: permission.name },
-        update: {
-          description: permission.description,
-          path: permission.path,
-          method: permission.method as any,
-        },
-        create: {
+        select: { id: true },
+      });
+      if (existing) {
+        permissionsSkipped++;
+        continue;
+      }
+      const isSystemPermission =
+        permission.name.includes('super_admin') ||
+        permission.name.startsWith('system.') ||
+        permission.name.startsWith('security.') ||
+        permission.name.startsWith('rate.limiting.');
+      await client.permissions.create({
+        data: {
           name: permission.name,
           description: permission.description,
           path: permission.path,
           method: permission.method as any,
-        },
+          is_system_permission: isSystemPermission,
+        } as any,
       });
       permissionsCreated++;
     } catch (e: any) {
-      // Skip unique constraint violations on (path, method)
+      // Skip unique constraint violations on (path, method) — another row
+      // with the same (path, method) already exists under a different name.
       if (e?.code === 'P2002') {
         permissionsSkipped++;
       } else {
@@ -2405,22 +3043,11 @@ export async function seedPermissionsAndRoles(
   }
   if (permissionsSkipped > 0) {
     console.log(
-      `   ⚠️  Skipped ${permissionsSkipped} permissions (duplicate path+method)`,
+      `   ⏭  Skipped ${permissionsSkipped} permissions (already exist — preserved)`,
     );
   }
 
-  // Mark critical permissions as system permissions
-  await client.permissions.updateMany({
-    where: {
-      OR: [
-        { name: { contains: 'super_admin' } },
-        { name: { startsWith: 'system.' } },
-        { name: { startsWith: 'security.' } },
-        { name: { startsWith: 'rate.limiting.' } },
-      ],
-    },
-    data: { is_system_permission: true } as any,
-  });
+  // is_system_permission flag is set at create-time (additive-only seed).
 
   // Create roles
   const superAdminRole = await client.roles.upsert({
@@ -2450,6 +3077,16 @@ export async function seedPermissionsAndRoles(
     create: {
       name: 'admin',
       description: 'Administrador de la organización',
+      is_system_role: true,
+    },
+  });
+
+  const fiscalSupervisorRole = await client.roles.upsert({
+    where: { name: 'fiscal_supervisor' },
+    update: {},
+    create: {
+      name: 'fiscal_supervisor',
+      description: 'Supervisor fiscal de la organización',
       is_system_role: true,
     },
   });
@@ -2504,32 +3141,23 @@ export async function seedPermissionsAndRoles(
     },
   });
 
-  // Ensure system roles have organization_id = null
-  await client.roles.updateMany({
-    where: { is_system_role: true },
-    data: { organization_id: null } as any,
-  });
+  // Create-only seed: system roles are inserted with organization_id=null on
+  // their initial upsert; existing roles are never mutated by this seed.
 
-  const rolesCreated = 7;
+  const rolesCreated = 8;
 
   // Assign permissions to roles
   const allPermissions = await client.permissions.findMany();
   let assignmentsCreated = 0;
 
   // Assign all permissions to super_admin
-  for (const permission of allPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: superAdminRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: superAdminRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const superAdminSync = await syncRolePermissions(
+    client,
+    superAdminRole.id,
+    allPermissions.map((p) => p.id),
+    'super_admin',
+  );
+  assignmentsCreated += superAdminSync.added;
 
   // Assign permissions to owner (full control of their organization)
   const ownerPermissions = allPermissions.filter(
@@ -2539,19 +3167,13 @@ export async function seedPermissionsAndRoles(
       !p.name.includes('users.impersonate'),
   );
 
-  for (const permission of ownerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: ownerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: ownerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const ownerSync = await syncRolePermissions(
+    client,
+    ownerRole.id,
+    ownerPermissions.map((p) => p.id),
+    'owner',
+  );
+  assignmentsCreated += ownerSync.added;
 
   // Assign permissions to admin (operational management)
   const adminPermissions = allPermissions.filter(
@@ -2564,7 +3186,10 @@ export async function seedPermissionsAndRoles(
         p.name.startsWith('exogenous:') ||
         p.name.startsWith('payroll:') ||
         p.name.startsWith('taxes:') ||
-        p.name.startsWith('withholding:')) &&
+        p.name.startsWith('withholding:') ||
+        p.name === 'subscriptions:read' ||
+        p.name === 'subscriptions:write' ||
+        p.name.startsWith('reseller:')) &&
       !p.name.includes('super_admin') &&
       !p.name.startsWith('system.') &&
       !p.name.startsWith('security.') &&
@@ -2572,62 +3197,89 @@ export async function seedPermissionsAndRoles(
       !p.name.includes('users.impersonate'),
   );
 
-  for (const permission of adminPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: adminRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: adminRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const adminSync = await syncRolePermissions(
+    client,
+    adminRole.id,
+    adminPermissions.map((p) => p.id),
+    'admin (ORG_ADMIN)',
+  );
+  assignmentsCreated += adminSync.added;
 
-  // Assign permissions to manager (full store management)
-  const managerPermissions = allPermissions.filter(
+  const fiscalSupervisorPermissions = allPermissions.filter(
     (p) =>
-      p.name.startsWith('store:') ||
-      p.name.startsWith('exogenous:') ||
-      p.name.startsWith('payroll:') ||
-      p.name.startsWith('taxes:') ||
-      p.name.startsWith('withholding:') ||
-      p.name.includes('organization:users:read') ||
-      p.name.includes('organization:users:search') ||
-      p.name.includes('organization:stores:read') ||
-      p.name.includes('organization:stores:settings') ||
-      p.name.includes('organization:addresses:read') ||
-      p.name.includes('audit.logs') ||
-      p.name.includes('email.read') ||
-      p.name.includes('email.send') ||
-      p.name.includes('auth.login') ||
-      p.name.includes('auth.logout') ||
-      p.name.includes('auth.profile') ||
-      p.name.includes('health.check') ||
-      (!p.name.includes('super_admin') &&
-        !p.name.includes('organization:roles:') &&
-        !p.name.includes('organization:permissions:') &&
-        !p.name.includes('organization:organizations:') &&
-        !p.name.includes('organization:domains:') &&
-        !p.name.includes('security.') &&
-        !p.name.includes('rate.limiting.')),
+      p.name === 'organization:invoicing:read' ||
+      p.name === 'organization:invoicing:resolutions:read' ||
+      p.name === 'organization:fiscal:supervise' ||
+      p.name === 'organization:withholding:read' ||
+      p.name === 'organization:payroll:read' ||
+      p.name === 'organization:payroll:settings:read' ||
+      p.name === 'organization:payroll:reports:read',
   );
 
-  for (const permission of managerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: managerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: managerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const fiscalSupervisorSync = await syncRolePermissions(
+    client,
+    fiscalSupervisorRole.id,
+    fiscalSupervisorPermissions.map((p) => p.id),
+    'fiscal_supervisor',
+  );
+  assignmentsCreated += fiscalSupervisorSync.added;
+
+  // Assign permissions to manager (full store management)
+  //
+  // STORE_ADMIN owns the per-store inventory write surface, but org-native
+  // inventory writes (locations / suppliers / adjustments / transfers full
+  // lifecycle / transactions ledger) belong exclusively to ORG_ADMIN — see
+  // Plan P2 ROUND 2 §6.3.2. Suppliers in particular are migrating: STORE
+  // keeps READ access and loses create/update/delete on the
+  // `store:inventory:suppliers:*` surface (the canonical write API now
+  // lives at /api/organization/inventory/suppliers).
+  const managerPermissions = allPermissions.filter(
+    (p) =>
+      // Manager loses store-side supplier writes — those move to ORG_ADMIN.
+      !(
+        p.name === 'store:inventory:suppliers:create' ||
+        p.name === 'store:inventory:suppliers:update' ||
+        p.name === 'store:inventory:suppliers:delete'
+      ) &&
+      (p.name.startsWith('store:') ||
+        p.name.startsWith('exogenous:') ||
+        p.name.startsWith('payroll:') ||
+        p.name.startsWith('taxes:') ||
+        p.name.startsWith('withholding:') ||
+        p.name.includes('organization:users:read') ||
+        p.name.includes('organization:users:search') ||
+        p.name.includes('organization:stores:read') ||
+        p.name.includes('organization:stores:settings') ||
+        p.name.includes('organization:addresses:read') ||
+        p.name.includes('audit.logs') ||
+        p.name.includes('email.read') ||
+        p.name.includes('email.send') ||
+        p.name.includes('auth.login') ||
+        p.name.includes('auth.logout') ||
+        p.name.includes('auth.profile') ||
+        p.name.includes('health.check') ||
+        (!p.name.includes('super_admin') &&
+          !p.name.includes('organization:roles:') &&
+          !p.name.includes('organization:permissions:') &&
+          !p.name.includes('organization:organizations:') &&
+          !p.name.includes('organization:domains:') &&
+          // org-native inventory writes belong to ORG_ADMIN only.
+          !p.name.startsWith('organization:inventory:') &&
+          !p.name.includes('security.') &&
+          !p.name.includes('rate.limiting.'))),
+  );
+
+  // Sync STORE_ADMIN (manager) using the canonical helper. This both inserts
+  // the missing assignments and revokes obsolete ones in a single idempotent
+  // pass — for example, supplier writes that moved to ORG_ADMIN, or any new
+  // `organization:inventory:*` rows we never want manager to inherit.
+  const managerSync = await syncRolePermissions(
+    client,
+    managerRole.id,
+    managerPermissions.map((p) => p.id),
+    'STORE_ADMIN (manager)',
+  );
+  assignmentsCreated += managerSync.added;
 
   // Assign basic permissions to supervisor
   const supervisorPermissions = allPermissions.filter(
@@ -2681,19 +3333,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:settings:write'),
   );
 
-  for (const permission of supervisorPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: supervisorRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: supervisorRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const supervisorSync = await syncRolePermissions(
+    client,
+    supervisorRole.id,
+    supervisorPermissions.map((p) => p.id),
+    'supervisor',
+  );
+  assignmentsCreated += supervisorSync.added;
 
   // Assign minimum permissions to employee
   const employeePermissions = allPermissions.filter(
@@ -2725,19 +3371,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reservations:write'),
   );
 
-  for (const permission of employeePermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: employeeRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: employeeRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const employeeSync = await syncRolePermissions(
+    client,
+    employeeRole.id,
+    employeePermissions.map((p) => p.id),
+    'employee',
+  );
+  assignmentsCreated += employeeSync.added;
 
   // Assign permissions to customer
   const customerPermissions = allPermissions.filter(
@@ -2773,19 +3413,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('system.health'),
   );
 
-  for (const permission of customerPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: customerRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: customerRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const customerSync = await syncRolePermissions(
+    client,
+    customerRole.id,
+    customerPermissions.map((p) => p.id),
+    'customer',
+  );
+  assignmentsCreated += customerSync.added;
 
   // Assign permissions to cashier (lectura amplia, escritura limitada)
   const cashierPermissions = allPermissions.filter(
@@ -2880,19 +3514,13 @@ export async function seedPermissionsAndRoles(
       p.name.includes('system.health'),
   );
 
-  for (const permission of cashierPermissions) {
-    await client.role_permissions.upsert({
-      where: {
-        role_id_permission_id: {
-          role_id: cashierRole.id,
-          permission_id: permission.id,
-        },
-      },
-      update: {},
-      create: { role_id: cashierRole.id, permission_id: permission.id },
-    });
-    assignmentsCreated++;
-  }
+  const cashierSync = await syncRolePermissions(
+    client,
+    cashierRole.id,
+    cashierPermissions.map((p) => p.id),
+    'cashier',
+  );
+  assignmentsCreated += cashierSync.added;
 
   return {
     permissionsCreated,

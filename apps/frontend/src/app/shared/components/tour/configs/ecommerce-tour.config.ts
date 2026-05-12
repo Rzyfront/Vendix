@@ -22,15 +22,14 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
   steps: [
     {
       id: 'welcome',
-      title: '¡Bienvenido a la Configuración de tu Tienda Online! 🛍️',
-      description: 'Aquí puedes personalizar todos los aspectos de tu tienda e-commerce. Desde el logo y colores hasta cómo se muestran tus productos y el proceso de compra.',
-      action: 'Haz clic en "Comenzar" para configurar tu tienda',
+      title: 'Configura tu tienda online',
+      description: 'Personaliza marca, catálogo y compra desde esta pantalla.',
     },
     {
       id: 'inicio-section',
-      title: 'Personaliza la Apariencia de tu Tienda',
-      description: 'Define la identidad visual de tu tienda: configura el título de bienvenida, sube tu logo y elige los colores que representan tu marca. ¡Haz que tu tienda sea única!',
-      action: 'Revisa la sección de Inicio',
+      title: 'Apariencia',
+      description: 'Define título, logo y colores de tu marca.',
+      action: 'Revisa Inicio',
       target: '[data-tour="inicio-section"]',
       beforeNext: async () => {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -39,9 +38,9 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'slider-section',
-      title: 'Destaca tus Productos con un Slider',
-      description: 'Activa el slider para mostrar un carrusel de imágenes en la página de inicio. Puedes agregar hasta 5 imágenes con títulos y descripciones para captar la atención de tus clientes.',
-      action: 'Configura tu slider principal',
+      title: 'Slider principal',
+      description: 'Muestra imágenes destacadas en la página de inicio.',
+      action: 'Configura el slider',
       target: '[data-tour="slider-section"]',
       beforeNext: async () => {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -50,9 +49,9 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'catalog-section',
-      title: 'Configura tu Catálogo de Productos',
-      description: 'Define cómo se muestran tus productos: cantidad por página, si permites reseñas, variantes, productos relacionados y filtros de búsqueda.',
-      action: 'Personaliza la configuración del catálogo',
+      title: 'Catálogo',
+      description: 'Ajusta productos por página, reseñas, variantes y filtros.',
+      action: 'Revisa el catálogo',
       target: '[data-tour="catalog-section"]',
       beforeNext: async () => {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -61,9 +60,9 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'checkout-section',
-      title: 'Configura el Carrito y Checkout',
-      description: 'Establece las reglas del carrito de compras, tiempo de expiración y opciones de pago como el checkout por WhatsApp.',
-      action: 'Configura las opciones de compra',
+      title: 'Carrito y checkout',
+      description: 'Define reglas del carrito, expiración y opciones de pago.',
+      action: 'Revisa la compra',
       target: '[data-tour="checkout-section"]',
       beforeNext: async () => {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -72,9 +71,9 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'open-store-btn',
-      title: '¡Abre tu Tienda al Mundo!',
-      description: 'Una vez configurada, usa el botón "Abrir Tienda" en la cabecera para ver cómo se ve tu tienda online. Ese es el enlace que compartirás con tus clientes.',
-      action: 'Haz clic en "Abrir Tienda" para ver tu tienda',
+      title: 'Abre tu tienda',
+      description: 'Usa "Abrir Tienda" para ver el sitio que compartirás.',
+      action: 'Vista pública',
       target: 'app-sticky-header, .sticky-header',
       beforeNext: async () => {
         await new Promise(resolve => setTimeout(resolve, 500));
@@ -83,9 +82,8 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     },
     {
       id: 'congratulations',
-      title: '¡Tu Tienda Online Está Lista! 🎉',
-      description: 'Has completado el tour de configuración. Ahora puedes personalizar cada sección a tu gusto y empezar a vender online. ¡Mucho éxito en tus ventas!',
-      action: '¡Comienza a configurar tu tienda!',
+      title: 'Tienda lista',
+      description: 'Ya conoces las secciones clave para empezar a vender online.',
     },
   ],
 };

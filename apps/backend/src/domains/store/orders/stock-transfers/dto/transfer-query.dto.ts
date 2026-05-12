@@ -18,9 +18,32 @@ export class TransferQueryDto {
   @Type(() => Number)
   limit?: number;
 
+  /**
+   * Lifecycle filter. Canonical values (P4 M3):
+   *   `pending`, `approved`, `in_transit`, `received`, `cancelled`.
+   *
+   * Legacy aliases still accepted for backward compatibility with older
+   * clients and historical rows: `draft`, `completed`.
+   */
   @IsOptional()
-  @IsEnum(['draft', 'approved', 'in_transit', 'completed', 'cancelled'])
-  status?: 'draft' | 'approved' | 'in_transit' | 'completed' | 'cancelled';
+  @IsEnum([
+    'pending',
+    'approved',
+    'in_transit',
+    'received',
+    'cancelled',
+    // legacy aliases — kept to preserve old frontend tabs / saved filters
+    'draft',
+    'completed',
+  ])
+  status?:
+    | 'pending'
+    | 'approved'
+    | 'in_transit'
+    | 'received'
+    | 'cancelled'
+    | 'draft'
+    | 'completed';
 
   @IsOptional()
   @IsNumber()

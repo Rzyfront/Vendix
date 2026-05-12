@@ -1,0 +1,31 @@
+meta {
+  name: Superadmin Update Plan
+  type: http
+  seq: 23
+}
+
+# Depends on 21-superadmin-plan-create.bru — uses {{superadmin_plan_id}}
+
+patch {
+  url: {{url}}/superadmin/subscriptions/plans/{{superadmin_plan_id}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "base_price": 39900,
+    "description": "Updated description from Bruno test"
+  }
+}
+
+tests {
+  test("Plan updated successfully", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("Base price reflected", function() {
+    expect(Number(res.body.data.base_price)).to.equal(39900);
+  });
+}

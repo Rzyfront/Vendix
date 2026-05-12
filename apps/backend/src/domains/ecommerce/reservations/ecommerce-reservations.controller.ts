@@ -44,7 +44,10 @@ export class EcommerceReservationsController {
       productId,
       query.date_from,
       query.date_to,
-      providerId ? parseInt(providerId, 10) : undefined,
+      {
+        provider_id: providerId ? parseInt(providerId, 10) : undefined,
+        product_variant_id: query.product_variant_id,
+      },
     );
     return { success: true, data: slots };
   }
@@ -71,6 +74,7 @@ export class EcommerceReservationsController {
     const booking = await this.reservationsService.create({
       customer_id: customerId,
       product_id: dto.product_id,
+      product_variant_id: dto.product_variant_id,
       date: dto.date,
       start_time: dto.start_time,
       end_time: dto.end_time,
@@ -91,6 +95,7 @@ export class EcommerceReservationsController {
     const hold = await this.reservationsService.hold({
       customer_id: customerId,
       product_id: dto.product_id,
+      product_variant_id: dto.product_variant_id,
       date: dto.date,
       start_time: dto.start_time,
       end_time: dto.end_time,

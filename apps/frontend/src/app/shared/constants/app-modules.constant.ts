@@ -38,6 +38,29 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
       key: 'settings',
       label: 'Configuraci\u00f3n',
       description: 'Ajustes de la organizaci\u00f3n',
+      isParent: true,
+      children: [
+        {
+          key: 'settings_operations',
+          label: 'Operaci\u00f3n',
+          description: 'Alcance operativo y modelo multi-tienda',
+        },
+        {
+          key: 'settings_fiscal_scope',
+          label: 'Modo fiscal',
+          description: 'Alcance fiscal y modelo DIAN por tienda u organizaci\u00f3n',
+        },
+        {
+          key: 'settings_application',
+          label: 'General',
+          description: 'Configuraci\u00f3n general de la aplicaci\u00f3n',
+        },
+        {
+          key: 'settings_payment_methods',
+          label: 'M\u00e9todos de Pago',
+          description: 'Configuraci\u00f3n de m\u00e9todos de pago',
+        },
+      ],
     },
     {
       key: 'accounting',
@@ -255,11 +278,29 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
       description: 'Secci\u00f3n de gastos',
     },
 
-    // Facturaci\u00f3n
+    // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',
       label: 'Facturaci\u00f3n',
       description: 'Emisi\u00f3n y gesti\u00f3n de facturas electr\u00f3nicas',
+      isParent: true,
+      children: [
+        {
+          key: 'invoicing_invoices',
+          label: 'Facturas',
+          description: 'Listado y gesti\u00f3n de facturas electr\u00f3nicas',
+        },
+        {
+          key: 'invoicing_resolutions',
+          label: 'Resoluciones',
+          description: 'Resoluciones de facturaci\u00f3n DIAN',
+        },
+        {
+          key: 'invoicing_dian_config',
+          label: 'Configuraci\u00f3n DIAN',
+          description: 'Par\u00e1metros y credenciales para facturaci\u00f3n electr\u00f3nica DIAN',
+        },
+      ],
     },
 
     // Contabilidad (padre con hijos)

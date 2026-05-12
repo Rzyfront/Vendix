@@ -164,51 +164,48 @@
               <!-- Right: Actions (Buttons + Dropdown Menu) -->
               <div class="footer-actions-wrap relative">
                 <div class="footer-actions flex gap-2">
-                  <!-- First two visible actions -->
-                  @for (
-                    action of getVisibleActions(item).slice(0, 2);
-                    track action
-                  ) {
-                    <button
-                      class="footer-action-btn"
-                      [ngClass]="[
-                        getActionVariant(action, item),
-                        isActionDisabled(action, item) ? 'action-disabled' : '',
-                      ]"
-                      [disabled]="isActionDisabled(action, item)"
-                      [title]="getActionTooltip(action, item)"
-                      (click)="executeAction(action, item, $event)"
-                    >
-                      <app-icon
-                        [name]="getActionIcon(action, item) || 'circle'"
-                        [size]="18"
-                      ></app-icon>
-                    </button>
+                  @if (actionsDisplay() === 'buttons') {
+                    <!-- First two visible actions -->
+                    @for (
+                      action of getVisibleActions(item).slice(0, 2);
+                      track action
+                    ) {
+                      <button
+                        class="footer-action-btn"
+                        [ngClass]="[
+                          getActionVariant(action, item),
+                          isActionDisabled(action, item) ? 'action-disabled' : '',
+                        ]"
+                        [disabled]="isActionDisabled(action, item)"
+                        [title]="getActionTooltip(action, item)"
+                        (click)="executeAction(action, item, $event)"
+                      >
+                        <app-icon
+                          [name]="getActionIcon(action, item) || 'circle'"
+                          [size]="18"
+                        ></app-icon>
+                      </button>
+                    }
                   }
                   <!-- More (Vertical) Menu Trigger Button -->
-                  @if (actions() && actions()!.length > 2) {
+                  @if (getMenuActions(item).length > 0) {
                     <button
                       class="footer-action-btn card-menu-button"
                       (click)="toggleMenu(i, $event)"
                       type="button"
-                      title="More Actions"
+                      title="Acciones"
                     >
                       <app-icon name="more-horizontal" [size]="18"></app-icon>
                     </button>
                   }
                 </div>
                 <!-- Dropdown Menu for overflow actions -->
-                @if (
-                  activeMenuIndex === i && actions() && actions()!.length > 2
-                ) {
+                @if (activeMenuIndex === i && getMenuActions(item).length > 0) {
                   <div
                     class="card-menu-dropdown"
                     (click)="$event.stopPropagation()"
                   >
-                    @for (
-                      action of getVisibleActions(item).slice(2);
-                      track action
-                    ) {
+                    @for (action of getMenuActions(item); track action) {
                       <button
                         class="menu-item"
                         [ngClass]="[

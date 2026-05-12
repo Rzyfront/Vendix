@@ -37,6 +37,48 @@ export const ErrorCodes = {
     devMessage: 'Resource conflict',
   },
 
+  // Uploads
+  UPLOAD_FILE_001: {
+    code: 'UPLOAD_FILE_001',
+    httpStatus: 400,
+    devMessage: 'Upload file is required',
+  },
+  UPLOAD_CONTEXT_001: {
+    code: 'UPLOAD_CONTEXT_001',
+    httpStatus: 400,
+    devMessage: 'Organization context required for upload',
+  },
+  UPLOAD_STORE_CONTEXT_001: {
+    code: 'UPLOAD_STORE_CONTEXT_001',
+    httpStatus: 400,
+    devMessage: 'Store context required for upload',
+  },
+  UPLOAD_ORG_001: {
+    code: 'UPLOAD_ORG_001',
+    httpStatus: 404,
+    devMessage: 'Upload organization not found',
+  },
+  UPLOAD_STORE_001: {
+    code: 'UPLOAD_STORE_001',
+    httpStatus: 404,
+    devMessage: 'Upload store not found',
+  },
+  UPLOAD_TYPE_001: {
+    code: 'UPLOAD_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'Unsupported upload entity type',
+  },
+  UPLOAD_FORBIDDEN_001: {
+    code: 'UPLOAD_FORBIDDEN_001',
+    httpStatus: 403,
+    devMessage: 'Upload file access denied',
+  },
+  UPLOAD_FAILED_001: {
+    code: 'UPLOAD_FAILED_001',
+    httpStatus: 502,
+    devMessage: 'File upload failed',
+  },
+
   // Payments
   PAY_INVALID_ORDER_001: {
     code: 'PAY_INVALID_ORDER_001',
@@ -77,6 +119,33 @@ export const ErrorCodes = {
     code: 'PAY_PERM_001',
     httpStatus: 403,
     devMessage: 'Access denied to payment resource',
+  },
+
+  // Payment Sources (Card-On-File / Wompi recurrent)
+  PAYMENT_SOURCE_NOT_FOUND: {
+    code: 'PAYMENT_SOURCE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Payment source not found in gateway',
+  },
+  PAYMENT_SOURCE_REVOKED: {
+    code: 'PAYMENT_SOURCE_REVOKED',
+    httpStatus: 422,
+    devMessage: 'Payment source revoked by issuer',
+  },
+  PAYMENT_SOURCE_NOT_AVAILABLE: {
+    code: 'PAYMENT_SOURCE_NOT_AVAILABLE',
+    httpStatus: 422,
+    devMessage: 'Payment source not available for charges',
+  },
+  PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN: {
+    code: 'PAYMENT_SOURCE_INVALID_ACCEPTANCE_TOKEN',
+    httpStatus: 400,
+    devMessage: 'Acceptance token rejected by gateway',
+  },
+  PAYMENT_METHOD_NOT_MIGRATED: {
+    code: 'PAYMENT_METHOD_NOT_MIGRATED',
+    httpStatus: 412,
+    devMessage: 'Payment method requires re-tokenization',
   },
 
   // Authentication
@@ -256,10 +325,26 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Organization context required',
   },
+  ORG_CONTEXT_002: {
+    code: 'ORG_CONTEXT_002',
+    httpStatus: 500,
+    devMessage:
+      'Failed to resolve inventory_mode from organization_settings. Check DB connectivity and that the organization row exists.',
+  },
   ORG_USER_001: {
     code: 'ORG_USER_001',
     httpStatus: 404,
     devMessage: 'Organization user not found',
+  },
+  ORG_USER_002: {
+    code: 'ORG_USER_002',
+    httpStatus: 409,
+    devMessage: 'User with this email already exists',
+  },
+  ORG_USER_003: {
+    code: 'ORG_USER_003',
+    httpStatus: 400,
+    devMessage: 'Invalid user state for this operation',
   },
   ORG_STORE_001: {
     code: 'ORG_STORE_001',
@@ -280,6 +365,16 @@ export const ErrorCodes = {
     code: 'ORG_DOMAIN_002',
     httpStatus: 400,
     devMessage: 'Invalid domain',
+  },
+  ORG_DOMAIN_003: {
+    code: 'ORG_DOMAIN_003',
+    httpStatus: 422,
+    devMessage: 'Hostname is blocked by policy',
+  },
+  ORG_DOMAIN_004: {
+    code: 'ORG_DOMAIN_004',
+    httpStatus: 403,
+    devMessage: 'Pending domain registration limit exceeded',
   },
 
   // Store
@@ -367,6 +462,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'El SKU de la variante no puede estar vacío',
   },
+  PROD_VALIDATE_004: {
+    code: 'PROD_VALIDATE_004',
+    httpStatus: 400,
+    devMessage:
+      'Los campos específicos de servicio solo pueden asignarse en variantes de productos tipo SERVICIO',
+  },
 
   // Product/Service & Variants Validation
   PROD_SVC_VARIANTS_001: {
@@ -377,22 +478,26 @@ export const ErrorCodes = {
   PROD_SVC_HAS_VARIANTS_001: {
     code: 'PROD_SVC_HAS_VARIANTS_001',
     httpStatus: 409,
-    devMessage: 'No se puede cambiar a SERVICE un producto con variantes existentes',
+    devMessage:
+      'No se puede cambiar a SERVICE un producto con variantes existentes',
   },
   PROD_TRACKING_CHANGE_001: {
     code: 'PROD_TRACKING_CHANGE_001',
     httpStatus: 400,
-    devMessage: 'Cambiar track_inventory con variantes requiere stock_transfer_mode',
+    devMessage:
+      'Cambiar track_inventory con variantes requiere stock_transfer_mode',
   },
   PROD_SALE_PRICE_001: {
     code: 'PROD_SALE_PRICE_001',
     httpStatus: 400,
-    devMessage: 'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
+    devMessage:
+      'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
   },
   PROD_VAR_SALE_PRICE_001: {
     code: 'PROD_VAR_SALE_PRICE_001',
     httpStatus: 400,
-    devMessage: 'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+    devMessage:
+      'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
   },
   PROD_VAR_PRICE_001: {
     code: 'PROD_VAR_PRICE_001',
@@ -402,7 +507,8 @@ export const ErrorCodes = {
   PROD_VAR_REMOVE_001: {
     code: 'PROD_VAR_REMOVE_001',
     httpStatus: 400,
-    devMessage: 'Eliminar variantes con stock requiere variant_removal_stock_mode',
+    devMessage:
+      'Eliminar variantes con stock requiere variant_removal_stock_mode',
   },
   PROD_HAS_RESERVATIONS_001: {
     code: 'PROD_HAS_RESERVATIONS_001',
@@ -419,7 +525,6 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'track_inventory_override inválido',
   },
-
 
   // Orders
   ORD_FIND_001: {
@@ -518,6 +623,96 @@ export const ErrorCodes = {
     code: 'INV_BULK_002',
     httpStatus: 400,
     devMessage: 'Bulk upload batch size exceeded (max 1000)',
+  },
+  INV_LOCATION_NOT_IN_STORE: {
+    code: 'INV_LOCATION_NOT_IN_STORE',
+    httpStatus: 403,
+    devMessage:
+      'Inventory location does not belong to the current store (independent inventory_mode)',
+  },
+  INV_LOCATION_NOT_IN_ORG: {
+    code: 'INV_LOCATION_NOT_IN_ORG',
+    httpStatus: 403,
+    devMessage:
+      'Inventory location does not belong to the current organization',
+  },
+  INV_DEFAULT_LOCATION_DELETE_BLOCKED: {
+    code: 'INV_DEFAULT_LOCATION_DELETE_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Cannot delete a location that is set as store default',
+  },
+  INV_NO_DEFAULT_LOCATION: {
+    code: 'INV_NO_DEFAULT_LOCATION',
+    httpStatus: 409,
+    devMessage:
+      'Store has no default inventory location configured; cannot infer location_id',
+  },
+  INV_SESSION_CLOSED: {
+    code: 'INV_SESSION_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Cash register session is not open; cannot resolve sale location from it',
+  },
+  INV_SESSION_STORE_MISMATCH: {
+    code: 'INV_SESSION_STORE_MISMATCH',
+    httpStatus: 403,
+    devMessage: 'Cash register session does not belong to the current store',
+  },
+  INV_CROSS_STORE_TRANSFER_FORBIDDEN: {
+    code: 'INV_CROSS_STORE_TRANSFER_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'Cross-store transfers are not allowed in independent inventory mode',
+  },
+  INV_CROSS_STORE_TRANSFER_PERMISSION: {
+    code: 'INV_CROSS_STORE_TRANSFER_PERMISSION',
+    httpStatus: 403,
+    devMessage:
+      'User lacks permission to create/approve cross-store inventory transfers',
+  },
+  INV_MODE_CHANGE_BLOCKED_BY_TRANSFERS: {
+    code: 'INV_MODE_CHANGE_BLOCKED_BY_TRANSFERS',
+    httpStatus: 409,
+    devMessage:
+      'No se puede cambiar a modo independent con transferencias cross-store abiertas',
+  },
+  INV_MODE_CHANGE_BLOCKED_BY_ORPHAN_LOCATIONS: {
+    code: 'INV_MODE_CHANGE_BLOCKED_BY_ORPHAN_LOCATIONS',
+    httpStatus: 409,
+    devMessage:
+      'No se puede cambiar a modo independent con bodegas org-wide (store_id=null) sin asignar a tienda',
+  },
+  INV_TRANSFER_VALIDATE_001: {
+    code: 'INV_TRANSFER_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Source and destination locations must be different',
+  },
+  INV_TRANSFER_STOCK_001: {
+    code: 'INV_TRANSFER_STOCK_001',
+    httpStatus: 400,
+    devMessage: 'Insufficient stock at source location for one or more items',
+  },
+  INV_TRANSFER_STATUS_001: {
+    code: 'INV_TRANSFER_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid transfer state transition',
+  },
+  INV_TRANSFER_FIND_001: {
+    code: 'INV_TRANSFER_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Stock transfer not found',
+  },
+
+  // Cash Registers
+  CR_FIND_001: {
+    code: 'CR_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Cash register not found',
+  },
+  CR_DUP_001: {
+    code: 'CR_DUP_001',
+    httpStatus: 409,
+    devMessage: 'A cash register with this code already exists',
   },
 
   // Customers
@@ -949,6 +1144,24 @@ export const ErrorCodes = {
     code: 'ACC_PERM_001',
     httpStatus: 403,
     devMessage: 'Access denied to accounting resource',
+  },
+  CHART_ALREADY_SEEDED: {
+    code: 'CHART_ALREADY_SEEDED',
+    httpStatus: 409,
+    devMessage:
+      'Chart of accounts already exists for this tenant. Use force=true to reseed.',
+  },
+  MISSING_ACCOUNTING_ENTITY: {
+    code: 'MISSING_ACCOUNTING_ENTITY',
+    httpStatus: 409,
+    devMessage:
+      'Crea primero las entidades fiscales por tienda antes de sembrar el plan de cuentas.',
+  },
+  TAXES_ALREADY_SEEDED: {
+    code: 'TAXES_ALREADY_SEEDED',
+    httpStatus: 409,
+    devMessage:
+      'Default taxes already exist for this tenant. Use force=true to reseed.',
   },
   // DIAN Electronic Invoicing
   DIAN_CONFIG_001: {
@@ -1566,36 +1779,116 @@ export const ErrorCodes = {
   },
 
   // Metadata Fields
-  META_FIND_001: { code: 'META_FIND_001', httpStatus: 404, devMessage: 'Metadata field not found' },
-  META_CREATE_001: { code: 'META_CREATE_001', httpStatus: 400, devMessage: 'Error creating metadata field' },
-  META_DUP_001: { code: 'META_DUP_001', httpStatus: 409, devMessage: 'Duplicate metadata field key' },
-  META_VALIDATE_001: { code: 'META_VALIDATE_001', httpStatus: 400, devMessage: 'Invalid metadata value' },
-  META_DEL_001: { code: 'META_DEL_001', httpStatus: 409, devMessage: 'Metadata field is used in a template' },
+  META_FIND_001: {
+    code: 'META_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Metadata field not found',
+  },
+  META_CREATE_001: {
+    code: 'META_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating metadata field',
+  },
+  META_DUP_001: {
+    code: 'META_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Duplicate metadata field key',
+  },
+  META_VALIDATE_001: {
+    code: 'META_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Invalid metadata value',
+  },
+  META_DEL_001: {
+    code: 'META_DEL_001',
+    httpStatus: 409,
+    devMessage: 'Metadata field is used in a template',
+  },
 
   // Data Collection
-  DCOL_FIND_001: { code: 'DCOL_FIND_001', httpStatus: 404, devMessage: 'Data collection template not found' },
-  DCOL_FIND_002: { code: 'DCOL_FIND_002', httpStatus: 404, devMessage: 'Submission not found' },
-  DCOL_TOKEN_001: { code: 'DCOL_TOKEN_001', httpStatus: 404, devMessage: 'Invalid or expired token' },
-  DCOL_TOKEN_002: { code: 'DCOL_TOKEN_002', httpStatus: 400, devMessage: 'Submission already completed' },
-  DCOL_CREATE_001: { code: 'DCOL_CREATE_001', httpStatus: 400, devMessage: 'Error creating submission' },
-  DCOL_DELETE_001: { code: 'DCOL_DELETE_001', httpStatus: 400, devMessage: 'Cannot delete template with existing submissions' },
+  DCOL_FIND_001: {
+    code: 'DCOL_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Data collection template not found',
+  },
+  DCOL_FIND_002: {
+    code: 'DCOL_FIND_002',
+    httpStatus: 404,
+    devMessage: 'Submission not found',
+  },
+  DCOL_TOKEN_001: {
+    code: 'DCOL_TOKEN_001',
+    httpStatus: 404,
+    devMessage: 'Invalid or expired token',
+  },
+  DCOL_TOKEN_002: {
+    code: 'DCOL_TOKEN_002',
+    httpStatus: 400,
+    devMessage: 'Submission already completed',
+  },
+  DCOL_CREATE_001: {
+    code: 'DCOL_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating submission',
+  },
+  DCOL_DELETE_001: {
+    code: 'DCOL_DELETE_001',
+    httpStatus: 400,
+    devMessage: 'Cannot delete template with existing submissions',
+  },
 
   // Customer History
-  CUST_HISTORY_001: { code: 'CUST_HISTORY_001', httpStatus: 404, devMessage: 'Customer history not found' },
-  CUST_HISTORY_002: { code: 'CUST_HISTORY_002', httpStatus: 404, devMessage: 'Booking not found in history' },
-  CUST_HISTORY_003: { code: 'CUST_HISTORY_003', httpStatus: 404, devMessage: 'Note not found' },
+  CUST_HISTORY_001: {
+    code: 'CUST_HISTORY_001',
+    httpStatus: 404,
+    devMessage: 'Customer history not found',
+  },
+  CUST_HISTORY_002: {
+    code: 'CUST_HISTORY_002',
+    httpStatus: 404,
+    devMessage: 'Booking not found in history',
+  },
+  CUST_HISTORY_003: {
+    code: 'CUST_HISTORY_003',
+    httpStatus: 404,
+    devMessage: 'Note not found',
+  },
 
   // Booking Confirmation
-  BOOK_CONFIRM_001: { code: 'BOOK_CONFIRM_001', httpStatus: 404, devMessage: 'Invalid or expired confirmation token' },
-  BOOK_CONFIRM_002: { code: 'BOOK_CONFIRM_002', httpStatus: 400, devMessage: 'Token already used' },
-  BOOK_CHECKIN_001: { code: 'BOOK_CHECKIN_001', httpStatus: 400, devMessage: 'Booking not in confirmed state' },
-  BOOK_CHECKIN_002: { code: 'BOOK_CHECKIN_002', httpStatus: 400, devMessage: 'Already checked in' },
+  BOOK_CONFIRM_001: {
+    code: 'BOOK_CONFIRM_001',
+    httpStatus: 404,
+    devMessage: 'Invalid or expired confirmation token',
+  },
+  BOOK_CONFIRM_002: {
+    code: 'BOOK_CONFIRM_002',
+    httpStatus: 400,
+    devMessage: 'Token already used',
+  },
+  BOOK_CHECKIN_001: {
+    code: 'BOOK_CHECKIN_001',
+    httpStatus: 400,
+    devMessage: 'Booking not in confirmed state',
+  },
+  BOOK_CHECKIN_002: {
+    code: 'BOOK_CHECKIN_002',
+    httpStatus: 400,
+    devMessage: 'Already checked in',
+  },
 
   // Email Templates
-  EMAIL_TPL_001: { code: 'EMAIL_TPL_001', httpStatus: 404, devMessage: 'Email template not found' },
+  EMAIL_TPL_001: {
+    code: 'EMAIL_TPL_001',
+    httpStatus: 404,
+    devMessage: 'Email template not found',
+  },
 
   // Shipping Assignment
-  ORD_SHIP_LOCKED_001: { code: 'ORD_SHIP_LOCKED_001', httpStatus: 409, devMessage: 'Cannot change shipping method after order has been shipped' },
+  ORD_SHIP_LOCKED_001: {
+    code: 'ORD_SHIP_LOCKED_001',
+    httpStatus: 409,
+    devMessage: 'Cannot change shipping method after order has been shipped',
+  },
 
   // Order Fast-Track & Shipping Flow
   ORD_SHIP_REQUIRED_FOR_FLOW_001: {
@@ -1606,7 +1899,8 @@ export const ErrorCodes = {
   ORD_SHIP_NO_RATE_FOR_ADDRESS_001: {
     code: 'ORD_SHIP_NO_RATE_FOR_ADDRESS_001',
     httpStatus: 422,
-    devMessage: 'No hay tarifas configuradas para la direccion del cliente en este metodo.',
+    devMessage:
+      'No hay tarifas configuradas para la direccion del cliente en este metodo.',
   },
   ORD_FAST_TRACK_INVALID_STATE_001: {
     code: 'ORD_FAST_TRACK_INVALID_STATE_001',
@@ -1616,8 +1910,260 @@ export const ErrorCodes = {
   ORD_FAST_TRACK_PAYMENT_REQUIRED_001: {
     code: 'ORD_FAST_TRACK_PAYMENT_REQUIRED_001',
     httpStatus: 400,
-    devMessage: 'Se requiere informacion de pago para procesar la orden completa.',
+    devMessage:
+      'Se requiere informacion de pago para procesar la orden completa.',
+  },
+
+  // ===== SaaS Subscriptions =====
+  SUBSCRIPTION_001: {
+    code: 'SUBSCRIPTION_001',
+    httpStatus: 404,
+    devMessage: 'No subscription found for this store',
+  },
+  SUBSCRIPTION_002: {
+    code: 'SUBSCRIPTION_002',
+    httpStatus: 402,
+    devMessage: 'Subscription is in draft state; activation required',
+  },
+  SUBSCRIPTION_003: {
+    code: 'SUBSCRIPTION_003',
+    httpStatus: 403,
+    devMessage: 'Subscription is cancelled/expired',
+  },
+  SUBSCRIPTION_004: {
+    code: 'SUBSCRIPTION_004',
+    httpStatus: 403,
+    devMessage: 'Store has no active subscription for AI features',
+  },
+  SUBSCRIPTION_005: {
+    code: 'SUBSCRIPTION_005',
+    httpStatus: 403,
+    devMessage: 'Feature not included in your current plan',
+  },
+  SUBSCRIPTION_006: {
+    code: 'SUBSCRIPTION_006',
+    httpStatus: 429,
+    devMessage: 'AI quota exceeded for this billing period',
+  },
+  SUBSCRIPTION_007: {
+    code: 'SUBSCRIPTION_007',
+    httpStatus: 200,
+    devMessage: 'Subscription past due — degraded mode',
+  },
+  SUBSCRIPTION_008: {
+    code: 'SUBSCRIPTION_008',
+    httpStatus: 402,
+    devMessage: 'Subscription suspended due to unpaid balance',
+  },
+  SUBSCRIPTION_009: {
+    code: 'SUBSCRIPTION_009',
+    httpStatus: 402,
+    devMessage: 'Subscription blocked — resolve billing to continue',
+  },
+  SUBSCRIPTION_010: {
+    code: 'SUBSCRIPTION_010',
+    httpStatus: 409,
+    devMessage: 'Invalid subscription state transition',
+  },
+  SUBSCRIPTION_INTERNAL_ERROR: {
+    code: 'SUBSCRIPTION_INTERNAL_ERROR',
+    httpStatus: 500,
+    devMessage: 'Internal error while resolving subscription access',
+  },
+  SUBSCRIPTION_VALIDATION: {
+    code: 'SUBSCRIPTION_VALIDATION',
+    httpStatus: 400,
+    devMessage: 'Subscription checkout validation failed',
+  },
+  SUBSCRIPTION_PAY_001: {
+    code: 'SUBSCRIPTION_PAY_001',
+    httpStatus: 400,
+    devMessage: 'Subscription payment method missing or disabled',
+  },
+  SUBSCRIPTION_PRORATION_001: {
+    code: 'SUBSCRIPTION_PRORATION_001',
+    httpStatus: 400,
+    devMessage: 'Invalid proration parameters',
+  },
+  SUBSCRIPTION_PROMO_002: {
+    code: 'SUBSCRIPTION_PROMO_002',
+    httpStatus: 409,
+    devMessage: 'Store does not meet promotional plan eligibility rules',
+  },
+
+  SUBSCRIPTION_TOKEN_INVALID: {
+    code: 'SUBSCRIPTION_TOKEN_INVALID',
+    httpStatus: 400,
+    devMessage: 'Wompi provider token is invalid or expired',
+  },
+  SUBSCRIPTION_CARD_DECLINED: {
+    code: 'SUBSCRIPTION_CARD_DECLINED',
+    httpStatus: 402,
+    devMessage: 'Card was declined or blocked by the payment provider',
+  },
+  SUBSCRIPTION_PROVIDER_UNAVAILABLE: {
+    code: 'SUBSCRIPTION_PROVIDER_UNAVAILABLE',
+    httpStatus: 503,
+    devMessage: 'Payment provider is unavailable or timed out',
+  },
+
+  // Platform-level payment gateway (superadmin/subscriptions/gateway)
+  SUBSCRIPTION_GATEWAY_001: {
+    code: 'SUBSCRIPTION_GATEWAY_001',
+    httpStatus: 400,
+    devMessage: 'Credenciales inválidas para entorno de producción',
+  },
+  SUBSCRIPTION_GATEWAY_002: {
+    code: 'SUBSCRIPTION_GATEWAY_002',
+    httpStatus: 400,
+    devMessage: 'Test de conexión requerido antes de activar producción',
+  },
+  SUBSCRIPTION_GATEWAY_003: {
+    code: 'SUBSCRIPTION_GATEWAY_003',
+    httpStatus: 404,
+    devMessage: 'Credenciales no configuradas',
+  },
+
+  // Partner / reseller
+  PARTNER_001: {
+    code: 'PARTNER_001',
+    httpStatus: 403,
+    devMessage: 'Organization is not a partner reseller',
+  },
+  PARTNER_002: {
+    code: 'PARTNER_002',
+    httpStatus: 422,
+    devMessage: 'Margin exceeds base plan maximum',
+  },
+  PARTNER_003: {
+    code: 'PARTNER_003',
+    httpStatus: 422,
+    devMessage: 'Partner cannot enable features beyond base plan',
+  },
+  PARTNER_004: {
+    code: 'PARTNER_004',
+    httpStatus: 409,
+    devMessage: 'Commission payout already processed',
+  },
+
+  // Promotional plans
+  PROMO_001: {
+    code: 'PROMO_001',
+    httpStatus: 409,
+    devMessage: 'Promotional plan no longer eligible',
+  },
+  PROMO_NOT_ELIGIBLE: {
+    code: 'PROMO_NOT_ELIGIBLE',
+    httpStatus: 400,
+    devMessage: 'Store does not meet promotional plan eligibility rules',
+  },
+
+  // Plans
+  PLAN_001: {
+    code: 'PLAN_001',
+    httpStatus: 409,
+    devMessage: 'Plan is archived and cannot be subscribed to',
+  },
+  PLAN_002: {
+    code: 'PLAN_002',
+    httpStatus: 403,
+    devMessage: 'Plan is not marked resellable',
+  },
+
+  // Trial
+  TRIAL_001: {
+    code: 'TRIAL_001',
+    httpStatus: 402,
+    devMessage: 'Trial ended; choose a plan to continue',
+  },
+  SUBSCRIPTION_TRIAL_001: {
+    code: 'SUBSCRIPTION_TRIAL_001',
+    httpStatus: 409,
+    devMessage: 'Trial ya consumido',
+  },
+
+  // Dunning
+  DUNNING_001: {
+    code: 'DUNNING_001',
+    httpStatus: 400,
+    devMessage: 'No payable invoice available for retry',
+  },
+
+  // Fiscal scope
+  FISCAL_SCOPE_INVALID_VALUE: {
+    code: 'FISCAL_SCOPE_INVALID_VALUE',
+    httpStatus: 400,
+    devMessage: 'Invalid fiscal scope value',
+  },
+  FISCAL_SCOPE_INVALID_COMBINATION: {
+    code: 'FISCAL_SCOPE_INVALID_COMBINATION',
+    httpStatus: 409,
+    devMessage: 'Invalid operating/fiscal scope combination',
+  },
+  FISCAL_SCOPE_CHANGE_BLOCKED: {
+    code: 'FISCAL_SCOPE_CHANGE_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal scope change blocked by pre-conditions',
+  },
+  FISCAL_SCOPE_FORCE_REASON_REQUIRED: {
+    code: 'FISCAL_SCOPE_FORCE_REASON_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'Force fiscal scope change requires a reason',
+  },
+  FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND: {
+    code: 'FISCAL_SCOPE_ACCOUNTING_ENTITY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Accounting entity does not belong to this organization',
+  },
+
+  // Fiscal status
+  FISCAL_STATUS_LOCKED: {
+    code: 'FISCAL_STATUS_LOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal status is locked by existing fiscal records',
+  },
+  FISCAL_STATUS_INVALID_TRANSITION: {
+    code: 'FISCAL_STATUS_INVALID_TRANSITION',
+    httpStatus: 409,
+    devMessage: 'Invalid fiscal status transition',
+  },
+  FISCAL_STATUS_WIZARD_STEP_INVALID: {
+    code: 'FISCAL_STATUS_WIZARD_STEP_INVALID',
+    httpStatus: 400,
+    devMessage: 'Invalid fiscal status wizard step',
+  },
+  FISCAL_STATUS_DEACTIVATION_BLOCKED: {
+    code: 'FISCAL_STATUS_DEACTIVATION_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Fiscal status deactivation is blocked',
+  },
+  FISCAL_STATUS_CONCURRENT_UPDATE: {
+    code: 'FISCAL_STATUS_CONCURRENT_UPDATE',
+    httpStatus: 409,
+    devMessage: 'Fiscal status was updated concurrently',
+  },
+  FISCAL_STATUS_PERMISSION_DENIED: {
+    code: 'FISCAL_STATUS_PERMISSION_DENIED',
+    httpStatus: 403,
+    devMessage: 'Fiscal status permission denied',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
+
+export const FiscalScopeBlockerCodes = {
+  INVALID_COMBINATION: 'FISCAL_SCOPE_INVALID_COMBINATION',
+  PENDING_INVOICES: 'FISCAL_SCOPE_PENDING_INVOICES',
+  PENDING_DIAN_RESPONSE: 'FISCAL_SCOPE_PENDING_DIAN_RESPONSE',
+  OPEN_PERIODS: 'FISCAL_SCOPE_OPEN_PERIODS',
+  NO_ACTIVE_STORES: 'FISCAL_SCOPE_NO_ACTIVE_STORES',
+  MISSING_DIAN_CONFIG: 'FISCAL_SCOPE_MISSING_DIAN_CONFIG',
+  MISSING_TAX_ID: 'FISCAL_SCOPE_MISSING_TAX_ID',
+  OPEN_INTERCOMPANY: 'FISCAL_SCOPE_OPEN_INTERCOMPANY',
+  PENDING_PAYROLL_RUNS: 'FISCAL_SCOPE_PENDING_PAYROLL_RUNS',
+  PENDING_PAYROLL_SETTLEMENTS: 'FISCAL_SCOPE_PENDING_PAYROLL_SETTLEMENTS',
+  PENDING_WITHHOLDINGS: 'FISCAL_SCOPE_PENDING_WITHHOLDINGS',
+} as const;
+
+export type FiscalScopeBlockerCode =
+  (typeof FiscalScopeBlockerCodes)[keyof typeof FiscalScopeBlockerCodes];
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

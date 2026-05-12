@@ -105,6 +105,18 @@ export const updateUser = createAction(
   props<{ user: any }>(),
 );
 
+export const refreshUser = createAction('[Auth] Refresh User');
+
+export const refreshUserSuccess = createAction(
+  '[Auth] Refresh User Success',
+  props<{ user: any }>(),
+);
+
+export const refreshUserFailure = createAction(
+  '[Auth] Refresh User Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
 export const clearAuthState = createAction('[Auth] Clear Auth State');
 
 export const checkAuthStatus = createAction('[Auth] Check Auth Status');

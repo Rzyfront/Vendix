@@ -65,7 +65,10 @@ export class PayrollRunsController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreatePayrollRunDto) {
     const result = await this.payroll_runs_service.create(create_dto);
-    return this.response_service.success(result, 'Payroll run created successfully');
+    return this.response_service.success(
+      result,
+      'Payroll run created successfully',
+    );
   }
 
   @Patch(':id')
@@ -74,45 +77,66 @@ export class PayrollRunsController {
     @Body() update_dto: UpdatePayrollRunDto,
   ) {
     const result = await this.payroll_runs_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Payroll run updated successfully');
+    return this.response_service.success(
+      result,
+      'Payroll run updated successfully',
+    );
   }
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.payroll_runs_service.remove(+id);
-    return this.response_service.success(null, 'Payroll run deleted successfully');
+    return this.response_service.success(
+      null,
+      'Payroll run deleted successfully',
+    );
   }
 
   @Post(':id/calculate')
   @HttpCode(HttpStatus.OK)
   async calculate(@Param('id') id: string) {
     const result = await this.payroll_flow_service.calculate(+id);
-    return this.response_service.success(result, 'Payroll calculated successfully');
+    return this.response_service.success(
+      result,
+      'Payroll calculated successfully',
+    );
   }
 
   @Patch(':id/approve')
   async approve(@Param('id') id: string) {
     const result = await this.payroll_flow_service.approve(+id);
-    return this.response_service.success(result, 'Payroll approved successfully');
+    return this.response_service.success(
+      result,
+      'Payroll approved successfully',
+    );
   }
 
   @Patch(':id/send')
   async send(@Param('id') id: string) {
     const result = await this.payroll_flow_service.send(+id);
-    return this.response_service.success(result, 'Payroll sent to provider successfully');
+    return this.response_service.success(
+      result,
+      'Payroll sent to provider successfully',
+    );
   }
 
   @Patch(':id/pay')
   async pay(@Param('id') id: string) {
     const result = await this.payroll_flow_service.pay(+id);
-    return this.response_service.success(result, 'Payroll marked as paid successfully');
+    return this.response_service.success(
+      result,
+      'Payroll marked as paid successfully',
+    );
   }
 
   @Patch(':id/cancel')
   async cancel(@Param('id') id: string) {
     const result = await this.payroll_flow_service.cancel(+id);
-    return this.response_service.success(result, 'Payroll cancelled successfully');
+    return this.response_service.success(
+      result,
+      'Payroll cancelled successfully',
+    );
   }
 
   @Post(':id/send-dian')
@@ -139,7 +163,13 @@ export class PayrollRunsController {
   async sendAdjustment(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
-    @Body() body: { predecessor_cune: string; predecessor_document_number: string; predecessor_generation_date: string; adjustment_type?: '1' | '2' },
+    @Body()
+    body: {
+      predecessor_cune: string;
+      predecessor_document_number: string;
+      predecessor_generation_date: string;
+      adjustment_type?: '1' | '2';
+    },
   ) {
     const result = await this.payroll_flow_service.sendAdjustment(
       +id,
@@ -151,7 +181,10 @@ export class PayrollRunsController {
         adjustment_type: body.adjustment_type || '1',
       },
     );
-    return this.response_service.success(result, 'Adjustment note sent to DIAN');
+    return this.response_service.success(
+      result,
+      'Adjustment note sent to DIAN',
+    );
   }
 
   @Post(':id/export-ach')
@@ -163,6 +196,9 @@ export class PayrollRunsController {
       dto.source_account,
       dto.source_account_type,
     );
-    return this.response_service.success(result, 'ACH file generated successfully');
+    return this.response_service.success(
+      result,
+      'ACH file generated successfully',
+    );
   }
 }

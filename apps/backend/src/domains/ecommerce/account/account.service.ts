@@ -242,7 +242,9 @@ export class AccountService {
           unit_price: item.unit_price,
           total_price: item.total_price,
           image_url: item.products?.product_images?.[0]?.image_url
-            ? await this.s3Service.signUrl(item.products.product_images[0].image_url)
+            ? await this.s3Service.signUrl(
+                item.products.product_images[0].image_url,
+              )
             : null,
         })),
       ),
@@ -253,16 +255,17 @@ export class AccountService {
         method: p.store_payment_method?.system_payment_method?.display_name,
         paid_at: p.paid_at,
       })),
-      bookings: (order as any).bookings?.map((b: any) => ({
-        id: b.id,
-        booking_number: b.booking_number,
-        date: b.date,
-        start_time: b.start_time,
-        end_time: b.end_time,
-        status: b.status,
-        product_id: b.product_id,
-        product_name: b.product?.name,
-      })) || [],
+      bookings:
+        order.bookings?.map((b: any) => ({
+          id: b.id,
+          booking_number: b.booking_number,
+          date: b.date,
+          start_time: b.start_time,
+          end_time: b.end_time,
+          status: b.status,
+          product_id: b.product_id,
+          product_name: b.product?.name,
+        })) || [],
     };
   }
 

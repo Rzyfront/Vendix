@@ -1,0 +1,30 @@
+meta {
+  name: Subscribe to Plan
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/store/subscriptions/subscribe
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "planId": 1,
+    "partnerOverrideId": null
+  }
+}
+
+tests {
+  test("Subscribe successful", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property('state');
+  });
+}

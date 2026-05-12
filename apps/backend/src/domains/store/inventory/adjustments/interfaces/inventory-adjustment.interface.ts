@@ -69,6 +69,7 @@ export interface InventoryAdjustment {
     name: string;
     code: string;
     type: string;
+    store_id?: number | null;
   };
   inventory_batches?: {
     id: number;

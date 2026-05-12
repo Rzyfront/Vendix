@@ -2,7 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { OnEvent } from '@nestjs/event-emitter';
-import { AutoEntryService } from './auto-entry.service';
+import { AutoEntryService, AutoEntryLine } from './auto-entry.service';
+import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 @Injectable()
@@ -11,9 +12,39 @@ export class AccountingEventsListener {
 
   constructor(
     private readonly auto_entry_service: AutoEntryService,
+    private readonly account_mapping_service: AccountMappingService,
     private readonly prisma: StorePrismaService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
+
+  /**
+   * RNC-31 helper — resolve a mapping key into an AutoEntryLine. Lives on
+   * the listener (instead of reusing AutoEntryService's private method via
+   * bracket access) because the SaaS double-entry posts to two different
+   * `organization_id`s (store + Vendix platform) and the helper needs to be
+   * callable for either side.
+   */
+  private async resolveSaasLine(
+    org_id: number,
+    mapping_key: string,
+    description: string,
+    debit_amount: number,
+    credit_amount: number,
+    store_id?: number,
+  ): Promise<AutoEntryLine | null> {
+    const mapping = await this.account_mapping_service.getMapping(
+      org_id,
+      mapping_key,
+      store_id,
+    );
+    if (!mapping) return null;
+    return {
+      account_code: mapping.account_code,
+      description,
+      debit_amount,
+      credit_amount,
+    };
+  }
 
   private async isFlowEnabled(
     store_id: number | undefined,
@@ -731,20 +762,28 @@ export class AccountingEventsListener {
     transfer_id: number;
     transfer_number: string;
     organization_id: number;
+    store_id?: number;
+    from_store_id?: number;
+    to_store_id?: number;
     from_location_id: number;
     to_location_id: number;
     total_cost: number;
     user_id?: number;
   }) {
     try {
-      if (
-        !(await this.isFlowEnabled((event as any).store_id, 'stock_transfers'))
-      )
+      if (!(await this.isFlowEnabled(event.store_id, 'stock_transfers'))) {
+        this.logger.debug(
+          `Skipping stock_transfer.completed auto-entry #${event.transfer_id}: stock_transfers accounting flow disabled for store=${event.store_id ?? 'n/a'}`,
+        );
         return;
+      }
       await this.auto_entry_service.onStockTransferCompleted({
         transfer_id: event.transfer_id,
         transfer_number: event.transfer_number,
         organization_id: event.organization_id,
+        store_id: event.store_id,
+        from_store_id: event.from_store_id,
+        to_store_id: event.to_store_id,
         from_location_id: event.from_location_id,
         to_location_id: event.to_location_id,
         total_cost: Number(event.total_cost),
@@ -1112,5 +1151,165 @@ export class AccountingEventsListener {
       select: { organization_id: true },
     });
     return store?.organization_id || 0;
+  }
+
+  /**
+   * RNC-31 — Double accounting entry on a successful SaaS subscription
+   * payment.
+   *
+   *   Store-cliente side  : DR 5135xx (SaaS expense)
+   *                         CR 1110xx (cash/bank)
+   *
+   *   Vendix-platform side: DR 1110xx (cash/bank)
+   *                         CR 4135xx (SaaS revenue)            -> vendix_share
+   *                         CR 2335xx (partner payable)         -> partner_share (if any)
+   *
+   * Account codes are NOT hard-coded — they are resolved via
+   * AccountMappingService against the new keys:
+   *   - saas_subscription_expense.expense        (DR, store side)
+   *   - saas_subscription_expense.cash_bank      (CR, store side)
+   *   - saas_revenue.cash_bank                   (DR, platform side)
+   *   - saas_revenue.revenue                     (CR vendix_share)
+   *   - saas_revenue.partner_payable             (CR partner_share, optional)
+   *
+   * Idempotency
+   * -----------
+   * Source uniqueness is `(source_type, source_id)` where source_id is the
+   * `subscription_payment.id`. Two calls with the same payment id will
+   * collide on AutoEntryService's entry-number / source-id constraint and
+   * fail to create a duplicate row, satisfying the RNC-31 dedup contract.
+   *
+   * Failure isolation: each side runs in its own try/catch — a missing
+   * mapping on the platform side must NOT block the store-side expense, and
+   * vice versa.
+   */
+  @OnEvent('accounting.saas_subscription_payment.succeeded')
+  async handleSaasSubscriptionPaymentSucceeded(event: {
+    invoiceId: number;
+    invoiceNumber?: string;
+    paymentId: number;
+    subscriptionId?: number;
+    dedupKey: number;
+    entryDate: Date | string;
+    currency?: string;
+    store: {
+      organization_id: number;
+      store_id: number;
+      amount: number;
+    };
+    platform: {
+      organization_id: number;
+      amount_total: number;
+      vendix_share: number;
+      partner_share: number;
+      partner_organization_id: number | null;
+    } | null;
+  }) {
+    const entryDate =
+      event.entryDate instanceof Date
+        ? event.entryDate
+        : new Date(event.entryDate);
+    const description = `Pago suscripción SaaS — Factura ${event.invoiceNumber ?? `#${event.invoiceId}`}`;
+
+    // ── Store-cliente side: SaaS expense ────────────────────────────────
+    if (
+      (await this.isFlowEnabled(event.store.store_id, 'expenses')) &&
+      event.store.amount > 0
+    ) {
+      try {
+        const lines = await Promise.all([
+          this.resolveSaasLine(
+            event.store.organization_id,
+            'saas_subscription_expense.expense',
+            'Gasto suscripción SaaS Vendix',
+            event.store.amount,
+            0,
+            event.store.store_id,
+          ),
+          this.resolveSaasLine(
+            event.store.organization_id,
+            'saas_subscription_expense.cash_bank',
+            'Pago a Vendix (suscripción)',
+            0,
+            event.store.amount,
+            event.store.store_id,
+          ),
+        ]);
+
+        await this.auto_entry_service.createAutoEntry({
+          source_type: 'saas_subscription_expense',
+          source_id: event.dedupKey,
+          organization_id: event.store.organization_id,
+          store_id: event.store.store_id,
+          entry_date: entryDate,
+          description,
+          lines,
+        });
+
+        this.logger.log(
+          `Auto-entry (store side) created for saas_subscription_expense ` +
+            `payment=${event.paymentId} invoice=${event.invoiceId}`,
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Failed store-side auto-entry for SaaS payment #${event.paymentId}: ${error?.message ?? error}`,
+          error?.stack,
+        );
+      }
+    }
+
+    // ── Vendix-platform side: SaaS revenue (+ partner payable split) ───
+    if (event.platform && event.platform.amount_total > 0) {
+      try {
+        const lines: (AutoEntryLine | null)[] = [
+          await this.resolveSaasLine(
+            event.platform.organization_id,
+            'saas_revenue.cash_bank',
+            'Cobro suscripción SaaS',
+            event.platform.amount_total,
+            0,
+          ),
+          await this.resolveSaasLine(
+            event.platform.organization_id,
+            'saas_revenue.revenue',
+            'Ingreso suscripción SaaS',
+            0,
+            event.platform.vendix_share,
+          ),
+        ];
+
+        if (event.platform.partner_share > 0) {
+          lines.push(
+            await this.resolveSaasLine(
+              event.platform.organization_id,
+              'saas_revenue.partner_payable',
+              `Comisión partner ${event.platform.partner_organization_id ?? ''}`.trim(),
+              0,
+              event.platform.partner_share,
+            ),
+          );
+        }
+
+        await this.auto_entry_service.createAutoEntry({
+          source_type: 'saas_revenue',
+          source_id: event.dedupKey,
+          organization_id: event.platform.organization_id,
+          entry_date: entryDate,
+          description,
+          lines,
+        });
+
+        this.logger.log(
+          `Auto-entry (platform side) created for saas_revenue ` +
+            `payment=${event.paymentId} invoice=${event.invoiceId} ` +
+            `vendix_share=${event.platform.vendix_share} partner_share=${event.platform.partner_share}`,
+        );
+      } catch (error: any) {
+        this.logger.error(
+          `Failed platform-side auto-entry for SaaS payment #${event.paymentId}: ${error?.message ?? error}`,
+          error?.stack,
+        );
+      }
+    }
   }
 }

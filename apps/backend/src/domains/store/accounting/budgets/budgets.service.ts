@@ -30,7 +30,7 @@ export class BudgetsService {
         fiscal_period_id: query.fiscal_period_id,
       }),
       ...(query.status && { status: query.status as any }),
-      ...(query.store_id && { store_id: query.store_id }),
+      // store_id filter dropped (phase3-round2): StorePrismaService auto-scopes.
     };
 
     const [data, total] = await Promise.all([

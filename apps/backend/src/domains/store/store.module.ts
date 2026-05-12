@@ -25,6 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { InvoicingModule } from './invoicing/invoicing.module';
 import { AccountingModule } from './accounting/accounting.module';
 import { PayrollModule } from './payroll/payroll.module';
+import { StorePayrollSettingsModule } from './payroll/payroll-settings.module';
 import { ReportsModule } from './reports/reports.module';
 import { StoreRolesModule } from './roles/store-roles.module';
 import { PromotionsModule } from './promotions/promotions.module';
@@ -49,6 +50,7 @@ import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/inv
 import { MetadataModule } from './metadata/metadata.module';
 import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
+import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 
 @Module({
   imports: [
@@ -76,6 +78,7 @@ import { ConsultationsModule } from './consultations/consultations.module';
     InvoicingModule,
     AccountingModule,
     PayrollModule,
+    StorePayrollSettingsModule,
     ReportsModule,
     StoreRolesModule,
     PromotionsModule,
@@ -100,8 +103,9 @@ import { ConsultationsModule } from './consultations/consultations.module';
     MetadataModule,
     DataCollectionModule,
     ConsultationsModule,
+    SubscriptionsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule { }
+export class StoreDomainModule {}

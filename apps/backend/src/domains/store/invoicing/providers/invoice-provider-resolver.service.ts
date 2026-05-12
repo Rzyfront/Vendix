@@ -34,12 +34,14 @@ export class InvoiceProviderResolver {
     }
 
     try {
+      // Consider both store-scoped and org-scoped DIAN configs (the latter
+      // applies when organizations.fiscal_scope=ORGANIZATION).
       const dian_config = await this.prisma.dian_configurations.findFirst({
         where: {
-          store_id: context.store_id,
+          OR: [{ store_id: context.store_id }, { store_id: null }],
           enablement_status: { in: ['testing', 'enabled'] },
         },
-        orderBy: { is_default: 'desc' },
+        orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
       });
 
       if (dian_config) {

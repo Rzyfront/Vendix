@@ -1,0 +1,45 @@
+meta {
+  name: Superadmin Create Promotional Plan
+  type: http
+  seq: 34
+}
+
+post {
+  url: {{url}}/superadmin/subscriptions/promotional
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "code": "promo_bru_{{$randomInt}}",
+    "name": "Bruno Promo Plan",
+    "description": "Promotional plan for superadmin coverage tests",
+    "billing_cycle": "monthly",
+    "base_price": 9900,
+    "currency": "COP",
+    "trial_days": 30,
+    "promo_rules": {
+      "redemption_code": "BRUNO50",
+      "max_redemptions": 100,
+      "discount_pct": 50
+    },
+    "promo_priority": 10
+  }
+}
+
+vars:post-response {
+  superadmin_promo_id: res.body.data.id
+}
+
+tests {
+  test("Promotional plan created", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property("id");
+  });
+
+  test("Promo rules persisted", function() {
+    expect(res.body.data).to.have.property("promo_rules");
+  });
+}

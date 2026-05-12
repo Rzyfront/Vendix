@@ -1,0 +1,53 @@
+meta {
+  name: Update With Deprecated Keys
+  type: http
+  seq: 3
+}
+
+patch {
+  url: {{baseUrl}}/store/settings
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "accounting_flows": {
+      "sale": { "enabled": true }
+    },
+    "app": {
+      "primary_color": "#123456",
+      "logo_url": "https://example.com/legacy-logo.png"
+    },
+    "pos": {
+      "allow_anonymous_sales": false
+    }
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Update silently drops deprecated keys (accounting_flows, app)", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Response settings exclude deprecated top-level keys", function() {
+    expect(res.body.data).to.not.have.property('accounting_flows');
+    expect(res.body.data).to.not.have.property('random_legacy');
+  });
+
+  test("Schema version stamped on returned settings", function() {
+    expect(res.body.data).to.have.property('_schema_version', 1);
+  });
+
+  test("Module flows accounting present after sanitization+migration", function() {
+    expect(res.body.data).to.have.property('module_flows');
+    expect(res.body.data.module_flows).to.have.property('accounting');
+  });
+}

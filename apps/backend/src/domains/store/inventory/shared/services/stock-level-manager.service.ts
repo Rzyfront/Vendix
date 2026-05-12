@@ -10,6 +10,7 @@ import { InventoryTransactionsService } from '../../transactions/inventory-trans
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 
 export interface UpdateStockParams {
   product_id: number;
@@ -33,12 +34,19 @@ export interface UpdateStockParams {
   validate_availability?: boolean;
   from_location_id?: number;
   to_location_id?: number;
+  source_module?: string;
+  unit_cost?: number;
 }
 
 export interface StockUpdateResult {
   stock_level: any;
   transaction: any;
   previous_quantity: number;
+  cost_snapshot?: {
+    unit_cost: number;
+    total_cost: number;
+    stock_value: number;
+  };
 }
 
 export interface StockUpdatedEvent {
@@ -57,6 +65,7 @@ export class StockLevelManager {
     private prisma: StorePrismaService,
     private transactionsService: InventoryTransactionsService,
     private eventEmitter: EventEmitter2,
+    private readonly operatingScopeService: OperatingScopeService,
   ) {}
 
   /**
@@ -116,6 +125,11 @@ export class StockLevelManager {
     }
 
     // 3. Calcular nuevas cantidades
+    const movementCostSnapshot = await this.calculateAndConsumeMovementCost(
+      prisma,
+      params,
+      stock_level,
+    );
     const new_quantity_on_hand =
       stock_level.quantity_on_hand + params.quantity_change;
     const new_quantity_reserved = stock_level.quantity_reserved;
@@ -140,16 +154,22 @@ export class StockLevelManager {
       throw new VendixHttpException(ErrorCodes.INV_FIND_001);
     }
 
+    const stockUpdateData: any = {
+      quantity_on_hand: Math.max(0, new_quantity_on_hand),
+      quantity_available: Math.max(0, new_quantity_available),
+      last_updated: new Date(),
+      updated_at: new Date(),
+    };
+
+    if (params.quantity_change > 0 && params.unit_cost !== undefined) {
+      stockUpdateData.cost_per_unit = new Prisma.Decimal(params.unit_cost);
+    }
+
     const updated_stock = await prisma.stock_levels.update({
       where: {
         id: existing_stock_level.id,
       },
-      data: {
-        quantity_on_hand: Math.max(0, new_quantity_on_hand),
-        quantity_available: Math.max(0, new_quantity_available),
-        last_updated: new Date(),
-        updated_at: new Date(),
-      },
+      data: stockUpdateData,
     });
 
     // 5. Crear inventory transaction
@@ -183,6 +203,22 @@ export class StockLevelManager {
       });
     }
 
+    if (params.movement_type === 'transfer' && params.quantity_change > 0) {
+      await this.createTransferCostLayer(
+        prisma,
+        params,
+        movementCostSnapshot.unit_cost,
+      );
+    }
+
+    const costSnapshot = await this.recordValuationSnapshot(
+      prisma,
+      updated_stock,
+      params,
+      transaction?.id,
+      movementCostSnapshot,
+    );
+
     // 7. Sincronizar con products.stock_quantity y product_variants.stock_quantity
     await this.syncProductStock(prisma, params.product_id, params.variant_id);
 
@@ -198,7 +234,7 @@ export class StockLevelManager {
     } as StockUpdatedEvent);
 
     // 9. Emitir alerta de stock bajo si aplica
-    const low_threshold = (existing_stock_level as any).reorder_point ?? 5;
+    const low_threshold = existing_stock_level.reorder_point ?? 5;
     if (
       updated_stock.quantity_available <= low_threshold &&
       updated_stock.quantity_available >= 0
@@ -222,7 +258,172 @@ export class StockLevelManager {
       stock_level: updated_stock,
       transaction,
       previous_quantity: stock_level.quantity_available,
+      cost_snapshot: costSnapshot,
     };
+  }
+
+  private async recordValuationSnapshot(
+    prisma: any,
+    stockLevel: any,
+    params: UpdateStockParams,
+    transactionId?: number,
+    movementCostSnapshot?: { unit_cost: number; total_cost: number },
+  ): Promise<{ unit_cost: number; total_cost: number; stock_value: number }> {
+    const context = RequestContextService.getContext();
+    const organizationId = context?.organization_id;
+    if (!organizationId || !stockLevel) {
+      return { unit_cost: 0, total_cost: 0, stock_value: 0 };
+    }
+
+    const [location, product, variant] = await Promise.all([
+      prisma.inventory_locations.findUnique({
+        where: { id: params.location_id },
+        select: { store_id: true },
+      }),
+      prisma.products.findUnique({
+        where: { id: params.product_id },
+        select: { cost_price: true },
+      }),
+      params.variant_id
+        ? prisma.product_variants.findUnique({
+            where: { id: params.variant_id },
+            select: { cost_price: true },
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const accountingEntity =
+      await this.operatingScopeService.resolveAccountingEntity({
+        organization_id: organizationId,
+        store_id: location?.store_id ?? null,
+        tx: prisma,
+      });
+    const operatingScope = await this.operatingScopeService.getOperatingScope(
+      organizationId,
+      prisma,
+    );
+    const unitCost =
+      Number(movementCostSnapshot?.unit_cost || 0) ||
+      Number(stockLevel.cost_per_unit || 0) ||
+      Number(variant?.cost_price || 0) ||
+      Number(product?.cost_price || 0);
+    const stockValue = Number(stockLevel.quantity_on_hand || 0) * unitCost;
+    const totalCost =
+      Number(movementCostSnapshot?.total_cost || 0) ||
+      Math.abs(params.quantity_change) * unitCost;
+
+    await prisma.inventory_valuation_snapshots.create({
+      data: {
+        organization_id: organizationId,
+        store_id: location?.store_id ?? null,
+        accounting_entity_id: accountingEntity.id,
+        location_id: params.location_id,
+        product_id: params.product_id,
+        product_variant_id: params.variant_id ?? null,
+        snapshot_at: new Date(),
+        quantity_on_hand: new Prisma.Decimal(stockLevel.quantity_on_hand || 0),
+        quantity_reserved: new Prisma.Decimal(
+          stockLevel.quantity_reserved || 0,
+        ),
+        quantity_available: new Prisma.Decimal(
+          stockLevel.quantity_available || 0,
+        ),
+        unit_cost: new Prisma.Decimal(unitCost),
+        total_value: new Prisma.Decimal(stockValue),
+        costing_method: 'weighted_average',
+        operating_scope: operatingScope,
+        source_type: params.movement_type,
+        source_id: transactionId ?? null,
+      },
+    });
+
+    return {
+      unit_cost: unitCost,
+      total_cost: totalCost,
+      stock_value: stockValue,
+    };
+  }
+
+  private async calculateAndConsumeMovementCost(
+    prisma: any,
+    params: UpdateStockParams,
+    stockLevel: any,
+  ): Promise<{ unit_cost: number; total_cost: number }> {
+    const quantity = Math.abs(params.quantity_change);
+    if (quantity === 0) return { unit_cost: 0, total_cost: 0 };
+
+    if (params.quantity_change >= 0) {
+      const unitCost = Number(
+        params.unit_cost ?? stockLevel.cost_per_unit ?? 0,
+      );
+      return { unit_cost: unitCost, total_cost: unitCost * quantity };
+    }
+
+    const layers = await prisma.inventory_cost_layers.findMany({
+      where: {
+        product_id: params.product_id,
+        product_variant_id: params.variant_id ?? null,
+        location_id: params.location_id,
+        quantity_remaining: { gt: 0 },
+      },
+      orderBy: { received_at: 'asc' },
+    });
+
+    let remaining = quantity;
+    let totalCost = 0;
+
+    for (const layer of layers) {
+      if (remaining <= 0) break;
+      const consumed = Math.min(remaining, layer.quantity_remaining);
+      totalCost += consumed * Number(layer.unit_cost || 0);
+      remaining -= consumed;
+
+      await prisma.inventory_cost_layers.update({
+        where: { id: layer.id },
+        data: { quantity_remaining: layer.quantity_remaining - consumed },
+      });
+    }
+
+    if (remaining > 0) {
+      totalCost += remaining * Number(stockLevel.cost_per_unit || 0);
+    }
+
+    const unitCost =
+      totalCost > 0
+        ? totalCost / quantity
+        : Number(stockLevel.cost_per_unit || 0);
+    return { unit_cost: unitCost, total_cost: totalCost };
+  }
+
+  private async createTransferCostLayer(
+    prisma: any,
+    params: UpdateStockParams,
+    unitCost: number,
+  ): Promise<void> {
+    if (!unitCost) return;
+
+    const location = await prisma.inventory_locations.findUnique({
+      where: { id: params.location_id },
+      select: { organization_id: true },
+    });
+
+    const organizationId =
+      location?.organization_id ??
+      RequestContextService.getContext()?.organization_id;
+
+    if (!organizationId) return;
+
+    await prisma.inventory_cost_layers.create({
+      data: {
+        organization_id: organizationId,
+        product_id: params.product_id,
+        product_variant_id: params.variant_id ?? null,
+        location_id: params.location_id,
+        quantity_remaining: Math.abs(params.quantity_change),
+        unit_cost: new Prisma.Decimal(unitCost),
+        received_at: new Date(),
+      },
+    });
   }
 
   /**
@@ -258,7 +459,22 @@ export class StockLevelManager {
   }
 
   /**
-   * Reserva stock para una orden
+   * Reserva stock para una orden.
+   *
+   * @param skip_reservation Cuando es `true`, el método se vuelve no-op:
+   *   - NO crea fila en `stock_reservations`.
+   *   - NO muta `stock_levels` (qty_reserved / qty_available no cambian).
+   *   - NO sincroniza `products.stock_quantity`.
+   *
+   *   Caso de uso (P3.4 — ecommerce auto-fulfillment): cuando una orden de
+   *   ecommerce ya tiene una reserva activa en la bodega central y se genera
+   *   un transfer automático para despacharla, el `dispatch` del transfer
+   *   debe consumir la reserva existente y decrementar `quantity_on_hand`
+   *   exactamente UNA vez. Si el transfer creara su propia reserva (default)
+   *   se produciría doble decremento sobre `quantity_available`.
+   *
+   *   El caller que pase `true` es responsable de garantizar que existe una
+   *   reserva upstream que cubre la misma cantidad.
    */
   async reserveStock(
     product_id: number,
@@ -271,7 +487,14 @@ export class StockLevelManager {
     validate_availability = true,
     tx?: any,
     expires_at?: Date | null,
+    skip_reservation = false,
   ): Promise<void> {
+    // P3.4: cuando una reserva upstream ya cubre el stock, evitar doble
+    // decremento manteniendo este método como no-op.
+    if (skip_reservation) {
+      return;
+    }
+
     const execute = async (prisma: any) => {
       // Validar contexto
       const context = RequestContextService.getContext();
@@ -417,12 +640,28 @@ export class StockLevelManager {
   /**
    * Libera reservas por referencia (order/transfer/adjustment ID).
    * No requiere location_id — busca directamente en stock_reservations.
+   *
+   * Reglas según `status`:
+   * - `consumed` (default): el stock reservado se considera entregado físicamente.
+   *   - `decrementOnHand` no especificado o `true` (default): decrementa
+   *     `quantity_on_hand` por el total reservado (caso normal: la entrega
+   *     sale de esta ubicación).
+   *   - `decrementOnHand: false`: NO toca `quantity_on_hand`. Solo libera
+   *     el `quantity_reserved` y recalcula `quantity_available`. Caso de uso
+   *     P3.4 (ecommerce auto-fulfillment): cuando un dispatch o transfer
+   *     ya decrementó `quantity_on_hand` upstream a través de `updateStock`,
+   *     consumir la reserva original sin volver a decrementar evita doble
+   *     conteo sobre la bodega central.
+   * - `cancelled`: la reserva se aborta sin entrega física. Restaura
+   *   `quantity_available` y NO toca `quantity_on_hand`. La opción
+   *   `decrementOnHand` se ignora en este branch.
    */
   async releaseReservationsByReference(
     reserved_for_type: 'order' | 'transfer' | 'adjustment' | 'layaway',
     reserved_for_id: number,
     status: 'consumed' | 'cancelled' = 'consumed',
     tx?: any,
+    options: { decrementOnHand?: boolean } = {},
   ): Promise<void> {
     const execute = async (prisma: any) => {
       // 1. Buscar todas las reservas activas para esta referencia
@@ -486,20 +725,26 @@ export class StockLevelManager {
         });
 
         if (stock_level) {
+          const newReserved = Math.max(
+            0,
+            stock_level.quantity_reserved - group.total_quantity,
+          );
           const data: any = {
-            quantity_reserved: Math.max(
-              0,
-              stock_level.quantity_reserved - group.total_quantity,
-            ),
+            quantity_reserved: newReserved,
             last_updated: new Date(),
             updated_at: new Date(),
           };
 
           if (status === 'consumed') {
-            data.quantity_on_hand = Math.max(
-              0,
-              stock_level.quantity_on_hand - group.total_quantity,
-            );
+            const newOnHand =
+              options.decrementOnHand === false
+                ? stock_level.quantity_on_hand
+                : Math.max(
+                    0,
+                    stock_level.quantity_on_hand - group.total_quantity,
+                  );
+            data.quantity_on_hand = newOnHand;
+            data.quantity_available = Math.max(0, newOnHand - newReserved);
           } else {
             data.quantity_available =
               stock_level.quantity_available + group.total_quantity;
@@ -838,6 +1083,7 @@ export class StockLevelManager {
         to_location_id: params.to_location_id || params.location_id,
         quantity: Math.abs(params.quantity_change),
         movement_type: movementType,
+        source_module: params.source_module,
         reason: params.reason,
         notes: params.reason,
         user_id: params.user_id,
@@ -1262,10 +1508,7 @@ export class StockLevelManager {
    * Invariante: un producto NUNCA coexiste con filas base y filas de variante simultáneamente.
    * Esto evita doble conteo en findOne/findAll y stock fantasma heredado de transiciones previas.
    */
-  async enforceStockLevelsMode(
-    prisma: any,
-    product_id: number,
-  ): Promise<void> {
+  async enforceStockLevelsMode(prisma: any, product_id: number): Promise<void> {
     const basePrisma = prisma._baseClient || prisma;
     const variantCount = await basePrisma.product_variants.count({
       where: { product_id },

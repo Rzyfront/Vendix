@@ -1,6 +1,10 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+  SkipModuleFlowGuard,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -14,7 +18,10 @@ import {
 } from '@nestjs/common';
 import { AccountMappingService } from './account-mapping.service';
 import { ResponseService } from '../../../../common/responses/response.service';
-import { UpsertAccountMappingDto, ResetAccountMappingDto } from './dto/upsert-account-mapping.dto';
+import {
+  UpsertAccountMappingDto,
+  ResetAccountMappingDto,
+} from './dto/upsert-account-mapping.dto';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 
 @Controller('store/accounting/account-mappings')
@@ -35,6 +42,7 @@ export class AccountMappingController {
   }
 
   @Get()
+  @SkipModuleFlowGuard() // bootstrap: wizard reads current mapping state during setup
   @Permissions('store:accounting:account_mappings:read')
   async getMappings(
     @Query('prefix') prefix?: string,
@@ -52,6 +60,7 @@ export class AccountMappingController {
   }
 
   @Put()
+  @SkipModuleFlowGuard() // bootstrap: wizard bulk-upserts mappings to satisfy ACTIVE requirements
   @Permissions('store:accounting:account_mappings:update')
   async bulkUpsertMappings(@Body() dto: UpsertAccountMappingDto) {
     const context = this.getContext();
@@ -61,10 +70,14 @@ export class AccountMappingController {
       dto.mappings,
       dto.store_id,
     );
-    return this.response_service.success(result, 'Mappings updated successfully');
+    return this.response_service.success(
+      result,
+      'Mappings updated successfully',
+    );
   }
 
   @Post('reset')
+  @SkipModuleFlowGuard() // bootstrap: wizard may reset mappings to defaults during setup
   @Permissions('store:accounting:account_mappings:create')
   @HttpCode(HttpStatus.OK)
   async resetToDefaults(@Body() dto: ResetAccountMappingDto) {

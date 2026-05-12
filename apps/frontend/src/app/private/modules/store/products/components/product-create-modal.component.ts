@@ -18,7 +18,6 @@ import {
   MultiSelectorOption,
   SelectorOption,
   DialogService,
-  SettingToggleComponent,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -48,7 +47,6 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
     InputComponent,
     IconComponent,
     MultiSelectorComponent,
-    SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
@@ -133,8 +131,6 @@ export class ProductCreateModalComponent {
       ],
       description: [''],
       base_price: [null, [Validators.required, Validators.min(0)]],
-      stock_quantity: [0, [Validators.required, Validators.min(0)]],
-      track_inventory: [true],
       sku: [''],
       category_ids: [[]],
       brand_ids: [[]],
@@ -146,8 +142,6 @@ export class ProductCreateModalComponent {
   resetForm() {
     this.productForm.reset({
       base_price: 0,
-      stock_quantity: 0,
-      track_inventory: true,
       tax_category_ids: [],
       state: ProductState.ACTIVE,
     });
@@ -159,8 +153,6 @@ export class ProductCreateModalComponent {
       name: val.name || '',
       description: val.description || '',
       base_price: val.base_price || 0,
-      stock_quantity: val.stock_quantity || 0,
-      track_inventory: val.track_inventory ?? true,
       sku: val.sku || '',
       category_ids: val.category_ids || [],
       brand_ids: val.brand_ids || [],
@@ -205,8 +197,6 @@ export class ProductCreateModalComponent {
     this.productForm.patchValue({
       name: prod.name,
       base_price: prod.base_price,
-      stock_quantity: prod.stock_quantity || 0,
-      track_inventory: prod.track_inventory !== false,
       // Try to get category from new structure or legacy if exists
       category_ids:
         (prod as any).category_ids?.length > 0
@@ -334,8 +324,6 @@ export class ProductCreateModalComponent {
     const dto: any = {
       name: val.name,
       base_price: val.base_price,
-      track_inventory: !!val.track_inventory,
-      stock_quantity: val.track_inventory ? val.stock_quantity : null,
       sku: val.sku || undefined,
       // Map categories to array for backend
       category_ids: val.category_ids || [],
@@ -343,6 +331,10 @@ export class ProductCreateModalComponent {
       tax_category_ids: val.tax_category_ids || [],
       state: val.state,
     };
+
+    if (!this.isEditMode) {
+      dto.track_inventory = false;
+    }
 
     // Remove legacy field if it exists in val but not needed in DTO
     // delete dto.category_id;

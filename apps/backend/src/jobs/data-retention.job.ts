@@ -19,7 +19,9 @@ export class DataRetentionJob {
       const expired_sessions = await this.prisma.user_sessions.deleteMany({
         where: { expires_at: { lt: now } },
       });
-      this.logger.log(`Deleted ${expired_sessions.count} expired user sessions`);
+      this.logger.log(
+        `Deleted ${expired_sessions.count} expired user sessions`,
+      );
 
       // 2. Delete login_attempts older than 1 year
       const one_year_ago = new Date();
@@ -28,7 +30,9 @@ export class DataRetentionJob {
       const old_login_attempts = await this.prisma.login_attempts.deleteMany({
         where: { attempted_at: { lt: one_year_ago } },
       });
-      this.logger.log(`Deleted ${old_login_attempts.count} login attempts older than 1 year`);
+      this.logger.log(
+        `Deleted ${old_login_attempts.count} login attempts older than 1 year`,
+      );
 
       // 3. Delete audit_logs older than 5 years
       const five_years_ago = new Date();
@@ -37,13 +41,15 @@ export class DataRetentionJob {
       const old_audit_logs = await this.prisma.audit_logs.deleteMany({
         where: { created_at: { lt: five_years_ago } },
       });
-      this.logger.log(`Deleted ${old_audit_logs.count} audit logs older than 5 years`);
+      this.logger.log(
+        `Deleted ${old_audit_logs.count} audit logs older than 5 years`,
+      );
 
       // Log summary
       this.logger.log(
         `Data retention job completed. Sessions: ${expired_sessions.count}, ` +
-        `Login attempts: ${old_login_attempts.count}, ` +
-        `Audit logs: ${old_audit_logs.count}`,
+          `Login attempts: ${old_login_attempts.count}, ` +
+          `Audit logs: ${old_audit_logs.count}`,
       );
     } catch (error) {
       this.logger.error('Error in data retention job', error);

@@ -72,9 +72,15 @@ export class CreateOrderDto {
   @Min(1)
   customer_id: number;
 
+  /**
+   * Optional. If provided, must match the store_id derived from RequestContext.
+   * If omitted, the value is taken from the authenticated context.
+   * Kept optional for backward compatibility with clients that still send it in the body.
+   */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  store_id: number;
+  store_id?: number;
 
   @IsOptional()
   @IsString()

@@ -19,6 +19,8 @@ import { HelpCenterAdminModule } from './help-center/help-center-admin.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { BackupModule } from './backups/backups.module';
 import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.module';
+import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.module';
+import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.modul
     MonitoringModule,
     BackupModule,
     PayrollDefaultsModule,
+    SuperadminSubscriptionsModule,
+    SuperadminSettingsSyncModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],
