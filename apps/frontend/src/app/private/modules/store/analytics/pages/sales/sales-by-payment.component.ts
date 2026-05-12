@@ -302,9 +302,10 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
 private updateChart(data: SalesByPaymentMethod[]): void {
-    const categories = data.map((item) => item.display_name);
-    const values = data.map((item) => item.total_amount);
-    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+    const sortedData = [...data].sort((a, b) => b.total_amount - a.total_amount);
+    const categories = sortedData.map((item) => item.display_name);
+    const values = sortedData.map((item) => item.total_amount);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6', '#f97316'];
 
     this.chartOptions.set({
       tooltip: {
@@ -318,10 +319,11 @@ private updateChart(data: SalesByPaymentMethod[]): void {
           return html;
         }},
       legend: {
-        data: categories,
+        data: ['Monto'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: '#6b7280' },
       },
       grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
@@ -343,13 +345,12 @@ private updateChart(data: SalesByPaymentMethod[]): void {
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
-      series: categories.map((cat, i) => ({
-          name: cat,
-          type: 'bar' as const,
-          data: [values[i]],
-          itemStyle: { color: colors[i % colors.length] },
-          barMaxWidth: 40,
-        })),
+      series: [{
+          name: 'Monto',
+          type: 'bar',
+          data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i % colors.length] } })),
+          barMaxWidth: 50,
+        }],
     });
   }
 

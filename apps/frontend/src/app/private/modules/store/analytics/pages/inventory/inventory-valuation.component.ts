@@ -340,6 +340,7 @@ legend: {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: '#6b7280' },
       },
       grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },

@@ -259,6 +259,7 @@ export class ReviewSummaryComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -308,6 +309,7 @@ export class ReviewSummaryComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },

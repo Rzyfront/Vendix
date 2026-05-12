@@ -170,6 +170,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -254,10 +255,12 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         },
       },
       legend: {
-        data: names,
+        data: ['Top 5 Productos'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -281,13 +284,12 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
-      series: names.map((name, i) => ({
-          name,
-          type: 'bar' as const,
-          data: [profits[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
-        })),
+      series: [{
+        name: 'Top 5 Productos',
+        type: 'bar' as const,
+        data: profits.map((p, i) => ({ value: p, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+        barMaxWidth: 40,
+      }],
     });
   }
 
@@ -296,8 +298,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     summary: ProfitabilitySummary,
   ): void {
     const style = getComputedStyle(document.documentElement);
-    const greenColor = '#22c55e';
-    const redColor = '#ef4444';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
@@ -306,7 +306,9 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       p.product_name.length > 15 ? p.product_name.substring(0, 15) + '...' : p.product_name,
     );
     const revenues = top5.map((p) => p.revenue);
-    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
+    const costs = top5.map((p) => p.total_cost);
+    const profits = top5.map((p) => p.profit);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b'];
 
     this.comparativeChartOptions.set({
       tooltip: {
@@ -330,23 +332,18 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
                   </span>
                   <strong style="font-size:12px">${this.currencyService.format(params[0].value)}</strong>
                 </div>
-                ${product ? `
-                  <div style="border-top:1px solid ${borderColor};margin-top:4px;padding-top:6px">
-                    <div style="display:flex;justify-content:space-between;gap:16px">
-                      <span style="color:#6b7280">Margen:</span>
-                      <strong style="color:${product.margin > 0 ? greenColor : redColor}">${product.margin}%</strong>
-                    </div>
-                  </div>
-                ` : ''}
               </div>
             </div>
           `;
         },
       },
       legend: {
-        data: ['Comparativa'],
+        data: ['Ingresos', 'Costos', 'Ganancia'],
+        selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -370,15 +367,32 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
-      series: [{
-        name: 'Ingresos',
-        type: 'bar',
-        data: revenues.map((v, i) => ({
-          value: v,
-          itemStyle: { color: colors[i % colors.length] }
-        })),
-        barMaxWidth: 50,
-      }],
+      series: [
+        {
+          name: 'Ingresos',
+          type: 'bar',
+          data: revenues,
+          itemStyle: { color: colors[0] },
+          barMaxWidth: 40,
+          barGap: '20%',
+        },
+        {
+          name: 'Costos',
+          type: 'bar',
+          data: costs,
+          itemStyle: { color: colors[1] },
+          barMaxWidth: 40,
+          barGap: '20%',
+        },
+        {
+          name: 'Ganancia',
+          type: 'bar',
+          data: profits,
+          itemStyle: { color: colors[2] },
+          barMaxWidth: 40,
+          barGap: '20%',
+        },
+      ],
     });
   }
 }

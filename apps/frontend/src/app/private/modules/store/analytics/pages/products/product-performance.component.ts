@@ -165,6 +165,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -201,14 +202,17 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
   }
 
   private updateTopSellersChart(topSellers: TopSellingProduct[]): void {
-
     const style = getComputedStyle(document.documentElement);
-    const primaryColor =
-      style.getPropertyValue('--color-primary').trim() || '#3b82f6';
-    const borderColor =
-      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary =
-      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+
+    if (!topSellers || topSellers.length === 0) {
+      this.topSellersChartOptions.set({
+        graphic: [{ type: 'text', left: 'center', top: 'middle', style: { text: 'Sin datos disponibles', fill: '#9ca3af', fontSize: 14 } }],
+      });
+      return;
+    }
 
     // Top 5 by units
     const top5 = topSellers.slice(0, 5);
@@ -219,7 +223,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
     );
     const units = top5.map((p) => p.units_sold);
 
-    this.topSellersChartOptions.set({
+this.topSellersChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -229,10 +233,12 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         },
       },
       legend: {
-        data: names,
+        data: ['Top 5 Productos'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -246,30 +252,22 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 10 },
+        axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
-        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-series: names.map((name, i) => ({
-          name,
-          type: 'bar' as const,
-          data: [units[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-          barMaxWidth: 40,
-        })),
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 40,
-        },
-      ],
+      series: [{
+        name: 'Top 5 Productos',
+        type: 'bar' as const,
+        data: units.map((u, i) => ({ value: u, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+        barMaxWidth: 40,
+      }],
     });
   }
 }

@@ -491,12 +491,13 @@ export class CustomersAnalyticsService {
     const orderCount = Number(completedOrders[0]?.count || 0);
 
     let recoveryRate: number;
-    if (abandonedCount > 0) {
+    if (abandonedCount > 0 && orderCount > 0) {
       const calculatedRate = (orderCount / abandonedCount) * 100;
       recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-      recoveryRate = recoveryRate > 0 ? recoveryRate : 15;
+    } else if (abandonedCount === 0) {
+      recoveryRate = 0;
     } else {
-      recoveryRate = 15;
+      recoveryRate = 0;
     }
 
     const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
@@ -576,7 +577,8 @@ export class CustomersAnalyticsService {
       ordersMap.set(periodKey, Number(o.order_count));
     });
 
-    const baselineRecoveryRate = 15;
+    let defaultRecoveryRate = 0;
+    let defaultAbandonmentRate = 0;
 
     return fillTimeSeries(
       results.map((r) => {
@@ -585,19 +587,18 @@ export class CustomersAnalyticsService {
         const cartCount = Number(r.abandoned_carts);
         
         let recoveryRate: number;
-        if (cartCount > 0) {
+        if (cartCount > 0 && orderCount > 0) {
           const calculatedRate = (orderCount / cartCount) * 100;
           recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
-          recoveryRate = recoveryRate > 0 ? recoveryRate : baselineRecoveryRate;
         } else {
-          recoveryRate = baselineRecoveryRate;
+          recoveryRate = 0;
         }
 
         return {
           period: periodKey,
           abandoned_carts: cartCount,
           recovered_carts: Math.floor(cartCount * (recoveryRate / 100)),
-          abandonment_rate: 100 - recoveryRate,
+          abandonment_rate: cartCount > 0 ? 100 - recoveryRate : 0,
           recovery_rate: recoveryRate,
         };
       }),
@@ -607,8 +608,8 @@ export class CustomersAnalyticsService {
       {
         abandoned_carts: 0,
         recovered_carts: 0,
-        abandonment_rate: 100 - baselineRecoveryRate,
-        recovery_rate: baselineRecoveryRate,
+        abandonment_rate: defaultAbandonmentRate,
+        recovery_rate: defaultRecoveryRate,
       },
       formatPeriodFromDate,
     );

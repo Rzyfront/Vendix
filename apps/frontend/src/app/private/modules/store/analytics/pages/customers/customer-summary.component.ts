@@ -161,6 +161,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -236,6 +237,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {

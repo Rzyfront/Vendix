@@ -1008,13 +1008,19 @@ export class BreadcrumbService {
       icon: 'warehouse',
     },
     {
-      path: '/admin/analytics/products/performance',
+      path: '/admin/analytics/products',
       title: 'Productos',
       parent: 'Analíticas',
       icon: 'package',
     },
     {
-      path: '/admin/analytics/customers/summary',
+      path: '/admin/analytics/products',
+      title: 'Productos',
+      parent: 'Analíticas',
+      icon: 'package',
+    },
+    {
+      path: '/admin/analytics/customers',
       title: 'Clientes',
       parent: 'Analíticas',
       icon: 'users',
@@ -1030,6 +1036,12 @@ export class BreadcrumbService {
       title: 'Reseñas',
       parent: 'Analíticas',
       icon: 'message-square',
+    },
+    {
+      path: '/admin/analytics/financial',
+      title: 'Financiero',
+      parent: 'Analíticas',
+      icon: 'dollar-sign',
     },
     {
       path: '/admin/analytics/financial/profit-loss',
@@ -1080,10 +1092,10 @@ export class BreadcrumbService {
       icon: 'credit-card',
     },
     {
-      path: '/admin/analytics/inventory/stock-info',
-      title: 'Info de Stock',
-      parent: 'Inventario',
-      icon: 'alert-triangle',
+      path: '/admin/analytics/inventory',
+      title: 'Inventario',
+      parent: 'Analíticas',
+      icon: 'warehouse',
     },
     {
       path: '/admin/analytics/inventory/stock-info',

@@ -330,6 +330,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: '#6b7280' },
       },
       grid: {

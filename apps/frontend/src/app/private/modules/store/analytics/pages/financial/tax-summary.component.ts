@@ -264,6 +264,8 @@ export class TaxSummaryComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -308,6 +310,8 @@ export class TaxSummaryComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       series: [

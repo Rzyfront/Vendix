@@ -201,10 +201,10 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
-        textStyle: { color: textSecondary, fontSize: 11 },
-        icon: 'roundRect',
         itemWidth: 14,
         itemHeight: 8,
+        textStyle: { color: textSecondary, fontSize: 11 },
+        icon: 'roundRect',
       },
       grid: {
         left: '3%',
@@ -317,6 +317,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -400,6 +401,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {

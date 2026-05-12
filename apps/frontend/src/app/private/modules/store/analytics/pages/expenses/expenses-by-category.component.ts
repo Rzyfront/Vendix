@@ -122,10 +122,11 @@ export class ExpensesByCategoryComponent {
   private buildChart(): void {
     const borderColor = '#e5e7eb';
     const textSecondary = '#6b7280';
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     this.chartOptions.set({
       tooltip: { trigger: 'axis' },
-      legend: { data: this.categoriesData().map(c => c.name), selectedMode: true, bottom: 30, left: 'center', textStyle: { color: textSecondary } },
+      legend: { data: ['Gastos'], selectedMode: true, bottom: 30, left: 'center', itemWidth: 14, itemHeight: 14, textStyle: { color: textSecondary } },
       grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',
@@ -141,12 +142,11 @@ export class ExpensesByCategoryComponent {
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: this.categoriesData().map((c, i) => ({
-          name: c.name,
+      series: [{
+          name: 'Gastos',
           type: 'bar' as const,
-          data: [c.value],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
-        })),
+          data: this.categoriesData().map((c, i) => ({ value: c.value, itemStyle: { color: colors[i % colors.length] } })),
+        }],
     });
   }
 

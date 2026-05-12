@@ -174,6 +174,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -274,6 +275,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
         textStyle: { color: textSecondary },
       },
       grid: {

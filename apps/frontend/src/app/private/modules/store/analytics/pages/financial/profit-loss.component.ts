@@ -260,6 +260,8 @@ export class ProfitLossComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -334,6 +336,8 @@ export class ProfitLossComponent implements OnInit {
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },

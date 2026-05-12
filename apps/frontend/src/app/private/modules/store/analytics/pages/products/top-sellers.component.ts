@@ -18,6 +18,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { TopSellingProduct } from '../../interfaces/products-analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 
 import * as ProductsActions from './state/products-analytics.actions';
 import * as ProductsSelectors from './state/products-analytics.selectors';
@@ -65,7 +66,12 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
   readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
-  readonly dateRange = toSignal(this.dateRange$);
+
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth',
+  });
 
   topSellersChartOptions= signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
@@ -133,16 +139,21 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
     });
   }
 onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
     this.store.dispatch(ProductsActions.setDateRange({ dateRange: range }));
   }
 
   private updateChart(topSellers: TopSellingProduct[]): void {
-
     const style = getComputedStyle(document.documentElement);
-    const borderColor =
-      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
-    const textSecondary =
-      style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+
+    if (!topSellers || topSellers.length === 0) {
+      this.topSellersChartOptions.set({
+        graphic: [{ type: 'text', left: 'center', top: 'middle', style: { text: 'Sin datos disponibles', fill: '#9ca3af', fontSize: 14 } }],
+      });
+      return;
+    }
 
     const reversed = [...topSellers].reverse();
     const names = reversed.map((p) =>
@@ -163,10 +174,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
       },
       legend: {
-        data: names,
+        data: ['Top Vendedores'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -193,13 +206,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: names.map((name, i) => ({
-          name,
-          type: 'bar' as const,
-          data: [revenues[i]],
-          itemStyle: { color: colors[i % colors.length] },
-          barMaxWidth: 40,
-        })),
+      series: [{
+        name: 'Top Vendedores',
+        type: 'bar' as const,
+        data: revenues.map((r, i) => ({ value: r, itemStyle: { color: colors[i % colors.length] } })),
+        barMaxWidth: 40,
+      }],
     });
   }
 

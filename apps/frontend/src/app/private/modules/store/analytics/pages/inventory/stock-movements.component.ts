@@ -394,21 +394,27 @@ onDateRangeChange(range: DateRangeFilter): void {
 
     const labels = types.map((t) => typeLabels[t]);
     const values = types.map((t) => movementsByType[t]);
+    const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
     this.movementsChartOptions.set({
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          const p = params[0];
-          return `${p.name}: <b>${p.value}</b> unidades`;
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`;
+          }
+          return html;
         },
       },
-legend: {
-        data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
+      legend: {
+        data: ['Movimientos'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -431,13 +437,12 @@ legend: {
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: borderColor } },
       },
-      series: labels.map((label, i) => ({
-          name: label,
+      series: [{
+          name: 'Movimientos',
           type: 'bar' as const,
-          data: [values[i]],
-          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+          data: values.map((v, i) => ({ value: v, itemStyle: { color: colors[i % colors.length] } })),
           barMaxWidth: 40,
-        })),
+        }],
     });
   }
 

@@ -255,10 +255,12 @@ export class RefundsSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: refundCats,
+        data: ['Reembolsos'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: {
@@ -283,25 +285,12 @@ export class RefundsSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: refundCats.map((cat: string, i: number) => ({
-        name: cat,
-        type: 'bar' as const,
-        data: refundCats.map((_: string, j: number) => j === i ? refundValues[i] : null),
-        itemStyle: { color: refundColors[i] },
-        areaStyle: {
-          color: {
-            type: 'linear',
-            x: 0,
-            y: 0,
-            x2: 0,
-            y2: 1,
-            colorStops: [
-              { offset: 0, color: refundColors[i] + '40' },
-              { offset: 1, color: refundColors[i] + '05' },
-            ],
-          },
-        },
-      })),
+      series: [{
+          name: 'Reembolsos',
+          type: 'bar' as const,
+          data: refundValues.map((v, i) => ({ value: v, itemStyle: { color: refundColors[i] } })),
+          barMaxWidth: 40,
+        }],
     });
 
     // Refunds Distribution Horizontal Bar
@@ -322,16 +311,18 @@ export class RefundsSummaryComponent implements OnInit {
         },
       },
       legend: {
-        data: ['Reembolsos'],
+        data: ['Distribución'],
         selectedMode: true,
         bottom: 30,
         left: 'center',
+        itemWidth: 14,
+        itemHeight: 14,
         textStyle: { color: textSecondary },
       },
       grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
-        data: ['Subtotal', 'Impuesto', 'Envío'],
+        data: distCats,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
       },
@@ -347,13 +338,9 @@ export class RefundsSummaryComponent implements OnInit {
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [{
-        name: 'Reembolsos',
+        name: 'Distribución',
         type: 'bar' as const,
-        data: [
-          { value: d?.subtotal_refunds || 0, itemStyle: { color: '#f97316' } },
-          { value: d?.tax_refunds || 0, itemStyle: { color: '#f59e0b' } },
-          { value: d?.shipping_refunds || 0, itemStyle: { color: '#3b82f6' } },
-        ],
+        data: distValues.map((v, i) => ({ value: v, itemStyle: { color: distColors[i] } })),
         barMaxWidth: 50,
       }],
     });
