@@ -320,21 +320,20 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         borderWidth: 1,
         textStyle: { color: textSecondary, fontSize: 12 },
         formatter: (params: any) => {
-          const product = top5.find((p) => p.product_name.substring(0, 15) === params[0].name || p.product_name === params[0].name);
-          return `
-            <div style="padding:8px">
+          let html = `<div style="padding:8px">
               <strong style="font-size:13px">${params[0].name}</strong>
-              <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
-                <div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
-                  <span style="display:flex;align-items:center;gap:6px">
-                    <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${params[0].color}"></span>
-                    Ingresos:
-                  </span>
-                  <strong style="font-size:12px">${this.currencyService.format(params[0].value)}</strong>
-                </div>
-              </div>
-            </div>
-          `;
+              <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">`;
+          for (const p of params) {
+            html += `<div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
+                <span style="display:flex;align-items:center;gap:6px">
+                  <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color}"></span>
+                  ${p.seriesName}:
+                </span>
+                <strong style="font-size:12px">${this.currencyService.format(p.value)}</strong>
+              </div>`;
+          }
+          html += `</div></div>`;
+          return html;
         },
       },
       legend: {
