@@ -530,12 +530,10 @@ export class StorePrismaService extends BasePrismaService {
     return query(scoped_args);
   }
 
-  private async resolveFiscalEntityForContext(
-    context: {
-      organization_id?: number | null;
-      store_id?: number | null;
-    },
-  ): Promise<{
+  private async resolveFiscalEntityForContext(context: {
+    organization_id?: number | null;
+    store_id?: number | null;
+  }): Promise<{
     id: number | null;
     fiscal_scope: 'STORE' | 'ORGANIZATION';
   }> {
@@ -623,10 +621,7 @@ export class StorePrismaService extends BasePrismaService {
 
     return {
       organization_id,
-      OR: [
-        { accounting_entity_id: fiscal_entity_id },
-        legacyScope,
-      ],
+      OR: [{ accounting_entity_id: fiscal_entity_id }, legacyScope],
     };
   }
 
@@ -635,9 +630,53 @@ export class StorePrismaService extends BasePrismaService {
       return securityFilter;
     }
 
+    if (!securityFilter || Object.keys(securityFilter).length === 0) {
+      return existingWhere;
+    }
+
+    const mergedWhere: Record<string, any> = { ...existingWhere };
+    const deferredFilters: any[] = [];
+
+    for (const [key, value] of Object.entries(securityFilter)) {
+      if (key in mergedWhere) {
+        if (this.areWhereValuesEqual(mergedWhere[key], value)) continue;
+        deferredFilters.push({ [key]: value });
+      } else {
+        mergedWhere[key] = value;
+      }
+    }
+
+    if (deferredFilters.length > 0) {
+      const existingAnd = mergedWhere.AND;
+      const existingAndFilters =
+        existingAnd === undefined
+          ? []
+          : Array.isArray(existingAnd)
+            ? existingAnd
+            : [existingAnd];
+      mergedWhere.AND = [...existingAndFilters, ...deferredFilters];
+    }
+
+    // Prisma findUnique/update/delete require the unique field to remain at the
+    // top level. Returning only `{ AND: [...] }` makes Prisma 7 reject valid
+    // scoped calls such as `store_settings.findUnique({ where: { store_id } })`.
+    if (Object.keys(mergedWhere).length > 0) {
+      return mergedWhere;
+    }
+
     return {
       AND: [existingWhere, securityFilter],
     };
+  }
+
+  private areWhereValuesEqual(left: any, right: any): boolean {
+    if (left === right) return true;
+
+    try {
+      return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+      return false;
+    }
   }
 
   private scoped_client: any;

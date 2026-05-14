@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { BusinessHours } from './interfaces/store-settings.interface';
+import { mergeStoreSettingsWithDefaults } from './defaults/default-store-settings';
 
 export interface ScheduleValidationResult {
   isWithinBusinessHours: boolean;
@@ -72,7 +73,7 @@ export class ScheduleValidationService {
       select: { settings: true },
     });
 
-    const settings = storeSettings?.settings;
+    const settings = mergeStoreSettingsWithDefaults(storeSettings?.settings);
     const posSettings = settings?.pos || {};
     const enableScheduleValidation =
       posSettings.enable_schedule_validation || false;
