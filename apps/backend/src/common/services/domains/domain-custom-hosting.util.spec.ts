@@ -252,4 +252,98 @@ describe('domain custom hosting utilities', () => {
       ]),
     );
   });
+
+  it('keeps validated apex ALIAS routing complete even when CDN IPs rotate', async () => {
+    const payload = buildDomainDnsInstructions({
+      domain: {
+        ...rootDomain,
+        status: 'active',
+        ssl_status: 'issued',
+        config: {
+          ...rootDomain.config,
+          ssl: {
+            ...rootDomain.config.ssl,
+            routing_status: 'complete',
+          },
+        },
+      },
+      edgeHost: 'd123.cloudfront.net',
+    });
+    const resolver = {
+      resolveTxt: jest.fn(),
+      resolveCname: jest.fn().mockResolvedValue({
+        records: [],
+        consensus: true,
+        consensusRecords: [],
+        perResolver: [
+          { resolver: '1.1.1.1', status: 'success', records: [] },
+          { resolver: '8.8.8.8', status: 'success', records: [] },
+          { resolver: '9.9.9.9', status: 'success', records: [] },
+        ],
+      }),
+      resolveA: jest
+        .fn()
+        .mockResolvedValueOnce({
+          records: ['54.230.144.80'],
+          consensus: true,
+          consensusRecords: ['54.230.144.80'],
+          perResolver: [
+            {
+              resolver: '1.1.1.1',
+              status: 'success',
+              records: ['54.230.144.80'],
+            },
+            {
+              resolver: '8.8.8.8',
+              status: 'success',
+              records: ['54.230.144.80'],
+            },
+            {
+              resolver: '9.9.9.9',
+              status: 'success',
+              records: ['54.230.144.80'],
+            },
+          ],
+        })
+        .mockResolvedValue({
+          records: ['3.166.96.29'],
+          consensus: true,
+          consensusRecords: ['3.166.96.29'],
+          perResolver: [
+            {
+              resolver: '1.1.1.1',
+              status: 'success',
+              records: ['3.166.96.29'],
+            },
+            {
+              resolver: '8.8.8.8',
+              status: 'success',
+              records: ['3.166.96.29'],
+            },
+            {
+              resolver: '9.9.9.9',
+              status: 'success',
+              records: ['3.166.96.29'],
+            },
+          ],
+        }),
+    } as any;
+
+    const enriched = await enrichDomainDnsInstructionsWithDiagnostics(
+      payload,
+      resolver,
+    );
+
+    expect(enriched.instructions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: 'routing',
+          scope: 'root',
+          status: 'complete',
+          status_reason:
+            'La conexión ya fue validada por Vendix. Los ALIAS/ANAME del dominio raíz pueden responder con IPs dinámicas.',
+        }),
+      ]),
+    );
+  });
 });
