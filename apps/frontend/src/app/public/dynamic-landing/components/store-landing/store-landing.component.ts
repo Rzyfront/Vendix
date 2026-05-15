@@ -2,6 +2,7 @@ import { Component, OnInit, inject, effect } from '@angular/core';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
+import { toTitleCase } from '../../../../core/utils/format.utils';
 import { LandingLayoutComponent } from '../../../../shared/components/layouts/landing-layout/landing-layout.component';
 import { DynamicHeroCarouselComponent } from '../shared/dynamic-hero-carousel/dynamic-hero-carousel.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -145,7 +146,12 @@ export class StoreLandingComponent implements OnInit {
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
       const domainConfig = appConfig.domainConfig;
-      this.storeName = domainConfig.store_slug || 'Store';
+      this.storeName = this.formatBrandName(
+        domainConfig.store_name ||
+          domainConfig.customConfig?.branding?.name ||
+          domainConfig.store_slug ||
+          'Store',
+      );
       this.branding = appConfig.branding || {};
 
       const customConfig = domainConfig.customConfig || {};
@@ -183,6 +189,10 @@ export class StoreLandingComponent implements OnInit {
         buttonLink: '/auth/login',
       },
     ];
+  }
+
+  private formatBrandName(name: string): string {
+    return toTitleCase(name.replace(/[-_]+/g, ' ').trim());
   }
 
   private mapFeatures(features: any): any[] {

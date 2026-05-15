@@ -2,6 +2,7 @@ import { Component, OnInit, inject, effect } from '@angular/core';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
+import { toTitleCase } from '../../../../core/utils/format.utils';
 import { LandingLayoutComponent } from '../../../../shared/components/layouts/landing-layout/landing-layout.component';
 import { DynamicHeroCarouselComponent } from '../shared/dynamic-hero-carousel/dynamic-hero-carousel.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -156,7 +157,12 @@ export class OrgLandingComponent implements OnInit {
     }
 
     const domainConfig = appConfig.domainConfig;
-    this.organizationName = domainConfig.organization_slug || 'Organización';
+    this.organizationName = this.formatBrandName(
+      domainConfig.organization_name ||
+        domainConfig.customConfig?.branding?.name ||
+        domainConfig.organization_slug ||
+        'Organización',
+    );
     this.branding = appConfig.branding || {};
     this.organizationDescription =
       appConfig.domainConfig.customConfig?.description || '';
@@ -195,6 +201,10 @@ export class OrgLandingComponent implements OnInit {
         buttonLink: '/auth/login',
       },
     ];
+  }
+
+  private formatBrandName(name: string): string {
+    return toTitleCase(name.replace(/[-_]+/g, ' ').trim());
   }
 
   private mapFeatures(features: any): any[] {

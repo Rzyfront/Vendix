@@ -21,6 +21,7 @@ import { ConfigFacade } from '../../../../core/store/config';
 
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
+import { toTitleCase } from '../../../../core/utils/format.utils';
 import {
   InputComponent,
   ButtonComponent,
@@ -415,6 +416,7 @@ export class ContextualLoginComponent implements OnInit {
     null,
   );
   readonly displayName = signal<string>('');
+  readonly contextSlug = signal<string>('');
   readonly logoUrl = signal<string>('');
   readonly showVlinkTooltip = signal(true);
 
@@ -494,16 +496,29 @@ export class ContextualLoginComponent implements OnInit {
     if (env === 'VENDIX_LANDING' || env === 'VENDIX_ADMIN') {
       this.contextType.set('vendix');
       this.displayName.set('Vendix Platform');
+      this.contextSlug.set('');
       this.loginForm.get('vlink')?.setValidators([Validators.required]);
     } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
       this.contextType.set('organization');
-      this.displayName.set(domainConfig.organization_slug || '');
+      this.contextSlug.set(domainConfig.organization_slug || '');
+      this.displayName.set(
+        this.formatContextName(
+          domainConfig.organization_name || domainConfig.organization_slug,
+        ),
+      );
       this.loginForm.get('vlink')?.clearValidators();
     } else if (
       ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
     ) {
       this.contextType.set('store');
-      this.displayName.set(domainConfig.store_slug || '');
+      this.contextSlug.set(domainConfig.store_slug || '');
+      this.displayName.set(
+        this.formatContextName(
+          domainConfig.store_name ||
+            domainConfig.customConfig?.branding?.name ||
+            domainConfig.store_slug,
+        ),
+      );
       this.loginForm.get('vlink')?.clearValidators();
     }
     this.loginForm.get('vlink')?.updateValueAndValidity();
@@ -513,6 +528,10 @@ export class ContextualLoginComponent implements OnInit {
       logo = 'vlogo.png';
     }
     this.logoUrl.set(logo);
+  }
+
+  private formatContextName(name?: string): string {
+    return toTitleCase((name || '').replace(/[-_]+/g, ' ').trim());
   }
 
   /**
@@ -577,9 +596,9 @@ export class ContextualLoginComponent implements OnInit {
       if (ctx === 'vendix') {
         organization_slug = vlink;
       } else if (ctx === 'organization') {
-        organization_slug = this.displayName();
+        organization_slug = this.contextSlug();
       } else if (ctx === 'store') {
-        store_slug = this.displayName();
+        store_slug = this.contextSlug();
       }
 
       this.authFacade.login(email, password, store_slug, organization_slug);
