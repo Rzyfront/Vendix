@@ -2,18 +2,19 @@
 name: vendix-prisma-scopes
 description: >
   Multi-tenant Prisma scoping system for Vendix: BasePrismaService, Global/Organization/Store/Ecommerce
-  scoped services, model registration, manual-scope caveats, and withoutScope rules.
+  scoped services, model registration, scoped unique-operation caveats, manual-scope caveats, and withoutScope rules.
   Trigger: When working with Prisma scoped services, adding models to scopes, or debugging
-  Forbidden/Unauthorized errors in database queries.
+  Forbidden/Unauthorized errors or Prisma WhereUnique/AND errors in database queries.
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
     - "Working with Prisma scoped services"
     - "Adding new models to domain scopes"
     - "Debugging Forbidden errors in Prisma queries"
+    - "Debugging Prisma WhereUnique/AND errors in scoped queries"
 ---
 
 ## Source of Truth
@@ -74,6 +75,38 @@ When adding a model:
 - Some getters return `scoped_client` for models not registered in all model lists; inspect source before relying on automatic scope.
 - `review_votes` and `review_reports` currently return `baseClient`.
 
+## Scoped Unique Operations
+
+Prisma unique operations (`findUnique`, `update`, `delete`, and the `where` part of `upsert`) require a `WhereUniqueInput`. Scoped Prisma extensions may merge tenant filters into `where`. If that merge wraps the lookup as `{ AND: [...] }`, Prisma rejects it before SQL execution with errors like:
+
+```text
+Argument where of type ...WhereUniqueInput needs at least one of id or store_id arguments
+```
+
+Rules:
+
+- In scoped services, do not assume `findUnique({ where: { id } })` or `findUnique({ where: { store_id } })` stays valid after the scope extension runs.
+- For tenant-scoped reads, prefer `findFirst({ where: { id, store_id } })` or `findFirst({ where: { store_id } })` so the final query can include both unique and tenant predicates.
+- For tenant-guarded writes, prefer `updateMany`/`deleteMany` with explicit tenant filters, then check the affected count when the caller needs "not found" behavior.
+- Use `upsert` only after confirming the scoped service preserves a top-level unique field in `where`; otherwise split the flow into scope-safe read/create/update steps.
+- Do not bypass this by calling `withoutScope()` in request handlers. Use `withoutScope()` only for the approved cases in this skill and add explicit tenant filters manually.
+- Repeated access to scoped singleton rows, such as `store_settings`, should live behind a helper that encodes the safe query shape.
+
+Example:
+
+```ts
+// Avoid in scoped services when the extension may add tenant filters.
+await prisma.store_settings.findUnique({ where: { store_id } });
+await prisma.domain_settings.update({ where: { id }, data });
+
+// Prefer scope-safe shapes.
+await prisma.store_settings.findFirst({ where: { store_id } });
+await prisma.domain_settings.updateMany({
+  where: { id, store_id, domain_type: 'ecommerce' },
+  data,
+});
+```
+
 ## withoutScope Rules
 
 - Never use `withoutScope()` in request handlers unless explicitly approved.
@@ -85,6 +118,7 @@ When adding a model:
 
 - `ForbiddenException`: missing store/org context or model expects scope but context was not populated.
 - `UnauthorizedException`: no request context, often a job/script using a scoped service.
+- `Argument where of type ...WhereUniqueInput...` with `where: { AND: [...] }`: a scoped extension transformed a unique query into a non-unique shape; replace it with a scope-safe `findFirst`, `updateMany`, or split `upsert` flow.
 - Data leak risk: getter returns `baseClient` or model missing from extension registration.
 - Missing create tenant fields: model not in direct scoped model list.
 
