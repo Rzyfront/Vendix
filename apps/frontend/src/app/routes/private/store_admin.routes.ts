@@ -425,6 +425,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'domains/:id/setup',
+            loadComponent: () =>
+              import('../../private/modules/store/settings/domains/domain-setup-page.component').then(
+                (c) => c.DomainSetupPageComponent,
+              ),
+          },
+          {
             path: 'domains',
             loadComponent: () =>
               import('../../private/modules/store/settings/domains/store-domains.component').then(

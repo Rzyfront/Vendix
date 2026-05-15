@@ -15,6 +15,7 @@ import {
   buildDomainDnsInstructions,
   buildInheritedDomainConfig,
   decorateDomainWithSslFields,
+  enrichDomainDnsInstructionsWithDiagnostics,
   getInheritedFromHostname,
   getOneLevelSubdomainLabel,
   hasIssuedWildcardSsl,
@@ -637,12 +638,19 @@ export class StoreDomainsService {
             ? await this.ensureVerificationToken(domain)
             : null)
         : domain.verification_token;
-    const edgeHost = this.getEdgeHost();
+    const routingTarget = await this.domainProvisioning.getRoutingTarget();
+    const legacyEdgeHost = this.getEdgeHost();
 
-    return buildDomainDnsInstructions({
+    const payload = buildDomainDnsInstructions({
       domain,
-      edgeHost,
+      edgeHost: routingTarget.target,
       verificationToken: verification_token,
+      routingTargetType: routingTarget.targetType,
+      legacyEdgeHost,
+    });
+
+    return enrichDomainDnsInstructionsWithDiagnostics(payload, this.dnsResolver, {
+      legacyEdgeHost,
     });
   }
 }

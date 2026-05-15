@@ -202,7 +202,7 @@ export class DnsInstructionsComponent implements OnInit {
     const labels: Record<string, string> = {
       ownership: 'Propiedad',
       routing: 'Routing',
-      certificate: 'Certificado ACM',
+      certificate: 'Certificado SSL',
     };
     return labels[purpose] || purpose;
   }

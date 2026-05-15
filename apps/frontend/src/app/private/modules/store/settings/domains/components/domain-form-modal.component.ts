@@ -23,9 +23,11 @@ import {
   SelectorComponent,
   SelectorOption,
   IconComponent,
+  SpinnerComponent,
 } from '../../../../../../shared/components/index';
 import {
   CreateStoreDomainDto,
+  DomainProvisioningStage,
   StoreDomain,
   StoreDomainType,
   StoreDomainOwnership,
@@ -43,6 +45,7 @@ import { environment } from '../../../../../../../environments/environment';
     InputComponent,
     SelectorComponent,
     IconComponent,
+    SpinnerComponent,
   ],
   templateUrl: './domain-form-modal.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -172,6 +175,68 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
     return this.recordsFor('routing');
   }
 
+  get provisioningStages(): DomainProvisioningStage[] {
+    return (
+      this.dnsInstructions()?.stages ?? [
+        {
+          key: 'ownership',
+          label: 'Verificación Vendix',
+          status: this.isOwnershipStepComplete ? 'complete' : 'pending',
+          detail: this.isOwnershipStepComplete
+            ? 'La propiedad ya fue verificada.'
+            : 'Agrega el TXT de propiedad.',
+          waiting: !this.isOwnershipStepComplete,
+        },
+        {
+          key: 'certificate',
+          label: 'Certificado SSL',
+          status: this.isCertificateStepComplete ? 'complete' : 'pending',
+          detail: this.isCertificateStepComplete
+            ? 'El certificado ya fue verificado.'
+            : 'Esperando validación DNS del certificado.',
+          waiting: !this.isCertificateStepComplete,
+        },
+      ]
+    );
+  }
+
+  get waitingStage(): DomainProvisioningStage | null {
+    return (
+      this.provisioningStages.find((stage) => stage.waiting) ??
+      (this.isWaitingDomainStatus ? {
+        key: 'cloudfront',
+        label: this.getStatusLabel(this.domain()?.status || ''),
+        status: 'waiting',
+        detail: 'Vendix está revisando el dominio automáticamente.',
+        waiting: true,
+      } : null)
+    );
+  }
+
+  get isWaitingDomainStatus(): boolean {
+    return [
+      'issuing_certificate',
+      'pending_alias',
+      'propagating',
+    ].includes(this.domain()?.status || '');
+  }
+
+  get awsCertificateIssued(): boolean {
+    return (
+      this.dnsInstructions()?.aws_certificate_status === 'ISSUED' ||
+      this.domain()?.config?.ssl?.aws_certificate_status === 'ISSUED' ||
+      this.domain()?.ssl_status === 'issued'
+    );
+  }
+
+  get antiPanicMessage(): string {
+    const dns = this.dnsInstructions();
+    if (dns?.routing_status === 'complete' && dns?.https_probe_status !== 'passed') {
+      return 'Vendix ya ve tus DNS desde internet. Si tu navegador aún falla, puede ser caché o DNS de tu red.';
+    }
+    return 'No pruebes el dominio como definitivo hasta que quede Activo; puede mostrar error SSL mientras el certificado y la conexión terminan.';
+  }
+
   get isOwnershipStepComplete(): boolean {
     const dns = this.dnsInstructions();
     const domain = this.domain();
@@ -237,7 +302,9 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
   statusLabel(status?: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
+      waiting: 'Esperando',
       complete: 'Completado',
+      failed: 'Fallido',
       not_required: 'No requerido',
       covered_by_parent: 'Cubierto por dominio padre',
     };
@@ -247,10 +314,49 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
   purposeLabel(purpose?: string): string {
     const labels: Record<string, string> = {
       ownership: 'propiedad',
-      certificate: 'certificado AWS',
+      certificate: 'certificado SSL',
       routing: 'enrutamiento',
     };
     return labels[purpose || ''] || purpose || 'registro';
+  }
+
+  providerHost(record: { provider_host?: string; name: string }): string {
+    return record.provider_host || record.name;
+  }
+
+  stageDotClass(stage: DomainProvisioningStage): string {
+    if (stage.status === 'complete' || stage.status === 'covered_by_parent') {
+      return 'border-emerald-500 bg-emerald-500 text-white';
+    }
+    if (stage.status === 'failed') return 'border-red-500 bg-red-500 text-white';
+    if (stage.waiting || stage.status === 'waiting') {
+      return 'border-sky-500 bg-sky-50 text-sky-600';
+    }
+    return 'border-slate-300 bg-white text-slate-400';
+  }
+
+  stageTextClass(stage: DomainProvisioningStage): string {
+    if (stage.status === 'complete' || stage.status === 'covered_by_parent') {
+      return 'text-emerald-800';
+    }
+    if (stage.status === 'failed') return 'text-red-800';
+    if (stage.waiting || stage.status === 'waiting') return 'text-sky-800';
+    return 'text-slate-500';
+  }
+
+  getStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending_ownership: 'Acción requerida',
+      pending_certificate: 'Esperando certificado',
+      issuing_certificate: 'Validando certificado',
+      pending_alias: 'Conectando dominio',
+      propagating: 'Propagando SSL',
+      active: 'Activo',
+      failed_ownership: 'Falló verificación',
+      failed_certificate: 'Falló certificado',
+      failed_alias: 'Falló conexión',
+    };
+    return labels[status] || status;
   }
 
   private recordsFor(group: 'ownership' | 'certificate' | 'routing') {

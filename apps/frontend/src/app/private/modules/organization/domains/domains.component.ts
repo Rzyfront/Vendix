@@ -484,7 +484,7 @@ export class DomainsComponent implements OnInit {
   readonly selectedDomainForVerify = signal<Domain | null>(null);
   readonly verificationResult = signal<VerifyDomainResult | null>(null);
   readonly dnsInstructions = signal<DnsInstructions | null>(null);
-  // Edge host (CloudFront target) for the DNS CNAME value, fetched from
+  // Edge host for the DNS CNAME value, fetched from
   // backend `getDnsInstructions().target`. Falls back to the platform domain
   // from environment so the modal never renders with an empty value.
   readonly dnsInstructionsTarget = signal<string | null>(null);
@@ -943,8 +943,8 @@ private loadInitialData(): void {
       pending_ssl: 'SSL Pendiente',
       pending_certificate: 'Certificado pendiente',
       issuing_certificate: 'Emitiendo certificado',
-      pending_alias: 'Alias pendiente',
-      propagating: 'Propagando',
+      pending_alias: 'Conectando dominio',
+      propagating: 'Propagando SSL',
       failed_ownership: 'Falló propiedad',
       failed_certificate: 'Falló certificado',
       failed_alias: 'Falló alias',
