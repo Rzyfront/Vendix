@@ -545,7 +545,9 @@ export async function enrichDomainDnsInstructionsWithDiagnostics(
           record,
           await dnsResolver.resolveCname(record.fqdn_name ?? record.name),
           record.value,
-          'El certificado ya fue verificado. Conserva el CNAME para renovaciones.',
+          awsIssued
+            ? 'El certificado ya fue verificado. Conserva el CNAME para renovaciones.'
+            : 'Vendix ya ve este CNAME desde DNS público. Ahora falta que el certificado termine de emitirse.',
           'Aún no se ve este CNAME de validación desde DNS público.',
         );
 

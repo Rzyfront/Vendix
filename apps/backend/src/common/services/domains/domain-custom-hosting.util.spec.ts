@@ -134,6 +134,65 @@ describe('domain custom hosting utilities', () => {
     expect(payload.covered_by_parent_hostname).toBe('example.com');
   });
 
+  it('distinguishes detected certificate DNS from issued certificate state', async () => {
+    const payload = buildDomainDnsInstructions({
+      domain: {
+        ...rootDomain,
+        status: 'issuing_certificate',
+        ssl_status: 'pending',
+      },
+      edgeHost: 'd123.cloudfront.net',
+    });
+    const resolver = {
+      resolveTxt: jest.fn(),
+      resolveCname: jest.fn().mockResolvedValue({
+        records: ['_abc.acm-validations.aws'],
+        consensus: true,
+        consensusRecords: ['_abc.acm-validations.aws'],
+        perResolver: [
+          {
+            resolver: '1.1.1.1',
+            status: 'success',
+            records: ['_abc.acm-validations.aws'],
+          },
+          {
+            resolver: '8.8.8.8',
+            status: 'success',
+            records: ['_abc.acm-validations.aws'],
+          },
+          { resolver: '9.9.9.9', status: 'error', records: [] },
+        ],
+      }),
+      resolveA: jest.fn().mockResolvedValue({
+        records: ['54.1.1.1'],
+        consensus: true,
+        consensusRecords: ['54.1.1.1'],
+        perResolver: [
+          { resolver: '1.1.1.1', status: 'success', records: ['54.1.1.1'] },
+          { resolver: '8.8.8.8', status: 'success', records: ['54.1.1.1'] },
+          { resolver: '9.9.9.9', status: 'success', records: ['54.1.1.1'] },
+        ],
+      }),
+    } as any;
+
+    const enriched = await enrichDomainDnsInstructionsWithDiagnostics(
+      payload,
+      resolver,
+    );
+
+    expect(enriched.certificate_status).toBe('pending');
+    expect(enriched.instructions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: 'certificate',
+          status: 'complete',
+          status_reason:
+            'Vendix ya ve este CNAME desde DNS público. Ahora falta que el certificado termine de emitirse.',
+        }),
+      ]),
+    );
+  });
+
   it('marks routing as complete when public resolvers see the legacy edge target', async () => {
     const payload = buildDomainDnsInstructions({
       domain: {
