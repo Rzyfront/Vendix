@@ -30,6 +30,7 @@ import { TOKEN_DEFAULTS } from './constants/token.constants';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { organizations } from '@prisma/client';
+import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 
 /**
  * Result of organization lookup with smart fallback logic
@@ -1749,7 +1750,9 @@ export class AuthService {
       target_organization_id = storeUser.store.organizations.id;
       target_store_id = storeUser.store.id;
       active_store = storeUser.store; // Guardar la tienda activa
-      active_store_settings = storeUser.store.store_settings?.settings || null;
+      active_store_settings = mergeStoreSettingsWithDefaults(
+        storeUser.store.store_settings?.settings,
+      );
       login_context = `store:${effective_store_slug}`;
     }
 

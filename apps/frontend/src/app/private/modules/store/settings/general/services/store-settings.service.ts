@@ -49,6 +49,17 @@ export class StoreSettingsService {
         `${this.api_base_url}/settings`,
       )
       .pipe(
+        tap((response) => {
+          const store_settings = response?.data;
+          if (!store_settings) return;
+
+          this.store.dispatch(
+            AuthActions.updateStoreSettings({ store_settings }),
+          );
+          if (store_settings.general?.currency) {
+            this.currencyFormatService.refresh();
+          }
+        }),
         map((response) => response || { success: true, data: null }),
         catchError(this.handleError)
       );

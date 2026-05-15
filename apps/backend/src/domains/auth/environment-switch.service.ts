@@ -8,11 +8,14 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
+import { S3Service } from '@common/services/s3.service';
 import {
   AuditService,
   AuditAction,
   AuditResource,
 } from '../../common/audit/audit.service';
+import { mergeStoreSettingsWithDefaults } from '../store/settings/defaults/default-store-settings';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -22,6 +25,8 @@ export class EnvironmentSwitchService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly auditService: AuditService,
+    private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly s3Service: S3Service,
   ) {}
 
   async switchEnvironment(
@@ -68,6 +73,7 @@ export class EnvironmentSwitchService {
 
     let store_id: number | null = null;
     let active_store: any = null;
+    let active_store_settings: any = null;
 
     // 1. Lógica para STORE_ADMIN
     if (targetEnvironment === 'STORE_ADMIN') {
@@ -167,8 +173,10 @@ export class EnvironmentSwitchService {
           organization_id: user.organization_id,
         },
         include: {
+          store_settings: true,
           organizations: {
             include: {
+              organization_settings: true,
               domain_settings: {
                 where: {
                   is_primary: true,
@@ -217,6 +225,9 @@ export class EnvironmentSwitchService {
 
       store_id = store.id;
       active_store = store;
+      active_store_settings = mergeStoreSettingsWithDefaults(
+        store.store_settings?.settings,
+      );
     }
 
     if (targetEnvironment === 'ORG_ADMIN') {
@@ -316,6 +327,7 @@ export class EnvironmentSwitchService {
         },
         organizations: {
           include: {
+            organization_settings: true,
             domain_settings: {
               where: {
                 is_primary: true,
@@ -345,6 +357,8 @@ export class EnvironmentSwitchService {
     const user_settings = await this.prismaService.user_settings.findUnique({
       where: { user_id: userId },
     });
+    const defaults = await this.defaultPanelUIService.generatePanelUI('');
+    const permissions = this.getPermissionsFromRoles(user.user_roles);
 
     // Registrar el cambio de entorno en auditoría
     await this.auditService.log({
@@ -361,10 +375,38 @@ export class EnvironmentSwitchService {
     // Remover password del response
     const { password, ...user_with_roles_and_password } = user_with_roles_array;
 
+    const signedLogoUrl = await this.s3Service.signUrl(active_store?.logo_url);
+    const cleanStore = active_store
+      ? {
+          id: active_store.id,
+          name: active_store.name,
+          slug: active_store.slug,
+          legal_name: active_store.legal_name,
+          tax_id: active_store.tax_id,
+          tax_id_dv: active_store.tax_id_dv,
+          nit_type: active_store.nit_type,
+          created_at: active_store.created_at,
+          updated_at: active_store.updated_at,
+          is_active: active_store.is_active,
+          logo_url: signedLogoUrl,
+          manager_user_id: active_store.manager_user_id,
+          organization_id: active_store.organization_id,
+          store_code: active_store.store_code,
+          store_type: active_store.store_type,
+          timezone: active_store.timezone,
+          operating_hours: active_store.operating_hours,
+          onboarding: active_store.onboarding,
+          default_location_id: active_store.default_location_id,
+          organizations: active_store.organizations,
+          domain_settings: active_store.domain_settings,
+          store_users: active_store.store_users,
+        }
+      : null;
+
     // Agregar active_store al usuario para consistencia con login
     const user_with_store = {
       ...user_with_roles_and_password,
-      store: active_store,
+      store: cleanStore,
     };
 
     const userSettingsForResponse = user_settings
@@ -379,6 +421,11 @@ export class EnvironmentSwitchService {
     const response = {
       user: user_with_store,
       user_settings: userSettingsForResponse,
+      store_settings:
+        targetEnvironment === 'STORE_ADMIN' ? active_store_settings : null,
+      default_panel_ui: defaults.panel_ui,
+      permissions,
+      roles,
       access_token: access_token,
       refresh_token: refresh_token,
       token_type: 'Bearer',
@@ -387,6 +434,22 @@ export class EnvironmentSwitchService {
     };
 
     return response;
+  }
+
+  private getPermissionsFromRoles(userRoles: any[]): string[] {
+    const permissions = new Set<string>();
+
+    for (const userRole of userRoles) {
+      const rolePermissions = userRole.roles?.role_permissions ?? [];
+      for (const rolePermission of rolePermissions) {
+        const permissionName = rolePermission.permissions?.name;
+        if (permissionName) {
+          permissions.add(permissionName);
+        }
+      }
+    }
+
+    return Array.from(permissions);
   }
 
   private async createUserSession(

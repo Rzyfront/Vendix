@@ -45,8 +45,8 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           new_customers_orders_alerts_email: true,
         },
         pos: {
-          allow_anonymous_sales: false,
-          anonymous_sales_as_default: false,
+          allow_anonymous_sales: true,
+          anonymous_sales_as_default: true,
           business_hours: {
             monday: { open: '07:00', close: '20:00' },
             tuesday: { open: '07:00', close: '20:00' },

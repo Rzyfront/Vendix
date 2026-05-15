@@ -415,6 +415,18 @@ export const authReducer = createReducer(
   })),
 
   // Update Store Settings
+  on(AuthActions.updateStoreSettings, (state, { store_settings }) => {
+    const newState = {
+      ...state,
+      store_settings,
+      loading: false,
+      error: null,
+    };
+    // Save to localStorage to keep runtime hydration consistent
+    saveAuthState(newState);
+    return newState;
+  }),
+
   on(AuthActions.updateStoreSettingsSuccess, (state, { store_settings }) => {
     const newState = {
       ...state,
