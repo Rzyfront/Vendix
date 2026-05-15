@@ -23,7 +23,7 @@ export class EcommerceService {
     return this.http
       .get<any>(`${this.apiBaseUrl}/settings`)
       .pipe(
-        map((response) => response.data || response),
+        map((response) => this.unwrapResponse<SettingsResponse>(response)),
         catchError(this.handleError)
       );
   }
@@ -36,7 +36,7 @@ export class EcommerceService {
     return this.http
       .get<any>(`${this.apiBaseUrl}/template/${type}`)
       .pipe(
-        map((response) => response.data || response),
+        map((response) => this.unwrapResponse<EcommerceSettings>(response)),
         catchError(this.handleError)
       );
   }
@@ -52,7 +52,7 @@ export class EcommerceService {
     return this.http
       .post<any>(`${this.apiBaseUrl}/upload-slider-image`, formData)
       .pipe(
-        map((response) => response.data || response),
+        map((response) => this.unwrapResponse<UploadImageResponse>(response)),
         catchError(this.handleError)
       );
   }
@@ -66,9 +66,17 @@ export class EcommerceService {
     return this.http
       .patch<any>(`${this.apiBaseUrl}/settings`, payload)
       .pipe(
-        map((response) => response.data || response),
+        map((response) => this.unwrapResponse<EcommerceSettings>(response)),
         catchError(this.handleError)
       );
+  }
+
+  private unwrapResponse<T>(response: any): T {
+    if (response?.success === false) {
+      throw new Error(response.message || response.error || 'Unknown error');
+    }
+
+    return (response?.data ?? response) as T;
   }
 
   private handleError(error: any): Observable<never> {

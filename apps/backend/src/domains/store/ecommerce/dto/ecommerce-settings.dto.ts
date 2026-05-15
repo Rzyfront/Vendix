@@ -127,6 +127,11 @@ export class SliderPhotoDto {
   @IsString()
   url?: string | null;
 
+  @ApiPropertyOptional({ description: 'Raw S3 key for persisted images' })
+  @IsOptional()
+  @IsString()
+  key?: string | null;
+
   @ApiPropertyOptional({ description: 'Title to display over the image' })
   @IsOptional()
   @IsString()
