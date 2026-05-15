@@ -127,6 +127,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging AI job failures | `vendix-ai-queue` |
 | Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
+| Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |

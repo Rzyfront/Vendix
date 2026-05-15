@@ -14,6 +14,7 @@ import {
   StoreSettings,
   EcommerceSettings,
 } from '../settings/interfaces/store-settings.interface';
+import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 
 @Injectable()
 export class EcommerceService {
@@ -32,22 +33,44 @@ export class EcommerceService {
    */
   async getSettings() {
     const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new Error('Store ID not found in context');
 
     // 1. Read from store_settings.settings.ecommerce (single source of truth)
-    const storeSettings = await this.prisma.store_settings.findUnique({
-      where: { store_id },
-    });
+    const storeSettings = await this.findStoreSettings(store_id);
+    const currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
 
-    const ecommerceConfig =
-      (storeSettings?.settings as StoreSettings)?.ecommerce || null;
+    let ecommerceConfig = currentSettings.ecommerce || null;
 
-    // 2. Find ecommerce domain to get the URL
-    const domain = await this.prisma.domain_settings.findFirst({
-      where: {
-        store_id,
-        domain_type: 'ecommerce',
-      },
-    });
+    // 2. Find ecommerce domain to get the URL and legacy config fallback
+    const domain = await this.findEcommerceDomain(store_id);
+
+    if (!ecommerceConfig) {
+      const legacyConfig = await this.findLegacyEcommerceConfig(store_id);
+
+      if (legacyConfig) {
+        ecommerceConfig = this.prepareEcommerceForStorage(legacyConfig);
+
+        await this.prisma.store_settings.upsert({
+          where: { store_id },
+          update: {
+            settings: {
+              ...currentSettings,
+              ecommerce: ecommerceConfig,
+            } as any,
+            updated_at: new Date(),
+          },
+          create: {
+            store_id,
+            settings: {
+              ...currentSettings,
+              ecommerce: ecommerceConfig,
+            } as any,
+          },
+        });
+      }
+    }
 
     if (!ecommerceConfig) {
       // Return null indicates setup mode (no configuration)
@@ -57,11 +80,13 @@ export class EcommerceService {
     // 3. Create a copy to avoid mutating the original
     const config = JSON.parse(JSON.stringify(ecommerceConfig));
 
-    // 4. Sign S3 URLs for slider photos
+    // 4. Sign S3 URLs for slider photos while keeping the raw key available
     if (config.slider?.photos) {
       for (const photo of config.slider.photos) {
-        if (photo.url && !photo.url.startsWith('http')) {
-          photo.url = await this.s3Service.signUrl(photo.url);
+        const storedKey = photo.key || photo.url;
+        if (storedKey && !storedKey.startsWith('http')) {
+          photo.url = await this.s3Service.signUrl(storedKey);
+          photo.key = storedKey;
         }
       }
     }
@@ -74,14 +99,128 @@ export class EcommerceService {
     }
 
     // 6. Build ecommerce URL from domain hostname
-    const ecommerceUrl = domain
-      ? this.buildEcommerceUrl(domain.hostname)
-      : null;
+    const ecommerceUrl = domain ? this.buildEcommerceUrl(domain.hostname) : null;
 
     return {
       config,
       ecommerceUrl,
     };
+  }
+
+  private async findStoreSettings(store_id: number) {
+    return this.prisma.store_settings.findFirst({
+      where: { store_id },
+    });
+  }
+
+  private async findEcommerceDomain(store_id: number) {
+    const activeDomain = await this.prisma.domain_settings.findFirst({
+      where: {
+        store_id,
+        domain_type: 'ecommerce',
+        status: 'active',
+      },
+      orderBy: { updated_at: 'desc' },
+    });
+
+    if (activeDomain) return activeDomain;
+
+    return this.prisma.domain_settings.findFirst({
+      where: {
+        store_id,
+        domain_type: 'ecommerce',
+      },
+      orderBy: { updated_at: 'desc' },
+    });
+  }
+
+  private async findLegacyEcommerceConfig(
+    store_id: number,
+  ): Promise<Partial<EcommerceSettings> | null> {
+    const domains = await this.prisma.domain_settings.findMany({
+      where: {
+        store_id,
+        domain_type: 'ecommerce',
+      },
+      orderBy: { updated_at: 'desc' },
+    });
+
+    for (const domain of domains) {
+      const legacyConfig = this.extractLegacyEcommerceConfig(domain.config);
+      if (legacyConfig) return legacyConfig;
+    }
+
+    return null;
+  }
+
+  private extractLegacyEcommerceConfig(
+    rawConfig: unknown,
+  ): Partial<EcommerceSettings> | null {
+    if (!this.isRecord(rawConfig)) return null;
+
+    if (this.isLegacyEcommerceConfig(rawConfig.ecommerce)) {
+      return rawConfig.ecommerce as Partial<EcommerceSettings>;
+    }
+
+    if (!this.isLegacyEcommerceConfig(rawConfig)) return null;
+
+    const {
+      branding: _branding,
+      security: _security,
+      ...legacyConfig
+    } = rawConfig;
+
+    return legacyConfig as Partial<EcommerceSettings>;
+  }
+
+  private isLegacyEcommerceConfig(value: unknown): boolean {
+    if (!this.isRecord(value)) return false;
+
+    return ['inicio', 'slider', 'catalog', 'cart', 'checkout', 'footer'].some(
+      (key) => key in value,
+    );
+  }
+
+  private isRecord(value: unknown): value is Record<string, any> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private prepareEcommerceForStorage(
+    ecommerceDto: EcommerceSettingsDto | Partial<EcommerceSettings>,
+  ): EcommerceSettings {
+    const settings = this.applyDefaultValues(
+      ecommerceDto as EcommerceSettingsDto,
+    ) as EcommerceSettings;
+
+    const preparedSettings: EcommerceSettings = {
+      ...settings,
+      enabled: settings.enabled ?? true,
+    };
+
+    if (
+      preparedSettings.slider?.photos &&
+      Array.isArray(preparedSettings.slider.photos)
+    ) {
+      preparedSettings.slider.photos = preparedSettings.slider.photos.map(
+        (photo: any) => {
+          const sanitizedPhoto = { ...photo };
+          const sourceValue = photo.key || photo.url;
+          const sanitizedKey = extractS3KeyFromUrl(sourceValue);
+          if (sanitizedKey) {
+            sanitizedPhoto.url = sanitizedKey;
+            sanitizedPhoto.key = sanitizedKey;
+          }
+          return sanitizedPhoto;
+        },
+      );
+    }
+
+    if (preparedSettings.inicio?.logo_url) {
+      preparedSettings.inicio.logo_url =
+        extractS3KeyFromUrl(preparedSettings.inicio.logo_url) ?? undefined;
+    }
+
+    return preparedSettings;
   }
 
   /**
@@ -137,12 +276,17 @@ export class EcommerceService {
     const processedDto = this.applyDefaultValues(ecommerceDto);
 
     // 1. Get current store_settings
-    const storeSettings = await this.prisma.store_settings.findUnique({
-      where: { store_id },
-    });
-    const currentSettings = (storeSettings?.settings || {}) as StoreSettings;
+    const storeSettings = await this.findStoreSettings(store_id);
+    const currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
+    const legacyEcommerce = currentSettings.ecommerce
+      ? null
+      : await this.findLegacyEcommerceConfig(store_id);
     const existingEcommerce =
-      currentSettings.ecommerce || ({} as Partial<EcommerceSettings>);
+      currentSettings.ecommerce ||
+      legacyEcommerce ||
+      ({} as Partial<EcommerceSettings>);
 
     // 2. Merge with existing ecommerce config
     const mergedEcommerce: EcommerceSettings = {
@@ -150,9 +294,11 @@ export class EcommerceService {
       ...processedDto,
       enabled: true,
       slider: {
+        ...existingEcommerce.slider,
+        ...processedDto.slider,
         enable:
-          existingEcommerce.slider?.enable ??
           processedDto.slider?.enable ??
+          existingEcommerce.slider?.enable ??
           false,
         photos:
           processedDto.slider?.photos ?? existingEcommerce.slider?.photos ?? [],
@@ -166,39 +312,19 @@ export class EcommerceService {
     } as EcommerceSettings;
 
     // 3. Sanitize URLs to S3 keys before storage
-    if (
-      mergedEcommerce.slider?.photos &&
-      Array.isArray(mergedEcommerce.slider.photos)
-    ) {
-      mergedEcommerce.slider.photos = mergedEcommerce.slider.photos.map(
-        (photo: any) => {
-          const sanitizedPhoto = { ...photo };
-          const sourceValue = photo.key || photo.url;
-          const sanitizedKey = extractS3KeyFromUrl(sourceValue);
-          if (sanitizedKey) {
-            sanitizedPhoto.url = sanitizedKey;
-            sanitizedPhoto.key = sanitizedKey;
-          }
-          return sanitizedPhoto;
-        },
-      );
-    }
-
-    if (mergedEcommerce.inicio?.logo_url) {
-      mergedEcommerce.inicio.logo_url =
-        extractS3KeyFromUrl(mergedEcommerce.inicio.logo_url) ?? undefined;
-    }
+    const preparedEcommerce =
+      this.prepareEcommerceForStorage(mergedEcommerce);
 
     // 4. Check if logo changed for favicon generation
     const logoChanged =
-      mergedEcommerce.inicio?.logo_url &&
-      mergedEcommerce.inicio.logo_url !== existingEcommerce.inicio?.logo_url;
+      preparedEcommerce.inicio?.logo_url &&
+      preparedEcommerce.inicio.logo_url !== existingEcommerce.inicio?.logo_url;
 
     // 5. Save to store_settings.settings.ecommerce (single source of truth)
     const updatedSettings = {
       ...currentSettings,
       // Keep store branding unchanged (no sync from ecommerce)
-      ecommerce: mergedEcommerce,
+      ecommerce: preparedEcommerce,
     };
 
     await this.prisma.store_settings.upsert({
@@ -222,21 +348,22 @@ export class EcommerceService {
       domain = await this.createEcommerceDomain(store_id, appType);
     } else {
       // Update app_type if needed (no config update)
-      await this.prisma.domain_settings.update({
-        where: { id: domain.id },
+      await this.prisma.domain_settings.updateMany({
+        where: { id: domain.id, store_id, domain_type: 'ecommerce' },
         data: { app_type: appType, updated_at: new Date() },
       });
     }
 
     // 7. Generate favicon if logo changed
-    if (logoChanged && mergedEcommerce.inicio?.logo_url) {
-      this.generateFaviconForEcommerce(mergedEcommerce.inicio.logo_url).catch(
-        (error) =>
-          this.logger.warn(`Favicon generation failed: ${error.message}`),
+    if (logoChanged && preparedEcommerce.inicio?.logo_url) {
+      this.generateFaviconForEcommerce(
+        preparedEcommerce.inicio.logo_url,
+      ).catch((error) =>
+        this.logger.warn(`Favicon generation failed: ${error.message}`),
       );
     }
 
-    return mergedEcommerce;
+    return preparedEcommerce;
   }
 
   /**
@@ -457,12 +584,12 @@ export class EcommerceService {
       this.logger.log(`Favicons generated: ${result.sizes.join(', ')}px`);
 
       // 4. Update store_settings.settings.branding.favicon_url (single source of truth)
-      const storeSettings = await this.prisma.store_settings.findUnique({
-        where: { store_id },
-      });
+      const storeSettings = await this.findStoreSettings(store_id);
 
       if (storeSettings) {
-        const currentSettings = (storeSettings.settings || {}) as StoreSettings;
+        const currentSettings = mergeStoreSettingsWithDefaults(
+          storeSettings.settings,
+        );
         const updatedSettings: StoreSettings = {
           ...currentSettings,
           branding: {
@@ -471,7 +598,7 @@ export class EcommerceService {
           },
         };
 
-        await this.prisma.store_settings.update({
+        await this.prisma.store_settings.updateMany({
           where: { store_id },
           data: {
             settings: updatedSettings as any,

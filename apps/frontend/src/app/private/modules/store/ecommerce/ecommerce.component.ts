@@ -115,13 +115,13 @@ export class EcommerceComponent {
   storeName = 'Mi Tienda';
 
   // Ecommerce URL for "Open Store" button
-  ecommerceUrl: string | null = null;
+  readonly ecommerceUrl = signal<string | null>(null);
 
   // Share modal state
   readonly isShareModalOpen = signal(false);
 
   // Footer settings (managed separately from the main form)
-  footerSettings: FooterSettings | undefined;
+  readonly footerSettings = signal<FooterSettings | undefined>(undefined);
 
   readonly ecommerceHeaderActions = computed<StickyHeaderActionButton[]>(() => {
     this.formValueSignal();
@@ -138,19 +138,21 @@ export class EcommerceComponent {
         disabled: isSaving || isPristine });
     }
 
-    if (this.isEditMode() && this.ecommerceUrl) {
+    const ecommerceUrl = this.ecommerceUrl();
+
+    if (this.isEditMode() && ecommerceUrl) {
       actions.push({
         id: 'share',
         label: 'Compartir',
         variant: 'outline',
         icon: 'share-2',
-        disabled: !this.ecommerceUrl });
+        disabled: !ecommerceUrl });
       actions.push({
         id: 'open',
         label: 'Abrir Tienda',
         variant: 'outline',
         icon: 'external-link',
-        disabled: !this.ecommerceUrl });
+        disabled: !ecommerceUrl });
     }
 
     actions.push({
@@ -337,33 +339,36 @@ export class EcommerceComponent {
             if (response.config.inicio?.logo_url) {
               this.logoPreview.set(response.config.inicio.logo_url);
               this.logoKey = response.config.inicio.logo_url;
+            } else {
+              this.logoPreview.set(null);
+              this.logoKey = null;
             }
 
             // Cargar imágenes del slider
             if (response.config.slider?.photos) {
               this.sliderImages.set(
                 response.config.slider.photos
-                  .filter((photo) => photo.url !== null || photo.key !== null)
+                  .filter((photo) => !!(photo.url || photo.key))
                   .map((photo) => ({
                     url: photo.url || undefined,
                     key: photo.key || undefined,
                     title: photo.title,
                     caption: photo.caption }))
               );
+            } else {
+              this.sliderImages.set([]);
             }
 
             // Cargar configuración del footer
-            if (response.config.footer) {
-              this.footerSettings = response.config.footer;
-            }
+            this.footerSettings.set(response.config.footer);
 
             // Obtener la URL de la Ecommerce desde la respuesta del endpoint
-            this.ecommerceUrl = response.ecommerceUrl || null;
+            this.ecommerceUrl.set(response.ecommerceUrl || null);
           } else {
             // MODO SETUP: no existe configuración
             this.isSetupMode.set(true);
             this.isEditMode.set(false);
-            this.ecommerceUrl = null;
+            this.ecommerceUrl.set(null);
             this.loadTemplate();
           }
           this.isLoading.set(false);
@@ -390,9 +395,7 @@ export class EcommerceComponent {
           this.sliderImages.set([]);
           this.activeImageIndex.set(0);
           // Cargar defaults del footer
-          if (template.footer) {
-            this.footerSettings = template.footer;
-          }
+          this.footerSettings.set(template.footer);
           this.isLoading.set(false);
         },
         error: (error) => {
@@ -778,7 +781,7 @@ export class EcommerceComponent {
           key: img.key || null,
           title: img.title || '',
           caption: img.caption || '' })) },
-      footer: this.footerSettings };
+      footer: this.footerSettings() };
 
     this.ecommerceService
       .updateSettings(settings)
@@ -830,8 +833,9 @@ export class EcommerceComponent {
    * Open the Ecommerce store in a new tab
    */
   openEcommerceStore(): void {
-    if (this.ecommerceUrl) {
-      window.open(this.ecommerceUrl, '_blank', 'noopener,noreferrer');
+    const ecommerceUrl = this.ecommerceUrl();
+    if (ecommerceUrl) {
+      window.open(ecommerceUrl, '_blank', 'noopener,noreferrer');
     } else {
       this.toastService.warning('No se pudo obtener la URL de la tienda');
     }
@@ -848,7 +852,7 @@ export class EcommerceComponent {
    * Handle footer settings changes from FooterSettingsFormComponent
    */
   onFooterChange(footer: FooterSettings): void {
-    this.footerSettings = footer;
+    this.footerSettings.set(footer);
     this.settingsForm.markAsDirty();
   }
 

@@ -64,6 +64,7 @@ export interface PublicationSettings {
 // ============================================================================
 export interface EcommerceSliderPhoto {
   url?: string;
+  key?: string;
   title?: string;
   caption?: string;
 }

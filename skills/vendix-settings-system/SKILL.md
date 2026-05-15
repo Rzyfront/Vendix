@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Adding new settings sections to stores or organizations"
@@ -41,6 +41,7 @@ Use this skill for `store_settings`, `organization_settings`, hardcoded defaults
 - Store settings updates sanitize logo/favicon URLs; never persist signed S3 URLs.
 - `getDefaultStoreSettings()` is the primary store default path.
 - `default_templates.store_default_settings` is manual/template-based and may lag hardcoded defaults; do not treat it as the only source of defaults.
+- `store_settings` is a scoped singleton row; use `vendix-prisma-scopes` before changing Prisma access patterns for it.
 - Organization settings are simpler full-JSON settings through GET/PUT; do not document branding-only endpoints unless they exist.
 - Frontend store settings currently use signals and explicit save through `saveSettingsNow()`, not BehaviorSubject autosave.
 
@@ -52,6 +53,13 @@ Use this skill for `store_settings`, `organization_settings`, hardcoded defaults
 4. Update `settings.service.ts` merge/sync logic only if the section affects other tables.
 5. Update frontend interfaces/components if the section is user-editable.
 6. Update `default_templates` only if manual template application should include the section.
+
+## Store Settings Persistence
+
+- When using `StorePrismaService`, avoid `findUnique` for `store_settings` reads because scoped filters can turn the unique lookup into an invalid `WhereUniqueInput` with `AND`.
+- Prefer a local helper such as `findStoreSettings(store_id)` that uses `findFirst({ where: { store_id } })`.
+- For updates that must stay tenant-guarded, prefer `updateMany({ where: { store_id }, data })` or another scope-safe write shape. Use `upsert` only when the scoped service preserves the unique field at the top level.
+- Merge partial settings with `mergeStoreSettingsWithDefaults()` before reading nested sections so missing JSON keys do not force setup-mode defaults over existing production data.
 
 ## Branding And S3 URLs
 

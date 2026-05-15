@@ -21,7 +21,10 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { AppSettingsDto } from './dto/settings-schemas.dto';
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
-import { getDefaultStoreSettings } from './defaults/default-store-settings';
+import {
+  getPersistableDefaultStoreSettings,
+  mergeStoreSettingsWithDefaults,
+} from './defaults/default-store-settings';
 import { SettingsMigratorService } from './migrations/settings-migrator.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
@@ -77,7 +80,7 @@ export class SettingsService {
       where: { store_id: storeId },
       create: {
         store_id: storeId,
-        settings: getDefaultStoreSettings() as any,
+        settings: getPersistableDefaultStoreSettings() as any,
       },
       update: {},
     });
@@ -168,14 +171,17 @@ export class SettingsService {
 
     // Run lazy schema migrations against the persisted JSON. If any migration
     // applied, persist the migrated value so subsequent reads are idempotent.
-    let rawSettings = (storeSettings?.settings || {}) as any;
+    const defaultSettings = getPersistableDefaultStoreSettings();
+    const rawSettings = (storeSettings?.settings || {}) as any;
+    let settings = mergeStoreSettingsWithDefaults(rawSettings);
     if (storeSettings?.settings) {
       const result = this.migrator.migrate(rawSettings);
+      const migratedSettings = mergeStoreSettingsWithDefaults(result.migrated);
       if (result.changed) {
         try {
           await this.prisma.store_settings.update({
             where: { store_id },
-            data: { settings: result.migrated, updated_at: new Date() },
+            data: { settings: migratedSettings, updated_at: new Date() },
           });
           this.logger.log(
             `[Settings] migrated store ${store_id}: v${result.fromVersion}->v${result.toVersion}`,
@@ -186,12 +192,11 @@ export class SettingsService {
           );
         }
       }
-      rawSettings = result.migrated;
+      settings = migratedSettings;
     }
 
     // Read branding from store_settings.settings.branding (source of truth)
-    const settings = (rawSettings || {}) as StoreSettings;
-    const branding = settings.branding || getDefaultStoreSettings().branding;
+    const branding = settings.branding || defaultSettings.branding;
 
     // Map branding to legacy app structure for compatibility
     const primaryColor = branding.primary_color || '#7ED7A5';
@@ -208,14 +213,13 @@ export class SettingsService {
 
     if (!storeSettings || !storeSettings.settings) {
       return {
-        ...getDefaultStoreSettings(),
+        ...defaultSettings,
         general: {
-          ...getDefaultStoreSettings().general,
+          ...defaultSettings.general,
           name: store?.name,
           logo_url: signedStoreLogoUrl,
           store_type: store?.store_type,
-          timezone:
-            store?.timezone || getDefaultStoreSettings().general.timezone,
+          timezone: store?.timezone || defaultSettings.general.timezone,
         },
         app: {
           name: branding.name || store?.name || 'Vendix',
@@ -275,8 +279,9 @@ export class SettingsService {
     const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id },
     });
-    let currentSettings = (storeSettings?.settings ||
-      getDefaultStoreSettings()) as StoreSettings;
+    let currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
 
     // Guardar valores antiguos para auditoría
     const oldValues = { ...currentSettings };
@@ -336,8 +341,9 @@ export class SettingsService {
       const freshStoreSettings = await this.prisma.store_settings.findUnique({
         where: { store_id },
       });
-      currentSettings = (freshStoreSettings?.settings ||
-        getDefaultStoreSettings()) as StoreSettings;
+      currentSettings = mergeStoreSettingsWithDefaults(
+        freshStoreSettings?.settings,
+      );
     }
 
     // Merge solo las secciones enviadas
@@ -484,7 +490,7 @@ export class SettingsService {
       );
     }
 
-    return result.settings as StoreSettings;
+    return mergeStoreSettingsWithDefaults(result.settings);
   }
 
   async resetToDefault(): Promise<StoreSettings> {
@@ -495,11 +501,20 @@ export class SettingsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    await this.prisma.store_settings.delete({
+    const defaults = getPersistableDefaultStoreSettings();
+    await this.prisma.store_settings.upsert({
       where: { store_id },
+      update: {
+        settings: defaults,
+        updated_at: new Date(),
+      },
+      create: {
+        store_id,
+        settings: defaults,
+      },
     });
 
-    return getDefaultStoreSettings();
+    return this.getSettings();
   }
 
   async getSystemTemplates(): Promise<any[]> {
@@ -542,19 +557,21 @@ export class SettingsService {
       throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
+    const settings = mergeStoreSettingsWithDefaults(template.template_data);
+
     await this.prisma.store_settings.upsert({
       where: { store_id },
       update: {
-        settings: template.template_data,
+        settings,
         updated_at: new Date(),
       },
       create: {
         store_id,
-        settings: template.template_data,
+        settings,
       },
     });
 
-    return template.template_data as unknown as StoreSettings;
+    return settings;
   }
 
   /**
@@ -636,8 +653,9 @@ export class SettingsService {
         where: { store_id: storeId },
       });
 
-      const currentSettings = (storeSettings?.settings ||
-        getDefaultStoreSettings()) as StoreSettings;
+      const currentSettings = mergeStoreSettingsWithDefaults(
+        storeSettings?.settings,
+      );
       const updatedSettings = {
         ...currentSettings,
         branding: {
@@ -682,10 +700,11 @@ export class SettingsService {
       where: { store_id: storeId },
     });
 
-    const currentSettings = (storeSettings?.settings ||
-      getDefaultStoreSettings()) as StoreSettings;
+    const currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
     const existingBranding =
-      currentSettings.branding || getDefaultStoreSettings().branding;
+      currentSettings.branding || getPersistableDefaultStoreSettings().branding;
 
     // Build updated branding - only update fields that are provided
     const updatedBranding = {
@@ -822,13 +841,13 @@ export class SettingsService {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
-    const fiscalScope = await this.fiscalScope.requireFiscalScope(
-      organization_id,
-    );
+    const fiscalScope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
 
     if (fiscalScope === 'ORGANIZATION') {
-      const orgSettings =
-        await this.organizationPrisma.withoutScope().organization_settings.findFirst({
+      const orgSettings = await this.organizationPrisma
+        .withoutScope()
+        .organization_settings.findFirst({
           where: { organization_id },
           select: { settings: true },
         });
@@ -852,8 +871,8 @@ export class SettingsService {
         },
       }),
     ]);
-    const fiscalData = ((existing?.settings as any)?.fiscal_data ??
-      {}) as Record<string, unknown>;
+    const fiscalData = (mergeStoreSettingsWithDefaults(existing?.settings)
+      .fiscal_data ?? {}) as Record<string, unknown>;
     return {
       ...fiscalData,
       legal_name: store?.legal_name ?? fiscalData.legal_name,
@@ -889,9 +908,8 @@ export class SettingsService {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
-    const fiscalScope = await this.fiscalScope.requireFiscalScope(
-      organization_id,
-    );
+    const fiscalScope =
+      await this.fiscalScope.requireFiscalScope(organization_id);
     if (fiscalScope === 'ORGANIZATION') {
       throw new BadRequestException(
         'Fiscal data is managed at organization level for this organization.',
@@ -903,8 +921,7 @@ export class SettingsService {
     const existing = await this.prisma.store_settings.findUnique({
       where: { store_id },
     });
-    const currentSettings = (existing?.settings ||
-      getDefaultStoreSettings()) as StoreSettings;
+    const currentSettings = mergeStoreSettingsWithDefaults(existing?.settings);
     const previousFiscalData = currentSettings.fiscal_data ?? {};
 
     const nextFiscalData = {
@@ -994,7 +1011,7 @@ export class SettingsService {
         select: { settings: true },
       });
 
-      const settings = storeSettings?.settings as StoreSettings | null;
+      const settings = mergeStoreSettingsWithDefaults(storeSettings?.settings);
       return settings?.general?.currency || 'USD';
     } catch {
       return 'USD';

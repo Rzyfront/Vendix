@@ -334,6 +334,54 @@ export function getDefaultStoreSettings(): StoreSettings {
   };
 }
 
+export function getPersistableDefaultStoreSettings(): StoreSettings {
+  const { app: _legacyApp, ...settings } = getDefaultStoreSettings();
+  return settings as StoreSettings;
+}
+
+export function mergeStoreSettingsWithDefaults(raw: unknown): StoreSettings {
+  const source = isPlainObject(raw) ? { ...raw } : {};
+  delete source.app;
+
+  return deepMergeSettings(
+    getPersistableDefaultStoreSettings() as unknown as SettingsRecord,
+    source,
+  ) as unknown as StoreSettings;
+}
+
+function deepMergeSettings(
+  defaults: SettingsRecord,
+  overrides: SettingsRecord,
+): SettingsRecord {
+  const merged: SettingsRecord = { ...defaults };
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) continue;
+
+    const defaultValue = merged[key];
+    if (isPlainObject(defaultValue) && isPlainObject(value)) {
+      merged[key] = deepMergeSettings(defaultValue, value);
+    } else if (isPlainObject(defaultValue) && !isPlainObject(value)) {
+      merged[key] = defaultValue;
+    } else {
+      merged[key] = value;
+    }
+  }
+
+  return merged;
+}
+
+function isPlainObject(value: unknown): value is SettingsRecord {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !(value instanceof Date)
+  );
+}
+
+type SettingsRecord = Record<string, unknown>;
+
 function getDefaultBusinessHours(): Record<
   string,
   { open: string; close: string }

@@ -669,7 +669,7 @@
               de contacto, enlaces útiles, ayuda al cliente y redes sociales.
             </p>
             <app-footer-settings-form
-              [initialData]="footerSettings"
+              [initialData]="footerSettings()"
               (valueChange)="onFooterChange($event)"
             >
             </app-footer-settings-form>
@@ -682,7 +682,7 @@
   @defer (when isShareModalOpen()) {
     <app-store-share-modal
       [isOpen]="isShareModalOpen()"
-      [storeUrl]="ecommerceUrl"
+      [storeUrl]="ecommerceUrl()"
       [storeName]="storeName"
       [logoUrl]="logoPreview()"
       [primaryColor]="primaryColor()"

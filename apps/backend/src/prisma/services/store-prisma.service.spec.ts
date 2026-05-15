@@ -31,4 +31,33 @@ describe('StorePrismaService', () => {
   it('should have transaction method', () => {
     expect(service.$transaction).toBeDefined();
   });
+
+  describe('mergeScopedWhere', () => {
+    it('keeps a unique store_id at the top level when applying the same scope', () => {
+      const result = (service as any).mergeScopedWhere(
+        { store_id: 11 },
+        { store_id: 11 },
+      );
+
+      expect(result).toEqual({ store_id: 11 });
+    });
+
+    it('keeps unique fields at the top level and adds non-conflicting scope filters', () => {
+      const result = (service as any).mergeScopedWhere(
+        { id: 123 },
+        { store_id: 11 },
+      );
+
+      expect(result).toEqual({ id: 123, store_id: 11 });
+    });
+
+    it('preserves impossible conflicting scope checks without losing the unique key', () => {
+      const result = (service as any).mergeScopedWhere(
+        { store_id: 99 },
+        { store_id: 11 },
+      );
+
+      expect(result).toEqual({ store_id: 99, AND: [{ store_id: 11 }] });
+    });
+  });
 });
