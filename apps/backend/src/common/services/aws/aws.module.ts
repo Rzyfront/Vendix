@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { AcmService } from './acm.service';
 import { CloudFrontService } from './cloudfront.service';
+import { DomainRootProvisioningService } from './domain-root-provisioning.service';
 import { DomainProvisioningService } from './domain-provisioning.service';
 
 /**
@@ -14,7 +15,17 @@ import { DomainProvisioningService } from './domain-provisioning.service';
 @Global()
 @Module({
   imports: [ConfigModule, PrismaModule],
-  providers: [AcmService, CloudFrontService, DomainProvisioningService],
-  exports: [AcmService, CloudFrontService, DomainProvisioningService],
+  providers: [
+    AcmService,
+    CloudFrontService,
+    DomainProvisioningService,
+    DomainRootProvisioningService,
+  ],
+  exports: [
+    AcmService,
+    CloudFrontService,
+    DomainProvisioningService,
+    DomainRootProvisioningService,
+  ],
 })
 export class AwsModule {}

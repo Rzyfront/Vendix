@@ -38,8 +38,10 @@ describe('Organization DomainsService', () => {
     } as any;
     const service = new DomainsService(
       prisma,
+      {} as any,
       { emit: jest.fn() } as any,
       { isBlocked: jest.fn().mockResolvedValue({ blocked: false }) } as any,
+      {} as any,
       {} as any,
       {} as any,
     );

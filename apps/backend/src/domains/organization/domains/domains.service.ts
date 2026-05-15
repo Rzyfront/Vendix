@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { Prisma } from '@prisma/client';
 import {
   CreateDomainSettingDto,
   UpdateDomainSettingDto,
@@ -19,6 +21,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { BlocklistService } from 'src/common/services/blocklist/blocklist.service';
 import { DnsResolverService } from 'src/common/services/dns/dns-resolver.service';
 import { DomainProvisioningService } from 'src/common/services/aws/domain-provisioning.service';
+import { DomainRootProvisioningService } from 'src/common/services/aws/domain-root-provisioning.service';
 import {
   buildDomainDnsInstructions,
   buildInheritedDomainConfig,
@@ -59,10 +62,12 @@ export class DomainsService implements OnModuleInit {
 
   constructor(
     private prisma: OrganizationPrismaService,
+    private globalPrisma: GlobalPrismaService,
     private eventEmitter: EventEmitter2,
     private blocklist: BlocklistService,
     private dnsResolver: DnsResolverService,
     private domainProvisioning: DomainProvisioningService,
+    private domainRootProvisioning: DomainRootProvisioningService,
   ) {}
 
   async onModuleInit() {}
@@ -129,7 +134,10 @@ export class DomainsService implements OnModuleInit {
     return storeId ? 'STORE_ECOMMERCE' : 'ORG_LANDING';
   }
 
-  private validateAppAssignment(appType: string, storeId?: number | null): void {
+  private validateAppAssignment(
+    appType: string,
+    storeId?: number | null,
+  ): void {
     if (!APP_TYPES.includes(appType)) {
       throw new BadRequestException('Invalid app_type');
     }
@@ -149,7 +157,8 @@ export class DomainsService implements OnModuleInit {
 
   private getEdgeHost(): string {
     return (
-      process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
+      process.env.EDGE_HOST ||
+      `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
     );
   }
 
@@ -471,7 +480,7 @@ export class DomainsService implements OnModuleInit {
       ? ('active' as any)
       : isInheritedSubdomain
         ? ('active' as any)
-      : ('pending_ownership' as any);
+        : ('pending_ownership' as any);
     const is_primary = status === 'active' ? data.is_primary || false : false;
 
     if (is_primary || status === 'active') {
@@ -491,15 +500,16 @@ export class DomainsService implements OnModuleInit {
       ? ('issued' as any)
       : isInheritedSubdomain
         ? ('issued' as any)
-      : ('pending' as any);
+        : ('pending' as any);
 
     const tokenExpiryDays = parseInt(
       process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
       10,
     );
-    const expires_token_at = status === 'active'
-      ? null
-      : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+    const expires_token_at =
+      status === 'active'
+        ? null
+        : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
     const config = isInheritedSubdomain
       ? buildInheritedDomainConfig(data.config as any, inheritedParent)
       : (data.config as any);
@@ -1031,8 +1041,119 @@ export class DomainsService implements OnModuleInit {
       legacyEdgeHost,
     });
 
-    return enrichDomainDnsInstructionsWithDiagnostics(payload, this.dnsResolver, {
-      legacyEdgeHost,
+    return enrichDomainDnsInstructionsWithDiagnostics(
+      payload,
+      this.dnsResolver,
+      {
+        legacyEdgeHost,
+      },
+    );
+  }
+
+  async createDomainRoot(
+    dto: { hostname: string; config?: Record<string, any> },
+    organizationId: number,
+  ) {
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const hostname = dto.hostname.trim().toLowerCase();
+    const blockResult = await this.blocklist.isBlocked(hostname);
+    if (blockResult.blocked) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_DOMAIN_003,
+        `Hostname ${hostname} is blocked: ${blockResult.reason ?? 'policy'}`,
+        { hostname, pattern: blockResult.pattern },
+      );
+    }
+
+    return this.domainRootProvisioning.createRoot({
+      hostname,
+      organization_id: organizationId,
+      store_id: null,
+      config: (dto.config ?? {}) as Prisma.InputJsonValue,
     });
+  }
+
+  async getDomainRoots(organizationId: number) {
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    return this.globalPrisma.domain_roots.findMany({
+      where: { organization_id: organizationId },
+      include: {
+        assignments: {
+          select: {
+            id: true,
+            hostname: true,
+            app_type: true,
+            status: true,
+            is_primary: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async getDomainRootById(rootId: number, organizationId: number) {
+    const root = await this.domainRootProvisioning.getRootById(rootId);
+    if (root.organization_id !== organizationId) {
+      throw new NotFoundException('Domain root not found');
+    }
+
+    return this.globalPrisma.domain_roots.findUnique({
+      where: { id: root.id },
+      include: {
+        assignments: {
+          select: {
+            id: true,
+            hostname: true,
+            app_type: true,
+            status: true,
+            is_primary: true,
+          },
+          orderBy: { created_at: 'asc' },
+        },
+      },
+    });
+  }
+
+  async getDomainRootDnsInstructions(rootId: number, organizationId: number) {
+    const root = await this.domainRootProvisioning.getRootById(rootId);
+    if (root.organization_id !== organizationId) {
+      throw new NotFoundException('Domain root not found');
+    }
+
+    const payload = await this.domainRootProvisioning.getDnsInstructions(
+      root.id,
+    );
+    return enrichDomainDnsInstructionsWithDiagnostics(
+      payload,
+      this.dnsResolver,
+      {
+        legacyEdgeHost: this.getEdgeHost(),
+      },
+    );
+  }
+
+  async verifyDomainRoot(rootId: number, organizationId: number) {
+    const root = await this.domainRootProvisioning.getRootById(rootId);
+    if (root.organization_id !== organizationId) {
+      throw new NotFoundException('Domain root not found');
+    }
+    return this.domainRootProvisioning.verifyRoot(root.id);
+  }
+
+  async provisionDomainRootNext(rootId: number, organizationId: number) {
+    const root = await this.domainRootProvisioning.getRootById(rootId);
+    if (root.organization_id !== organizationId) {
+      throw new NotFoundException('Domain root not found');
+    }
+    await this.domainRootProvisioning.provisionNext(root.id);
+    return this.getDomainRootById(root.id, organizationId);
   }
 }

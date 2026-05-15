@@ -23,6 +23,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.domain_settings;
   }
 
+  get domain_roots() {
+    return this.baseClient.domain_roots;
+  }
+
   get domain_blocklist() {
     return this.baseClient.domain_blocklist;
   }

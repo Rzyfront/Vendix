@@ -34,6 +34,7 @@ import {
 } from './types/domain.types';
 import {
   CreateDomainSettingDto,
+  CreateDomainRootDto,
   UpdateDomainSettingDto,
   ValidateHostnameDto,
   DuplicateDomainDto,
@@ -203,6 +204,144 @@ export class DomainsController {
     return this.responseService.success(
       result,
       'Domain setting retrieved successfully',
+    );
+  }
+
+  @Post('roots')
+  @UseGuards(DomainRegistrationGuard)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:create')
+  @HttpCode(HttpStatus.CREATED)
+  async createDomainRoot(
+    @Body() create_root_dto: CreateDomainRootDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const organizationId = req?.user?.organization_id;
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.createDomainRoot(
+      create_root_dto,
+      organizationId,
+    );
+    return this.responseService.created(
+      result,
+      'Dominio base creado exitosamente',
+    );
+  }
+
+  @Get('roots')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async getDomainRoots(
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any[]>> {
+    const organizationId = req?.user?.organization_id;
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.getDomainRoots(organizationId);
+    return this.responseService.success(
+      result,
+      'Dominios base obtenidos exitosamente',
+    );
+  }
+
+  @Get('roots/:rootId')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async getDomainRootById(
+    @Param('rootId') rootId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const root_id = parseInt(rootId, 10);
+    const organizationId = req?.user?.organization_id;
+    if (isNaN(root_id)) throw new BadRequestException('Invalid root ID');
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.getDomainRootById(
+      root_id,
+      organizationId,
+    );
+    return this.responseService.success(
+      result,
+      'Dominio base obtenido exitosamente',
+    );
+  }
+
+  @Get('roots/:rootId/dns-instructions')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async getDomainRootDnsInstructions(
+    @Param('rootId') rootId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const root_id = parseInt(rootId, 10);
+    const organizationId = req?.user?.organization_id;
+    if (isNaN(root_id)) throw new BadRequestException('Invalid root ID');
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.getDomainRootDnsInstructions(
+      root_id,
+      organizationId,
+    );
+    return this.responseService.success(
+      result,
+      'Instrucciones DNS obtenidas exitosamente',
+    );
+  }
+
+  @Post('roots/:rootId/verify')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:verify')
+  async verifyDomainRoot(
+    @Param('rootId') rootId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const root_id = parseInt(rootId, 10);
+    const organizationId = req?.user?.organization_id;
+    if (isNaN(root_id)) throw new BadRequestException('Invalid root ID');
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.verifyDomainRoot(
+      root_id,
+      organizationId,
+    );
+    return this.responseService.success(
+      result,
+      'Verificación DNS ejecutada exitosamente',
+    );
+  }
+
+  @Post('roots/:rootId/provision-next')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async provisionDomainRootNext(
+    @Param('rootId') rootId: string,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<SuccessResponse<any>> {
+    const root_id = parseInt(rootId, 10);
+    const organizationId = req?.user?.organization_id;
+    if (isNaN(root_id)) throw new BadRequestException('Invalid root ID');
+    if (!organizationId) {
+      throw new BadRequestException('organization_id is required');
+    }
+
+    const result = await this.domainsService.provisionDomainRootNext(
+      root_id,
+      organizationId,
+    );
+    return this.responseService.success(
+      result,
+      'Provisioning del dominio base actualizado exitosamente',
     );
   }
 
@@ -386,9 +525,8 @@ export class DomainsController {
     if (isNaN(domainId)) {
       throw new BadRequestException('Invalid domain ID');
     }
-    const result = await this.domainsService.startCertificateProvisioning(
-      domainId,
-    );
+    const result =
+      await this.domainsService.startCertificateProvisioning(domainId);
     // domain_settings row from Prisma update() carries Date|null fields and a
     // nullable organization_id; the API response shape (DomainSettingResponse)
     // declares stringified timestamps. The runtime payload is compatible — the

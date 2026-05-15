@@ -224,6 +224,18 @@ export class FeaturesConfigDto {
   advanced_analytics?: boolean;
 }
 
+export class CreateDomainRootDto {
+  @ApiProperty({ example: 'gorrerolicor.online' })
+  @IsString()
+  @IsNotEmpty()
+  hostname: string;
+
+  @ApiPropertyOptional({ description: 'Metadata opcional del dominio base' })
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, any>;
+}
+
 export class ThemeConfigDto {
   @ApiPropertyOptional({ example: 'sidebar' })
   @IsOptional()

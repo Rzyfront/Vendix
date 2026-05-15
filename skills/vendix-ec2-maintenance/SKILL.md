@@ -71,6 +71,7 @@ AWS CLI checks such as `aws sts get-caller-identity` are safe for validating acc
 
 ## Related Skills
 
+- `vendix-cloud-operations` - General AWS CLI, SSH, and private production runbook orientation.
 - `vendix-monorepo-workspaces`
 - `buildcheck-dev`
 - `git-workflow`
