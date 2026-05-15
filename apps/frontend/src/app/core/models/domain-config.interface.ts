@@ -10,7 +10,9 @@ export interface DomainConfig {
   domainType: string; // DomainType enum value
   environment: AppTypeImport; // AppType enum value
   organization_slug?: string;
+  organization_name?: string;
   store_slug?: string;
+  store_name?: string;
   organization_id?: number;
   store_id?: number;
   customConfig?: DomainCustomConfig;
