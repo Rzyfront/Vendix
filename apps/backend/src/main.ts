@@ -6,6 +6,7 @@ import { AllExceptionsFilter } from '@common/filters/http-exception.filter';
 import { DomainConfigService } from '@common/config/domain.config';
 import { GlobalPrismaService } from './prisma/services/global-prisma.service';
 import { PublicSeoService } from './domains/public/seo/public-seo.service';
+import { DynamicCorsService } from './common/cors/dynamic-cors.service';
 import { json, urlencoded } from 'express';
 import * as v8 from 'v8';
 
@@ -86,6 +87,8 @@ async function bootstrap() {
 
   // Allow any CloudFront distribution
   const cloudfrontRegex = /^https:\/\/[a-z0-9]+\.cloudfront\.net$/;
+  const corsService = app.get(DynamicCorsService);
+  const corsLogger = new Logger('CORS');
 
   // CORS configuration
   app.enableCors({
@@ -109,13 +112,21 @@ async function bootstrap() {
         return callback(null, true);
       }
 
-      // Only log in development or if explicitly debug enabled
-      if (process.env.NODE_ENV === 'development') {
-        const logger = new Logger('CORS');
-        logger.warn(`Blocked request from origin: ${origin}`);
-      }
-
-      callback(null, false);
+      corsService
+        .isAllowed(origin)
+        .then((allowed) => {
+          if (!allowed && process.env.NODE_ENV === 'development') {
+            corsLogger.warn(`Blocked request from origin: ${origin}`);
+          }
+          callback(null, allowed);
+        })
+        .catch((error) => {
+          corsLogger.error(
+            `Failed to evaluate dynamic CORS origin: ${origin}`,
+            error instanceof Error ? error.stack : undefined,
+          );
+          callback(null, false);
+        });
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],

@@ -16,9 +16,8 @@ import { GlobalPrismaService } from '../../prisma/services/global-prisma.service
  * - Listens to `domain.activated` / `domain.disabled` events to invalidate
  *   the cache lazily.
  *
- * NOTE: This service is intentionally NOT wired into `main.ts` yet — the
- * static regex there is still authoritative. This file exists so the future
- * swap is a one-liner.
+ * The service is wired into `main.ts` after the static platform-domain checks,
+ * so active custom domains can call the API without manual CORS env updates.
  */
 @Injectable()
 export class DynamicCorsService implements OnModuleInit {
