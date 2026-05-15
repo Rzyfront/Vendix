@@ -9,10 +9,15 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   CloudFrontClient,
+  CreateDistributionTenantCommand,
   GetDistributionConfigCommand,
   GetDistributionCommand,
+  GetConnectionGroupCommand,
+  GetDistributionTenantCommand,
+  UpdateDistributionTenantCommand,
   UpdateDistributionCommand,
   DistributionConfig,
+  DistributionTenant,
 } from '@aws-sdk/client-cloudfront';
 
 /** Maximum aliases that may be added in a single addAliasesToDistribution call.
@@ -32,6 +37,25 @@ export interface DistributionStatus {
   status: string;
   domainName: string;
   aliases: string[];
+}
+
+export interface ConnectionGroupStatus {
+  id: string;
+  status: string;
+  routingEndpoint: string;
+  enabled: boolean;
+}
+
+export interface DistributionTenantStatus {
+  id: string;
+  distributionId: string;
+  name: string;
+  arn?: string;
+  status: string;
+  enabled: boolean;
+  domains: Array<{ domain: string; status: string }>;
+  connectionGroupId?: string;
+  etag?: string;
 }
 
 /**
@@ -153,6 +177,130 @@ export class CloudFrontService {
     }
   }
 
+  async getConnectionGroup(
+    connectionGroupId: string,
+  ): Promise<ConnectionGroupStatus> {
+    try {
+      const response = await this.client.send(
+        new GetConnectionGroupCommand({ Identifier: connectionGroupId }),
+      );
+
+      const group = response.ConnectionGroup;
+      if (!group?.Id) {
+        throw new NotFoundException(
+          `CloudFront connection group ${connectionGroupId} not found`,
+        );
+      }
+
+      return {
+        id: group.Id,
+        status: group.Status ?? 'Unknown',
+        routingEndpoint: group.RoutingEndpoint ?? '',
+        enabled: group.Enabled ?? false,
+      };
+    } catch (error) {
+      this.handleAwsError(error, `getConnectionGroup(${connectionGroupId})`);
+    }
+  }
+
+  async createDistributionTenant(params: {
+    distributionId: string;
+    connectionGroupId: string;
+    name: string;
+    domains: string[];
+    acmCertificateArn: string;
+    tags?: Array<{ key: string; value: string }>;
+  }): Promise<DistributionTenantStatus> {
+    try {
+      const response = await this.client.send(
+        new CreateDistributionTenantCommand({
+          DistributionId: params.distributionId,
+          Name: params.name,
+          Domains: params.domains.map((domain) => ({ Domain: domain })),
+          ConnectionGroupId: params.connectionGroupId,
+          Enabled: true,
+          Customizations: {
+            Certificate: {
+              Arn: params.acmCertificateArn,
+            },
+          },
+          Tags: params.tags?.length
+            ? {
+                Items: params.tags.map((tag) => ({
+                  Key: tag.key,
+                  Value: tag.value,
+                })),
+              }
+            : undefined,
+        }),
+      );
+
+      return this.normalizeDistributionTenant(
+        response.DistributionTenant,
+        response.ETag,
+        `createDistributionTenant(${params.name})`,
+      );
+    } catch (error) {
+      this.handleAwsError(error, `createDistributionTenant(${params.name})`);
+    }
+  }
+
+  async getDistributionTenant(
+    tenantId: string,
+  ): Promise<DistributionTenantStatus> {
+    try {
+      const response = await this.client.send(
+        new GetDistributionTenantCommand({ Identifier: tenantId }),
+      );
+
+      return this.normalizeDistributionTenant(
+        response.DistributionTenant,
+        response.ETag,
+        `getDistributionTenant(${tenantId})`,
+      );
+    } catch (error) {
+      this.handleAwsError(error, `getDistributionTenant(${tenantId})`);
+    }
+  }
+
+  async updateDistributionTenant(params: {
+    tenantId: string;
+    distributionId: string;
+    connectionGroupId: string;
+    domains: string[];
+    acmCertificateArn: string;
+    ifMatch: string;
+  }): Promise<DistributionTenantStatus> {
+    try {
+      const response = await this.client.send(
+        new UpdateDistributionTenantCommand({
+          Id: params.tenantId,
+          DistributionId: params.distributionId,
+          Domains: params.domains.map((domain) => ({ Domain: domain })),
+          ConnectionGroupId: params.connectionGroupId,
+          Enabled: true,
+          IfMatch: params.ifMatch,
+          Customizations: {
+            Certificate: {
+              Arn: params.acmCertificateArn,
+            },
+          },
+        }),
+      );
+
+      return this.normalizeDistributionTenant(
+        response.DistributionTenant,
+        response.ETag,
+        `updateDistributionTenant(${params.tenantId})`,
+      );
+    } catch (error) {
+      this.handleAwsError(
+        error,
+        `updateDistributionTenant(${params.tenantId})`,
+      );
+    }
+  }
+
   /**
    * Adds aliases (CNAMEs) to a CloudFront distribution, optionally also setting
    * the ACM certificate ARN to use for those aliases. Read-modify-write with
@@ -266,6 +414,34 @@ export class CloudFrontService {
     );
   }
 
+  private normalizeDistributionTenant(
+    tenant: DistributionTenant | undefined,
+    etag: string | undefined,
+    context: string,
+  ): DistributionTenantStatus {
+    if (!tenant?.Id || !tenant.DistributionId || !tenant.Name) {
+      this.logger.error(`CloudFront ${context} returned incomplete tenant`);
+      throw new InternalServerErrorException(
+        'CloudFront returned incomplete distribution tenant',
+      );
+    }
+
+    return {
+      id: tenant.Id,
+      distributionId: tenant.DistributionId,
+      name: tenant.Name,
+      arn: tenant.Arn,
+      status: tenant.Status ?? 'Unknown',
+      enabled: tenant.Enabled ?? false,
+      domains: (tenant.Domains ?? []).map((item) => ({
+        domain: item.Domain ?? '',
+        status: item.Status ?? 'inactive',
+      })),
+      connectionGroupId: tenant.ConnectionGroupId,
+      etag,
+    };
+  }
+
   /**
    * Maps AWS SDK error names to typed Nest exceptions and logs the original.
    * Always re-throws.
@@ -284,6 +460,7 @@ export class CloudFrontService {
     switch (name) {
       case 'NoSuchDistribution':
       case 'NoSuchResource':
+      case 'EntityNotFound':
         throw new NotFoundException(
           `CloudFront resource not found: ${message}`,
         );

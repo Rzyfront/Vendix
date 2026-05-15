@@ -16,6 +16,8 @@ import { DomainRegistrationGuard } from '../../../common/services/rate-limit/dom
 import { StoreDomainsService } from './domains.service';
 import {
   CreateStoreDomainDto,
+  CreateDomainRootAssignmentDto,
+  CreateDomainRootDto,
   UpdateStoreDomainDto,
   StoreDomainQueryDto,
 } from './dto';
@@ -60,6 +62,134 @@ export class StoreDomainsController {
     } catch (error) {
       return this.response_service.error(
         'Error al obtener los dominios',
+        error.message,
+      );
+    }
+  }
+
+  @Post('roots')
+  @UseGuards(DomainRegistrationGuard)
+  @Permissions('store:domains:create')
+  async createRoot(@Body() create_root_dto: CreateDomainRootDto) {
+    try {
+      const root = await this.domains_service.createRoot(create_root_dto);
+      return this.response_service.created(
+        root,
+        'Dominio base creado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al crear el dominio base',
+        error.message,
+      );
+    }
+  }
+
+  @Get('roots')
+  @Permissions('store:domains:read')
+  async findRoots() {
+    try {
+      const roots = await this.domains_service.findRoots();
+      return this.response_service.success(
+        roots,
+        'Dominios base obtenidos exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al obtener dominios base',
+        error.message,
+      );
+    }
+  }
+
+  @Get('roots/:rootId')
+  @Permissions('store:domains:read')
+  async findRoot(@Param('rootId', ParseIntPipe) rootId: number) {
+    try {
+      const root = await this.domains_service.findRoot(rootId);
+      return this.response_service.success(
+        root,
+        'Dominio base obtenido exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al obtener el dominio base',
+        error.message,
+      );
+    }
+  }
+
+  @Get('roots/:rootId/dns-instructions')
+  @Permissions('store:domains:read')
+  async getRootDnsInstructions(@Param('rootId', ParseIntPipe) rootId: number) {
+    try {
+      const instructions =
+        await this.domains_service.getRootDnsInstructions(rootId);
+      return this.response_service.success(
+        instructions,
+        'Instrucciones DNS obtenidas exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al obtener instrucciones DNS',
+        error.message,
+      );
+    }
+  }
+
+  @Post('roots/:rootId/verify')
+  @Permissions('store:domains:update')
+  async verifyRoot(@Param('rootId', ParseIntPipe) rootId: number) {
+    try {
+      const result = await this.domains_service.verifyRoot(rootId);
+      return this.response_service.success(
+        result,
+        'Verificación DNS ejecutada exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al verificar el dominio base',
+        error.message,
+      );
+    }
+  }
+
+  @Post('roots/:rootId/provision-next')
+  @Permissions('store:domains:update')
+  async provisionRootNext(@Param('rootId', ParseIntPipe) rootId: number) {
+    try {
+      const root = await this.domains_service.provisionRootNext(rootId);
+      return this.response_service.success(
+        root,
+        'Provisioning del dominio base actualizado exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al provisionar el dominio base',
+        error.message,
+      );
+    }
+  }
+
+  @Post('roots/:rootId/assignments')
+  @UseGuards(DomainRegistrationGuard)
+  @Permissions('store:domains:create')
+  async createRootAssignment(
+    @Param('rootId', ParseIntPipe) rootId: number,
+    @Body() create_assignment_dto: CreateDomainRootAssignmentDto,
+  ) {
+    try {
+      const domain = await this.domains_service.createRootAssignment(
+        rootId,
+        create_assignment_dto,
+      );
+      return this.response_service.created(
+        domain,
+        'Asignación creada exitosamente',
+      );
+    } catch (error) {
+      return this.response_service.error(
+        'Error al crear la asignación',
         error.message,
       );
     }
@@ -171,7 +301,8 @@ export class StoreDomainsController {
   @Permissions('store:domains:update')
   async startCertificateProvisioning(@Param('id', ParseIntPipe) id: number) {
     try {
-      const domain = await this.domains_service.startCertificateProvisioning(id);
+      const domain =
+        await this.domains_service.startCertificateProvisioning(id);
       return this.response_service.success(
         domain,
         'Solicitud de certificado iniciada exitosamente',
@@ -208,11 +339,11 @@ export class StoreDomainsController {
       const domain = await this.domains_service.attachCloudFrontAlias(id);
       return this.response_service.success(
         domain,
-        'Alias CloudFront configurado exitosamente',
+        'Conexión del dominio configurada exitosamente',
       );
     } catch (error) {
       return this.response_service.error(
-        'Error al configurar alias CloudFront',
+        'Error al configurar la conexión del dominio',
         error.message,
       );
     }
@@ -225,11 +356,11 @@ export class StoreDomainsController {
       const domain = await this.domains_service.refreshCloudFrontStatus(id);
       return this.response_service.success(
         domain,
-        'Estado de CloudFront actualizado exitosamente',
+        'Estado de conexión actualizado exitosamente',
       );
     } catch (error) {
       return this.response_service.error(
-        'Error al consultar CloudFront',
+        'Error al consultar la conexión del dominio',
         error.message,
       );
     }

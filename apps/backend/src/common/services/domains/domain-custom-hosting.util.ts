@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { DnsResolverService, ResolverResult } from '../dns/dns-resolver.service';
+import {
+  DnsResolverService,
+  ResolverResult,
+} from '../dns/dns-resolver.service';
 
 export type DomainInstructionStatus =
   | 'pending'
@@ -61,6 +64,8 @@ export interface DomainProvisioningStage {
 }
 
 export interface DomainDnsInstructionsPayload {
+  domain_root_id?: number;
+  root_hostname?: string;
   hostname: string;
   ownership: string;
   dns_type: 'CNAME' | 'A';
@@ -77,6 +82,14 @@ export interface DomainDnsInstructionsPayload {
   cloudfront_status?: string;
   https_probe_status?: 'pending' | 'passed' | 'failed';
   next_check_at?: string;
+  diagnostics?: Array<{ label: string; status: string; detail: string }>;
+  assignments?: Array<{
+    id: number;
+    hostname: string;
+    app_type: string;
+    status: string;
+    is_primary: boolean;
+  }>;
   instructions: DomainDnsInstruction[];
 }
 
@@ -156,7 +169,9 @@ export function getCertificateDomainNames(
   domain: DomainHostingRecord,
 ): string[] {
   const wildcardHostname = getWildcardHostname(domain);
-  return wildcardHostname ? [domain.hostname, wildcardHostname] : [domain.hostname];
+  return wildcardHostname
+    ? [domain.hostname, wildcardHostname]
+    : [domain.hostname];
 }
 
 export function getCloudFrontAliasesForDomain(
@@ -168,7 +183,9 @@ export function getCloudFrontAliasesForDomain(
 export function getInheritedFromHostname(
   domain: DomainHostingRecord,
 ): string | null {
-  const inherited = getDomainSslConfig(domain.config)['inherited_from_hostname'];
+  const inherited = getDomainSslConfig(domain.config)[
+    'inherited_from_hostname'
+  ];
   return typeof inherited === 'string' && inherited.length > 0
     ? inherited
     : null;
@@ -481,7 +498,8 @@ export function buildDomainDnsInstructions(params: {
     covered_by_parent_hostname: inheritedFrom,
     provisioning_stage: currentProvisioningStage(stages),
     stages,
-    aws_certificate_status: stringValue(sslConfig['aws_certificate_status']) ??
+    aws_certificate_status:
+      stringValue(sslConfig['aws_certificate_status']) ??
       stringValue(sslConfig['certificate_status']) ??
       (domain.ssl_status === 'issued' ? 'ISSUED' : undefined),
     cloudfront_status: stringValue(sslConfig['cloudfront_status']),
@@ -664,7 +682,8 @@ function buildProvisioningStages(params: {
     {
       key: 'ownership',
       label: 'Verificación Vendix',
-      status: failed && ownershipStatus !== 'complete' ? 'failed' : ownershipStatus,
+      status:
+        failed && ownershipStatus !== 'complete' ? 'failed' : ownershipStatus,
       detail:
         ownershipStatus === 'complete'
           ? 'La propiedad del dominio ya fue verificada.'
@@ -718,7 +737,8 @@ function buildProvisioningStages(params: {
         active || cloudfrontStatus === 'Deployed'
           ? 'La conexión del dominio ya fue desplegada.'
           : 'Vendix está conectando el dominio.',
-      waiting: domain.status === 'pending_alias' || domain.status === 'propagating',
+      waiting:
+        domain.status === 'pending_alias' || domain.status === 'propagating',
       updated_at: toIso(domain.cloudfront_deployed_at),
     },
     {
@@ -798,9 +818,9 @@ async function enrichRoutingRecord(
   const fqdn = record.fqdn_name ?? record.name;
   const cnameResult = await dnsResolver.resolveCname(fqdn);
   const aResult = await dnsResolver.resolveA(fqdn);
-  const expectedTargets = [target, legacyEdgeHost].filter(Boolean).map((value) =>
-    normalizeDnsValue(value as string),
-  );
+  const expectedTargets = [target, legacyEdgeHost]
+    .filter(Boolean)
+    .map((value) => normalizeDnsValue(value as string));
   const cnameMatches = cnameResult.perResolver.filter((resolver) =>
     resolver.records.some((value) =>
       expectedTargets.includes(normalizeDnsValue(value)),
@@ -818,7 +838,8 @@ async function enrichRoutingRecord(
     legacyEdgeHost &&
     cnameResult.perResolver.some((resolver) =>
       resolver.records.some(
-        (value) => normalizeDnsValue(value) === normalizeDnsValue(legacyEdgeHost),
+        (value) =>
+          normalizeDnsValue(value) === normalizeDnsValue(legacyEdgeHost),
       ),
     );
 
@@ -838,7 +859,9 @@ async function enrichRoutingRecord(
         ? `Detectado usando ${legacyEdgeHost} como destino anterior. Funciona, pero recomendamos el destino directo para nuevos registros.`
         : 'Vendix ve este enrutamiento desde DNS público.'
       : 'Vendix aún no ve este enrutamiento desde DNS público.',
-    routing_target_type: usedLegacy ? 'legacy_edge_alias' : record.routing_target_type,
+    routing_target_type: usedLegacy
+      ? 'legacy_edge_alias'
+      : record.routing_target_type,
   };
 }
 

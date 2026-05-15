@@ -7,6 +7,10 @@ describe('DomainProvisioningJob', () => {
       { id: 2, hostname: 'shop.example.com', status: 'propagating' },
     ];
     const prisma = {
+      domain_roots: {
+        findMany: jest.fn().mockResolvedValue([]),
+        update: jest.fn(),
+      },
       domain_settings: {
         findMany: jest.fn().mockResolvedValue(domains),
         update: jest.fn(),
@@ -15,7 +19,14 @@ describe('DomainProvisioningJob', () => {
     const domainProvisioning = {
       provisionNext: jest.fn().mockResolvedValue({}),
     } as any;
-    const job = new DomainProvisioningJob(prisma, domainProvisioning);
+    const domainRootProvisioning = {
+      provisionNext: jest.fn().mockResolvedValue({}),
+    } as any;
+    const job = new DomainProvisioningJob(
+      prisma,
+      domainProvisioning,
+      domainRootProvisioning,
+    );
 
     await job.handleDomainProvisioningQueue();
 
@@ -31,5 +42,6 @@ describe('DomainProvisioningJob', () => {
     expect(domainProvisioning.provisionNext).toHaveBeenCalledTimes(2);
     expect(domainProvisioning.provisionNext).toHaveBeenCalledWith(1);
     expect(domainProvisioning.provisionNext).toHaveBeenCalledWith(2);
+    expect(domainRootProvisioning.provisionNext).not.toHaveBeenCalled();
   });
 });

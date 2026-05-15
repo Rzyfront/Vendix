@@ -20,6 +20,7 @@ export class StorePrismaService extends BasePrismaService {
     'store_payment_methods',
     'addresses',
     'domain_settings',
+    'domain_roots',
     'shipping_zones',
     'shipping_methods',
     'expenses',
@@ -921,6 +922,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get domain_settings() {
     return this.scoped_client.domain_settings;
+  }
+
+  get domain_roots() {
+    return this.scoped_client.domain_roots;
   }
 
   get shipping_zones() {

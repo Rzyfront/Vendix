@@ -366,6 +366,7 @@ model organizations {
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
+  domain_roots                  domain_roots[]
   inventory_adjustments         inventory_adjustments[]
   inventory_locations           inventory_locations[]
   inventory_movements           inventory_movements[]
@@ -604,6 +605,7 @@ model stores {
   brands                      brands[]
   categories                  categories[]
   domain_settings             domain_settings[]
+  domain_roots                domain_roots[]
   inventory_locations         inventory_locations[]
   login_attempts              login_attempts[]
   orders                      orders[]
@@ -726,6 +728,7 @@ model domain_settings {
   hostname        String @db.VarChar(255)
   organization_id Int?
   store_id        Int?
+  domain_root_id  Int?
 
   // NUEVO: app_type es la única fuente de verdad para el tipo de aplicación
   app_type app_type_enum @default(VENDIX_LANDING)
@@ -762,14 +765,62 @@ model domain_settings {
 
   organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store        stores?        @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  domain_root  domain_roots?  @relation(fields: [domain_root_id], references: [id], onDelete: SetNull)
 
   @@index([hostname])
   @@index([organization_id])
   @@index([store_id])
+  @@index([domain_root_id])
   @@index([status])
   @@index([domain_type])
   @@index([ownership])
   @@index([app_type])
+}
+
+model domain_roots {
+  id              Int    @id @default(autoincrement())
+  hostname        String @unique @db.VarChar(255)
+  organization_id Int?
+  store_id        Int?
+
+  status             domain_status_enum @default(pending_ownership)
+  ssl_status         ssl_status_enum    @default(pending)
+  verification_token String?            @unique @db.VarChar(100)
+  last_verified_at   DateTime?          @db.Timestamp(6)
+  expires_token_at   DateTime?          @db.Timestamptz(6)
+
+  validation_cname_name    String?   @db.VarChar(255)
+  validation_cname_value   String?   @db.VarChar(255)
+  acm_certificate_arn      String?   @db.VarChar(2048)
+  certificate_requested_at DateTime? @db.Timestamptz(6)
+  certificate_issued_at    DateTime? @db.Timestamptz(6)
+  cert_expires_at          DateTime? @db.Timestamptz(6)
+
+  cloudfront_saas_distribution_id       String?   @db.VarChar(80)
+  cloudfront_saas_connection_group_id   String?   @db.VarChar(80)
+  cloudfront_distribution_tenant_id     String?   @db.VarChar(120)
+  cloudfront_distribution_tenant_arn    String?   @db.VarChar(2048)
+  cloudfront_distribution_tenant_status String?   @db.VarChar(80)
+  cloudfront_distribution_tenant_etag   String?   @db.VarChar(255)
+  routing_endpoint                      String?   @db.VarChar(255)
+  cloudfront_deployed_at                DateTime? @db.Timestamptz(6)
+
+  config          Json?     @default("{}")
+  last_error      String?   @db.VarChar(255)
+  last_error_code String?   @db.VarChar(80)
+  retry_count     Int       @default(0)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  organization organizations?    @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store        stores?           @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  assignments  domain_settings[]
+
+  @@index([organization_id])
+  @@index([store_id])
+  @@index([status])
+  @@index([ssl_status])
+  @@index([cloudfront_distribution_tenant_id])
 }
 
 model domain_blocklist {

@@ -39,21 +39,41 @@ export class DomainRegistrationGuard implements CanActivate {
       return true;
     }
 
-    const pendingCount = await this.prisma.domain_settings.count({
-      where: {
-        organization_id: orgId,
-        status: {
-          in: [
-            'pending_ownership',
-            'verifying_ownership',
-            'pending_certificate',
-            'issuing_certificate',
-            'pending_alias',
-            'propagating',
+    const pendingStatuses = [
+      'pending_ownership',
+      'verifying_ownership',
+      'pending_certificate',
+      'issuing_certificate',
+      'pending_alias',
+      'propagating',
+    ] as const;
+
+    const [pendingDomainCount, pendingRootCount] = await Promise.all([
+      this.prisma.domain_settings.count({
+        where: {
+          OR: [
+            { organization_id: orgId },
+            { store: { is: { organization_id: orgId } } },
           ],
+          status: {
+            in: [...pendingStatuses],
+          },
         },
-      },
-    });
+      }),
+      this.prisma.domain_roots.count({
+        where: {
+          OR: [
+            { organization_id: orgId },
+            { store: { is: { organization_id: orgId } } },
+          ],
+          status: {
+            in: [...pendingStatuses],
+          },
+        },
+      }),
+    ]);
+
+    const pendingCount = pendingDomainCount + pendingRootCount;
 
     if (pendingCount >= this.maxPending) {
       throw new VendixHttpException(

@@ -54,8 +54,45 @@ export class CreateStoreDomainDto {
   ])
   ownership?: string;
 
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  domain_root_id?: number;
+
   @IsObject()
   config: Record<string, any>;
+}
+
+export class CreateDomainRootDto {
+  @IsString()
+  @IsNotEmpty()
+  hostname: string;
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, any>;
+}
+
+export class CreateDomainRootAssignmentDto {
+  @IsString()
+  @IsNotEmpty()
+  hostname: string;
+
+  @IsOptional()
+  @IsIn(['vendix_core', 'organization', 'store', 'ecommerce'])
+  domain_type?: string;
+
+  @IsOptional()
+  @IsIn(STORE_APP_TYPES)
+  app_type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_primary?: boolean;
+
+  @IsOptional()
+  @IsObject()
+  config?: Record<string, any>;
 }
 
 export class UpdateStoreDomainDto {

@@ -1,4 +1,5 @@
 import { StoreDomainsService } from './domains.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 describe('StoreDomainsService', () => {
   it('creates one-level custom subdomains as active when a wildcard parent exists', async () => {
@@ -45,20 +46,37 @@ describe('StoreDomainsService', () => {
         create,
       },
     } as any;
+    const globalPrisma = {
+      domain_roots: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    } as any;
     const service = new StoreDomainsService(
       prisma,
+      globalPrisma,
       { emit: jest.fn() } as any,
       { isBlocked: jest.fn().mockResolvedValue({ blocked: false }) } as any,
       {} as any,
       {} as any,
+      {} as any,
     );
 
-    const result = await service.create({
-      hostname: 'promo.example.com',
-      app_type: 'STORE_ECOMMERCE',
-      ownership: 'custom_subdomain',
-      config: {},
-    });
+    const result = await RequestContextService.run(
+      {
+        organization_id: 1,
+        store_id: 10,
+        is_super_admin: false,
+        is_owner: true,
+      },
+      () => {
+        return service.create({
+          hostname: 'promo.example.com',
+          app_type: 'STORE_ECOMMERCE',
+          ownership: 'custom_subdomain',
+          config: {},
+        });
+      },
+    );
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({

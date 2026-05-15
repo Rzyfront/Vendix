@@ -32,6 +32,7 @@ export class OrganizationPrismaService extends BasePrismaService {
     'roles',
     'organization_settings',
     'domain_settings',
+    'domain_roots',
     'inventory_locations',
     'inventory_movements',
     'inventory_adjustments',
@@ -86,6 +87,12 @@ export class OrganizationPrismaService extends BasePrismaService {
     // the related store. OR is required because direct AND on organization_id
     // would filter out store-linked domains where organization_id is null.
     domain_settings: (orgId) => ({
+      OR: [
+        { organization_id: orgId },
+        { store: { is: { organization_id: orgId } } },
+      ],
+    }),
+    domain_roots: (orgId) => ({
       OR: [
         { organization_id: orgId },
         { store: { is: { organization_id: orgId } } },
@@ -273,6 +280,10 @@ export class OrganizationPrismaService extends BasePrismaService {
     return this.scoped_client.domain_settings;
   }
 
+  get domain_roots() {
+    return this.scoped_client.domain_roots;
+  }
+
   get inventory_locations() {
     return this.scoped_client.inventory_locations;
   }
@@ -451,9 +462,8 @@ export class OrganizationPrismaService extends BasePrismaService {
       );
     }
 
-    const scope = await this.operatingScopeService.getOperatingScope(
-      organization_id,
-    );
+    const scope =
+      await this.operatingScopeService.getOperatingScope(organization_id);
 
     if (scope === 'ORGANIZATION') {
       if (store_id_filter == null) {

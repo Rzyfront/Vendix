@@ -64,22 +64,36 @@ const PENDING_PROVISIONING_STATUSES = new Set([
         (actionClicked)="onHeaderAction($event)"
       />
 
-      <div class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-3 pb-3 md:gap-6 md:px-6 md:pb-6">
+      <div
+        class="mx-auto flex w-full max-w-6xl flex-col gap-4 px-3 pb-3 md:gap-6 md:px-6 md:pb-6"
+      >
         @if (isLoading()) {
-          <div class="flex min-h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-white">
-            <app-spinner text="Cargando dominio" color="text-sky-600"></app-spinner>
+          <div
+            class="flex min-h-[320px] items-center justify-center rounded-lg border border-slate-200 bg-white"
+          >
+            <app-spinner
+              text="Cargando dominio"
+              color="text-sky-600"
+            ></app-spinner>
           </div>
         } @else if (domain(); as item) {
-          <section class="rounded-lg border border-slate-200 bg-white p-4 md:p-6">
-            <div class="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <section
+            class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+          >
+            <div
+              class="mb-4 flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
+            >
               <div>
                 <h2 class="text-base font-semibold text-slate-950">Progreso</h2>
                 <p class="text-sm text-slate-600">
-                  Vendix revisa el dominio automáticamente; tú solo debes actuar cuando un paso lo pida.
+                  Vendix revisa el dominio automáticamente; tú solo debes actuar
+                  cuando un paso lo pida.
                 </p>
               </div>
               @if (waitingStage(); as stage) {
-                <div class="flex items-center gap-2 rounded-full bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700">
+                <div
+                  class="flex items-center gap-2 rounded-full bg-sky-50 px-3 py-2 text-sm font-medium text-sky-700"
+                >
                   <app-spinner size="sm" color="text-sky-600"></app-spinner>
                   {{ stage.label }}
                 </div>
@@ -90,34 +104,148 @@ const PENDING_PROVISIONING_STATUSES = new Set([
               @for (stage of provisioningStages(); track stage.key) {
                 <div class="rounded-lg border p-3 {{ stageCardClass(stage) }}">
                   <div class="mb-2 flex items-center gap-2">
-                    <span class="flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold {{ stageDotClass(stage) }}">
+                    <span
+                      class="flex h-8 w-8 items-center justify-center rounded-full border text-xs font-bold {{
+                        stageDotClass(stage)
+                      }}"
+                    >
                       @if (stage.waiting) {
-                        <span class="h-2.5 w-2.5 animate-pulse rounded-full bg-current"></span>
+                        <span
+                          class="h-2.5 w-2.5 animate-pulse rounded-full bg-current"
+                        ></span>
                       } @else {
-                        <app-icon [name]="stage.status === 'complete' ? 'check' : 'circle'" [size]="14"></app-icon>
+                        <app-icon
+                          [name]="
+                            stage.status === 'complete' ? 'check' : 'circle'
+                          "
+                          [size]="14"
+                        ></app-icon>
                       }
                     </span>
-                    <span class="text-sm font-semibold leading-tight {{ stageTextClass(stage) }}">
+                    <span
+                      class="text-sm font-semibold leading-tight {{
+                        stageTextClass(stage)
+                      }}"
+                    >
                       {{ stage.label }}
                     </span>
                   </div>
-                  <p class="text-xs leading-relaxed text-slate-600">{{ stage.detail }}</p>
+                  <p class="text-xs leading-relaxed text-slate-600">
+                    {{ stage.detail }}
+                  </p>
                 </div>
               }
             </div>
           </section>
 
-          <div class="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
-            <section class="rounded-lg border border-slate-200 bg-white p-4 md:p-6">
-              <h2 class="mb-1 text-base font-semibold text-slate-950">Ajustes</h2>
+          @if (dnsInstructions()?.root_hostname) {
+            <section
+              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+            >
+              <div
+                class="mb-4 flex flex-col gap-2 md:flex-row md:items-start md:justify-between"
+              >
+                <div>
+                  <h2 class="text-base font-semibold text-slate-950">
+                    Dominio base
+                  </h2>
+                  <p class="text-sm text-slate-600">
+                    Este dominio ya puede alimentar el dominio principal y
+                    subdominios de un nivel dentro de Vendix.
+                  </p>
+                </div>
+                <span
+                  class="inline-flex w-fit rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700"
+                >
+                  {{ dnsInstructions()?.root_hostname }}
+                </span>
+              </div>
+
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span
+                    class="block text-xs font-semibold uppercase text-slate-500"
+                    >Wildcard</span
+                  >
+                  <span class="mt-1 block font-mono text-sm text-slate-950">
+                    {{
+                      dnsInstructions()?.wildcard_hostname ||
+                        '*.' + dnsInstructions()?.root_hostname
+                    }}
+                  </span>
+                  <p class="mt-1 text-xs text-slate-600">
+                    Cubre subdominios como promo.{{
+                      dnsInstructions()?.root_hostname
+                    }}
+                    sin repetir el flujo de certificado.
+                  </p>
+                </div>
+
+                <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <span
+                    class="block text-xs font-semibold uppercase text-slate-500"
+                    >Asignaciones</span
+                  >
+                  @if ((dnsInstructions()?.assignments?.length ?? 0) > 0) {
+                    <div class="mt-2 space-y-2">
+                      @for (
+                        assignment of dnsInstructions()?.assignments;
+                        track assignment.id
+                      ) {
+                        <div
+                          class="flex items-center justify-between gap-3 rounded-md bg-white px-2 py-2"
+                        >
+                          <div class="min-w-0">
+                            <span
+                              class="block truncate text-sm font-medium text-slate-950"
+                              >{{ assignment.hostname }}</span
+                            >
+                            <span class="block text-xs text-slate-500">{{
+                              appTypeLabel(assignment.app_type)
+                            }}</span>
+                          </div>
+                          <span
+                            class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold {{
+                              statusPillClass(assignment.status)
+                            }}"
+                          >
+                            {{ statusLabel(assignment.status) }}
+                          </span>
+                        </div>
+                      }
+                    </div>
+                  } @else {
+                    <p class="mt-1 text-sm text-slate-600">
+                      Aún no hay hostnames asociados a este dominio base.
+                    </p>
+                  }
+                </div>
+              </div>
+            </section>
+          }
+
+          <div
+            class="grid gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]"
+          >
+            <section
+              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+            >
+              <h2 class="mb-1 text-base font-semibold text-slate-950">
+                Ajustes
+              </h2>
               <p class="mb-4 text-sm text-slate-600">
                 Cambia a qué app apunta el dominio y si debe ser principal.
               </p>
 
               <form [formGroup]="form" class="space-y-4">
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Aplicación</label>
-                  <select formControlName="app_type" class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950">
+                  <label class="mb-1 block text-sm font-medium text-slate-700"
+                    >Aplicación</label
+                  >
+                  <select
+                    formControlName="app_type"
+                    class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950"
+                  >
                     <option value="STORE_ECOMMERCE">E-commerce</option>
                     <option value="STORE_LANDING">Landing tienda</option>
                     <option value="STORE_ADMIN">Admin tienda</option>
@@ -125,57 +253,96 @@ const PENDING_PROVISIONING_STATUSES = new Set([
                 </div>
 
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Tipo de dominio</label>
-                  <select formControlName="domain_type" class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950">
+                  <label class="mb-1 block text-sm font-medium text-slate-700"
+                    >Tipo de dominio</label
+                  >
+                  <select
+                    formControlName="domain_type"
+                    class="h-11 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950"
+                  >
                     <option value="ecommerce">E-commerce</option>
                     <option value="store">Tienda</option>
                   </select>
                 </div>
 
-                <label class="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <input type="checkbox" formControlName="is_primary" class="mt-1 h-4 w-4 rounded border-slate-300" />
+                <label
+                  class="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3"
+                >
+                  <input
+                    type="checkbox"
+                    formControlName="is_primary"
+                    class="mt-1 h-4 w-4 rounded border-slate-300"
+                  />
                   <span>
-                    <span class="block text-sm font-semibold text-slate-950">Dominio principal</span>
-                    <span class="block text-xs text-slate-600">Se usará como dominio por defecto para esta app.</span>
+                    <span class="block text-sm font-semibold text-slate-950"
+                      >Dominio principal</span
+                    >
+                    <span class="block text-xs text-slate-600"
+                      >Se usará como dominio por defecto para esta app.</span
+                    >
                   </span>
                 </label>
               </form>
 
               <div class="mt-5 flex flex-col gap-2 sm:flex-row">
                 @if (!isOwnershipComplete()) {
-                  <app-button variant="primary" type="button" (clicked)="verifyDomain()" [disabled]="isSaving()">
+                  <app-button
+                    variant="primary"
+                    type="button"
+                    (clicked)="verifyDomain()"
+                    [disabled]="isSaving()"
+                  >
                     Verificar DNS
                   </app-button>
                 }
                 @if (canProvision()) {
-                  <app-button variant="outline" type="button" (clicked)="provisionDomain()" [disabled]="isSaving()">
+                  <app-button
+                    variant="outline"
+                    type="button"
+                    (clicked)="provisionDomain()"
+                    [disabled]="isSaving()"
+                  >
                     Sincronizar estado
                   </app-button>
                 }
               </div>
             </section>
 
-            <section class="rounded-lg border border-slate-200 bg-white p-4 md:p-6">
-              <h2 class="mb-1 text-base font-semibold text-slate-950">Diagnóstico</h2>
+            <section
+              class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+            >
+              <h2 class="mb-1 text-base font-semibold text-slate-950">
+                Diagnóstico
+              </h2>
               <p class="mb-4 text-sm text-slate-600">
-                Estos datos salen desde verificaciones públicas, no desde el navegador del cliente.
+                Estos datos salen desde verificaciones públicas, no desde el
+                navegador del cliente.
               </p>
 
               <div class="space-y-3">
                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Certificado SSL</span>
+                  <span
+                    class="block text-xs font-semibold uppercase tracking-wide text-slate-500"
+                    >Certificado SSL</span
+                  >
                   <span class="mt-1 block text-sm font-medium text-slate-950">
                     {{ certificateProcessLabel() }}
                   </span>
                 </div>
                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Conexión del dominio</span>
+                  <span
+                    class="block text-xs font-semibold uppercase tracking-wide text-slate-500"
+                    >Conexión del dominio</span
+                  >
                   <span class="mt-1 block text-sm font-medium text-slate-950">
                     {{ connectionProcessLabel() }}
                   </span>
                 </div>
                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <span class="block text-xs font-semibold uppercase tracking-wide text-slate-500">Prueba segura</span>
+                  <span
+                    class="block text-xs font-semibold uppercase tracking-wide text-slate-500"
+                    >Prueba segura</span
+                  >
                   <span class="mt-1 block text-sm font-medium text-slate-950">
                     {{ httpsProbeLabel() }}
                   </span>
@@ -184,51 +351,112 @@ const PENDING_PROVISIONING_STATUSES = new Set([
             </section>
           </div>
 
-          <section class="rounded-lg border border-slate-200 bg-white p-4 md:p-6">
+          <section
+            class="rounded-lg border border-slate-200 bg-white p-4 md:p-6"
+          >
             <div class="mb-4">
-              <h2 class="text-base font-semibold text-slate-950">Registros DNS</h2>
+              <h2 class="text-base font-semibold text-slate-950">
+                Registros DNS
+              </h2>
               <p class="text-sm text-slate-600">
-                Copia el <strong>Host en proveedor</strong> y el <strong>Valor</strong>. Evita copiar el dominio completo si tu proveedor ya lo agrega automáticamente.
+                Copia el <strong>Host en proveedor</strong> y el
+                <strong>Valor</strong>. Evita copiar el dominio completo si tu
+                proveedor ya lo agrega automáticamente.
               </p>
             </div>
 
             <div class="grid gap-4 xl:grid-cols-3">
               <div class="space-y-3">
-                <h3 class="text-sm font-semibold text-emerald-900">Verificación Vendix</h3>
+                <h3 class="text-sm font-semibold text-emerald-900">
+                  Verificación Vendix
+                </h3>
                 @if (recordsFor('ownership').length === 0) {
-                  <ng-container [ngTemplateOutlet]="emptyCard" [ngTemplateOutletContext]="{ title: 'Sin acción requerida', detail: 'La propiedad ya fue verificada o está cubierta por otro dominio.' }"></ng-container>
+                  <ng-container
+                    [ngTemplateOutlet]="emptyCard"
+                    [ngTemplateOutletContext]="{
+                      title: 'Sin acción requerida',
+                      detail:
+                        'La propiedad ya fue verificada o está cubierta por otro dominio.',
+                    }"
+                  ></ng-container>
                 }
-                @for (record of recordsFor('ownership'); track record.record_type + record.name + record.value) {
-                  <ng-container [ngTemplateOutlet]="dnsCard" [ngTemplateOutletContext]="{ record: record, tone: 'emerald' }"></ng-container>
+                @for (
+                  record of recordsFor('ownership');
+                  track record.record_type + record.name + record.value
+                ) {
+                  <ng-container
+                    [ngTemplateOutlet]="dnsCard"
+                    [ngTemplateOutletContext]="{
+                      record: record,
+                      tone: 'emerald',
+                    }"
+                  ></ng-container>
                 }
               </div>
               <div class="space-y-3">
-                <h3 class="text-sm font-semibold text-sky-900">Certificado SSL</h3>
+                <h3 class="text-sm font-semibold text-sky-900">
+                  Certificado SSL
+                </h3>
                 @if (awsCertificateIssued()) {
-                  <p class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                    El certificado ya fue verificado. Conserva los CNAME para renovaciones.
+                  <p
+                    class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"
+                  >
+                    El certificado ya fue verificado. Conserva los CNAME para
+                    renovaciones.
                   </p>
                 }
                 @if (recordsFor('certificate').length === 0) {
-                  <ng-container [ngTemplateOutlet]="emptyCard" [ngTemplateOutletContext]="{ title: certificateEmptyTitle(), detail: certificateEmptyDetail() }"></ng-container>
+                  <ng-container
+                    [ngTemplateOutlet]="emptyCard"
+                    [ngTemplateOutletContext]="{
+                      title: certificateEmptyTitle(),
+                      detail: certificateEmptyDetail(),
+                    }"
+                  ></ng-container>
                 }
-                @for (record of recordsFor('certificate'); track record.record_type + record.name + record.value) {
-                  <ng-container [ngTemplateOutlet]="dnsCard" [ngTemplateOutletContext]="{ record: record, tone: 'sky' }"></ng-container>
+                @for (
+                  record of recordsFor('certificate');
+                  track record.record_type + record.name + record.value
+                ) {
+                  <ng-container
+                    [ngTemplateOutlet]="dnsCard"
+                    [ngTemplateOutletContext]="{ record: record, tone: 'sky' }"
+                  ></ng-container>
                 }
               </div>
               <div class="space-y-3">
-                <h3 class="text-sm font-semibold text-slate-900">Enrutamiento</h3>
+                <h3 class="text-sm font-semibold text-slate-900">
+                  Enrutamiento
+                </h3>
                 @if (recordsFor('routing').length === 0) {
-                  <ng-container [ngTemplateOutlet]="emptyCard" [ngTemplateOutletContext]="{ title: 'Sin registros de enrutamiento', detail: 'Vendix todavía está preparando las instrucciones.' }"></ng-container>
+                  <ng-container
+                    [ngTemplateOutlet]="emptyCard"
+                    [ngTemplateOutletContext]="{
+                      title: 'Sin registros de enrutamiento',
+                      detail:
+                        'Vendix todavía está preparando las instrucciones.',
+                    }"
+                  ></ng-container>
                 }
-                @for (record of recordsFor('routing'); track record.record_type + record.name + record.value) {
-                  <ng-container [ngTemplateOutlet]="dnsCard" [ngTemplateOutletContext]="{ record: record, tone: 'slate' }"></ng-container>
+                @for (
+                  record of recordsFor('routing');
+                  track record.record_type + record.name + record.value
+                ) {
+                  <ng-container
+                    [ngTemplateOutlet]="dnsCard"
+                    [ngTemplateOutletContext]="{
+                      record: record,
+                      tone: 'slate',
+                    }"
+                  ></ng-container>
                 }
               </div>
             </div>
           </section>
         } @else {
-          <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+          <div
+            class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+          >
             No se pudo cargar el dominio.
           </div>
         }
@@ -239,31 +467,55 @@ const PENDING_PROVISIONING_STATUSES = new Set([
       <article class="rounded-lg border border-slate-200 bg-slate-50 p-3">
         <div class="mb-3 flex items-start justify-between gap-2">
           <div>
-            <span class="text-sm font-semibold text-slate-950">{{ record.record_type }}</span>
+            <span class="text-sm font-semibold text-slate-950">{{
+              record.record_type
+            }}</span>
             @if (record.domain_name) {
-              <span class="ml-1 text-xs text-slate-500">{{ record.domain_name }}</span>
+              <span class="ml-1 text-xs text-slate-500">{{
+                record.domain_name
+              }}</span>
             }
           </div>
-          <span class="rounded-full px-2 py-0.5 text-[11px] font-semibold {{ recordStatusPillClass(record.status) }}">
+          <span
+            class="rounded-full px-2 py-0.5 text-[11px] font-semibold {{
+              recordStatusPillClass(record.status)
+            }}"
+          >
             {{ instructionStatusLabel(record.status) }}
           </span>
         </div>
 
         <div class="space-y-3">
           <div>
-            <span class="mb-1 block text-xs font-medium text-slate-600">Host en proveedor</span>
-            <button type="button" class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950" (click)="copyToClipboard(providerHost(record))">
-              <span class="min-w-0 flex-1 break-all">{{ providerHost(record) }}</span>
+            <span class="mb-1 block text-xs font-medium text-slate-600"
+              >Host en proveedor</span
+            >
+            <button
+              type="button"
+              class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950"
+              (click)="copyToClipboard(providerHost(record))"
+            >
+              <span class="min-w-0 flex-1 break-all">{{
+                providerHost(record)
+              }}</span>
               <app-icon name="copy" [size]="14"></app-icon>
             </button>
             @if (record.fqdn_name) {
-              <span class="mt-1 block break-all text-[11px] text-slate-500">{{ record.fqdn_name }}</span>
+              <span class="mt-1 block break-all text-[11px] text-slate-500">{{
+                record.fqdn_name
+              }}</span>
             }
           </div>
 
           <div>
-            <span class="mb-1 block text-xs font-medium text-slate-600">Valor</span>
-            <button type="button" class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950" (click)="copyToClipboard(record.value)">
+            <span class="mb-1 block text-xs font-medium text-slate-600"
+              >Valor</span
+            >
+            <button
+              type="button"
+              class="flex w-full items-start gap-2 rounded-md bg-white px-2 py-2 text-left font-mono text-xs text-slate-950"
+              (click)="copyToClipboard(record.value)"
+            >
               <span class="min-w-0 flex-1 break-all">{{ record.value }}</span>
               <app-icon name="copy" [size]="14"></app-icon>
             </button>
@@ -282,12 +534,20 @@ const PENDING_PROVISIONING_STATUSES = new Set([
     </ng-template>
 
     <ng-template #emptyCard let-title="title" let-detail="detail">
-      <article class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3">
+      <article
+        class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-3"
+      >
         <div class="flex items-start gap-2">
-          <app-icon name="info" [size]="16" class="mt-0.5 text-slate-500"></app-icon>
+          <app-icon
+            name="info"
+            [size]="16"
+            class="mt-0.5 text-slate-500"
+          ></app-icon>
           <div>
             <h4 class="text-sm font-semibold text-slate-800">{{ title }}</h4>
-            <p class="mt-1 text-xs leading-relaxed text-slate-600">{{ detail }}</p>
+            <p class="mt-1 text-xs leading-relaxed text-slate-600">
+              {{ detail }}
+            </p>
           </div>
         </div>
       </article>
@@ -343,15 +603,15 @@ export class DomainSetupPageComponent implements OnInit {
     this.domain() ? this.statusLabel(this.domain()!.status) : '',
   );
 
-  readonly headerBadgeColor = computed<'green' | 'blue' | 'yellow' | 'gray' | 'red'>(
-    () => {
-      const status = this.domain()?.status || '';
-      if (status === 'active') return 'green';
-      if (status.startsWith('failed')) return 'red';
-      if (PENDING_PROVISIONING_STATUSES.has(status)) return 'blue';
-      return 'yellow';
-    },
-  );
+  readonly headerBadgeColor = computed<
+    'green' | 'blue' | 'yellow' | 'gray' | 'red'
+  >(() => {
+    const status = this.domain()?.status || '';
+    if (status === 'active') return 'green';
+    if (status.startsWith('failed')) return 'red';
+    if (PENDING_PROVISIONING_STATUSES.has(status)) return 'blue';
+    return 'yellow';
+  });
 
   readonly provisioningStages = computed<DomainProvisioningStage[]>(() => {
     const domain = this.domain();
@@ -386,7 +646,10 @@ export class DomainSetupPageComponent implements OnInit {
 
   readonly antiPanicMessage = computed(() => {
     const dns = this.dnsInstructions();
-    if (dns?.routing_status === 'complete' && dns?.https_probe_status !== 'passed') {
+    if (
+      dns?.routing_status === 'complete' &&
+      dns?.https_probe_status !== 'passed'
+    ) {
       return 'Vendix ya ve tus DNS desde internet. Si tu navegador aún falla, puede ser caché o DNS de tu red.';
     }
     return 'No pruebes el dominio como definitivo hasta que quede Activo; puede mostrar error SSL mientras el certificado y la conexión terminan.';
@@ -453,7 +716,8 @@ export class DomainSetupPageComponent implements OnInit {
           if (response.success) this.dnsInstructions.set(response.data);
         },
         error: () => {
-          if (!silent) this.toastService.error('Error al cargar instrucciones DNS');
+          if (!silent)
+            this.toastService.error('Error al cargar instrucciones DNS');
         },
       });
   }
@@ -527,7 +791,9 @@ export class DomainSetupPageComponent implements OnInit {
       });
   }
 
-  recordsFor(group: 'ownership' | 'certificate' | 'routing'): DnsInstructionRecord[] {
+  recordsFor(
+    group: 'ownership' | 'certificate' | 'routing',
+  ): DnsInstructionRecord[] {
     return (
       this.dnsInstructions()?.instructions.filter(
         (record) => (record.group || record.purpose) === group,
@@ -672,6 +938,15 @@ export class DomainSetupPageComponent implements OnInit {
     return labels[status] || status;
   }
 
+  appTypeLabel(appType: string): string {
+    const labels: Record<string, string> = {
+      STORE_ECOMMERCE: 'E-commerce',
+      STORE_LANDING: 'Landing tienda',
+      STORE_ADMIN: 'Admin tienda',
+    };
+    return labels[appType] || appType;
+  }
+
   instructionStatusLabel(status?: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
@@ -687,7 +962,8 @@ export class DomainSetupPageComponent implements OnInit {
   statusPillClass(status: string): string {
     if (status === 'active') return 'bg-emerald-100 text-emerald-700';
     if (status.startsWith('failed')) return 'bg-red-100 text-red-700';
-    if (PENDING_PROVISIONING_STATUSES.has(status)) return 'bg-sky-100 text-sky-700';
+    if (PENDING_PROVISIONING_STATUSES.has(status))
+      return 'bg-sky-100 text-sky-700';
     return 'bg-amber-100 text-amber-700';
   }
 
@@ -704,7 +980,8 @@ export class DomainSetupPageComponent implements OnInit {
       return 'border-emerald-200 bg-emerald-50/70';
     }
     if (stage.status === 'failed') return 'border-red-200 bg-red-50/70';
-    if (stage.waiting || stage.status === 'waiting') return 'border-sky-200 bg-sky-50/70';
+    if (stage.waiting || stage.status === 'waiting')
+      return 'border-sky-200 bg-sky-50/70';
     return 'border-slate-200 bg-slate-50/70';
   }
 
@@ -712,7 +989,8 @@ export class DomainSetupPageComponent implements OnInit {
     if (stage.status === 'complete' || stage.status === 'covered_by_parent') {
       return 'border-emerald-500 bg-emerald-500 text-white';
     }
-    if (stage.status === 'failed') return 'border-red-500 bg-red-500 text-white';
+    if (stage.status === 'failed')
+      return 'border-red-500 bg-red-500 text-white';
     if (stage.waiting || stage.status === 'waiting') {
       return 'border-sky-500 bg-white text-sky-600';
     }

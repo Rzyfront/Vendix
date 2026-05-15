@@ -88,6 +88,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
+| Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
@@ -99,6 +100,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring MCP authentication | `vendix-mcp-server` |
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
+| Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
 | Creating API endpoints | `vendix-backend-api` |
@@ -215,6 +217,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User requests agent teams, subordinate agents, parallel agents, or background agents | `agent-teams` |
+| Using AWS CLI to inspect or administer Vendix cloud resources | `vendix-cloud-operations` |
+| Using SSH to inspect Vendix production infrastructure | `vendix-cloud-operations` |
 | Using input(), output(), model(), signal(), computed(), effect(), or toSignal() | `vendix-zoneless-signals` |
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
