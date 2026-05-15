@@ -1,5 +1,5 @@
 import * as AdmZip from 'adm-zip';
-import sharp from 'sharp';
+import sharp = require('sharp');
 import { v4 as uuidv4 } from 'uuid';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';

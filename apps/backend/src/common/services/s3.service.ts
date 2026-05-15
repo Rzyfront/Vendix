@@ -9,7 +9,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
-import sharp from 'sharp';
+import sharp = require('sharp');
 import { ImageContext, IMAGE_PRESETS } from '../config/image-presets';
 import {
   extractS3KeyFromUrl,
