@@ -48,6 +48,34 @@ export interface AcmTaggedCertificate {
   domainName: string;
 }
 
+const ACM_TAG_VALUE_MAX_LENGTH = 256;
+const ACM_TAG_KEY_MAX_LENGTH = 128;
+const ACM_TAG_DISALLOWED_CHARS = /[^A-Za-z0-9_.:/=+\-@ ]/g;
+
+export function sanitizeAcmTagValue(value: string | null | undefined): string {
+  return String(value ?? '')
+    .replace(ACM_TAG_DISALLOWED_CHARS, '_')
+    .slice(0, ACM_TAG_VALUE_MAX_LENGTH);
+}
+
+function sanitizeAcmTagKey(key: string): string {
+  return key
+    .replace(ACM_TAG_DISALLOWED_CHARS, '_')
+    .slice(0, ACM_TAG_KEY_MAX_LENGTH);
+}
+
+export function normalizeAcmTags(
+  tags: Array<{ key: string; value: string }> = [],
+): Array<{ Key: string; Value: string }> {
+  return [
+    { Key: 'vendix:managed', Value: 'true' },
+    ...tags.map((tag) => ({
+      Key: sanitizeAcmTagKey(tag.key),
+      Value: sanitizeAcmTagValue(tag.value),
+    })),
+  ].filter((tag) => tag.Key.length > 0);
+}
+
 /**
  * Service responsible for interacting with AWS ACM (us-east-1, required by CloudFront).
  *
@@ -80,10 +108,7 @@ export class AcmService {
     idempotencyToken: string;
     tags?: Array<{ key: string; value: string }>;
   }): Promise<{ certificateArn: string }> {
-    const tags = [
-      { Key: 'vendix:managed', Value: 'true' },
-      ...(params.tags ?? []).map((t) => ({ Key: t.key, Value: t.value })),
-    ];
+    const tags = normalizeAcmTags(params.tags);
 
     try {
       const response = await this.client.send(

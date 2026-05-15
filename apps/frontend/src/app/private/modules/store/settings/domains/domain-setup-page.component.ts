@@ -20,6 +20,7 @@ import {
   ToastService,
 } from '../../../../../shared/components/index';
 import type { StickyHeaderActionButton } from '../../../../../shared/components/index';
+import type { IconName } from '../../../../../shared/components/icon/icons.registry';
 import {
   DnsInstructionRecord,
   DnsInstructions,
@@ -37,6 +38,15 @@ const PENDING_PROVISIONING_STATUSES = new Set([
   'propagating',
   'https_check_pending',
 ]);
+
+interface DomainNextStep {
+  title: string;
+  detail: string;
+  icon: IconName;
+  waiting: boolean;
+  showSync: boolean;
+  className: string;
+}
 
 @Component({
   selector: 'app-domain-setup-page',
@@ -137,6 +147,42 @@ const PENDING_PROVISIONING_STATUSES = new Set([
               }
             </div>
           </section>
+
+          @if (nextStep(); as step) {
+            <section class="rounded-lg border p-4 md:p-5 {{ step.className }}">
+              <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div class="flex items-start gap-3">
+                  <span
+                    class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/80"
+                  >
+                    @if (step.waiting) {
+                      <app-spinner size="sm" color="text-sky-600"></app-spinner>
+                    } @else {
+                      <app-icon [name]="step.icon" [size]="18"></app-icon>
+                    }
+                  </span>
+                  <div>
+                    <h2 class="text-sm font-semibold text-slate-950">
+                      {{ step.title }}
+                    </h2>
+                    <p class="mt-1 text-sm leading-relaxed text-slate-700">
+                      {{ step.detail }}
+                    </p>
+                  </div>
+                </div>
+                @if (step.showSync) {
+                  <app-button
+                    variant="outline"
+                    type="button"
+                    (clicked)="provisionDomain()"
+                    [disabled]="isSaving()"
+                  >
+                    Sincronizar estado
+                  </app-button>
+                }
+              </div>
+            </section>
+          }
 
           @if (dnsInstructions()?.root_hostname) {
             <section
@@ -347,6 +393,22 @@ const PENDING_PROVISIONING_STATUSES = new Set([
                     {{ httpsProbeLabel() }}
                   </span>
                 </div>
+                @for (
+                  diagnostic of dnsInstructions()?.diagnostics ?? [];
+                  track diagnostic.label + diagnostic.detail
+                ) {
+                  <div
+                    class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800"
+                  >
+                    <span
+                      class="block text-xs font-semibold uppercase tracking-wide text-red-500"
+                      >{{ diagnostic.label }}</span
+                    >
+                    <span class="mt-1 block text-sm font-medium">
+                      {{ diagnostic.detail }}
+                    </span>
+                  </div>
+                }
               </div>
             </section>
           </div>
@@ -428,18 +490,17 @@ const PENDING_PROVISIONING_STATUSES = new Set([
                 <h3 class="text-sm font-semibold text-slate-900">
                   Enrutamiento
                 </h3>
-                @if (recordsFor('routing').length === 0) {
+                @if (visibleRoutingRecords().length === 0) {
                   <ng-container
                     [ngTemplateOutlet]="emptyCard"
                     [ngTemplateOutletContext]="{
-                      title: 'Sin registros de enrutamiento',
-                      detail:
-                        'Vendix todavía está preparando las instrucciones.',
+                      title: routingEmptyTitle(),
+                      detail: routingEmptyDetail(),
                     }"
                   ></ng-container>
                 }
                 @for (
-                  record of recordsFor('routing');
+                  record of visibleRoutingRecords();
                   track record.record_type + record.name + record.value
                 ) {
                   <ng-container
@@ -644,6 +705,102 @@ export class DomainSetupPageComponent implements OnInit {
         : null),
   );
 
+  readonly nextStep = computed<DomainNextStep | null>(() => {
+    const domain = this.domain();
+    if (!domain) return null;
+
+    const failedDiagnostic = this.dnsInstructions()?.diagnostics?.find(
+      (diagnostic) => diagnostic.status === 'failed',
+    );
+    if (failedDiagnostic || domain.last_error) {
+      return {
+        title: 'Necesitamos reintentar este paso',
+        detail:
+          failedDiagnostic?.detail ||
+          'El último intento no se completó. Sincroniza de nuevo para continuar.',
+        icon: 'refresh-cw',
+        waiting: false,
+        showSync: true,
+        className: 'border-red-200 bg-red-50',
+      };
+    }
+
+    if (!this.isOwnershipComplete()) {
+      return {
+        title: 'Primero verifica la propiedad',
+        detail:
+          'Agrega el TXT de verificación en tu proveedor DNS y luego presiona Verificar DNS.',
+        icon: 'shield',
+        waiting: false,
+        showSync: false,
+        className: 'border-amber-200 bg-amber-50',
+      };
+    }
+
+    const certificateRecords = this.recordsFor('certificate');
+    if (!this.awsCertificateIssued() && certificateRecords.length === 0) {
+      const routingAlreadyDetected = this.recordsFor('routing').some(
+        (record) => record.status === 'complete',
+      );
+      return {
+        title: 'Ahora espera los registros seguros',
+        detail: routingAlreadyDetected
+          ? 'Ya detectamos registros de conexión. No borres nada: falta que Vendix genere los CNAME del certificado para poder continuar.'
+          : 'No agregues más registros todavía. Vendix está generando los CNAME del certificado; cuando aparezcan, copia esos CNAME en tu proveedor DNS.',
+        icon: 'lock',
+        waiting: true,
+        showSync: true,
+        className: 'border-sky-200 bg-sky-50',
+      };
+    }
+
+    if (!this.awsCertificateIssued()) {
+      return {
+        title: 'Agrega los CNAME del certificado',
+        detail:
+          'Copia cada Host en proveedor y Valor de la sección Certificado SSL. Después Vendix revisará el DNS público automáticamente.',
+        icon: 'copy',
+        waiting: false,
+        showSync: true,
+        className: 'border-amber-200 bg-amber-50',
+      };
+    }
+
+    if (this.dnsInstructions()?.routing_status !== 'complete') {
+      return {
+        title: 'Conecta el dominio',
+        detail:
+          'Ahora sí agrega los registros de Enrutamiento para que el dominio raíz y el wildcard apunten al destino de conexión.',
+        icon: 'link',
+        waiting: false,
+        showSync: true,
+        className: 'border-amber-200 bg-amber-50',
+      };
+    }
+
+    if (domain.status !== 'active') {
+      return {
+        title: 'Solo falta esperar',
+        detail:
+          'Vendix está conectando el dominio y probando HTTPS desde internet. No uses el dominio como definitivo hasta que figure Activo.',
+        icon: 'clock',
+        waiting: true,
+        showSync: false,
+        className: 'border-sky-200 bg-sky-50',
+      };
+    }
+
+    return {
+      title: 'Dominio listo',
+      detail:
+        'El dominio ya está activo. Puedes usarlo como dominio principal o crear subdominios de un nivel desde este dominio base.',
+      icon: 'check',
+      waiting: false,
+      showSync: false,
+      className: 'border-emerald-200 bg-emerald-50',
+    };
+  });
+
   readonly antiPanicMessage = computed(() => {
     const dns = this.dnsInstructions();
     if (
@@ -801,6 +958,19 @@ export class DomainSetupPageComponent implements OnInit {
     );
   }
 
+  visibleRoutingRecords(): DnsInstructionRecord[] {
+    if (!this.shouldShowRoutingRecords()) return [];
+    return this.recordsFor('routing');
+  }
+
+  shouldShowRoutingRecords(): boolean {
+    return (
+      this.awsCertificateIssued() ||
+      this.recordsFor('certificate').length > 0 ||
+      this.dnsInstructions()?.certificate_status === 'complete'
+    );
+  }
+
   providerHost(record: DnsInstructionRecord): string {
     return record.provider_host || record.name;
   }
@@ -915,7 +1085,19 @@ export class DomainSetupPageComponent implements OnInit {
     if (this.awsCertificateIssued()) {
       return 'El certificado ya fue verificado. No hay registros nuevos por copiar en este momento.';
     }
-    return 'Vendix mostrará aquí los CNAME cuando el proceso de certificado los entregue.';
+    return 'No copies registros de conexión todavía. Vendix mostrará aquí los CNAME seguros cuando termine de generarlos.';
+  }
+
+  routingEmptyTitle(): string {
+    if (!this.shouldShowRoutingRecords()) return 'Todavía no hagas este paso';
+    return 'Sin registros de enrutamiento';
+  }
+
+  routingEmptyDetail(): string {
+    if (!this.shouldShowRoutingRecords()) {
+      return 'Primero espera los registros del certificado. Si ya agregaste el @ o el wildcard, no los borres: simplemente falta el paso seguro.';
+    }
+    return 'Vendix todavía está preparando las instrucciones de conexión.';
   }
 
   statusLabel(status: string): string {

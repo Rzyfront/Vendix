@@ -24,6 +24,8 @@ export interface DomainRootHostingRecord {
   cloudfront_distribution_tenant_status?: string | null;
   routing_endpoint?: string | null;
   cloudfront_deployed_at?: Date | string | null;
+  last_error?: string | null;
+  last_error_code?: string | null;
   config?: Prisma.JsonValue | Prisma.InputJsonValue | null;
 }
 
@@ -156,6 +158,7 @@ export function buildDomainRootDnsInstructions(params: {
     httpsProbeStatus === 'passed' || root.status === 'active';
 
   const instructions: DomainDnsInstruction[] = [];
+  const certificateRecords = getStoredRootValidationRecords(root);
 
   if (!ownershipComplete && verificationToken) {
     instructions.push({
@@ -173,7 +176,7 @@ export function buildDomainRootDnsInstructions(params: {
     });
   }
 
-  for (const record of getStoredRootValidationRecords(root)) {
+  for (const record of certificateRecords) {
     const providerHost = toProviderHost(record.name, root.hostname);
     instructions.push({
       record_type: record.record_type || 'CNAME',
@@ -234,11 +237,22 @@ export function buildDomainRootDnsInstructions(params: {
     routingComplete,
     tenantComplete,
     httpsComplete,
+    hasCertificateRecords: certificateRecords.length > 0,
     certificateStatus,
     tenantStatus,
     httpsProbeStatus,
     rootStatus: root.status,
   });
+  const diagnostics =
+    root.last_error || root.last_error_code
+      ? [
+          {
+            label: 'Último intento',
+            status: 'failed',
+            detail: humanizeRootProvisioningError(root.last_error),
+          },
+        ]
+      : undefined;
 
   return {
     domain_root_id: root.id,
@@ -262,6 +276,7 @@ export function buildDomainRootDnsInstructions(params: {
       typeof sslConfig['next_check_at'] === 'string'
         ? (sslConfig['next_check_at'] as string)
         : undefined,
+    diagnostics,
     assignments,
     instructions,
   };
@@ -273,6 +288,7 @@ function buildDomainRootStages(params: {
   routingComplete: boolean;
   tenantComplete: boolean;
   httpsComplete: boolean;
+  hasCertificateRecords: boolean;
   certificateStatus?: string;
   tenantStatus?: string;
   httpsProbeStatus?: string;
@@ -304,7 +320,9 @@ function buildDomainRootStages(params: {
           : 'pending',
       detail: params.certificateComplete
         ? 'El certificado ya fue verificado.'
-        : 'Agrega los CNAME del certificado cuando aparezcan.',
+        : params.ownershipComplete && !params.hasCertificateRecords
+          ? 'Vendix está generando los CNAME del certificado.'
+          : 'Agrega los CNAME del certificado.',
       waiting:
         params.ownershipComplete && !params.certificateComplete && !failed,
     },
@@ -363,6 +381,21 @@ function buildDomainRootStages(params: {
 
 function inferRootStage(stages: DomainProvisioningStage[]) {
   return stages.find((stage) => stage.waiting)?.key ?? 'active';
+}
+
+function humanizeRootProvisioningError(error?: string | null): string {
+  if (!error) {
+    return 'No pudimos completar el último intento. Sincroniza de nuevo en unos minutos.';
+  }
+
+  if (
+    error.includes('ValidationException') ||
+    error.includes('ACM invalid parameter')
+  ) {
+    return 'No pudimos generar los registros del certificado por una validación interna. Ya puedes reintentar la sincronización.';
+  }
+
+  return error;
 }
 
 function stripTrailingDot(value: string): string {
