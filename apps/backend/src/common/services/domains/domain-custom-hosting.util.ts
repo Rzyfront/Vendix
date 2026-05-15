@@ -835,7 +835,9 @@ async function enrichRoutingRecord(
   const aMatches = aResult.perResolver.filter((resolver) =>
     resolver.records.some((value) => targetIps.has(value)),
   );
-  const found = cnameMatches.length >= 2 || aMatches.length >= 2;
+  const alreadyComplete = record.status === 'complete';
+  const found =
+    alreadyComplete || cnameMatches.length >= 2 || aMatches.length >= 2;
   const usedLegacy =
     legacyEdgeHost &&
     cnameResult.perResolver.some((resolver) =>
@@ -857,7 +859,9 @@ async function enrichRoutingRecord(
     ]),
     status: found ? 'complete' : 'pending',
     status_reason: found
-      ? usedLegacy
+      ? alreadyComplete && cnameMatches.length === 0 && aMatches.length === 0
+        ? 'La conexión ya fue validada por Vendix. Los ALIAS/ANAME del dominio raíz pueden responder con IPs dinámicas.'
+        : usedLegacy
         ? `Detectado usando ${legacyEdgeHost} como destino anterior. Funciona, pero recomendamos el destino directo para nuevos registros.`
         : 'Vendix ve este enrutamiento desde DNS público.'
       : 'Vendix aún no ve este enrutamiento desde DNS público.',
