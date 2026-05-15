@@ -42,6 +42,7 @@ const PENDING_PROVISIONING_STATUSES = new Set([
 interface DomainNextStep {
   title: string;
   detail: string;
+  waitHint?: string;
   icon: IconName;
   waiting: boolean;
   showSync: boolean;
@@ -141,7 +142,7 @@ interface DomainNextStep {
                     </span>
                   </div>
                   <p class="text-xs leading-relaxed text-slate-600">
-                    {{ stage.detail }}
+                    {{ stageDetail(stage) }}
                   </p>
                 </div>
               }
@@ -168,6 +169,13 @@ interface DomainNextStep {
                     <p class="mt-1 text-sm leading-relaxed text-slate-700">
                       {{ step.detail }}
                     </p>
+                    @if (step.waitHint) {
+                      <p
+                        class="mt-3 rounded-lg border border-white/70 bg-white/70 px-3 py-2 text-xs leading-relaxed text-slate-700"
+                      >
+                        {{ step.waitHint }}
+                      </p>
+                    }
                   </div>
                 </div>
                 @if (step.showSync) {
@@ -747,7 +755,23 @@ export class DomainSetupPageComponent implements OnInit {
         detail: routingAlreadyDetected
           ? 'Ya detectamos registros de conexión. No borres nada: falta que Vendix genere los CNAME del certificado para poder continuar.'
           : 'No agregues más registros todavía. Vendix está generando los CNAME del certificado; cuando aparezcan, copia esos CNAME en tu proveedor DNS.',
+        waitHint:
+          'Este paso puede tardar varios minutos. Puedes cerrar esta pantalla y volver más tarde; Vendix seguirá revisando automáticamente.',
         icon: 'lock',
+        waiting: true,
+        showSync: true,
+        className: 'border-sky-200 bg-sky-50',
+      };
+    }
+
+    if (!this.awsCertificateIssued() && this.certificateDnsDetected()) {
+      return {
+        title: 'DNS listo, esperando emisión',
+        detail:
+          'Vendix ya ve los CNAME del certificado desde internet. Ahora solo falta que el certificado termine de emitirse.',
+        waitHint:
+          'No tienes que quedarte esperando aquí. Normalmente tarda unos minutos, pero por propagación DNS puede tomar más tiempo. Puedes volver luego y revisar el estado.',
+        icon: 'clock',
         waiting: true,
         showSync: true,
         className: 'border-sky-200 bg-sky-50',
@@ -759,6 +783,8 @@ export class DomainSetupPageComponent implements OnInit {
         title: 'Agrega los CNAME del certificado',
         detail:
           'Copia cada Host en proveedor y Valor de la sección Certificado SSL. Después Vendix revisará el DNS público automáticamente.',
+        waitHint:
+          'Cuando el DNS quede detectado, la emisión puede tardar varios minutos. Puedes salir de esta pantalla y regresar más tarde.',
         icon: 'copy',
         waiting: false,
         showSync: true,
@@ -783,6 +809,8 @@ export class DomainSetupPageComponent implements OnInit {
         title: 'Solo falta esperar',
         detail:
           'Vendix está conectando el dominio y probando HTTPS desde internet. No uses el dominio como definitivo hasta que figure Activo.',
+        waitHint:
+          'Esta parte puede tardar varios minutos. No necesitas dejar la pantalla abierta: Vendix seguirá verificando y puedes volver más tarde.',
         icon: 'clock',
         waiting: true,
         showSync: false,
@@ -955,6 +983,17 @@ export class DomainSetupPageComponent implements OnInit {
       this.dnsInstructions()?.instructions.filter(
         (record) => (record.group || record.purpose) === group,
       ) ?? []
+    );
+  }
+
+  certificateDnsDetected(): boolean {
+    const records = this.recordsFor('certificate');
+    return (
+      records.length > 0 &&
+      records.every(
+        (record) =>
+          record.status === 'complete' || (record.seen_in?.length ?? 0) >= 2,
+      )
     );
   }
 
@@ -1186,5 +1225,24 @@ export class DomainSetupPageComponent implements OnInit {
     if (stage.status === 'failed') return 'text-red-900';
     if (stage.waiting || stage.status === 'waiting') return 'text-sky-900';
     return 'text-slate-600';
+  }
+
+  stageDetail(stage: DomainProvisioningStage): string {
+    if (
+      stage.key === 'certificate' &&
+      !this.awsCertificateIssued() &&
+      this.certificateDnsDetected()
+    ) {
+      return 'Los CNAME ya se ven desde internet; falta que el certificado termine de emitirse.';
+    }
+
+    if (
+      (stage.key === 'cloudfront' || stage.key === 'https') &&
+      (stage.waiting || stage.status === 'waiting')
+    ) {
+      return `${stage.detail} Puede tardar varios minutos; puedes volver más tarde.`;
+    }
+
+    return stage.detail;
   }
 }
