@@ -57,6 +57,7 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
   readonly verify = output<StoreDomain>();
 
   readonly copied = signal(false);
+  readonly ownershipExpanded = signal(true);
 
   form: FormGroup;
   vendixDomain = environment.vendixDomain;
@@ -111,6 +112,10 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
       });
       this.form.get('hostname')?.enable();
     }
+
+    if (changes['domain'] || changes['dnsInstructions']) {
+      this.ownershipExpanded.set(!this.isOwnershipStepComplete);
+    }
   }
 
   onCancel(): void {
@@ -153,5 +158,106 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
   get isCustomDomain(): boolean {
     const ownership = this.domain()?.ownership || this.form.get('ownership')?.value;
     return ownership === 'custom_domain' || ownership === 'custom_subdomain';
+  }
+
+  get ownershipRecords() {
+    return this.recordsFor('ownership');
+  }
+
+  get certificateRecords() {
+    return this.recordsFor('certificate');
+  }
+
+  get routingRecords() {
+    return this.recordsFor('routing');
+  }
+
+  get isOwnershipStepComplete(): boolean {
+    const dns = this.dnsInstructions();
+    const domain = this.domain();
+    return (
+      dns?.ownership_status === 'complete' ||
+      dns?.ownership_status === 'covered_by_parent' ||
+      !!domain?.last_verified_at ||
+      (domain?.status !== undefined && domain.status !== 'pending_ownership')
+    );
+  }
+
+  get isCertificateStepComplete(): boolean {
+    const dns = this.dnsInstructions();
+    const domain = this.domain();
+    return (
+      dns?.certificate_status === 'complete' ||
+      dns?.certificate_status === 'covered_by_parent' ||
+      domain?.ssl_status === 'issued'
+    );
+  }
+
+  get isInheritedDomain(): boolean {
+    return !!(
+      this.dnsInstructions()?.covered_by_parent_hostname ||
+      this.domain()?.ssl_inherited_from_hostname ||
+      this.domain()?.config?.ssl?.inherited_from_hostname
+    );
+  }
+
+  get coveredByParentHostname(): string | null {
+    return (
+      this.dnsInstructions()?.covered_by_parent_hostname ||
+      this.domain()?.ssl_inherited_from_hostname ||
+      this.domain()?.config?.ssl?.inherited_from_hostname ||
+      null
+    );
+  }
+
+  get ownershipSectionClasses(): string {
+    return this.isOwnershipStepComplete
+      ? 'space-y-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-4'
+      : 'space-y-3 rounded-lg border border-amber-200 bg-amber-50/60 p-4';
+  }
+
+  get ownershipIconClass(): string {
+    return this.isOwnershipStepComplete
+      ? 'mt-0.5 text-emerald-600'
+      : 'mt-0.5 text-amber-600';
+  }
+
+  get ownershipTitleClass(): string {
+    return this.isOwnershipStepComplete
+      ? 'text-sm font-semibold text-emerald-950'
+      : 'text-sm font-semibold text-amber-950';
+  }
+
+  get ownershipTextClass(): string {
+    return this.isOwnershipStepComplete
+      ? 'block text-xs text-emerald-800'
+      : 'block text-xs text-amber-800';
+  }
+
+  statusLabel(status?: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      complete: 'Completado',
+      not_required: 'No requerido',
+      covered_by_parent: 'Cubierto por dominio padre',
+    };
+    return labels[status || ''] || status || 'Pendiente';
+  }
+
+  purposeLabel(purpose?: string): string {
+    const labels: Record<string, string> = {
+      ownership: 'propiedad',
+      certificate: 'certificado AWS',
+      routing: 'enrutamiento',
+    };
+    return labels[purpose || ''] || purpose || 'registro';
+  }
+
+  private recordsFor(group: 'ownership' | 'certificate' | 'routing') {
+    return (
+      this.dnsInstructions()?.instructions.filter(
+        (record) => (record.group || record.purpose) === group,
+      ) ?? []
+    );
   }
 }

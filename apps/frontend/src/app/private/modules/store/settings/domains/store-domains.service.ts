@@ -1,7 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
-import { tap, map } from 'rxjs/operators';
+import { finalize, tap } from 'rxjs/operators';
 import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -34,8 +34,13 @@ export class StoreDomainsService {
     /**
      * Get all domains for the current store with pagination
      */
-    getDomains(query?: StoreDomainQueryDto): Observable<PaginatedDomainsResponse> {
-        this.loading.set(true);
+    getDomains(
+        query?: StoreDomainQueryDto,
+        options?: { silent?: boolean },
+    ): Observable<PaginatedDomainsResponse> {
+        if (!options?.silent) {
+            this.loading.set(true);
+        }
 
         let params = new HttpParams();
         if (query?.page) params = params.set('page', query.page.toString());
@@ -52,7 +57,11 @@ export class StoreDomainsService {
                     if (response.success && response.data) {
                         this.domains.set(response.data);
                     }
-                    this.loading.set(false);
+                }),
+                finalize(() => {
+                    if (!options?.silent) {
+                        this.loading.set(false);
+                    }
                 }),
             );
     }

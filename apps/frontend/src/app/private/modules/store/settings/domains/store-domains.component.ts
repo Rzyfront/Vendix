@@ -9,6 +9,7 @@ import {Component,
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
+import { interval } from 'rxjs';
 
 
 import {
@@ -36,6 +37,13 @@ import {
   DnsInstructions} from './domain.interface';
 import { environment } from '../../../../../../environments/environment';
 import { DomainFormModalComponent } from './components/domain-form-modal.component';
+
+const PENDING_PROVISIONING_STATUSES = new Set([
+  'pending_certificate',
+  'issuing_certificate',
+  'pending_alias',
+  'propagating',
+]);
 
 @Component({
   selector: 'app-store-domains',
@@ -391,6 +399,17 @@ readonly domains = signal<StoreDomain[]>([]);
     this.domains_service.is_loading$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => this.is_loading.set(loading));
+
+    interval(15000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (!this.hasPendingProvisioningDomains()) return;
+
+        this.loadDomains(undefined, { silent: true });
+        if (this.editing_domain && this.isCustomDomain(this.editing_domain)) {
+          this.loadDnsInstructions(this.editing_domain, { silent: true });
+        }
+      });
   }
 
   ngAfterViewInit(): void {
@@ -404,9 +423,12 @@ readonly domains = signal<StoreDomain[]>([]);
       }
     }
   }
-loadDomains(query?: StoreDomainQueryDto): void {
+loadDomains(
+    query?: StoreDomainQueryDto,
+    options?: { silent?: boolean },
+  ): void {
     this.domains_service
-      .getDomains(query || { page: 1, limit: 50 })
+      .getDomains(query || { page: 1, limit: 50 }, options)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -416,7 +438,9 @@ loadDomains(query?: StoreDomainQueryDto): void {
           }
         },
         error: (error) => {
-          this.toast_service.error('Error al cargar los dominios');
+          if (!options?.silent) {
+            this.toast_service.error('Error al cargar los dominios');
+          }
         }});
   }
 
@@ -542,7 +566,10 @@ loadDomains(query?: StoreDomainQueryDto): void {
         }});
   }
 
-  loadDnsInstructions(domain: StoreDomain): void {
+  loadDnsInstructions(
+    domain: StoreDomain,
+    options?: { silent?: boolean },
+  ): void {
     this.domains_service
       .getDnsInstructions(domain.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -553,7 +580,9 @@ loadDomains(query?: StoreDomainQueryDto): void {
           }
         },
         error: () => {
-          this.toast_service.error('Error al cargar instrucciones DNS');
+          if (!options?.silent) {
+            this.toast_service.error('Error al cargar instrucciones DNS');
+          }
         }});
   }
 
@@ -568,7 +597,14 @@ loadDomains(query?: StoreDomainQueryDto): void {
             this.toast_service.success(
               'Propiedad verificada. Certificado pendiente de emisión.',
             );
-            this.closeModal();
+            this.editing_domain = {
+              ...domain,
+              status: response.data.status_after,
+              ssl_status: response.data.ssl_status,
+              last_verified_at:
+                domain.last_verified_at || new Date().toISOString(),
+            };
+            this.loadDnsInstructions(this.editing_domain);
           } else {
             this.toast_service.warning('No se encontró el TXT de verificación');
           }
@@ -708,6 +744,12 @@ loadDomains(query?: StoreDomainQueryDto): void {
       domain.last_verified_at != null &&
       domain.status !== 'active' &&
       domain.status !== 'failed_ownership'
+    );
+  }
+
+  private hasPendingProvisioningDomains(): boolean {
+    return this.domains().some((domain) =>
+      PENDING_PROVISIONING_STATUSES.has(domain.status),
     );
   }
 }

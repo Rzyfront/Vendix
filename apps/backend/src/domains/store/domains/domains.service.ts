@@ -11,6 +11,14 @@ import { BlocklistService } from '../../../common/services/blocklist/blocklist.s
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { DnsResolverService } from '../../../common/services/dns/dns-resolver.service';
 import { DomainProvisioningService } from '../../../common/services/aws/domain-provisioning.service';
+import {
+  buildDomainDnsInstructions,
+  buildInheritedDomainConfig,
+  decorateDomainWithSslFields,
+  getInheritedFromHostname,
+  getOneLevelSubdomainLabel,
+  hasIssuedWildcardSsl,
+} from '../../../common/services/domains/domain-custom-hosting.util';
 
 const STORE_APP_TYPES = ['STORE_ECOMMERCE', 'STORE_LANDING', 'STORE_ADMIN'];
 const CUSTOM_OWNERSHIPS = ['custom_domain', 'custom_subdomain'];
@@ -41,6 +49,30 @@ export class StoreDomainsService {
     return (
       process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
     );
+  }
+
+  private async findActiveWildcardParentForSubdomain(hostname: string) {
+    const parents = await this.prisma.domain_settings.findMany({
+      where: {
+        ownership: 'custom_domain',
+        status: 'active',
+        ssl_status: 'issued',
+      },
+    });
+
+    return (
+      parents
+        .filter(
+          (parent) =>
+            getOneLevelSubdomainLabel(hostname, parent.hostname) !== null &&
+            hasIssuedWildcardSsl(parent),
+        )
+        .sort((a, b) => b.hostname.length - a.hostname.length)[0] ?? null
+    );
+  }
+
+  private decorateDomain(domain: any) {
+    return decorateDomainWithSslFields(domain);
   }
 
   private inferDomainType(appType: string, provided?: string): string {
@@ -125,12 +157,22 @@ export class StoreDomainsService {
     const ownership = (create_domain_dto.ownership ||
       'vendix_subdomain') as any;
 
-    // Vendix subdomains: Vendix controla el DNS, activación inmediata.
-    // Custom domains: SIEMPRE pending_ownership — sólo prueba DNS desbloquea active.
-    const isVendixSubdomain = ownership === 'vendix_subdomain';
-    const status = isVendixSubdomain ? 'active' : 'pending_ownership';
+    const inheritedParent =
+      ownership === 'custom_subdomain'
+        ? await this.findActiveWildcardParentForSubdomain(
+            create_domain_dto.hostname,
+          )
+        : null;
 
-    const is_primary = isVendixSubdomain
+    // Vendix subdomains: Vendix controla el DNS, activación inmediata.
+    // Custom subdomains under an already-active wildcard root inherit SSL/DNS.
+    // Other custom domains enter pending_ownership until TXT proves ownership.
+    const isVendixSubdomain = ownership === 'vendix_subdomain';
+    const isInheritedSubdomain = !!inheritedParent;
+    const status =
+      isVendixSubdomain || isInheritedSubdomain ? 'active' : 'pending_ownership';
+
+    const is_primary = status === 'active'
       ? create_domain_dto.is_primary || false
       : false;
 
@@ -142,9 +184,15 @@ export class StoreDomainsService {
       process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
       10,
     );
-    const expires_token_at = isVendixSubdomain
+    const expires_token_at = status === 'active'
       ? null
       : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+    const config = isInheritedSubdomain
+      ? buildInheritedDomainConfig(
+          create_domain_dto.config as Prisma.JsonValue,
+          inheritedParent,
+        )
+      : (create_domain_dto.config as any);
 
     // Create domain - store_id is auto-injected by StorePrismaService
     const created = await this.prisma.domain_settings.create({
@@ -154,12 +202,11 @@ export class StoreDomainsService {
         app_type: app_type as any,
         is_primary,
         status: status as any,
-        ssl_status: isVendixSubdomain ? ('issued' as any) : ('pending' as any),
+        ssl_status: status === 'active' ? ('issued' as any) : ('pending' as any),
         ownership,
-        config: create_domain_dto.config as any,
-        verification_token: isVendixSubdomain
-          ? null
-          : this.generateVerificationToken(),
+        config,
+        verification_token: status === 'active' ? null : this.generateVerificationToken(),
+        last_verified_at: isInheritedSubdomain ? new Date() : undefined,
         expires_token_at,
       },
     });
@@ -178,7 +225,7 @@ export class StoreDomainsService {
       });
     }
 
-    return created;
+    return this.decorateDomain(created);
   }
 
   private async ensureSingleActiveType(domain_type: any, exclude_id?: number) {
@@ -258,7 +305,7 @@ export class StoreDomainsService {
     ]);
 
     return {
-      data,
+      data: data.map((domain) => this.decorateDomain(domain)),
       meta: {
         total,
         page,
@@ -280,7 +327,7 @@ export class StoreDomainsService {
       throw new NotFoundException('Domain not found');
     }
 
-    return domain;
+    return this.decorateDomain(domain);
   }
 
   /**
@@ -393,7 +440,7 @@ export class StoreDomainsService {
       });
     }
 
-    return updated;
+    return this.decorateDomain(updated);
   }
 
   /**
@@ -460,7 +507,7 @@ export class StoreDomainsService {
       });
     }
 
-    return updated;
+    return this.decorateDomain(updated);
   }
 
   async verifyDomain(id: number) {
@@ -468,6 +515,26 @@ export class StoreDomainsService {
 
     if (!CUSTOM_OWNERSHIPS.includes(domain.ownership)) {
       throw new BadRequestException('Domain type not verifiable');
+    }
+
+    const inheritedFrom = getInheritedFromHostname(domain);
+    if (inheritedFrom) {
+      return {
+        hostname: domain.hostname,
+        status_before: domain.status,
+        status_after: domain.status,
+        ssl_status: domain.ssl_status,
+        verified: true,
+        checks: {
+          parent: {
+            valid: true,
+            name: inheritedFrom,
+            reason: `Cubierto por el wildcard SSL de ${inheritedFrom}`,
+          },
+        },
+        suggested_fixes: [],
+        timestamp: new Date().toISOString(),
+      };
     }
 
     const verification_token = await this.ensureVerificationToken(domain);
@@ -562,58 +629,20 @@ export class StoreDomainsService {
 
   async getDnsInstructions(id: number) {
     const domain = await this.findOne(id);
-    const verification_token = CUSTOM_OWNERSHIPS.includes(domain.ownership)
-      ? await this.ensureVerificationToken(domain)
-      : domain.verification_token;
+    const inheritedFrom = getInheritedFromHostname(domain);
+    const verification_token =
+      CUSTOM_OWNERSHIPS.includes(domain.ownership) && !inheritedFrom
+        ? domain.verification_token ||
+          (!domain.last_verified_at
+            ? await this.ensureVerificationToken(domain)
+            : null)
+        : domain.verification_token;
     const edgeHost = this.getEdgeHost();
-    const isSubdomain =
-      domain.ownership === 'custom_subdomain' ||
-      domain.ownership === 'third_party_subdomain' ||
-      domain.ownership === 'vendix_subdomain';
 
-    const instructions: {
-      record_type: string;
-      name: string;
-      value: string;
-      ttl: number;
-      purpose?: string;
-    }[] = [];
-
-    if (verification_token) {
-      instructions.push({
-        record_type: 'TXT',
-        name: this.getTxtRecordName(domain.hostname),
-        value: verification_token,
-        ttl: 300,
-        purpose: 'ownership',
-      });
-    }
-
-    if (domain.validation_cname_name && domain.validation_cname_value) {
-      instructions.push({
-        record_type: 'CNAME',
-        name: domain.validation_cname_name,
-        value: domain.validation_cname_value,
-        ttl: 300,
-        purpose: 'certificate',
-      });
-    }
-
-    instructions.push({
-      record_type: !isSubdomain ? 'ALIAS/ANAME' : 'CNAME',
-      name: isSubdomain ? domain.hostname.split('.')[0] : '@',
-      value: edgeHost,
-      ttl: 300,
-      purpose: 'routing',
+    return buildDomainDnsInstructions({
+      domain,
+      edgeHost,
+      verificationToken: verification_token,
     });
-
-    return {
-      hostname: domain.hostname,
-      ownership: domain.ownership,
-      dns_type: 'CNAME' as const,
-      target: edgeHost,
-      requires_alias: !isSubdomain,
-      instructions,
-    };
   }
 }

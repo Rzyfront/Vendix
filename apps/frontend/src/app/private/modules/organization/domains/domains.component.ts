@@ -8,7 +8,7 @@ import {Component,
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { forkJoin } from 'rxjs';
+import { forkJoin, interval } from 'rxjs';
 
 import {
   Domain,
@@ -58,6 +58,13 @@ interface StoreOption {
   name: string;
   slug: string;
 }
+
+const PENDING_PROVISIONING_STATUSES = new Set([
+  DomainStatus.PENDING_CERTIFICATE,
+  DomainStatus.ISSUING_CERTIFICATE,
+  DomainStatus.PENDING_ALIAS,
+  DomainStatus.PROPAGATING,
+]);
 
 @Component({
   selector: 'app-domains',
@@ -499,6 +506,18 @@ export class DomainsComponent implements OnInit {
   );
 ngOnInit(): void {
     this.loadInitialData();
+    interval(15000)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (!this.hasPendingProvisioningDomains()) return;
+
+        this.loadDomains({ silent: true });
+        this.loadStats();
+        const selected = this.selectedDomainForVerify();
+        if (selected && this.canVerifyDomain(selected)) {
+          this.loadDnsInstructionsForVerifyModal(selected, { silent: true });
+        }
+      });
   }
 private loadInitialData(): void {
     this.isLoading.set(true);
@@ -527,8 +546,10 @@ private loadInitialData(): void {
         }});
   }
 
-  loadDomains(): void {
-    this.isLoading.set(true);
+  loadDomains(options?: { silent?: boolean }): void {
+    if (!options?.silent) {
+      this.isLoading.set(true);
+    }
 
     const query: DomainQueryDto = {
       limit: 200,
@@ -553,12 +574,16 @@ private loadInitialData(): void {
           } else {
             this.domains.set([]);
           }
-          this.isLoading.set(false);
+          if (!options?.silent) {
+            this.isLoading.set(false);
+          }
         },
         error: (error) => {
           console.error('Error loading domains:', error);
           this.domains.set([]);
-          this.isLoading.set(false);
+          if (!options?.silent) {
+            this.isLoading.set(false);
+          }
         }});
   }
 
@@ -607,8 +632,8 @@ private loadInitialData(): void {
         }});
   }
 
-  refreshDomains(): void {
-    this.loadDomains();
+  refreshDomains(options?: { silent?: boolean }): void {
+    this.loadDomains(options);
     this.loadStats();
   }
 
@@ -750,6 +775,13 @@ private loadInitialData(): void {
     // Load DNS instructions from backend so the modal can render the real
     // edge host (target). If the call fails, the computed `edgeHost` falls
     // back to environment.vendixDomain.
+    this.loadDnsInstructionsForVerifyModal(domain);
+  }
+
+  private loadDnsInstructionsForVerifyModal(
+    domain: Domain,
+    options?: { silent?: boolean },
+  ): void {
     this.domainsService
       .getDnsInstructions(domain.hostname)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -762,6 +794,9 @@ private loadInitialData(): void {
         },
         error: (error) => {
           console.error('Error loading DNS instructions:', error);
+          if (!options?.silent) {
+            this.toastService.error('Error al cargar instrucciones DNS');
+          }
         },
       });
   }
@@ -809,6 +844,12 @@ private loadInitialData(): void {
       domain.last_verified_at != null &&
       domain.status !== DomainStatus.ACTIVE &&
       domain.status !== DomainStatus.FAILED_OWNERSHIP
+    );
+  }
+
+  private hasPendingProvisioningDomains(): boolean {
+    return this.domains().some((domain) =>
+      PENDING_PROVISIONING_STATUSES.has(domain.status),
     );
   }
 

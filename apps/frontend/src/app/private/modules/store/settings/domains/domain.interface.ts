@@ -19,6 +19,8 @@ export interface StoreDomain {
     cloudfront_alias_added_at?: string;
     cloudfront_deployed_at?: string;
     last_error?: string;
+    wildcard_ssl_status?: 'pending' | 'issued' | 'upgrade_required' | 'not_applicable' | 'error' | string;
+    ssl_inherited_from_hostname?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -72,6 +74,22 @@ export interface StoreDomainConfig {
         support?: boolean;
         analytics?: boolean;
     };
+    ssl?: {
+        inherited?: boolean;
+        inherited_from_domain_id?: number;
+        inherited_from_hostname?: string;
+        wildcard_hostname?: string | null;
+        wildcard_status?: string;
+        certificate_status?: string;
+        validation_records?: Array<{
+            domain_name?: string;
+            record_type: string;
+            name: string;
+            value: string;
+            validation_status?: string;
+        }>;
+        cloudfront_aliases?: string[];
+    };
 }
 
 export interface CreateStoreDomainDto {
@@ -108,6 +126,11 @@ export interface DnsInstructionRecord {
     value: string;
     ttl: number;
     purpose?: 'ownership' | 'routing' | 'certificate' | string;
+    group?: 'ownership' | 'routing' | 'certificate';
+    status?: 'pending' | 'complete' | 'not_required' | 'covered_by_parent' | string;
+    scope?: 'root' | 'wildcard' | 'subdomain' | 'parent' | string;
+    covered_by_parent_hostname?: string;
+    domain_name?: string;
 }
 
 export interface DnsInstructions {
@@ -116,6 +139,11 @@ export interface DnsInstructions {
     dns_type: 'CNAME' | 'A';
     target: string;
     requires_alias?: boolean;
+    ownership_status?: 'pending' | 'complete' | 'not_required' | 'covered_by_parent' | string;
+    certificate_status?: 'pending' | 'complete' | 'not_required' | 'covered_by_parent' | string;
+    routing_status?: 'pending' | 'complete' | 'not_required' | 'covered_by_parent' | string;
+    wildcard_hostname?: string;
+    covered_by_parent_hostname?: string | null;
     instructions: DnsInstructionRecord[];
 }
 
