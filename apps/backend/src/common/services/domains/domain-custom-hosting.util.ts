@@ -1,10 +1,28 @@
 import { Prisma } from '@prisma/client';
+import { DnsResolverService, ResolverResult } from '../dns/dns-resolver.service';
 
 export type DomainInstructionStatus =
   | 'pending'
   | 'complete'
   | 'not_required'
   | 'covered_by_parent';
+
+export type DomainProvisioningStageKey =
+  | 'ownership'
+  | 'certificate'
+  | 'routing'
+  | 'cloudfront'
+  | 'https'
+  | 'active'
+  | 'failed';
+
+export type DomainProvisioningStageStatus =
+  | 'pending'
+  | 'waiting'
+  | 'complete'
+  | 'failed'
+  | 'covered_by_parent'
+  | 'not_required';
 
 export interface DomainValidationRecord {
   domain_name?: string;
@@ -25,6 +43,21 @@ export interface DomainDnsInstruction {
   scope?: 'root' | 'wildcard' | 'subdomain' | 'parent';
   covered_by_parent_hostname?: string;
   domain_name?: string;
+  provider_host?: string;
+  fqdn_name?: string;
+  detected_values?: string[];
+  seen_in?: string[];
+  status_reason?: string;
+  routing_target_type?: 'cloudfront_distribution' | 'legacy_edge_alias';
+}
+
+export interface DomainProvisioningStage {
+  key: DomainProvisioningStageKey;
+  label: string;
+  status: DomainProvisioningStageStatus;
+  detail: string;
+  waiting: boolean;
+  updated_at?: string;
 }
 
 export interface DomainDnsInstructionsPayload {
@@ -38,6 +71,12 @@ export interface DomainDnsInstructionsPayload {
   routing_status?: DomainInstructionStatus;
   wildcard_hostname?: string;
   covered_by_parent_hostname?: string | null;
+  provisioning_stage?: DomainProvisioningStageKey;
+  stages?: DomainProvisioningStage[];
+  aws_certificate_status?: string;
+  cloudfront_status?: string;
+  https_probe_status?: 'pending' | 'passed' | 'failed';
+  next_check_at?: string;
   instructions: DomainDnsInstruction[];
 }
 
@@ -52,6 +91,8 @@ export interface DomainHostingRecord {
   last_verified_at?: Date | string | null;
   validation_cname_name?: string | null;
   validation_cname_value?: string | null;
+  cloudfront_deployed_at?: Date | string | null;
+  certificate_issued_at?: Date | string | null;
 }
 
 const VERIFIED_DOMAIN_STATUSES = new Set([
@@ -275,8 +316,17 @@ export function buildDomainDnsInstructions(params: {
   domain: DomainHostingRecord;
   edgeHost: string;
   verificationToken?: string | null;
+  routingTargetType?: 'cloudfront_distribution' | 'legacy_edge_alias';
+  legacyEdgeHost?: string;
 }): DomainDnsInstructionsPayload {
-  const { domain, edgeHost, verificationToken } = params;
+  const {
+    domain,
+    edgeHost,
+    verificationToken,
+    routingTargetType = 'cloudfront_distribution',
+    legacyEdgeHost,
+  } = params;
+  const sslConfig = getDomainSslConfig(domain.config);
   const inheritedFrom = getInheritedFromHostname(domain);
   const isSubdomain =
     domain.ownership === 'custom_subdomain' ||
@@ -311,6 +361,10 @@ export function buildDomainDnsInstructions(params: {
       group: 'ownership',
       status: ownershipStatus,
       scope: isSubdomain ? 'subdomain' : 'root',
+      status_reason:
+        ownershipStatus === 'complete'
+          ? 'Vendix ya verificó la propiedad del dominio.'
+          : 'Agrega este TXT para demostrar que controlas el dominio.',
     });
   }
 
@@ -326,6 +380,10 @@ export function buildDomainDnsInstructions(params: {
         status: certificateStatus,
         scope: record.domain_name?.startsWith('*.') ? 'wildcard' : 'root',
         domain_name: record.domain_name,
+        status_reason:
+          certificateStatus === 'complete'
+            ? 'El certificado ya fue verificado. Conserva el CNAME para renovaciones.'
+            : 'El certificado necesita ver este CNAME para emitirse y renovarse.',
       });
     }
   }
@@ -341,6 +399,8 @@ export function buildDomainDnsInstructions(params: {
       status: 'covered_by_parent',
       scope: 'parent',
       covered_by_parent_hostname: inheritedFrom,
+      status_reason: `Este subdominio está cubierto por el wildcard de ${inheritedFrom}.`,
+      routing_target_type: 'cloudfront_distribution',
     });
   } else if (isCustomRootDomain(domain)) {
     instructions.push(
@@ -353,6 +413,12 @@ export function buildDomainDnsInstructions(params: {
         group: 'routing',
         status: routingStatus,
         scope: 'root',
+        status_reason: routingStatusReason(
+          routingStatus,
+          routingTargetType,
+          legacyEdgeHost,
+        ),
+        routing_target_type: routingTargetType,
       },
       {
         record_type: 'CNAME',
@@ -363,6 +429,12 @@ export function buildDomainDnsInstructions(params: {
         group: 'routing',
         status: routingStatus,
         scope: 'wildcard',
+        status_reason: routingStatusReason(
+          routingStatus,
+          routingTargetType,
+          legacyEdgeHost,
+        ),
+        routing_target_type: routingTargetType,
       },
     );
   } else {
@@ -375,8 +447,26 @@ export function buildDomainDnsInstructions(params: {
       group: 'routing',
       status: routingStatus,
       scope: isSubdomain ? 'subdomain' : 'root',
+      status_reason: routingStatusReason(
+        routingStatus,
+        routingTargetType,
+        legacyEdgeHost,
+      ),
+      routing_target_type: routingTargetType,
     });
   }
+
+  const enrichedInstructions = instructions.map((record) =>
+    withProviderFields(record, domain.hostname),
+  );
+  const stages = buildProvisioningStages({
+    domain,
+    ownershipStatus,
+    certificateStatus,
+    routingStatus,
+    inheritedFrom,
+    sslConfig,
+  });
 
   return {
     hostname: domain.hostname,
@@ -389,6 +479,380 @@ export function buildDomainDnsInstructions(params: {
     routing_status: routingStatus,
     wildcard_hostname: getWildcardHostname(domain) ?? undefined,
     covered_by_parent_hostname: inheritedFrom,
+    provisioning_stage: currentProvisioningStage(stages),
+    stages,
+    aws_certificate_status: stringValue(sslConfig['aws_certificate_status']) ??
+      stringValue(sslConfig['certificate_status']) ??
+      (domain.ssl_status === 'issued' ? 'ISSUED' : undefined),
+    cloudfront_status: stringValue(sslConfig['cloudfront_status']),
+    https_probe_status: probeStatusValue(sslConfig['https_probe_status']),
+    next_check_at: stringValue(sslConfig['next_check_at']),
+    instructions: enrichedInstructions,
+  };
+}
+
+export async function enrichDomainDnsInstructionsWithDiagnostics(
+  payload: DomainDnsInstructionsPayload,
+  dnsResolver: DnsResolverService,
+  params?: {
+    legacyEdgeHost?: string;
+  },
+): Promise<DomainDnsInstructionsPayload> {
+  const legacyEdgeHost = params?.legacyEdgeHost;
+  const targetARecords = await safeResolveA(dnsResolver, payload.target);
+  const legacyARecords =
+    legacyEdgeHost && legacyEdgeHost !== payload.target
+      ? await safeResolveA(dnsResolver, legacyEdgeHost)
+      : null;
+
+  const instructions = await Promise.all(
+    payload.instructions.map(async (record) => {
+      if (record.status === 'covered_by_parent') return record;
+
+      if (record.group === 'ownership') {
+        return enrichExpectedValueRecord(
+          record,
+          await dnsResolver.resolveTxt(record.fqdn_name ?? record.name),
+          record.value,
+          'Vendix ve el TXT desde DNS público.',
+          'Vendix aún no ve el TXT desde DNS público.',
+        );
+      }
+
+      if (record.group === 'certificate') {
+        const awsIssued =
+          payload.aws_certificate_status === 'ISSUED' ||
+          payload.certificate_status === 'complete';
+        const enriched = enrichExpectedValueRecord(
+          record,
+          await dnsResolver.resolveCname(record.fqdn_name ?? record.name),
+          record.value,
+          'El certificado ya fue verificado. Conserva el CNAME para renovaciones.',
+          'Aún no se ve este CNAME de validación desde DNS público.',
+        );
+
+        return awsIssued
+          ? {
+              ...enriched,
+              status: 'complete' as const,
+              status_reason:
+                enriched.detected_values && enriched.detected_values.length > 0
+                  ? 'El certificado ya fue verificado. Conserva el CNAME para renovaciones.'
+                  : 'El certificado ya fue verificado; si el CNAME falta, vuelve a agregarlo para futuras renovaciones.',
+            }
+          : enriched;
+      }
+
+      if (record.group === 'routing') {
+        return enrichRoutingRecord(
+          record,
+          dnsResolver,
+          payload.target,
+          targetARecords,
+          legacyEdgeHost,
+          legacyARecords,
+        );
+      }
+
+      return record;
+    }),
+  );
+
+  return {
+    ...payload,
     instructions,
   };
+}
+
+function withProviderFields(
+  record: DomainDnsInstruction,
+  hostname: string,
+): DomainDnsInstruction {
+  const providerHost = toProviderHost(record.name, hostname);
+  return {
+    ...record,
+    provider_host: providerHost,
+    fqdn_name: toFqdnName(record.name, providerHost, hostname),
+  };
+}
+
+function toProviderHost(name: string, hostname: string): string {
+  const normalized = trimDot(name);
+  if (normalized === hostname) return '@';
+  if (normalized === `*.${hostname}`) return '*';
+  if (normalized === '@' || normalized === '*') return normalized;
+
+  const suffix = `.${hostname}`;
+  if (normalized.endsWith(suffix)) {
+    const relative = normalized.slice(0, -suffix.length);
+    return relative || '@';
+  }
+
+  if (!normalized.includes('.')) return normalized;
+
+  return normalized;
+}
+
+function toFqdnName(
+  originalName: string,
+  providerHost: string,
+  hostname: string,
+): string {
+  const normalized = trimDot(originalName);
+  if (normalized.includes('.') && normalized !== hostname) return normalized;
+  if (providerHost === '@') return hostname;
+  if (providerHost === '*') return `*.${hostname}`;
+  return `${providerHost}.${hostname}`;
+}
+
+function trimDot(value: string): string {
+  return value.endsWith('.') ? value.slice(0, -1) : value;
+}
+
+function normalizeDnsValue(value: string): string {
+  return trimDot(value).toLowerCase();
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function probeStatusValue(
+  value: unknown,
+): 'pending' | 'passed' | 'failed' | undefined {
+  return value === 'pending' || value === 'passed' || value === 'failed'
+    ? value
+    : undefined;
+}
+
+function routingStatusReason(
+  status: DomainInstructionStatus,
+  routingTargetType: 'cloudfront_distribution' | 'legacy_edge_alias',
+  legacyEdgeHost?: string,
+): string {
+  if (status === 'complete') return 'El enrutamiento ya fue aplicado.';
+  if (routingTargetType === 'legacy_edge_alias') {
+    return 'Este destino anterior sigue siendo aceptado, pero para nuevos registros recomendamos el destino directo.';
+  }
+  return legacyEdgeHost
+    ? `Apunta hacia el destino directo. Si ya usas ${legacyEdgeHost}, Vendix lo acepta como destino anterior.`
+    : 'Apunta hacia el destino directo de conexión.';
+}
+
+function buildProvisioningStages(params: {
+  domain: DomainHostingRecord;
+  ownershipStatus: DomainInstructionStatus;
+  certificateStatus: DomainInstructionStatus;
+  routingStatus: DomainInstructionStatus;
+  inheritedFrom: string | null;
+  sslConfig: Record<string, unknown>;
+}): DomainProvisioningStage[] {
+  const {
+    domain,
+    ownershipStatus,
+    certificateStatus,
+    routingStatus,
+    inheritedFrom,
+    sslConfig,
+  } = params;
+  const cloudfrontStatus = stringValue(sslConfig['cloudfront_status']);
+  const httpsProbeStatus = probeStatusValue(sslConfig['https_probe_status']);
+  const active = domain.status === 'active';
+  const failed = domain.status.startsWith('failed');
+
+  return [
+    {
+      key: 'ownership',
+      label: 'Verificación Vendix',
+      status: failed && ownershipStatus !== 'complete' ? 'failed' : ownershipStatus,
+      detail:
+        ownershipStatus === 'complete'
+          ? 'La propiedad del dominio ya fue verificada.'
+          : inheritedFrom
+            ? `Cubierto por ${inheritedFrom}.`
+            : 'Agrega el TXT de propiedad.',
+      waiting: ownershipStatus === 'pending',
+      updated_at: toIso(domain.last_verified_at),
+    },
+    {
+      key: 'certificate',
+      label: 'Certificado SSL',
+      status:
+        failed && certificateStatus !== 'complete'
+          ? 'failed'
+          : certificateStatus === 'complete'
+            ? 'complete'
+            : 'waiting',
+      detail:
+        certificateStatus === 'complete'
+          ? 'El certificado ya fue verificado.'
+          : 'Esperando validación DNS del certificado.',
+      waiting: certificateStatus === 'pending',
+      updated_at: toIso(domain.certificate_issued_at),
+    },
+    {
+      key: 'routing',
+      label: 'Enrutamiento DNS',
+      status:
+        routingStatus === 'complete'
+          ? 'complete'
+          : routingStatus === 'covered_by_parent'
+            ? 'covered_by_parent'
+            : 'waiting',
+      detail:
+        routingStatus === 'complete'
+          ? 'El dominio ya apunta al destino correcto.'
+          : 'Esperando que los DNS apunten al destino correcto.',
+      waiting: routingStatus === 'pending',
+    },
+    {
+      key: 'cloudfront',
+      label: 'Conexión del dominio',
+      status:
+        active || cloudfrontStatus === 'Deployed'
+          ? 'complete'
+          : domain.status === 'pending_alias' || domain.status === 'propagating'
+            ? 'waiting'
+            : 'pending',
+      detail:
+        active || cloudfrontStatus === 'Deployed'
+          ? 'La conexión del dominio ya fue desplegada.'
+          : 'Vendix está conectando el dominio.',
+      waiting: domain.status === 'pending_alias' || domain.status === 'propagating',
+      updated_at: toIso(domain.cloudfront_deployed_at),
+    },
+    {
+      key: 'https',
+      label: 'Prueba HTTPS',
+      status:
+        active || httpsProbeStatus === 'passed'
+          ? 'complete'
+          : httpsProbeStatus === 'failed'
+            ? 'waiting'
+            : 'pending',
+      detail:
+        active || httpsProbeStatus === 'passed'
+          ? 'Vendix confirmó que HTTPS responde desde internet.'
+          : 'Probando que el certificado funcione desde internet.',
+      waiting:
+        httpsProbeStatus === 'pending' ||
+        httpsProbeStatus === 'failed' ||
+        domain.status === 'propagating',
+      updated_at: stringValue(sslConfig['last_probe_at']),
+    },
+    {
+      key: 'active',
+      label: 'Activo',
+      status: active ? 'complete' : 'pending',
+      detail: active
+        ? 'El dominio ya está listo para clientes.'
+        : 'Aún no pruebes el dominio como definitivo.',
+      waiting: false,
+    },
+  ];
+}
+
+function currentProvisioningStage(
+  stages: DomainProvisioningStage[],
+): DomainProvisioningStageKey {
+  return stages.find((stage) => stage.status !== 'complete')?.key ?? 'active';
+}
+
+function toIso(value?: Date | string | null): string | undefined {
+  if (!value) return undefined;
+  return value instanceof Date ? value.toISOString() : value;
+}
+
+function enrichExpectedValueRecord(
+  record: DomainDnsInstruction,
+  result: ResolverResult<string>,
+  expectedValue: string,
+  successReason: string,
+  pendingReason: string,
+): DomainDnsInstruction {
+  const expected = normalizeDnsValue(expectedValue);
+  const seenIn = result.perResolver
+    .filter((resolver) =>
+      resolver.records.some((value) => normalizeDnsValue(value) === expected),
+    )
+    .map((resolver) => resolver.resolver);
+  const found = seenIn.length >= 2;
+
+  return {
+    ...record,
+    detected_values: uniqueValues(result.perResolver.flatMap((r) => r.records)),
+    seen_in: seenIn,
+    status: found ? 'complete' : 'pending',
+    status_reason: found ? successReason : pendingReason,
+  };
+}
+
+async function enrichRoutingRecord(
+  record: DomainDnsInstruction,
+  dnsResolver: DnsResolverService,
+  target: string,
+  targetARecords: ResolverResult<string> | null,
+  legacyEdgeHost?: string,
+  legacyARecords?: ResolverResult<string> | null,
+): Promise<DomainDnsInstruction> {
+  const fqdn = record.fqdn_name ?? record.name;
+  const cnameResult = await dnsResolver.resolveCname(fqdn);
+  const aResult = await dnsResolver.resolveA(fqdn);
+  const expectedTargets = [target, legacyEdgeHost].filter(Boolean).map((value) =>
+    normalizeDnsValue(value as string),
+  );
+  const cnameMatches = cnameResult.perResolver.filter((resolver) =>
+    resolver.records.some((value) =>
+      expectedTargets.includes(normalizeDnsValue(value)),
+    ),
+  );
+  const targetIps = new Set([
+    ...(targetARecords?.records ?? []),
+    ...(legacyARecords?.records ?? []),
+  ]);
+  const aMatches = aResult.perResolver.filter((resolver) =>
+    resolver.records.some((value) => targetIps.has(value)),
+  );
+  const found = cnameMatches.length >= 2 || aMatches.length >= 2;
+  const usedLegacy =
+    legacyEdgeHost &&
+    cnameResult.perResolver.some((resolver) =>
+      resolver.records.some(
+        (value) => normalizeDnsValue(value) === normalizeDnsValue(legacyEdgeHost),
+      ),
+    );
+
+  return {
+    ...record,
+    detected_values: uniqueValues([
+      ...cnameResult.perResolver.flatMap((r) => r.records),
+      ...aResult.perResolver.flatMap((r) => r.records),
+    ]),
+    seen_in: uniqueValues([
+      ...cnameMatches.map((resolver) => resolver.resolver),
+      ...aMatches.map((resolver) => resolver.resolver),
+    ]),
+    status: found ? 'complete' : 'pending',
+    status_reason: found
+      ? usedLegacy
+        ? `Detectado usando ${legacyEdgeHost} como destino anterior. Funciona, pero recomendamos el destino directo para nuevos registros.`
+        : 'Vendix ve este enrutamiento desde DNS público.'
+      : 'Vendix aún no ve este enrutamiento desde DNS público.',
+    routing_target_type: usedLegacy ? 'legacy_edge_alias' : record.routing_target_type,
+  };
+}
+
+async function safeResolveA(
+  dnsResolver: DnsResolverService,
+  hostname: string,
+): Promise<ResolverResult<string> | null> {
+  try {
+    return await dnsResolver.resolveA(hostname);
+  } catch {
+    return null;
+  }
+}
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort();
 }

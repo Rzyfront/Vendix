@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
+import { request as httpsRequest } from 'node:https';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AcmCertificateDescription, AcmService } from './acm.service';
 import { CloudFrontService } from './cloudfront.service';
@@ -77,11 +78,13 @@ export class DomainProvisioningService {
         config: mergeDomainSslConfig(domain.config, {
           certificate_domain_names: certificateDomainNames,
           certificate_status: 'PENDING_VALIDATION',
+          aws_certificate_status: 'PENDING_VALIDATION',
           wildcard_hostname: getWildcardHostname(domain),
           wildcard_status: getWildcardHostname(domain)
             ? 'pending'
             : 'not_applicable',
           certificate_requested_at: new Date().toISOString(),
+          next_check_at: this.nextCheckAt(),
         }),
         last_error: null,
         last_error_code: null,
@@ -117,10 +120,12 @@ export class DomainProvisioningService {
           config: mergeDomainSslConfig(domain.config, {
             certificate_domain_names: certificateDomainNames,
             certificate_status: cert.status,
+            aws_certificate_status: cert.status,
             validation_records: validationRecords,
             validation_refreshed_at: new Date().toISOString(),
             wildcard_hostname: wildcardHostname,
             wildcard_status: wildcardHostname ? 'error' : 'not_applicable',
+            next_check_at: this.nextCheckAt(),
           }),
           last_error: `ACM certificate status: ${cert.status}`,
           last_error_code: cert.status,
@@ -142,6 +147,7 @@ export class DomainProvisioningService {
         config: mergeDomainSslConfig(domain.config, {
           certificate_domain_names: certificateDomainNames,
           certificate_status: cert.status,
+          aws_certificate_status: cert.status,
           validation_records: validationRecords,
           validation_refreshed_at: new Date().toISOString(),
           wildcard_hostname: wildcardHostname,
@@ -150,6 +156,7 @@ export class DomainProvisioningService {
               ? 'issued'
               : 'pending'
             : 'not_applicable',
+          next_check_at: issued ? this.nextCheckAt(2) : this.nextCheckAt(),
         }),
         certificate_issued_at: issued
           ? (domain.certificate_issued_at ?? new Date())
@@ -176,6 +183,7 @@ export class DomainProvisioningService {
     );
     const existingAliases = config.Aliases?.Items ?? [];
     const aliasesToAdd = getCloudFrontAliasesForDomain(domain);
+    const routingTarget = await this.getRoutingTarget();
     const aliasesOutsideThisDomain = existingAliases.filter(
       (alias) => !aliasesToAdd.includes(alias),
     );
@@ -207,6 +215,11 @@ export class DomainProvisioningService {
           cloudfront_aliases: aliasesToAdd,
           wildcard_hostname: getWildcardHostname(domain),
           wildcard_status: getWildcardHostname(domain) ? 'issued' : 'not_applicable',
+          cloudfront_status: 'Updating',
+          routing_target: routingTarget.target,
+          routing_target_type: routingTarget.targetType,
+          https_probe_status: 'pending',
+          next_check_at: this.nextCheckAt(2),
         }),
         status: 'pending_alias',
         updated_at: new Date(),
@@ -245,6 +258,35 @@ export class DomainProvisioningService {
     const deployed = distribution.status === 'Deployed';
 
     if (aliasPresent && deployed) {
+      const probes = await this.probeDomainHttps(domain);
+      const httpsReady = probes.every((probe) => probe.passed);
+      const probePatch = {
+        cloudfront_aliases: requiredAliases,
+        cloudfront_status: distribution.status,
+        routing_target: distribution.domainName,
+        routing_target_type: 'cloudfront_distribution',
+        wildcard_hostname: getWildcardHostname(domain),
+        wildcard_status: getWildcardHostname(domain)
+          ? 'issued'
+          : 'not_applicable',
+        https_probe_status: httpsReady ? 'passed' : 'failed',
+        https_probe_results: probes,
+        last_probe_at: new Date().toISOString(),
+        next_check_at: httpsReady ? null : this.nextCheckAt(2),
+      };
+
+      if (!httpsReady) {
+        return this.prisma.domain_settings.update({
+          where: { id: domain.id },
+          data: {
+            status: 'propagating',
+            cloudfront_distribution_id: distributionId,
+            config: mergeDomainSslConfig(domain.config, probePatch),
+            updated_at: new Date(),
+          },
+        });
+      }
+
       await this.deactivateSiblingActiveDomains(domain);
       const updated = await this.prisma.domain_settings.update({
         where: { id: domain.id },
@@ -253,13 +295,7 @@ export class DomainProvisioningService {
           ssl_status: 'issued',
           cloudfront_distribution_id: distributionId,
           cloudfront_deployed_at: new Date(),
-          config: mergeDomainSslConfig(domain.config, {
-            cloudfront_aliases: requiredAliases,
-            wildcard_hostname: getWildcardHostname(domain),
-            wildcard_status: getWildcardHostname(domain)
-              ? 'issued'
-              : 'not_applicable',
-          }),
+          config: mergeDomainSslConfig(domain.config, probePatch),
           last_error: null,
           last_error_code: null,
           updated_at: new Date(),
@@ -283,8 +319,13 @@ export class DomainProvisioningService {
         cloudfront_distribution_id: distributionId,
         config: mergeDomainSslConfig(domain.config, {
           cloudfront_aliases: requiredAliases,
+          cloudfront_status: distribution.status,
+          routing_target: distribution.domainName,
+          routing_target_type: 'cloudfront_distribution',
           wildcard_hostname: getWildcardHostname(domain),
           wildcard_status: getWildcardHostname(domain) ? 'issued' : 'not_applicable',
+          https_probe_status: 'pending',
+          next_check_at: this.nextCheckAt(2),
         }),
         updated_at: new Date(),
       },
@@ -306,6 +347,50 @@ export class DomainProvisioningService {
       return this.refreshCloudFrontStatus(domain.id);
     }
     return domain;
+  }
+
+  async getRoutingTarget(): Promise<{
+    target: string;
+    targetType: 'cloudfront_distribution' | 'legacy_edge_alias';
+    legacyEdgeHost: string;
+  }> {
+    const legacyEdgeHost = this.getLegacyEdgeHost();
+    const configuredDomain =
+      this.configService.get<string>('CLOUDFRONT_DOMAIN_NAME') ||
+      this.configService.get<string>('AWS_CLOUDFRONT_DOMAIN_NAME');
+
+    if (configuredDomain) {
+      return {
+        target: configuredDomain,
+        targetType: 'cloudfront_distribution',
+        legacyEdgeHost,
+      };
+    }
+
+    try {
+      const distribution = await this.cloudFrontService.getDistribution(
+        this.getDistributionId(),
+      );
+      if (distribution.domainName) {
+        return {
+          target: distribution.domainName,
+          targetType: 'cloudfront_distribution',
+          legacyEdgeHost,
+        };
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Could not resolve CloudFront routing target, falling back to ${legacyEdgeHost}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    return {
+      target: legacyEdgeHost,
+      targetType: 'legacy_edge_alias',
+      legacyEdgeHost,
+    };
   }
 
   private async getDomain(domainId: number) {
@@ -373,6 +458,70 @@ export class DomainProvisioningService {
       throw new BadRequestException('CLOUDFRONT_DISTRIBUTION_ID is not configured');
     }
     return distributionId;
+  }
+
+  private getLegacyEdgeHost(): string {
+    return (
+      this.configService.get<string>('EDGE_HOST') ||
+      `edge.${this.configService.get<string>('BASE_DOMAIN') || 'vendix.online'}`
+    );
+  }
+
+  private async probeDomainHttps(domain: NonNullable<DomainRecord>): Promise<
+    Array<{
+      hostname: string;
+      passed: boolean;
+      error?: string;
+    }>
+  > {
+    const hostnames = [domain.hostname];
+    const wildcardHostname = getWildcardHostname(domain);
+    if (wildcardHostname) {
+      hostnames.push(`vdx-health-${domain.id}.${domain.hostname}`);
+    }
+
+    return Promise.all(
+      hostnames.map(async (hostname) => {
+        try {
+          await this.httpsHead(hostname);
+          return { hostname, passed: true };
+        } catch (error) {
+          return {
+            hostname,
+            passed: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }),
+    );
+  }
+
+  private httpsHead(hostname: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const req = httpsRequest(
+        {
+          hostname,
+          method: 'HEAD',
+          path: '/',
+          timeout: 8_000,
+          servername: hostname,
+        },
+        (res) => {
+          res.resume();
+          resolve();
+        },
+      );
+
+      req.on('timeout', () => {
+        req.destroy(new Error(`HTTPS probe timed out for ${hostname}`));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  private nextCheckAt(minutes = 5): string {
+    return new Date(Date.now() + minutes * 60_000).toISOString();
   }
 
   private async markAliasFailed(

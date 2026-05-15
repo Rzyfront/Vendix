@@ -40,7 +40,11 @@ describe('DomainProvisioningService', () => {
     const cloudFront = {
       getDistributionConfig: jest.fn(),
       addAliasesToDistribution: jest.fn(),
-      getDistribution: jest.fn(),
+      getDistribution: jest.fn().mockResolvedValue({
+        status: 'Deployed',
+        domainName: 'd123.cloudfront.net',
+        aliases: [],
+      }),
     } as any;
     const config = {
       get: overrides?.getConfig ?? jest.fn((key: string) => {
@@ -195,5 +199,54 @@ describe('DomainProvisioningService', () => {
       aliasesToAdd: ['example.com', '*.example.com'],
       acmCertificateArn: 'arn:aws:acm:cert/root',
     });
+  });
+
+  it('does not mark active until the HTTPS probe passes', async () => {
+    const findUnique = jest.fn().mockResolvedValue({
+      ...rootDomain,
+      acm_certificate_arn: 'arn:aws:acm:cert/root',
+      status: 'propagating',
+      ssl_status: 'issued',
+      cloudfront_distribution_id: 'DIST123',
+    });
+    const update = jest.fn().mockImplementation(({ data }) =>
+      Promise.resolve({
+        ...rootDomain,
+        ...data,
+      }),
+    );
+    const { service, cloudFront, prisma, events } = createService({
+      findUnique,
+      update,
+    });
+    cloudFront.getDistribution.mockResolvedValue({
+      status: 'Deployed',
+      domainName: 'd123.cloudfront.net',
+      aliases: ['example.com', '*.example.com'],
+    });
+    jest
+      .spyOn(service as any, 'httpsHead')
+      .mockRejectedValue(new Error('handshake failure'));
+
+    await service.refreshCloudFrontStatus(rootDomain.id);
+
+    expect(prisma.domain_settings.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'propagating',
+          config: expect.objectContaining({
+            ssl: expect.objectContaining({
+              cloudfront_status: 'Deployed',
+              https_probe_status: 'failed',
+              routing_target: 'd123.cloudfront.net',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(events.emit).not.toHaveBeenCalledWith(
+      'domain.activated',
+      expect.anything(),
+    );
   });
 });

@@ -9,6 +9,7 @@ import {Component,
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { interval } from 'rxjs';
 
 
@@ -292,8 +293,8 @@ readonly domains = signal<StoreDomain[]>([]);
         { value: 'pending_ssl', label: 'Pendiente SSL' },
         { value: 'pending_certificate', label: 'Pendiente certificado' },
         { value: 'issuing_certificate', label: 'Emitiendo certificado' },
-        { value: 'pending_alias', label: 'Pendiente alias' },
-        { value: 'propagating', label: 'Propagando' },
+        { value: 'pending_alias', label: 'Conectando dominio' },
+        { value: 'propagating', label: 'Propagando SSL' },
         { value: 'failed_ownership', label: 'Falló propiedad' },
         { value: 'failed_certificate', label: 'Falló certificado' },
         { value: 'failed_alias', label: 'Falló alias' },
@@ -391,6 +392,7 @@ readonly domains = signal<StoreDomain[]>([]);
   constructor(
     private domains_service: StoreDomainsService,
     private toast_service: ToastService,
+    private router: Router,
   ) {}
 
   ngOnInit(): void {
@@ -500,6 +502,11 @@ loadDomains(
   }
 
   openEditModal(domain: StoreDomain): void {
+    if (this.isCustomDomain(domain)) {
+      this.router.navigate(['/admin/settings/domains', domain.id, 'setup']);
+      return;
+    }
+
     this.editing_domain = domain;
     this.dns_instructions.set(null);
     this.is_modal_open = true;
@@ -537,11 +544,18 @@ loadDomains(
         .createDomain(dto)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: () => {
+          next: (response) => {
             this.toast_service.success('Dominio creado correctamente');
             this.closeModal();
             this.loadDomains();
             this.is_saving.set(false);
+            if (response.success && response.data && this.isCustomDomain(response.data)) {
+              this.router.navigate([
+                '/admin/settings/domains',
+                response.data.id,
+                'setup',
+              ]);
+            }
           },
           error: () => {
             this.toast_service.error('Error al crear el dominio');
@@ -693,8 +707,8 @@ loadDomains(
       pending_ssl: 'Pendiente SSL',
       pending_certificate: 'Pendiente certificado',
       issuing_certificate: 'Emitiendo certificado',
-      pending_alias: 'Pendiente alias',
-      propagating: 'Propagando',
+      pending_alias: 'Conectando dominio',
+      propagating: 'Propagando SSL',
       failed_ownership: 'Falló propiedad',
       failed_certificate: 'Falló certificado',
       failed_alias: 'Falló alias',

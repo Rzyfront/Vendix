@@ -2,6 +2,7 @@ import {
   buildDomainDnsInstructions,
   buildInheritedDomainConfig,
   decorateDomainWithSslFields,
+  enrichDomainDnsInstructionsWithDiagnostics,
   getCertificateDomainNames,
   getOneLevelSubdomainLabel,
   hasIssuedWildcardSsl,
@@ -52,7 +53,7 @@ describe('domain custom hosting utilities', () => {
   it('dedupes ACM records and includes apex plus wildcard routing instructions', () => {
     const payload = buildDomainDnsInstructions({
       domain: rootDomain,
-      edgeHost: 'edge.vendix.online',
+      edgeHost: 'd123.cloudfront.net',
       verificationToken: rootDomain.verification_token,
     });
 
@@ -66,19 +67,31 @@ describe('domain custom hosting utilities', () => {
         expect.objectContaining({
           record_type: 'ALIAS/ANAME',
           name: '@',
-          value: 'edge.vendix.online',
+          value: 'd123.cloudfront.net',
           group: 'routing',
           scope: 'root',
+          provider_host: '@',
+          fqdn_name: 'example.com',
         }),
         expect.objectContaining({
           record_type: 'CNAME',
           name: '*',
-          value: 'edge.vendix.online',
+          value: 'd123.cloudfront.net',
           group: 'routing',
           scope: 'wildcard',
+          provider_host: '*',
+          fqdn_name: '*.example.com',
+        }),
+        expect.objectContaining({
+          record_type: 'CNAME',
+          group: 'certificate',
+          provider_host: '_abc',
+          fqdn_name: '_abc.example.com',
         }),
       ]),
     );
+    expect(payload.target).toBe('d123.cloudfront.net');
+    expect(payload.provisioning_stage).toBe('active');
   });
 
   it('detects one-level subdomains only', () => {
@@ -108,7 +121,7 @@ describe('domain custom hosting utilities', () => {
     };
     const payload = buildDomainDnsInstructions({
       domain: inheritedDomain,
-      edgeHost: 'edge.vendix.online',
+      edgeHost: 'd123.cloudfront.net',
     });
 
     expect(decorateDomainWithSslFields(inheritedDomain)).toEqual(
@@ -119,5 +132,65 @@ describe('domain custom hosting utilities', () => {
     expect(payload.ownership_status).toBe('covered_by_parent');
     expect(payload.certificate_status).toBe('covered_by_parent');
     expect(payload.covered_by_parent_hostname).toBe('example.com');
+  });
+
+  it('marks routing as complete when public resolvers see the legacy edge target', async () => {
+    const payload = buildDomainDnsInstructions({
+      domain: {
+        ...rootDomain,
+        status: 'pending_alias',
+        ssl_status: 'issued',
+      },
+      edgeHost: 'd123.cloudfront.net',
+      legacyEdgeHost: 'edge.vendix.online',
+    });
+    const resolver = {
+      resolveTxt: jest.fn(),
+      resolveCname: jest.fn().mockResolvedValue({
+        records: ['edge.vendix.online'],
+        consensus: true,
+        consensusRecords: ['edge.vendix.online'],
+        perResolver: [
+          {
+            resolver: '1.1.1.1',
+            status: 'success',
+            records: ['edge.vendix.online'],
+          },
+          {
+            resolver: '8.8.8.8',
+            status: 'success',
+            records: ['edge.vendix.online'],
+          },
+          { resolver: '9.9.9.9', status: 'error', records: [] },
+        ],
+      }),
+      resolveA: jest.fn().mockResolvedValue({
+        records: ['54.1.1.1'],
+        consensus: true,
+        consensusRecords: ['54.1.1.1'],
+        perResolver: [
+          { resolver: '1.1.1.1', status: 'success', records: ['54.1.1.1'] },
+          { resolver: '8.8.8.8', status: 'success', records: ['54.1.1.1'] },
+          { resolver: '9.9.9.9', status: 'success', records: ['54.1.1.1'] },
+        ],
+      }),
+    } as any;
+
+    const enriched = await enrichDomainDnsInstructionsWithDiagnostics(
+      payload,
+      resolver,
+      { legacyEdgeHost: 'edge.vendix.online' },
+    );
+
+    expect(enriched.instructions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: 'routing',
+          status: 'complete',
+          routing_target_type: 'legacy_edge_alias',
+          seen_in: expect.arrayContaining(['1.1.1.1', '8.8.8.8']),
+        }),
+      ]),
+    );
   });
 });

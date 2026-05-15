@@ -103,6 +103,13 @@ export interface DomainConfig {
     wildcard_hostname?: string | null;
     wildcard_status?: string;
     certificate_status?: string;
+    aws_certificate_status?: string;
+    cloudfront_status?: string;
+    https_probe_status?: 'pending' | 'passed' | 'failed';
+    routing_target?: string;
+    routing_target_type?: 'cloudfront_distribution' | 'legacy_edge_alias';
+    last_probe_at?: string;
+    next_check_at?: string | null;
     validation_records?: Array<{
       domain_name?: string;
       record_type: string;
@@ -268,6 +275,21 @@ export interface DnsInstruction {
   scope?: 'root' | 'wildcard' | 'subdomain' | 'parent' | string;
   covered_by_parent_hostname?: string;
   domain_name?: string;
+  provider_host?: string;
+  fqdn_name?: string;
+  detected_values?: string[];
+  seen_in?: string[];
+  status_reason?: string;
+  routing_target_type?: 'cloudfront_distribution' | 'legacy_edge_alias';
+}
+
+export interface DomainProvisioningStage {
+  key: 'ownership' | 'certificate' | 'routing' | 'cloudfront' | 'https' | 'active' | 'failed' | string;
+  label: string;
+  status: 'pending' | 'waiting' | 'complete' | 'failed' | 'covered_by_parent' | 'not_required' | string;
+  detail: string;
+  waiting: boolean;
+  updated_at?: string;
 }
 
 export interface DnsInstructions {
@@ -281,6 +303,12 @@ export interface DnsInstructions {
   routing_status?: 'pending' | 'complete' | 'not_required' | 'covered_by_parent' | string;
   wildcard_hostname?: string;
   covered_by_parent_hostname?: string | null;
+  provisioning_stage?: 'ownership' | 'certificate' | 'routing' | 'cloudfront' | 'https' | 'active' | 'failed' | string;
+  stages?: DomainProvisioningStage[];
+  aws_certificate_status?: string;
+  cloudfront_status?: string;
+  https_probe_status?: 'pending' | 'passed' | 'failed';
+  next_check_at?: string;
   instructions: DnsInstruction[];
 }
 

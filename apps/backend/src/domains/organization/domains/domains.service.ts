@@ -23,6 +23,7 @@ import {
   buildDomainDnsInstructions,
   buildInheritedDomainConfig,
   decorateDomainWithSslFields,
+  enrichDomainDnsInstructionsWithDiagnostics,
   getInheritedFromHostname,
   getOneLevelSubdomainLabel,
   hasIssuedWildcardSsl,
@@ -1011,7 +1012,8 @@ export class DomainsService implements OnModuleInit {
   }> {
     const domain = await this.getDomainSettingByHostname(hostname);
 
-    const edgeHost = this.getEdgeHost();
+    const routingTarget = await this.domainProvisioning.getRoutingTarget();
+    const legacyEdgeHost = this.getEdgeHost();
     const inheritedFrom = getInheritedFromHostname(domain);
     const verification_token =
       CUSTOM_OWNERSHIPS.includes(domain.ownership) && !inheritedFrom
@@ -1021,10 +1023,16 @@ export class DomainsService implements OnModuleInit {
             : null)
         : domain.verification_token;
 
-    return buildDomainDnsInstructions({
+    const payload = buildDomainDnsInstructions({
       domain,
-      edgeHost,
+      edgeHost: routingTarget.target,
       verificationToken: verification_token,
+      routingTargetType: routingTarget.targetType,
+      legacyEdgeHost,
+    });
+
+    return enrichDomainDnsInstructionsWithDiagnostics(payload, this.dnsResolver, {
+      legacyEdgeHost,
     });
   }
 }

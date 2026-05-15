@@ -13,9 +13,11 @@ import {
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
 
 import {
   Domain,
+  DomainProvisioningStage,
   VerifyDomainResult,
   DomainOwnership,
   DnsInstructions,
@@ -24,7 +26,7 @@ import {
 @Component({
   selector: 'app-domain-verify-modal',
   standalone: true,
-  imports: [ModalComponent, ButtonComponent, IconComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -55,6 +57,69 @@ import {
               </div>
             </div>
           </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <div class="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h4 class="text-sm font-semibold text-slate-950">
+                  Progreso del dominio
+                </h4>
+                <p class="text-xs text-slate-600">{{ antiPanicMessage }}</p>
+              </div>
+              @if (waitingStage) {
+                <app-spinner
+                  size="sm"
+                  text="Esperando"
+                  color="text-sky-600"
+                ></app-spinner>
+              }
+            </div>
+            <div class="grid gap-2 md:grid-cols-6">
+              @for (stage of provisioningStages; track stage.key) {
+                <div class="rounded-md border border-slate-100 bg-slate-50/70 p-2">
+                  <div class="mb-1 flex items-center gap-2">
+                    <span
+                      class="flex h-6 w-6 items-center justify-center rounded-full border text-[11px] font-bold {{ stageDotClass(stage) }}"
+                    >
+                      @if (stage.waiting) {
+                        <span
+                          class="h-2 w-2 animate-pulse rounded-full bg-current"
+                        ></span>
+                      } @else {
+                        <app-icon
+                          [name]="stage.status === 'complete' ? 'check' : 'circle'"
+                          [size]="12"
+                        ></app-icon>
+                      }
+                    </span>
+                    <span
+                      class="text-[11px] font-semibold leading-tight {{ stageTextClass(stage) }}"
+                    >
+                      {{ stage.label }}
+                    </span>
+                  </div>
+                  <p class="text-[11px] leading-snug text-slate-600">
+                    {{ stage.detail }}
+                  </p>
+                </div>
+              }
+            </div>
+          </div>
+
+          @if (waitingStage; as stage) {
+            <div
+              class="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs text-sky-800"
+            >
+              <app-spinner size="sm" color="text-sky-600"></app-spinner>
+              <div>
+                <strong>{{ stage.label }}:</strong>
+                {{ stage.detail }}
+                @if (dnsInstructions()?.next_check_at) {
+                  <span> Vendix volverá a revisar automáticamente.</span>
+                }
+              </div>
+            </div>
+          }
         }
 
         <!-- DNS Records -->
@@ -117,12 +182,13 @@ import {
                     <div class="grid grid-cols-1 gap-3 rounded border border-black/10 bg-white/80 p-3 md:grid-cols-2">
                       <div>
                         <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                          Nombre/Host
+                          Host en proveedor
                         </label>
-                        <button type="button" class="flex w-full items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-left" (click)="copyToClipboard(record.name)">
-                          <code class="text-sm flex-1 truncate">{{ record.name }}</code>
+                        <button type="button" class="flex w-full items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--color-muted)] px-3 py-2 text-left" (click)="copyToClipboard(providerHost(record))">
+                          <code class="text-sm flex-1 truncate">{{ providerHost(record) }}</code>
                           <app-icon name="copy" [size]="14"></app-icon>
                         </button>
+                        <span class="mt-1 block truncate text-xs text-[var(--color-text-secondary)]">{{ record.fqdn_name }}</span>
                       </div>
                       <div>
                         <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
@@ -134,6 +200,11 @@ import {
                         </button>
                       </div>
                     </div>
+                    @if (record.status_reason) {
+                      <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                        {{ record.status_reason }}
+                      </p>
+                    }
                   }
                 </div>
               }
@@ -141,14 +212,16 @@ import {
 
             <div class="rounded-lg border border-sky-200 bg-sky-50 p-4">
               <div class="mb-3">
-                <h5 class="font-medium text-sky-950">Certificado AWS</h5>
+                <h5 class="font-medium text-sky-950">Certificado SSL</h5>
                 <p class="text-sm text-sky-700">
                   @if (isInheritedDomain) {
                     El SSL se hereda del certificado wildcard de {{ coveredByParentHostname }}.
+                  } @else if (awsCertificateIssued) {
+                    El certificado ya fue verificado. Conserva estos CNAME para renovaciones.
                   } @else if (certificateRecords.length > 0) {
-                    Agrega estos CNAME de ACM para emitir y renovar SSL.
+                    Agrega estos CNAME para emitir y renovar SSL.
                   } @else {
-                    Cuando AWS genere los CNAME del certificado aparecerán aquí.
+                    Cuando se generen los CNAME del certificado aparecerán aquí.
                   }
                 </p>
               </div>
@@ -156,12 +229,13 @@ import {
                 <div class="mb-3 grid grid-cols-1 gap-3 rounded border border-sky-200 bg-white/80 p-3 last:mb-0 md:grid-cols-2">
                   <div>
                     <label class="block text-xs font-medium text-sky-700 mb-1">
-                      Nombre/Host
+                      Host en proveedor
                     </label>
-                    <button type="button" class="flex w-full items-center gap-2 rounded border border-sky-200 bg-sky-100 px-3 py-2 text-left" (click)="copyToClipboard(record.name)">
-                      <code class="text-sm flex-1 truncate">{{ record.name }}</code>
+                    <button type="button" class="flex w-full items-center gap-2 rounded border border-sky-200 bg-sky-100 px-3 py-2 text-left" (click)="copyToClipboard(providerHost(record))">
+                      <code class="text-sm flex-1 truncate">{{ providerHost(record) }}</code>
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
+                    <span class="mt-1 block truncate text-xs text-sky-700">{{ record.fqdn_name }}</span>
                   </div>
                   <div>
                     <label class="block text-xs font-medium text-sky-700 mb-1">
@@ -172,6 +246,14 @@ import {
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
                   </div>
+                  @if (record.status_reason || (record.seen_in?.length ?? 0) > 0) {
+                    <p class="md:col-span-2 text-xs text-sky-700">
+                      {{ record.status_reason }}
+                      @if ((record.seen_in?.length ?? 0) > 0) {
+                        <span> Detectado por DNS público.</span>
+                      }
+                    </p>
+                  }
                 </div>
               }
             </div>
@@ -182,19 +264,20 @@ import {
                   Enrutamiento
                 </h5>
                 <p class="text-sm text-[var(--color-text-secondary)]">
-                  Apunta el dominio al edge de Vendix. Los dominios raíz incluyen también el wildcard.
+                  Apunta el dominio al destino directo de conexión. Los dominios raíz incluyen también el wildcard.
                 </p>
               </div>
               @for (record of routingRecords; track record.record_type + record.name + record.value) {
                 <div class="mb-3 grid grid-cols-1 gap-3 rounded border border-[var(--color-border)] bg-[var(--color-muted)]/50 p-3 last:mb-0 md:grid-cols-2">
                   <div>
                     <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
-                      Nombre/Host
+                      Host en proveedor
                     </label>
-                    <button type="button" class="flex w-full items-center gap-2 rounded bg-white px-3 py-2 text-left" (click)="copyToClipboard(record.name)">
-                      <code class="text-sm flex-1 truncate">{{ record.name }}</code>
+                    <button type="button" class="flex w-full items-center gap-2 rounded bg-white px-3 py-2 text-left" (click)="copyToClipboard(providerHost(record))">
+                      <code class="text-sm flex-1 truncate">{{ providerHost(record) }}</code>
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
+                    <span class="mt-1 block truncate text-xs text-[var(--color-text-secondary)]">{{ record.fqdn_name }}</span>
                   </div>
                   <div>
                     <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-1">
@@ -205,6 +288,14 @@ import {
                       <app-icon name="copy" [size]="14"></app-icon>
                     </button>
                   </div>
+                  @if (record.status_reason || (record.seen_in?.length ?? 0) > 0) {
+                    <p class="md:col-span-2 text-xs text-[var(--color-text-secondary)]">
+                      {{ record.status_reason }}
+                      @if ((record.seen_in?.length ?? 0) > 0) {
+                        <span> Detectado por DNS público.</span>
+                      }
+                    </p>
+                  }
                 </div>
               }
             </div>
@@ -375,7 +466,7 @@ export class DomainVerifyModalComponent implements OnChanges {
   readonly domain = input<Domain | null>(null);
   readonly verificationResult = input<VerifyDomainResult | null>(null);
   readonly dnsInstructions = input<DnsInstructions | null>(null);
-  // Edge host (CloudFront target) provided by backend `getDnsInstructions().target`.
+  // Edge host provided by backend `getDnsInstructions().target`.
   // Required so the modal does not hardcode the platform domain.
   readonly edgeHost = input.required<string>();
 
@@ -431,6 +522,59 @@ export class DomainVerifyModalComponent implements OnChanges {
     return this.recordsFor('routing');
   }
 
+  get provisioningStages(): DomainProvisioningStage[] {
+    return (
+      this.dnsInstructions()?.stages ?? [
+        {
+          key: 'ownership',
+          label: 'Verificación Vendix',
+          status: this.isOwnershipStepComplete ? 'complete' : 'pending',
+          detail: this.isOwnershipStepComplete
+            ? 'La propiedad ya fue verificada.'
+            : 'Agrega el TXT de propiedad.',
+          waiting: !this.isOwnershipStepComplete,
+        },
+      ]
+    );
+  }
+
+  get waitingStage(): DomainProvisioningStage | null {
+    return (
+      this.provisioningStages.find((stage) => stage.waiting) ??
+      (this.isWaitingDomainStatus
+        ? {
+            key: 'cloudfront',
+            label: this.getStatusLabel(this.domain()?.status || ''),
+            status: 'waiting',
+            detail: 'Vendix está revisando el dominio automáticamente.',
+            waiting: true,
+          }
+        : null)
+    );
+  }
+
+  get isWaitingDomainStatus(): boolean {
+    return ['issuing_certificate', 'pending_alias', 'propagating'].includes(
+      this.domain()?.status || '',
+    );
+  }
+
+  get awsCertificateIssued(): boolean {
+    return (
+      this.dnsInstructions()?.aws_certificate_status === 'ISSUED' ||
+      this.domain()?.config?.ssl?.aws_certificate_status === 'ISSUED' ||
+      this.domain()?.ssl_status === 'issued'
+    );
+  }
+
+  get antiPanicMessage(): string {
+    const dns = this.dnsInstructions();
+    if (dns?.routing_status === 'complete' && dns?.https_probe_status !== 'passed') {
+      return 'Vendix ya ve tus DNS desde internet. Si tu navegador aún falla, puede ser caché o DNS de tu red.';
+    }
+    return 'No pruebes el dominio como definitivo hasta que quede Activo; puede mostrar error SSL mientras el certificado y la conexión terminan.';
+  }
+
   get isOwnershipStepComplete(): boolean {
     const dns = this.dnsInstructions();
     const domain = this.domain();
@@ -462,7 +606,9 @@ export class DomainVerifyModalComponent implements OnChanges {
   statusLabel(status?: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
+      waiting: 'Esperando',
       complete: 'Completado',
+      failed: 'Fallido',
       not_required: 'No requerido',
       covered_by_parent: 'Cubierto por dominio padre',
     };
@@ -472,7 +618,7 @@ export class DomainVerifyModalComponent implements OnChanges {
   purposeLabel(purpose?: string): string {
     const labels: Record<string, string> = {
       ownership: 'propiedad',
-      certificate: 'certificado AWS',
+      certificate: 'certificado SSL',
       routing: 'enrutamiento',
     };
     return labels[purpose || ''] || purpose || 'registro';
@@ -484,6 +630,45 @@ export class DomainVerifyModalComponent implements OnChanges {
         (record) => (record.group || record.purpose) === group,
       ) ?? []
     );
+  }
+
+  providerHost(record: { provider_host?: string; name: string }): string {
+    return record.provider_host || record.name;
+  }
+
+  stageDotClass(stage: DomainProvisioningStage): string {
+    if (stage.status === 'complete' || stage.status === 'covered_by_parent') {
+      return 'border-emerald-500 bg-emerald-500 text-white';
+    }
+    if (stage.status === 'failed') return 'border-red-500 bg-red-500 text-white';
+    if (stage.waiting || stage.status === 'waiting') {
+      return 'border-sky-500 bg-sky-50 text-sky-600';
+    }
+    return 'border-slate-300 bg-white text-slate-400';
+  }
+
+  stageTextClass(stage: DomainProvisioningStage): string {
+    if (stage.status === 'complete' || stage.status === 'covered_by_parent') {
+      return 'text-emerald-800';
+    }
+    if (stage.status === 'failed') return 'text-red-800';
+    if (stage.waiting || stage.status === 'waiting') return 'text-sky-800';
+    return 'text-slate-500';
+  }
+
+  getStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending_ownership: 'Acción requerida',
+      pending_certificate: 'Esperando certificado',
+      issuing_certificate: 'Validando certificado',
+      pending_alias: 'Conectando dominio',
+      propagating: 'Propagando SSL',
+      active: 'Activo',
+      failed_ownership: 'Falló verificación',
+      failed_certificate: 'Falló certificado',
+      failed_alias: 'Falló conexión',
+    };
+    return labels[status] || status;
   }
 
   getCheckResults(): Array<{ name: string; valid: boolean; reason?: string }> {
