@@ -8,8 +8,16 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
-import { AcmService } from './acm.service';
+import { AcmCertificateDescription, AcmService } from './acm.service';
 import { CloudFrontService } from './cloudfront.service';
+import {
+  dedupeValidationRecords,
+  DomainValidationRecord,
+  getCertificateDomainNames,
+  getCloudFrontAliasesForDomain,
+  getWildcardHostname,
+  mergeDomainSslConfig,
+} from '../domains/domain-custom-hosting.util';
 
 type DomainRecord = Awaited<
   ReturnType<GlobalPrismaService['domain_settings']['findUnique']>
@@ -43,14 +51,19 @@ export class DomainProvisioningService {
       return this.refreshCertificateStatus(domain.id);
     }
 
+    const certificateDomainNames = getCertificateDomainNames(domain);
+    const subjectAlternativeNames = certificateDomainNames.slice(1);
     const { certificateArn } = await this.acmService.requestCertificate({
       domainName: domain.hostname,
+      subjectAlternativeNames:
+        subjectAlternativeNames.length > 0 ? subjectAlternativeNames : undefined,
       idempotencyToken: this.certificateToken(domain),
       tags: [
         { key: 'domain_id', value: String(domain.id) },
         { key: 'organization_id', value: String(domain.organization_id ?? '') },
         { key: 'store_id', value: String(domain.store_id ?? '') },
         { key: 'hostname', value: domain.hostname },
+        { key: 'wildcard_hostname', value: getWildcardHostname(domain) ?? '' },
       ],
     });
 
@@ -61,6 +74,15 @@ export class DomainProvisioningService {
         certificate_requested_at: new Date(),
         status: 'issuing_certificate',
         ssl_status: 'pending',
+        config: mergeDomainSslConfig(domain.config, {
+          certificate_domain_names: certificateDomainNames,
+          certificate_status: 'PENDING_VALIDATION',
+          wildcard_hostname: getWildcardHostname(domain),
+          wildcard_status: getWildcardHostname(domain)
+            ? 'pending'
+            : 'not_applicable',
+          certificate_requested_at: new Date().toISOString(),
+        }),
         last_error: null,
         last_error_code: null,
         updated_at: new Date(),
@@ -79,10 +101,10 @@ export class DomainProvisioningService {
     const cert = await this.acmService.describeCertificate(
       domain.acm_certificate_arn,
     );
-    const validation = cert.domainValidationOptions.find(
-      (option) => option.domainName === domain.hostname,
-    );
-    const record = validation?.resourceRecord;
+    const validationRecords = this.extractValidationRecords(cert);
+    const record = this.getPrimaryValidationRecord(validationRecords, domain);
+    const certificateDomainNames = getCertificateDomainNames(domain);
+    const wildcardHostname = getWildcardHostname(domain);
 
     if (TERMINAL_CERT_FAILURES.includes(cert.status)) {
       return this.prisma.domain_settings.update({
@@ -92,6 +114,14 @@ export class DomainProvisioningService {
           ssl_status: 'error',
           validation_cname_name: record?.name ?? domain.validation_cname_name,
           validation_cname_value: record?.value ?? domain.validation_cname_value,
+          config: mergeDomainSslConfig(domain.config, {
+            certificate_domain_names: certificateDomainNames,
+            certificate_status: cert.status,
+            validation_records: validationRecords,
+            validation_refreshed_at: new Date().toISOString(),
+            wildcard_hostname: wildcardHostname,
+            wildcard_status: wildcardHostname ? 'error' : 'not_applicable',
+          }),
           last_error: `ACM certificate status: ${cert.status}`,
           last_error_code: cert.status,
           retry_count: { increment: 1 },
@@ -109,6 +139,18 @@ export class DomainProvisioningService {
         validation_cname_name: record?.name ?? domain.validation_cname_name,
         validation_cname_value: record?.value ?? domain.validation_cname_value,
         cert_expires_at: cert.notAfter ?? domain.cert_expires_at,
+        config: mergeDomainSslConfig(domain.config, {
+          certificate_domain_names: certificateDomainNames,
+          certificate_status: cert.status,
+          validation_records: validationRecords,
+          validation_refreshed_at: new Date().toISOString(),
+          wildcard_hostname: wildcardHostname,
+          wildcard_status: wildcardHostname
+            ? issued
+              ? 'issued'
+              : 'pending'
+            : 'not_applicable',
+        }),
         certificate_issued_at: issued
           ? (domain.certificate_issued_at ?? new Date())
           : domain.certificate_issued_at,
@@ -133,8 +175,9 @@ export class DomainProvisioningService {
       distributionId,
     );
     const existingAliases = config.Aliases?.Items ?? [];
+    const aliasesToAdd = getCloudFrontAliasesForDomain(domain);
     const aliasesOutsideThisDomain = existingAliases.filter(
-      (alias) => alias !== domain.hostname,
+      (alias) => !aliasesToAdd.includes(alias),
     );
 
     if (
@@ -160,6 +203,11 @@ export class DomainProvisioningService {
           aliases: existingAliases,
           viewerCertificate: (config.ViewerCertificate ?? null) as unknown,
         } as Prisma.InputJsonValue,
+        config: mergeDomainSslConfig(domain.config, {
+          cloudfront_aliases: aliasesToAdd,
+          wildcard_hostname: getWildcardHostname(domain),
+          wildcard_status: getWildcardHostname(domain) ? 'issued' : 'not_applicable',
+        }),
         status: 'pending_alias',
         updated_at: new Date(),
       },
@@ -167,7 +215,7 @@ export class DomainProvisioningService {
 
     await this.cloudFrontService.addAliasesToDistribution({
       distributionId,
-      aliasesToAdd: [domain.hostname],
+      aliasesToAdd,
       acmCertificateArn: domain.acm_certificate_arn,
     });
 
@@ -190,7 +238,10 @@ export class DomainProvisioningService {
     const distribution = await this.cloudFrontService.getDistribution(
       distributionId,
     );
-    const aliasPresent = distribution.aliases.includes(domain.hostname);
+    const requiredAliases = getCloudFrontAliasesForDomain(domain);
+    const aliasPresent = requiredAliases.every((alias) =>
+      distribution.aliases.includes(alias),
+    );
     const deployed = distribution.status === 'Deployed';
 
     if (aliasPresent && deployed) {
@@ -202,6 +253,13 @@ export class DomainProvisioningService {
           ssl_status: 'issued',
           cloudfront_distribution_id: distributionId,
           cloudfront_deployed_at: new Date(),
+          config: mergeDomainSslConfig(domain.config, {
+            cloudfront_aliases: requiredAliases,
+            wildcard_hostname: getWildcardHostname(domain),
+            wildcard_status: getWildcardHostname(domain)
+              ? 'issued'
+              : 'not_applicable',
+          }),
           last_error: null,
           last_error_code: null,
           updated_at: new Date(),
@@ -223,6 +281,11 @@ export class DomainProvisioningService {
       data: {
         status: aliasPresent ? 'propagating' : 'pending_alias',
         cloudfront_distribution_id: distributionId,
+        config: mergeDomainSslConfig(domain.config, {
+          cloudfront_aliases: requiredAliases,
+          wildcard_hostname: getWildcardHostname(domain),
+          wildcard_status: getWildcardHostname(domain) ? 'issued' : 'not_applicable',
+        }),
         updated_at: new Date(),
       },
     });
@@ -268,6 +331,37 @@ export class DomainProvisioningService {
     return `vdx${domain.id}${domain.hostname.replace(/[^a-z0-9]/g, '').slice(0, 20)}`.slice(
       0,
       32,
+    );
+  }
+
+  private extractValidationRecords(
+    cert: AcmCertificateDescription,
+  ): DomainValidationRecord[] {
+    const records: DomainValidationRecord[] = [];
+
+    for (const option of cert.domainValidationOptions) {
+      const record = option.resourceRecord;
+      if (!record?.name || !record.value) continue;
+
+      records.push({
+        domain_name: option.domainName,
+        record_type: record.type || 'CNAME',
+        name: record.name,
+        value: record.value,
+        validation_status: option.validationStatus,
+      });
+    }
+
+    return dedupeValidationRecords(records);
+  }
+
+  private getPrimaryValidationRecord(
+    records: DomainValidationRecord[],
+    domain: NonNullable<DomainRecord>,
+  ): DomainValidationRecord | undefined {
+    return (
+      records.find((record) => record.domain_name === domain.hostname) ??
+      records[0]
     );
   }
 

@@ -8,6 +8,7 @@ import { LayawayRemindersJob } from './layaway-reminders.job';
 import { DepreciationMonthlyJob } from './depreciation-monthly.job';
 import { DataRetentionJob } from './data-retention.job';
 import { CertificateExpiryAlertJob } from './certificate-expiry-alert.job';
+import { DomainProvisioningJob } from './domain-provisioning.job';
 import { InvoiceRetryJob } from './invoice-retry.job';
 import { BookingRemindersJob } from './booking-reminders.job';
 import { BookingConfirmationJob } from './booking-confirmation.job';
@@ -76,6 +77,7 @@ import { ResponseModule } from '../common/responses/response.module';
     DepreciationMonthlyJob,
     DataRetentionJob,
     CertificateExpiryAlertJob,
+    DomainProvisioningJob,
     InvoiceRetryJob,
     BookingRemindersJob,
     BookingConfirmationJob,

@@ -19,6 +19,14 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { BlocklistService } from 'src/common/services/blocklist/blocklist.service';
 import { DnsResolverService } from 'src/common/services/dns/dns-resolver.service';
 import { DomainProvisioningService } from 'src/common/services/aws/domain-provisioning.service';
+import {
+  buildDomainDnsInstructions,
+  buildInheritedDomainConfig,
+  decorateDomainWithSslFields,
+  getInheritedFromHostname,
+  getOneLevelSubdomainLabel,
+  hasIssuedWildcardSsl,
+} from 'src/common/services/domains/domain-custom-hosting.util';
 
 const APP_TYPES = [
   'VENDIX_LANDING',
@@ -142,6 +150,34 @@ export class DomainsService implements OnModuleInit {
     return (
       process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`
     );
+  }
+
+  private async findActiveWildcardParentForSubdomain(
+    hostname: string,
+    storeId?: number | null,
+  ) {
+    const parents = await this.prisma.domain_settings.findMany({
+      where: {
+        ownership: 'custom_domain',
+        status: 'active',
+        ssl_status: 'issued',
+        store_id: storeId ?? null,
+      },
+    });
+
+    return (
+      parents
+        .filter(
+          (parent) =>
+            getOneLevelSubdomainLabel(hostname, parent.hostname) !== null &&
+            hasIssuedWildcardSsl(parent),
+        )
+        .sort((a, b) => b.hostname.length - a.hostname.length)[0] ?? null
+    );
+  }
+
+  private decorateDomain(domain: any) {
+    return decorateDomainWithSslFields(domain);
   }
 
   private async ensureVerificationToken(domain: {
@@ -419,13 +455,23 @@ export class DomainsService implements OnModuleInit {
     );
 
     // Vendix subdomains are automatically active (Vendix controls the DNS).
-    // Custom domains ALWAYS enter pending_ownership regardless of is_primary —
-    // DNS proof of ownership (TXT _vendix-verify) is the only valid approval.
+    // Custom subdomains under an already-active wildcard root inherit SSL/DNS.
+    // Other custom domains enter pending_ownership until TXT proves ownership.
     const isVendixSubdomain = inferred_ownership === 'vendix_subdomain';
+    const inheritedParent =
+      inferred_ownership === 'custom_subdomain'
+        ? await this.findActiveWildcardParentForSubdomain(
+            data.hostname,
+            data.store_id,
+          )
+        : null;
+    const isInheritedSubdomain = !!inheritedParent;
     const status = isVendixSubdomain
       ? ('active' as any)
+      : isInheritedSubdomain
+        ? ('active' as any)
       : ('pending_ownership' as any);
-    const is_primary = isVendixSubdomain ? data.is_primary || false : false;
+    const is_primary = status === 'active' ? data.is_primary || false : false;
 
     if (is_primary || status === 'active') {
       await this.ensureSingleActiveApp(
@@ -435,21 +481,27 @@ export class DomainsService implements OnModuleInit {
       );
     }
 
-    // Generate verification token
-    const verification_token = this.generateVerificationToken();
+    // Generate verification token only when the domain needs direct TXT proof.
+    const verification_token =
+      status === 'active' ? null : this.generateVerificationToken();
 
     // Vendix subdomains have SSL automatically issued (managed by Vendix)
     const ssl_status = isVendixSubdomain
       ? ('issued' as any)
+      : isInheritedSubdomain
+        ? ('issued' as any)
       : ('pending' as any);
 
     const tokenExpiryDays = parseInt(
       process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
       10,
     );
-    const expires_token_at = isVendixSubdomain
+    const expires_token_at = status === 'active'
       ? null
       : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+    const config = isInheritedSubdomain
+      ? buildInheritedDomainConfig(data.config as any, inheritedParent)
+      : (data.config as any);
 
     // Create domain setting
     const domainSetting = await this.prisma.domain_settings.create({
@@ -457,7 +509,7 @@ export class DomainsService implements OnModuleInit {
         hostname: data.hostname,
         ...(data.organization_id && { organization_id: data.organization_id }),
         store_id: data.store_id,
-        config: data.config as any,
+        config,
         domain_type: inferred_type as any,
         app_type: app_type as any,
         status,
@@ -465,6 +517,7 @@ export class DomainsService implements OnModuleInit {
         is_primary,
         ownership: inferred_ownership as any,
         verification_token: verification_token,
+        last_verified_at: isInheritedSubdomain ? new Date() : undefined,
         expires_token_at,
         updated_at: new Date(),
       },
@@ -484,7 +537,7 @@ export class DomainsService implements OnModuleInit {
       });
     }
 
-    return domainSetting;
+    return this.decorateDomain(domainSetting);
   }
 
   private async ensureSingleActiveType(
@@ -558,7 +611,7 @@ export class DomainsService implements OnModuleInit {
     ]);
 
     return {
-      data: domain_settings,
+      data: domain_settings.map((domain) => this.decorateDomain(domain)),
       total,
       limit,
       offset: skip,
@@ -578,7 +631,7 @@ export class DomainsService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
-    return domain_setting;
+    return this.decorateDomain(domain_setting);
   }
 
   async getDomainSettingById(id: number) {
@@ -593,7 +646,7 @@ export class DomainsService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
-    return domain_setting;
+    return this.decorateDomain(domain_setting);
   }
 
   async updateDomainSetting(
@@ -701,7 +754,7 @@ export class DomainsService implements OnModuleInit {
       });
     }
 
-    return updated;
+    return this.decorateDomain(updated);
   }
 
   async deleteDomainSetting(hostname: string) {
@@ -771,6 +824,26 @@ export class DomainsService implements OnModuleInit {
     }
 
     const status_before = domain.status;
+    const inheritedFrom = getInheritedFromHostname(domain);
+    if (inheritedFrom) {
+      return {
+        hostname,
+        status_before,
+        status_after: domain.status,
+        ssl_status: domain.ssl_status,
+        verified: true,
+        checks: {
+          parent: {
+            valid: true,
+            name: inheritedFrom,
+            reason: `Cubierto por el wildcard SSL de ${inheritedFrom}`,
+          },
+        },
+        suggested_fixes: [],
+        timestamp: new Date().toISOString(),
+      };
+    }
+
     const verification_token = await this.ensureVerificationToken(domain);
     const txt_name = this.getTxtRecordName(hostname);
 
@@ -939,64 +1012,19 @@ export class DomainsService implements OnModuleInit {
     const domain = await this.getDomainSettingByHostname(hostname);
 
     const edgeHost = this.getEdgeHost();
+    const inheritedFrom = getInheritedFromHostname(domain);
+    const verification_token =
+      CUSTOM_OWNERSHIPS.includes(domain.ownership) && !inheritedFrom
+        ? domain.verification_token ||
+          (!domain.last_verified_at
+            ? await this.ensureVerificationToken(domain)
+            : null)
+        : domain.verification_token;
 
-    const isSubdomain =
-      domain.ownership === 'custom_subdomain' ||
-      domain.ownership === 'third_party_subdomain' ||
-      domain.ownership === 'vendix_subdomain';
-
-    // fix(domains): always return CNAME to edge CloudFront host.
-    // A record no soportado actualmente: el cliente debe usar CNAME / ALIAS al edge CloudFront.
-    // For apex/root domains (non-subdomain ownerships) the registrar must support
-    // ALIAS / ANAME / CNAME-flatten, signaled to clients via `requires_alias: true`.
-    const dnsType: 'CNAME' | 'A' = 'CNAME';
-    const target = edgeHost;
-    const requiresAlias = !isSubdomain;
-
-    const instructions: {
-      record_type: string;
-      name: string;
-      value: string;
-      ttl: number;
-      purpose?: string;
-    }[] = [];
-
-    if (CUSTOM_OWNERSHIPS.includes(domain.ownership)) {
-      const verification_token = await this.ensureVerificationToken(domain);
-      instructions.push({
-        record_type: 'TXT',
-        name: this.getTxtRecordName(hostname),
-        value: verification_token,
-        ttl: 300,
-        purpose: 'ownership',
-      });
-    }
-
-    if (domain.validation_cname_name && domain.validation_cname_value) {
-      instructions.push({
-        record_type: 'CNAME',
-        name: domain.validation_cname_name,
-        value: domain.validation_cname_value,
-        ttl: 300,
-        purpose: 'certificate',
-      });
-    }
-
-    instructions.push({
-      record_type: requiresAlias ? 'ALIAS/ANAME' : 'CNAME',
-      name: isSubdomain ? hostname.split('.')[0] : '@',
-      value: target,
-      ttl: 300,
-      purpose: 'routing',
+    return buildDomainDnsInstructions({
+      domain,
+      edgeHost,
+      verificationToken: verification_token,
     });
-
-    return {
-      hostname,
-      ownership: domain.ownership,
-      dns_type: dnsType,
-      target,
-      requires_alias: requiresAlias,
-      instructions,
-    };
   }
 }
