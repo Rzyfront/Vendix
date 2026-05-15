@@ -17,10 +17,17 @@ export interface SwitchEnvironmentRequest {
 
 export interface SwitchEnvironmentData {
   user: any;
-  tokens: {
+  tokens?: {
     access_token: string;
     refresh_token: string;
   };
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  user_settings?: any;
+  store_settings?: any;
+  default_panel_ui?: Record<string, Record<string, boolean>>;
   permissions: string[];
   roles: string[];
   updated_environment: string;
@@ -172,9 +179,11 @@ export class EnvironmentSwitchService {
       this.authFacade.restoreAuthState(
         response_data.user,
         tokens_payload,
-        response_data.user?.permissions || [],
-        response_data.user?.roles || [],
+        response_data.permissions || response_data.user?.permissions || [],
+        response_data.roles || response_data.user?.roles || [],
         response_data.user_settings,
+        response_data.store_settings,
+        response_data.default_panel_ui,
       );
 
       this.saveUnifiedAuthState(response_data, tokens_payload);
@@ -249,7 +258,17 @@ export class EnvironmentSwitchService {
       const unified_state = {
         user: response_data.user,
         user_settings: response_data.user_settings,
-        tokens: tokens,
+        store_settings: response_data.store_settings,
+        default_panel_ui: response_data.default_panel_ui || null,
+        tokens: {
+          access_token: tokens.access_token || tokens.accessToken,
+          refresh_token: tokens.refresh_token || tokens.refreshToken,
+          token_type: tokens.token_type || tokens.tokenType || 'Bearer',
+          expires_in: tokens.expires_in || tokens.expiresIn,
+        },
+        permissions:
+          response_data.permissions || response_data.user?.permissions || [],
+        roles: response_data.roles || response_data.user?.roles || [],
         environment: response_data.updated_environment,
         timestamp: Date.now(),
       };

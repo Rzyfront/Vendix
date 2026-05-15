@@ -272,11 +272,15 @@ export class AuthFacade {
     permissions?: string[],
     roles?: string[],
     user_settings?: any,
+    store_settings?: any,
+    default_panel_ui?: Record<string, Record<string, boolean>>,
   ): void {
     this.store.dispatch(
       AuthActions.restoreAuthState({
         user,
         user_settings,
+        store_settings,
+        default_panel_ui,
         tokens,
         permissions,
         roles,
@@ -429,7 +433,7 @@ export class AuthFacade {
   // Store settings methods
   updateStoreSettings(storeSettings: any): void {
     this.store.dispatch(
-      AuthActions.updateStoreSettingsSuccess({ store_settings: storeSettings }),
+      AuthActions.updateStoreSettings({ store_settings: storeSettings }),
     );
   }
 
