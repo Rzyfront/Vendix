@@ -13,12 +13,14 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class RegisterStaffDto {
   @ApiProperty({ example: 'Juan', description: 'Nombre del staff' })
   @IsString()
+  @IsNotEmpty({ message: 'El nombre es requerido' })
   @MinLength(1)
   @MaxLength(100)
   first_name: string;
 
   @ApiProperty({ example: 'Pérez', description: 'Apellido del staff' })
   @IsString()
+  @IsNotEmpty({ message: 'El apellido es requerido' })
   @MinLength(1)
   @MaxLength(100)
   last_name: string;
