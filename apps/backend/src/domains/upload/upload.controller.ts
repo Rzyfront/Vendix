@@ -233,6 +233,11 @@ export class UploadController {
       throw new VendixHttpException(ErrorCodes.UPLOAD_ORG_001);
     }
 
+    // Validate key does not contain path traversal sequences before normalization
+    if (key.includes('..')) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FORBIDDEN_001);
+    }
+
     const expectedOrgPrefix = this.s3PathHelper.buildOrgPath(org);
 
     // Normalize key to resolve path segments before checking prefix
