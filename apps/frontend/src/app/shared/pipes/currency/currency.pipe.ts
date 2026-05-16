@@ -55,11 +55,15 @@ export class CurrencyFormatService {
   private readonly http = inject(HttpClient);
   private readonly tenantFacade = inject(TenantFacade);
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+  private readonly CURRENCIES_CACHE_TTL = 30 * 60 * 1000; // 30 minutos
 
   // Signals para estado reactivo
   private currentCurrencySignal = signal<Currency | null>(null);
   private loadingSignal = signal<boolean>(false);
   private lastFetchTime = 0;
+  private activeCurrencies: Currency[] | null = null;
+  private activeCurrenciesFetchTime = 0;
+  private activeCurrenciesPromise: Promise<Currency[] | null> | null = null;
 
   // Signals públicos de solo lectura
   readonly currentCurrency = this.currentCurrencySignal.asReadonly();
@@ -116,6 +120,11 @@ export class CurrencyFormatService {
         return null;
       }
 
+      const cachedCurrencyCode = this.getCurrencyCodeFromAuthState();
+      if (cachedCurrencyCode) {
+        return this.loadCurrencyForCode(cachedCurrencyCode, force);
+      }
+
       const storeId = this.tenantFacade.getCurrentStoreId();
       if (!storeId) {
         return null;
@@ -136,34 +145,89 @@ export class CurrencyFormatService {
 
       const currencyCode = settingsResponse.data.general.currency;
 
-      const currencyResponse = await firstValueFrom(
-        this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
-          `${environment.apiUrl}/public/currencies/active`,
-        ),
-      );
-
-      if (!currencyResponse.success || !currencyResponse.data) {
-        return null;
-      }
-
-      const currency = currencyResponse.data.find(
-        (c: Currency) => c.code === currencyCode,
-      );
-
-      if (!currency) {
-        return null;
-      }
-
-      this.currentCurrencySignal.set(currency);
-      this.lastFetchTime = Date.now();
-
-      return currency;
+      return this.loadCurrencyForCode(currencyCode, force);
     } catch (error) {
       console.error('[CurrencyFormat] Error fetching currency:', error);
       return null;
     } finally {
       this.loadingSignal.set(false);
     }
+  }
+
+  async loadCurrencyForCode(
+    currencyCode: string,
+    force = false,
+  ): Promise<Currency | null> {
+    if (!currencyCode) {
+      return null;
+    }
+
+    const current = this.currentCurrency();
+    if (
+      !force &&
+      current?.code === currencyCode &&
+      Date.now() - this.lastFetchTime < this.CACHE_TTL
+    ) {
+      return current;
+    }
+
+    const currencies = await this.loadActiveCurrencies(force);
+    if (!currencies) {
+      return null;
+    }
+
+    const currency = currencies.find((c: Currency) => c.code === currencyCode);
+    if (!currency) {
+      return null;
+    }
+
+    this.currentCurrencySignal.set(currency);
+    this.lastFetchTime = Date.now();
+
+    return currency;
+  }
+
+  private async loadActiveCurrencies(
+    force = false,
+  ): Promise<Currency[] | null> {
+    if (
+      !force &&
+      this.activeCurrencies &&
+      Date.now() - this.activeCurrenciesFetchTime < this.CURRENCIES_CACHE_TTL
+    ) {
+      return this.activeCurrencies;
+    }
+
+    if (this.activeCurrenciesPromise) {
+      return this.activeCurrenciesPromise;
+    }
+
+    this.activeCurrenciesPromise = firstValueFrom(
+      this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
+        `${environment.apiUrl}/public/currencies/active`,
+      ),
+    )
+      .then((currencyResponse) => {
+        if (!currencyResponse.success || !currencyResponse.data) {
+          return null;
+        }
+
+        this.activeCurrencies = currencyResponse.data;
+        this.activeCurrenciesFetchTime = Date.now();
+        return this.activeCurrencies;
+      })
+      .catch((error) => {
+        console.error(
+          '[CurrencyFormat] Error fetching active currencies:',
+          error,
+        );
+        return this.activeCurrencies;
+      })
+      .finally(() => {
+        this.activeCurrenciesPromise = null;
+      });
+
+    return this.activeCurrenciesPromise;
   }
 
   /**
@@ -181,19 +245,37 @@ export class CurrencyFormatService {
     }
   }
 
+  private getCurrencyCodeFromAuthState(): string | null {
+    try {
+      if (typeof localStorage === 'undefined') return null;
+      const authState = localStorage.getItem('vendix_auth_state');
+      if (!authState) return null;
+      const parsed = JSON.parse(authState);
+      return parsed?.store_settings?.general?.currency ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   private getLocaleForStyle(style?: string): string {
     switch (style) {
-      case 'dot_comma':   return 'de-DE';
-      case 'space_comma': return 'fr-FR';
+      case 'dot_comma':
+        return 'de-DE';
+      case 'space_comma':
+        return 'fr-FR';
       case 'comma_dot':
-      default:            return 'en-US';
+      default:
+        return 'en-US';
     }
   }
 
   /**
    * Formatea un monto con la moneda actual
    */
-  format(amount: number | string | null | undefined, decimals?: number): string {
+  format(
+    amount: number | string | null | undefined,
+    decimals?: number,
+  ): string {
     const num = Number(amount) || 0;
     const currency = this.currentCurrency();
     if (!currency) {
@@ -238,7 +320,9 @@ export class CurrencyFormatService {
     } else if (Math.abs(num) >= 1_000) {
       formatted = `${(num / 1_000).toFixed(1)}K`;
     } else {
-      formatted = Math.round(num).toLocaleString(this.getLocaleForStyle(currency?.format_style));
+      formatted = Math.round(num).toLocaleString(
+        this.getLocaleForStyle(currency?.format_style),
+      );
     }
 
     return position === 'before'

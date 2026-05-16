@@ -1661,6 +1661,18 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/settings/schedule-status',
       method: 'GET',
     },
+    {
+      name: 'store:pos:price_override',
+      description: 'Editar el precio final de productos permitidos en POS',
+      path: '/api/store/payments/pos/price-override',
+      method: 'POST',
+    },
+    {
+      name: 'store:pos:custom_items:create',
+      description: 'Crear ítems personalizados facturables desde POS',
+      path: '/api/store/payments/pos/custom-items',
+      method: 'POST',
+    },
 
     // Facturación (Invoicing)
     {

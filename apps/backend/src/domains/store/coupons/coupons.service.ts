@@ -36,6 +36,12 @@ export class CouponsService {
       throw new VendixHttpException(ErrorCodes.CPN_VALIDATE_001);
     }
 
+    this.validateTargetSelection(
+      dto.applies_to ?? CouponAppliesTo.ALL_PRODUCTS,
+      dto.product_ids,
+      dto.category_ids,
+    );
+
     // Check unique code in store
     const existing = await this.prisma.coupons.findFirst({
       where: { code: dto.code },
@@ -174,7 +180,7 @@ export class CouponsService {
   }
 
   async update(id: number, dto: UpdateCouponDto) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
 
     // Validate: percentage <= 100
     if (
@@ -191,6 +197,16 @@ export class CouponsService {
         throw new VendixHttpException(ErrorCodes.CPN_VALIDATE_001);
       }
     }
+
+    this.validateTargetSelection(
+      dto.applies_to ?? existing.applies_to,
+      dto.product_ids ??
+        existing.coupon_products?.map((cp: any) => cp.product_id) ??
+        [],
+      dto.category_ids ??
+        existing.coupon_categories?.map((cc: any) => cc.category_id) ??
+        [],
+    );
 
     return this.prisma.$transaction(async (tx: any) => {
       const updateData: any = {};
@@ -318,52 +334,27 @@ export class CouponsService {
       throw new VendixHttpException(ErrorCodes.CPN_MIN_001);
     }
 
-    // Check product/category applicability
-    if (coupon.applies_to === 'SPECIFIC_PRODUCTS' && dto.product_ids?.length) {
-      const couponProductIds = coupon.coupon_products.map(
-        (cp) => cp.product_id,
-      );
-      const hasApplicable = dto.product_ids.some((pid) =>
-        couponProductIds.includes(pid),
-      );
-      if (!hasApplicable) {
-        throw new VendixHttpException(ErrorCodes.CPN_APPLY_001);
-      }
-    }
-
-    if (
-      coupon.applies_to === 'SPECIFIC_CATEGORIES' &&
-      dto.category_ids?.length
-    ) {
-      const couponCategoryIds = coupon.coupon_categories.map(
-        (cc) => cc.category_id,
-      );
-      const hasApplicable = dto.category_ids.some((cid) =>
-        couponCategoryIds.includes(cid),
-      );
-      if (!hasApplicable) {
-        throw new VendixHttpException(ErrorCodes.CPN_APPLY_001);
-      }
+    const applicableSubtotal = this.getApplicableSubtotal(coupon, dto);
+    if (applicableSubtotal <= 0) {
+      throw new VendixHttpException(ErrorCodes.CPN_APPLY_001);
     }
 
     // Calculate discount
     let discount_amount = 0;
     if (coupon.discount_type === 'PERCENTAGE') {
       discount_amount =
-        (dto.cart_subtotal * Number(coupon.discount_value)) / 100;
+        (applicableSubtotal * Number(coupon.discount_value)) / 100;
       // Apply cap
-      if (coupon.max_discount_amount) {
-        discount_amount = Math.min(
-          discount_amount,
-          Number(coupon.max_discount_amount),
-        );
+      const maxDiscountAmount = Number(coupon.max_discount_amount);
+      if (Number.isFinite(maxDiscountAmount) && maxDiscountAmount > 0) {
+        discount_amount = Math.min(discount_amount, maxDiscountAmount);
       }
     } else {
       discount_amount = Number(coupon.discount_value);
     }
 
     // Discount cannot exceed subtotal
-    discount_amount = Math.min(discount_amount, dto.cart_subtotal);
+    discount_amount = Math.min(discount_amount, applicableSubtotal);
     discount_amount = Math.round(discount_amount * 100) / 100;
 
     return {
@@ -381,6 +372,86 @@ export class CouponsService {
         ? Number(coupon.max_discount_amount)
         : null,
     };
+  }
+
+  private validateTargetSelection(
+    appliesTo: CouponAppliesTo | string,
+    productIds?: number[],
+    categoryIds?: number[],
+  ): void {
+    if (
+      appliesTo === CouponAppliesTo.SPECIFIC_PRODUCTS &&
+      (!productIds || productIds.length === 0)
+    ) {
+      throw new VendixHttpException(ErrorCodes.CPN_VALIDATE_001);
+    }
+
+    if (
+      appliesTo === CouponAppliesTo.SPECIFIC_CATEGORIES &&
+      (!categoryIds || categoryIds.length === 0)
+    ) {
+      throw new VendixHttpException(ErrorCodes.CPN_VALIDATE_001);
+    }
+  }
+
+  private getApplicableSubtotal(coupon: any, dto: ValidateCouponDto): number {
+    const cartItems = dto.items || [];
+
+    if (coupon.applies_to === CouponAppliesTo.SPECIFIC_PRODUCTS) {
+      const couponProductIds = coupon.coupon_products.map((cp) =>
+        Number(cp.product_id),
+      );
+      const matchingItems = cartItems.filter((item) =>
+        couponProductIds.includes(Number(item.product_id)),
+      );
+
+      if (cartItems.length > 0) {
+        return this.sumLineTotals(matchingItems);
+      }
+
+      const hasApplicable = (dto.product_ids || []).some((pid) =>
+        couponProductIds.includes(Number(pid)),
+      );
+      return hasApplicable ? dto.cart_subtotal : 0;
+    }
+
+    if (coupon.applies_to === CouponAppliesTo.SPECIFIC_CATEGORIES) {
+      const couponCategoryIds = coupon.coupon_categories.map((cc) =>
+        Number(cc.category_id),
+      );
+      const matchingItems = cartItems.filter((item) =>
+        this.getCouponItemCategoryIds(item).some((categoryId) =>
+          couponCategoryIds.includes(categoryId),
+        ),
+      );
+
+      if (cartItems.length > 0) {
+        return this.sumLineTotals(matchingItems);
+      }
+
+      const hasApplicable = (dto.category_ids || []).some((cid) =>
+        couponCategoryIds.includes(Number(cid)),
+      );
+      return hasApplicable ? dto.cart_subtotal : 0;
+    }
+
+    return dto.cart_subtotal;
+  }
+
+  private getCouponItemCategoryIds(item: any): number[] {
+    const categoryIds = Array.isArray(item.category_ids)
+      ? item.category_ids
+      : item.category_id
+        ? [item.category_id]
+        : [];
+
+    return categoryIds
+      .map((categoryId: string | number) => Number(categoryId))
+      .filter((categoryId: number) => Number.isFinite(categoryId));
+  }
+
+  private sumLineTotals(items: Array<{ line_total: number }>): number {
+    return items.reduce((sum, item) => sum + Number(item.line_total || 0), 0);
   }
 
   async getStats() {

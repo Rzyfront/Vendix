@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsBoolean,
   IsArray,
+  ArrayMinSize,
   IsDateString,
   IsEnum,
   IsIn,
@@ -17,9 +18,28 @@ import {
 import { Type } from 'class-transformer';
 
 export class PosOrderItemDto {
+  @IsOptional()
+  @IsString()
+  @IsIn(['product', 'custom'])
+  item_type?: 'product' | 'custom';
+
+  @IsOptional()
   @IsInt()
+  @Min(1)
   @Type(() => Number)
-  product_id: number;
+  product_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  category_id?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  category_ids?: number[];
 
   @IsOptional()
   @IsInt()
@@ -29,6 +49,11 @@ export class PosOrderItemDto {
   @IsString()
   @MaxLength(255)
   product_name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
 
   @IsOptional()
   @IsString()
@@ -56,6 +81,23 @@ export class PosOrderItemDto {
   @Min(0)
   @Type(() => Number)
   total_price: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  final_unit_price?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  tax_category_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  price_override_reason?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 5 })
@@ -177,6 +219,7 @@ export class CreatePosPaymentDto {
   cash_register_session_id?: number;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)
   items: PosOrderItemDto[];

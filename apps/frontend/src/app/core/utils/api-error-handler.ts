@@ -36,6 +36,34 @@ export interface NormalizedApiPayload {
   timestamp?: string;
 }
 
+function extractNestedMessage(value: any): string | null {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.filter((item) => typeof item === 'string').join(', ') || null;
+  }
+
+  if (value && typeof value === 'object') {
+    if (typeof value.message === 'string') {
+      return value.message;
+    }
+
+    if (Array.isArray(value.message)) {
+      return value.message
+        .filter((item: unknown) => typeof item === 'string')
+        .join(', ') || null;
+    }
+
+    if (typeof value.error === 'string') {
+      return value.error;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Extrae el mensaje de error de una respuesta de API
  * @param response Respuesta de la API
@@ -78,8 +106,9 @@ export function extractApiErrorMessage(response: any): string {
         return apiResponse.error;
       }
       // Caso 3: Si hay un mensaje en la raíz
-      if (apiResponse.message) {
-        return apiResponse.message;
+      const apiMessage = extractNestedMessage(apiResponse.message);
+      if (apiMessage) {
+        return apiMessage;
       }
       // Caso por defecto
       return 'Error en la operación';
@@ -89,6 +118,11 @@ export function extractApiErrorMessage(response: any): string {
     if (apiResponse.success) {
       return apiResponse.message || 'Operación completada';
     }
+  }
+
+  const nestedMessage = extractNestedMessage(response?.message);
+  if (nestedMessage) {
+    return nestedMessage;
   }
 
   // Para errores HTTP estándar
@@ -118,8 +152,9 @@ export function extractApiErrorMessage(response: any): string {
   }
 
   // Para errores genéricos
-  if (response && typeof response === 'object' && 'message' in response) {
-    return response.message as string;
+  const genericMessage = extractNestedMessage(response?.message);
+  if (genericMessage) {
+    return genericMessage;
   }
 
   // Valor por defecto
@@ -146,8 +181,9 @@ export function normalizeApiPayload(response: any): NormalizedApiPayload {
     payload.success = Boolean(response.success);
   }
 
-  if (typeof response.message === 'string') {
-    payload.message = response.message;
+  const message = extractNestedMessage(response.message);
+  if (message) {
+    payload.message = message;
   } else if (response.error && typeof response.error === 'string') {
     // caso en el que `error` es string y contiene mensaje
     payload.message = response.error;
@@ -161,7 +197,7 @@ export function normalizeApiPayload(response: any): NormalizedApiPayload {
     typeof response.error === 'object' &&
     response.error.message
   ) {
-    payload.error = response.error.message;
+    payload.error = extractNestedMessage(response.error.message) ?? undefined;
   }
 
   if (typeof response.statusCode === 'number') {

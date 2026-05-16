@@ -14,6 +14,7 @@ import {
 import { ToastService, DialogService } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-customers',
@@ -156,7 +157,10 @@ export class CustomersComponent {
         next: (stats: CustomerStats) => this.stats.set(stats),
         error: (error: any) => {
           console.error('Error loading stats:', error);
-          this.toastService.error('Error al cargar estadísticas');
+          this.toastService.error(
+            extractApiErrorMessage(error),
+            'Error al cargar estadísticas',
+          );
         },
       });
   }
@@ -174,8 +178,11 @@ export class CustomersComponent {
           this.customers.set(response.data);
           this.totalItems.set(response.meta.total);
         },
-        error: () => {
-          this.toastService.error('Error al cargar clientes');
+        error: (error) => {
+          this.toastService.error(
+            extractApiErrorMessage(error),
+            'Error al cargar clientes',
+          );
         },
       });
   }
@@ -230,9 +237,12 @@ export class CustomersComponent {
           this.loadCustomers();
           this.loadStats(); // Refresh stats too
         },
-        error: (err) => {
-          console.error(err);
-          this.toastService.error('Operación fallida');
+        error: (error) => {
+          console.error('Error saving customer:', error);
+          this.toastService.error(
+            extractApiErrorMessage(error),
+            `Error al ${this.selectedCustomer() ? 'actualizar' : 'crear'} cliente`,
+          );
         },
       });
   }
@@ -264,8 +274,11 @@ export class CustomersComponent {
                 this.loadCustomers();
                 this.loadStats();
               },
-              error: () => {
-                this.toastService.error('Error al eliminar cliente');
+              error: (error) => {
+                this.toastService.error(
+                  extractApiErrorMessage(error),
+                  'Error al eliminar cliente',
+                );
               },
             });
         }

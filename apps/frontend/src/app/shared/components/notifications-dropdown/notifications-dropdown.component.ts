@@ -6,7 +6,9 @@ import {
   computed,
   signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
+import { map, timer } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import {
   NotificationsFacade,
@@ -93,6 +95,10 @@ export class NotificationsDropdownComponent {
   private router = inject(Router);
 
   readonly isOpen = signal(false);
+  private readonly relativeTimeNow = toSignal(
+    timer(0, 60_000).pipe(map(() => Date.now())),
+    { initialValue: Date.now() },
+  );
 
   // Signal-based properties from facade
   readonly notifications = this.notifFacade.notifications;
@@ -190,8 +196,7 @@ export class NotificationsDropdownComponent {
   formatTime(dateStr: string): string {
     try {
       const date = new Date(dateStr);
-      const now = new Date();
-      const diff = now.getTime() - date.getTime();
+      const diff = this.relativeTimeNow() - date.getTime();
       const minutes = Math.floor(diff / 60000);
       const hours = Math.floor(diff / 3600000);
 

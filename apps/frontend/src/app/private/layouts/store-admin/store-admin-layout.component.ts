@@ -17,7 +17,6 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ConfigFacade } from '../../../core/store/config';
-import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { TourModalComponent } from '../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../shared/components/tour/services/tour.service';
@@ -143,11 +142,13 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
       </div>
     </div>
 
-    <!-- Onboarding Modal -->
-    <app-onboarding-modal
-      [(isOpen)]="showOnboardingModal"
-      (completed)="onOnboardingCompleted($event)"
-    ></app-onboarding-modal>
+    <!-- Onboarding Modal - Only render if onboarding is needed -->
+    @if (needsOnboarding()) {
+      <app-onboarding-modal
+        [(isOpen)]="showOnboardingModal"
+        (completed)="onOnboardingCompleted($event)"
+      ></app-onboarding-modal>
+    }
 
     <!-- Tour Modal -->
     <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
@@ -163,7 +164,6 @@ export class StoreAdminLayoutComponent {
 
   private authFacade = inject(AuthFacade);
   private configFacade = inject(ConfigFacade);
-  private onboardingWizardService = inject(OnboardingWizardService);
   private tourService = inject(TourService);
   private menuFilterService = inject(MenuFilterService);
   private subscriptionFacade = inject(SubscriptionFacade);

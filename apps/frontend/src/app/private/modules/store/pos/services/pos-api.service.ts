@@ -124,13 +124,21 @@ export class PosApiService {
     return this.http.get(`${this.apiUrl}/store/promotions/active`);
   }
 
-  validateCoupon(code: string, cartSubtotal?: number, customerId?: number, productIds?: number[], categoryIds?: number[]): Observable<any> {
+  validateCoupon(
+    code: string,
+    cartSubtotal?: number,
+    customerId?: number,
+    productIds?: number[],
+    categoryIds?: number[],
+    items?: Array<{ product_id?: number; category_ids?: number[]; line_total: number }>,
+  ): Observable<any> {
     return this.http.post(`${this.apiUrl}/store/coupons/validate`, {
       code,
       cart_subtotal: cartSubtotal,
       customer_id: customerId,
       product_ids: productIds,
       category_ids: categoryIds,
+      items,
     });
   }
 }

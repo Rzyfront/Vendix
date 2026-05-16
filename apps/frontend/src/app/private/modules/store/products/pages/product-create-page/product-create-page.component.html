@@ -210,7 +210,6 @@
               [options]="pricingTypeOptions"
               formControlName="pricing_type"
               placeholder="Seleccionar tipo"
-              [disabled]="isService"
               tooltipText="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios."
             >
             </app-selector>
@@ -219,7 +218,7 @@
               <app-multi-selector
                 class="flex-1"
                 label="Impuestos Aplicables"
-                [options]="taxCategoryOptions"
+                [options]="taxCategoryOptions()"
                 formControlName="tax_category_ids"
                 placeholder="Seleccionar impuestos..."
                 tooltipText="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
@@ -524,6 +523,13 @@
               formControlName="available_for_ecommerce"
               label="Disponible en E-commerce"
               description="Visible en tu tienda online"
+            >
+            </app-setting-toggle>
+
+            <app-setting-toggle
+              formControlName="allow_pos_price_override"
+              label="Precio editable en POS"
+              description="Permite que usuarios autorizados vendan este producto con precio negociado"
             >
             </app-setting-toggle>
 

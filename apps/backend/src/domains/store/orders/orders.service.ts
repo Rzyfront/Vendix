@@ -115,14 +115,23 @@ export class OrdersService {
               create: await Promise.all(
                 createOrderDto.items.map(async (item) => {
                   // Resolve product type for snapshot
-                  const product = await this.prisma.products.findUnique({
-                    where: { id: item.product_id },
-                    select: { product_type: true },
-                  });
+                  const product = item.product_id
+                    ? await this.prisma.products.findUnique({
+                        where: { id: item.product_id },
+                        select: { product_type: true },
+                      })
+                    : null;
+                  const itemType =
+                    item.item_type === 'product'
+                      ? product?.product_type || 'physical'
+                      : item.item_type || product?.product_type || 'custom';
                   return {
-                    product_id: item.product_id,
-                    product_variant_id: item.product_variant_id,
+                    product_id: item.product_id || null,
+                    product_variant_id: item.product_id
+                      ? item.product_variant_id
+                      : null,
                     product_name: item.product_name,
+                    description: item.description,
                     variant_sku: item.variant_sku,
                     variant_attributes: item.variant_attributes,
                     quantity: item.quantity,
@@ -130,14 +139,23 @@ export class OrdersService {
                     total_price: item.total_price,
                     tax_rate: item.tax_rate,
                     tax_amount_item: item.tax_amount_item,
+                    catalog_unit_price: item.catalog_unit_price,
+                    catalog_final_price: item.catalog_final_price,
+                    final_unit_price: item.final_unit_price ?? item.unit_price,
+                    is_price_overridden:
+                      item.is_price_overridden ??
+                      Boolean(item.price_override_reason),
+                    price_override_reason: item.price_override_reason,
                     weight: item.weight,
                     weight_unit: item.weight_unit,
-                    item_type: product?.product_type || 'physical',
-                    cost_price: await resolveCostPrice(
-                      this.prisma,
-                      item.product_id,
-                      item.product_variant_id,
-                    ),
+                    item_type: itemType,
+                    cost_price: item.product_id
+                      ? await resolveCostPrice(
+                          this.prisma,
+                          item.product_id,
+                          item.product_variant_id,
+                        )
+                      : null,
                     updated_at: new Date(),
                   };
                 }),
@@ -518,9 +536,10 @@ export class OrdersService {
       await tx.order_items.createMany({
         data: dto.items.map((item) => ({
           order_id: id,
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id,
+          product_id: item.product_id || null,
+          product_variant_id: item.product_id ? item.product_variant_id : null,
           product_name: item.product_name,
+          description: item.description,
           variant_sku: item.variant_sku,
           variant_attributes: item.variant_attributes,
           quantity: item.quantity,
@@ -528,8 +547,18 @@ export class OrdersService {
           total_price: item.total_price,
           tax_rate: item.tax_rate,
           tax_amount_item: item.tax_amount_item,
+          catalog_unit_price: item.catalog_unit_price,
+          catalog_final_price: item.catalog_final_price,
+          final_unit_price: item.final_unit_price ?? item.unit_price,
+          is_price_overridden:
+            item.is_price_overridden ?? Boolean(item.price_override_reason),
+          price_override_reason: item.price_override_reason,
           weight: item.weight,
           weight_unit: item.weight_unit,
+          item_type:
+            item.item_type === 'product'
+              ? 'physical'
+              : item.item_type || (item.product_id ? 'physical' : 'custom'),
           updated_at: new Date(),
         })),
       });

@@ -589,7 +589,6 @@ export class PaymentsService {
     createPosPaymentDto: CreatePosPaymentDto,
     user: any,
   ): Promise<PosPaymentResponseDto> {
-    try {
       // Resolve store_id from RequestContext (authoritative). Backward-compat:
       // if the client sent store_id in body, validate it matches the context.
       const context = RequestContextService.getContext();
@@ -641,10 +640,12 @@ export class PaymentsService {
 
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
         // Validate ALL items before any reservation occurs
-        // Use allow_oversell from DTO to decide if oversell is permitted
-        const allowOversell = createPosPaymentDto.allow_oversell ?? false;
+        // Oversell is intentionally not controlled by the public POS payload.
+        const allowOversell = false;
 
         for (const item of order.order_items) {
+          if (!item.product_id) continue;
+
           const product = await tx.products.findUnique({
             where: { id: item.product_id },
             select: {
@@ -683,7 +684,7 @@ export class PaymentsService {
               ? ` (variant ${item.product_variant_id})`
               : '';
             throw new BadRequestException(
-              `Insufficient stock for ${product.name}${variantInfo}: requested ${item.quantity}, available ${available}. Set allow_oversell=true to permit overselling.`,
+              `Stock insuficiente para ${product.name}${variantInfo}: solicitado ${item.quantity}, disponible ${available}.`,
             );
           }
         }
@@ -703,6 +704,8 @@ export class PaymentsService {
         });
 
         for (const item of order.order_items) {
+          if (!item.product_id) continue;
+
           const product = await tx.products.findUnique({
             where: { id: item.product_id },
             select: { track_inventory: true },
@@ -776,11 +779,15 @@ export class PaymentsService {
             try {
               const { discount } = await this.promotionEngine.validatePromotion(
                 promoId,
-                createPosPaymentDto.items.map((i) => ({
-                  product_id: i.product_id,
-                  unit_price: i.unit_price,
-                  quantity: i.quantity,
-                })),
+                createPosPaymentDto.items
+                  .filter((i) => i.product_id)
+                  .map((i) => ({
+                    product_id: i.product_id!,
+                    category_id: i.category_id,
+                    category_ids: i.category_ids,
+                    unit_price: i.final_unit_price ?? i.unit_price,
+                    quantity: i.quantity,
+                  })),
                 createPosPaymentDto.customer_id,
               );
               await this.promotionEngine.applyPromotion(
@@ -981,6 +988,7 @@ export class PaymentsService {
             {
               id: result.order.id,
               store_id: createPosPaymentDto.store_id,
+              grand_total: result.order.total_amount,
             } as any,
             createPosPaymentDto,
           );
@@ -1075,13 +1083,6 @@ export class PaymentsService {
       }
 
       return result;
-    } catch (error) {
-      return {
-        success: false,
-        message: error.message || 'Error processing payment',
-        errors: [error.message],
-      };
-    }
   }
 
   /**
@@ -1196,6 +1197,414 @@ export class PaymentsService {
     });
   }
 
+  private hasActivePermission(user: any, permissionName: string): boolean {
+    const roles = user?.roles || [];
+    if (roles.includes('super_admin') || roles.includes('SUPER_ADMIN')) {
+      return true;
+    }
+
+    return (user?.permissions || []).some(
+      (permission: any) =>
+        permission?.name === permissionName && permission?.status === 'active',
+    );
+  }
+
+  private requireActivePermission(user: any, permissionName: string): void {
+    if (!this.hasActivePermission(user, permissionName)) {
+      throw new VendixHttpException(
+        ErrorCodes.AUTH_PERM_001,
+        'No tienes permiso para realizar esta operación en POS.',
+      );
+    }
+  }
+
+  private roundMoney(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  }
+
+  private roundRate(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100000) / 100000;
+  }
+
+  private getPosLineUnits(item: any): number {
+    const weight = Number(item.weight || 0);
+    if (weight > 0) return weight;
+    return Number(item.quantity || 0);
+  }
+
+  private resolveRequestedFinalUnitPrice(
+    item: any,
+    lineUnits: number,
+    fallbackFinalUnitPrice: number,
+  ): number {
+    if (item.final_unit_price !== undefined && item.final_unit_price !== null) {
+      return this.roundMoney(Number(item.final_unit_price));
+    }
+
+    if (
+      item.total_price !== undefined &&
+      item.total_price !== null &&
+      lineUnits > 0
+    ) {
+      return this.roundMoney(Number(item.total_price) / lineUnits);
+    }
+
+    return this.roundMoney(fallbackFinalUnitPrice);
+  }
+
+  private resolveCatalogUnitBasePrice(product: any, variant?: any): number {
+    const productBase = Number(product.base_price || 0);
+
+    if (
+      variant?.is_on_sale &&
+      variant.sale_price != null &&
+      Number(variant.sale_price) > 0
+    ) {
+      return Number(variant.sale_price);
+    }
+
+    if (variant?.price_override != null && Number(variant.price_override) > 0) {
+      return Number(variant.price_override);
+    }
+
+    if (
+      product.is_on_sale &&
+      product.sale_price != null &&
+      Number(product.sale_price) > 0
+    ) {
+      return Number(product.sale_price);
+    }
+
+    return productBase;
+  }
+
+  private async calculateTaxCategoryTaxes(
+    tx: any,
+    taxCategoryId: number | undefined,
+    basePrice: number,
+    storeId: number,
+  ): Promise<{
+    total_rate: number;
+    total_tax_amount: number;
+    taxes: { tax_rate_id: number; name: string; rate: number; amount: number }[];
+  }> {
+    if (!taxCategoryId) {
+      return { total_rate: 0, total_tax_amount: 0, taxes: [] };
+    }
+
+    const store = await tx.stores.findUnique({
+      where: { id: storeId },
+      select: { organization_id: true },
+    });
+    const organizationId =
+      store?.organization_id ??
+      RequestContextService.getContext()?.organization_id;
+
+    const scopeOptions: any[] = [{ store_id: storeId }];
+    if (organizationId) {
+      scopeOptions.push({ organization_id: organizationId, store_id: null });
+    }
+
+    const taxCategory = await tx.tax_categories.findFirst({
+      where: {
+        id: taxCategoryId,
+        OR: scopeOptions,
+      },
+      include: { tax_rates: true },
+    });
+
+    if (!taxCategory) {
+      throw new BadRequestException(
+        'La categoría de impuesto seleccionada no existe para esta tienda.',
+      );
+    }
+
+    const taxes = (taxCategory.tax_rates || []).map((rate: any) => {
+      const rateValue = Number(rate.rate || 0);
+      return {
+        tax_rate_id: rate.id,
+        name: rate.name,
+        rate: rateValue,
+        amount: basePrice * rateValue,
+      };
+    });
+    const totalRate = taxes.reduce((sum, tax) => sum + tax.rate, 0);
+
+    return {
+      total_rate: totalRate,
+      total_tax_amount: basePrice * totalRate,
+      taxes,
+    };
+  }
+
+  private async buildPosOrderItem(
+    tx: any,
+    item: any,
+    dtoStoreId: number,
+    user: any,
+  ): Promise<any> {
+    const isCustomItem = item.item_type === 'custom' || !item.product_id;
+    const lineUnits = this.getPosLineUnits(item);
+
+    if (lineUnits <= 0) {
+      throw new BadRequestException('La cantidad del ítem debe ser mayor a 0.');
+    }
+
+    if (isCustomItem) {
+      this.requireActivePermission(user, 'store:pos:custom_items:create');
+
+      const productName = (item.product_name || '').trim();
+      if (!productName) {
+        throw new BadRequestException(
+          'El ítem personalizado requiere un nombre o descripción.',
+        );
+      }
+
+      const rateProbe = await this.calculateTaxCategoryTaxes(
+        tx,
+        item.tax_category_id,
+        1,
+        dtoStoreId,
+      );
+      const finalUnitPrice = this.resolveRequestedFinalUnitPrice(
+        item,
+        lineUnits,
+        Number(item.unit_price || 0) * (1 + rateProbe.total_rate),
+      );
+      const unitBasePrice =
+        rateProbe.total_rate > 0
+          ? finalUnitPrice / (1 + rateProbe.total_rate)
+          : finalUnitPrice;
+      const taxInfo = await this.calculateTaxCategoryTaxes(
+        tx,
+        item.tax_category_id,
+        unitBasePrice,
+        dtoStoreId,
+      );
+
+      return this.buildOrderItemSnapshot({
+        item,
+        productName,
+        sku: item.product_sku,
+        description: item.description || item.notes,
+        itemType: 'custom',
+        quantity: item.quantity,
+        lineUnits,
+        unitBasePrice,
+        finalUnitPrice,
+        taxInfo,
+        costPrice: null,
+        catalogUnitPrice: null,
+        catalogFinalPrice: null,
+        isPriceOverridden: false,
+        priceOverrideReason: undefined,
+        priceOverriddenByUserId: undefined,
+        productId: undefined,
+        productVariantId: undefined,
+      });
+    }
+
+    const product = await tx.products.findFirst({
+      where: {
+        id: item.product_id,
+        store_id: dtoStoreId,
+      },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        base_price: true,
+        is_on_sale: true,
+        sale_price: true,
+        product_type: true,
+        allow_pos_price_override: true,
+      },
+    });
+
+    if (!product) {
+      throw new BadRequestException('Producto no encontrado para esta tienda.');
+    }
+
+    const variant = item.product_variant_id
+      ? await tx.product_variants.findFirst({
+          where: {
+            id: item.product_variant_id,
+            product_id: product.id,
+          },
+          select: {
+            id: true,
+            sku: true,
+            price_override: true,
+            is_on_sale: true,
+            sale_price: true,
+          },
+        })
+      : null;
+
+    if (item.product_variant_id && !variant) {
+      throw new BadRequestException('La variante no pertenece al producto.');
+    }
+
+    const catalogUnitPrice = this.roundMoney(
+      this.resolveCatalogUnitBasePrice(product, variant),
+    );
+    const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
+      product.id,
+      catalogUnitPrice,
+    );
+    const catalogFinalPrice = this.roundMoney(
+      catalogUnitPrice + catalogTaxInfo.total_tax_amount,
+    );
+    const finalUnitPrice = this.resolveRequestedFinalUnitPrice(
+      item,
+      lineUnits,
+      catalogFinalPrice,
+    );
+    const isPriceOverridden =
+      Math.abs(finalUnitPrice - catalogFinalPrice) >= 0.01;
+
+    if (isPriceOverridden) {
+      if (!product.allow_pos_price_override) {
+        throw new BadRequestException(
+          `El producto "${product.name}" no permite editar el precio en POS.`,
+        );
+      }
+      this.requireActivePermission(user, 'store:pos:price_override');
+    }
+
+    const unitBasePrice =
+      catalogTaxInfo.total_rate > 0
+        ? finalUnitPrice / (1 + catalogTaxInfo.total_rate)
+        : finalUnitPrice;
+    const taxInfo = await this.taxes_service.calculateProductTaxes(
+      product.id,
+      unitBasePrice,
+    );
+    const costPrice = await resolveCostPrice(
+      tx,
+      product.id,
+      item.product_variant_id,
+    );
+
+    return this.buildOrderItemSnapshot({
+      item,
+      productName: item.product_name || product.name,
+      sku: item.product_sku || variant?.sku || product.sku,
+      description: item.description || item.notes,
+      itemType: product.product_type === 'service' ? 'service' : 'physical',
+      quantity: item.quantity,
+      lineUnits,
+      unitBasePrice,
+      finalUnitPrice,
+      taxInfo,
+      costPrice,
+      catalogUnitPrice,
+      catalogFinalPrice,
+      isPriceOverridden,
+      priceOverrideReason: isPriceOverridden
+        ? item.price_override_reason
+        : undefined,
+      priceOverriddenByUserId: isPriceOverridden ? user?.id : undefined,
+      productId: product.id,
+      productVariantId: item.product_variant_id,
+    });
+  }
+
+  private buildOrderItemSnapshot(params: {
+    item: any;
+    productName: string;
+    sku?: string | null;
+    description?: string;
+    itemType: string;
+    quantity: number;
+    lineUnits: number;
+    unitBasePrice: number;
+    finalUnitPrice: number;
+    taxInfo: {
+      total_rate: number;
+      total_tax_amount: number;
+      taxes: {
+        tax_rate_id: number;
+        name: string;
+        rate: number;
+        amount: number;
+      }[];
+    };
+    costPrice: number | null;
+    catalogUnitPrice: number | null;
+    catalogFinalPrice: number | null;
+    isPriceOverridden: boolean;
+    priceOverrideReason?: string;
+    priceOverriddenByUserId?: number;
+    productId?: number;
+    productVariantId?: number;
+  }): any {
+    const lineBaseTotal = this.roundMoney(
+      params.unitBasePrice * params.lineUnits,
+    );
+    const lineTaxTotal = this.roundMoney(
+      params.taxInfo.total_tax_amount * params.lineUnits,
+    );
+    const isWeightedLine = Number(params.item.weight || 0) > 0;
+    const itemTaxAmount = isWeightedLine
+      ? lineTaxTotal
+      : this.roundMoney(params.taxInfo.total_tax_amount);
+
+    const orderItem: any = {
+      product_name: params.productName,
+      description: params.description,
+      variant_sku: params.sku || undefined,
+      variant_attributes: params.item.variant_attributes
+        ? JSON.stringify(params.item.variant_attributes)
+        : undefined,
+      quantity: params.quantity,
+      unit_price: this.roundMoney(params.unitBasePrice),
+      total_price: lineBaseTotal,
+      tax_rate: this.roundRate(params.taxInfo.total_rate),
+      tax_amount_item: itemTaxAmount,
+      cost_price: params.costPrice,
+      catalog_unit_price:
+        params.catalogUnitPrice === null
+          ? undefined
+          : this.roundMoney(params.catalogUnitPrice),
+      catalog_final_price:
+        params.catalogFinalPrice === null
+          ? undefined
+          : this.roundMoney(params.catalogFinalPrice),
+      final_unit_price: this.roundMoney(params.finalUnitPrice),
+      is_price_overridden: params.isPriceOverridden,
+      price_override_reason: params.priceOverrideReason || undefined,
+      price_overridden_by_user_id: params.priceOverriddenByUserId || undefined,
+      weight: params.item.weight || undefined,
+      weight_unit: params.item.weight_unit || undefined,
+      item_type: params.itemType,
+    };
+
+    if (params.productId) {
+      orderItem.products = { connect: { id: params.productId } };
+    }
+
+    if (params.productVariantId) {
+      orderItem.product_variants = {
+        connect: { id: params.productVariantId },
+      };
+    }
+
+    if (params.taxInfo.taxes.length > 0) {
+      orderItem.order_item_taxes = {
+        create: params.taxInfo.taxes.map((tax) => ({
+          tax_rate_id: tax.tax_rate_id,
+          tax_name: tax.name,
+          tax_rate: this.roundRate(tax.rate),
+          tax_amount: this.roundMoney(tax.amount * params.lineUnits),
+          is_compound: false,
+        })),
+      };
+    }
+
+    return orderItem;
+  }
+
   /**
    * Create or update order from POS data
    */
@@ -1220,56 +1629,48 @@ export class PaymentsService {
         // Generate order number for this store
         orderNumber = await this.generateOrderNumber(tx, dtoStoreId);
 
-        // Create order items
+        // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
-          dto.items.map(async (item) => {
-            let item_tax_rate = item.tax_rate;
-            let item_tax_amount = item.tax_amount_item;
+          dto.items.map((item) =>
+            this.buildPosOrderItem(tx, item, dtoStoreId, user),
+          ),
+        );
 
-            // If taxes are missing or 0, calculate them
-            if (!item_tax_rate || item_tax_rate === 0) {
-              const taxInfo = await this.taxes_service.calculateProductTaxes(
-                item.product_id,
-                item.unit_price,
+        const calculatedSubtotal = this.roundMoney(
+          orderItems.reduce(
+            (sum, item) => sum + Number(item.total_price || 0),
+            0,
+          ),
+        );
+        const calculatedTaxAmount = this.roundMoney(
+          orderItems.reduce((sum, item) => {
+            const nestedTaxes = item.order_item_taxes?.create || [];
+            if (nestedTaxes.length > 0) {
+              return (
+                sum +
+                nestedTaxes.reduce(
+                  (taxSum: number, tax: any) =>
+                    taxSum + Number(tax.tax_amount || 0),
+                  0,
+                )
               );
-              item_tax_rate = taxInfo.total_rate;
-              item_tax_amount = taxInfo.total_tax_amount;
             }
 
-            const cost_price = await resolveCostPrice(
-              tx,
-              item.product_id,
-              item.product_variant_id,
-            );
-
-            const orderItem: any = {
-              product_name: item.product_name,
-              variant_sku: item.product_sku,
-              variant_attributes: item.variant_attributes
-                ? JSON.stringify(item.variant_attributes)
-                : undefined,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              total_price: item.total_price,
-              tax_rate: item_tax_rate,
-              tax_amount_item: item_tax_amount,
-              cost_price,
-              weight: item.weight || undefined,
-              weight_unit: item.weight_unit || undefined,
-            };
-
-            if (item.product_id) {
-              orderItem.products = { connect: { id: item.product_id } };
-            }
-
-            if (item.product_variant_id) {
-              orderItem.product_variants = {
-                connect: { id: item.product_variant_id },
-              };
-            }
-
-            return orderItem;
-          }),
+            const multiplier =
+              Number(item.weight || 0) > 0 ? 1 : Number(item.quantity || 1);
+            return sum + Number(item.tax_amount_item || 0) * multiplier;
+          }, 0),
+        );
+        const discountAmount = this.roundMoney(dto.discount_amount || 0);
+        const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+        const grandTotal = this.roundMoney(
+          Math.max(
+            0,
+            calculatedSubtotal +
+              calculatedTaxAmount -
+              discountAmount +
+              shippingCost,
+          ),
         );
 
         // Build order data - only include customer_id if provided (for anonymous sales)
@@ -1279,10 +1680,10 @@ export class PaymentsService {
           order_number: orderNumber,
           state: 'created', // Orders start in 'created' state, flow service handles transitions
           channel: 'pos', // POS orders are assigned 'pos' channel
-          subtotal_amount: dto.subtotal,
-          tax_amount: dto.tax_amount || 0,
-          discount_amount: dto.discount_amount || 0,
-          grand_total: dto.total_amount,
+          subtotal_amount: calculatedSubtotal,
+          tax_amount: calculatedTaxAmount,
+          discount_amount: discountAmount,
+          grand_total: grandTotal,
           currency: dto.currency,
           coupon_id: dto.coupon_id || undefined,
           coupon_code: dto.coupon_code || undefined,
@@ -1292,7 +1693,7 @@ export class PaymentsService {
           // Shipping fields (for delivery orders)
           delivery_type: dto.delivery_type || 'direct_delivery',
           payment_form: dto.payment_form || (dto.requires_payment ? '1' : '2'),
-          shipping_cost: dto.shipping_cost || 0,
+          shipping_cost: shippingCost,
           shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {
             create: orderItems,
@@ -1371,6 +1772,9 @@ export class PaymentsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const dtoStoreId: number = dto.store_id;
+    const payableAmount = this.roundMoney(
+      Number(order?.grand_total ?? order?.total_amount ?? dto.total_amount ?? 0),
+    );
 
     // Get payment method details
     if (!dto.store_payment_method_id) {
@@ -1403,7 +1807,7 @@ export class PaymentsService {
       const gatewayResult = await this.paymentGateway.processPayment({
         orderId: order.id,
         customerId: dto.customer_id,
-        amount: dto.total_amount,
+        amount: payableAmount,
         currency: dto.currency || 'COP',
         storePaymentMethodId: dto.store_payment_method_id,
         storeId: dtoStoreId,
@@ -1444,11 +1848,17 @@ export class PaymentsService {
     // Direct methods (cash, card, bank_transfer) - existing flow continues below
     // Calculate change for cash payments
     let change = 0;
-    if (
-      paymentMethod.system_payment_method.type === 'cash' &&
-      dto.amount_received
-    ) {
-      change = dto.amount_received - dto.total_amount;
+    const amountReceived =
+      dto.amount_received !== undefined && dto.amount_received !== null
+        ? Number(dto.amount_received)
+        : payableAmount;
+    if (paymentMethod.system_payment_method.type === 'cash') {
+      if (amountReceived < payableAmount) {
+        throw new BadRequestException(
+          'El monto recibido no puede ser menor al total de la orden.',
+        );
+      }
+      change = this.roundMoney(amountReceived - payableAmount);
     }
 
     // Create payment record
@@ -1456,7 +1866,7 @@ export class PaymentsService {
       data: {
         order_id: order.id,
         store_payment_method_id: dto.store_payment_method_id,
-        amount: dto.total_amount,
+        amount: payableAmount,
         currency: dto.currency,
         state: 'succeeded',
         transaction_id: await this.generateTransactionId(),
@@ -1466,7 +1876,7 @@ export class PaymentsService {
           metadata: {
             register_id: dto.register_id,
             seller_user_id: dto.seller_user_id,
-            amount_received: dto.amount_received,
+            amount_received: amountReceived,
             is_pos_payment: true,
           },
         },
@@ -1541,6 +1951,8 @@ export class PaymentsService {
   private async updateInventoryFromOrder(tx: any, order: any): Promise<number> {
     let totalCost = 0;
     for (const item of order.order_items) {
+      if (!item.product_id) continue;
+
       const product = await tx.products.findUnique({
         where: { id: item.product_id },
         select: { track_inventory: true, product_type: true },

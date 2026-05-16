@@ -3,6 +3,7 @@ import { PosCustomer } from '../models/customer.model';
 
 export interface CartItem {
   id: string;
+  itemType?: 'product' | 'custom';
   product: Product;
   quantity: number;
   unitPrice: number;
@@ -11,6 +12,12 @@ export interface CartItem {
   taxAmount: number;
   addedAt: Date;
   notes?: string;
+  description?: string;
+  taxCategoryId?: number | null;
+  taxRate?: number;
+  originalFinalPrice?: number;
+  isPriceOverridden?: boolean;
+  priceOverrideReason?: string;
   discounts?: CartDiscount[];
   variant_id?: number;
   variant_sku?: string;
@@ -79,10 +86,28 @@ export interface AddToCartRequest {
   weight_unit?: 'kg' | 'g' | 'lb';
 }
 
+export interface AddCustomItemRequest {
+  name: string;
+  description?: string;
+  quantity: number;
+  finalPrice: number;
+  taxCategory?: {
+    id: number;
+    name: string;
+    tax_rates?: Array<{ rate: string | number }>;
+  } | null;
+}
+
 export interface UpdateCartItemRequest {
   itemId: string;
   quantity: number;
   notes?: string;
+}
+
+export interface UpdateCartItemPriceRequest {
+  itemId: string;
+  finalPrice: number;
+  reason?: string;
 }
 
 export interface ApplyDiscountRequest {

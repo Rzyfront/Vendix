@@ -244,7 +244,8 @@ export class InvoicingService {
       await this.invoice_number_generator.generateNextNumber();
 
     const productItems = (order.order_items || []).map((item: any) => {
-      const description = item.product_name || item.products?.name || 'Product';
+      const description =
+        item.description || item.product_name || item.products?.name || 'Product';
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount_amount || 0);

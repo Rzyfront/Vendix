@@ -242,6 +242,10 @@ export class QuotationListComponent {
       icon: 'arrow-right-circle',
       variant: 'success',
       action: (item: Quotation) => this.convert.emit(item),
+      tooltip: (item: Quotation) =>
+        item.status === 'accepted'
+          ? 'Convertir a orden'
+          : 'Primero acepta la cotización para convertirla en orden',
       show: (item: Quotation) =>
         ['draft', 'sent', 'accepted'].includes(item.status),
     },

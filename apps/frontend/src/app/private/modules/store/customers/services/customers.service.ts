@@ -57,7 +57,7 @@ export class CustomersService {
             }),
             catchError((error) => {
                 console.error('Error fetching customer stats:', error);
-                return throwError(() => new Error('Failed to fetch customer stats'));
+                return throwError(() => error);
             }),
         );
 

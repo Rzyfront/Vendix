@@ -337,25 +337,8 @@ export class SettingsModalComponent {
   filteredStandaloneModules: any[] = [];
 
   constructor() {
-    // Initialize panel_ui controls for ORG_ADMIN
-    const orgAdminControls: any = {};
-    APP_MODULES.ORG_ADMIN.forEach((module) => {
-      orgAdminControls[module.key] = [false]; // Default to false
-    });
-
-    // Initialize panel_ui controls for STORE_ADMIN (all modules including submodules)
-    const storeAdminControls: any = {};
-    APP_MODULES.STORE_ADMIN.forEach((module) => {
-      // For parent modules, initialize with true
-      // For child modules, also initialize with true (all enabled by default now)
-      storeAdminControls[module.key] = [false];
-      // Also initialize children if they exist
-      if (module.isParent && module.children) {
-        module.children.forEach((child) => {
-          storeAdminControls[child.key] = [false];
-        });
-      }
-    });
+    const orgAdminControls = this.createPanelUiControls('ORG_ADMIN');
+    const storeAdminControls = this.createPanelUiControls('STORE_ADMIN');
 
     this.settingsForm = this.fb.group({
       app: ['ORG_ADMIN', Validators.required],
@@ -484,6 +467,52 @@ export class SettingsModalComponent {
     });
 
     return modules;
+  }
+
+  private createPanelUiControls(appType: string): Record<string, [boolean]> {
+    const controls: Record<string, [boolean]> = {};
+    this.getAllModulesForAppType(appType).forEach((module: any) => {
+      controls[module.key] = [false];
+    });
+    return controls;
+  }
+
+  private buildPanelUiPatch(appType: string, config: any): Record<string, boolean> {
+    const defaults = this.defaultPanelUi?.[appType] || {};
+    const patch: Record<string, boolean> = {};
+
+    this.getAllModulesForAppType(appType).forEach((module: any) => {
+      const isNewKey =
+        !config.panel_ui?.[appType]?.hasOwnProperty(module.key) &&
+        !config.panel_ui?.hasOwnProperty(module.key);
+      const defaultValue = defaults[module.key] ?? false;
+      patch[module.key] = isNewKey
+        ? defaultValue
+        : (config.panel_ui?.[appType]?.[module.key] ??
+          config.panel_ui?.[module.key] ??
+          false);
+    });
+
+    return patch;
+  }
+
+  private syncChildControlStates(appType: string, patch: Record<string, boolean>): void {
+    APP_MODULES[appType as keyof typeof APP_MODULES]?.forEach((module: any) => {
+      if (!module.isParent || !module.children) return;
+
+      const parentEnabled = patch[module.key] === true;
+      module.children.forEach((child: any) => {
+        const childControl = this.settingsForm.get(
+          `panel_ui.${appType}.${child.key}`,
+        );
+        if (!childControl) return;
+        if (parentEnabled) {
+          childControl.enable({ emitEvent: false });
+        } else {
+          childControl.disable({ emitEvent: false });
+        }
+      });
+    });
   }
 
   /**
@@ -639,51 +668,8 @@ export class SettingsModalComponent {
       },
     };
 
-    // Update ORG_ADMIN modules
-    const orgDefaults = this.defaultPanelUi?.['ORG_ADMIN'] || {};
-    APP_MODULES.ORG_ADMIN.forEach((module) => {
-      const isNewKey =
-        !config.panel_ui?.ORG_ADMIN?.hasOwnProperty(module.key) &&
-        !config.panel_ui?.hasOwnProperty(module.key);
-      const defaultValue = orgDefaults[module.key] ?? false;
-      const currentValue = isNewKey
-        ? defaultValue
-        : (config.panel_ui?.ORG_ADMIN?.[module.key] ??
-          config.panel_ui?.[module.key] ??
-          false);
-      patchObj.panel_ui.ORG_ADMIN[module.key] = currentValue;
-    });
-
-    // Update STORE_ADMIN modules (including children)
-    const storeDefaults = this.defaultPanelUi?.['STORE_ADMIN'] || {};
-    APP_MODULES.STORE_ADMIN.forEach((module: any) => {
-      const isNewKey =
-        !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(module.key) &&
-        !config.panel_ui?.hasOwnProperty(module.key);
-      const defaultValue = storeDefaults[module.key] ?? false;
-      const currentValue = isNewKey
-        ? defaultValue
-        : (config.panel_ui?.STORE_ADMIN?.[module.key] ??
-          config.panel_ui?.[module.key] ??
-          false);
-      patchObj.panel_ui.STORE_ADMIN[module.key] = currentValue;
-
-      // Also handle children if they exist
-      if (module.isParent && module.children) {
-        module.children.forEach((child: any) => {
-          const isChildNew =
-            !config.panel_ui?.STORE_ADMIN?.hasOwnProperty(child.key) &&
-            !config.panel_ui?.hasOwnProperty(child.key);
-          const childDefault = storeDefaults[child.key] ?? false;
-          const childValue = isChildNew
-            ? childDefault
-            : (config.panel_ui?.STORE_ADMIN?.[child.key] ??
-              config.panel_ui?.[child.key] ??
-              false);
-          patchObj.panel_ui.STORE_ADMIN[child.key] = childValue;
-        });
-      }
-    });
+    patchObj.panel_ui.ORG_ADMIN = this.buildPanelUiPatch('ORG_ADMIN', config);
+    patchObj.panel_ui.STORE_ADMIN = this.buildPanelUiPatch('STORE_ADMIN', config);
 
     // Update preferences
     const prefs = config.preferences || { language: 'es', theme: 'default' };
@@ -694,22 +680,8 @@ export class SettingsModalComponent {
     this.settingsForm.patchValue(patchObj);
 
     // Sync disabled state of child controls based on each parent's value
-    APP_MODULES.STORE_ADMIN.forEach((module: any) => {
-      if (!module.isParent || !module.children) return;
-      const parentEnabled =
-        patchObj.panel_ui.STORE_ADMIN[module.key] === true;
-      module.children.forEach((child: any) => {
-        const childControl = this.settingsForm.get(
-          `panel_ui.STORE_ADMIN.${child.key}`,
-        );
-        if (!childControl) return;
-        if (parentEnabled) {
-          childControl.enable({ emitEvent: false });
-        } else {
-          childControl.disable({ emitEvent: false });
-        }
-      });
-    });
+    this.syncChildControlStates('ORG_ADMIN', patchObj.panel_ui.ORG_ADMIN);
+    this.syncChildControlStates('STORE_ADMIN', patchObj.panel_ui.STORE_ADMIN);
   }
 
   getModulesForAppType(appType: string): any[] {
@@ -730,6 +702,7 @@ export class SettingsModalComponent {
     this.moduleSearchTerm = '';
     this.currentAppType = appType;
     this.settingsForm.patchValue({ app: appType });
+    this.recomputeFilteredModules();
   }
 
   selectTheme(theme: string) {

@@ -562,7 +562,8 @@ export class OrderFlowService {
   }
 
   /**
-   * Cancel payment of a processing order (processing -> created)
+   * Cancel payment of an order that has an active payment attempt
+   * (pending_payment/processing -> created)
    * Privileged reverse transition — bypasses normal state machine
    * Only admin/owner can perform this action
    */
@@ -573,9 +574,9 @@ export class OrderFlowService {
   ) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'processing') {
+    if (!['pending_payment', 'processing'].includes(order.state)) {
       throw new BadRequestException(
-        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'processing' state.`,
+        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'pending_payment' or 'processing' state.`,
       );
     }
 

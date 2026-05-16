@@ -1,4 +1,4 @@
 This is a Brave Creators publisher verification file.
 
 Domain: vendix.online
-Token: 27940c9d71f0286c8c0d5c0dc35eded6985f039536d35c95c7e9f88e36bec343
+Token: 55500eef66f848afc25503ee4ddb47cf9e372dfc8d1fc76e24d29cdc5652b3ed

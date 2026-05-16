@@ -2,7 +2,7 @@ import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Observable } from 'rxjs';
+import { finalize, Observable } from 'rxjs';
 import { QuotationsService } from '../../services/quotations.service';
 import { QuotationPrintService } from '../../services/quotation-print.service';
 import { Quotation, QuotationStatus } from '../../interfaces/quotation.interface';
@@ -22,6 +22,7 @@ import type {
   TimelineStep,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 const STATUS_LABELS: Record<QuotationStatus, string> = {
   draft: 'Borrador',
@@ -272,6 +273,40 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
                   No hay acciones disponibles
                 </div>
               }
+
+              @if (canProcessAll()) {
+                <div class="mt-4 pt-4 border-t border-border">
+                  <label class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-200 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      [checked]="processAllEnabled()"
+                      (change)="processAllEnabled.set($any($event.target).checked)"
+                      class="mt-0.5"
+                    />
+                    <div>
+                      <p class="text-sm font-bold text-amber-800">Procesar cotización completa</p>
+                      <p class="text-xs text-text-secondary mt-0.5">
+                        Ejecuta en cadena los pasos pendientes: enviar al correo del cliente, aceptar y convertir en orden.
+                        Si algún paso falla, podrás reintentar desde el último estado completado.
+                      </p>
+                    </div>
+                  </label>
+
+                  @if (processAllEnabled()) {
+                    <app-button
+                      variant="outline-warning"
+                      [fullWidth]="true"
+                      customClasses="mt-2"
+                      [disabled]="actionLoading() !== null"
+                      [loading]="actionLoading() === 'process-all'"
+                      (clicked)="onProcessAll()"
+                    >
+                      <app-icon slot="icon" name="zap" size="16"></app-icon>
+                      Confirmar y procesar todo
+                    </app-button>
+                  }
+                </div>
+              }
             </app-card>
 
             <!-- Payment Summary -->
@@ -333,6 +368,7 @@ export class QuotationDetailComponent {
   readonly quotation = signal<Quotation | null>(null);
   readonly loading = signal(true);
   readonly actionLoading = signal<string | null>(null);
+  readonly processAllEnabled = signal(false);
 
   readonly statusLabel = computed(() => {
     const q = this.quotation();
@@ -408,6 +444,11 @@ export class QuotationDetailComponent {
 
   readonly visibleActions = computed(() => {
     return this.headerActions().filter(a => a.visible);
+  });
+
+  readonly canProcessAll = computed(() => {
+    const q = this.quotation();
+    return !!q && ['draft', 'sent', 'accepted'].includes(q.status);
   });
 
   readonly timelineSteps = computed<TimelineStep[]>(() => {
@@ -603,6 +644,12 @@ export class QuotationDetailComponent {
   }
 
   private async onConvert(): Promise<void> {
+    const blockedMessage = this.getConvertBlockedMessage();
+    if (blockedMessage) {
+      this.toastService.error(blockedMessage);
+      return;
+    }
+
     const confirmed = await this.dialogService.confirm({
       title: 'Convertir a orden',
       message: '¿Deseas convertir esta cotización directamente en una orden de venta? La cotización quedará marcada como convertida.',
@@ -629,7 +676,46 @@ export class QuotationDetailComponent {
         },
         error: (err) => {
           this.actionLoading.set(null);
-          this.toastService.error(err.message || 'Error al duplicar la cotización');
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
+  }
+
+  async onProcessAll(): Promise<void> {
+    const q = this.quotation();
+    if (!q) return;
+
+    const blockedMessage = this.getProcessAllBlockedMessage(q);
+    if (blockedMessage) {
+      this.toastService.error(blockedMessage);
+      return;
+    }
+
+    const confirmed = await this.dialogService.confirm({
+      title: 'Procesar cotización completa',
+      message: this.getProcessAllConfirmMessage(q),
+      confirmText: 'Procesar todo',
+      cancelText: 'Cancelar',
+      confirmVariant: 'primary',
+    });
+    if (!confirmed) return;
+
+    this.actionLoading.set('process-all');
+    this.quotationsService
+      .processCompleteQuotation(q)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.actionLoading.set(null)),
+      )
+      .subscribe({
+        next: (result) => {
+          this.quotation.set(result);
+          this.quotationsService.invalidateCache();
+          this.processAllEnabled.set(false);
+          this.toastService.success('Cotización procesada y convertida a orden exitosamente');
+        },
+        error: (err) => {
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
   }
@@ -652,8 +738,54 @@ export class QuotationDetailComponent {
         },
         error: (err: any) => {
           this.actionLoading.set(null);
-          this.toastService.error(err.message || 'Error al realizar la acción');
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
+  }
+
+  private getConvertBlockedMessage(): string | null {
+    const q = this.quotation();
+    if (!q || q.status === 'accepted') {
+      return null;
+    }
+
+    if (q.status === 'draft') {
+      return 'Antes de convertirla en orden, envía la cotización y márcala como aceptada.';
+    }
+
+    if (q.status === 'sent') {
+      return 'Antes de convertirla en orden, márcala como aceptada cuando el cliente la apruebe.';
+    }
+
+    return 'Solo las cotizaciones aceptadas pueden convertirse en orden.';
+  }
+
+  private getProcessAllBlockedMessage(q: Quotation): string | null {
+    if (!['draft', 'sent', 'accepted'].includes(q.status)) {
+      return 'Solo las cotizaciones en borrador, enviadas o aceptadas pueden procesarse en este flujo.';
+    }
+
+    if (!q.customer_id) {
+      return 'Asigna un cliente a esta cotización antes de procesarla completa.';
+    }
+
+    if (q.status === 'draft' && !q.customer?.email) {
+      return 'Agrega un correo al cliente antes de enviar y procesar esta cotización.';
+    }
+
+    return null;
+  }
+
+  private getProcessAllConfirmMessage(q: Quotation): string {
+    const steps: string[] = [];
+    if (q.status === 'draft') {
+      steps.push('enviar la cotización al correo del cliente');
+    }
+    if (q.status === 'draft' || q.status === 'sent') {
+      steps.push('marcarla como aceptada');
+    }
+    steps.push('convertirla en orden');
+
+    return `Se ejecutará en cadena: ${steps.join(', ')}. Si un paso falla, podrás reintentar desde el último estado completado.`;
   }
 }

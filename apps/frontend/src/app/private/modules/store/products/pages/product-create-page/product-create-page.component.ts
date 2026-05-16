@@ -1,4 +1,5 @@
 import {
+  afterNextRender,
   Component,
   computed,
   effect,
@@ -455,7 +456,7 @@ export class ProductCreatePageComponent {
   isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
-  taxCategoryOptions: MultiSelectorOption[] = [];
+  readonly taxCategoryOptions = signal<MultiSelectorOption[]>([]);
   stateOptions: SelectorOption[] = [
     { value: ProductState.ACTIVE, label: 'Activo' },
     { value: ProductState.INACTIVE, label: 'Inactivo' },
@@ -531,6 +532,25 @@ export class ProductCreatePageComponent {
     }
   }
 
+  private syncPricingTypeControlState(isService: boolean): void {
+    const pricingTypeControl = this.productForm.get('pricing_type');
+    if (!pricingTypeControl) return;
+
+    if (isService) {
+      if (pricingTypeControl.value !== 'unit') {
+        pricingTypeControl.setValue('unit', { emitEvent: false });
+      }
+      if (pricingTypeControl.enabled) {
+        pricingTypeControl.disable({ emitEvent: false });
+      }
+      return;
+    }
+
+    if (pricingTypeControl.disabled) {
+      pricingTypeControl.enable({ emitEvent: false });
+    }
+  }
+
   // Variants State
   hasVariants = false;
   variantAttributes: VariantAttribute[] = [];
@@ -593,6 +613,13 @@ export class ProductCreatePageComponent {
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+    this.productForm
+      .get('product_type')
+      ?.valueChanges.pipe(takeUntilDestroyed())
+      .subscribe((productType) => {
+        this.syncPricingTypeControlState(productType === 'service');
+      });
+    this.syncPricingTypeControlState(this.isService);
 
     // Auto-cargar proveedores cuando se activa requires_booking (o al entrar en edit con el flag ya activo)
     effect(() => {
@@ -608,8 +635,10 @@ export class ProductCreatePageComponent {
 
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
-    this.loadCategoriesAndBrands();
-    this.loadDataCollectionTemplates();
+    afterNextRender(() => {
+      this.loadCategoriesAndBrands();
+      this.loadDataCollectionTemplates();
+    });
 
     // Verificar draft del modal de creación rápida
     const navState = history.state;
@@ -636,6 +665,7 @@ export class ProductCreatePageComponent {
       base_price: draft.base_price || 0,
       stock_quantity: draft.stock_quantity || 0,
       track_inventory: draft.track_inventory ?? true,
+      allow_pos_price_override: draft.allow_pos_price_override ?? false,
       sku: draft.sku || '',
       category_ids: draft.category_ids || [],
       brand_ids: draft.brand_id ? [draft.brand_id] : [],
@@ -712,6 +742,7 @@ export class ProductCreatePageComponent {
       is_on_sale: [false],
       sale_price: [0, [Validators.min(0)]],
       available_for_ecommerce: [true],
+      allow_pos_price_override: [false],
       sku: ['', [Validators.maxLength(100)]],
       stock_quantity: [0, [Validators.min(0)]],
       track_inventory: [true],
@@ -863,6 +894,7 @@ export class ProductCreatePageComponent {
       is_on_sale: product.is_on_sale || false,
       sale_price: product.sale_price || 0,
       available_for_ecommerce: product.available_for_ecommerce !== false,
+      allow_pos_price_override: product.allow_pos_price_override === true,
       sku: product.sku,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
@@ -984,18 +1016,20 @@ export class ProductCreatePageComponent {
     this.taxesService.getTaxCategories().subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
-        this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => {
-          // Extraer la tasa del primer tax_rate si no existe en el nivel superior
-          const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
-          const rate = parseFloat(String(rawRate));
-          const finalRate = isNaN(rate) ? 0 : rate;
+        this.taxCategoryOptions.set(
+          taxCategories.map((cat: TaxCategory) => {
+            // Extraer la tasa del primer tax_rate si no existe en el nivel superior
+            const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
+            const rate = parseFloat(String(rawRate));
+            const finalRate = isNaN(rate) ? 0 : rate;
 
-          return {
-            value: cat.id,
-            label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
-            description: cat.description,
-          };
-        });
+            return {
+              value: cat.id,
+              label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
+              description: cat.description,
+            };
+          }),
+        );
       },
       error: (error: any) => {
         console.error('Error loading tax categories:', error);
@@ -1889,7 +1923,7 @@ export class ProductCreatePageComponent {
     }
 
     this.isSubmitting.set(true);
-    const formValue = this.productForm.value;
+    const formValue = this.productForm.getRawValue();
 
     // Prepare Images
     const images: CreateProductImageDto[] = this.imageUrls.map(
@@ -1912,6 +1946,7 @@ export class ProductCreatePageComponent {
       is_on_sale: !!formValue.is_on_sale,
       sale_price: Number(formValue.sale_price),
       available_for_ecommerce: !!formValue.available_for_ecommerce,
+      allow_pos_price_override: !!formValue.allow_pos_price_override,
       sku: formValue.sku || undefined,
       track_inventory: isServiceType ? false : !!formValue.track_inventory,
       stock_quantity: isServiceType

@@ -59,6 +59,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               </div>
               <p class="empty-text">Tu carrito está vacío</p>
               <p class="empty-hint">Selecciona productos para comenzar</p>
+              @if (canCreateCustomItems()) {
+                <button
+                  type="button"
+                  class="empty-custom-item-btn"
+                  (click)="customItemRequested.emit()"
+                >
+                  <app-icon name="file-plus" [size]="16"></app-icon>
+                  <span>Agregar ítem personalizado</span>
+                </button>
+              }
             </div>
           }
     
@@ -94,6 +104,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                         {{ item.variant_display_name }}
                       </p>
                     }
+                    @if (item.itemType === 'custom' || item.description) {
+                      <p class="item-description">
+                        {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
+                      </p>
+                    }
                     <div class="item-meta">
                       @if (item.variant_sku || item.product.sku) {
                         <span class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
@@ -106,6 +121,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                       <span class="item-unit-price">
                         {{ formatCurrency(item.finalPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : ' c/u' }}
                       </span>
+                      @if ((item.taxAmount || 0) > 0) {
+                        <span class="item-tax-badge">
+                          IVA {{ formatCurrency(item.taxAmount) }}
+                        </span>
+                      }
+                      @if (item.isPriceOverridden) {
+                        <span class="item-price-badge">precio editado</span>
+                      }
                     </div>
                   </div>
                   <!-- Remove Button -->
@@ -132,6 +155,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                         (valueChange)="onQuantityChange(item.id, $event)"
                       ></app-quantity-control>
                     }
+                    @if (canEditItemPrice(item)) {
+                      <button
+                        type="button"
+                        class="edit-price-btn"
+                        (click)="itemPriceEditRequested.emit(item)"
+                        title="Editar precio de venta"
+                      >
+                        <app-icon name="pencil" [size]="15"></app-icon>
+                      </button>
+                    }
                     <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
                   </div>
                 </div>
@@ -143,12 +176,21 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <!-- Summary Section -->
         @if (cartState()?.items?.length) {
           <div class="summary-section">
+            <button
+              type="button"
+              class="summary-custom-item-btn"
+              (click)="customItemRequested.emit()"
+              [disabled]="!canCreateCustomItems()"
+            >
+              <app-icon name="file-plus" [size]="16"></app-icon>
+              <span>Ítem personalizado</span>
+            </button>
             <div class="summary-row">
               <span>Subtotal</span>
               <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
             <div class="summary-row">
-              <span>Impuestos</span>
+              <span>IVA / impuestos</span>
               <span>{{ formatCurrency(cartState()?.summary?.taxAmount || 0) }}</span>
             </div>
             <div class="summary-row total">
@@ -335,6 +377,22 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         margin: 0;
       }
 
+      .empty-custom-item-btn {
+        margin-top: 18px;
+        min-height: 44px;
+        padding: 0 16px;
+        border: 1px solid rgba(var(--color-primary-rgb), 0.28);
+        border-radius: 12px;
+        background: rgba(var(--color-primary-rgb), 0.08);
+        color: var(--color-primary);
+        font-size: 14px;
+        font-weight: 700;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
       /* Items List */
       .items-list {
         display: flex;
@@ -407,8 +465,20 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .item-meta {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: 6px;
         margin-top: 2px;
+      }
+
+      .item-description {
+        margin: 2px 0 0;
+        color: var(--color-text-secondary);
+        font-size: 11px;
+        line-height: 1.25;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
 
       .item-sku {
@@ -420,6 +490,27 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .item-unit-price {
         font-size: 12px;
         color: var(--color-text-secondary);
+      }
+
+      .item-tax-badge,
+      .item-price-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .item-tax-badge {
+        background: rgba(249, 115, 22, 0.12);
+        color: rgb(194, 65, 12);
+      }
+
+      .item-price-badge {
+        background: rgba(147, 51, 234, 0.12);
+        color: rgb(126, 34, 206);
       }
 
       .item-weight-badge {
@@ -485,6 +576,23 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         font-size: 15px;
         font-weight: 700;
         color: var(--color-primary);
+        margin-left: auto;
+      }
+
+      .edit-price-btn {
+        width: 34px;
+        height: 34px;
+        border: 1px solid var(--color-border);
+        border-radius: 10px;
+        background: var(--color-surface);
+        color: var(--color-text-secondary);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .edit-price-btn:active {
+        transform: scale(0.96);
       }
 
       /* Summary Section */
@@ -493,6 +601,26 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         border-top: 1px solid var(--color-border);
         background: var(--color-muted);
         flex-shrink: 0;
+      }
+
+      .summary-custom-item-btn {
+        width: 100%;
+        min-height: 42px;
+        margin-bottom: 10px;
+        border: 1px solid rgba(var(--color-primary-rgb), 0.24);
+        border-radius: 12px;
+        background: var(--color-surface);
+        color: var(--color-primary);
+        font-size: 14px;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+
+      .summary-custom-item-btn:disabled {
+        opacity: 0.4;
       }
 
       .summary-row {
@@ -611,8 +739,12 @@ export class PosCartModalComponent {
 
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
+  readonly canCreateCustomItems = input<boolean>(false);
+  readonly canOverridePrices = input<boolean>(false);
 
   readonly closed = output<void>();
+  readonly customItemRequested = output<void>();
+  readonly itemPriceEditRequested = output<CartItem>();
   readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
@@ -621,10 +753,11 @@ export class PosCartModalComponent {
   readonly checkout = output<void>();
 
   constructor() {
+    void this.currencyService.loadCurrency();
+
     effect(() => {
       if (this.isOpen()) {
         document.body.style.overflow = 'hidden';
-        this.currencyService.loadCurrency();
       } else {
         document.body.style.overflow = '';
       }
@@ -651,6 +784,12 @@ export class PosCartModalComponent {
 
   trackByItemId(_index: number, item: CartItem): string {
     return item.id;
+  }
+
+  canEditItemPrice(item: CartItem): boolean {
+    return item.itemType === 'custom'
+      ? this.canCreateCustomItems()
+      : item.product.allow_pos_price_override === true && this.canOverridePrices();
   }
 
   handleImageError(event: Event): void {

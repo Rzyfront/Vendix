@@ -526,6 +526,18 @@ export const ErrorCodes = {
     devMessage: 'track_inventory_override inválido',
   },
 
+  // Quotations
+  QUOTE_CONVERT_STATUS_001: {
+    code: 'QUOTE_CONVERT_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Quotation must be accepted before conversion',
+  },
+  QUOTE_CONVERT_CUSTOMER_001: {
+    code: 'QUOTE_CONVERT_CUSTOMER_001',
+    httpStatus: 400,
+    devMessage: 'Quotation must have a customer before conversion',
+  },
+
   // Orders
   ORD_FIND_001: {
     code: 'ORD_FIND_001',

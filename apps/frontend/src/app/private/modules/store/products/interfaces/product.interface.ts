@@ -41,6 +41,7 @@ export interface Product {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  allow_pos_price_override?: boolean;
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
@@ -214,6 +215,7 @@ export interface CreateProductDto {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  allow_pos_price_override?: boolean;
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
@@ -266,6 +268,7 @@ export interface UpdateProductDto {
   stock_quantity?: number;
   track_inventory?: boolean;
   available_for_ecommerce?: boolean;
+  allow_pos_price_override?: boolean;
   weight?: number;
   dimensions?: {
     length: number;

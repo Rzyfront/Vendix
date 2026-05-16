@@ -242,6 +242,11 @@ export class CreateProductDto {
   available_for_ecommerce?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  allow_pos_price_override?: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -475,6 +480,11 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  allow_pos_price_override?: boolean;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
