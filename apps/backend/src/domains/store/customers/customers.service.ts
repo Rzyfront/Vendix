@@ -15,6 +15,14 @@ export class CustomersService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  private normalizeOptionalString(
+    value?: string | null,
+  ): string | null | undefined {
+    if (value === undefined) return undefined;
+    const normalized = value?.trim();
+    return normalized ? normalized : null;
+  }
+
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
     // Eliminar caracteres especiales
@@ -93,9 +101,9 @@ export class CustomersService {
         password: hashedPassword,
         first_name: formatted_first_name,
         last_name: formatted_last_name,
-        phone: dto.phone,
-        document_type: dto.document_type,
-        document_number: dto.document_number,
+        phone: this.normalizeOptionalString(dto.phone),
+        document_type: this.normalizeOptionalString(dto.document_type),
+        document_number: this.normalizeOptionalString(dto.document_number),
         username: username,
         email_verified: false,
         organization_id: store.organization_id,
@@ -240,9 +248,9 @@ export class CustomersService {
       data: {
         first_name: dto.first_name,
         last_name: dto.last_name,
-        phone: dto.phone,
-        document_number: dto.document_number,
-        document_type: dto.document_type,
+        phone: this.normalizeOptionalString(dto.phone),
+        document_number: this.normalizeOptionalString(dto.document_number),
+        document_type: this.normalizeOptionalString(dto.document_type),
         email: dto.email, // Can we update email? Usually requires verification, but for CRUD basic...
       },
     });

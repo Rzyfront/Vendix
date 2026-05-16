@@ -17,8 +17,8 @@ export interface Coupon {
   applies_to: 'ALL_PRODUCTS' | 'SPECIFIC_PRODUCTS' | 'SPECIFIC_CATEGORIES';
   created_at: string;
   updated_at: string;
-  coupon_products?: { product: { id: number; name: string; sku?: string } }[];
-  coupon_categories?: { category: { id: number; name: string } }[];
+  coupon_products?: { product_id?: number; product: { id: number; name: string; sku?: string } }[];
+  coupon_categories?: { category_id?: number; category: { id: number; name: string } }[];
   _count?: { coupon_uses: number };
 }
 

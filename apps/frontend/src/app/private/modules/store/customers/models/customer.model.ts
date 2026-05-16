@@ -3,9 +3,9 @@ export interface Customer {
     email: string;
     first_name: string;
     last_name: string;
-    phone?: string;
-    document_type?: string;
-    document_number?: string;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
     created_at?: string;
     updated_at?: string;
     total_orders?: number;
@@ -18,9 +18,9 @@ export interface CreateCustomerRequest {
     email: string;
     first_name: string;
     last_name: string;
-    phone?: string;
-    document_type?: string;
-    document_number?: string;
+    phone?: string | null;
+    document_type?: string | null;
+    document_number?: string | null;
 }
 
 export interface UpdateCustomerRequest extends Partial<CreateCustomerRequest> { }

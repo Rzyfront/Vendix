@@ -1,12 +1,19 @@
-import { Component, inject, input, output } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 
 import {
   ReactiveFormsModule,
+  AbstractControl,
   FormBuilder,
   FormGroup,
+  ValidationErrors,
   Validators,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Coupon, CreateCouponRequest } from '../../interfaces/coupon.interface';
+import {
+  MultiSelectorComponent,
+  MultiSelectorOption,
+} from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 import {
   ModalComponent,
   ButtonComponent,
@@ -16,6 +23,8 @@ import {
   TextareaComponent,
   SettingToggleComponent,
 } from '../../../../../../../shared/components';
+import { ProductsService } from '../../../../products/services/products.service';
+import { CategoriesService } from '../../../../products/services/categories.service';
 
 @Component({
   selector: 'app-coupon-modal',
@@ -27,7 +36,8 @@ import {
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    SettingToggleComponent
+    SettingToggleComponent,
+    MultiSelectorComponent,
 ],
   template: `
     @if (visible()) {
@@ -104,6 +114,28 @@ import {
             formControlName="applies_to"
           ></app-selector>
         </div>
+
+        @if (form.get('applies_to')?.value === 'SPECIFIC_PRODUCTS') {
+          <app-multi-selector
+            label="Productos"
+            [options]="productOptions()"
+            formControlName="product_ids"
+            placeholder="Buscar productos..."
+            [required]="true"
+            [errorText]="form.get('product_ids')?.touched && form.get('product_ids')?.invalid ? 'Selecciona al menos un producto' : ''"
+          ></app-multi-selector>
+        }
+
+        @if (form.get('applies_to')?.value === 'SPECIFIC_CATEGORIES') {
+          <app-multi-selector
+            label="Categorias"
+            [options]="categoryOptions()"
+            formControlName="category_ids"
+            placeholder="Buscar categorias..."
+            [required]="true"
+            [errorText]="form.get('category_ids')?.touched && form.get('category_ids')?.invalid ? 'Selecciona al menos una categoria' : ''"
+          ></app-multi-selector>
+        }
 
         <!-- Valid From + Valid Until + Min Purchase -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -184,6 +216,12 @@ export class CouponModalComponent {
   save = output<CreateCouponRequest>();
 
   private fb = inject(FormBuilder);
+  private productsService = inject(ProductsService);
+  private categoriesService = inject(CategoriesService);
+  private destroyRef = inject(DestroyRef);
+
+  readonly productOptions = signal<MultiSelectorOption[]>([]);
+  readonly categoryOptions = signal<MultiSelectorOption[]>([]);
 
   discountTypeOptions: SelectorOption[] = [
     { value: 'PERCENTAGE', label: 'Porcentaje' },
@@ -210,38 +248,102 @@ export class CouponModalComponent {
     valid_until: ['', Validators.required],
     is_active: [true],
     applies_to: ['ALL_PRODUCTS'],
+    product_ids: [[]],
+    category_ids: [[]],
   });
 
-  ngOnChanges() {
-    const c = this.coupon();
-    if (c) {
-      this.form.patchValue({
-        code: c.code,
-        name: c.name,
-        description: c.description || '',
-        discount_type: c.discount_type,
-        discount_value: Number(c.discount_value),
-        min_purchase_amount: c.min_purchase_amount
-          ? Number(c.min_purchase_amount)
-          : null,
-        max_discount_amount: c.max_discount_amount
-          ? Number(c.max_discount_amount)
-          : null,
-        max_uses: c.max_uses,
-        max_uses_per_customer: c.max_uses_per_customer,
-        valid_from: this.toDatetimeLocal(c.valid_from),
-        valid_until: this.toDatetimeLocal(c.valid_until),
-        is_active: c.is_active,
-        applies_to: c.applies_to,
+  constructor() {
+    effect(() => {
+      this.populateForm(this.coupon());
+    });
+
+    this.form.get('discount_type')?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => this.configureDiscountValueValidators(type));
+
+    this.form.get('applies_to')?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((appliesTo) => this.configureAppliesToValidators(appliesTo));
+
+    this.productsService.getProducts({ limit: 500 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        this.productOptions.set(res.data.map((product) => ({
+          value: product.id,
+          label: product.name,
+          description: product.sku,
+        })));
       });
-    } else if (!this.coupon()) {
-      this.form.reset({
-        discount_type: 'PERCENTAGE',
-        is_active: true,
-        applies_to: 'ALL_PRODUCTS',
-        max_uses_per_customer: 1,
+
+    this.categoriesService.getCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((categories) => {
+        this.categoryOptions.set(categories.map((category) => ({
+          value: category.id,
+          label: category.name,
+        })));
       });
+  }
+
+  private populateForm(coupon: Coupon | null): void {
+    this.form.reset({
+      code: coupon?.code || '',
+      name: coupon?.name || '',
+      description: coupon?.description || '',
+      discount_type: coupon?.discount_type || 'PERCENTAGE',
+      discount_value: coupon?.discount_value ? Number(coupon.discount_value) : null,
+      min_purchase_amount: coupon?.min_purchase_amount
+        ? Number(coupon.min_purchase_amount)
+        : null,
+      max_discount_amount: coupon?.max_discount_amount
+        ? Number(coupon.max_discount_amount)
+        : null,
+      max_uses: coupon?.max_uses ?? null,
+      max_uses_per_customer: coupon?.max_uses_per_customer ?? 1,
+      valid_from: this.toDatetimeLocal(coupon?.valid_from),
+      valid_until: this.toDatetimeLocal(coupon?.valid_until),
+      is_active: coupon?.is_active ?? true,
+      applies_to: coupon?.applies_to || 'ALL_PRODUCTS',
+      product_ids: coupon?.coupon_products?.map((cp) => cp.product_id ?? cp.product?.id).filter(Boolean) || [],
+      category_ids: coupon?.coupon_categories?.map((cc) => cc.category_id ?? cc.category?.id).filter(Boolean) || [],
+    }, { emitEvent: false });
+
+    this.configureDiscountValueValidators(this.form.get('discount_type')?.value);
+    this.configureAppliesToValidators(this.form.get('applies_to')?.value);
+  }
+
+  private configureDiscountValueValidators(type: string): void {
+    const discountValueControl = this.form.get('discount_value');
+    const validators = [Validators.required, Validators.min(0.01)];
+    if (type === 'PERCENTAGE') {
+      validators.push(Validators.max(100));
     }
+    discountValueControl?.setValidators(validators);
+    discountValueControl?.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private configureAppliesToValidators(appliesTo: string): void {
+    const productIdsControl = this.form.get('product_ids');
+    const categoryIdsControl = this.form.get('category_ids');
+
+    productIdsControl?.clearValidators();
+    categoryIdsControl?.clearValidators();
+
+    if (appliesTo === 'SPECIFIC_PRODUCTS') {
+      productIdsControl?.setValidators([this.requiredArray]);
+    }
+    if (appliesTo === 'SPECIFIC_CATEGORIES') {
+      categoryIdsControl?.setValidators([this.requiredArray]);
+    }
+
+    productIdsControl?.updateValueAndValidity({ emitEvent: false });
+    categoryIdsControl?.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private requiredArray(control: AbstractControl): ValidationErrors | null {
+    return Array.isArray(control.value) && control.value.length > 0
+      ? null
+      : { required: true };
   }
 
   generateCode() {
@@ -254,7 +356,11 @@ export class CouponModalComponent {
   }
 
   onSubmit() {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
+
     const raw = this.form.getRawValue();
     const request: CreateCouponRequest = {
       code: raw.code.toUpperCase().trim(),
@@ -271,10 +377,24 @@ export class CouponModalComponent {
       is_active: raw.is_active,
       applies_to: raw.applies_to,
     };
+
+    if (raw.applies_to === 'SPECIFIC_PRODUCTS') {
+      request.product_ids = this.toNumberArray(raw.product_ids);
+    }
+    if (raw.applies_to === 'SPECIFIC_CATEGORIES') {
+      request.category_ids = this.toNumberArray(raw.category_ids);
+    }
+
     this.save.emit(request);
   }
 
-  private toDatetimeLocal(iso: string): string {
+  private toNumberArray(value: unknown): number[] {
+    return Array.isArray(value)
+      ? value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+      : [];
+  }
+
+  private toDatetimeLocal(iso?: string): string {
     if (!iso) return '';
     const d = new Date(iso);
     return d.toISOString().slice(0, 16);

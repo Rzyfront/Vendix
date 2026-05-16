@@ -135,6 +135,7 @@ export class ProductCreateModalComponent {
       category_ids: [[]],
       brand_ids: [[]],
       tax_category_ids: [[] as number[]],
+      allow_pos_price_override: [false],
       state: [ProductState.ACTIVE],
     });
   }
@@ -143,6 +144,7 @@ export class ProductCreateModalComponent {
     this.productForm.reset({
       base_price: 0,
       tax_category_ids: [],
+      allow_pos_price_override: false,
       state: ProductState.ACTIVE,
     });
   }
@@ -157,6 +159,7 @@ export class ProductCreateModalComponent {
       category_ids: val.category_ids || [],
       brand_ids: val.brand_ids || [],
       tax_category_ids: val.tax_category_ids || [],
+      allow_pos_price_override: !!val.allow_pos_price_override,
       state: val.state || 'active',
     };
 
@@ -208,6 +211,7 @@ export class ProductCreateModalComponent {
       tax_category_ids: (prod.product_tax_assignments || []).map(
         (ta: any) => ta.tax_category_id,
       ),
+      allow_pos_price_override: prod.allow_pos_price_override === true,
       state: prod.state || ProductState.ACTIVE,
     });
   }
@@ -329,6 +333,7 @@ export class ProductCreateModalComponent {
       category_ids: val.category_ids || [],
       brand_id: val.brand_ids?.[0] ? Number(val.brand_ids[0]) : null,
       tax_category_ids: val.tax_category_ids || [],
+      allow_pos_price_override: !!val.allow_pos_price_override,
       state: val.state,
     };
 

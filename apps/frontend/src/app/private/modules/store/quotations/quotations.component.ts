@@ -4,6 +4,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import { QuotationsService } from './services/quotations.service';
 import { QuotationListComponent } from './components/quotation-list/quotation-list.component';
 import {
@@ -166,7 +167,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización enviada'); this.refresh(); },
-        error: () => this.toastService.error('Error al enviar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al enviar cotización'),
       });
   }
 
@@ -175,7 +176,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización aceptada'); this.refresh(); },
-        error: () => this.toastService.error('Error al aceptar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al aceptar cotización'),
       });
   }
 
@@ -184,7 +185,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización rechazada'); this.refresh(); },
-        error: () => this.toastService.error('Error al rechazar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al rechazar cotización'),
       });
   }
 
@@ -202,11 +203,17 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización cancelada'); this.refresh(); },
-        error: () => this.toastService.error('Error al cancelar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al cancelar cotización'),
       });
   }
 
   async onConvert(q: Quotation): Promise<void> {
+    const blockedMessage = this.getConvertBlockedMessage(q);
+    if (blockedMessage) {
+      this.toastService.error(blockedMessage);
+      return;
+    }
+
     const confirmed = await this.dialogService.confirm({
       title: 'Convertir a orden',
       message: `¿Convertir la cotización ${q.quotation_number} en una orden de venta?`,
@@ -219,7 +226,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización convertida a orden'); this.refresh(); },
-        error: () => this.toastService.error('Error al convertir cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al convertir cotización'),
       });
   }
 
@@ -228,7 +235,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización duplicada'); this.refresh(); },
-        error: () => this.toastService.error('Error al duplicar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al duplicar cotización'),
       });
   }
 
@@ -246,7 +253,7 @@ export class QuotationsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización eliminada'); this.refresh(); },
-        error: () => this.toastService.error('Error al eliminar cotización'),
+        error: (err) => this.showQuotationError(err, 'Error al eliminar cotización'),
       });
   }
 
@@ -264,5 +271,26 @@ export class QuotationsComponent {
     this.quotationsService.invalidateCache();
     this.loadStats();
     this.loadQuotations();
+  }
+
+  private getConvertBlockedMessage(q: Quotation): string | null {
+    if (q.status === 'accepted') {
+      return null;
+    }
+
+    if (q.status === 'draft') {
+      return 'Antes de convertirla en orden, envía la cotización y márcala como aceptada.';
+    }
+
+    if (q.status === 'sent') {
+      return 'Antes de convertirla en orden, márcala como aceptada cuando el cliente la apruebe.';
+    }
+
+    return 'Solo las cotizaciones aceptadas pueden convertirse en orden.';
+  }
+
+  private showQuotationError(error: any, fallback: string): void {
+    const message = extractApiErrorMessage(error);
+    this.toastService.error(message || fallback);
   }
 }

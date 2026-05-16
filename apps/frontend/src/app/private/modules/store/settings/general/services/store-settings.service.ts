@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
-import { map, catchError, tap } from 'rxjs/operators';
+import { Observable, of, throwError } from 'rxjs';
+import { map, catchError, tap, finalize, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import { Store } from '@ngrx/store';
 import {
@@ -34,6 +34,10 @@ export interface StoreFiscalDataRequestOptions {
   store_id?: number | null;
 }
 
+export interface StoreSettingsRequestOptions {
+  forceRefresh?: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -42,27 +46,46 @@ export class StoreSettingsService {
   private store = inject(Store);
   private currencyFormatService = inject(CurrencyFormatService);
   private readonly api_base_url = `${environment.apiUrl}/store`;
+  private readonly settings_cache_ttl_ms = 60 * 1000;
+  private settings_cache: ApiResponse<StoreSettings> | null = null;
+  private settings_cache_time = 0;
+  private settings_request$?: Observable<ApiResponse<StoreSettings>>;
 
-  getSettings(): Observable<ApiResponse<StoreSettings>> {
-    return this.http
-      .get<ApiResponse<StoreSettings>>(
-        `${this.api_base_url}/settings`,
-      )
+  getSettings(
+    options: StoreSettingsRequestOptions = {},
+  ): Observable<ApiResponse<StoreSettings>> {
+    const now = Date.now();
+    if (
+      !options.forceRefresh &&
+      this.settings_cache &&
+      now - this.settings_cache_time < this.settings_cache_ttl_ms
+    ) {
+      return of(this.settings_cache);
+    }
+
+    if (!options.forceRefresh && this.settings_request$) {
+      return this.settings_request$;
+    }
+
+    const request$ = this.http
+      .get<ApiResponse<StoreSettings>>(`${this.api_base_url}/settings`)
       .pipe(
+        map((response) => response || { success: true, data: null }),
         tap((response) => {
-          const store_settings = response?.data;
-          if (!store_settings) return;
-
-          this.store.dispatch(
-            AuthActions.updateStoreSettings({ store_settings }),
-          );
-          if (store_settings.general?.currency) {
-            this.currencyFormatService.refresh();
+          this.cacheSettingsResponse(response);
+          this.publishStoreSettings(response);
+        }),
+        catchError((error) => this.handleSettingsReadError(error)),
+        finalize(() => {
+          if (this.settings_request$ === request$) {
+            this.settings_request$ = undefined;
           }
         }),
-        map((response) => response || { success: true, data: null }),
-        catchError(this.handleError)
+        shareReplay({ bufferSize: 1, refCount: false }),
       );
+
+    this.settings_request$ = request$;
+    return request$;
   }
 
   saveSettingsNow(
@@ -73,13 +96,16 @@ export class StoreSettingsService {
 
   resetToDefault(): Observable<ApiResponse<StoreSettings>> {
     return this.http
-      .post<ApiResponse<StoreSettings>>(
-        `${this.api_base_url}/settings/reset`,
-        {},
-      )
+      .post<
+        ApiResponse<StoreSettings>
+      >(`${this.api_base_url}/settings/reset`, {})
       .pipe(
         map((response) => response || { success: true, data: null }),
-        catchError(this.handleError)
+        tap((response) => {
+          this.cacheSettingsResponse(response);
+          this.publishStoreSettings(response);
+        }),
+        catchError(this.handleError),
       );
   }
 
@@ -87,12 +113,12 @@ export class StoreSettingsService {
     options?: StoreFiscalDataRequestOptions,
   ): Observable<ApiResponse<StoreFiscalData>> {
     return this.http
-      .get<ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }>(
-        this.fiscalDataUrl(options),
-      )
+      .get<
+        ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }
+      >(this.fiscalDataUrl(options))
       .pipe(
         map((response) => this.mapFiscalDataResponse(response)),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -101,50 +127,55 @@ export class StoreSettingsService {
     options?: StoreFiscalDataRequestOptions,
   ): Observable<ApiResponse<StoreFiscalData>> {
     return this.http
-      .patch<ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }>(
-        this.fiscalDataUrl(options),
-        dto,
-      )
+      .patch<
+        ApiResponse<StoreFiscalData> | { fiscal_data?: StoreFiscalData }
+      >(this.fiscalDataUrl(options), dto)
       .pipe(
         map((response) => this.mapFiscalDataResponse(response)),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
   getSystemTemplates(): Observable<ApiResponse<any[]>> {
     return this.http
-      .get<ApiResponse<any[]>>(
-        `${this.api_base_url}/settings/templates`,
-      )
+      .get<ApiResponse<any[]>>(`${this.api_base_url}/settings/templates`)
       .pipe(
         map((response) => response || { success: true, data: [] }),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
   applyTemplate(template_name: string): Observable<ApiResponse<StoreSettings>> {
     return this.http
-      .post<ApiResponse<StoreSettings>>(
-        `${this.api_base_url}/settings/apply-template`,
-        { template_name },
-      )
+      .post<
+        ApiResponse<StoreSettings>
+      >(`${this.api_base_url}/settings/apply-template`, { template_name })
       .pipe(
         map((response) => response || { success: true, data: null }),
-        catchError(this.handleError)
+        tap((response) => {
+          this.cacheSettingsResponse(response);
+          this.publishStoreSettings(response);
+        }),
+        catchError(this.handleError),
       );
   }
 
-  uploadStoreLogo(file: File): Observable<{ key: string; url: string; thumbKey?: string; thumbUrl?: string }> {
+  uploadStoreLogo(
+    file: File,
+  ): Observable<{
+    key: string;
+    url: string;
+    thumbKey?: string;
+    thumbUrl?: string;
+  }> {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('entityType', 'store_logos');
 
-    return this.http
-      .post<any>(`${environment.apiUrl}/upload`, formData)
-      .pipe(
-        map((response) => response.data ?? response),
-        catchError(this.handleError)
-      );
+    return this.http.post<any>(`${environment.apiUrl}/upload`, formData).pipe(
+      map((response) => response.data ?? response),
+      catchError(this.handleError),
+    );
   }
 
   uploadStoreFavicon(file: File): Observable<{ key: string; url: string }> {
@@ -152,34 +183,34 @@ export class StoreSettingsService {
     formData.append('file', file);
     formData.append('entityType', 'store_favicons');
 
-    return this.http
-      .post<any>(`${environment.apiUrl}/upload`, formData)
-      .pipe(
-        map((response) => response.data ?? response),
-        catchError(this.handleError)
-      );
+    return this.http.post<any>(`${environment.apiUrl}/upload`, formData).pipe(
+      map((response) => response.data ?? response),
+      catchError(this.handleError),
+    );
   }
 
   /**
    * Obtiene el estado de validación del horario del POS
    * Incluye información sobre si el usuario es admin
    */
-  getScheduleStatus(): Observable<ApiResponse<{
-    isWithinBusinessHours: boolean;
-    currentDay: string;
-    currentTime: string;
-    openTime?: string;
-    closeTime?: string;
-    nextOpenTime?: string;
-    message?: string;
-    isAdmin: boolean;
-    canBypass: boolean;
-  }>> {
+  getScheduleStatus(): Observable<
+    ApiResponse<{
+      isWithinBusinessHours: boolean;
+      currentDay: string;
+      currentTime: string;
+      openTime?: string;
+      closeTime?: string;
+      nextOpenTime?: string;
+      message?: string;
+      isAdmin: boolean;
+      canBypass: boolean;
+    }>
+  > {
     return this.http
       .get<ApiResponse<any>>(`${this.api_base_url}/settings/schedule-status`)
       .pipe(
         map((response) => response || { success: true, data: null }),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -187,23 +218,58 @@ export class StoreSettingsService {
     settings: Partial<StoreSettings>,
   ): Observable<ApiResponse<StoreSettings>> {
     return this.http
-      .patch<ApiResponse<StoreSettings>>(
-        `${this.api_base_url}/settings`,
-        settings,
-      )
+      .patch<
+        ApiResponse<StoreSettings>
+      >(`${this.api_base_url}/settings`, settings)
       .pipe(
+        map((response) => response || { success: true, data: null }),
         tap((response) => {
+          this.cacheSettingsResponse(response);
+
           const store_settings = response?.data;
           if (!store_settings) return;
 
-          this.store.dispatch(AuthActions.updateStoreSettingsSuccess({ store_settings }));
-          if (store_settings.general?.currency) {
-            this.currencyFormatService.refresh();
-          }
+          this.store.dispatch(
+            AuthActions.updateStoreSettingsSuccess({ store_settings }),
+          );
+          this.syncCurrencyFromSettings(store_settings);
         }),
-        map((response) => response || { success: true, data: null }),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
+  }
+
+  private cacheSettingsResponse(response: ApiResponse<StoreSettings>): void {
+    this.settings_cache = response;
+    this.settings_cache_time = Date.now();
+  }
+
+  private publishStoreSettings(response: ApiResponse<StoreSettings>): void {
+    const store_settings = response?.data;
+    if (!store_settings) return;
+
+    this.store.dispatch(AuthActions.updateStoreSettings({ store_settings }));
+    this.syncCurrencyFromSettings(store_settings);
+  }
+
+  private syncCurrencyFromSettings(store_settings: StoreSettings): void {
+    const currencyCode = store_settings.general?.currency;
+    if (!currencyCode) return;
+
+    void this.currencyFormatService.loadCurrencyForCode(currencyCode);
+  }
+
+  private handleSettingsReadError(
+    error: any,
+  ): Observable<ApiResponse<StoreSettings>> {
+    if (this.settings_cache) {
+      console.warn(
+        'StoreSettingsService: using cached settings after read error',
+        error,
+      );
+      return of(this.settings_cache);
+    }
+
+    return this.handleError(error);
   }
 
   private fiscalDataUrl(options?: StoreFiscalDataRequestOptions): string {

@@ -31,6 +31,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <span class="total-amount">{{
               formatCurrency(cartSummary()?.total || 0)
             }}</span>
+            <span class="tax-amount">
+              IVA {{ formatCurrency(cartSummary()?.taxAmount || 0) }}
+            </span>
           </div>
         </div>
 
@@ -67,6 +70,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       } @else {
         <!-- Row 2: Secondary Action Buttons -->
         <div class="actions-row">
+          <button
+            class="action-btn custom-item-btn"
+            (click)="customItem.emit()"
+            [disabled]="!canCreateCustomItems()"
+            >
+            <app-icon name="file-plus" [size]="16"></app-icon>
+            <span>Ítem</span>
+          </button>
           <button
             class="action-btn save-btn"
             (click)="saveDraft.emit()"
@@ -190,6 +201,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         text-overflow: ellipsis;
       }
 
+      .tax-amount {
+        margin-top: 2px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        line-height: 1.1;
+      }
+
       .view-detail-btn {
         display: flex;
         align-items: center;
@@ -225,7 +244,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       /* Row 2: Actions */
       .actions-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 10px;
       }
 
@@ -264,6 +283,16 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         background: var(--color-surface);
         border: 1px solid var(--color-border);
         color: var(--color-text-primary);
+      }
+
+      .custom-item-btn {
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.24);
+        color: var(--color-primary);
+      }
+
+      .custom-item-btn:hover:not(:disabled) {
+        background: rgba(var(--color-primary-rgb), 0.14);
       }
 
       .save-btn:hover:not(:disabled) {
@@ -319,7 +348,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         }
 
         .action-btn {
-          font-size: 13px;
+          font-size: 12px;
           gap: 6px;
         }
       }
@@ -334,8 +363,10 @@ export class PosMobileFooterComponent {
   readonly isTablet = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  readonly canCreateCustomItems = input<boolean>(false);
 
   readonly viewCart = output<void>();
+  readonly customItem = output<void>();
   readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();

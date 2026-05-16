@@ -68,7 +68,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           <select
             [id]="id()"
             [class]="selectClasses"
-            [disabled]="disabled()"
+            [disabled]="isDisabled()"
             [required]="required()"
             [ngModel]="selectedValue()"
             (ngModelChange)="onModelChange($event)"
@@ -122,6 +122,7 @@ export class SelectorComponent implements ControlValueAccessor {
   readonly errorText = input<string>('');
   readonly required = input<boolean>(false);
   readonly disabled = input<boolean>(false);
+  readonly disabledState = signal(false);
   readonly size = input<SelectorSize>('md');
   readonly variant = input<SelectorVariant>('default');
   readonly styleVariant = input<FormStyleVariant>('modern');
@@ -151,8 +152,12 @@ export class SelectorComponent implements ControlValueAccessor {
     this.onTouched = fn;
   }
 
-  setDisabledState(_isDisabled: boolean): void {
-    // disabled is managed via input() signal — no action needed
+  setDisabledState(isDisabled: boolean): void {
+    this.disabledState.set(isDisabled);
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.disabledState();
   }
 
   onModelChange(value: string | number | null): void {
@@ -189,7 +194,7 @@ export class SelectorComponent implements ControlValueAccessor {
         'uppercase',
         'tracking-[0.05em]',
         'text-[var(--color-text-muted)]',
-        this.disabled() ? 'opacity-50 cursor-not-allowed' : '',
+        this.isDisabled() ? 'opacity-50 cursor-not-allowed' : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -199,7 +204,7 @@ export class SelectorComponent implements ControlValueAccessor {
       ...baseClasses,
       'text-sm',
       'text-[var(--color-text-primary)]',
-      this.disabled() ? 'opacity-50 cursor-not-allowed' : '',
+      this.isDisabled() ? 'opacity-50 cursor-not-allowed' : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -291,7 +296,7 @@ export class SelectorComponent implements ControlValueAccessor {
     return [
       'selector-placeholder',
       this.size() && `selector-placeholder-${this.size()}`,
-      this.disabled() ? 'selector-placeholder-disabled' : '',
+      this.isDisabled() ? 'selector-placeholder-disabled' : '',
     ]
       .filter(Boolean)
       .join(' ');

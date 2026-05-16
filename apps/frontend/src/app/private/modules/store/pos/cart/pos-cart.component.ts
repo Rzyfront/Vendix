@@ -1,4 +1,4 @@
-import { Component, input, output, inject, DestroyRef } from '@angular/core';
+import { Component, input, output, inject, DestroyRef, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { map, distinctUntilChanged, skip } from 'rxjs/operators';
@@ -11,15 +11,35 @@ import { CartDiscount } from '../models/cart.model';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
+import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import {
+  ButtonComponent,
+  InputComponent,
+  SelectorComponent,
+  TextareaComponent,
+} from '../../../../../shared/components';
+import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { PosScaleService } from '../services/pos-scale.service';
 import { PosApiService } from '../services/pos-api.service';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TaxesService } from '../../products/services/taxes.service';
+import { TaxCategory } from '../../products/interfaces';
 
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [FormsModule, IconComponent, QuantityControlComponent],
+  imports: [
+    FormsModule,
+    IconComponent,
+    ModalComponent,
+    ButtonComponent,
+    InputComponent,
+    SelectorComponent,
+    TextareaComponent,
+    QuantityControlComponent,
+  ],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
@@ -197,6 +217,16 @@ import { PosApiService } from '../services/pos-api.service';
               <div class="cart-actions-row">
                 <button
                   type="button"
+                  class="cart-btn custom-item-btn"
+                  (click)="openCustomItemModal()"
+                  [disabled]="!canCreateCustomItems()"
+                  title="Agregar ítem personalizado"
+                >
+                  <app-icon name="file-plus" [size]="16"></app-icon>
+                  <span>Ítem</span>
+                </button>
+                <button
+                  type="button"
                   class="cart-btn save-btn"
                   (click)="saveCart()"
                   [disabled]="isEmpty()"
@@ -323,6 +353,13 @@ import { PosApiService } from '../services/pos-api.service';
                       {{ item.variant_display_name }}
                     </p>
                   }
+                  @if (item.itemType === 'custom' || item.description) {
+                    <p
+                      class="text-[10px] text-text-secondary truncate leading-tight"
+                    >
+                      {{ item.itemType === 'custom' ? 'Ítem personalizado' : item.description }}
+                    </p>
+                  }
                   <div class="flex items-center gap-2 mt-0.5">
                     <span class="text-[10px] text-text-muted">
                       Base: {{ formatCurrency(item.unitPrice)
@@ -346,55 +383,87 @@ import { PosApiService } from '../services/pos-api.service';
                         +{{ formatCurrency(getItemTaxAmount(item)) }}
                       </span>
                     }
+                    @if (item.isPriceOverridden) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-purple-100 text-purple-800"
+                      >
+                        precio editado
+                      </span>
+                    }
                   </div>
                 </div>
-                <!-- Remove Button -->
-                <button
-                  (click)="removeFromCart(item.id)"
-                  class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors self-start"
-                  title="Eliminar"
-                >
-                  <app-icon name="trash-2" [size]="14"></app-icon>
-                </button>
+                <!-- Item actions -->
+                <div class="flex items-start gap-1 self-start">
+                  @if (item.itemType === 'custom' && canEditItemPrice(item)) {
+                    <button
+                      type="button"
+                      (click)="editItemPrice(item)"
+                      class="p-1 rounded-sm text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
+                      title="Editar ítem personalizado"
+                    >
+                      <app-icon name="pencil" [size]="14"></app-icon>
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    (click)="removeFromCart(item.id)"
+                    class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                    title="Eliminar"
+                  >
+                    <app-icon name="trash-2" [size]="14"></app-icon>
+                  </button>
+                </div>
                 <!-- Actions Row: Quantity + Total -->
                 <div
                   class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
                 >
-                  <!-- Weight products: show clickable weight badge instead of quantity control -->
-                  @if (item.is_weight_product) {
-                    <button
-                      (click)="editWeight(item)"
-                      class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
-                      title="Editar peso"
-                    >
-                      <app-icon
-                        name="scale"
-                        [size]="14"
-                        class="text-blue-600"
-                      ></app-icon>
-                      <span class="text-xs font-bold text-blue-700"
-                        >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
+                  <div class="flex items-center gap-2 min-w-0">
+                    <!-- Weight products: show clickable weight badge instead of quantity control -->
+                    @if (item.is_weight_product) {
+                      <button
+                        (click)="editWeight(item)"
+                        class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                        title="Editar peso"
                       >
-                      <app-icon
-                        name="edit"
-                        [size]="10"
-                        class="text-blue-400"
-                      ></app-icon>
-                    </button>
-                  } @else {
-                    <app-quantity-control
-                      [value]="item.quantity"
-                      [min]="1"
-                      [max]="
-                        item.product.track_inventory !== false
-                          ? item.product.stock
-                          : 999
-                      "
-                      [editable]="true"
-                      [size]="'sm'"
-                      (valueChange)="updateQuantity(item.id, $event)"
-                    ></app-quantity-control>
-                  }
+                        <app-icon
+                          name="scale"
+                          [size]="14"
+                          class="text-blue-600"
+                        ></app-icon>
+                        <span class="text-xs font-bold text-blue-700"
+                          >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
+                        >
+                        <app-icon
+                          name="edit"
+                          [size]="10"
+                          class="text-blue-400"
+                        ></app-icon>
+                      </button>
+                    } @else {
+                      <app-quantity-control
+                        [value]="item.quantity"
+                        [min]="1"
+                        [max]="
+                          item.product.track_inventory !== false
+                            ? item.product.stock
+                            : 999
+                        "
+                        [editable]="true"
+                        [size]="'sm'"
+                        (valueChange)="updateQuantity(item.id, $event)"
+                      ></app-quantity-control>
+                    }
+                    @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
+                      <button
+                        type="button"
+                        (click)="editItemPrice(item)"
+                        class="p-1.5 rounded-md text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
+                        title="Editar precio de venta"
+                      >
+                        <app-icon name="pencil" [size]="14"></app-icon>
+                      </button>
+                    }
+                  </div>
                   <span class="text-sm font-extrabold text-primary">
                     {{ formatCurrency(item.totalPrice) }}
                   </span>
@@ -405,6 +474,106 @@ import { PosApiService } from '../services/pos-api.service';
         }
       </div>
     </div>
+
+    <app-modal
+      [isOpen]="customItemModalOpen()"
+      title="Ítem personalizado"
+      subtitle="Agrega una línea facturable sin afectar inventario"
+      size="sm"
+      (closed)="customItemModalOpen.set(false)"
+    >
+      <div class="space-y-4">
+        <app-input
+          label="Nombre"
+          placeholder="Servicio de instalación"
+          [ngModel]="customItemDraft().name"
+          (ngModelChange)="updateCustomItemDraft('name', $event)"
+        ></app-input>
+
+        <app-textarea
+          label="Detalle"
+          placeholder="Alcance, materiales, condiciones o notas visibles en la orden"
+          [rows]="3"
+          [ngModel]="customItemDraft().description"
+          (ngModelChange)="updateCustomItemDraft('description', $event)"
+        ></app-textarea>
+
+        <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <app-input
+            label="Cantidad"
+            type="number"
+            min="1"
+            [ngModel]="customItemDraft().quantity"
+            (ngModelChange)="updateCustomItemDraft('quantity', $event)"
+          ></app-input>
+
+          <app-input
+            label="Precio final"
+            placeholder="$0"
+            min="0"
+            [currency]="true"
+            [ngModel]="customItemDraft().finalPrice"
+            (ngModelChange)="updateCustomItemDraft('finalPrice', $event)"
+          ></app-input>
+        </div>
+
+        <app-selector
+          label="IVA / impuesto"
+          helpText="Usa los impuestos configurados para la tienda."
+          [options]="taxCategoryOptions()"
+          [ngModel]="customItemDraft().taxCategoryId ?? 0"
+          (ngModelChange)="updateCustomItemDraft('taxCategoryId', $event)"
+        ></app-selector>
+
+        <div
+          class="rounded-xl border border-border bg-[var(--color-background)]/60 px-3 py-2 text-xs"
+        >
+          <div class="flex justify-between">
+            <span class="text-text-secondary">Base</span>
+            <span class="font-semibold">{{
+              formatCurrency(customItemBasePrice())
+            }}</span>
+          </div>
+          <div class="flex justify-between">
+            <span class="text-text-secondary">Impuesto</span>
+            <span class="font-semibold">{{
+              formatCurrency(customItemTaxAmount())
+            }}</span>
+          </div>
+          <div class="mt-1 flex justify-between border-t border-border/60 pt-1">
+            <span class="font-semibold text-text-primary">Total línea</span>
+            <span class="font-bold text-[var(--color-primary)]">{{
+              formatCurrency(customItemTotal())
+            }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+      >
+        <app-button
+          class="w-full sm:w-auto"
+          variant="outline"
+          size="md"
+          customClasses="min-w-[120px]"
+          (clicked)="customItemModalOpen.set(false)"
+        >
+          Cancelar
+        </app-button>
+        <app-button
+          class="w-full sm:w-auto"
+          variant="primary"
+          size="md"
+          customClasses="min-w-[120px]"
+          [disabled]="!canSubmitCustomItem()"
+          (clicked)="addCustomItem()"
+        >
+          Agregar
+        </app-button>
+      </div>
+    </app-modal>
   `,
   styles: [
     `
@@ -421,7 +590,7 @@ import { PosApiService } from '../services/pos-api.service';
 
       .cart-actions-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 8px;
       }
 
@@ -481,6 +650,16 @@ import { PosApiService } from '../services/pos-api.service';
         opacity: 0.85;
       }
 
+      .custom-item-btn {
+        background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+        border: 1px solid color-mix(in srgb, var(--color-primary) 25%, var(--color-border));
+        color: var(--color-primary);
+      }
+
+      .custom-item-btn:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface));
+      }
+
       .shipping-btn:hover:not(:disabled) {
         opacity: 1;
       }
@@ -494,10 +673,42 @@ private cartService = inject(PosCartService);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private posApiService = inject(PosApiService);
+  private authFacade = inject(AuthFacade);
+  private taxesService = inject(TaxesService);
 
   readonly cartState = this.cartService.cartState;
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
   readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
+  readonly taxCategories = signal<TaxCategory[]>([]);
+  readonly customItemModalOpen = signal(false);
+  readonly customItemDraft = signal({
+    name: '',
+    description: '',
+    quantity: 1,
+    finalPrice: 0,
+    taxCategoryId: null as number | null,
+  });
+  readonly taxCategoryOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Sin impuesto' },
+    ...this.taxCategories().map((tax) => ({
+      value: tax.id,
+      label: `${tax.name} (${this.formatPercentRate(tax)})`,
+    })),
+  ]);
+  readonly canSubmitCustomItem = computed(() => {
+    const draft = this.customItemDraft();
+    return (
+      draft.name.trim().length > 0 &&
+      Number(draft.quantity || 0) > 0 &&
+      Number(draft.finalPrice || 0) >= 0
+    );
+  });
+  readonly canCreateCustomItems = computed(() =>
+    this.hasPermission('store:pos:custom_items:create'),
+  );
+  readonly canOverridePrices = computed(() =>
+    this.hasPermission('store:pos:price_override'),
+  );
 
   activePromotions: any[] = [];
   couponCode = '';
@@ -513,6 +724,14 @@ private cartService = inject(PosCartService);
   readonly layaway = output<void>();
 
   constructor() {
+    this.taxesService
+      .getTaxCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (taxCategories) => this.taxCategories.set(taxCategories || []),
+        error: () => this.taxCategories.set([]),
+      });
+
 // Load active promotions
     this.posApiService
       .getActivePromotions()
@@ -553,6 +772,139 @@ private cartService = inject(PosCartService);
 
   trackByItemId(_index: number, item: CartItem): string {
     return item.id;
+  }
+
+  private hasPermission(permission: string): boolean {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    return (
+      permissions.includes(permission) ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN')
+    );
+  }
+
+  openCustomItemModal(): void {
+    if (!this.canCreateCustomItems()) {
+      this.toastService.warning('No tienes permiso para agregar ítems personalizados');
+      return;
+    }
+    this.customItemDraft.set({
+      name: '',
+      description: '',
+      quantity: 1,
+      finalPrice: 0,
+      taxCategoryId: null,
+    });
+    this.customItemModalOpen.set(true);
+  }
+
+  updateCustomItemDraft(
+    field: 'name' | 'description' | 'quantity' | 'finalPrice' | 'taxCategoryId',
+    value: string | number | null,
+  ): void {
+    this.customItemDraft.update((draft) => ({
+      ...draft,
+      [field]:
+        field === 'quantity' || field === 'finalPrice'
+          ? Number(value || 0)
+          : field === 'taxCategoryId'
+            ? value === null || value === '' || Number(value) <= 0
+              ? null
+              : Number(value)
+            : String(value || ''),
+    }));
+  }
+
+  addCustomItem(): void {
+    if (!this.canSubmitCustomItem()) {
+      this.toastService.warning('Completa el nombre y un valor válido para el ítem');
+      return;
+    }
+
+    const draft = this.customItemDraft();
+    const taxCategory = this.getSelectedTaxCategory();
+
+    this.cartService
+      .addCustomItem({
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        quantity: Number(draft.quantity || 1),
+        finalPrice: Number(draft.finalPrice || 0),
+        taxCategory,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.customItemModalOpen.set(false);
+          this.toastService.success('Ítem personalizado agregado');
+        },
+        error: (error) => {
+          this.toastService.error(error.message || 'Error al agregar el ítem');
+        },
+      });
+  }
+
+  canEditItemPrice(item: CartItem): boolean {
+    if (item.itemType === 'custom') {
+      return this.canCreateCustomItems();
+    }
+
+    return (
+      item.product.allow_pos_price_override === true &&
+      this.canOverridePrices()
+    );
+  }
+
+  async editItemPrice(item: CartItem): Promise<void> {
+    if (!this.canEditItemPrice(item)) {
+      this.toastService.warning('No tienes permiso para editar este precio');
+      return;
+    }
+
+    const value = await this.dialogService.prompt(
+      {
+        title: 'Editar precio de venta',
+        message: item.product.name,
+        placeholder: 'Precio final',
+        defaultValue: item.finalPrice.toString(),
+        confirmText: 'Actualizar',
+        cancelText: 'Cancelar',
+        inputType: 'number',
+      },
+      { size: 'sm' },
+    );
+
+    if (value === undefined) return;
+    const finalPrice = Number(value);
+    if (Number.isNaN(finalPrice) || finalPrice < 0) {
+      this.toastService.warning('El precio debe ser un número válido');
+      return;
+    }
+
+    let reason = item.priceOverrideReason;
+    if (item.itemType !== 'custom') {
+      reason = await this.dialogService.prompt(
+        {
+          title: 'Motivo del cambio',
+          message: 'Opcional, queda como referencia de auditoría de la orden.',
+          placeholder: 'Ej. precio negociado con el cliente',
+          defaultValue: item.priceOverrideReason || '',
+          confirmText: 'Guardar',
+          cancelText: 'Omitir',
+        },
+        { size: 'sm' },
+      );
+    }
+
+    this.cartService
+      .updateCartItemPrice({ itemId: item.id, finalPrice, reason })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.toastService.success('Precio actualizado'),
+        error: (error) =>
+          this.toastService.error(error.message || 'Error al actualizar precio'),
+      });
   }
 
   updateQuantity(itemId: string, quantity: number): void {
@@ -704,13 +1056,48 @@ private cartService = inject(PosCartService);
     const subtotal =
       currentState.summary.subtotal + currentState.summary.taxAmount;
     const customerId = currentState.customer?.id;
-    const productIds = currentState.items.map((item) =>
-      parseInt(item.product.id),
+    const productIds = currentState.items
+      .filter((item) => item.itemType !== 'custom')
+      .map((item) => parseInt(item.product.id))
+      .filter((id) => Number.isFinite(id));
+    const categoryIds = Array.from(
+      new Set(
+        currentState.items.flatMap((item) => {
+          const product = item.product as any;
+          const ids = Array.isArray(product.category_ids)
+            ? product.category_ids
+            : product.category_id
+              ? [product.category_id]
+              : [];
+          return ids
+            .map((id: string | number) => Number(id))
+            .filter((id: number) => Number.isFinite(id));
+        }),
+      ),
     );
+    const couponItems = currentState.items
+      .filter((item) => item.itemType !== 'custom')
+      .map((item) => {
+        const product = item.product as any;
+        const itemCategoryIds = Array.isArray(product.category_ids)
+          ? product.category_ids
+          : product.category_id
+            ? [product.category_id]
+            : [];
+
+        return {
+          product_id: Number(item.product.id),
+          category_ids: itemCategoryIds
+            .map((id: string | number) => Number(id))
+            .filter((id: number) => Number.isFinite(id)),
+          line_total: Number(item.totalPrice || 0),
+        };
+      })
+      .filter((item) => Number.isFinite(item.product_id));
 
     this.couponLoading = true;
     this.posApiService
-      .validateCoupon(code, subtotal, customerId, productIds)
+      .validateCoupon(code, subtotal, customerId, productIds, categoryIds, couponItems)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -769,6 +1156,43 @@ private cartService = inject(PosCartService);
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);
+  }
+
+  getTaxCategoryRate(taxCategory?: TaxCategory | null): number {
+    return (
+      taxCategory?.tax_rates?.reduce(
+        (sum, rate: any) => sum + Number(rate.rate || 0),
+        0,
+      ) || 0
+    );
+  }
+
+  formatPercentRate(taxCategory: TaxCategory): string {
+    return `${(this.getTaxCategoryRate(taxCategory) * 100).toFixed(2)}%`;
+  }
+
+  getSelectedTaxCategory(): TaxCategory | null {
+    const selectedId = this.customItemDraft().taxCategoryId;
+    if (!selectedId) return null;
+    return this.taxCategories().find((tax) => tax.id === selectedId) || null;
+  }
+
+  customItemBasePrice(): number {
+    const draft = this.customItemDraft();
+    const finalPrice = Number(draft.finalPrice || 0);
+    const rate = this.getTaxCategoryRate(this.getSelectedTaxCategory());
+    return rate > 0 ? finalPrice / (1 + rate) : finalPrice;
+  }
+
+  customItemTaxAmount(): number {
+    const draft = this.customItemDraft();
+    const quantity = Number(draft.quantity || 1);
+    return (Number(draft.finalPrice || 0) - this.customItemBasePrice()) * quantity;
+  }
+
+  customItemTotal(): number {
+    const draft = this.customItemDraft();
+    return Number(draft.finalPrice || 0) * Number(draft.quantity || 1);
   }
 
   getItemTaxRate(item: CartItem): number {

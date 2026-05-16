@@ -139,6 +139,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_SHIP_RATE_MISMATCH_001: 'La tarifa seleccionada no corresponde al método de envío.',
   ORD_SHIP_LOCKED_001: 'No es posible cambiar el método: la orden ya fue enviada.',
 
+  // Quotations
+  QUOTE_CONVERT_STATUS_001:
+    'Para convertir esta cotización en orden, primero debes marcarla como aceptada.',
+  QUOTE_CONVERT_CUSTOMER_001:
+    'Asigna un cliente a esta cotización antes de convertirla en orden.',
+
   // Inventory
   INV_FIND_001: 'Inventario no encontrado.',
   INV_CREATE_001: 'Error al crear el registro de inventario.',

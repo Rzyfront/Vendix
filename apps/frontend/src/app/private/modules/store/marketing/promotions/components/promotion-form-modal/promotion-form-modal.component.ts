@@ -1,8 +1,10 @@
-import { Component, DestroyRef, inject, input, output } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, output, signal } from '@angular/core';
 import {
   ReactiveFormsModule,
+  AbstractControl,
   FormBuilder,
   FormGroup,
+  ValidationErrors,
   Validators,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -110,9 +112,11 @@ import { CategoriesService } from '../../../../products/services/categories.serv
         @if (form.get('scope')?.value === 'product') {
           <app-multi-selector
             label="Productos"
-            [options]="productOptions"
+            [options]="productOptions()"
             formControlName="product_ids"
             placeholder="Buscar productos..."
+            [required]="true"
+            [errorText]="form.get('product_ids')?.touched && form.get('product_ids')?.invalid ? 'Selecciona al menos un producto' : ''"
           ></app-multi-selector>
         }
 
@@ -120,9 +124,11 @@ import { CategoriesService } from '../../../../products/services/categories.serv
         @if (form.get('scope')?.value === 'category') {
           <app-multi-selector
             label="Categorias"
-            [options]="categoryOptions"
+            [options]="categoryOptions()"
             formControlName="category_ids"
             placeholder="Buscar categorias..."
+            [required]="true"
+            [errorText]="form.get('category_ids')?.touched && form.get('category_ids')?.invalid ? 'Selecciona al menos una categoria' : ''"
           ></app-multi-selector>
         }
 
@@ -212,10 +218,11 @@ export class PromotionFormModalComponent {
   private productsService = inject(ProductsService);
   private categoriesService = inject(CategoriesService);
   private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
 
   form!: FormGroup;
-  productOptions: MultiSelectorOption[] = [];
-  categoryOptions: MultiSelectorOption[] = [];
+  readonly productOptions = signal<MultiSelectorOption[]>([]);
+  readonly categoryOptions = signal<MultiSelectorOption[]>([]);
 
   typeOptions: SelectorOption[] = [
     { value: 'percentage', label: 'Porcentaje' },
@@ -228,43 +235,130 @@ export class PromotionFormModalComponent {
     { value: 'category', label: 'Categoria' },
   ];
 
-  constructor(private fb: FormBuilder) {
-    const p = this.promotion();
+  constructor() {
     this.form = this.fb.group({
-      name: [p?.name || '', Validators.required],
-      description: [p?.description || ''],
-      code: [p?.code || ''],
-      type: [p?.type || 'percentage', Validators.required],
-      value: [p?.value || null, [Validators.required, Validators.min(0.01)]],
-      scope: [p?.scope || 'order'],
-      start_date: [p?.start_date?.split('T')[0] || '', Validators.required],
-      end_date: [p?.end_date?.split('T')[0] || ''],
-      min_purchase_amount: [p?.min_purchase_amount || null],
-      max_discount_amount: [p?.max_discount_amount || null],
-      usage_limit: [p?.usage_limit || null],
-      per_customer_limit: [p?.per_customer_limit || null],
-      is_auto_apply: [p?.is_auto_apply ?? false],
-      priority: [p?.priority ?? 0],
-      product_ids: [p?.promotion_products?.map(pp => pp.product_id) || []],
-      category_ids: [p?.promotion_categories?.map(pc => pc.category_id) || []],
+      name: ['', Validators.required],
+      description: [''],
+      code: [''],
+      type: ['percentage', Validators.required],
+      value: [null, [Validators.required, Validators.min(0.01), Validators.max(100)]],
+      scope: ['order'],
+      start_date: ['', Validators.required],
+      end_date: [''],
+      min_purchase_amount: [null],
+      max_discount_amount: [null],
+      usage_limit: [null],
+      per_customer_limit: [null],
+      is_auto_apply: [false],
+      priority: [0],
+      product_ids: [[]],
+      category_ids: [[]],
     });
+
+    effect(() => {
+      this.populateForm(this.promotion());
+    });
+
+    this.form.get('type')?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((type) => {
+        this.configureValueValidators(type);
+        if (type !== 'percentage') {
+          this.form.patchValue({ max_discount_amount: null }, { emitEvent: false });
+        }
+      });
+
+    this.form.get('scope')?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((scope) => this.configureScopeValidators(scope));
 
     // Load product and category options for multi-selectors
     this.productsService.getProducts({ limit: 500 })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(res => {
-        this.productOptions = res.data.map(p => ({ value: p.id, label: p.name, description: p.sku }));
+        this.productOptions.set(res.data.map(p => ({ value: p.id, label: p.name, description: p.sku })));
       });
 
     this.categoriesService.getCategories()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(cats => {
-        this.categoryOptions = cats.map(c => ({ value: c.id, label: c.name }));
+        this.categoryOptions.set(cats.map(c => ({ value: c.id, label: c.name })));
       });
   }
 
+  private populateForm(promotion: Promotion | null): void {
+    this.form.reset({
+      name: promotion?.name || '',
+      description: promotion?.description || '',
+      code: promotion?.code || '',
+      type: promotion?.type || 'percentage',
+      value: promotion?.value ?? null,
+      scope: promotion?.scope || 'order',
+      start_date: this.toDateInputValue(promotion?.start_date),
+      end_date: this.toDateInputValue(promotion?.end_date),
+      min_purchase_amount: promotion?.min_purchase_amount ?? null,
+      max_discount_amount: promotion?.max_discount_amount ?? null,
+      usage_limit: promotion?.usage_limit ?? null,
+      per_customer_limit: promotion?.per_customer_limit ?? null,
+      is_auto_apply: promotion?.is_auto_apply ?? false,
+      priority: promotion?.priority ?? 0,
+      product_ids: promotion?.promotion_products?.map((pp) => pp.product_id) || [],
+      category_ids: promotion?.promotion_categories?.map((pc) => pc.category_id) || [],
+    }, { emitEvent: false });
+
+    this.configureValueValidators(this.form.get('type')?.value);
+    this.configureScopeValidators(this.form.get('scope')?.value);
+  }
+
+  private configureValueValidators(type: string): void {
+    const valueControl = this.form.get('value');
+    const validators = [Validators.required, Validators.min(0.01)];
+    if (type === 'percentage') {
+      validators.push(Validators.max(100));
+    }
+    valueControl?.setValidators(validators);
+    valueControl?.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private configureScopeValidators(scope: string): void {
+    const productIdsControl = this.form.get('product_ids');
+    const categoryIdsControl = this.form.get('category_ids');
+
+    productIdsControl?.clearValidators();
+    categoryIdsControl?.clearValidators();
+
+    if (scope === 'product') {
+      productIdsControl?.setValidators([this.requiredArray]);
+    }
+    if (scope === 'category') {
+      categoryIdsControl?.setValidators([this.requiredArray]);
+    }
+
+    productIdsControl?.updateValueAndValidity({ emitEvent: false });
+    categoryIdsControl?.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private requiredArray(control: AbstractControl): ValidationErrors | null {
+    return Array.isArray(control.value) && control.value.length > 0
+      ? null
+      : { required: true };
+  }
+
+  private toDateInputValue(value?: string | null): string {
+    return value ? value.split('T')[0] : '';
+  }
+
+  private toNumberArray(value: unknown): number[] {
+    return Array.isArray(value)
+      ? value.map((item) => Number(item)).filter((item) => Number.isFinite(item))
+      : [];
+  }
+
   onSubmit(): void {
-    if (this.form.invalid) return;
+    if (this.form.invalid) {
+      this.form.markAllAsTouched();
+      return;
+    }
 
     const raw = this.form.getRawValue();
 
@@ -273,15 +367,18 @@ export class PromotionFormModalComponent {
     if (!dto.description) delete dto.description;
     if (!dto.code) delete dto.code;
     if (!dto.end_date) delete dto.end_date;
-    if (dto.min_purchase_amount === null) delete dto.min_purchase_amount;
-    if (dto.max_discount_amount === null) delete dto.max_discount_amount;
-    if (dto.usage_limit === null) delete dto.usage_limit;
-    if (dto.per_customer_limit === null) delete dto.per_customer_limit;
+    if (dto.min_purchase_amount === null || dto.min_purchase_amount === '') delete dto.min_purchase_amount;
+    if (dto.max_discount_amount === null || dto.max_discount_amount === '') delete dto.max_discount_amount;
+    if (dto.usage_limit === null || dto.usage_limit === '') delete dto.usage_limit;
+    if (dto.per_customer_limit === null || dto.per_customer_limit === '') delete dto.per_customer_limit;
+    if (dto.type !== 'percentage') delete dto.max_discount_amount;
 
     // Clean up scope-specific IDs
     if (dto.scope === 'product') {
+      dto.product_ids = this.toNumberArray(dto.product_ids);
       delete dto.category_ids;
     } else if (dto.scope === 'category') {
+      dto.category_ids = this.toNumberArray(dto.category_ids);
       delete dto.product_ids;
     } else {
       delete dto.product_ids;

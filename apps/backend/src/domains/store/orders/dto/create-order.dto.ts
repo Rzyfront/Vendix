@@ -4,6 +4,9 @@ import {
   IsOptional,
   IsNumber,
   IsArray,
+  ArrayMinSize,
+  IsBoolean,
+  IsIn,
   ValidateNested,
   IsEnum,
   Min,
@@ -14,17 +17,29 @@ import { Type, Transform } from 'class-transformer';
 import { order_state_enum, payments_state_enum } from '@prisma/client';
 
 export class CreateOrderItemDto {
+  @IsOptional()
   @IsInt()
   @Min(1)
-  product_id: number;
+  product_id?: number;
 
   @IsOptional()
   @IsInt()
   @Min(1)
   product_variant_id?: number;
 
+  @IsOptional()
   @IsString()
+  @IsIn(['product', 'custom', 'physical', 'service'])
+  item_type?: 'product' | 'custom' | 'physical' | 'service';
+
+  @IsString()
+  @MaxLength(255)
   product_name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
 
   @IsOptional()
   @IsString()
@@ -55,6 +70,30 @@ export class CreateOrderItemDto {
   @Transform(({ value }) => parseFloat(value))
   @IsNumber({ maxDecimalPlaces: 2 })
   tax_amount_item?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  catalog_unit_price?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  catalog_final_price?: number;
+
+  @IsOptional()
+  @Transform(({ value }) => parseFloat(value))
+  @IsNumber({ maxDecimalPlaces: 2 })
+  final_unit_price?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_price_overridden?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  price_override_reason?: string;
 
   @IsOptional()
   @Transform(({ value }) => parseFloat(value))
@@ -140,6 +179,7 @@ export class CreateOrderDto {
   estimated_delivery_date?: string;
 
   @IsArray()
+  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];

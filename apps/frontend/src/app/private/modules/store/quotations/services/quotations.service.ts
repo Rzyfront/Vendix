@@ -1,8 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
-import { catchError, map, shareReplay, tap } from 'rxjs/operators';
+import { Observable, of, throwError } from 'rxjs';
+import { catchError, concatMap, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   Quotation,
   QuotationQuery,
@@ -134,6 +135,20 @@ export class QuotationsService {
     );
   }
 
+  processCompleteQuotation(quotation: Quotation): Observable<Quotation> {
+    let flow$: Observable<Quotation> = of(quotation);
+
+    if (quotation.status === 'draft') {
+      flow$ = flow$.pipe(concatMap(() => this.sendQuotation(quotation.id)));
+    }
+
+    if (quotation.status === 'draft' || quotation.status === 'sent') {
+      flow$ = flow$.pipe(concatMap(() => this.acceptQuotation(quotation.id)));
+    }
+
+    return flow$.pipe(concatMap(() => this.convertToOrder(quotation.id)));
+  }
+
   duplicateQuotation(id: number): Observable<Quotation> {
     return this.http.post<any>(`${this.apiUrl}/store/quotations/${id}/duplicate`, {}).pipe(
       map((r) => r.data || r),
@@ -147,6 +162,6 @@ export class QuotationsService {
   }
 
   private extractErrorMessage(error: any): string {
-    return error?.error?.message || error?.message || 'Error desconocido';
+    return extractApiErrorMessage(error);
   }
 }

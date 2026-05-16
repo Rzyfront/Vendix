@@ -793,6 +793,7 @@ export class ProductsService {
             product_type: product.product_type,
             track_inventory: product.track_inventory,
             available_for_ecommerce: product.available_for_ecommerce,
+            allow_pos_price_override: product.allow_pos_price_override,
             requires_batch_tracking: product.requires_batch_tracking,
             requires_booking: product.requires_booking,
             booking_mode: product.booking_mode,
@@ -907,6 +908,7 @@ export class ProductsService {
           product_type: product.product_type,
           track_inventory: product.track_inventory,
           available_for_ecommerce: product.available_for_ecommerce,
+          allow_pos_price_override: product.allow_pos_price_override,
           requires_batch_tracking: product.requires_batch_tracking,
           requires_booking: product.requires_booking,
           booking_mode: product.booking_mode,
@@ -1088,6 +1090,7 @@ export class ProductsService {
       product_type: product.product_type,
       track_inventory: product.track_inventory,
       available_for_ecommerce: product.available_for_ecommerce,
+      allow_pos_price_override: product.allow_pos_price_override,
       // Service-specific fields
       service_duration_minutes: product.service_duration_minutes,
       service_modality: product.service_modality,

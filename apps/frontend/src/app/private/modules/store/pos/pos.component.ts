@@ -7,6 +7,7 @@ import {
   inject,
   DestroyRef,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 import { Router, ActivatedRoute } from '@angular/router';
@@ -20,11 +21,18 @@ import {
   CardComponent,
   BadgeComponent,
   DialogService,
+  ModalComponent,
+  InputComponent,
+  SelectorComponent,
+  TextareaComponent,
 } from '../../../../shared/components';
+import type { SelectorOption } from '../../../../shared/components/selector/selector.component';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import {
   selectStoreSettings,
   selectUserDomainHostname,
 } from '../../../../core/store/auth/auth.selectors';
+import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import {
   PosCartService,
   CartState,
@@ -67,6 +75,8 @@ import { PosScheduleModalComponent } from './components/pos-schedule-modal.compo
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
+import { TaxesService } from '../products/services/taxes.service';
+import { TaxCategory } from '../products/interfaces';
 
 const DEFAULT_CART_SUMMARY: CartSummary = {
   subtotal: 0,
@@ -81,8 +91,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   selector: 'app-pos',
   standalone: true,
   imports: [
+    FormsModule,
     ButtonComponent,
     IconComponent,
+    ModalComponent,
+    InputComponent,
+    SelectorComponent,
+    TextareaComponent,
     SpinnerComponent,
     CardComponent,
     PosStatsComponent,
@@ -254,14 +269,15 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                     (detailClicked)="showSessionDetailModal.set(true)"
                   ></app-pos-session-status-bar>
                 }
-
               </div>
             </div>
           </div>
         </div>
 
         @if (activeSession()?.register?.location) {
-          <div class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600">
+          <div
+            class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600"
+          >
             Descontando de: {{ activeSession()!.register!.location!.name }}
           </div>
         }
@@ -399,7 +415,9 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isTablet]="isTablet()"
           [isQuotationMode]="isQuotationMode()"
           [isLayawayMode]="isLayawayMode()"
+          [canCreateCustomItems]="canCreateCustomItems()"
           (viewCart)="onOpenCartModal()"
+          (customItem)="openCustomItemModal()"
           (saveDraft)="onSaveDraft()"
           (shipping)="onShipping()"
           (checkout)="onCheckout()"
@@ -412,7 +430,11 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       <app-pos-cart-modal
         [isOpen]="showCartModal() && (isMobile() || isTablet())"
         [cartState]="cartState()"
+        [canCreateCustomItems]="canCreateCustomItems()"
+        [canOverridePrices]="canOverridePrices()"
         (closed)="onCloseCartModal()"
+        (customItemRequested)="openCustomItemModal()"
+        (itemPriceEditRequested)="editItemPriceFromMobile($event)"
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
@@ -420,6 +442,108 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
       ></app-pos-cart-modal>
+
+      <app-modal
+        [isOpen]="customItemModalOpen()"
+        title="Ítem personalizado"
+        subtitle="Agrega una línea facturable sin afectar inventario"
+        size="sm"
+        (closed)="closeCustomItemModal()"
+      >
+        <div class="space-y-4">
+          <app-input
+            label="Nombre"
+            placeholder="Servicio de instalación"
+            [ngModel]="customItemDraft().name"
+            (ngModelChange)="updateCustomItemDraft('name', $event)"
+          ></app-input>
+
+          <app-textarea
+            label="Detalle"
+            placeholder="Alcance, materiales, condiciones o notas visibles en la orden"
+            [rows]="3"
+            [ngModel]="customItemDraft().description"
+            (ngModelChange)="updateCustomItemDraft('description', $event)"
+          ></app-textarea>
+
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <app-input
+              label="Cantidad"
+              type="number"
+              min="1"
+              [ngModel]="customItemDraft().quantity"
+              (ngModelChange)="updateCustomItemDraft('quantity', $event)"
+            ></app-input>
+
+            <app-input
+              label="Precio final"
+              placeholder="$0"
+              min="0"
+              [currency]="true"
+              [ngModel]="customItemDraft().finalPrice"
+              (ngModelChange)="updateCustomItemDraft('finalPrice', $event)"
+            ></app-input>
+          </div>
+
+          <app-selector
+            label="IVA / impuesto"
+            helpText="Usa los impuestos configurados para la tienda."
+            [options]="taxCategoryOptions()"
+            [ngModel]="customItemDraft().taxCategoryId ?? 0"
+            (ngModelChange)="updateCustomItemDraft('taxCategoryId', $event)"
+          ></app-selector>
+
+          <div
+            class="rounded-xl border border-border bg-[var(--color-background)]/60 px-3 py-2 text-xs"
+          >
+            <div class="flex justify-between">
+              <span class="text-text-secondary">Base</span>
+              <span class="font-semibold">{{
+                formatCurrency(customItemBasePrice())
+              }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-text-secondary">IVA / impuesto</span>
+              <span class="font-semibold">{{
+                formatCurrency(customItemTaxAmount())
+              }}</span>
+            </div>
+            <div
+              class="mt-1 flex justify-between border-t border-border/60 pt-1"
+            >
+              <span class="font-semibold text-text-primary">Total línea</span>
+              <span class="font-bold text-[var(--color-primary)]">{{
+                formatCurrency(customItemTotal())
+              }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div
+          slot="footer"
+          class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+        >
+          <app-button
+            class="w-full sm:w-auto"
+            variant="outline"
+            size="md"
+            customClasses="min-w-[120px]"
+            (clicked)="closeCustomItemModal()"
+          >
+            Cancelar
+          </app-button>
+          <app-button
+            class="w-full sm:w-auto"
+            variant="primary"
+            size="md"
+            customClasses="min-w-[120px]"
+            [disabled]="!canSubmitCustomItem()"
+            (clicked)="addCustomItemFromMobile()"
+          >
+            Agregar
+          </app-button>
+        </div>
+      </app-modal>
 
       <!-- Loading Overlay -->
       @if (loading()) {
@@ -675,6 +799,30 @@ export class PosComponent {
   showOrderConfirmation = signal(false);
   productRefreshCounter = signal(0);
   showCartModal = signal(false);
+  customItemModalOpen = signal(false);
+  customItemDraft = signal({
+    name: '',
+    description: '',
+    quantity: 1,
+    finalPrice: 0,
+    taxCategoryId: null as number | null,
+  });
+  taxCategories = signal<TaxCategory[]>([]);
+  readonly taxCategoryOptions = computed<SelectorOption[]>(() => [
+    { value: 0, label: 'Sin impuesto' },
+    ...this.taxCategories().map((tax) => ({
+      value: tax.id,
+      label: `${tax.name} (${this.formatPercentRate(tax)})`,
+    })),
+  ]);
+  readonly canSubmitCustomItem = computed(() => {
+    const draft = this.customItemDraft();
+    return (
+      draft.name.trim().length > 0 &&
+      Number(draft.quantity || 0) > 0 &&
+      Number(draft.finalPrice || 0) >= 0
+    );
+  });
 
   currentOrderId = signal<string | null>(null);
   currentOrderNumber = signal<string | null>(null);
@@ -772,6 +920,9 @@ export class PosComponent {
 
   // Store domain for QR URL construction
   private storeDomainHostname: string | null = null;
+  private posSettingsHydrationRequested = false;
+  private queueSubscriptionInitialized = false;
+  private cashRegisterSessionInitialized = false;
 
   private destroyRef = inject(DestroyRef);
   private cartService = inject(PosCartService);
@@ -789,6 +940,16 @@ export class PosComponent {
   private layawayService = inject(LayawayApiService);
   private cashRegisterService = inject(PosCashRegisterService);
   private queueService = inject(PosQueueService);
+  private authFacade = inject(AuthFacade);
+  private taxesService = inject(TaxesService);
+  private currencyService = inject(CurrencyFormatService);
+
+  readonly canCreateCustomItems = computed(() =>
+    this.hasPermission('store:pos:custom_items:create'),
+  );
+  readonly canOverridePrices = computed(() =>
+    this.hasPermission('store:pos:price_override'),
+  );
 
   constructor() {
     this.checkMobile();
@@ -798,6 +959,7 @@ export class PosComponent {
     this.checkQuotationMode();
     this.checkLayawayMode();
     this.validateScheduleOnInit();
+    this.loadTaxCategories();
 
     this.store
       .select(selectUserDomainHostname)
@@ -910,6 +1072,26 @@ export class PosComponent {
       .subscribe((loading: boolean) => {
         this.loading.set(Boolean(loading));
       });
+  }
+
+  private loadTaxCategories(): void {
+    this.taxesService
+      .getTaxCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (taxCategories) => this.taxCategories.set(taxCategories || []),
+        error: () => this.taxCategories.set([]),
+      });
+  }
+
+  private hasPermission(permission: string): boolean {
+    const permissions = this.authFacade.userPermissions();
+    const roles = this.authFacade.userRoles();
+    return (
+      permissions.includes(permission) ||
+      roles.includes('super_admin') ||
+      roles.includes('SUPER_ADMIN')
+    );
   }
 
   get isEmpty(): boolean {
@@ -1378,6 +1560,180 @@ export class PosComponent {
     this.showCartModal.set(false);
   }
 
+  openCustomItemModal(): void {
+    if (!this.canCreateCustomItems()) {
+      this.toastService.warning(
+        'No tienes permiso para agregar ítems personalizados',
+      );
+      return;
+    }
+
+    this.customItemDraft.set({
+      name: '',
+      description: '',
+      quantity: 1,
+      finalPrice: 0,
+      taxCategoryId: null,
+    });
+    this.customItemModalOpen.set(true);
+  }
+
+  closeCustomItemModal(): void {
+    this.customItemModalOpen.set(false);
+  }
+
+  updateCustomItemDraft(
+    field: 'name' | 'description' | 'quantity' | 'finalPrice' | 'taxCategoryId',
+    value: string | number | null,
+  ): void {
+    this.customItemDraft.update((draft) => ({
+      ...draft,
+      [field]:
+        field === 'quantity' || field === 'finalPrice'
+          ? Number(value || 0)
+          : field === 'taxCategoryId'
+            ? value === null || value === '' || Number(value) <= 0
+              ? null
+              : Number(value)
+            : String(value || ''),
+    }));
+  }
+
+  addCustomItemFromMobile(): void {
+    if (!this.canSubmitCustomItem()) {
+      this.toastService.warning(
+        'Completa el nombre y un valor válido para el ítem',
+      );
+      return;
+    }
+
+    const draft = this.customItemDraft();
+    const taxCategory = this.getSelectedTaxCategory();
+
+    this.cartService
+      .addCustomItem({
+        name: draft.name.trim(),
+        description: draft.description.trim(),
+        quantity: Number(draft.quantity || 1),
+        finalPrice: Number(draft.finalPrice || 0),
+        taxCategory,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.customItemModalOpen.set(false);
+          this.showCartModal.set(true);
+          this.toastService.success('Ítem personalizado agregado');
+        },
+        error: (error: any) => {
+          this.toastService.error(error.message || 'Error al agregar el ítem');
+        },
+      });
+  }
+
+  async editItemPriceFromMobile(item: CartItem): Promise<void> {
+    if (!this.canEditItemPrice(item)) {
+      this.toastService.warning('No tienes permiso para editar este precio');
+      return;
+    }
+
+    const value = await this.dialogService.prompt(
+      {
+        title: 'Editar precio de venta',
+        message: item.product.name,
+        placeholder: 'Precio final',
+        defaultValue: item.finalPrice.toString(),
+        confirmText: 'Actualizar',
+        cancelText: 'Cancelar',
+        inputType: 'number',
+      },
+      { size: 'sm' },
+    );
+
+    if (value === undefined) return;
+    const finalPrice = Number(value);
+    if (Number.isNaN(finalPrice) || finalPrice < 0) {
+      this.toastService.warning('El precio debe ser un número válido');
+      return;
+    }
+
+    let reason = item.priceOverrideReason;
+    if (item.itemType !== 'custom') {
+      reason = await this.dialogService.prompt(
+        {
+          title: 'Motivo del cambio',
+          message: 'Opcional, queda como referencia de auditoría de la orden.',
+          placeholder: 'Ej. precio negociado con el cliente',
+          defaultValue: item.priceOverrideReason || '',
+          confirmText: 'Guardar',
+          cancelText: 'Omitir',
+        },
+        { size: 'sm' },
+      );
+    }
+
+    this.cartService
+      .updateCartItemPrice({ itemId: item.id, finalPrice, reason })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.toastService.success('Precio actualizado'),
+        error: (error: any) =>
+          this.toastService.error(
+            error.message || 'Error al actualizar precio',
+          ),
+      });
+  }
+
+  private canEditItemPrice(item: CartItem): boolean {
+    return item.itemType === 'custom'
+      ? this.canCreateCustomItems()
+      : item.product.allow_pos_price_override === true &&
+          this.canOverridePrices();
+  }
+
+  getTaxCategoryRate(taxCategory?: TaxCategory | null): number {
+    return (
+      taxCategory?.tax_rates?.reduce(
+        (sum, rate: any) => sum + Number(rate.rate || 0),
+        0,
+      ) || 0
+    );
+  }
+
+  formatPercentRate(taxCategory: TaxCategory): string {
+    return `${(this.getTaxCategoryRate(taxCategory) * 100).toFixed(2)}%`;
+  }
+
+  getSelectedTaxCategory(): TaxCategory | null {
+    const selectedId = this.customItemDraft().taxCategoryId;
+    if (!selectedId) return null;
+    return this.taxCategories().find((tax) => tax.id === selectedId) || null;
+  }
+
+  customItemBasePrice(): number {
+    const draft = this.customItemDraft();
+    const finalPrice = Number(draft.finalPrice || 0);
+    const rate = this.getTaxCategoryRate(this.getSelectedTaxCategory());
+    return rate > 0 ? finalPrice / (1 + rate) : finalPrice;
+  }
+
+  customItemTaxAmount(): number {
+    const draft = this.customItemDraft();
+    const quantity = Number(draft.quantity || 1);
+    return (
+      (Number(draft.finalPrice || 0) - this.customItemBasePrice()) * quantity
+    );
+  }
+
+  customItemTotal(): number {
+    const draft = this.customItemDraft();
+    return Number(draft.finalPrice || 0) * Number(draft.quantity || 1);
+  }
+
+  formatCurrency(amount: number): string {
+    return this.currencyService.format(amount);
+  }
+
   onCartItemQuantityChanged(event: { itemId: string; quantity: number }): void {
     if (event.quantity <= 0) {
       this.onCartItemRemoved(event.itemId);
@@ -1697,86 +2053,111 @@ export class PosComponent {
       .select(selectStoreSettings)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
-        const settings = storeSettings;
-        if (settings?.general?.timezone) {
-          this.storeTimezone.set(settings.general.timezone);
+        if (!storeSettings) {
+          return;
         }
-        if (settings?.pos) {
-          this.enableScheduleValidation.set(
-            settings.pos.enable_schedule_validation || false,
-          );
-          this.businessHours.set(settings.pos.business_hours || {});
 
-          const crEnabled = settings.pos.cash_register?.enabled || false;
-          this.cashRegisterEnabled.set(crEnabled);
-          this.cashRegisterService.setFeatureEnabled(crEnabled);
-          this.paymentService.setRequireSessionForSales(
-            settings.pos.cash_register?.require_session_for_sales || false,
-          );
-          if (crEnabled) {
-            this.initCashRegisterSession();
-          }
-
-          const cqEnabled = settings.pos.customer_queue?.enabled || false;
-          this.queueEnabled.set(cqEnabled);
-          if (cqEnabled) {
-            this.initQueueSubscription();
-          }
-
-          if (!settings.pos.cash_register) {
-            this.settingsService
-              .getSettings()
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe((response) => {
-                const freshSettings = response?.data;
-                if (freshSettings?.pos?.cash_register) {
-                  const crFresh =
-                    freshSettings.pos.cash_register.enabled || false;
-                  this.cashRegisterEnabled.set(crFresh);
-                  this.cashRegisterService.setFeatureEnabled(crFresh);
-                  this.paymentService.setRequireSessionForSales(
-                    freshSettings.pos.cash_register.require_session_for_sales ||
-                      false,
-                  );
-                  if (crFresh) {
-                    this.initCashRegisterSession();
-                  }
-                }
-              });
-          }
-
-          if (!cqEnabled) {
-            this.settingsService
-              .getSettings()
-              .pipe(takeUntilDestroyed(this.destroyRef))
-              .subscribe((response) => {
-                const freshSettings = response?.data;
-                if (freshSettings?.pos?.customer_queue?.enabled) {
-                  this.queueEnabled.set(true);
-                  this.initQueueSubscription();
-                }
-              });
-          }
-
-          if (
-            !this.scheduleHandledByBackend() &&
-            this.scheduleStatusChecked() &&
-            this.enableScheduleValidation()
-          ) {
-            const localOutOfHours = !this.isWithinBusinessHours();
-            if (localOutOfHours) {
-              this.isActuallyOutOfHours.set(true);
-              if (!this.canBypassSchedule()) {
-                this.isOutOfHours.set(true);
-                this.nextOpenTime.set(this.getLocalNextOpenDay());
-                this.outOfHoursMessage.set(
-                  'El punto de venta está fuera del horario de atención configurado (Validación local).',
-                );
-              }
-            }
-          }
+        if (!storeSettings.pos) {
+          this.hydrateMissingPosSettings();
+          return;
         }
+
+        this.applyPosSettings(storeSettings);
       });
+  }
+
+  private applyPosSettings(settings: any): void {
+    if (settings?.general?.timezone) {
+      this.storeTimezone.set(settings.general.timezone);
+    }
+
+    const posSettings = settings?.pos;
+    if (!posSettings) {
+      return;
+    }
+
+    this.enableScheduleValidation.set(
+      posSettings.enable_schedule_validation === true,
+    );
+    this.businessHours.set(posSettings.business_hours || {});
+
+    const cashRegisterSettings = posSettings.cash_register;
+    const crEnabled = cashRegisterSettings?.enabled === true;
+    this.cashRegisterEnabled.set(crEnabled);
+    this.cashRegisterService.setFeatureEnabled(crEnabled);
+    this.paymentService.setRequireSessionForSales(
+      cashRegisterSettings?.require_session_for_sales === true,
+    );
+
+    if (crEnabled && !this.cashRegisterSessionInitialized) {
+      this.cashRegisterSessionInitialized = true;
+      this.initCashRegisterSession();
+    } else if (!crEnabled) {
+      this.cashRegisterSessionInitialized = false;
+    }
+
+    const customerQueueSettings = posSettings.customer_queue;
+    const cqEnabled = customerQueueSettings?.enabled === true;
+    this.queueEnabled.set(cqEnabled);
+    if (cqEnabled && !this.queueSubscriptionInitialized) {
+      this.queueSubscriptionInitialized = true;
+      this.initQueueSubscription();
+    } else if (!cqEnabled) {
+      this.queueSubscriptionInitialized = false;
+    }
+
+    if (!cashRegisterSettings || !customerQueueSettings) {
+      this.hydrateMissingPosSettings();
+    }
+
+    this.validateLocalScheduleIfNeeded();
+  }
+
+  private hydrateMissingPosSettings(): void {
+    if (this.posSettingsHydrationRequested) {
+      return;
+    }
+
+    this.posSettingsHydrationRequested = true;
+    this.settingsService
+      .getSettings({ forceRefresh: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response?.data?.pos) {
+            this.applyPosSettings(response.data);
+          }
+        },
+        error: (error) => {
+          console.warn('No se pudo hidratar la configuración POS', error);
+        },
+      });
+  }
+
+  private validateLocalScheduleIfNeeded(): void {
+    if (
+      this.scheduleHandledByBackend() ||
+      !this.scheduleStatusChecked() ||
+      !this.enableScheduleValidation()
+    ) {
+      return;
+    }
+
+    const localOutOfHours = !this.isWithinBusinessHours();
+    if (!localOutOfHours) {
+      return;
+    }
+
+    this.isActuallyOutOfHours.set(true);
+    if (this.canBypassSchedule()) {
+      return;
+    }
+
+    this.isOutOfHours.set(true);
+    this.nextOpenTime.set(this.getLocalNextOpenDay());
+    this.outOfHoursMessage.set(
+      'El punto de venta está fuera del horario de atención configurado (Validación local).',
+    );
   }
 
   private initQueueSubscription(): void {

@@ -349,14 +349,21 @@ export class QuotationsService {
   async convertToOrder(id: number) {
     const quotation = await this.findOne(id);
     if (quotation.status !== quotation_status_enum.accepted) {
-      throw new BadRequestException(
-        'Solo se pueden convertir cotizaciones aceptadas',
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_CONVERT_STATUS_001,
+        undefined,
+        {
+          current_status: quotation.status,
+          required_status: quotation_status_enum.accepted,
+        },
       );
     }
 
     if (!quotation.customer_id) {
-      throw new BadRequestException(
-        'La cotización debe tener un cliente asignado para convertirse a orden',
+      throw new VendixHttpException(
+        ErrorCodes.QUOTE_CONVERT_CUSTOMER_001,
+        undefined,
+        { quotation_id: quotation.id },
       );
     }
 

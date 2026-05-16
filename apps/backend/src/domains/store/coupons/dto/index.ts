@@ -12,6 +12,7 @@ import {
   IsDateString,
   IsArray,
   Max,
+  ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
@@ -141,6 +142,29 @@ export class CouponQueryDto {
   discount_type?: CouponDiscountType;
 }
 
+export class ValidateCouponItemDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  category_id?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  category_ids?: number[];
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  line_total: number;
+}
+
 export class ValidateCouponDto {
   @IsString()
   @IsNotEmpty()
@@ -168,4 +192,10 @@ export class ValidateCouponDto {
   @IsInt({ each: true })
   @Type(() => Number)
   category_ids?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ValidateCouponItemDto)
+  items?: ValidateCouponItemDto[];
 }

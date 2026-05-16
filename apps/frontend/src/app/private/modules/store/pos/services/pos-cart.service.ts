@@ -8,7 +8,9 @@ import {
   CartState,
   CartDiscount,
   AddToCartRequest,
+  AddCustomItemRequest,
   UpdateCartItemRequest,
+  UpdateCartItemPriceRequest,
   ApplyDiscountRequest,
   CartValidationError,
   PendingBooking,
@@ -17,9 +19,11 @@ import {
 // Re-export types for component usage
 export type {
   AddToCartRequest,
+  AddCustomItemRequest,
   CartItem,
   CartState,
   PendingBooking,
+  UpdateCartItemPriceRequest,
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
@@ -82,11 +86,30 @@ export class PosCartService {
   }
 
   /**
+   * Add a billable custom item to the cart.
+   */
+  addCustomItem(request: AddCustomItemRequest): Observable<CartState> {
+    return of(request).pipe(
+      map((req) => this.processAddCustomItem(req)),
+      tap((newState) => this.cartState.set(newState)),
+    );
+  }
+
+  /**
    * Update cart item quantity
    */
   updateCartItem(request: UpdateCartItemRequest): Observable<CartState> {
     return of(request).pipe(
       map((req) => this.processUpdateCartItem(req)),
+      tap((newState) => this.cartState.set(newState)),
+    );
+  }
+
+  updateCartItemPrice(
+    request: UpdateCartItemPriceRequest,
+  ): Observable<CartState> {
+    return of(request).pipe(
+      map((req) => this.processUpdateCartItemPrice(req)),
       tap((newState) => this.cartState.set(newState)),
     );
   }
@@ -183,10 +206,12 @@ export class PosCartService {
 
     // Fetch full product data for each order item
     const productRequests: Observable<{ item: any; product: Product | null }>[] = order.order_items.map((item: any) =>
-      this.productService.getProductById(item.product_id.toString()).pipe(
-        map((product: Product | null) => ({ item, product })),
-        catchError(() => of({ item, product: null as Product | null })),
-      )
+      item.product_id
+        ? this.productService.getProductById(item.product_id.toString()).pipe(
+            map((product: Product | null) => ({ item, product })),
+            catchError(() => of({ item, product: null as Product | null })),
+          )
+        : of({ item, product: null as Product | null }),
     );
 
     return forkJoin(productRequests).pipe(
@@ -196,13 +221,14 @@ export class PosCartService {
 
           // If product was found from API, use it; otherwise create a stub
           const cartProduct: Product = product || {
-            id: item.product_id.toString(),
+            id: item.product_id?.toString() || this.generateCustomProductId(),
             name: item.product_name,
             sku: item.variant_sku || '',
             price: Number(item.unit_price),
-            final_price: Number(item.unit_price),
+            final_price: Number(item.final_unit_price || item.unit_price),
             category: '',
             stock: 9999,
+            track_inventory: false,
             minStock: 0,
             isActive: true,
             createdAt: new Date(),
@@ -221,10 +247,15 @@ export class PosCartService {
             product: cartProduct,
             quantity,
             unitPrice,
-            finalPrice: totalPrice / quantity,
-            totalPrice,
+            finalPrice: Number(item.final_unit_price || totalPrice / quantity),
+            totalPrice: Number(item.final_unit_price || totalPrice / quantity) * quantity,
             taxAmount,
             addedAt: new Date(),
+            itemType: item.item_type === 'custom' || !item.product_id ? 'custom' : 'product',
+            description: item.description || undefined,
+            originalFinalPrice: Number(item.catalog_final_price || item.final_unit_price || totalPrice / quantity),
+            isPriceOverridden: item.is_price_overridden === true,
+            priceOverrideReason: item.price_override_reason || undefined,
           } as CartItem;
         });
 
@@ -301,7 +332,7 @@ export class PosCartService {
         // Remove previously auto-applied promotion discounts
         const manualDiscounts = currentState.appliedDiscounts.filter(d => !d.is_auto_applied);
 
-        // Calculate cart total for eligibility
+        // Calculate cart total for order-level eligibility
         const subtotal = this.calculateSubtotal(currentState.items);
 
         // Apply eligible auto-apply promotions
@@ -312,23 +343,23 @@ export class PosCartService {
           // Check min purchase
           if (promo.min_purchase_amount && subtotal < Number(promo.min_purchase_amount)) continue;
 
-          // Check scope eligibility
-          if (promo.scope === 'product') {
-            const promoProductIds = (promo.promotion_products || []).map((pp: any) => pp.product_id);
-            const hasProduct = currentState.items.some(item => promoProductIds.includes(Number(item.product.id)));
-            if (!hasProduct) continue;
-          }
+          const applicableTotal = this.calculatePromotionApplicableTotal(
+            promo,
+            currentState.items,
+          );
+          if (applicableTotal <= 0) continue;
 
           // Calculate discount
           let discountAmount = 0;
           if (promo.type === 'percentage') {
-            discountAmount = subtotal * (Number(promo.value) / 100);
+            discountAmount = applicableTotal * (Number(promo.value) / 100);
           } else {
-            discountAmount = Math.min(Number(promo.value), subtotal);
+            discountAmount = Math.min(Number(promo.value), applicableTotal);
           }
 
-          if (promo.max_discount_amount) {
-            discountAmount = Math.min(discountAmount, Number(promo.max_discount_amount));
+          const maxDiscountAmount = this.toOptionalNumber(promo.max_discount_amount);
+          if (maxDiscountAmount !== null && maxDiscountAmount > 0) {
+            discountAmount = Math.min(discountAmount, maxDiscountAmount);
           }
 
           promoDiscounts.push({
@@ -495,6 +526,133 @@ export class PosCartService {
     return item ? item.quantity : 0;
   }
 
+  private processAddCustomItem(request: AddCustomItemRequest): CartState {
+    const currentState = this.cartState();
+    const quantity = Number(request.quantity || 1);
+    const finalPrice = Number(request.finalPrice || 0);
+
+    if (!request.name?.trim()) {
+      throw new Error('El ítem personalizado requiere una descripción.');
+    }
+    if (quantity <= 0) {
+      throw new Error('La cantidad debe ser mayor a 0.');
+    }
+    if (finalPrice < 0) {
+      throw new Error('El precio no puede ser negativo.');
+    }
+
+    const taxRate = this.calculateTaxCategoryRate(request.taxCategory);
+    const unitPrice = taxRate > 0 ? finalPrice / (1 + taxRate) : finalPrice;
+    const taxAmount = (finalPrice - unitPrice) * quantity;
+    const customProduct: Product = {
+      id: this.generateCustomProductId(),
+      name: request.name.trim(),
+      sku: '',
+      price: unitPrice,
+      final_price: finalPrice,
+      cost: 0,
+      category: 'Personalizado',
+      stock: 999999,
+      track_inventory: false,
+      minStock: 0,
+      image: '',
+      image_url: '',
+      description: request.description || '',
+      isActive: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      tax_assignments: request.taxCategory
+        ? [
+            {
+              product_id: 0,
+              tax_category_id: request.taxCategory.id,
+              tax_categories: request.taxCategory as any,
+            },
+          ]
+        : [],
+      has_variants: false,
+      product_variants: [],
+      pricing_type: 'unit',
+    };
+
+    const customItem: CartItem = {
+      id: this.generateItemId(),
+      itemType: 'custom',
+      product: customProduct,
+      quantity,
+      unitPrice: this.roundMoney(unitPrice),
+      finalPrice: this.roundMoney(finalPrice),
+      totalPrice: this.roundMoney(finalPrice * quantity),
+      taxAmount: this.roundMoney(taxAmount),
+      taxCategoryId: request.taxCategory?.id ?? null,
+      taxRate,
+      description: request.description?.trim() || undefined,
+      addedAt: new Date(),
+    };
+
+    const updatedItems = [customItem, ...currentState.items];
+    return {
+      ...currentState,
+      items: updatedItems,
+      summary: this.calculateSummary(
+        updatedItems,
+        currentState.appliedDiscounts,
+      ),
+      updatedAt: new Date(),
+    };
+  }
+
+  private processUpdateCartItemPrice(
+    request: UpdateCartItemPriceRequest,
+  ): CartState {
+    const currentState = this.cartState();
+    const itemIndex = currentState.items.findIndex(
+      (item) => item.id === request.itemId,
+    );
+
+    if (itemIndex === -1) {
+      throw new Error('Item not found in cart');
+    }
+    if (request.finalPrice < 0) {
+      throw new Error('El precio no puede ser negativo.');
+    }
+
+    const item = currentState.items[itemIndex];
+    const taxRate = item.taxRate ?? this.calculateRateSum(item.product);
+    const finalPrice = this.roundMoney(Number(request.finalPrice || 0));
+    const unitPrice = taxRate > 0 ? finalPrice / (1 + taxRate) : finalPrice;
+    const multiplier = item.is_weight_product && item.weight
+      ? item.weight
+      : item.quantity;
+    const taxAmount = (finalPrice - unitPrice) * multiplier;
+
+    const updatedItems = [...currentState.items];
+    updatedItems[itemIndex] = {
+      ...item,
+      unitPrice: this.roundMoney(unitPrice),
+      finalPrice,
+      totalPrice: this.roundMoney(finalPrice * multiplier),
+      taxAmount: this.roundMoney(taxAmount),
+      originalFinalPrice: item.originalFinalPrice ?? item.finalPrice,
+      isPriceOverridden:
+        item.itemType === 'custom'
+          ? false
+          : Math.abs(finalPrice - (item.originalFinalPrice ?? item.finalPrice)) >=
+            0.01,
+      priceOverrideReason: request.reason?.trim() || item.priceOverrideReason,
+    };
+
+    return {
+      ...currentState,
+      items: updatedItems,
+      summary: this.calculateSummary(
+        updatedItems,
+        currentState.appliedDiscounts,
+      ),
+      updatedAt: new Date(),
+    };
+  }
+
   /**
    * Process add to cart
    */
@@ -550,11 +708,13 @@ export class PosCartService {
       const taxMultiplier = isWeightProduct ? weight : quantity;
       const newItem: CartItem = {
         id: this.generateItemId(),
+        itemType: 'product',
         product: request.product,
         quantity: quantity,
         unitPrice: basePrice,
         taxAmount: this.calculateItemTaxWithBase(request.product, basePrice, taxMultiplier),
         finalPrice: finalUnitPrice,
+        originalFinalPrice: finalUnitPrice,
         totalPrice: itemTotalPrice,
         addedAt: new Date(),
         notes: request.notes,
@@ -742,6 +902,53 @@ export class PosCartService {
     return items.reduce((sum, item) => sum + item.totalPrice, 0);
   }
 
+  private calculatePromotionApplicableTotal(promo: any, items: CartItem[]): number {
+    if (promo.scope === 'product') {
+      const promoProductIds = (promo.promotion_products || [])
+        .map((pp: any) => Number(pp.product_id))
+        .filter((id: number) => Number.isFinite(id));
+
+      return items
+        .filter((item) => promoProductIds.includes(Number(item.product.id)))
+        .reduce((sum, item) => sum + item.totalPrice, 0);
+    }
+
+    if (promo.scope === 'category') {
+      const promoCategoryIds = (promo.promotion_categories || [])
+        .map((pc: any) => Number(pc.category_id))
+        .filter((id: number) => Number.isFinite(id));
+
+      return items
+        .filter((item) =>
+          this.getItemCategoryIds(item).some((categoryId) =>
+            promoCategoryIds.includes(categoryId),
+          ),
+        )
+        .reduce((sum, item) => sum + item.totalPrice, 0);
+    }
+
+    return this.calculateSubtotal(items);
+  }
+
+  private getItemCategoryIds(item: CartItem): number[] {
+    const product = item.product as any;
+    const categoryIds = Array.isArray(product.category_ids)
+      ? product.category_ids
+      : product.category_id
+        ? [product.category_id]
+        : [];
+
+    return categoryIds
+      .map((categoryId: string | number) => Number(categoryId))
+      .filter((categoryId: number) => Number.isFinite(categoryId));
+  }
+
+  private toOptionalNumber(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  }
+
   /**
    * Calculate tax for a single item
    */
@@ -790,6 +997,21 @@ export class PosCartService {
         return rateSum + assignmentRate;
       }, 0) || 0
     );
+  }
+
+  private calculateTaxCategoryRate(
+    taxCategory?: { tax_rates?: Array<{ rate: string | number }> } | null,
+  ): number {
+    return (
+      taxCategory?.tax_rates?.reduce(
+        (sum, rate) => sum + Number(rate.rate || 0),
+        0,
+      ) || 0
+    );
+  }
+
+  private roundMoney(value: number): number {
+    return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
   }
 
   /**
@@ -946,6 +1168,12 @@ export class PosCartService {
    */
   private generateItemId(): string {
     return 'ITEM_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+  }
+
+  private generateCustomProductId(): string {
+    return (
+      'custom-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9)
+    );
   }
 
   /**

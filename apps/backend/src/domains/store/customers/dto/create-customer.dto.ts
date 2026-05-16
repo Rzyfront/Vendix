@@ -23,15 +23,15 @@ export class CreateCustomerDto {
   @IsNotEmpty()
   last_name: string;
 
-  @ApiProperty({ example: '12345678' })
+  @ApiPropertyOptional({ example: '12345678' })
   @IsString()
-  @IsNotEmpty()
-  document_number: string;
+  @IsOptional()
+  document_number?: string | null;
 
   @ApiPropertyOptional({ example: 'CC' })
   @IsString()
   @IsOptional()
-  document_type?: string;
+  document_type?: string | null;
 
   @ApiPropertyOptional({ example: '3001234567' })
   @IsString()
@@ -40,5 +40,5 @@ export class CreateCustomerDto {
     message:
       'El teléfono solo puede contener números y los símbolos + # * ( ) -',
   })
-  phone?: string;
+  phone?: string | null;
 }

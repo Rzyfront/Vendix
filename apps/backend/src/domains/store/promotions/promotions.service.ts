@@ -161,6 +161,7 @@ export class PromotionsService {
 
   async create(dto: CreatePromotionDto) {
     const { product_ids, category_ids, ...promotionData } = dto;
+    this.validateScopeSelection(dto.scope || 'order', product_ids, category_ids);
 
     const data: any = {
       ...promotionData,
@@ -196,6 +197,10 @@ export class PromotionsService {
   async update(id: number, dto: UpdatePromotionDto) {
     const existing = await this.prisma.promotions.findFirst({
       where: { id },
+      include: {
+        promotion_products: true,
+        promotion_categories: true,
+      },
     });
 
     if (!existing) {
@@ -203,6 +208,11 @@ export class PromotionsService {
     }
 
     const { product_ids, category_ids, ...updateData } = dto;
+    this.validateScopeSelection(
+      dto.scope || existing.scope,
+      product_ids ?? existing.promotion_products.map((pp) => pp.product_id),
+      category_ids ?? existing.promotion_categories.map((pc) => pc.category_id),
+    );
 
     // Prepare date conversions
     const data: any = { ...updateData };
@@ -327,5 +337,25 @@ export class PromotionsService {
       });
       await tx.promotions.delete({ where: { id } });
     });
+  }
+
+  private validateScopeSelection(
+    scope: 'order' | 'product' | 'category',
+    productIds?: number[],
+    categoryIds?: number[],
+  ): void {
+    if (scope === 'product' && (!productIds || productIds.length === 0)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'Selecciona al menos un producto para esta promocion',
+      );
+    }
+
+    if (scope === 'category' && (!categoryIds || categoryIds.length === 0)) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'Selecciona al menos una categoria para esta promocion',
+      );
+    }
   }
 }

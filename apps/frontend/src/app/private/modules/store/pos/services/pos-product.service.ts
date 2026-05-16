@@ -16,7 +16,10 @@ export interface Product {
   cost?: number;
   is_on_sale?: boolean;
   sale_price?: number | null;
+  allow_pos_price_override?: boolean;
   category: string;
+  category_id?: number | null;
+  category_ids?: number[];
   brand?: string;
   stock: number;
   track_inventory?: boolean;
@@ -339,6 +342,13 @@ export class PosProductService {
         }),
       );
 
+      const categories = Array.isArray(product.categories)
+        ? product.categories
+        : product.product_categories?.map((pc: any) => pc.categories || pc.category || pc) || [];
+      const categoryIds = categories
+        .map((category: any) => Number(category?.id))
+        .filter((id: number) => Number.isFinite(id));
+
       const transformed = {
         id: product.id?.toString() || '',
         name: product.name || '',
@@ -347,11 +357,11 @@ export class PosProductService {
         final_price: parseFloat(
           product.final_price || product.base_price || product.price || 0,
         ),
+        allow_pos_price_override: product.allow_pos_price_override === true,
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
-        category:
-          product.product_categories && product.product_categories.length > 0
-            ? product.product_categories[0].name
-            : product.category?.name || 'Sin categoría',
+        category: categories[0]?.name || product.category?.name || 'Sin categoría',
+        category_id: categoryIds[0] ?? null,
+        category_ids: categoryIds,
         brand: product.brands?.name || '',
         stock: totalStock,
         track_inventory: product.track_inventory,

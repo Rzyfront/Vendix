@@ -1162,10 +1162,12 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
 
     this.isCalculatingShipping.set(true);
 
-    const items = this.cartState()!.items.map((item) => ({
-      product_id: parseInt(item.product.id),
-      quantity: item.quantity,
-      price: item.totalPrice }));
+    const items = this.cartState()!.items
+      .filter((item) => item.itemType !== 'custom')
+      .map((item) => ({
+        product_id: parseInt(item.product.id),
+        quantity: item.quantity,
+        price: item.totalPrice }));
 
     this.shippingService
       .calculateShipping(items, {

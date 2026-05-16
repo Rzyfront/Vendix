@@ -41,29 +41,8 @@ export class PromotionEngineService {
         if (customerUsage >= promo.per_customer_limit) continue;
       }
 
-      // Check scope eligibility
-      if (promo.scope === 'product') {
-        const promoProductIds = promo.promotion_products.map(
-          (pp) => pp.product_id,
-        );
-        const hasEligibleProduct = cartItems.some((item) =>
-          promoProductIds.includes(item.product_id),
-        );
-        if (!hasEligibleProduct) continue;
-      }
-
-      if (promo.scope === 'category') {
-        // For category scope, we need product category info from the caller
-        // If cart items include category_id, we can match; otherwise skip
-        const promoCategoryIds = promo.promotion_categories.map(
-          (pc) => pc.category_id,
-        );
-        const hasEligibleCategory = cartItems.some(
-          (item) =>
-            item.category_id && promoCategoryIds.includes(item.category_id),
-        );
-        if (!hasEligibleCategory) continue;
-      }
+      const applicableTotal = this.calculateApplicableTotal(promo, cartItems);
+      if (applicableTotal <= 0) continue;
 
       // Check minimum purchase
       const cartTotal = cartItems.reduce(
@@ -92,20 +71,7 @@ export class PromotionEngineService {
    * Calculate discount amount for a promotion
    */
   calculateDiscount(promotion: any, cartItems: any[]): number {
-    let applicableTotal = 0;
-
-    if (promotion.scope === 'product') {
-      const promoProductIds =
-        promotion.promotion_products?.map((pp: any) => pp.product_id) || [];
-      applicableTotal = cartItems
-        .filter((item) => promoProductIds.includes(item.product_id))
-        .reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
-    } else {
-      applicableTotal = cartItems.reduce(
-        (sum, item) => sum + item.unit_price * item.quantity,
-        0,
-      );
-    }
+    const applicableTotal = this.calculateApplicableTotal(promotion, cartItems);
 
     let discount = 0;
     if (promotion.type === 'percentage') {
@@ -115,11 +81,55 @@ export class PromotionEngineService {
     }
 
     // Apply max_discount_amount cap
-    if (promotion.max_discount_amount) {
-      discount = Math.min(discount, Number(promotion.max_discount_amount));
+    const maxDiscountAmount = Number(promotion.max_discount_amount);
+    if (Number.isFinite(maxDiscountAmount) && maxDiscountAmount > 0) {
+      discount = Math.min(discount, maxDiscountAmount);
     }
 
     return Math.round(discount * 100) / 100;
+  }
+
+  private calculateApplicableTotal(promotion: any, cartItems: any[]): number {
+    if (promotion.scope === 'product') {
+      const promoProductIds =
+        promotion.promotion_products?.map((pp: any) => Number(pp.product_id)) ||
+        [];
+
+      return cartItems
+        .filter((item) => promoProductIds.includes(Number(item.product_id)))
+        .reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+    }
+
+    if (promotion.scope === 'category') {
+      const promoCategoryIds =
+        promotion.promotion_categories?.map((pc: any) => Number(pc.category_id)) ||
+        [];
+
+      return cartItems
+        .filter((item) =>
+          this.getItemCategoryIds(item).some((categoryId) =>
+            promoCategoryIds.includes(categoryId),
+          ),
+        )
+        .reduce((sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0);
+    }
+
+    return cartItems.reduce(
+      (sum, item) => sum + Number(item.unit_price) * Number(item.quantity),
+      0,
+    );
+  }
+
+  private getItemCategoryIds(item: any): number[] {
+    const categoryIds = Array.isArray(item.category_ids)
+      ? item.category_ids
+      : item.category_id
+        ? [item.category_id]
+        : [];
+
+    return categoryIds
+      .map((categoryId: string | number) => Number(categoryId))
+      .filter((categoryId: number) => Number.isFinite(categoryId));
   }
 
   /**
@@ -207,6 +217,11 @@ export class PromotionEngineService {
       throw new BadRequestException(
         `Compra minima de ${promotion.min_purchase_amount} requerida`,
       );
+    }
+
+    const applicableTotal = this.calculateApplicableTotal(promotion, cartItems);
+    if (applicableTotal <= 0) {
+      throw new BadRequestException('Promocion no aplica a los items del carrito');
     }
 
     const discount = this.calculateDiscount(promotion, cartItems);

@@ -5,7 +5,7 @@ import { catchError, map, timeout, delay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import { PosCashRegisterService } from './pos-cash-register.service';
-import { CartState } from '../models/cart.model';
+import { CartItem, CartState } from '../models/cart.model';
 import {
   PaymentMethod,
   PaymentRequest,
@@ -111,6 +111,90 @@ export class PosPaymentService {
    */
   private getRegisterId(): string | null {
     return this.cashRegisterService.getRegisterId();
+  }
+
+  private mapCartItemsForPos(cartState: CartState): any[] {
+    return cartState.items.map((item) => this.mapCartItemForPos(item));
+  }
+
+  private getAppliedPromotionIds(cartState: CartState): number[] {
+    return cartState.appliedDiscounts
+      .filter((discount) => discount.promotion_id && !discount.coupon_id)
+      .map((discount) => Number(discount.promotion_id))
+      .filter((promotionId) => Number.isFinite(promotionId));
+  }
+
+  private mapCartItemForPos(item: CartItem): any {
+    const isCustomItem =
+      item.itemType === 'custom' || item.product.id.startsWith('custom-');
+    const lineUnits = item.is_weight_product && item.weight
+      ? item.weight
+      : item.quantity;
+    const taxRate = item.taxRate ?? this.calculateItemTaxRate(item);
+    const categoryIds = this.getProductCategoryIds(item);
+
+    return {
+      item_type: isCustomItem ? 'custom' : 'product',
+      product_id: isCustomItem ? null : parseInt(item.product.id, 10),
+      category_id: isCustomItem ? undefined : categoryIds[0],
+      category_ids: isCustomItem ? undefined : categoryIds,
+      product_name: item.product.name,
+      description: item.description || item.notes || item.product.description || undefined,
+      product_sku: isCustomItem ? undefined : item.product.sku,
+      quantity: item.quantity,
+      unit_price: Number(item.unitPrice.toFixed(2)),
+      final_unit_price: Number(item.finalPrice.toFixed(2)),
+      total_price: Number((item.finalPrice * lineUnits).toFixed(2)),
+      tax_rate: taxRate,
+      tax_amount_item:
+        item.taxAmount > 0 && lineUnits > 0
+          ? Number((item.taxAmount / lineUnits).toFixed(2))
+          : undefined,
+      tax_category_id: item.taxCategoryId || undefined,
+      cost:
+        !isCustomItem && item.product.cost
+          ? parseFloat(item.product.cost.toString())
+          : undefined,
+      product_variant_id: isCustomItem ? null : item.variant_id || null,
+      variant_sku: isCustomItem ? null : item.variant_sku || null,
+      variant_attributes: isCustomItem ? null : item.variant_attributes || null,
+      weight: item.weight || undefined,
+      weight_unit: item.weight_unit || undefined,
+      price_override_reason: item.isPriceOverridden
+        ? item.priceOverrideReason
+        : undefined,
+    };
+  }
+
+  private getProductCategoryIds(item: CartItem): number[] {
+    const product = item.product as any;
+    const rawCategoryIds = Array.isArray(product.category_ids)
+      ? product.category_ids
+      : product.category_id
+        ? [product.category_id]
+        : [];
+
+    return rawCategoryIds
+      .map((categoryId: string | number) => Number(categoryId))
+      .filter((categoryId: number) => Number.isFinite(categoryId));
+  }
+
+  private calculateItemTaxRate(item: CartItem): number | undefined {
+    const product = item.product;
+    if (!product?.tax_assignments?.length) return undefined;
+    const rateSum = product.tax_assignments.reduce(
+      (sum: number, assignment: any) => {
+        const assignmentRate =
+          assignment.tax_categories?.tax_rates?.reduce(
+            (rateTotal: number, rate: any) =>
+              rateTotal + parseFloat(rate.rate || '0'),
+            0,
+          ) || 0;
+        return sum + assignmentRate;
+      },
+      0,
+    );
+    return rateSum || undefined;
   }
 
   getPaymentMethods(): Observable<PaymentMethod[]> {
@@ -293,22 +377,7 @@ export class PosPaymentService {
     // Build sale data with conditional customer fields
     const sale_data: any = {
       store_id: this.getStoreId(),
-      items: cartState.items.map((item) => ({
-        product_id: parseInt(item.product.id),
-        product_name: item.product.name,
-        product_sku: item.product.sku,
-        quantity: item.quantity,
-        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
-        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
-        cost: item.product.cost
-          ? parseFloat(item.product.cost.toString())
-          : undefined,
-        product_variant_id: item.variant_id || null,
-        variant_sku: item.variant_sku || null,
-        variant_attributes: item.variant_attributes || null,
-        weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined,
-      })),
+      items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -318,6 +387,7 @@ export class PosPaymentService {
       discount_amount: Number(
         parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
+      promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
@@ -437,22 +507,7 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: cartState.items.map((item) => ({
-        product_id: parseInt(item.product.id),
-        product_name: item.product.name,
-        product_sku: item.product.sku,
-        quantity: item.quantity,
-        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
-        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
-        cost: item.product.cost
-          ? parseFloat(item.product.cost.toString())
-          : undefined,
-        product_variant_id: item.variant_id || null,
-        variant_sku: item.variant_sku || null,
-        variant_attributes: item.variant_attributes || null,
-        weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined,
-      })),
+      items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -462,6 +517,7 @@ export class PosPaymentService {
       discount_amount: Number(
         parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
+      promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: totalWithShipping,
       // Shipping fields
       delivery_type: shippingData.deliveryType,
@@ -566,20 +622,7 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: cartState.items.map((item) => ({
-        product_id: parseInt(item.product.id),
-        product_name: item.product.name,
-        product_sku: item.product.sku,
-        quantity: item.quantity,
-        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
-        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
-        cost: item.product.cost
-          ? parseFloat(item.product.cost.toString())
-          : undefined,
-        product_variant_id: item.variant_id || null,
-        variant_sku: item.variant_sku || null,
-        variant_attributes: item.variant_attributes || null,
-      })),
+      items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -589,6 +632,7 @@ export class PosPaymentService {
       discount_amount: Number(
         parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
+      promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
@@ -658,20 +702,7 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: cartState.items.map((item) => ({
-        product_id: parseInt(item.product.id),
-        product_name: item.product.name,
-        product_sku: item.product.sku,
-        quantity: item.quantity,
-        unit_price: Number(parseFloat(item.unitPrice.toString()).toFixed(2)),
-        total_price: Number(parseFloat(item.totalPrice.toString()).toFixed(2)),
-        cost: item.product.cost
-          ? parseFloat(item.product.cost.toString())
-          : undefined,
-        product_variant_id: item.variant_id || null,
-        variant_sku: item.variant_sku || null,
-        variant_attributes: item.variant_attributes || null,
-      })),
+      items: this.mapCartItemsForPos(cartState),
       subtotal: Number(
         parseFloat(cartState.summary.subtotal.toString()).toFixed(2),
       ),
@@ -681,6 +712,7 @@ export class PosPaymentService {
       discount_amount: Number(
         parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
+      promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
         parseFloat(cartState.summary.total.toString()).toFixed(2),
       ),
@@ -749,23 +781,11 @@ export class PosPaymentService {
       customer_email: cartState.customer.email,
       customer_phone: cartState.customer.phone,
       store_id: this.getStoreId(),
-      items: cartState.items.map((item) => ({
-        product_id: parseInt(item.product.id),
-        product_name: item.product.name,
-        product_sku: item.product.sku,
-        quantity: item.quantity,
-        unit_price: Number(item.unitPrice.toFixed(2)),
-        total_price: Number(item.totalPrice.toFixed(2)),
-        cost: item.product.cost,
-        product_variant_id: item.variant_id || null,
-        variant_sku: item.variant_sku || null,
-        variant_attributes: item.variant_attributes || null,
-        weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined,
-      })),
+      items: this.mapCartItemsForPos(cartState),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
+      promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       requires_payment: false,
       ...(register_id ? { register_id } : {}),
