@@ -389,7 +389,7 @@ export class QuotationsService {
         internal_notes: `Convertida desde cotización ${quotation.quotation_number}`,
         channel: quotation.channel,
       } as any,
-      context?.user_id,
+      { id: context?.user_id },
     );
 
     // Update quotation status
