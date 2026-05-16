@@ -335,6 +335,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | ------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `Vendix-core`            | Core patterns and conventions                           | [skills/Vendix-core/SKILL.md](skills/Vendix-core/SKILL.md)                       |
 | `vendix-product-pricing` | Advanced product pricing logic and rentability patterns | [skills/vendix-product-pricing/SKILL.md](skills/vendix-product-pricing/SKILL.md) |
+| `vendix-analytics-pattern` | Shell+tabs pattern for analytics views and registry    | [.claude/skills/vendix-analytics-pattern/SKILL.md](.claude/skills/vendix-analytics-pattern/SKILL.md) |
 | `agent-teams`            | Agent team orchestration for complex composite tasks    | [skills/agent-teams/SKILL.md](skills/agent-teams/SKILL.md)                       |
 | `vendix-saas-billing`    | SaaS platform billing with partner rev-share split      | [skills/vendix-saas-billing/SKILL.md](skills/vendix-saas-billing/SKILL.md)       |
 | `vendix-subscription-gate` | Feature gating by store subscription state (AI + modules) | [skills/vendix-subscription-gate/SKILL.md](skills/vendix-subscription-gate/SKILL.md) |

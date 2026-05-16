@@ -1,7 +1,7 @@
 import {Component, OnInit, OnDestroy, inject,
-  DestroyRef} from '@angular/core';
+  DestroyRef, signal, computed} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -10,10 +10,6 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -22,25 +18,46 @@ import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   OverviewSummary,
   OverviewTrend } from '../../../interfaces/overview-analytics.interface';
+import {
+  AnalyticsCardComponent
+} from '../../../components/analytics-card/analytics-card.component';
+import {
+  AnalyticsCategoryChipsComponent
+} from '../../../components/analytics-category-chips/analytics-category-chips.component';
+import {
+  ExportButtonComponent
+} from '../../../components/export-button/export-button.component';
+import {
+  DateRangeFilterComponent
+} from '../../../components/date-range-filter/date-range-filter.component';
+import {
+  ANALYTICS_CATEGORIES,
+  ANALYTICS_VIEWS,
+  AnalyticsCategoryId,
+  AnalyticsView,
+} from '../../../config/analytics-registry';
 
 import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
 
 import { EChartsOption } from 'echarts';
-import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
+import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 @Component({
-  selector: 'vendix-overview-summary',
+  selector: 'app-overview-summary',
   standalone: true,
   imports: [
     CommonModule,
-    RouterLink,
+    FormsModule,
     CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     CurrencyPipe,
+    AnalyticsCardComponent,
+    AnalyticsCategoryChipsComponent,
+    ExportButtonComponent,
+    DateRangeFilterComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -72,38 +89,61 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly loading = toSignal(this.loading$, { initialValue: false });
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
 
-  // Chart options
-  gaugeChartOptions: EChartsOption = {};
-  comparativeChartOptions: EChartsOption = {};
+  // Analytics Catalog signals
+  readonly selectedCategory = signal<AnalyticsCategoryId | null>(null);
+  readonly searchTerm = signal<string>('');
 
-  // Cached summary for template helper methods
+  readonly categories = ANALYTICS_CATEGORIES;
+
+  private readonly categoryById = computed(() =>
+    new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
+  );
+
+  readonly filteredViews = computed(() => {
+    const category = this.selectedCategory();
+    const search = this.searchTerm().toLowerCase().trim();
+
+    let views = ANALYTICS_VIEWS.filter((v) => v.category !== 'overview');
+
+    if (category) {
+      views = views.filter((v) => v.category === category);
+    }
+
+    if (search) {
+      views = views.filter(
+        (v) =>
+          v.title.toLowerCase().includes(search) ||
+          v.description.toLowerCase().includes(search),
+      );
+    }
+
+    return views;
+  });
+
+  readonly viewsByCategory = computed(() => {
+    const views = this.filteredViews();
+    const grouped = new Map<AnalyticsCategoryId, AnalyticsView[]>();
+
+    for (const view of views) {
+      if (!grouped.has(view.category)) {
+        grouped.set(view.category, []);
+      }
+      grouped.get(view.category)!.push(view);
+    }
+
+    return grouped;
+  });
+
+// Chart options
+  gaugeChartOptions= signal<EChartsOption>({});
+  comparativeChartOptions= signal<EChartsOption>({});
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
+
+  // Cached summary for template helpers
   private currentSummary: OverviewSummary | null = null;
-
-  // Filter config (no channel — overview is cross-channel)
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date' },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date' },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'hour', label: 'Por Hora' },
-        { value: 'day', label: 'Por Dia' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Ano' },
-      ],
-      placeholder: 'Seleccionar' },
-  ];
-
-  filterValues: FilterValues = {};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -111,16 +151,6 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     // Dispatch initial loads
     this.store.dispatch(OverviewActions.loadOverviewSummary());
     this.store.dispatch(OverviewActions.loadOverviewTrends());
-
-    // Sync store state → filterValues
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
-      });
 
     // Cache summary for template helpers
     this.summary$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((summary) => {
@@ -143,42 +173,33 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-
-    const currentRange = this.filterValues;
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        OverviewActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        OverviewActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
+  onCategoryChange(categoryId: AnalyticsCategoryId | null): void {
+    this.selectedCategory.set(categoryId);
   }
 
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      OverviewActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(OverviewActions.setGranularity({ granularity: 'day' }));
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.store.dispatch(OverviewActions.setDateRange({ dateRange: range }));
   }
+
+  onSearchChange(term: string): void {
+    this.searchTerm.set(term);
+  }
+
+  exportReport(): void {
+  }
+
+  getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.label ?? categoryId;
+  };
+
+  getCategoryIcon = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.icon ?? 'folder';
+  };
+
+  getCategoryColor = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.color ?? 'var(--color-primary)';
+  };
 
   // Template helpers
   getGrowthText(growth?: number): string {
@@ -225,7 +246,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
 
   // Chart builders
   private updateGaugeChart(ratio: number): void {
-    this.gaugeChartOptions = {
+    this.gaugeChartOptions.set({
       series: [
         {
           type: 'gauge',
@@ -266,14 +287,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
             offsetCenter: [0, '20%'],
             color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
           data: [{ value: Math.min(ratio, 150) }] },
-      ] };
+      ] });
   }
 
   private updateComparativeChart(
     trends: OverviewTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const borderColor =
@@ -285,7 +305,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
       formatChartPeriod(t.period, granularity),
     );
 
-    this.comparativeChartOptions = {
+    this.comparativeChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -297,12 +317,12 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         } },
       legend: {
         data: ['Ventas', 'Gastos', 'Impuestos', 'Rend. Bruto', 'Rend. Neto'],
-        bottom: 0,
+        bottom: 30,
         textStyle: { color: textSecondary } },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -314,15 +334,16 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0) },
+          formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
           name: 'Ventas',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.sales),
-          lineStyle: { color: '#22c55e', width: 2 },
+
           itemStyle: { color: '#22c55e' },
           areaStyle: {
             color: {
@@ -339,8 +360,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           name: 'Gastos',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.expenses),
-          lineStyle: { color: '#ef4444', width: 2 },
+
           itemStyle: { color: '#ef4444' },
           areaStyle: {
             color: {
@@ -357,8 +379,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           name: 'Impuestos',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.taxes),
-          lineStyle: { color: '#f59e0b', width: 2 },
+
           itemStyle: { color: '#f59e0b' },
           areaStyle: {
             color: {
@@ -375,8 +398,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           name: 'Rend. Bruto',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.gross_profit),
-          lineStyle: { color: '#3b82f6', width: 2 },
+
           itemStyle: { color: '#3b82f6' },
           areaStyle: {
             color: {
@@ -393,8 +417,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           name: 'Rend. Neto',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.net_profit),
-          lineStyle: { color: '#8b5cf6', width: 2 },
+
           itemStyle: { color: '#8b5cf6' },
           areaStyle: {
             color: {
@@ -407,7 +432,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
                 { offset: 0, color: '#8b5cf64D' },
                 { offset: 1, color: '#8b5cf60D' },
               ] } } },
-      ] };
+      ] });
   }
 
 }

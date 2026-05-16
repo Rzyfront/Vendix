@@ -1,0 +1,19 @@
+<div class="analytics-shell">
+  <header class="shell-header">
+    <div class="header-content">
+      <div class="header-icon" [style.color]="category()?.color">
+        <app-icon [name]="category()?.icon ?? 'chart-bar'" [size]="24"></app-icon>
+      </div>
+      <div class="header-text">
+        <h1 class="header-title">{{ category()?.label }}</h1>
+        <p class="header-description">{{ category()?.description }}</p>
+      </div>
+    </div>
+  </header>
+
+  <app-analytics-tab-bar [tabs]="tabs()"></app-analytics-tab-bar>
+
+  <main class="shell-content">
+    <router-outlet></router-outlet>
+  </main>
+</div>

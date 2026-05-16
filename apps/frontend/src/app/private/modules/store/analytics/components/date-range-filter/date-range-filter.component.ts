@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
@@ -13,20 +13,19 @@ type DatePreset =
   | 'thisMonth'
   | 'lastMonth'
   | 'thisYear'
-  | 'lastYear'
-  | 'custom';
+  | 'lastYear';
 
 @Component({
   selector: 'vendix-date-range-filter',
   standalone: true,
   imports: [
     FormsModule,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
-    <div class="flex flex-col gap-2">
-      <!-- Row 1: Preset Selector -->
-      <div class="w-full sm:w-44">
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+      <!-- Preset Selector -->
+      <div class="w-full sm:w-40 flex-shrink-0">
         <app-selector
           [options]="presetOptions"
           [ngModel]="selectedPreset()"
@@ -36,22 +35,13 @@ type DatePreset =
         ></app-selector>
       </div>
 
-      <!-- Row 2: Date Range Inputs (always visible) -->
-      <div class="flex items-center gap-2">
-        <input
-          type="date"
-          [ngModel]="customStartDate()"
-          (ngModelChange)="onStartDateChange($event)"
-          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        />
-        <span class="text-text-secondary">-</span>
-        <input
-          type="date"
-          [ngModel]="customEndDate()"
-          (ngModelChange)="onEndDateChange($event)"
-          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        />
-      </div>
+      <!-- Date Input -->
+      <input
+        type="date"
+        [ngModel]="selectedDate()"
+        (ngModelChange)="onDateChange($event)"
+        class="px-3 py-2 text-sm border border-black rounded-xl bg-[var(--color-background)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 transition-colors w-full sm:w-40"
+      />
     </div>
   `,
 })
@@ -60,8 +50,7 @@ export class DateRangeFilterComponent {
   valueChange = output<DateRangeFilter>();
 
   selectedPreset = signal<DatePreset>('thisMonth');
-  customStartDate = signal<string>('');
-  customEndDate = signal<string>('');
+  selectedDate = signal<string>('');
 
   presetOptions: SelectorOption[] = [
     { value: 'today', label: 'Hoy' },
@@ -72,82 +61,39 @@ export class DateRangeFilterComponent {
     { value: 'lastMonth', label: 'Mes Pasado' },
     { value: 'thisYear', label: 'Este Año' },
     { value: 'lastYear', label: 'Año Pasado' },
-    { value: 'custom', label: 'Personalizado' },
   ];
 
-  dateRangeLabel = computed(() => {
-    const range = this.getDateRange(this.selectedPreset());
-    if (!range) return '';
-    const start = new Date(range.start_date).toLocaleDateString('es-CO', {
-      day: '2-digit',
-      month: 'short',
-      timeZone: 'UTC',
-    });
-    const end = new Date(range.end_date).toLocaleDateString('es-CO', {
-      day: '2-digit',
-      month: 'short',
-      timeZone: 'UTC',
-    });
-    return `${start} - ${end}`;
-  });
-
   constructor() {
-    // Initialize with default value
     const initialValue = this.value();
-    if (initialValue?.preset) {
-      this.selectedPreset.set(initialValue.preset);
-    }
-    if (initialValue?.start_date) {
-      this.customStartDate.set(initialValue.start_date);
-    }
-    if (initialValue?.end_date) {
-      this.customEndDate.set(initialValue.end_date);
+    if (initialValue?.preset && initialValue.preset !== 'custom') {
+      this.selectedPreset.set(initialValue.preset as DatePreset);
     }
 
-    // Pre-fill date inputs from the default preset if no custom dates were provided
-    if (!this.customStartDate() || !this.customEndDate()) {
-      const defaultRange = this.getDateRange(this.selectedPreset());
-      if (defaultRange) {
-        this.customStartDate.set(defaultRange.start_date);
-        this.customEndDate.set(defaultRange.end_date);
-      }
+    const range = this.getDateRange(this.selectedPreset());
+    if (range) {
+      this.selectedDate.set(range.start_date);
     }
   }
 
   onPresetChange(preset: string): void {
     this.selectedPreset.set(preset as DatePreset);
-    if (preset !== 'custom') {
-      const range = this.getDateRange(preset as DatePreset);
-      if (range) {
-        this.customStartDate.set(range.start_date);
-        this.customEndDate.set(range.end_date);
-        this.valueChange.emit(range);
-      }
+    const range = this.getDateRange(preset as DatePreset);
+    if (range) {
+      this.selectedDate.set(range.start_date);
+      console.log('=== Preset changed ===', preset, JSON.stringify(range));
+      this.valueChange.emit(range);
     }
   }
 
-  onStartDateChange(date: string): void {
-    this.customStartDate.set(date);
-    this.selectedPreset.set('custom');
-    this.emitCustomRange();
-  }
-
-  onEndDateChange(date: string): void {
-    this.customEndDate.set(date);
-    this.selectedPreset.set('custom');
-    this.emitCustomRange();
-  }
-
-  private emitCustomRange(): void {
-    const start = this.customStartDate();
-    const end = this.customEndDate();
-    if (start && end) {
-      this.valueChange.emit({
-        start_date: start,
-        end_date: end,
-        preset: 'custom',
-      });
-    }
+  onDateChange(date: string): void {
+    this.selectedDate.set(date);
+    const range: DateRangeFilter = {
+      start_date: date,
+      end_date: date,
+      preset: this.selectedPreset(),
+    };
+    console.log('=== Date changed ===', date, JSON.stringify(range));
+    this.valueChange.emit(range);
   }
 
   private getDateRange(preset: DatePreset): DateRangeFilter | null {

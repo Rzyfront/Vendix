@@ -346,8 +346,8 @@ export async function seedUsers(
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
-          analytics_traffic: true,
-          analytics_performance: true,
+          analytics_purchases: true,
+          analytics_reviews: true,
           // Settings - ALL enabled
           settings: true,
           settings_general: true,
@@ -401,8 +401,8 @@ export async function seedUsers(
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
-          analytics_traffic: true,
-          analytics_performance: true,
+          analytics_purchases: true,
+          analytics_reviews: true,
           // Settings - ALL enabled
           settings: true,
           settings_general: true,
@@ -443,8 +443,8 @@ export async function seedUsers(
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
-          analytics_traffic: true,
-          analytics_performance: true,
+          analytics_purchases: true,
+          analytics_reviews: true,
           // Settings - ALL enabled
           settings: true,
           settings_general: true,

@@ -55,44 +55,43 @@
 
   <!-- Filter Bar -->
   <div
-    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+    class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
   >
-    <div class="flex items-center justify-between gap-2">
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div
+        class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+      >
+        <app-icon name="users" class="text-[var(--color-primary)]"></app-icon>
+      </div>
       <div class="min-w-0">
         <h2
-          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
+          class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate"
         >
           Analíticas de Clientes
         </h2>
         <p
-          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
+          class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate"
         >
           Tendencias, top clientes y métricas clave
         </p>
       </div>
+    </div>
 
-      <div class="flex items-center gap-2 flex-shrink-0">
-        <vendix-export-button
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
-
-        <app-options-dropdown
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [filters]="filterConfigs"
-          [filterValues]="filterValues"
-          title="Filtros"
-          triggerLabel="Filtros"
-          (filterChange)="onFilterChange($event)"
-          (clearAllFilters)="onClearAllFilters()"
-        ></app-options-dropdown>
-      </div>
+    <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
+      <vendix-export-button
+        [loading]="exporting()"
+        (export)="exportReport()"
+      ></vendix-export-button>
     </div>
   </div>
 
-  <!-- Charts -->
-  <div class="grid grid-cols-1 gap-6 md:mt-4">
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts -->
     <!-- New Customers Trend Chart -->
     <app-card
       shadow="none"
@@ -115,56 +114,17 @@
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
-        } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="trendsChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
-        }
-      </div>
-    </app-card>
-
-    <!-- Top 10 Customers by Spend -->
-    <app-card
-      shadow="none"
-      [padding]="false"
-      overflow="hidden"
-      [showHeader]="true"
-    >
-      <div slot="header" class="flex flex-col">
-        <span class="text-sm font-bold text-[var(--color-text-primary)]"
-          >Top 10 Clientes por Gasto</span
-        >
-        <span class="text-xs text-[var(--color-text-secondary)]"
-          >Clientes con mayor gasto total en el período</span
-        >
-      </div>
-      <div class="p-4">
-        @if (loadingTrends()) {
-          <div class="h-64 flex items-center justify-center">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
+        } @else if (!trendsChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="users" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
           </div>
         } @else {
-          @defer (on viewport) {
-            <app-chart
-              [options]="topCustomersChartOptions"
-              size="large"
-              [showLegend]="false"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <app-chart
+            [options]="trendsChartOptions()"
+            size="large"
+            [showLegend]="true"
+          ></app-chart>
         }
       </div>
     </app-card>
@@ -173,53 +133,12 @@
   <!-- Quick Links -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
     <span class="text-sm font-bold text-[var(--color-text-primary)]"
-      >Reportes Relacionados</span
+      >Vistas de Clientes</span
     >
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <a
-        routerLink="../acquisition"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="user-plus"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Adquisición</span>
-      </a>
-      <a
-        routerLink="../abandoned-carts"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="shopping-cart"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Carritos Abandonados</span>
-      </a>
-      <a
-        routerLink="../../sales/by-customer"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="dollar-sign"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas por Cliente</span>
-      </a>
-      <a
-        routerLink="../../sales/summary"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="trending-up"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Resumen de Ventas</span>
-      </a>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of customersViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
     </div>
   </app-card>
 </div>

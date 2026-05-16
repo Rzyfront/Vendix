@@ -771,18 +771,6 @@ export class BreadcrumbService {
       parent: 'Ventas',
       icon: 'bar-chart',
     },
-    {
-      path: '/admin/analytics/traffic',
-      title: 'Tráfico',
-      parent: 'Analíticas',
-      icon: 'globe',
-    },
-    {
-      path: '/admin/analytics/performance',
-      title: 'Rendimiento',
-      parent: 'Analíticas',
-      icon: 'trending-up',
-    },
 
     // E-commerce
     {
@@ -1026,16 +1014,40 @@ export class BreadcrumbService {
       icon: 'warehouse',
     },
     {
-      path: '/admin/analytics/products/performance',
+      path: '/admin/analytics/products',
       title: 'Productos',
       parent: 'Analíticas',
       icon: 'package',
     },
     {
-      path: '/admin/analytics/customers/summary',
+      path: '/admin/analytics/products',
+      title: 'Productos',
+      parent: 'Analíticas',
+      icon: 'package',
+    },
+    {
+      path: '/admin/analytics/customers',
       title: 'Clientes',
       parent: 'Analíticas',
       icon: 'users',
+    },
+    {
+      path: '/admin/analytics/purchases',
+      title: 'Compras',
+      parent: 'Analíticas',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/analytics/reviews',
+      title: 'Reseñas',
+      parent: 'Analíticas',
+      icon: 'message-square',
+    },
+    {
+      path: '/admin/analytics/financial',
+      title: 'Financiero',
+      parent: 'Analíticas',
+      icon: 'dollar-sign',
     },
     {
       path: '/admin/analytics/financial/profit-loss',
@@ -1086,10 +1098,10 @@ export class BreadcrumbService {
       icon: 'credit-card',
     },
     {
-      path: '/admin/analytics/inventory/stock-info',
-      title: 'Info de Stock',
-      parent: 'Inventario',
-      icon: 'alert-triangle',
+      path: '/admin/analytics/inventory',
+      title: 'Inventario',
+      parent: 'Analíticas',
+      icon: 'warehouse',
     },
     {
       path: '/admin/analytics/inventory/stock-info',

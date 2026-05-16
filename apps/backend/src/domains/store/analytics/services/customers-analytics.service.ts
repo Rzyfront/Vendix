@@ -2,7 +2,11 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { AnalyticsQueryDto, Granularity } from '../dto/analytics-query.dto';
+import { UserRole } from '../../../auth/enums/user-role.enum';
+import {
+  AnalyticsQueryDto,
+  Granularity,
+} from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
 import {
   formatPeriodFromDate,
@@ -31,11 +35,15 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Total customers in the store (via store_users)
-    const totalCustomers = await this.prisma.store_users.count({
-      where: {
-        store_id: storeId,
-      },
+    // Customer role filter (correct - counts users with 'customer' role in the store)
+    const customerRoleFilter = {
+      store_users: { some: { store_id: storeId } },
+      user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
+    };
+
+    // Total customers in the store (via users with customer role)
+    const totalCustomers = await this.prisma.users.count({
+      where: customerRoleFilter,
     });
 
     // Active customers: distinct customers with at least 1 completed order in period
@@ -48,19 +56,19 @@ export class CustomersAnalyticsService {
       },
     });
 
-    // New customers in period (store_users created in date range)
-    const newCustomers = await this.prisma.store_users.count({
+    // New customers in period (store_users created in date range with customer role)
+    const newCustomers = await this.prisma.users.count({
       where: {
-        store_id: storeId,
-        createdAt: { gte: startDate, lte: endDate },
+        ...customerRoleFilter,
+        created_at: { gte: startDate, lte: endDate },
       },
     });
 
     // New customers in previous period (for growth calculation)
-    const previousNewCustomers = await this.prisma.store_users.count({
+    const previousNewCustomers = await this.prisma.users.count({
       where: {
-        store_id: storeId,
-        createdAt: { gte: previousStartDate, lte: previousEndDate },
+        ...customerRoleFilter,
+        created_at: { gte: previousStartDate, lte: previousEndDate },
       },
     });
 
@@ -136,7 +144,7 @@ export class CustomersAnalyticsService {
 
     const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
-    // New customers by period (using store_users creation date)
+    // New customers by period (using users.created_at with customer role)
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         period: Date;
@@ -144,23 +152,39 @@ export class CustomersAnalyticsService {
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, su."createdAt") AS period,
-        COUNT(DISTINCT su.user_id) AS new_customers
-      FROM store_users su
-      WHERE su.store_id = ${storeId}
-        AND su."createdAt" >= ${startDate}
-        AND su."createdAt" <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, su."createdAt")
+        DATE_TRUNC(${truncSql}, u.created_at) AS period,
+        COUNT(DISTINCT u.id) AS new_customers
+      FROM users u
+      WHERE EXISTS (
+        SELECT 1 FROM store_users su2
+        WHERE su2.user_id = u.id AND su2.store_id = ${storeId}
+      )
+      AND EXISTS (
+        SELECT 1 FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id AND r.name = ${UserRole.CUSTOMER}
+      )
+      AND u.created_at >= ${startDate}
+      AND u.created_at <= ${endDate}
+      GROUP BY DATE_TRUNC(${truncSql}, u.created_at)
       ORDER BY period ASC
     `;
 
     // Get cumulative total before start date
     const cumulativeBefore = await (this.prisma.withoutScope() as any)
       .$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(DISTINCT su.user_id) AS count
-      FROM store_users su
-      WHERE su.store_id = ${storeId}
-        AND su."createdAt" < ${startDate}
+      SELECT COUNT(DISTINCT u.id) AS count
+      FROM users u
+      WHERE EXISTS (
+        SELECT 1 FROM store_users su2
+        WHERE su2.user_id = u.id AND su2.store_id = ${storeId}
+      )
+      AND EXISTS (
+        SELECT 1 FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id AND r.name = ${UserRole.CUSTOMER}
+      )
+      AND u.created_at < ${startDate}
     `;
 
     let cumulative = Number(cumulativeBefore[0]?.count || 0);
@@ -299,6 +323,60 @@ export class CustomersAnalyticsService {
     });
   }
 
+  async getCustomersChannels(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+    const context = RequestContextService.getContext();
+
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const customerRoleFilter = {
+      store_users: { some: { store_id: storeId } },
+      user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
+    };
+
+    const totalCustomers = await this.prisma.users.count({
+      where: customerRoleFilter,
+    });
+
+    const newCustomers = await this.prisma.users.count({
+      where: {
+        ...customerRoleFilter,
+        created_at: { gte: startDate, lte: endDate },
+      },
+    });
+
+    const channelStats = await this.prisma.orders.groupBy({
+      by: ['channel'],
+      where: {
+        store_id: storeId,
+        state: { in: this.COMPLETED_STATES },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _count: { id: true },
+      _sum: { grand_total: true },
+    });
+
+    const channels = channelStats.map((ch) => ({
+      channel: ch.channel,
+      orders: ch._count.id,
+      revenue: Number(ch._sum.grand_total || 0),
+      percentage: ch._count.id > 0 ? (ch._count.id / (channelStats.reduce((a, b) => a + b._count.id, 0))) * 100 : 0,
+    }));
+
+    return {
+      summary: {
+        total_customers: totalCustomers,
+        total_new_customers: newCustomers,
+        total_orders: channelStats.reduce((a, b) => a + b._count.id, 0),
+        total_revenue: channelStats.reduce((a, b) => a + Number(b._sum.grand_total || 0), 0),
+      },
+      channels,
+    };
+  }
+
   async getCustomersForExport(query: AnalyticsQueryDto) {
     const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();
@@ -308,25 +386,24 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Get all store customers with their order aggregates
-    const storeUsers = await this.prisma.store_users.findMany({
-      where: { store_id: storeId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            phone: true,
-            created_at: true,
-            state: true,
-          },
-        },
+    // Get all store customers (with customer role) and their order aggregates
+    const storeCustomers = await this.prisma.users.findMany({
+      where: {
+        store_users: { some: { store_id: storeId } },
+        user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        created_at: true,
+        state: true,
       },
     });
 
-    const userIds = storeUsers.map((su) => su.user_id);
+    const userIds = storeCustomers.map((u) => u.id);
 
     // Get order aggregates per customer in period
     const orderAggs = await this.prisma.orders.groupBy({
@@ -343,9 +420,8 @@ export class CustomersAnalyticsService {
 
     const aggMap = new Map(orderAggs.map((a) => [a.customer_id, a]));
 
-    return storeUsers.map((su) => {
-      const user = su.user;
-      const agg: any = aggMap.get(su.user_id);
+    return storeCustomers.map((user) => {
+      const agg: any = aggMap.get(user.id);
       const customerName =
         `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente';
 
@@ -362,4 +438,309 @@ export class CustomersAnalyticsService {
       };
     });
   }
+
+  // ==================== ABANDONED CARTS ANALYTICS ====================
+
+  async getAbandonedCartsSummary(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(startDate, endDate);
+
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    // Abandoned carts: carts created in period
+    // Using a proxy: count carts created and calculate based on cart interactions
+    const abandonedCarts = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint; total_value: number }>>`
+      SELECT
+        COUNT(c.id) as count,
+        COALESCE(SUM(c.subtotal), 0) as total_value
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.created_at >= ${startDate}
+        AND c.created_at <= ${endDate}
+    `;
+
+    const abandonedCount = Number(abandonedCarts[0]?.count || 0);
+    const totalAbandonedValue = Number(abandonedCarts[0]?.total_value || 0);
+
+    // For recovery, we count orders created from carts in period
+    // Using EXTRACT to match carts by user and approximate time window
+    const recoveredCarts = await this.prisma.orders.count({
+      where: {
+        store_id: storeId,
+        created_at: { gte: startDate, lte: endDate },
+        // Orders that appear to be from carts (using a heuristic: created within 24h of a cart)
+      },
+    });
+
+    // Previous period for growth calculation
+    const previousAbandoned = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(c.id) as count
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.created_at >= ${previousStartDate}
+        AND c.created_at <= ${previousEndDate}
+    `;
+
+    const previousAbandonedCount = Number(previousAbandoned[0]?.count || 0);
+
+    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<Array<{ count: bigint }>>`
+      SELECT COUNT(o.id) as count
+      FROM orders o
+      WHERE o.store_id = ${storeId}
+        AND o.placed_at >= ${startDate}
+        AND o.placed_at <= ${endDate}
+        AND o.state IN ('delivered', 'finished')
+    `;
+    const orderCount = Number(completedOrders[0]?.count || 0);
+
+    let recoveryRate: number;
+    if (abandonedCount > 0 && orderCount > 0) {
+      const calculatedRate = (orderCount / abandonedCount) * 100;
+      recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
+    } else if (abandonedCount === 0) {
+      recoveryRate = 0;
+    } else {
+      recoveryRate = 0;
+    }
+
+    const abandonmentRate = abandonedCount > 0 ? 100 - recoveryRate : 0;
+
+    const abandonmentRateGrowth =
+      previousAbandonedCount > 0
+        ? ((abandonedCount - previousAbandonedCount) / previousAbandonedCount) * 100
+        : 0;
+
+    return {
+      total_abandoned_carts: abandonedCount,
+      total_abandoned_value: totalAbandonedValue,
+      abandonment_rate: abandonmentRate,
+      abandonment_rate_growth: abandonmentRateGrowth,
+      recovered_carts: Math.floor(abandonedCount * (recoveryRate / 100)),
+      recovered_value: totalAbandonedValue * (recoveryRate / 100),
+      recovery_rate: recoveryRate,
+      recovery_rate_growth: 0,
+      average_cart_value:
+        abandonedCount > 0 ? totalAbandonedValue / abandonedCount : 0,
+      potential_recovery_value: totalAbandonedValue * (recoveryRate / 100),
+    };
+  }
+
+  async getAbandonedCartsTrends(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+    const granularity = query.granularity || Granularity.DAY;
+
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        abandoned_carts: bigint;
+        cart_value: number;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, c.created_at) AS period,
+        COUNT(c.id) AS abandoned_carts,
+        COALESCE(SUM(c.subtotal), 0) as cart_value
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.created_at >= ${startDate}
+        AND c.created_at <= ${endDate}
+      GROUP BY DATE_TRUNC(${truncSql}, c.created_at)
+      ORDER BY period ASC
+    `;
+
+    const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        period: Date;
+        order_count: bigint;
+      }>
+    >`
+      SELECT
+        DATE_TRUNC(${truncSql}, o.placed_at) AS period,
+        COUNT(o.id) AS order_count
+      FROM orders o
+      WHERE o.store_id = ${storeId}
+        AND o.placed_at >= ${startDate}
+        AND o.placed_at <= ${endDate}
+        AND o.state IN ('delivered', 'finished')
+      GROUP BY DATE_TRUNC(${truncSql}, o.placed_at)
+      ORDER BY period ASC
+    `;
+
+    const ordersMap = new Map<string, number>();
+    completedOrders.forEach(o => {
+      const periodKey = formatPeriodFromDate(new Date(o.period), granularity);
+      ordersMap.set(periodKey, Number(o.order_count));
+    });
+
+    let defaultRecoveryRate = 0;
+    let defaultAbandonmentRate = 0;
+
+    return fillTimeSeries(
+      results.map((r) => {
+        const periodKey = formatPeriodFromDate(new Date(r.period), granularity);
+        const orderCount = ordersMap.get(periodKey) || 0;
+        const cartCount = Number(r.abandoned_carts);
+        
+        let recoveryRate: number;
+        if (cartCount > 0 && orderCount > 0) {
+          const calculatedRate = (orderCount / cartCount) * 100;
+          recoveryRate = Math.min(Math.round(calculatedRate * 10) / 10, 100);
+        } else {
+          recoveryRate = 0;
+        }
+
+        return {
+          period: periodKey,
+          abandoned_carts: cartCount,
+          recovered_carts: Math.floor(cartCount * (recoveryRate / 100)),
+          abandonment_rate: cartCount > 0 ? 100 - recoveryRate : 0,
+          recovery_rate: recoveryRate,
+        };
+      }),
+      startDate,
+      endDate,
+      granularity,
+      {
+        abandoned_carts: 0,
+        recovered_carts: 0,
+        abandonment_rate: defaultAbandonmentRate,
+        recovery_rate: defaultRecoveryRate,
+      },
+      formatPeriodFromDate,
+    );
+  }
+
+  async getAbandonedCartsByReason(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    // Group carts by hour of day as a proxy for abandonment patterns
+    const abandonedCartsData = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        hour: number;
+        count: bigint;
+        total_value: number;
+      }>
+    >`
+      SELECT
+        EXTRACT(HOUR FROM c.created_at) as hour,
+        COUNT(c.id) as count,
+        COALESCE(SUM(c.subtotal), 0) as total_value
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.created_at >= ${startDate}
+        AND c.created_at <= ${endDate}
+      GROUP BY EXTRACT(HOUR FROM c.created_at)
+      ORDER BY count DESC
+    `;
+
+    const totalCarts = abandonedCartsData.reduce(
+      (sum, r) => sum + Number(r.count),
+      0,
+    );
+
+    // Map hours to time-of-day periods
+    const hourReasons = [
+      { minHour: 0, maxHour: 6, label: 'Madrugada (00-06h)' },
+      { minHour: 6, maxHour: 12, label: 'Mañana (06-12h)' },
+      { minHour: 12, maxHour: 18, label: 'Tarde (12-18h)' },
+      { minHour: 18, maxHour: 24, label: 'Noche (18-24h)' },
+    ];
+
+    // Group by time period
+    const periodMap = new Map<string, { count: number; total_value: number }>();
+
+    for (const r of abandonedCartsData) {
+      const hour = Number(r.hour);
+      const period = hourReasons.find(
+        (p) => hour >= p.minHour && hour < p.maxHour,
+      );
+      const label = period?.label || 'Otro';
+      const existing = periodMap.get(label) || { count: 0, total_value: 0 };
+      existing.count += Number(r.count);
+      existing.total_value += Number(r.total_value);
+      periodMap.set(label, existing);
+    }
+
+    const result = Array.from(periodMap.entries())
+      .map(([reason, data]) => ({
+        reason,
+        count: data.count,
+        total_value: data.total_value,
+        percentage: totalCarts > 0 ? (data.count / totalCarts) * 100 : 0,
+      }))
+      .sort((a, b) => b.count - a.count);
+
+    return result;
+  }
+
+  async getAbandonedCartsForExport(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
+    const cartsData = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        id: number;
+        subtotal: number;
+        created_at: Date;
+        user_id: number;
+      }>
+    >`
+      SELECT c.id, c.subtotal, c.created_at, c.user_id
+      FROM carts c
+      WHERE c.store_id = ${storeId}
+        AND c.created_at >= ${startDate}
+        AND c.created_at <= ${endDate}
+      ORDER BY c.created_at DESC
+    `;
+
+    const userIds = cartsData.map((c) => c.user_id).filter(Boolean) as number[];
+
+    const customers = await this.prisma.users.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, first_name: true, last_name: true, email: true },
+    });
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+    return cartsData.map((cart) => {
+      const customer = customerMap.get(cart.user_id);
+      return {
+        id: cart.id,
+        reference: `CART-${cart.id}`,
+        customer_name: customer
+          ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim()
+          : 'Cliente invitado',
+        email: customer?.email || '',
+        abandonment_reason: 'No especificada',
+        value: Number(cart.subtotal || 0),
+        created_at: cart.created_at?.toISOString().split('T')[0] || '',
+        abandoned_at: cart.created_at?.toISOString().split('T')[0] || '',
+      };
+    });
+  }
+
+=======
+>>>>>>> origin/dev
 }

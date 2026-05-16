@@ -21,8 +21,9 @@ export interface CustomerTrend {
 // Top Customer by spend
 export interface TopCustomer {
   id: number;
-  first_name: string;
-  last_name: string;
+  customer_name?: string;
+  first_name?: string;
+  last_name?: string;
   email: string;
   total_orders: number;
   total_spent: number;
@@ -37,4 +38,23 @@ export interface CustomersAnalyticsQueryDto {
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
   granularity?: 'hour' | 'day' | 'week' | 'month' | 'year';
+}
+
+// Acquisition Channel
+export interface AcquisitionChannel {
+  channel: string;
+  orders: number;
+  revenue: number;
+  percentage: number;
+}
+
+// Customers By Channel Response
+export interface CustomersByChannel {
+  summary: {
+    total_customers: number;
+    total_new_customers: number;
+    total_orders: number;
+    total_revenue: number;
+  };
+  channels: AcquisitionChannel[];
 }

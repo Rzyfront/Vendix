@@ -9,6 +9,8 @@ import { ProductsAnalyticsService } from './services/products-analytics.service'
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
 import { FinancialAnalyticsService } from './services/financial-analytics.service';
+import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
+import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import {
   AnalyticsQueryDto,
   SalesAnalyticsQueryDto,
@@ -27,6 +29,8 @@ export class AnalyticsController {
     private readonly overview_analytics_service: OverviewAnalyticsService,
     private readonly customers_analytics_service: CustomersAnalyticsService,
     private readonly financial_analytics_service: FinancialAnalyticsService,
+    private readonly purchases_analytics_service: PurchasesAnalyticsService,
+    private readonly reviews_analytics_service: ReviewsAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -490,6 +494,13 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('customers/channels')
+  @Permissions('store:analytics:read')
+  async getCustomersChannels(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getCustomersChannels(query);
+    return this.response_service.success(result);
+  }
+
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
@@ -540,6 +551,94 @@ export class AnalyticsController {
     });
 
     return new StreamableFile(buffer);
+  }
+
+  @Get('customers/abandoned-carts/summary')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/trends')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsTrends(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsTrends(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/by-reason')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsByReason(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsByReason(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/export')
+  @Permissions('store:analytics:read')
+  async exportAbandonedCarts(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rows = await this.customers_analytics_service.getAbandonedCartsForExport(query);
+
+    const data = rows.map(r => ({
+      'ID': r.id,
+      'Referencia': r.reference,
+      'Cliente': r.customer_name,
+      'Email': r.email,
+      'Razón Abandono': r.abandonment_reason,
+      'Valor': r.value,
+      'Fecha Creación': r.created_at,
+      'Abandonado el': r.abandoned_at,
+    }));
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Carritos Abandonados');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `carritos_abandonados_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  // ==================== PURCHASES ANALYTICS ====================
+
+  @Get('purchases/summary')
+  @Permissions('store:analytics:read')
+  async getPurchasesSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('purchases/by-supplier')
+  @Permissions('store:analytics:read')
+  async getPurchasesBySupplier(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesBySupplier(query);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
+  }
+
+  // ==================== REVIEWS ANALYTICS ====================
+
+  @Get('reviews/summary')
+  @Permissions('store:analytics:read')
+  async getReviewsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsSummary(query);
+    return this.response_service.success(result);
   }
 
   // ==================== FINANCIAL ANALYTICS ====================

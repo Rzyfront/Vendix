@@ -11,9 +11,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
-import {
-  SelectorComponent,
-  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption, SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -32,6 +30,8 @@ import {
   MovementSummaryItem,
   MovementTrend,
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-movement-analysis',
@@ -41,90 +41,18 @@ import {
     FormsModule,
     CardComponent,
     ResponsiveDataViewComponent,
-    SelectorComponent,
     IconComponent,
     StatsComponent,
     ChartComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    SelectorComponent,
+    AnalyticsCardComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
-      <!-- Header -->
-      <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-      >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
-              >Inventario</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Análisis de Movimientos</span>
-          </div>
-          <h1 class="text-2xl font-bold text-text-primary">
-            Análisis de Movimientos
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Tendencias, distribución y detalle de movimientos de inventario
-          </p>
-        </div>
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
-        >
-          <vendix-date-range-filter
-            [value]="dateRange()"
-            (valueChange)="onDateRangeChange($event)"
-          ></vendix-date-range-filter>
-          <div class="w-full sm:w-36">
-            <app-selector
-              [options]="granularityOptions"
-              [ngModel]="granularity()"
-              (ngModelChange)="onGranularityChange($event)"
-              size="sm"
-              placeholder="Granularidad"
-            ></app-selector>
-          </div>
-          <!-- Toggle Chart/Table -->
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="activeView.set('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'chart'
-                  ? 'bg-primary text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráficas
-            </button>
-            <button
-              (click)="activeView.set('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'table'
-                  ? 'bg-primary text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
-          <vendix-export-button
-            [loading]="exporting()"
-            (export)="exportReport()"
-          ></vendix-export-button>
-        </div>
-      </div>
-
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Movimientos"
           [value]="totalMovements()"
@@ -159,6 +87,54 @@ import {
         ></app-stats>
       </div>
 
+      <!-- Header -->
+      <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+            <app-icon name="trending-up" class="text-[var(--color-primary)]"></app-icon>
+          </div>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Análisis de Movimientos
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Tendencias, distribución y detalle de movimientos de inventario
+            </p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
+          <vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
+        </div>
+      </div>
+
+      <!-- Content Grid -->
+      <div class="grid grid-cols-1 gap-6">
       <!-- Chart View -->
       @if (activeView() === 'chart') {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -168,16 +144,10 @@ import {
               >Tendencia de Movimientos</span
             >
             <div class="h-[350px]">
-              @defer (on viewport) {
-                <app-chart
-                  [options]="trendsChartOptions()"
-                  [loading]="loadingTrends()"
-                ></app-chart>
-              } @placeholder {
-                <div
-                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart
+                [options]="trendsChartOptions()"
+                [loading]="loadingTrends()"
+              ></app-chart>
             </div>
           </app-card>
 
@@ -187,16 +157,10 @@ import {
               >Distribución por Tipo</span
             >
             <div class="h-[350px]">
-              @defer (on viewport) {
-                <app-chart
-                  [options]="distributionChartOptions()"
-                  [loading]="loadingSummary()"
-                ></app-chart>
-              } @placeholder {
-                <div
-                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart
+                [options]="distributionChartOptions()"
+                [loading]="loadingSummary()"
+              ></app-chart>
             </div>
           </app-card>
         </div>
@@ -233,7 +197,18 @@ import {
           </div>
         </app-card>
       }
-    </div>
+      </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Inventario</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of inventoryViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
+  </div>
   `})
 export class MovementAnalysisComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
@@ -260,6 +235,17 @@ export class MovementAnalysisComponent implements OnInit {
   trendsChartOptions = signal<EChartsOption>({});
   distributionChartOptions = signal<EChartsOption>({});
 
+  readonly typeLabels: Record<string, string> = {
+    stock_in: 'Entrada',
+    stock_out: 'Salida',
+    sale: 'Venta',
+    return: 'Devolución',
+    transfer: 'Transferencia',
+    adjustment: 'Ajuste',
+    damage: 'Daño',
+    expiration: 'Expiración',
+  };
+
   // Filters
   granularity = signal<string>('day');
   dateRange = signal<DateRangeFilter>({
@@ -272,6 +258,10 @@ export class MovementAnalysisComponent implements OnInit {
     { value: 'week', label: 'Semanal' },
     { value: 'month', label: 'Mensual' },
   ];
+
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
+    (v) => v.key !== 'inventory_movement_analysis'
+  );
 
   columns: TableColumn[] = [
     {
@@ -481,91 +471,166 @@ onDateRangeChange(range: DateRangeFilter): void {
       style.getPropertyValue('--color-primary').trim() || '#3b82f6';
     const warnColor =
       style.getPropertyValue('--color-warning').trim() || '#f59e0b';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
     this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' }},
+        formatter: (params: any) => {
+          return params.map((p: any) => `${p.marker} ${p.seriesName}: ${p.value}`).join('<br/>');
+        },
+      },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
-        bottom: 0},
+        selectedMode: true,
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         top: '5%',
-        containLabel: true},
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 11 }},
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
       yAxis: {
         type: 'value',
-        axisLabel: { fontSize: 11 }},
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
       series: [
         {
           name: 'Entradas',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.stock_in),
-          lineStyle: { color: successColor, width: 2 },
-          itemStyle: { color: successColor }},
+          itemStyle: { color: successColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${successColor}4D` },
+                { offset: 1, color: `${successColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Salidas',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.stock_out),
-          lineStyle: { color: dangerColor, width: 2 },
-          itemStyle: { color: dangerColor }},
+          itemStyle: { color: dangerColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${dangerColor}4D` },
+                { offset: 1, color: `${dangerColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Ajustes',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.adjustments),
-          lineStyle: { color: primaryColor, width: 2 },
-          itemStyle: { color: primaryColor }},
+          itemStyle: { color: primaryColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${primaryColor}4D` },
+                { offset: 1, color: `${primaryColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Transferencias',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: trends.map((t) => t.transfers),
-          lineStyle: { color: warnColor, width: 2 },
-          itemStyle: { color: warnColor }},
-      ]});
+          itemStyle: { color: warnColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${warnColor}4D` },
+                { offset: 1, color: `${warnColor}0D` },
+              ],
+            },
+          },
+        },
+      ],
+    });
   }
 
   private updateDistributionChart(summary: MovementSummaryItem[]): void {
-    const typeLabels: Record<string, string> = {
-      stock_in: 'Entrada',
-      stock_out: 'Salida',
-      sale: 'Venta',
-      return: 'Devolución',
-      transfer: 'Transferencia',
-      adjustment: 'Ajuste',
-      damage: 'Daño',
-      expiration: 'Expiración'};
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    const labels = summary.map((s) => this.typeLabels[s.movement_type] || s.movement_type);
+    const series = summary.map((s, i) => ({
+      name: this.typeLabels[s.movement_type] || s.movement_type,
+      type: 'bar' as const,
+      data: [s.count],
+      itemStyle: { color: colors[i % 6] },
+      barMaxWidth: 32,
+    }));
 
     this.distributionChartOptions.set({
       tooltip: {
-        trigger: 'item',
-        formatter: '{b}: {c} ({d}%)'},
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: <b>${p.value}</b>`;
+        }},
       legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'center'},
-      series: [
-        {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' }},
-          data: summary.map((s) => ({
-            name: typeLabels[s.movement_type] || s.movement_type,
-            value: s.count}))},
-      ]});
+        data: labels,
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: '#6b7280' },
+      },
+      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: { type: 'category', data: ['Tipo'] },
+      yAxis: {
+        type: 'value',
+      },
+      series,
+    });
   }
 
   exportReport(): void {

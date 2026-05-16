@@ -116,14 +116,13 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
           <div class="loading-spinner"></div>
         </div>
       }
-      <div
-        echarts
-        [options]="mergedOptions()"
-        [theme]="$any(echartsTheme())"
-        class="echarts-chart"
-        (chartClick)="onChartClick($event)"
-        (chartMouseOver)="onChartHover($event)"
-      ></div>
+<div
+      echarts
+      [options]="mergedOptions()"
+      class="echarts-chart"
+      (chartClick)="onChartClick($event)"
+      (chartMouseOver)="onChartHover($event)"
+    ></div>
     </div>
     `,
   styles: [

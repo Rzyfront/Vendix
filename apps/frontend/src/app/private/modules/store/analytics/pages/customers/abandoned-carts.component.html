@@ -1,0 +1,174 @@
+<div class="pb-6">
+  <!-- Stats Cards -->
+  @if (loading()) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div
+          class="bg-surface border border-border rounded-xl p-4 animate-pulse"
+        >
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div
+      class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+    >
+      <app-stats
+        title="Carritos Abandonados"
+        [value]="summary()?.total_abandoned_carts || 0"
+        smallText="Total en el período"
+        iconName="shopping-cart"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
+
+      <app-stats
+        title="Valor Abandonado"
+        [value]="summary()?.total_abandoned_value | currency"
+        smallText="Potencial perdido"
+        iconName="dollar-sign"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Tasa de Abandono"
+        [value]="getAbandonmentRate()"
+        [smallText]="getGrowthText(summary()?.abandonment_rate_growth)"
+        iconName="alert-triangle"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+
+      <app-stats
+        title="Tasa de Recuperación"
+        [value]="getRecoveryRate()"
+        [smallText]="getGrowthText(summary()?.recovery_rate_growth)"
+        iconName="refresh-cw"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+        <app-icon name="shopping-cart" class="text-[var(--color-primary)]"></app-icon>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+          Carritos Abandonados
+        </h1>
+        <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+          Análisis de abandono y recuperación de carritos
+        </p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 md:gap-3 shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
+      <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [loading]="exporting()"
+          (export)="exportReport()"
+        ></vendix-export-button>
+    </div>
+  </div>
+
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts -->
+    <!-- Abandoned vs Recovered Carts Trend -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Tendencia de Carritos</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Carritos abandonados vs recuperados por período</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else if (!trendsChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="shopping-cart" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
+          </div>
+        } @else {
+          <app-chart
+            [options]="trendsChartOptions()"
+            size="large"
+            [showLegend]="true"
+          ></app-chart>
+        }
+      </div>
+    </app-card>
+
+    <!-- Recovery Rate Trend -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Tasa de Recuperación</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Porcentaje de carritos abandonados que fueron recuperados</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else if (!recoveryRateChartOptions()) {
+          <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+            <app-icon name="refresh-cw" [size]="48" class="mb-2 opacity-50"></app-icon>
+            <p>No hay datos para el período seleccionado</p>
+          </div>
+        } @else {
+          <app-chart
+            [options]="recoveryRateChartOptions()"
+            size="large"
+            [showLegend]="true"
+          ></app-chart>
+        }
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Quick Links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]"
+      >Vistas de Clientes</span
+    >
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of customersViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

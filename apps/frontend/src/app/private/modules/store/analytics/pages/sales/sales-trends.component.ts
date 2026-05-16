@@ -8,6 +8,7 @@ import { FormsModule } from '@angular/forms';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
   SelectorComponent,
   SelectorOption} from '../../../../../../shared/components/selector/selector.component';
@@ -28,6 +29,8 @@ import {
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-sales-trends',
@@ -37,39 +40,70 @@ import { EChartsOption } from 'echarts';
     FormsModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     SelectorComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Período"
+          [value]="periodLabel()"
+          iconName="calendar"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Total Órdenes"
+          [value]="getTotalOrders()"
+          iconName="shopping-cart"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ingresos Total"
+          [value]="getTotalRevenue()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ticket Promedio"
+          [value]="getAvgOrder()"
+          iconName=" receipt"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
       >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary"
-              >Ventas</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Tendencias</span>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div
+            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+          >
+            <app-icon name="trending-up" class="text-[var(--color-primary)]"></app-icon>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
-            Tendencias de Ventas
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Evolución de ventas en el tiempo
-          </p>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Tendencias de Ventas
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Evolución de ventas en el tiempo
+            </p>
+          </div>
         </div>
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
-        >
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -114,6 +148,11 @@ import { EChartsOption } from 'echarts';
                   class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
                 ></div>
               </div>
+            } @else if (data().length === 0) {
+              <div class="h-80 flex flex-col items-center justify-center text-text-secondary">
+                <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
+                <p>No hay datos para el período seleccionado</p>
+              </div>
             } @else {
               @defer (on viewport) {
                 <app-chart
@@ -151,6 +190,11 @@ import { EChartsOption } from 'echarts';
                   class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
                 ></div>
               </div>
+            } @else if (data().length === 0) {
+              <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+                <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
+                <p>No hay datos para el período seleccionado</p>
+              </div>
             } @else {
               @defer (on viewport) {
                 <app-chart
@@ -166,6 +210,16 @@ import { EChartsOption } from 'echarts';
           </div>
         </app-card>
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of salesViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class SalesTrendsComponent implements OnInit {
@@ -176,6 +230,7 @@ export class SalesTrendsComponent implements OnInit {
 loading = signal(true);
   exporting = signal(false);
   data = signal<SalesTrend[]>([]);
+  periodLabel = signal<string>('Este Mes');
   granularity = signal<'day' | 'week' | 'month'>('day');
   combinedChartOptions = signal<EChartsOption>({});
   aovChartOptions = signal<EChartsOption>({});
@@ -189,6 +244,10 @@ loading = signal(true);
     { value: 'week', label: 'Semanal' },
     { value: 'month', label: 'Mensual' },
   ];
+
+  readonly salesViews: AnalyticsView[] = getViewsByCategory('sales').filter(
+    (v) => v.key !== 'sales_trends'
+  );
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -240,12 +299,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisPointer: { type: 'cross' }},
       legend: {
         data: ['Ingresos', 'Órdenes'],
-        top: 0,
+        bottom: 30,
         textStyle: { color: '#6b7280' }},
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '15%',
         top: '15%',
         containLabel: true},
       xAxis: {
@@ -258,6 +317,9 @@ onDateRangeChange(range: DateRangeFilter): void {
           type: 'value',
           name: 'Ingresos',
           position: 'left',
+          min: 0,
+          max: 1000000,
+          splitNumber: 5,
           axisLine: { show: false },
           axisLabel: {
             color: '#6b7280',
@@ -268,6 +330,9 @@ onDateRangeChange(range: DateRangeFilter): void {
           type: 'value',
           name: 'Órdenes',
           position: 'right',
+          min: 0,
+          max: 100,
+          splitNumber: 5,
           axisLine: { show: false },
           axisLabel: { color: '#6b7280' },
           splitLine: { show: false }},
@@ -277,9 +342,9 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Ingresos',
           type: 'line',
           smooth: true,
+          symbol: 'circle',
           data: revenues,
           yAxisIndex: 0,
-          lineStyle: { color: '#22c55e', width: 2 },
           itemStyle: { color: '#22c55e' },
           areaStyle: {
             color: {
@@ -291,15 +356,17 @@ onDateRangeChange(range: DateRangeFilter): void {
               colorStops: [
                 { offset: 0, color: 'rgba(34, 197, 94, 0.2)' },
                 { offset: 1, color: 'rgba(34, 197, 94, 0)' },
-              ]}}},
+              ] }},
+        },
         {
           name: 'Órdenes',
-          type: 'bar',
+          type: 'line',
+          smooth: true,
+          symbol: 'circle',
           data: orders,
           yAxisIndex: 1,
-          itemStyle: {
-            color: '#3b82f6',
-            borderRadius: [4, 4, 0, 0]}},
+          itemStyle: { color: '#3b82f6' },
+        },
       ]});
 
     // AOV Chart
@@ -310,10 +377,15 @@ onDateRangeChange(range: DateRangeFilter): void {
           const d = params[0];
           return `${d.name}<br/>Ticket Promedio: ${this.formatCurrency(d.value)}`;
         }},
+      legend: {
+        data: ['Ticket Promedio'],
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '15%',
         containLabel: true},
       xAxis: {
         type: 'category',
@@ -322,6 +394,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLabel: { color: '#6b7280' }},
       yAxis: {
         type: 'value',
+        min: 0,
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
@@ -332,9 +405,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Ticket Promedio',
           type: 'line',
-          smooth: true,
           data: aov,
-          lineStyle: { color: '#8b5cf6', width: 2 },
           itemStyle: { color: '#8b5cf6' },
           areaStyle: {
             color: {
@@ -346,7 +417,8 @@ onDateRangeChange(range: DateRangeFilter): void {
               colorStops: [
                 { offset: 0, color: 'rgba(139, 92, 246, 0.2)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0)' },
-              ]}}},
+              ] }},
+        },
       ]});
   }
 
@@ -375,5 +447,20 @@ onDateRangeChange(range: DateRangeFilter): void {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  getTotalOrders(): number {
+    return this.data().reduce((sum, d) => sum + (d.orders || 0), 0);
+  }
+
+  getTotalRevenue(): string {
+    const total = this.data().reduce((sum, d) => sum + (d.revenue || 0), 0);
+    return this.currencyService.format(total, 0);
+  }
+
+  getAvgOrder(): string {
+    const total = this.data().reduce((sum, d) => sum + (d.revenue || 0), 0);
+    const orders = this.getTotalOrders();
+    return orders ? this.currencyService.format(total / orders, 0) : '$0';
   }
 }

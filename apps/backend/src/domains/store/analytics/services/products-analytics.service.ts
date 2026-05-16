@@ -119,6 +119,11 @@ export class ProductsAnalyticsService {
     const productIds = results
       .map((r) => r.product_id)
       .filter(Boolean) as number[];
+
+    if (productIds.length === 0) {
+      return [];
+    }
+
     const products = (await this.prisma.products.findMany({
       where: { id: { in: productIds } },
       select: {
@@ -143,28 +148,35 @@ export class ProductsAnalyticsService {
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
-    return results.map((r) => {
-      const product = productMap.get(r.product_id as number);
-      const revenue = Number(r._sum.total_price || 0);
-      const units = Number(r._sum.quantity || 0);
-      const costPrice = product ? Number(product.cost_price || 0) : 0;
-      const avgPrice = units > 0 ? revenue / units : 0;
-      const profitMargin =
-        costPrice > 0 && avgPrice > 0
-          ? ((avgPrice - costPrice) / avgPrice) * 100
-          : null;
+    return results
+      .map((r) => {
+        const product = productMap.get(r.product_id as number);
+        const revenue = Number(r._sum.total_price || 0);
+        const units = Number(r._sum.quantity || 0);
 
-      return {
-        product_id: r.product_id,
-        product_name: product?.name || 'Desconocido',
-        sku: product?.sku || '',
-        image_url: product?.product_images?.[0]?.image_url || null,
-        units_sold: units,
-        revenue,
-        average_price: avgPrice,
-        profit_margin: profitMargin,
-      };
-    });
+        if (units === 0 || revenue === 0) {
+          return null;
+        }
+
+        const costPrice = product ? Number(product.cost_price || 0) : 0;
+        const avgPrice = units > 0 ? revenue / units : 0;
+        const profitMargin =
+          costPrice > 0 && avgPrice > 0
+            ? ((avgPrice - costPrice) / avgPrice) * 100
+            : null;
+
+        return {
+          product_id: r.product_id,
+          product_name: product?.name || 'Desconocido',
+          sku: product?.sku || '',
+          image_url: product?.product_images?.[0]?.image_url || null,
+          units_sold: units,
+          revenue,
+          average_price: avgPrice,
+          profit_margin: profitMargin,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   }
 
   async getProductsTable(query: ProductsAnalyticsQueryDto) {

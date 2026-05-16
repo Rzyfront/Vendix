@@ -1,5 +1,7 @@
 :host {
   display: block;
+  min-width: 0;
+  width: 100%;
 
   // Mobile: Fixed width for horizontal scroll container
   @media (max-width: 639px) {
@@ -14,6 +16,8 @@
 
 .stat-card {
   @apply bg-surface rounded-2xl shadow-sm border border-border transition-shadow overflow-hidden;
+  height: 100%;
+  min-height: 88px;
 
   // Desktop layout: horizontal with icon on right
   @apply p-3.5 flex items-center;
@@ -84,6 +88,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 
   // Mobile: same size as reference
   @media (max-width: 639px) {

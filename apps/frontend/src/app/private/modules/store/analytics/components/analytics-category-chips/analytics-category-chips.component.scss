@@ -1,0 +1,62 @@
+:host {
+  display: block;
+}
+
+.chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 9999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background-color: var(--color-surface-hover);
+    border-color: var(--color-border-strong);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  &.selected {
+    color: var(--chip-color, var(--color-primary));
+    background-color: color-mix(in srgb, var(--chip-color, var(--color-primary)) 10%, transparent);
+    border-color: var(--chip-color, var(--color-primary));
+    font-weight: 600;
+
+    &:hover {
+      background-color: color-mix(in srgb, var(--chip-color, var(--color-primary)) 15%, transparent);
+    }
+  }
+
+  app-icon {
+    flex-shrink: 0;
+  }
+}
+
+@media (min-width: 768px) {
+  .chip {
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+  }
+}

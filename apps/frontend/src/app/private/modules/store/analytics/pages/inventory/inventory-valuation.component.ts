@@ -7,19 +7,25 @@ import { RouterModule } from '@angular/router';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { InventoryValuation } from '../../interfaces/inventory-analytics.interface';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 import { EChartsOption } from 'echarts';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-inventory-valuation',
@@ -28,39 +34,107 @@ import { EChartsOption } from 'echarts';
     RouterModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
+    AnalyticsCardComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Ubicaciones"
+          [value]="getLocationCount()"
+          smallText=" ubicaciones"
+          iconName="map-pin"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Valor Total"
+          [value]="getTotalValue()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Unidades Totales"
+          [value]="getTotalUnits()"
+          iconName="package"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ubicación Principal"
+          [value]="getTopLocation()"
+          iconName="trophy"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
       >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/inventory" class="hover:text-primary"
-              >Inventario</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Valoración</span>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div
+            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+          >
+            <app-icon name="dollar-sign" class="text-[var(--color-primary)]"></app-icon>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
-            Valoración de Inventario
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Valor del inventario por ubicación y categoría
-          </p>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Valoración de Inventario
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Valor del inventario por ubicación y categoría
+            </p>
+          </div>
         </div>
-        <vendix-export-button
-          [loading]="exporting()"
-          (export)="exportReport()"
-        ></vendix-export-button>
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+          <vendix-date-range-filter
+            [value]="dateRange()"
+            (valueChange)="onDateRangeChange($event)"
+          ></vendix-date-range-filter>
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="activeView.set('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="activeView.set('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
+          <vendix-export-button
+            [loading]="exporting()"
+            (export)="exportReport()"
+          ></vendix-export-button>
+        </div>
       </div>
 
       <!-- Total Value Card -->
@@ -79,8 +153,9 @@ import { EChartsOption } from 'echarts';
       }
 
       <!-- Content Grid -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Pie Chart -->
+      <div class="grid grid-cols-1 gap-6">
+      <!-- Chart View -->
+      @if (activeView() === 'chart') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -94,47 +169,57 @@ import { EChartsOption } from 'echarts';
           </div>
           <div class="p-4">
             @if (loading()) {
-              <div class="h-64 flex items-center justify-center">
-                <div
-                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-                ></div>
+              <div class="h-80 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              </div>
+            } @else if (data().length === 0) {
+              <div class="h-80 flex flex-col items-center justify-center text-text-secondary">
+                <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
+                <p>No hay datos para el período seleccionado</p>
               </div>
             } @else {
-              @defer (on viewport) {
-                <app-chart [options]="chartOptions()" size="large"></app-chart>
-              } @placeholder {
-                <div
-                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart [options]="chartOptions()" size="large"></app-chart>
             }
           </div>
         </app-card>
+      }
 
-        <!-- Table -->
-        <app-card
-          shadow="none"
-          [padding]="false"
-          overflow="hidden"
-          [showHeader]="true"
-        >
-          <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]"
-              >Detalle por Ubicación</span
-            >
-          </div>
-          <div class="p-4">
-            <app-responsive-data-view
-              [data]="data()"
-              [columns]="columns"
-              [cardConfig]="cardConfig"
-              [loading]="loading()"
-              emptyMessage="No hay datos de valoración"
-              emptyIcon="dollar-sign"
-            ></app-responsive-data-view>
-          </div>
-        </app-card>
+      <!-- Table View -->
+      @if (activeView() === 'table') {
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]"
+            >Detalle por Ubicación</span
+          >
+        </div>
+        <div class="p-4">
+          <app-responsive-data-view
+            [data]="data()"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [loading]="loading()"
+            emptyMessage="No hay datos de valoración"
+            emptyIcon="dollar-sign"
+          ></app-responsive-data-view>
+        </div>
+      </app-card>
+      }
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Inventario</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of inventoryViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class InventoryValuationComponent implements OnInit {
@@ -144,10 +229,19 @@ export class InventoryValuationComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
 loading = signal(true);
   exporting = signal(false);
+  activeView = signal<'chart' | 'table'>('chart');
   data = signal<InventoryValuation[]>([]);
   chartOptions = signal<EChartsOption>({});
   totalValue = signal(0);
   totalQuantity = signal(0);
+  dateRange = signal<DateRangeFilter>({
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
+    preset: 'thisMonth'});
+
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
+    (v) => v.key !== 'inventory_valuation'
+  );
 
   columns: TableColumn[] = [
     { key: 'location_name', label: 'Ubicación', sortable: true, priority: 1 },
@@ -205,7 +299,7 @@ loadData(): void {
     this.loading.set(true);
 
     this.analyticsService
-      .getInventoryValuation()
+      .getInventoryValuation({ date_range: this.dateRange() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -230,48 +324,54 @@ loadData(): void {
   private updateChart(data: InventoryValuation[]): void {
     const chartData = data.map((item) => ({
       value: item.total_value,
-      name: item.location_name}));
+      name: item.location_name,
+    }));
 
     this.chartOptions.set({
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
         formatter: (params: any) => {
-          return `${params.name}<br/>Valor: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
-        }},
-      legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'middle',
-        textStyle: { color: '#6b7280' }},
-      series: [
-        {
-          name: 'Valoración',
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2},
-          label: {
-            show: false},
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 14,
-              fontWeight: 'bold'}},
-          labelLine: {
-            show: false},
-          data: chartData},
-      ],
-      color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']});
+          const p = params[0];
+          return `${p.name}<br/>Valor: ${this.formatCurrency(p.value)}<br/>Porcentaje: ${p.percent}%`;
+        },
+      },
+legend: {
+        data: ['Valor'],
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: '#6b7280' },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: chartData.map((d: any) => d.name),
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: '#6b7280', fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        splitNumber: 5,
+        axisLine: { show: false },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO') },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
+      },
+      series: chartData.map((d: any, i: number) => ({
+          name: d.name,
+          type: 'bar' as const,
+          data: [d.value],
+          itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] },
+          barMaxWidth: 40,
+        })),
+    });
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
-      .exportInventoryAnalytics({})
+      .exportInventoryAnalytics({ date_range: this.dateRange() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
@@ -289,7 +389,31 @@ loadData(): void {
         }});
   }
 
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.dateRange.set(range);
+    this.loadData();
+  }
+
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  getLocationCount(): number {
+    return this.data().length;
+  }
+
+  getTotalValue(): string {
+    const total = this.data().reduce((sum, l) => sum + (l.total_value || 0), 0);
+    return this.currencyService.format(total, 0);
+  }
+
+  getTotalUnits(): number {
+    return this.data().reduce((sum, l) => sum + (l.total_quantity || 0), 0);
+  }
+
+  getTopLocation(): string {
+    if (!this.data().length) return '-';
+    const top = [...this.data()].sort((a, b) => b.total_value - a.total_value)[0];
+    return top?.location_name?.substring(0, 15) || '-';
   }
 }
