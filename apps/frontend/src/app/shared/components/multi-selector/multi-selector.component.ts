@@ -121,7 +121,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
                 [ngModel]="searchTerm()"
                 (ngModelChange)="onSearch($event)"
               class="w-full px-3 py-1.5 text-sm border border-border
-                     focus:outline-none focus:ring-1 focus:ring-secondary/40 focus:border-primary
+                     hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
                      bg-[var(--color-surface)] text-[var(--color-text-primary)]"
                 style="border-radius: var(--radius-sm);"
                 placeholder="Buscar..."
@@ -359,6 +359,8 @@ export class MultiSelectorComponent implements ControlValueAccessor {
       'border',
       'bg-[var(--color-surface)]',
       'transition-colors',
+      'hover:border-[var(--color-primary)]',
+      'focus:border-[var(--color-primary)]',
       'focus:outline-none',
       'disabled:opacity-50',
       'disabled:cursor-not-allowed',
@@ -381,7 +383,7 @@ export class MultiSelectorComponent implements ControlValueAccessor {
         'rounded-xl',
         '!bg-[var(--color-background)]',
         'focus:!bg-[var(--color-surface)]',
-        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+        'focus:shadow-[0_0_0_2px_var(--color-ring)]',
       ].join(' ');
     }
 
@@ -391,8 +393,8 @@ export class MultiSelectorComponent implements ControlValueAccessor {
       ...sizeClasses[this.size()],
       'rounded-xl',
       'focus:ring-2',
-      'focus:ring-secondary/40',
-      'focus:border-primary',
+      'focus:ring-[var(--color-ring)]',
+      'focus:border-[var(--color-primary)]',
     ].join(' ');
   }
 }

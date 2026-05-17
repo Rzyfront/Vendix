@@ -31,6 +31,7 @@ import {
   ButtonComponent,
   InputComponent,
   SelectorComponent,
+  TextareaComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton } from '../../../../shared/components';
@@ -51,6 +52,7 @@ import type { Currency } from '../../../../shared/pipes/currency';
     ButtonComponent,
     InputComponent,
     SelectorComponent,
+    TextareaComponent,
     SettingToggleComponent,
     StickyHeaderComponent,
     FooterSettingsFormComponent,

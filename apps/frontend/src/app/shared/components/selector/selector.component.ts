@@ -232,16 +232,16 @@ export class SelectorComponent implements ControlValueAccessor {
     if (this.errorText()) {
       stateClasses = [
         'border',
-        'border-black',
-        'focus:border-black',
+        'border-[var(--color-destructive)]',
+        'focus:border-[var(--color-destructive)]',
         'bg-[rgba(239,68,68,0.1)]',
       ];
     } else {
       stateClasses = [
         'border',
-        'border-black',
-        'hover:border-black',
-        'focus:border-primary',
+        'border-border',
+        'hover:border-[var(--color-primary)]',
+        'focus:border-[var(--color-primary)]',
       ];
     }
 
@@ -265,8 +265,8 @@ export class SelectorComponent implements ControlValueAccessor {
         '!bg-[var(--color-background)]',
         'focus:!bg-[var(--color-surface)]',
         this.errorText()
-          ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
-          : 'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          : 'focus:shadow-[0_0_0_2px_var(--color-ring)]',
       ];
     } else {
       // Classic: with ring focus
@@ -276,7 +276,7 @@ export class SelectorComponent implements ControlValueAccessor {
         'focus:ring-2',
         this.errorText()
           ? 'focus:ring-[var(--color-destructive)]/30'
-          : 'focus:ring-secondary/40',
+          : 'focus:ring-[var(--color-ring)]',
       ];
     }
 
