@@ -78,6 +78,19 @@ export class CatalogService {
       where.is_on_sale = true;
     }
 
+    // Apply out_of_stock_action setting from store
+    const storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const ecommerceSettings = storeSettings?.settings?.ecommerce || {};
+    const outOfStockAction = ecommerceSettings.out_of_stock_action || 'hide';
+
+    // Filter products based on out_of_stock_action
+    if (outOfStockAction === 'hide') {
+      where.stock_quantity = { gt: 0 };
+    }
+
     let orderBy: any;
     let explicitIds: number[] | null = null;
 
@@ -368,9 +381,12 @@ export class CatalogService {
   }
 
   async getBrands() {
+    const store_id = RequestContextService.getStoreId();
+
     const brands = await this.prisma.brands.findMany({
       where: {
         state: 'active',
+        store_id,
       },
       orderBy: { name: 'asc' },
       select: {
