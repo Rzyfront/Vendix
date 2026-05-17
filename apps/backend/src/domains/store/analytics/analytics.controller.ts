@@ -9,6 +9,8 @@ import { ProductsAnalyticsService } from './services/products-analytics.service'
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
 import { FinancialAnalyticsService } from './services/financial-analytics.service';
+import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
+import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import {
   AnalyticsQueryDto,
   SalesAnalyticsQueryDto,
@@ -27,6 +29,8 @@ export class AnalyticsController {
     private readonly overview_analytics_service: OverviewAnalyticsService,
     private readonly customers_analytics_service: CustomersAnalyticsService,
     private readonly financial_analytics_service: FinancialAnalyticsService,
+    private readonly purchases_analytics_service: PurchasesAnalyticsService,
+    private readonly reviews_analytics_service: ReviewsAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -402,6 +406,22 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('inventory/aging')
+  @Permissions('store:analytics:read')
+  async getInventoryAging(@Query() query: InventoryAnalyticsQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getInventoryAging(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('inventory/expiring')
+  @Permissions('store:analytics:read')
+  async getExpiringProducts(@Query() query: InventoryAnalyticsQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getExpiringProducts(query);
+    return this.response_service.success(result);
+  }
+
   @Get('inventory/movement-summary')
   @Permissions('store:analytics:read')
   async getMovementSummary(@Query() query: InventoryAnalyticsQueryDto) {
@@ -490,6 +510,13 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('customers/channels')
+  @Permissions('store:analytics:read')
+  async getCustomersChannels(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getCustomersChannels(query);
+    return this.response_service.success(result);
+  }
+
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
@@ -542,6 +569,152 @@ export class AnalyticsController {
     return new StreamableFile(buffer);
   }
 
+  @Get('customers/abandoned-carts/summary')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/trends')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsTrends(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsTrends(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/by-reason')
+  @Permissions('store:analytics:read')
+  async getAbandonedCartsByReason(@Query() query: AnalyticsQueryDto) {
+    const result = await this.customers_analytics_service.getAbandonedCartsByReason(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('customers/abandoned-carts/export')
+  @Permissions('store:analytics:read')
+  async exportAbandonedCarts(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rows = await this.customers_analytics_service.getAbandonedCartsForExport(query);
+
+    const data = rows.map(r => ({
+      'ID': r.id,
+      'Referencia': r.reference,
+      'Cliente': r.customer_name,
+      'Email': r.email,
+      'Razón Abandono': r.abandonment_reason,
+      'Valor': r.value,
+      'Fecha Creación': r.created_at,
+      'Abandonado el': r.abandoned_at,
+    }));
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Carritos Abandonados');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `carritos_abandonados_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  // ==================== PURCHASES ANALYTICS ====================
+
+  @Get('purchases/summary')
+  @Permissions('store:analytics:read')
+  async getPurchasesSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('purchases/by-supplier')
+  @Permissions('store:analytics:read')
+  async getPurchasesBySupplier(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesBySupplier(query);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
+  }
+
+  @Get('purchases/export')
+  @Permissions('store:analytics:read')
+  async exportPurchasesAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rows =
+      await this.purchases_analytics_service.getPurchasesBySupplier(query);
+    const data = Array.isArray(rows) ? rows : rows.data;
+
+    const exportData = data.map((row) => ({
+      Proveedor: row.supplier_name,
+      Órdenes: row.order_count,
+      'Total Gastado': row.total_spent,
+      Pendientes: row.pending_orders,
+      'Última Orden': row.last_order_date || '',
+    }));
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, ws, 'Compras');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `compras_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
+  // ==================== REVIEWS ANALYTICS ====================
+
+  @Get('reviews/summary')
+  @Permissions('store:analytics:read')
+  async getReviewsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('reviews/export')
+  @Permissions('store:analytics:read')
+  async exportReviewsAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.reviews_analytics_service.getReviewsForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Reseñas');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `resenas_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
   // ==================== FINANCIAL ANALYTICS ====================
 
   @Get('financial/tax-summary')
@@ -570,6 +743,40 @@ export class AnalyticsController {
     const result =
       await this.financial_analytics_service.getProfitLossSummary(query);
     return this.response_service.success(result);
+  }
+
+  @Get('financial/refunds')
+  @Permissions('store:analytics:read')
+  async getRefundsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.financial_analytics_service.getRefundsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('financial/export')
+  @Permissions('store:analytics:read')
+  async exportFinancialAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data =
+      await this.financial_analytics_service.getFinancialSummaryForExport(
+        query,
+      );
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Financiero');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `financiero_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   @Get('financial/tax-summary/export')

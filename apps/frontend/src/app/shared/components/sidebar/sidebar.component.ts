@@ -12,7 +12,6 @@ import {
 } from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
-import { TooltipComponent } from '../tooltip/tooltip.component';
 import { BadgeComponent } from '../badge/badge.component';
 import { ToastService } from '../toast/toast.service';
 
@@ -67,7 +66,7 @@ export interface MenuItem {
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterModule, IconComponent, TooltipComponent, BadgeComponent],
+  imports: [RouterModule, IconComponent, BadgeComponent],
   template: `
     <!-- Mobile Backdrop -->
     @if (isMobile() && isMobileOpen()) {
@@ -129,15 +128,6 @@ export interface MenuItem {
               <span class="truncate">{{ vlink() }}</span>
               <app-icon name="link-2" [size]="12"></app-icon>
             </a>
-            <app-tooltip
-              class="vlink-tooltip"
-              position="right"
-              color="primary"
-              size="sm"
-              [visible]="showPromoTooltip()"
-            >
-              {{ showPromoTooltip() ? 'Descubre tu propio entorno personalizado' : vlink() + ' commerce' }}
-            </app-tooltip>
           </div>
         </div>
       </div>
@@ -273,7 +263,6 @@ export class SidebarComponent implements AfterViewInit {
   readonly collapsed = input<boolean>(false);
   readonly isOpen = input<boolean>(false);
   readonly showFooter = input<boolean>(false);
-  readonly isVendixDomain = input<boolean>(false);
   readonly shimmer = input<boolean>(false);
 
   // --- Outputs ---
@@ -289,15 +278,12 @@ export class SidebarComponent implements AfterViewInit {
   // --- State signals ---
   readonly isMobile = signal(false);
   readonly isMobileOpen = signal(false);
-  readonly showPromoTooltip = signal(false);
 
   // --- Locked-item defaults exposed to template ---
   protected readonly defaultLockedBadge = DEFAULT_LOCKED_BADGE;
   protected readonly defaultLockedTooltip = DEFAULT_LOCKED_TOOLTIP;
 
   // --- Private state ---
-  private promoTooltipTimeout: any;
-  private promoTooltipHideTimeout: any;
   private readonly openSubmenus = signal<Set<string>>(new Set());
   private resizeListener: () => void;
   private documentClickListener?: () => void;
@@ -335,12 +321,6 @@ export class SidebarComponent implements AfterViewInit {
       if (this.resizeListener) {
         this.resizeListener();
       }
-      if (this.promoTooltipTimeout) {
-        clearTimeout(this.promoTooltipTimeout);
-      }
-      if (this.promoTooltipHideTimeout) {
-        clearTimeout(this.promoTooltipHideTimeout);
-      }
       this.removeEventListeners();
       this.removeBodyScrollLock();
     });
@@ -349,21 +329,6 @@ export class SidebarComponent implements AfterViewInit {
   ngAfterViewInit(): void {
     // Setup focusable elements for accessibility
     this.updateFocusableElements();
-
-    // Auto-show promotional tooltip for Vendix domains
-    if (this.isVendixDomain()) {
-      this.showPromoTooltipOnMount();
-    }
-  }
-
-  private showPromoTooltipOnMount(): void {
-    this.promoTooltipTimeout = setTimeout(() => {
-      this.showPromoTooltip.set(true);
-
-      this.promoTooltipHideTimeout = setTimeout(() => {
-        this.showPromoTooltip.set(false);
-      }, 5000);
-    }, 200);
   }
 
   private removeEventListeners() {

@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal,
+import {Component, OnInit, computed, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -7,6 +7,7 @@ import { RouterModule } from '@angular/router';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -27,6 +28,8 @@ import {
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
 @Component({
   selector: 'vendix-sales-by-category',
@@ -35,43 +38,103 @@ import { EChartsOption } from 'echarts';
     RouterModule,
     CardComponent,
     ChartComponent,
+    StatsComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
+    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
+      <!-- Stats Cards -->
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+        <app-stats
+          title="Total Categorías"
+          [value]="getCategoryCount()"
+          smallText=" categorías"
+          iconName="folder"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+
+        <app-stats
+          title="Total Ingresos"
+          [value]="getTotalRevenue()"
+          iconName="dollar-sign"
+          iconBgColor="bg-green-100"
+          iconColor="text-green-600"
+        ></app-stats>
+
+        <app-stats
+          title="Categoría Top"
+          [value]="getTopCategoryName()"
+          iconName="trophy"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+
+        <app-stats
+          title="Ingreso Promedio"
+          [value]="getAvgRevenue()"
+          smallText="por categoría"
+          iconName="bar-chart-2"
+          iconBgColor="bg-purple-100"
+          iconColor="text-purple-600"
+        ></app-stats>
+      </div>
+
       <!-- Header -->
       <div
-        class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+        class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4"
       >
-        <div>
-          <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-            <a routerLink="/admin/reports" class="hover:text-primary"
-              >Reportes</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <a routerLink="/admin/reports/sales" class="hover:text-primary"
-              >Ventas</a
-            >
-            <app-icon name="chevron-right" [size]="14"></app-icon>
-            <span>Por Categoría</span>
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div
+            class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0"
+          >
+            <app-icon name="folder" class="text-[var(--color-primary)]"></app-icon>
           </div>
-          <h1 class="text-2xl font-bold text-text-primary">
-            Ventas por Categoría
-          </h1>
-          <p class="text-text-secondary mt-1">
-            Distribución de ventas por categoría de producto
-          </p>
+          <div class="min-w-0">
+            <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
+              Ventas por Categoría
+            </h1>
+            <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
+              Distribución de ventas por categoría de producto
+            </p>
+          </div>
         </div>
-        <div
-          class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3"
-        >
+        <div class="flex items-center gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
+          <!-- Toggle Chart/Table -->
+          <div class="flex rounded-lg border border-border overflow-hidden">
+            <button
+              (click)="setActiveView('chart')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'chart'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="bar-chart-2" [size]="16"></app-icon>
+              Gráficas
+            </button>
+            <button
+              (click)="setActiveView('table')"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
+              [class]="
+                activeView() === 'table'
+                  ? 'bg-black text-white'
+                  : 'bg-surface text-text-secondary hover:bg-background'
+              "
+            >
+              <app-icon name="table" [size]="16"></app-icon>
+              Tabla
+            </button>
+          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -80,8 +143,9 @@ import { EChartsOption } from 'echarts';
       </div>
 
       <!-- Content Grid -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <!-- Pie Chart -->
+      <div class="grid grid-cols-1 gap-6">
+        <!-- Chart -->
+        @if (activeView() === 'chart') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -94,25 +158,26 @@ import { EChartsOption } from 'echarts';
             >
           </div>
           <div class="p-4">
-            @if (loading()) {
+            @if (chartLoading()) {
               <div class="h-64 flex items-center justify-center">
                 <div
                   class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
                 ></div>
               </div>
+            } @else if (chartData().length === 0) {
+              <div class="h-64 flex flex-col items-center justify-center text-text-secondary">
+                <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
+                <p>No hay datos para el período seleccionado</p>
+              </div>
             } @else {
-              @defer (on viewport) {
-                <app-chart [options]="chartOptions()" size="large"></app-chart>
-              } @placeholder {
-                <div
-                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-                ></div>
-              }
+              <app-chart [options]="chartOptions()" size="large"></app-chart>
             }
           </div>
         </app-card>
+        }
 
         <!-- Table -->
+        @if (activeView() === 'table') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -126,16 +191,27 @@ import { EChartsOption } from 'echarts';
           </div>
           <div class="p-4">
             <app-responsive-data-view
-              [data]="data()"
+              [data]="tableData()"
               [columns]="columns"
               [cardConfig]="cardConfig"
-              [loading]="loading()"
+              [loading]="tableLoading()"
               emptyMessage="No hay datos"
               emptyIcon="folder"
             ></app-responsive-data-view>
           </div>
         </app-card>
+        }
       </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Ventas</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of salesViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `})
 export class SalesByCategoryComponent implements OnInit {
@@ -143,14 +219,26 @@ export class SalesByCategoryComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-loading = signal(true);
+  chartLoading = signal(false);
+  tableLoading = signal(false);
   exporting = signal(false);
-  data = signal<SalesByCategory[]>([]);
+  activeView = signal<'chart' | 'table'>('chart');
+  chartData = signal<SalesByCategory[]>([]);
+  tableData = signal<SalesByCategory[]>([]);
   chartOptions = signal<EChartsOption>({});
+  private chartQueryKey = signal<string | null>(null);
+  private tableQueryKey = signal<string | null>(null);
+  readonly activeData = computed(() =>
+    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
+  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
+
+  readonly salesViews: AnalyticsView[] = getViewsByCategory('sales').filter(
+    (v) => v.key !== 'sales_by_category'
+  );
 
   columns: TableColumn[] = [
     { key: 'category_name', label: 'Categoría', sortable: true, priority: 1 },
@@ -194,80 +282,158 @@ loading = signal(true);
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.loadData();
+    this.loadActiveView();
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadData();
+    this.invalidateModeData();
+    this.loadActiveView();
   }
 
-  loadData(): void {
-    this.loading.set(true);
-    const query: SalesAnalyticsQueryDto = {
-      date_range: this.dateRange()};
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadChartData();
+      return;
+    }
+    this.loadTableData();
+  }
+
+  private buildQuery(mode: 'chart' | 'table'): SalesAnalyticsQueryDto {
+    return {
+      date_range: this.dateRange(),
+      limit: mode === 'chart' ? 10 : 25,
+      ...(mode === 'table' && { page: 1 }),
+    };
+  }
+
+  private buildQueryKey(mode: 'chart' | 'table'): string {
+    return JSON.stringify({ mode, query: this.buildQuery(mode) });
+  }
+
+  private invalidateModeData(): void {
+    this.chartQueryKey.set(null);
+    this.tableQueryKey.set(null);
+  }
+
+  private loadChartData(): void {
+    const queryKey = this.buildQueryKey('chart');
+    if (this.chartQueryKey() === queryKey) return;
+
+    this.chartLoading.set(true);
 
     this.analyticsService
-      .getSalesByCategory(query)
+      .getSalesByCategory(this.buildQuery('chart'))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.data.set(response.data);
-          this.updateChart(response.data);
-          this.loading.set(false);
+          const rows = this.extractRows(response);
+          this.chartData.set(rows);
+          this.updateChart(rows);
+          this.chartQueryKey.set(queryKey);
+          this.chartLoading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar ventas por categoría');
-          this.loading.set(false);
+          this.chartLoading.set(false);
         }});
   }
 
+  private loadTableData(): void {
+    const queryKey = this.buildQueryKey('table');
+    if (this.tableQueryKey() === queryKey) return;
+
+    this.tableLoading.set(true);
+
+    this.analyticsService
+      .getSalesByCategory(this.buildQuery('table'))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.tableData.set(this.extractRows(response));
+          this.tableQueryKey.set(queryKey);
+          this.tableLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar tabla de ventas por categoría');
+          this.tableLoading.set(false);
+        }});
+  }
+
+  private extractRows(response: any): SalesByCategory[] {
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.data)) return response.data.data;
+    return [];
+  }
+
   private updateChart(data: SalesByCategory[]): void {
-    const chartData = data.map((item) => ({
-      value: item.revenue,
-      name: item.category_name}));
+    const sortedData = [...data].sort((a, b) => b.revenue - a.revenue);
+    const categories = sortedData.map((item) => item.category_name);
+    const revenues = sortedData.map((item) => item.revenue);
+    const units = sortedData.map((item) => item.units_sold);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
     this.chartOptions.set({
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          return `${params.name}<br/>Ingresos: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${this.formatCurrency(p.value)}</b><br/>`;
+          }
+          return html;
         }},
       legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'middle',
-        textStyle: { color: '#6b7280' }},
+        data: ['Ingresos', 'Unidades'],
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: '#6b7280' },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '25%',
+        top: '3%',
+        containLabel: true},
+      xAxis: {
+        type: 'category',
+        data: categories,
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        axisLine: { show: false },
+        axisLabel: {
+          color: '#6b7280',
+          formatter: (v: number) => this.formatCurrency(Math.round(v)),
+        },
+        splitLine: { lineStyle: { color: '#f3f4f6' } },
+      },
       series: [
         {
-          name: 'Ventas por Categoría',
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2},
-          label: {
-            show: false},
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 14,
-              fontWeight: 'bold'}},
-          labelLine: {
-            show: false},
-          data: chartData},
+          name: 'Ingresos',
+          type: 'bar',
+          data: revenues.map((v, i) => ({ value: v, itemStyle: { color: colors[i % colors.length] } })),
+          barMaxWidth: 40,
+        },
+        {
+          name: 'Unidades',
+          type: 'bar',
+          data: units.map((v, i) => ({ value: v, itemStyle: { color: colors[(i + 3) % colors.length] } })),
+          barMaxWidth: 40,
+        },
       ],
-      color: [
-        '#22c55e',
-        '#3b82f6',
-        '#f59e0b',
-        '#ef4444',
-        '#8b5cf6',
-        '#06b6d4',
-        '#ec4899',
-      ]});
+    });
   }
 
   exportReport(): void {
@@ -293,5 +459,26 @@ onDateRangeChange(range: DateRangeFilter): void {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  getCategoryCount(): number {
+    return this.activeData().length;
+  }
+
+  getTotalRevenue(): string {
+    const total = this.activeData().reduce((sum, c) => sum + (c.revenue || 0), 0);
+    return this.currencyService.format(total, 0);
+  }
+
+  getTopCategoryName(): string {
+    if (!this.activeData().length) return '-';
+    const top = [...this.activeData()].sort((a, b) => b.revenue - a.revenue)[0];
+    return top?.category_name?.substring(0, 15) || '-';
+  }
+
+  getAvgRevenue(): string {
+    if (!this.activeData().length) return '-';
+    const total = this.activeData().reduce((sum, c) => sum + (c.revenue || 0), 0);
+    return this.currencyService.format(total / this.activeData().length, 0);
   }
 }

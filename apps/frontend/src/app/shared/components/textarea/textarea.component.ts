@@ -211,8 +211,8 @@ export class TextareaComponent implements ControlValueAccessor {
     } else {
       stateClasses = [
         'border-border',
-        'hover:border-border',
-        'focus:border-primary',
+        'hover:border-[var(--color-primary)]',
+        'focus:border-[var(--color-primary)]',
       ];
     }
 
@@ -228,8 +228,8 @@ export class TextareaComponent implements ControlValueAccessor {
         'bg-[var(--color-background)]',   // Subtle background like onboarding
         'focus:bg-[var(--color-surface)]', // Change to surface on focus
         isInvalid
-          ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
-          : 'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          : 'focus:shadow-[0_0_0_2px_var(--color-ring)]',
       ];
     } else {
       // Classic: standard with ring focus
@@ -241,7 +241,7 @@ export class TextareaComponent implements ControlValueAccessor {
         'text-base',
         isInvalid
           ? 'focus:ring-[var(--color-destructive)]/30'
-          : 'focus:ring-secondary/40',
+          : 'focus:ring-[var(--color-ring)]',
       ];
     }
 

@@ -2,17 +2,20 @@ import { Component, forwardRef, input, output, signal } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
+import { IconComponent } from '../icon/icon.component';
+import type { IconName } from '../icon/icons.registry';
 import { TooltipComponent } from '../tooltip/tooltip.component';
 
 export interface InputButtonOption {
   value: string;
   label: string;
+  icon?: IconName;
 }
 
 @Component({
   selector: 'app-input-buttons',
   standalone: true,
-  imports: [TooltipComponent],
+  imports: [TooltipComponent, IconComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -59,8 +62,16 @@ export interface InputButtonOption {
             [disabled]="isDisabled()"
             (click)="selectOption(option.value)"
             [class]="getButtonClasses(option.value)"
+            [attr.aria-label]="option.label"
           >
-            {{ option.label }}
+            @if (option.icon) {
+              <app-icon
+                [name]="option.icon"
+                [size]="14"
+                class="shrink-0"
+              ></app-icon>
+            }
+            <span [class]="getLabelClasses(option)">{{ option.label }}</span>
           </button>
         }
       </div>
@@ -110,6 +121,8 @@ export class InputButtonsComponent implements ControlValueAccessor {
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly customWrapperClass = input('');
   readonly customContainerClass = input('');
+  readonly hideLabelsOnMobile = input(false);
+  readonly equalWidth = input(true);
 
   readonly valueChange = output<string>();
 
@@ -180,7 +193,12 @@ export class InputButtonsComponent implements ControlValueAccessor {
   getButtonClasses(optionValue: string): string {
     const isSelected = this.value() === optionValue;
     const base = [
-      'flex-1',
+      this.equalWidth() ? 'flex-1' : 'flex-none',
+      'inline-flex',
+      'items-center',
+      'justify-center',
+      'gap-1.5',
+      'min-w-0',
       'h-full',
       'text-xs',
       'sm:text-sm',
@@ -192,6 +210,10 @@ export class InputButtonsComponent implements ControlValueAccessor {
       'disabled:opacity-50',
       'disabled:cursor-not-allowed',
     ];
+
+    if (!this.equalWidth()) {
+      base.push('px-3');
+    }
 
     if (isSelected) {
       return [
@@ -209,5 +231,15 @@ export class InputButtonsComponent implements ControlValueAccessor {
       'hover:bg-[var(--color-surface)]',
       'hover:text-[var(--color-text-primary)]',
     ].join(' ');
+  }
+
+  getLabelClasses(option: InputButtonOption): string {
+    const classes = ['truncate'];
+
+    if (this.hideLabelsOnMobile() && option.icon) {
+      classes.unshift('hidden', 'sm:inline');
+    }
+
+    return classes.join(' ');
   }
 }

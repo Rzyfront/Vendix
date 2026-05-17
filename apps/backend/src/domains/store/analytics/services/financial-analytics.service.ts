@@ -218,62 +218,62 @@ export class FinancialAnalyticsService {
   async getProfitLossSummary(query: AnalyticsQueryDto) {
     const { startDate, endDate } = parseDateRange(query);
 
-    // Revenue from completed orders
-    const orderAggregates = await this.prisma.orders.aggregate({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      _sum: {
-        subtotal_amount: true,
-        discount_amount: true,
-        tax_amount: true,
-        shipping_cost: true,
-        grand_total: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    // Cost of goods sold from order_items
-    const cogsResult = await this.prisma.order_items.aggregate({
-      where: {
-        orders: {
+    const [
+      orderAggregates,
+      cogsResult,
+      refundAggregates,
+      expenseAggregates,
+    ] = await Promise.all([
+      this.prisma.orders.aggregate({
+        where: {
           state: { in: this.COMPLETED_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
-      },
-      _sum: {
-        cost_price: true,
-        quantity: true,
-      },
-    });
-
-    // Refunds
-    const refundAggregates = await this.prisma.refunds.aggregate({
-      where: {
-        state: { in: ['completed', 'approved'] },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      _sum: {
-        amount: true,
-        subtotal_refund: true,
-        tax_refund: true,
-        shipping_refund: true,
-      },
-    });
-
-    // Operating expenses
-    const expenseAggregates = await this.prisma.expenses.aggregate({
-      where: {
-        state: 'paid',
-        expense_date: { gte: startDate, lte: endDate },
-      },
-      _sum: {
-        amount: true,
-      },
-    });
+        _sum: {
+          subtotal_amount: true,
+          discount_amount: true,
+          tax_amount: true,
+          shipping_cost: true,
+          grand_total: true,
+        },
+        _count: {
+          id: true,
+        },
+      }),
+      this.prisma.order_items.aggregate({
+        where: {
+          orders: {
+            state: { in: this.COMPLETED_STATES },
+            created_at: { gte: startDate, lte: endDate },
+          },
+        },
+        _sum: {
+          cost_price: true,
+          quantity: true,
+        },
+      }),
+      this.prisma.refunds.aggregate({
+        where: {
+          state: { in: ['completed', 'approved'] },
+          created_at: { gte: startDate, lte: endDate },
+        },
+        _sum: {
+          amount: true,
+          subtotal_refund: true,
+          tax_refund: true,
+          shipping_refund: true,
+        },
+      }),
+      this.prisma.expenses.aggregate({
+        where: {
+          state: 'paid',
+          expense_date: { gte: startDate, lte: endDate },
+        },
+        _sum: {
+          amount: true,
+        },
+      }),
+    ]);
 
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
@@ -324,6 +324,77 @@ export class FinancialAnalyticsService {
         order_count: orderAggregates._count.id || 0,
       },
     };
+  }
+
+  async getRefundsSummary(query: AnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+
+    const refundAggregates = await this.prisma.refunds.aggregate({
+      where: {
+        state: { in: ['completed', 'approved'] },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      _sum: {
+        amount: true,
+        subtotal_refund: true,
+        tax_refund: true,
+        shipping_refund: true,
+      },
+    });
+
+    return {
+      total_refunds: Number(refundAggregates._sum.amount || 0),
+      subtotal_refunds: Number(refundAggregates._sum.subtotal_refund || 0),
+      tax_refunds: Number(refundAggregates._sum.tax_refund || 0),
+      shipping_refunds: Number(refundAggregates._sum.shipping_refund || 0),
+    };
+  }
+
+  async getFinancialSummaryForExport(query: AnalyticsQueryDto) {
+    const [profitLoss, taxSummary, refunds] = await Promise.all([
+      this.getProfitLossSummary(query),
+      this.getTaxSummary(query),
+      this.getRefundsSummary(query),
+    ]);
+
+    return [
+      {
+        Métrica: 'Ingresos brutos',
+        Valor: profitLoss.revenue.gross_revenue,
+      },
+      {
+        Métrica: 'Ingresos netos',
+        Valor: profitLoss.revenue.net_revenue,
+      },
+      {
+        Métrica: 'Costo de mercancía vendida',
+        Valor: profitLoss.costs.cost_of_goods_sold,
+      },
+      {
+        Métrica: 'Utilidad bruta',
+        Valor: profitLoss.costs.gross_profit,
+      },
+      {
+        Métrica: 'Gastos operativos',
+        Valor: profitLoss.operating_expenses,
+      },
+      {
+        Métrica: 'Utilidad neta',
+        Valor: profitLoss.bottom_line.net_profit,
+      },
+      {
+        Métrica: 'Impuesto cobrado',
+        Valor: taxSummary.total_tax_collected,
+      },
+      {
+        Métrica: 'Impuesto devuelto',
+        Valor: taxSummary.total_tax_refunded,
+      },
+      {
+        Métrica: 'Reembolsos totales',
+        Valor: refunds.total_refunds,
+      },
+    ];
   }
 
   async getTaxSummaryForExport(query: AnalyticsQueryDto) {

@@ -45,6 +45,7 @@
 
   &.selector-focused {
     .selector-wrapper {
+      border-color: var(--color-primary);
       box-shadow: 0 0 0 2px var(--color-ring);
     }
   }
@@ -89,7 +90,7 @@
   transition: all var(--transition-fast) ease;
 
   &:hover:not(.selector-disabled) {
-    border-color: var(--color-text-secondary);
+    border-color: var(--color-primary);
   }
 
   // Estados
@@ -231,7 +232,7 @@
   &:focus {
     outline: none;
     box-shadow: 0 0 0 2px var(--color-ring);
-    border-color: transparent;
+    border-color: var(--color-primary);
   }
 
   // Error state
@@ -426,7 +427,7 @@
     border-color: var(--color-border);
 
     &:hover:not(.selector-disabled) {
-      border-color: var(--color-text-secondary);
+      border-color: var(--color-primary);
     }
   }
 

@@ -54,7 +54,6 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
         subtitle="Administrador de Tienda"
         [vlink]="storeSlug() || 'slug'"
         [domainHostname]="storeDomainHostname()"
-        [isVendixDomain]="isVendixDomain()"
         [collapsed]="sidebarCollapsed()"
         [showFooter]="true"
         [shimmer]="sidebarShimmer()"
@@ -181,11 +180,6 @@ export class StoreAdminLayoutComponent {
   readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
   readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
   readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
-
-  // --- isVendixDomain: resolved once from config ---
-  readonly isVendixDomain = signal(
-    !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain,
-  );
 
   // --- storeLogo: computed from store$ + domainConfig ---
   private readonly storeSignal = toSignal(this.authFacade.userStore$, { initialValue: null });
@@ -403,31 +397,49 @@ export class StoreAdminLayoutComponent {
           label: 'Resumen',
           icon: 'circle',
           route: '/admin/analytics/overview',
+          alwaysVisible: true,
         },
         {
           label: 'Ventas',
           icon: 'circle',
-          route: '/admin/analytics/sales/summary',
+          route: '/admin/analytics/sales',
+          alwaysVisible: true,
         },
         {
-          label: 'Analíticas de Inventario',
+          label: 'Inventario',
           icon: 'circle',
-          route: '/admin/analytics/inventory/overview',
+          route: '/admin/analytics/inventory',
+          alwaysVisible: true,
         },
         {
-          label: 'Analíticas de Productos',
+          label: 'Productos',
           icon: 'circle',
-          route: '/admin/analytics/products/performance',
+          route: '/admin/analytics/products',
+          alwaysVisible: true,
         },
         {
-          label: 'Analíticas de Clientes',
+          label: 'Clientes',
           icon: 'circle',
-          route: '/admin/analytics/customers/summary',
+          route: '/admin/analytics/customers',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Compras',
+          icon: 'circle',
+          route: '/admin/analytics/purchases',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Reseñas',
+          icon: 'circle',
+          route: '/admin/analytics/reviews',
+          alwaysVisible: true,
         },
         {
           label: 'Financiero',
           icon: 'circle',
-          route: '/admin/analytics/financial/profit-loss',
+          route: '/admin/analytics/financial',
+          alwaysVisible: true,
         },
       ],
     },

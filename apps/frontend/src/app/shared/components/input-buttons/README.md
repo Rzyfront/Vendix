@@ -9,20 +9,26 @@ Grupo de botones estilo tabs para seleccion de opciones mutuamente excluyentes.
 
 <!-- Con validacion y tooltip -->
 <app-input-buttons label="Prioridad" [options]="priorityOptions" [control]="form.get('priority')" [required]="true" tooltipText="Selecciona la prioridad del ticket"></app-input-buttons>
+
+<!-- Con iconos y labels compactos en mobile -->
+<app-input-buttons [options]="viewOptions" [(ngModel)]="activeView" [hideLabelsOnMobile]="true" [equalWidth]="false"></app-input-buttons>
 ```
 
 ## Inputs
 
-| Input                | Tipo                  | Default  | Descripcion                  |
-| -------------------- | --------------------- | -------- | ---------------------------- |
-| `label`              | `string`              | -        | Etiqueta del grupo           |
-| `options`            | `InputButtonOption[]` | `[]`     | Lista de opciones            |
-| `disabled`           | `boolean`             | `false`  | Deshabilita todo el grupo    |
-| `required`           | `boolean`             | `false`  | Campo requerido              |
-| `helperText`         | `string`              | -        | Texto de ayuda               |
-| `tooltipText`        | `string`              | -        | Texto para tooltip de ayuda  |
-| `styleVariant`       | `FormStyleVariant`    | `modern` | Estilo: `modern` o `classic` |
-| `customWrapperClass` | `string`              | `''`     | Clases para el wrapper       |
+| Input                  | Tipo                  | Default  | Descripcion                                      |
+| ---------------------- | --------------------- | -------- | ------------------------------------------------ |
+| `label`                | `string`              | -        | Etiqueta del grupo                               |
+| `options`              | `InputButtonOption[]` | `[]`     | Lista de opciones                                |
+| `disabled`             | `boolean`             | `false`  | Deshabilita todo el grupo                        |
+| `required`             | `boolean`             | `false`  | Campo requerido                                  |
+| `helperText`           | `string`              | -        | Texto de ayuda                                   |
+| `tooltipText`          | `string`              | -        | Texto para tooltip de ayuda                      |
+| `styleVariant`         | `FormStyleVariant`    | `modern` | Estilo: `modern` o `classic`                     |
+| `customWrapperClass`   | `string`              | `''`     | Clases para el wrapper                           |
+| `customContainerClass` | `string`              | `''`     | Clases para el contenedor                        |
+| `hideLabelsOnMobile`   | `boolean`             | `false`  | Oculta labels en mobile si la opcion tiene icono |
+| `equalWidth`           | `boolean`             | `true`   | Reparte los botones en anchos iguales            |
 
 ## InputButtonOption
 
@@ -30,6 +36,7 @@ Grupo de botones estilo tabs para seleccion de opciones mutuamente excluyentes.
 interface InputButtonOption {
   value: string;
   label: string;
+  icon?: IconName;
 }
 ```
 

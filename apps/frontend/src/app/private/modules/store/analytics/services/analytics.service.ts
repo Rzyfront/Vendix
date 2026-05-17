@@ -35,6 +35,9 @@ import {
   ProductAnalyticsRow,
   ProductTrend,
   ProductsAnalyticsQueryDto,
+  ProductProfitability,
+  ProfitabilitySummary,
+  ProfitabilityResponse,
 } from '../interfaces/products-analytics.interface';
 import {
   OverviewSummary,
@@ -46,8 +49,106 @@ import {
   CustomerTrend,
   TopCustomer,
   CustomersAnalyticsQueryDto,
+  CustomersByChannel,
 } from '../interfaces/customers-analytics.interface';
+import {
+  AbandonedCartsSummary,
+  AbandonedCartTrend,
+  AbandonedCartByReason,
+  AbandonedCartsAnalyticsQueryDto,
+} from '../interfaces/abandoned-carts-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
+
+// Purchases interfaces
+export interface PurchasesSummary {
+  total_orders: number;
+  total_spent: number;
+  pending_orders: number;
+  completed_orders: number;
+  total_items_ordered: number;
+  total_items_received: number;
+  total_tax_amount: number;
+  average_order_value: number;
+}
+
+export interface PurchasesBySupplier {
+  supplier_id: number;
+  supplier_name: string;
+  order_count: number;
+  total_spent: number;
+  pending_orders: number;
+  last_order_date: string | null;
+}
+
+// Reviews interfaces
+export interface ReviewsSummary {
+  total_reviews: number;
+  average_rating: number;
+  verified_purchases: number;
+  pending_reviews: number;
+  approved_reviews: number;
+  rejected_reviews: number;
+  rating_distribution: {
+    1: number;
+    2: number;
+    3: number;
+    4: number;
+    5: number;
+  };
+  total_helpful_votes: number;
+}
+
+// Financial interfaces
+export interface ProfitLossSummary {
+  period: { start_date: string; end_date: string };
+  revenue: {
+    gross_revenue: number;
+    discounts: number;
+    net_revenue: number;
+    shipping_revenue: number;
+    tax_collected: number;
+  };
+  costs: {
+    cost_of_goods_sold: number;
+    gross_profit: number;
+    gross_margin: number;
+  };
+  refunds: {
+    total_refunds: number;
+    subtotal_refunds: number;
+    tax_refunds: number;
+    shipping_refunds: number;
+  };
+  operating_expenses: number;
+  bottom_line: {
+    net_profit: number;
+    net_margin: number;
+    order_count: number;
+  };
+}
+
+export interface RefundsSummary {
+  total_refunds: number;
+  subtotal_refunds: number;
+  tax_refunds: number;
+  shipping_refunds: number;
+}
+
+export interface TaxSummary {
+  period: { start_date: string; end_date: string };
+  total_tax_collected: number;
+  total_tax_refunded: number;
+  net_tax: number;
+  total_taxable_revenue: number;
+  effective_tax_rate: number;
+  breakdown: Array<{
+    tax_name: string;
+    tax_rate: number;
+    total_tax: number;
+    taxable_amount: number;
+    is_compound: boolean;
+  }>;
+}
 
 // Cache entry interface
 interface CacheEntry<T> {
@@ -76,13 +177,10 @@ export class AnalyticsService {
       if (value !== undefined && value !== null) {
         if (typeof value === 'object' && key === 'date_range') {
           const dateRange = value as DateRangeFilter;
-          if (dateRange.start_date) {
+          if (dateRange.start_date && dateRange.end_date) {
             params = params.set('date_from', dateRange.start_date);
-          }
-          if (dateRange.end_date) {
             params = params.set('date_to', dateRange.end_date);
-          }
-          if (dateRange.preset) {
+          } else if (dateRange.preset) {
             params = params.set('date_preset', dateRange.preset);
           }
         } else {
@@ -133,9 +231,12 @@ export class AnalyticsService {
   getOverviewTrends(
     query: OverviewAnalyticsQueryDto = {},
   ): Observable<ApiResponse<OverviewTrend[]>> {
-    return this.http.get<ApiResponse<OverviewTrend[]>>(
-      this.getApiUrl('overview/trends'),
-      { params: this.buildParams(query) },
+    const cacheKey = `overview-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<OverviewTrend[]>>(
+        this.getApiUrl('overview/trends'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
@@ -155,45 +256,60 @@ export class AnalyticsService {
   getSalesByProduct(
     query: SalesAnalyticsQueryDto = {},
   ): Observable<ApiResponse<SalesByProduct[]>> {
-    return this.http.get<ApiResponse<SalesByProduct[]>>(
-      this.getApiUrl('sales/by-product'),
-      { params: this.buildParams(query) },
+    const cacheKey = `sales-by-product-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<SalesByProduct[]>>(
+        this.getApiUrl('sales/by-product'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getSalesByCategory(
     query: SalesAnalyticsQueryDto = {},
   ): Observable<ApiResponse<SalesByCategory[]>> {
-    return this.http.get<ApiResponse<SalesByCategory[]>>(
-      this.getApiUrl('sales/by-category'),
-      { params: this.buildParams(query) },
+    const cacheKey = `sales-by-category-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<SalesByCategory[]>>(
+        this.getApiUrl('sales/by-category'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getSalesByPaymentMethod(
     query: SalesAnalyticsQueryDto = {},
   ): Observable<ApiResponse<SalesByPaymentMethod[]>> {
-    return this.http.get<ApiResponse<SalesByPaymentMethod[]>>(
-      this.getApiUrl('sales/by-payment-method'),
-      { params: this.buildParams(query) },
+    const cacheKey = `sales-by-payment-method-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<SalesByPaymentMethod[]>>(
+        this.getApiUrl('sales/by-payment-method'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getSalesTrends(
     query: SalesAnalyticsQueryDto = {},
   ): Observable<ApiResponse<SalesTrend[]>> {
-    return this.http.get<ApiResponse<SalesTrend[]>>(
-      this.getApiUrl('sales/trends'),
-      { params: this.buildParams(query) },
+    const cacheKey = `sales-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<SalesTrend[]>>(
+        this.getApiUrl('sales/trends'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getSalesByCustomer(
     query: SalesAnalyticsQueryDto = {},
   ): Observable<ApiResponse<SalesByCustomer[]>> {
-    return this.http.get<ApiResponse<SalesByCustomer[]>>(
-      this.getApiUrl('sales/by-customer'),
-      { params: this.buildParams(query) },
+    const cacheKey = `sales-by-customer-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<SalesByCustomer[]>>(
+        this.getApiUrl('sales/by-customer'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
@@ -229,32 +345,62 @@ export class AnalyticsService {
   getTopSellingProducts(
     query: ProductsAnalyticsQueryDto = {},
   ): Observable<ApiResponse<TopSellingProduct[]>> {
-    return this.http.get<ApiResponse<TopSellingProduct[]>>(
-      this.getApiUrl('products/top-sellers'),
-      { params: this.buildParams(query) },
+    const cacheKey = `products-top-sellers-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<TopSellingProduct[]>>(
+        this.getApiUrl('products/top-sellers'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getProductsTrends(
     query: ProductsAnalyticsQueryDto = {},
   ): Observable<ApiResponse<ProductTrend[]>> {
-    return this.http.get<ApiResponse<ProductTrend[]>>(
-      this.getApiUrl('products/trends'),
-      { params: this.buildParams(query) },
+    const cacheKey = `products-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProductTrend[]>>(
+        this.getApiUrl('products/trends'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getProductsTable(
     query: ProductsAnalyticsQueryDto = {},
   ): Observable<PaginatedResponse<ProductAnalyticsRow>> {
-    return this.http.get<PaginatedResponse<ProductAnalyticsRow>>(
-      this.getApiUrl('products/table'),
-      { params: this.buildParams(query) },
+    const cacheKey = `products-table-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<ProductAnalyticsRow>>(
+        this.getApiUrl('products/table'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   exportProductsAnalytics(query: ProductsAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('products/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  getProductProfitability(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<ProfitabilityResponse>> {
+    const cacheKey = `product-profitability-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProfitabilityResponse>>(
+        this.getApiUrl('products/profitability'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportProductProfitability(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<Blob> {
+    return this.http.get(this.getApiUrl('products/profitability/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });
@@ -295,54 +441,72 @@ export class AnalyticsService {
   getStockMovements(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<StockMovementReport[]>> {
-    return this.http.get<ApiResponse<StockMovementReport[]>>(
-      this.getApiUrl('inventory/movements'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-movements-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<StockMovementReport[]>>(
+        this.getApiUrl('inventory/movements'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getInventoryValuation(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<InventoryValuation[]>> {
-    return this.http.get<ApiResponse<InventoryValuation[]>>(
-      this.getApiUrl('inventory/valuation'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-valuation-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<InventoryValuation[]>>(
+        this.getApiUrl('inventory/valuation'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getInventoryAging(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<InventoryAging[]>> {
-    return this.http.get<ApiResponse<InventoryAging[]>>(
-      this.getApiUrl('inventory/aging'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-aging-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<InventoryAging[]>>(
+        this.getApiUrl('inventory/aging'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getExpiringProducts(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<ExpiringProduct[]>> {
-    return this.http.get<ApiResponse<ExpiringProduct[]>>(
-      this.getApiUrl('inventory/expiring'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-expiring-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ExpiringProduct[]>>(
+        this.getApiUrl('inventory/expiring'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getMovementSummary(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<MovementSummaryItem[]>> {
-    return this.http.get<ApiResponse<MovementSummaryItem[]>>(
-      this.getApiUrl('inventory/movement-summary'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-movement-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<MovementSummaryItem[]>>(
+        this.getApiUrl('inventory/movement-summary'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
   getMovementTrends(
     query: InventoryAnalyticsQueryDto = {},
   ): Observable<ApiResponse<MovementTrend[]>> {
-    return this.http.get<ApiResponse<MovementTrend[]>>(
-      this.getApiUrl('inventory/movement-trends'),
-      { params: this.buildParams(query) },
+    const cacheKey = `inventory-movement-trends-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<MovementTrend[]>>(
+        this.getApiUrl('inventory/movement-trends'),
+        { params: this.buildParams(query) },
+      ),
     );
   }
 
@@ -391,8 +555,152 @@ export class AnalyticsService {
     );
   }
 
+  getCustomersChannels(
+    query: CustomersAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<CustomersByChannel>> {
+    return this.http.get<ApiResponse<CustomersByChannel>>(
+      this.getApiUrl('customers/channels'),
+      { params: this.buildParams(query) },
+    );
+  }
+
   exportCustomersAnalytics(query: CustomersAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('customers/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  // ==================== ABANDONED CARTS ANALYTICS ====================
+
+  getAbandonedCartsSummary(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartsSummary>> {
+    const cacheKey = `abandoned-carts-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<AbandonedCartsSummary>>(
+        this.getApiUrl('customers/abandoned-carts/summary'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getAbandonedCartsTrends(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartTrend[]>> {
+    return this.http.get<ApiResponse<AbandonedCartTrend[]>>(
+      this.getApiUrl('customers/abandoned-carts/trends'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getAbandonedCartsByReason(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartByReason[]>> {
+    return this.http.get<ApiResponse<AbandonedCartByReason[]>>(
+      this.getApiUrl('customers/abandoned-carts/by-reason'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  exportAbandonedCartsAnalytics(query: AbandonedCartsAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('customers/abandoned-carts/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  // ==================== PURCHASES ANALYTICS ====================
+
+  getPurchasesSummary(
+    query: any = {},
+  ): Observable<ApiResponse<PurchasesSummary>> {
+    const cacheKey = `purchases-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<PurchasesSummary>>(this.getApiUrl('purchases/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getPurchasesBySupplier(
+    query: any = {},
+  ): Observable<PaginatedResponse<PurchasesBySupplier>> {
+    const cacheKey = `purchases-by-supplier-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<PaginatedResponse<PurchasesBySupplier>>(
+        this.getApiUrl('purchases/by-supplier'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  // ==================== REVIEWS ANALYTICS ====================
+
+  getReviewsSummary(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsSummary>> {
+    const cacheKey = `reviews-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsSummary>>(this.getApiUrl('reviews/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  // ==================== FINANCIAL ANALYTICS ====================
+
+  getProfitLossSummary(
+    query: any = {},
+  ): Observable<ApiResponse<ProfitLossSummary>> {
+    const cacheKey = `profit-loss-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProfitLossSummary>>(this.getApiUrl('financial/profit-loss'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getTaxSummary(
+    query: any = {},
+  ): Observable<ApiResponse<TaxSummary>> {
+    const cacheKey = `tax-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<TaxSummary>>(this.getApiUrl('financial/tax-summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getRefundsSummary(
+    query: any = {},
+  ): Observable<ApiResponse<RefundsSummary>> {
+    const cacheKey = `refunds-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<RefundsSummary>>(this.getApiUrl('financial/refunds'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  // ==================== EXPORTS ====================
+
+  exportPurchasesAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  exportReviewsAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  exportFinancialAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('financial/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

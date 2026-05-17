@@ -359,8 +359,8 @@ export class InputComponent implements ControlValueAccessor {
     } else {
       stateClasses = [
         'border-border',
-        'hover:border-border',
-        'focus:border-primary',
+        'hover:border-[var(--color-primary)]',
+        'focus:border-[var(--color-primary)]',
       ];
     }
 
@@ -397,12 +397,10 @@ export class InputComponent implements ControlValueAccessor {
         'rounded-xl',
         'bg-[var(--color-background)]',
         'focus:bg-[var(--color-surface)]',
-        'focus:shadow-[0_0_0_3px_var(--color-ring)]',
+        'focus:shadow-[0_0_0_2px_var(--color-ring)]',
         control?.invalid && control?.touched
-          ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
-          : control?.valid && control?.touched && control?.value
-            ? 'focus:shadow-[0_0_0_3px_rgba(126,215,165,0.3)]'
-            : '',
+          ? 'focus:shadow-[0_0_0_2px_rgba(239,68,68,0.3)]'
+          : '',
       ];
     } else {
       // Classic: with ring focus
@@ -412,9 +410,7 @@ export class InputComponent implements ControlValueAccessor {
         'focus:ring-2',
         control?.invalid && control?.touched
           ? 'focus:ring-[var(--color-destructive)]/30'
-          : control?.valid && control?.touched && control?.value
-            ? 'focus:ring-[var(--color-primary)]/30'
-            : 'focus:ring-secondary/40',
+          : 'focus:ring-[var(--color-ring)]',
       ];
     }
 

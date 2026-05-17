@@ -54,45 +54,38 @@
   }
 
   <!-- Filter Bar: sticky below stats on mobile, standard on desktop -->
-  <div
-    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
-  >
-    <div class="flex items-center justify-between gap-2">
+  <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
+    <div class="flex items-center gap-2.5 min-w-0">
+      <div class="hidden md:flex w-10 h-10 rounded-lg bg-[var(--color-background)] items-center justify-center border border-[var(--color-border)] shadow-sm shrink-0">
+        <app-icon name="package" class="text-[var(--color-primary)]"></app-icon>
+      </div>
       <div class="min-w-0">
-        <h2
-          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
-        >
+        <h1 class="text-base md:text-lg font-bold text-[var(--color-text-primary)] leading-tight truncate">
           Dashboard de Inventario
-        </h2>
-        <p
-          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
-        >
+        </h1>
+        <p class="hidden sm:block text-xs text-[var(--color-text-secondary)] font-medium truncate">
           Resumen consolidado de inventario, movimientos y valorización
         </p>
       </div>
+    </div>
 
-      <div class="flex items-center gap-2 flex-shrink-0">
-        <vendix-export-button
+    <div class="flex items-center gap-2 md:gap-3 shrink-0">
+      <vendix-date-range-filter
+        [value]="dateRange()"
+        (valueChange)="onDateRangeChange($event)"
+      ></vendix-date-range-filter>
+      <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [loading]="exporting()"
           (export)="exportReport()"
         ></vendix-export-button>
-
-        <app-options-dropdown
-          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [filters]="filterConfigs"
-          [filterValues]="filterValues"
-          title="Filtros"
-          triggerLabel="Filtros"
-          (filterChange)="onFilterChange($event)"
-          (clearAllFilters)="onClearAllFilters()"
-        ></app-options-dropdown>
-      </div>
     </div>
   </div>
 
-  <!-- Charts Grid -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 md:mt-4">
+  <!-- Content Grid -->
+  <div class="grid grid-cols-1 gap-6">
+    <!-- Charts Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Movement Trend Chart: full width -->
     <app-card
       shadow="none"
@@ -119,7 +112,7 @@
         } @else {
           @defer (on immediate) {
             <app-chart
-              [options]="movementTrendChartOptions"
+              [options]="movementTrendChartOptions()"
               size="large"
             ></app-chart>
           } @placeholder {
@@ -158,7 +151,7 @@
           } @else {
             @defer (on immediate) {
               <app-chart
-                [options]="valuationChartOptions"
+                [options]="valuationChartOptions()"
                 size="large"
               ></app-chart>
             } @placeholder {
@@ -195,7 +188,7 @@
           } @else {
             @defer (on immediate) {
               <app-chart
-                [options]="quantityChartOptions"
+                [options]="quantityChartOptions()"
                 size="large"
               ></app-chart>
             } @placeholder {
@@ -212,42 +205,12 @@
   <!-- Quick Links -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
     <span class="text-sm font-bold text-[var(--color-text-primary)]"
-      >Reportes Detallados</span
+      >Vistas de Inventario</span
     >
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <a
-        routerLink="../stock-info"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="alert-triangle"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Bajo Stock</span>
-      </a>
-      <a
-        routerLink="../movements"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="repeat"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Movimientos</span>
-      </a>
-      <a
-        routerLink="../valuation"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="dollar-sign"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Valorización</span>
-      </a>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of inventoryViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
     </div>
   </app-card>
 </div>

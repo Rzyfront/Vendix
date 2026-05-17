@@ -1,0 +1,13 @@
+<div class="analytics-shell">
+  <app-sticky-header
+    [title]="category()?.label || 'Analíticas'"
+    [subtitle]="category()?.description || ''"
+    [icon]="category()?.icon || 'chart-bar'"
+    [tabs]="tabs()"
+    tabsAriaLabel="Navegacion de analiticas"
+  ></app-sticky-header>
+
+  <main class="shell-content">
+    <router-outlet></router-outlet>
+  </main>
+</div>

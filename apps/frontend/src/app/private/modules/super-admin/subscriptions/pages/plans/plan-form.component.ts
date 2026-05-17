@@ -20,11 +20,11 @@ import {
   TextareaComponent,
   ToggleComponent,
   SelectorComponent,
-  ScrollableTabsComponent,
 } from '../../../../../../shared/components';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  StickyHeaderTab,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { AiFeatureMatrixComponent } from '../../components/ai-feature-matrix.component';
 import { PricingCycleEditorComponent } from '../../components/pricing-cycle-editor.component';
@@ -70,7 +70,6 @@ interface PlanFormControls {
     TextareaComponent,
     ToggleComponent,
     SelectorComponent,
-    ScrollableTabsComponent,
     StickyHeaderComponent,
     AiFeatureMatrixComponent,
     PricingCycleEditorComponent,
@@ -90,16 +89,14 @@ interface PlanFormControls {
         [showBackButton]="true"
         backRoute="/super-admin/subscriptions/plans"
         [actions]="headerActions()"
+        [tabs]="tabs"
+        [activeTab]="activeTab()"
+        tabsAriaLabel="Secciones del plan"
         (actionClicked)="onHeaderAction($event)"
+        (tabChanged)="activeTab.set($event)"
       ></app-sticky-header>
 
       <form [formGroup]="form" (ngSubmit)="onSubmit()" class="px-2 md:px-6 pb-6 space-y-6">
-        <app-scrollable-tabs
-          [tabs]="tabs"
-          [activeTab]="activeTab()"
-          (tabChange)="activeTab.set($event)"
-        ></app-scrollable-tabs>
-
         @if (activeTab() === 'overview') {
           <!-- Información básica -->
           <div class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4">
@@ -380,7 +377,7 @@ export class PlanFormComponent {
   private readonly paidPricingBeforeFree = signal<PlanPricing[] | undefined>(undefined);
   private setupFeeBeforeFree: number | null = null;
 
-  readonly tabs = [
+  readonly tabs: StickyHeaderTab[] = [
     { id: 'overview', label: 'Resumen', icon: 'file-text' },
     { id: 'ai-matrix', label: 'Matriz IA', icon: 'bot' },
     { id: 'pricing', label: 'Precios', icon: 'credit-card' },

@@ -13,9 +13,10 @@ metadata:
 
 ## When to Use
 
-- Form/detail pages that need save/cancel actions, a back button, metadata, or a status badge.
+- Form/detail pages that need save/cancel actions, a back button, metadata, a status badge, or page-level tabs.
 - Settings pages and create/edit pages where actions should remain visible while scrolling.
 - Replacing custom sticky header markup with the shared `app-sticky-header` component.
+- Replacing hardcoded module headers with compact route/state tabs.
 
 For standard list modules, use sticky stats plus sticky search from `vendix-frontend-standard-module` instead.
 
@@ -24,7 +25,7 @@ For standard list modules, use sticky stats plus sticky search from `vendix-fron
 - Component: `apps/frontend/src/app/shared/components/sticky-header/sticky-header.component.ts`
 - Template: `apps/frontend/src/app/shared/components/sticky-header/sticky-header.component.html`
 - README: `apps/frontend/src/app/shared/components/sticky-header/README.md`
-- Real pages: product create/edit, general settings, and super-admin subscription gateway pages.
+- Real pages: product create/edit, general settings, super-admin monitoring, super-admin plan form, analytics shell, and super-admin subscription gateway pages.
 
 ## Critical Rule
 
@@ -61,10 +62,14 @@ Inputs:
 - `badgeText: string = ''`.
 - `badgeColor: 'green' | 'blue' | 'yellow' | 'gray' | 'red' = 'blue'`.
 - `actions: StickyHeaderActionButton[] = []`.
+- `tabs: StickyHeaderTab[] = []`.
+- `activeTab: string = ''`.
+- `tabsAriaLabel: string = 'Secciones'`.
 
-Output:
+Outputs:
 
 - `actionClicked: output<string>()`, emitting the action `id`.
+- `tabChanged: output<string>()`, emitting the tab `id`.
 
 `metadataContent` is rendered as plain interpolated text in the current template, not `[innerHTML]`. The current template does not expose an `ng-content` slot.
 
@@ -91,6 +96,42 @@ onHeaderAction(actionId: string): void {
 
 `StickyHeaderActionButton` supports `id`, `label`, `variant`, `icon`, `loading`, `disabled`, and `visible`.
 
+## Tabs
+
+Use header tabs for page-level module views. Tabs can be local state tabs or route tabs:
+The component renders tabs as a compact top row above the title/action row.
+
+```typescript
+readonly activeTab = signal('overview');
+
+readonly tabs: StickyHeaderTab[] = [
+  { id: 'overview', label: 'Resumen', icon: 'file-text' },
+  { id: 'pricing', label: 'Precios', icon: 'credit-card' },
+];
+```
+
+```html
+<app-sticky-header
+  title="Nuevo plan"
+  subtitle="Crea un plan de suscripción"
+  icon="credit-card"
+  [tabs]="tabs"
+  [activeTab]="activeTab()"
+  (tabChanged)="activeTab.set($event)"
+/>
+```
+
+Route tabs use `route` and rely on `RouterLinkActive`:
+
+```typescript
+readonly tabs: StickyHeaderTab[] = [
+  { id: 'overview', route: 'overview', label: 'Overview', icon: 'layout-dashboard' },
+  { id: 'health', route: 'health', label: 'Salud', icon: 'heart-pulse' },
+];
+```
+
+`StickyHeaderTab` supports `id`, `label`, `shortLabel`, `icon`, `route`, `exact`, `disabled`, and `visible`.
+
 ## Form Scope
 
 If a header action submits the form, keep the `<form>` around both `app-sticky-header` and the form body. Otherwise, the save action is disconnected from the form lifecycle.
@@ -98,9 +139,12 @@ If a header action submits the form, keep the `<form>` around both `app-sticky-h
 ## Rules
 
 - Use `app-sticky-header` before custom markup unless the page has a documented exception.
+- Put page-level tabs in `app-sticky-header` before creating custom tab bars or sibling `app-scrollable-tabs`.
 - Keep page content padding below the header, not on the sticky parent.
 - Verify every header icon exists in `icons.registry.ts`.
 - Keep action arrays signal/computed-based when they depend on saving/loading/edit mode state.
+- Keep state-tab arrays typed as `StickyHeaderTab[]` and update a signal from `(tabChanged)`.
+- Use route tabs for sibling child routes and state tabs for in-page view switching.
 - Do not use negative margins to compensate for parent padding; move padding to the content area.
 
 ## Related Skills

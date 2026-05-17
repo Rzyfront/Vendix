@@ -46,6 +46,37 @@ export interface ProductTrend {
   revenue: number;
 }
 
+// Product Profitability
+export interface ProductProfitability {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  category: string | null;
+  revenue: number;
+  total_cost: number;
+  profit: number;
+  margin: number;
+  markup: number;
+  units_sold: number;
+  avg_selling_price: number;
+  catalog_base_price: number;
+  catalog_cost_price: number;
+  catalog_margin: number | null;
+}
+
+export interface ProfitabilitySummary {
+  total_products: number;
+  total_revenue: number;
+  total_cost: number;
+  total_profit: number;
+  overall_margin: number;
+}
+
+export interface ProfitabilityResponse {
+  products: ProductProfitability[];
+  summary: ProfitabilitySummary;
+}
+
 // Query DTO for Products Analytics
 export interface ProductsAnalyticsQueryDto {
   date_range?: DateRangeFilter;

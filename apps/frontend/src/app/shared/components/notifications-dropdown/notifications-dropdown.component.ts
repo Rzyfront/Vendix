@@ -153,7 +153,7 @@ export class NotificationsDropdownComponent {
           : '/admin/customers/all';
       case 'low_stock':
         return d?.product_id
-          ? `/admin/products/${d.product_id}`
+          ? `/admin/products/edit/${d.product_id}`
           : '/admin/products';
       case 'layaway_payment_received':
       case 'layaway_payment_reminder':

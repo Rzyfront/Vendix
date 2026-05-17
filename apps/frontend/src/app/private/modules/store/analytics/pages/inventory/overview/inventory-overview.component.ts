@@ -1,7 +1,6 @@
-import {Component, OnInit, OnDestroy, inject,
+import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -10,15 +9,11 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
-import {
-  FilterConfig,
-  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
-
+import { DateRangeFilterComponent } from '../../../components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   InventorySummary,
@@ -30,20 +25,22 @@ import * as InventorySelectors from './state/inventory-overview.selectors';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
+import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
 @Component({
   selector: 'vendix-inventory-overview',
   standalone: true,
   imports: [
     CommonModule,
-    RouterLink,
     CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
-    OptionsDropdownComponent,
     ExportButtonComponent,
+    DateRangeFilterComponent,
     CurrencyPipe,
+    AnalyticsCardComponent,
   ],
   templateUrl: './inventory-overview.component.html',
   styleUrls: ['./inventory-overview.component.scss'] })
@@ -93,39 +90,14 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
   readonly lowStockPct = toSignal(this.lowStockPct$, { initialValue: '0' });
   readonly outOfStockPct = toSignal(this.outOfStockPct$, { initialValue: '0' });
+  readonly dateRange = toSignal(this.dateRange$);
 
   // Chart options
-  movementTrendChartOptions: EChartsOption = {};
-  valuationChartOptions: EChartsOption = {};
-  quantityChartOptions: EChartsOption = {};
+  movementTrendChartOptions = signal<EChartsOption>({});
+  valuationChartOptions = signal<EChartsOption>({});
+  quantityChartOptions = signal<EChartsOption>({});
 
-  // Filter configs
-  filterConfigs: FilterConfig[] = [
-    {
-      key: 'date_from',
-      label: 'Desde',
-      type: 'date',
-      defaultValue: getDefaultStartDate() },
-    {
-      key: 'date_to',
-      label: 'Hasta',
-      type: 'date',
-      defaultValue: getDefaultEndDate() },
-    {
-      key: 'granularity',
-      label: 'Granularidad',
-      type: 'select',
-      options: [
-        { value: 'day', label: 'Por Día' },
-        { value: 'week', label: 'Por Semana' },
-        { value: 'month', label: 'Por Mes' },
-        { value: 'year', label: 'Por Año' },
-      ],
-      placeholder: 'Seleccionar',
-      defaultValue: 'day' },
-  ];
-
-  filterValues: FilterValues = {};
+  readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory');
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -134,16 +106,6 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     this.store.dispatch(InventoryActions.loadInventorySummary());
     this.store.dispatch(InventoryActions.loadMovementTrends());
     this.store.dispatch(InventoryActions.loadValuations());
-
-    // Sync store state → filterValues
-    combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
-          date_from: dateRange.start_date || null,
-          date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
-      });
 
     // Subscribe to movement trends to build trend chart
     combineLatest([this.movementTrends$, this.granularity$])
@@ -164,47 +126,12 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
 this.store.dispatch(InventoryActions.clearInventoryOverviewState());
   }
 
-  onFilterChange(values: FilterValues): void {
-    const dateFrom = values['date_from'] as string;
-    const dateTo = values['date_to'] as string;
-    const granularity = values['granularity'] as string;
-
-    const currentRange = this.filterValues;
-    if (
-      dateFrom !== currentRange['date_from'] ||
-      dateTo !== currentRange['date_to']
-    ) {
-      this.store.dispatch(
-        InventoryActions.setDateRange({
-          dateRange: {
-            start_date: dateFrom || '',
-            end_date: dateTo || '',
-            preset: 'custom' } }),
-      );
-    }
-
-    if (granularity !== currentRange['granularity']) {
-      this.store.dispatch(
-        InventoryActions.setGranularity({ granularity: granularity || 'day' }),
-      );
-    }
-  }
-
-  onClearAllFilters(): void {
-    this.store.dispatch(
-      InventoryActions.setDateRange({
-        dateRange: {
-          start_date: getDefaultStartDate(),
-          end_date: getDefaultEndDate(),
-          preset: 'thisMonth' } }),
-    );
-    this.store.dispatch(
-      InventoryActions.setGranularity({ granularity: 'day' }),
-    );
-  }
-
   exportReport(): void {
     this.store.dispatch(InventoryActions.exportInventoryReport());
+  }
+
+  onDateRangeChange(range: DateRangeFilter): void {
+    this.store.dispatch(InventoryActions.setDateRange({ dateRange: range }));
   }
 
   private getThemeColors() {
@@ -221,7 +148,6 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
     trends: MovementTrend[],
     granularity: string,
   ): void {
-    if (!trends.length) return;
 
     const { border, textSecondary } = this.getThemeColors();
     const labels = trends.map((t) =>
@@ -234,7 +160,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       adjustments: '#f59e0b',
       transfers: '#3b82f6' };
 
-    this.movementTrendChartOptions = {
+    this.movementTrendChartOptions.set({
       tooltip: {
         trigger: 'axis',
         formatter: (params: any) => {
@@ -246,9 +172,10 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         } },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
-        bottom: 0,
+        selectedMode: true,
+        bottom: 30,
         textStyle: { color: textSecondary, fontSize: 12 } },
-      grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+      grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
@@ -256,6 +183,9 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
+        min: 0,
+        max: 100,
+        splitNumber: 5,
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
         splitLine: { lineStyle: { color: border } } },
@@ -280,14 +210,15 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
           trends.map((t) => t.transfers),
           colors.transfers,
         ),
-      ] };
+      ] });
   }
 
-  private buildLineSeries(name: string, data: number[], color: string): any {
+private buildLineSeries(name: string, data: number[], color: string): any {
     return {
       name,
       type: 'line',
       smooth: true,
+      symbol: 'circle',
       data,
       areaStyle: {
         color: {
@@ -297,19 +228,21 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: `${color}33` },
-            { offset: 1, color: `${color}05` },
-          ] } },
+            { offset: 0, color: `${color}4D` },
+            { offset: 1, color: `${color}0D` },
+          ],
+        },
+      },
       lineStyle: { color, width: 2 },
-      itemStyle: { color } };
+      itemStyle: { color },
+    };
   }
 
   // ─── Valuation by Location Rose Chart ───
 
   private updateValuationChart(valuations: InventoryValuation[]): void {
-    if (!valuations.length) return;
 
-    const { textSecondary } = this.getThemeColors();
+    const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
       .sort((a, b) => b.total_value - a.total_value)
       .slice(0, 10);
@@ -327,36 +260,54 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       '#e11d48',
     ];
 
-    this.valuationChartOptions = {
+    this.valuationChartOptions.set({
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) =>
-          `${params.name}<br/>Valor: <b>${this.currencyService.format(params.value)}</b> (${params.percent}%)` },
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}<br/>Valor: <b>${this.currencyService.format(p.value)}</b>`;
+        },
+      },
       legend: {
-        orient: 'vertical',
-        right: 10,
-        top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 } },
-      series: [
-        {
-          type: 'pie',
-          roseType: 'area',
-          radius: ['20%', '75%'],
-          center: ['35%', '50%'],
-          label: { show: false },
-          data: sorted.map((v, i) => ({
-            name: v.location_name,
-            value: v.total_value,
-            itemStyle: { color: locationColors[i % locationColors.length] } })) },
-      ] };
+        data: ['Valor'],
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: sorted.map((v) => v.location_name),
+        axisLine: { lineStyle: { color: border } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(Math.round(v), 0) },
+        splitLine: { lineStyle: { color: border } },
+      },
+      series: [{
+        name: 'Valor',
+        type: 'bar',
+        data: sorted.map((v, i) => ({
+          value: v.total_value,
+          itemStyle: { color: locationColors[i % locationColors.length] }
+        })),
+        barMaxWidth: 50,
+      }],
+    });
   }
 
-  // ─── Quantity by Location Rose Chart ───
+  // ─── Quantity by Location Bar Chart ───
 
   private updateQuantityChart(valuations: InventoryValuation[]): void {
-    if (!valuations.length) return;
 
-    const { textSecondary } = this.getThemeColors();
+    const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
       .sort((a, b) => b.total_quantity - a.total_quantity)
       .slice(0, 10);
@@ -374,28 +325,46 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       '#e11d48',
     ];
 
-    this.quantityChartOptions = {
+    this.quantityChartOptions.set({
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) =>
-          `${params.name}<br/>Cantidad: <b>${params.value.toLocaleString('es-CO')}</b> uds (${params.percent}%)` },
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}<br/>Cantidad: <b>${p.value.toLocaleString('es-CO')}</b> uds`;
+        },
+      },
       legend: {
-        orient: 'vertical',
-        right: 10,
-        top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 } },
-      series: [
-        {
-          type: 'pie',
-          roseType: 'area',
-          radius: ['20%', '75%'],
-          center: ['35%', '50%'],
-          label: { show: false },
-          data: sorted.map((v, i) => ({
-            name: v.location_name,
-            value: v.total_quantity,
-            itemStyle: { color: locationColors[i % locationColors.length] } })) },
-      ] };
+        data: ['Cantidad'],
+        selectedMode: true,
+        bottom: 30,
+        left: 'center',
+        itemWidth: 14,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: sorted.map((v) => v.location_name),
+        axisLine: { lineStyle: { color: border } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        splitLine: { lineStyle: { color: border } },
+      },
+      series: [{
+        name: 'Cantidad',
+        type: 'bar',
+        data: sorted.map((v, i) => ({
+          value: v.total_quantity,
+          itemStyle: { color: locationColors[i % locationColors.length] }
+        })),
+        barMaxWidth: 50,
+      }],
+    });
   }
-
 }

@@ -23,6 +23,7 @@ ssl/private/
 ssl/cert.conf
 # OS
 Thumbs.db
+*:Zone.Identifier
 # Documentation
 docs/
 .claude/

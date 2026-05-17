@@ -60,7 +60,7 @@ import {
               <div class="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-600 text-white text-[10px] font-bold shrink-0">2</div>
               <div>
                 <p class="text-xs font-medium text-indigo-900">Completa los datos</p>
-                <p class="text-[11px] text-indigo-700">Nombre, SKU, Precio, Costo, Stock y más. Rápida o Completa.</p>
+                <p class="text-[11px] text-indigo-700">Nombre, SKU, tipo, estado, precio de venta y datos comerciales.</p>
               </div>
             </div>
             <div class="flex items-start gap-2.5 px-3 py-2 bg-violet-50 rounded-lg border border-violet-100">
@@ -92,12 +92,11 @@ import {
                     <th class="px-2 py-0.5 text-left text-gray-600">Estado</th>
                     <th class="px-2 py-0.5 text-left text-gray-600">Controla Inv.</th>
                     <th class="px-2 py-0.5 text-right text-gray-600">Precio Venta</th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">Precio Compra</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td class="px-2 py-0.5">Camiseta Básica</td><td class="px-2 py-0.5">CAM-001</td><td class="px-2 py-0.5">physical</td><td class="px-2 py-0.5">active</td><td class="px-2 py-0.5">Sí</td><td class="px-2 py-0.5 text-right">15000</td><td class="px-2 py-0.5 text-right">8000</td></tr>
-                  <tr><td class="px-2 py-0.5">Corte de Cabello</td><td class="px-2 py-0.5">SRV-COR-01</td><td class="px-2 py-0.5">service</td><td class="px-2 py-0.5">active</td><td class="px-2 py-0.5">No</td><td class="px-2 py-0.5 text-right">25000</td><td class="px-2 py-0.5 text-right">0</td></tr>
+                  <tr><td class="px-2 py-0.5">Camiseta Básica</td><td class="px-2 py-0.5">CAM-001</td><td class="px-2 py-0.5">physical</td><td class="px-2 py-0.5">active</td><td class="px-2 py-0.5">Sí</td><td class="px-2 py-0.5 text-right">15000</td></tr>
+                  <tr><td class="px-2 py-0.5">Corte de Cabello</td><td class="px-2 py-0.5">SRV-COR-01</td><td class="px-2 py-0.5">service</td><td class="px-2 py-0.5">active</td><td class="px-2 py-0.5">No</td><td class="px-2 py-0.5 text-right">25000</td></tr>
                 </tbody>
               </table>
             </div>
@@ -146,8 +145,8 @@ import {
               <app-icon name="info" [size]="20" class="text-blue-600 shrink-0"></app-icon>
               <div class="flex-1">
                 <p class="text-sm text-blue-800">
-                  Esta carga masiva gestiona el <strong>catálogo</strong> (definir productos y servicios). 
-                  Para ingresar mercancía con costo y respaldo contable, usa 
+                  Esta carga masiva gestiona el <strong>catálogo</strong> (definir productos y servicios).
+                  No mueve stock, costos de compra ni activos registrados. Para ingresar mercancía con costo y respaldo contable, usa
                   <strong>Inventario > POP > Carga masiva</strong>.
                 </p>
               </div>
@@ -216,7 +215,7 @@ import {
                   </div>
                   <div class="min-w-0">
                     <p class="font-semibold text-indigo-900 text-xs">Plantilla Rápida</p>
-                    <p class="text-[10px] text-indigo-600 truncate">Solo campos indispensables: Nombre, SKU, Tipo, Precio Venta, Precio Compra y Cantidad Inicial</p>
+                    <p class="text-[10px] text-indigo-600 truncate">Solo catálogo: Nombre, SKU, Tipo, Estado y Precio Venta</p>
                     <div class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1">
                       <app-icon name="download" [size]="12" class="mr-1"></app-icon>
                       DESCARGAR EXCEL
@@ -459,14 +458,14 @@ import {
                             </td>
                           </tr>
                         }
-                        <!-- Deprecation warning banner -->
-                        @if (hasStockDeprecationWarning(item.warnings)) {
+                        <!-- Catalog-only warning banner -->
+                        @if (hasCatalogOnlyIgnoredWarning(item.warnings)) {
                           <tr>
                             <td colspan="7" class="px-3 py-1">
                               <div class="bg-amber-50 border border-amber-300 rounded-md px-3 py-2 mb-1 flex items-center gap-2">
                                 <app-icon name="alert-triangle" [size]="16" class="text-amber-600 shrink-0"></app-icon>
                                 <span class="text-xs text-amber-800 flex-1">
-                                  El campo de stock será deshabilitado próximamente. Usa POP para ingreso de mercancía.
+                                  Se ignoraron columnas de inventario o compra. Usa POP para mover stock y registrar costos reales.
                                 </span>
                                 <a routerLink="/store/inventory/pop" 
                                    class="shrink-0 text-xs font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded transition-colors">
@@ -588,12 +587,12 @@ import {
                         }
                       </div>
                     }
-                    <!-- Deprecation warning (mobile) -->
-                    @if (hasStockDeprecationWarning(item.warnings)) {
+                    <!-- Catalog-only warning (mobile) -->
+                    @if (hasCatalogOnlyIgnoredWarning(item.warnings)) {
                       <div class="bg-amber-50 border border-amber-300 rounded-md px-3 py-2 mt-2 flex items-center gap-2">
                         <app-icon name="alert-triangle" [size]="14" class="text-amber-600 shrink-0"></app-icon>
                         <span class="text-[11px] text-amber-800 flex-1">
-                          Stock será deshabilitado. Usa POP.
+                          Inventario/compra ignorado. Usa POP.
                         </span>
                         <a routerLink="/store/inventory/pop" 
                            class="shrink-0 text-[10px] font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 px-2 py-1 rounded transition-colors">
@@ -884,11 +883,11 @@ export class BulkUploadModalComponent {
     this.dontShowIntroAgain.update(v => !v);
   }
 
-  hasStockDeprecationWarning(warnings: (string | BulkValidationMessage)[]): boolean {
+  hasCatalogOnlyIgnoredWarning(warnings: (string | BulkValidationMessage)[]): boolean {
     return warnings.some(w =>
       typeof w === 'object'
-        ? w.code === 'STOCK_FIELD_DEPRECATED'
-        : w.includes('STOCK_FIELD_DEPRECATED')
+        ? w.code === 'CATALOG_ONLY_IGNORED_FIELDS'
+        : w.includes('CATALOG_ONLY_IGNORED_FIELDS')
     );
   }
 

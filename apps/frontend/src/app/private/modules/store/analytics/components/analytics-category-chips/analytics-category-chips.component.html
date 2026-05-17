@@ -1,0 +1,23 @@
+<div class="chips-container" role="group" aria-label="Filtrar por categoria">
+  <app-button
+    size="sm"
+    [variant]="getChipVariant(selectedCategory() === null)"
+    customClasses="!rounded-full"
+    (clicked)="onChipClick(null)"
+  >
+    <app-icon slot="icon" name="layout-grid" [size]="14"></app-icon>
+    Todas
+  </app-button>
+
+  @for (chip of chips(); track trackByCategoryId($index, chip)) {
+    <app-button
+      size="sm"
+      [variant]="getChipVariant(chip.isSelected)"
+      customClasses="!rounded-full"
+      (clicked)="onChipClick(chip.id)"
+    >
+      <app-icon slot="icon" [name]="chip.icon" [size]="14"></app-icon>
+      {{ chip.label }}
+    </app-button>
+  }
+</div>

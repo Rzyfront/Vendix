@@ -341,8 +341,10 @@ export class ProductCreateModalComponent {
       dto.track_inventory = false;
     }
 
-    // Remove legacy field if it exists in val but not needed in DTO
-    // delete dto.category_id;
+    delete dto.stock_quantity;
+    delete dto.stock_by_location;
+    delete dto.cost_price;
+    delete dto.profit_margin;
 
     this.submit.emit(dto);
   }

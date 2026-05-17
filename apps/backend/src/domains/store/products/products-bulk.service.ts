@@ -1,19 +1,14 @@
 import {
   Injectable,
-  NotFoundException,
-  ConflictException,
   BadRequestException,
   Logger,
 } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
-import { ProductVariantService } from './services/product-variant.service';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
-import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
-import { LocationsService } from '../inventory/locations/locations.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   BulkProductUploadDto,
@@ -35,15 +30,40 @@ export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
   private readonly MAX_BATCH_SIZE = 1000;
   private readonly NULL_MARKER = '__NULL__';
+  private readonly CATALOG_ONLY_IGNORED_FIELDS = new Set([
+    'stock_quantity',
+    'stock_by_location',
+    'warehouse_code',
+    'warehouse_name',
+    'cost_price',
+    'profit_margin',
+    'min_stock_level',
+    'max_stock_level',
+    'reorder_point',
+    'reorder_quantity',
+    'requires_serial_numbers',
+    'requires_batch_tracking',
+  ]);
+  private readonly CATALOG_ONLY_IGNORED_FIELD_LABELS: Record<string, string> = {
+    stock_quantity: 'Cantidad inicial',
+    stock_by_location: 'Stock por ubicación',
+    warehouse_code: 'Código de bodega',
+    warehouse_name: 'Nombre de bodega',
+    cost_price: 'Precio compra',
+    profit_margin: 'Margen por costo',
+    min_stock_level: 'Stock mínimo',
+    max_stock_level: 'Stock máximo',
+    reorder_point: 'Punto de reorden',
+    reorder_quantity: 'Cantidad de reorden',
+    requires_serial_numbers: 'Maneja series',
+    requires_batch_tracking: 'Maneja lotes',
+  };
 
   // Mapa de encabezados en Español a claves del DTO
   private readonly HEADER_MAP = {
     Nombre: 'name',
     SKU: 'sku',
     'Precio Venta': 'base_price',
-    'Precio Compra': 'cost_price',
-    Margen: 'profit_margin',
-    'Cantidad Inicial': 'stock_quantity',
     'Controla Inventario': 'track_inventory',
     Descripción: 'description',
     Categorías: 'category_ids',
@@ -53,8 +73,6 @@ export class ProductsBulkService {
     'En Oferta': 'is_on_sale',
     'Precio Oferta': 'sale_price',
     Peso: 'weight',
-    'Codigo Bodega': 'warehouse_code',
-    'Nombre Bodega': 'warehouse_name',
     Tipo: 'product_type',
     'Duración Servicio (min)': 'service_duration_minutes',
     'Modalidad Servicio': 'service_modality',
@@ -65,12 +83,6 @@ export class ProductsBulkService {
     'Es Recurrente': 'is_recurring',
     'Instrucciones Servicio': 'service_instructions',
     'Tiempo Preparación (min)': 'preparation_time_minutes',
-    'Stock Mínimo': 'min_stock_level',
-    'Stock Máximo': 'max_stock_level',
-    'Punto Reorden': 'reorder_point',
-    'Cantidad Reorden': 'reorder_quantity',
-    'Maneja Series': 'requires_serial_numbers',
-    'Maneja Lotes': 'requires_batch_tracking',
     'Tipo Precio': 'pricing_type',
   };
 
@@ -139,10 +151,7 @@ export class ProductsBulkService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly productsService: ProductsService,
-    private readonly variantService: ProductVariantService,
     private readonly accessValidationService: AccessValidationService,
-    private readonly stockLevelManager: StockLevelManager,
-    private readonly locationsService: LocationsService,
     private readonly s3Service: S3Service,
   ) {}
 
@@ -267,6 +276,49 @@ export class ProductsBulkService {
     }
   }
 
+  private stripCatalogOnlyIgnoredFields(product: Record<string, any>): string[] {
+    const ignored = new Set<string>();
+
+    for (const field of this.CATALOG_ONLY_IGNORED_FIELDS) {
+      if (product[field] !== undefined) {
+        ignored.add(field);
+        delete product[field];
+      }
+    }
+
+    if (Array.isArray(product.variants)) {
+      for (const variant of product.variants) {
+        if (!variant || typeof variant !== 'object') continue;
+
+        for (const field of [
+          'stock_quantity',
+          'stock_by_location',
+          'cost_price',
+          'profit_margin',
+        ]) {
+          if (variant[field] !== undefined) {
+            ignored.add(`variants.${field}`);
+            delete variant[field];
+          }
+        }
+      }
+    }
+
+    return Array.from(ignored);
+  }
+
+  private formatIgnoredCatalogFields(fields: string[]): string {
+    return fields
+      .map((field) => {
+        const normalizedField = field.replace(/^variants\./, '');
+        const label =
+          this.CATALOG_ONLY_IGNORED_FIELD_LABELS[normalizedField] ??
+          normalizedField;
+        return field.startsWith('variants.') ? `Variantes: ${label}` : label;
+      })
+      .join(', ');
+  }
+
   /**
    * Analiza un archivo Excel/CSV sin procesar los productos.
    * Retorna un análisis detallado por producto con status ready/warning/error.
@@ -332,22 +384,24 @@ export class ProductsBulkService {
     let withErrors = 0;
 
     for (let i = 0; i < products.length; i++) {
-      const product = products[i];
+      const product = { ...products[i] };
+      const ignoredCatalogFields =
+        this.stripCatalogOnlyIgnoredFields(product);
       const item: BulkProductAnalysisItemDto = {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: product.name || '',
         sku: product.sku || '',
         product_type: 'physical',
         base_price: parseFloat(product.base_price) || 0,
-        cost_price: parseFloat(product.cost_price) || 0,
-        stock_quantity: parseFloat(product.stock_quantity) || 0,
+        cost_price: 0,
+        stock_quantity: 0,
         track_inventory: undefined,
         brand_name: undefined,
         brand_will_create: false,
         category_names: [],
         categories_will_create: [],
-        warehouse_code: product.warehouse_code || undefined,
-        warehouse_name: product.warehouse_name || undefined,
+        warehouse_code: undefined,
+        warehouse_name: undefined,
         action: 'create',
         existing_product_id: undefined,
         status: 'ready',
@@ -391,6 +445,14 @@ export class ProductsBulkService {
         item.track_inventory = false;
       }
 
+      if (ignoredCatalogFields.length > 0) {
+        item.warnings.push({
+          code: 'CATALOG_ONLY_IGNORED_FIELDS',
+          message: `Se ignoraron columnas exclusivas de inventario/compra (${this.formatIgnoredCatalogFields(ignoredCatalogFields)}). Las entradas, salidas y costos reales de inventario se gestionan desde Inventario > POP.`,
+          field: ignoredCatalogFields[0],
+        });
+      }
+
       // Validate required fields
       if (!item.name) {
         item.errors.push({
@@ -414,18 +476,11 @@ export class ProductsBulkService {
         });
       }
 
-      // Check margin -> price calculation
-      let margin = parseFloat(product.profit_margin) || 0;
-      if (margin > 0 && margin < 1) margin = margin * 100;
-      if (margin > 0 && item.cost_price > 0) {
-        item.base_price = item.cost_price * (1 + margin / 100);
-      }
-
-      // Check for no price at all
-      if (item.base_price === 0 && item.cost_price === 0 && margin === 0) {
+      // Check for no sell price
+      if (item.base_price === 0) {
         item.warnings.push({
           code: 'NO_PRICE_SPECIFIED',
-          message: 'No se especificó precio de venta ni costo con margen',
+          message: 'No se especificó precio de venta',
           field: 'base_price',
         });
       }
@@ -530,15 +585,6 @@ export class ProductsBulkService {
         }
       }
 
-      // Service with stock warning
-      if (item.product_type === 'service' && item.stock_quantity > 0) {
-        item.warnings.push({
-          code: 'SERVICE_NO_STOCK',
-          message: 'Los servicios no manejan stock. Se ignorará la cantidad.',
-          field: 'stock_quantity',
-        });
-      }
-
       // Cross-field validations (only when BOTH fields are explicitly present)
       if (
         item.product_type === 'service' &&
@@ -577,53 +623,6 @@ export class ProductsBulkService {
         });
       }
 
-      if (
-        product.min_stock_level !== undefined &&
-        product.max_stock_level !== undefined &&
-        Number(product.min_stock_level) > Number(product.max_stock_level)
-      ) {
-        item.warnings.push({
-          code: 'MIN_GT_MAX_STOCK',
-          message: 'Stock mínimo no puede ser mayor que stock máximo.',
-          field: 'min_stock_level',
-        });
-      }
-
-      if (
-        product.reorder_point !== undefined &&
-        product.max_stock_level !== undefined &&
-        Number(product.reorder_point) > Number(product.max_stock_level)
-      ) {
-        item.warnings.push({
-          code: 'REORDER_GT_MAX',
-          message: 'Punto de reorden no puede ser mayor que stock máximo.',
-          field: 'reorder_point',
-        });
-      }
-
-      if (
-        product.requires_batch_tracking !== undefined &&
-        product.track_inventory !== undefined &&
-        product.requires_batch_tracking === true &&
-        product.track_inventory === false
-      ) {
-        item.warnings.push({
-          code: 'BATCH_REQUIRES_INVENTORY',
-          message: 'Manejo de lotes requiere control de inventario activo.',
-          field: 'requires_batch_tracking',
-        });
-      }
-
-      // Deprecation warning for stock fields
-      if (product.stock_quantity > 0 || product.cost_price > 0) {
-        item.warnings.push({
-          code: 'STOCK_FIELD_DEPRECATED',
-          message:
-            'El stock será ignorado en futuras versiones. Usa Inventario > POP > Carga masiva para ingresar mercancía con costo y respaldo contable.',
-          field: product.stock_quantity > 0 ? 'stock_quantity' : 'cost_price',
-        });
-      }
-
       // Compute modified vs nulled fields for sparse update preview
       const modifiedFields: string[] = [];
       const nulledFields: string[] = [];
@@ -633,9 +632,6 @@ export class ProductsBulkService {
         'sku',
         'description',
         'base_price',
-        'cost_price',
-        'profit_margin',
-        'stock_quantity',
         'state',
         'product_type',
         'track_inventory',
@@ -655,12 +651,6 @@ export class ProductsBulkService {
         'is_recurring',
         'service_instructions',
         'preparation_time_minutes',
-        'min_stock_level',
-        'max_stock_level',
-        'reorder_point',
-        'reorder_quantity',
-        'requires_serial_numbers',
-        'requires_batch_tracking',
       ];
 
       for (const field of FIELDS_TO_TRACK) {
@@ -770,7 +760,6 @@ export class ProductsBulkService {
         'Estado',
         'Controla Inventario',
         'Precio Venta',
-        'Precio Compra',
       ];
       exampleData = [
         {
@@ -780,7 +769,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 15000,
-          'Precio Compra': 8000,
         },
         {
           Nombre: 'Producto Ejemplo 2',
@@ -789,7 +777,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 25000,
-          'Precio Compra': 12000,
         },
         {
           Nombre: 'Producto Ejemplo 3',
@@ -798,7 +785,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 42000,
-          'Precio Compra': 19000,
         },
         {
           Nombre: 'Producto Ejemplo 4',
@@ -807,7 +793,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 85000,
-          'Precio Compra': 45000,
         },
         {
           Nombre: 'Producto Ejemplo 5',
@@ -816,7 +801,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 32000,
-          'Precio Compra': 18000,
         },
         {
           Nombre: 'Producto Ejemplo 6',
@@ -825,7 +809,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 55000,
-          'Precio Compra': 27000,
         },
         {
           Nombre: 'Producto Ejemplo 7',
@@ -834,7 +817,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 18000,
-          'Precio Compra': 9000,
         },
         {
           Nombre: 'Servicio Ejemplo 1',
@@ -843,7 +825,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 50000,
-          'Precio Compra': 0,
         },
         {
           Nombre: 'Servicio Ejemplo 2',
@@ -852,7 +833,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 35000,
-          'Precio Compra': 0,
         },
         {
           Nombre: 'Producto Ejemplo 8',
@@ -861,7 +841,6 @@ export class ProductsBulkService {
           Estado: 'inactivo',
           'Controla Inventario': 'sí',
           'Precio Venta': 18000,
-          'Precio Compra': 9000,
         },
       ];
     } else {
@@ -872,8 +851,6 @@ export class ProductsBulkService {
         'Estado',
         'Controla Inventario',
         'Precio Venta',
-        'Precio Compra',
-        'Margen',
         'Descripción',
         'Marca',
         'Categorías',
@@ -891,12 +868,6 @@ export class ProductsBulkService {
         'Es Recurrente',
         'Instrucciones Servicio',
         'Tiempo Preparación (min)',
-        'Stock Mínimo',
-        'Stock Máximo',
-        'Punto Reorden',
-        'Cantidad Reorden',
-        'Maneja Series',
-        'Maneja Lotes',
       ];
       exampleData = [
         {
@@ -906,8 +877,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 85000,
-          'Precio Compra': 45000,
-          Margen: 45,
           Descripción: 'Zapatillas ideales para correr largas distancias.',
           Marca: 'Nike',
           Categorías: 'Deportes, Calzado',
@@ -925,12 +894,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': 10,
-          'Stock Máximo': 200,
-          'Punto Reorden': 20,
-          'Cantidad Reorden': 50,
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'no',
         },
         {
           Nombre: 'Asesoría Tributaria',
@@ -939,8 +902,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 150000,
-          'Precio Compra': 60000,
-          Margen: 60,
           Descripción: 'Asesoría tributaria profesional por sesión.',
           Marca: '',
           Categorías: 'Servicios, Contabilidad',
@@ -958,12 +919,6 @@ export class ProductsBulkService {
           'Es Recurrente': 'no',
           'Instrucciones Servicio': 'Traer cédula y comprobante de pago.',
           'Tiempo Preparación (min)': 15,
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': '',
-          'Maneja Lotes': '',
         },
         {
           Nombre: 'Leche Entera 1L',
@@ -972,8 +927,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 5200,
-          'Precio Compra': 3800,
-          Margen: 37,
           Descripción: 'Leche entera pasteurizada de origen colombiano.',
           Marca: 'Colanta',
           Categorías: 'Alimentos, Lácteos',
@@ -991,12 +944,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': 50,
-          'Stock Máximo': 500,
-          'Punto Reorden': 100,
-          'Cantidad Reorden': 200,
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'sí',
         },
         {
           Nombre: 'Camiseta Dry-Fit Running',
@@ -1005,8 +952,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 65000,
-          'Precio Compra': 32000,
-          Margen: 50,
           Descripción: 'Camiseta deportiva transpirable para hombre.',
           Marca: 'Adidas',
           Categorías: 'Deportes, Ropa Deportiva',
@@ -1024,12 +969,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'no',
         },
         {
           Nombre: 'Consultoría Estratégica Virtual',
@@ -1038,8 +977,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 250000,
-          'Precio Compra': 100000,
-          Margen: 150,
           Descripción:
             'Consultoría estratégica virtual por sesión de 90 minutos.',
           Marca: '',
@@ -1059,12 +996,6 @@ export class ProductsBulkService {
           'Instrucciones Servicio':
             'Conexión por Zoom 5 minutos antes de la sesión.',
           'Tiempo Preparación (min)': 10,
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': '',
-          'Maneja Lotes': '',
         },
         {
           Nombre: 'Escritorio Plegable Madera',
@@ -1073,8 +1004,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 180000,
-          'Precio Compra': 95000,
-          Margen: 47,
           Descripción:
             'Escritorio plegable de madera 120x60cm para home office.',
           Marca: 'Muebles Express',
@@ -1093,12 +1022,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': 5,
-          'Stock Máximo': 50,
-          'Punto Reorden': 8,
-          'Cantidad Reorden': 15,
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'no',
         },
         {
           Nombre: 'Aceite de Oliva Extra Virgen 500ml',
@@ -1107,8 +1030,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 38000,
-          'Precio Compra': 24000,
-          Margen: 58,
           Descripción: 'Aceite de oliva importado, primera prensada en frío.',
           Marca: 'Olivetto',
           Categorías: 'Alimentos, Aceites',
@@ -1126,12 +1047,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'sí',
         },
         {
           Nombre: 'Teclado Mecánico RGB',
@@ -1140,8 +1055,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 320000,
-          'Precio Compra': 180000,
-          Margen: 78,
           Descripción:
             'Teclado mecánico con switches Cherry MX e iluminación RGB.',
           Marca: 'Corsair',
@@ -1160,12 +1073,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': 'sí',
-          'Maneja Lotes': 'no',
         },
         {
           Nombre: 'Mantenimiento Preventivo Anual',
@@ -1174,8 +1081,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'no',
           'Precio Venta': 480000,
-          'Precio Compra': 200000,
-          Margen: 71,
           Descripción: 'Plan de mantenimiento preventivo anual para equipos.',
           Marca: '',
           Categorías: 'Servicios, Mantenimiento',
@@ -1194,12 +1099,6 @@ export class ProductsBulkService {
           'Instrucciones Servicio':
             'Coordinar visita técnica con anticipación de 24 horas.',
           'Tiempo Preparación (min)': 30,
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': '',
-          'Maneja Lotes': '',
         },
         {
           Nombre: 'Bloqueador Solar Facial SPF 60',
@@ -1208,8 +1107,6 @@ export class ProductsBulkService {
           Estado: 'inactivo',
           'Controla Inventario': 'sí',
           'Precio Venta': 48000,
-          'Precio Compra': 28000,
-          Margen: 71,
           Descripción: 'Protector solar facial oil-free con SPF 60.',
           Marca: 'La Roche-Posay',
           Categorías: 'Belleza, Cuidado Personal',
@@ -1227,12 +1124,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'sí',
         },
         {
           Nombre: 'Frutas Orgánicas Mix 1kg',
@@ -1241,8 +1132,6 @@ export class ProductsBulkService {
           Estado: 'activo',
           'Controla Inventario': 'sí',
           'Precio Venta': 22000,
-          'Precio Compra': 9000,
-          Margen: 59,
           Descripción: 'Mix de frutas orgánicas de temporada por kilo.',
           Marca: '',
           Categorías: 'Alimentos, Orgánicos',
@@ -1260,12 +1149,6 @@ export class ProductsBulkService {
           'Es Recurrente': '',
           'Instrucciones Servicio': '',
           'Tiempo Preparación (min)': '',
-          'Stock Mínimo': '',
-          'Stock Máximo': '',
-          'Punto Reorden': '',
-          'Cantidad Reorden': '',
-          'Maneja Series': 'no',
-          'Maneja Lotes': 'no',
         },
       ];
     }
@@ -1309,34 +1192,23 @@ export class ProductsBulkService {
     let successful = 0;
     let failed = 0;
 
-    // Cache de bodegas para evitar N+1 queries
-    const locationCache = new Map<string, any>();
-
     for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
       const productData = products[rowIndex];
       const rowNumber = rowIndex + 2; // header = fila 1
       try {
-        if (
-          (productData.stock_quantity ?? 0) > 0 ||
-          (productData.cost_price ?? 0) > 0
-        ) {
-          this.logger.warn('PRODUCT_BULK_DEPRECATED_STOCK_FIELD', {
+        const ignoredCatalogFields =
+          this.stripCatalogOnlyIgnoredFields(productData as any);
+
+        if (ignoredCatalogFields.length > 0) {
+          this.logger.warn('PRODUCT_BULK_IGNORED_INVENTORY_FIELDS', {
             storeId,
             sku: productData.sku,
-            stock: productData.stock_quantity,
-            cost: productData.cost_price,
+            fields: ignoredCatalogFields,
           });
         }
 
         // Pre-procesar: Crear marcas y categorías si son strings
         await this.preprocessProductData(productData, storeId);
-
-        // Resolver bodega si se especificó
-        const resolvedLocation = await this.resolveWarehouse(
-          productData.warehouse_code,
-          productData.warehouse_name,
-          locationCache,
-        );
 
         // Validar datos
         await this.validateProductData(productData, storeId);
@@ -1360,37 +1232,6 @@ export class ProductsBulkService {
             updateProductDto,
           );
 
-          // Asignar stock a bodega si hay cantidad, bodega resuelta y controla inventario
-          const isPhysical =
-            (productData.product_type || 'physical') !== 'service';
-          const hasExplicitStock =
-            productData.stock_quantity !== undefined &&
-            String(productData.stock_quantity) !== this.NULL_MARKER;
-          const stockQty =
-            hasExplicitStock && !isNaN(Number(productData.stock_quantity))
-              ? Number(productData.stock_quantity)
-              : 0;
-          if (
-            isPhysical &&
-            hasExplicitStock &&
-            (productData.track_inventory ?? true) &&
-            stockQty > 0
-          ) {
-            const targetLocation =
-              resolvedLocation ||
-              (await this.locationsService.getDefaultLocation(storeId));
-            if (targetLocation) {
-              await this.stockLevelManager.updateStock({
-                product_id: existingProduct.id,
-                location_id: targetLocation.id,
-                quantity_change: stockQty,
-                movement_type: 'adjustment',
-                reason: 'Carga masiva - actualización de stock',
-                source_module: 'product_bulk_legacy',
-              });
-            }
-          }
-
           results.push({
             product: resultProduct,
             status: 'success',
@@ -1413,30 +1254,6 @@ export class ProductsBulkService {
                 createdId as unknown as number,
                 productData.variants,
               );
-            }
-
-            // Asignar stock inicial a bodega
-            const isPhysical =
-              (productData.product_type || 'physical') !== 'service';
-            const stockQty = productData.stock_quantity || 0;
-            if (
-              isPhysical &&
-              (productData.track_inventory ?? true) &&
-              stockQty > 0
-            ) {
-              const targetLocation =
-                resolvedLocation ||
-                (await this.locationsService.getDefaultLocation(storeId));
-              if (targetLocation) {
-                await this.stockLevelManager.updateStock({
-                  product_id: createdId!,
-                  location_id: targetLocation.id,
-                  quantity_change: stockQty,
-                  movement_type: 'initial',
-                  reason: 'Carga masiva - stock inicial',
-                  source_module: 'product_bulk_legacy',
-                });
-              }
             }
 
             results.push({
@@ -1597,20 +1414,6 @@ export class ProductsBulkService {
         }
         product.category_ids = categoryIds;
       }
-    }
-
-    // Lógica de Precios: Margen tiene preferencia
-    const cost = parseFloat(product.cost_price || 0);
-    let margin = parseFloat(product.profit_margin || 0);
-    // Auto-fix for decimal margins (e.g. 0.3 -> 30%)
-    if (margin > 0 && margin < 1) {
-      margin = margin * 100;
-      product.profit_margin = margin;
-    }
-
-    if (margin > 0 && cost > 0) {
-      // Precio = Costo * (1 + Margen/100)
-      product.base_price = cost * (1 + margin / 100);
     }
 
     // Normalizar Booleanos (Si/No -> true/false)
@@ -1944,8 +1747,6 @@ export class ProductsBulkService {
             : undefined,
       category_ids:
         product.category_ids === this.NULL_MARKER ? [] : product.category_ids,
-      cost_price: product.cost_price,
-      profit_margin: product.profit_margin,
       weight:
         product.weight && typeof product.weight === 'number'
           ? product.weight
@@ -1971,12 +1772,6 @@ export class ProductsBulkService {
       'is_recurring',
       'service_instructions',
       'preparation_time_minutes',
-      'min_stock_level',
-      'max_stock_level',
-      'reorder_point',
-      'reorder_quantity',
-      'requires_serial_numbers',
-      'requires_batch_tracking',
       'pricing_type',
     ];
 
@@ -1998,8 +1793,6 @@ export class ProductsBulkService {
       'name',
       'base_price',
       'sku',
-      'cost_price',
-      'profit_margin',
       'state',
     ];
 
@@ -2068,12 +1861,6 @@ export class ProductsBulkService {
       'is_recurring',
       'service_instructions',
       'preparation_time_minutes',
-      'min_stock_level',
-      'max_stock_level',
-      'reorder_point',
-      'reorder_quantity',
-      'requires_serial_numbers',
-      'requires_batch_tracking',
       'pricing_type',
     ];
 
@@ -2095,102 +1882,4 @@ export class ProductsBulkService {
     }
   }
 
-  /**
-   * Resuelve la bodega destino: prioridad código > nombre.
-   * Usa cache para evitar N+1 queries por batch.
-   * Retorna null si no se especificó bodega (usa default).
-   */
-  private async resolveWarehouse(
-    warehouseCode: string | undefined,
-    warehouseName: string | undefined,
-    cache: Map<string, any>,
-  ): Promise<any | null> {
-    const code = warehouseCode?.toString().trim();
-    const name = warehouseName?.toString().trim();
-
-    if (!code && !name) return null;
-
-    const cacheKey = code
-      ? `code:${code.toLowerCase()}`
-      : `name:${name!.toLowerCase()}`;
-
-    if (cache.has(cacheKey)) {
-      return cache.get(cacheKey);
-    }
-
-    let location: any = null;
-
-    if (code) {
-      location = await this.locationsService.findByCode(code);
-    }
-
-    if (!location && name) {
-      location = await this.locationsService.findByName(name);
-    }
-
-    if (!location) {
-      const context = RequestContextService.getContext()!;
-      location = await this.prisma.inventory_locations.create({
-        data: {
-          name: name || code!,
-          code: code || generateSlug(name!),
-          type: 'warehouse',
-          is_active: true,
-          store_id: context.store_id!,
-          organization_id: context.organization_id!,
-        },
-      });
-
-      // Cache with both keys if applicable
-      if (code) cache.set(`code:${code.toLowerCase()}`, location);
-      if (name) cache.set(`name:${name.toLowerCase()}`, location);
-      return location;
-    }
-
-    cache.set(cacheKey, location);
-    return location;
-  }
-
-  private async processInitialStock(
-    productId: number,
-    quantity: number,
-    storeId: number,
-  ): Promise<void> {
-    const defaultLocation =
-      await this.locationsService.getDefaultLocation(storeId);
-    if (!defaultLocation) return; // O lanzar error
-
-    await this.stockLevelManager.updateStock({
-      product_id: productId,
-      location_id: defaultLocation.id,
-      quantity_change: quantity,
-      movement_type: 'initial',
-      reason: 'Carga masiva inicial',
-      source_module: 'product_bulk_legacy',
-    });
-  }
-
-  private async processStockByLocation(
-    productId: number,
-    stockByLocation: any[],
-    storeId: number,
-  ): Promise<void> {
-    // Implementación similar a la original
-    const defaultLocation =
-      await this.locationsService.getDefaultLocation(storeId);
-
-    for (const stockData of stockByLocation) {
-      const locationId = stockData.location_id || defaultLocation?.id;
-      if (!locationId) continue;
-
-      await this.stockLevelManager.updateStock({
-        product_id: productId,
-        location_id: locationId,
-        quantity_change: stockData.quantity || 0,
-        movement_type: 'initial',
-        reason: stockData.notes || 'Carga masiva por ubicación',
-        source_module: 'product_bulk_legacy',
-      });
-    }
-  }
 }

@@ -1,6 +1,6 @@
-import { Component, input, output } from '@angular/core';
+import { Component, computed, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { ButtonComponent } from '../button/button.component';
 
@@ -14,15 +14,26 @@ export interface StickyHeaderActionButton {
     visible?: boolean;
 }
 
+export interface StickyHeaderTab {
+    id: string;
+    label: string;
+    shortLabel?: string;
+    icon?: string;
+    route?: string | unknown[];
+    exact?: boolean;
+    disabled?: boolean;
+    visible?: boolean;
+}
+
 export type StickyHeaderVariant = 'default' | 'glass';
 export type StickyHeaderBadgeColor = 'green' | 'blue' | 'yellow' | 'gray' | 'red';
 
 @Component({
     selector: 'app-sticky-header',
     standalone: true,
-    imports: [CommonModule, RouterLink, IconComponent, ButtonComponent],
+    imports: [CommonModule, RouterLink, RouterLinkActive, IconComponent, ButtonComponent],
     templateUrl: './sticky-header.component.html',
-    styleUrls: [],
+    styleUrls: ['./sticky-header.component.scss'],
 })
 export class StickyHeaderComponent {
     title = input.required<string>();
@@ -36,11 +47,33 @@ export class StickyHeaderComponent {
     badgeText = input<string>('');
     badgeColor = input<StickyHeaderBadgeColor>('blue');
     actions = input<StickyHeaderActionButton[]>([]);
+    tabs = input<StickyHeaderTab[]>([]);
+    activeTab = input<string>('');
+    tabsAriaLabel = input<string>('Secciones');
 
     actionClicked = output<string>();
+    tabChanged = output<string>();
+
+    readonly visibleTabs = computed(() =>
+        this.tabs().filter((tab) => tab.visible !== false),
+    );
 
     onActionClick(id: string): void {
         this.actionClicked.emit(id);
+    }
+
+    onTabClick(tab: StickyHeaderTab, event?: Event): void {
+        if (tab.disabled) {
+            event?.preventDefault();
+            return;
+        }
+
+        this.tabChanged.emit(tab.id);
+    }
+
+    isTabActive(tab: StickyHeaderTab, routeActive = false): boolean {
+        const activeTab = this.activeTab();
+        return activeTab ? activeTab === tab.id : routeActive;
     }
 
     getBadgeClasses(): string {

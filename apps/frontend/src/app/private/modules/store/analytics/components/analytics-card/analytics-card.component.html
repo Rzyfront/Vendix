@@ -1,0 +1,28 @@
+<div
+  class="analytics-card"
+  (click)="onClick()"
+  (mouseenter)="showTooltip.set(true)"
+  (mouseleave)="showTooltip.set(false)"
+  [style.--card-color]="categoryColor()"
+>
+  <div class="card-icon">
+    <app-icon [name]="view().icon" [size]="20" />
+  </div>
+
+  <div class="card-content">
+    <h4 class="card-title">{{ view().title }}</h4>
+    <p class="card-description">{{ view().description }}</p>
+  </div>
+
+  <span class="card-badge">{{ categoryLabel() }}</span>
+
+  @if (showTooltip()) {
+    <div class="card-tooltip">
+      <div class="tooltip-header">
+        <app-icon [name]="view().icon" [size]="16" />
+        <span>{{ view().title }}</span>
+      </div>
+      <p class="tooltip-body">{{ view().detailedDescription || view().description }}</p>
+    </div>
+  }
+</div>
