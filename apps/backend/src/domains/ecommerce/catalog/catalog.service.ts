@@ -368,9 +368,12 @@ export class CatalogService {
   }
 
   async getBrands() {
+    const store_id = RequestContextService.getStoreId();
+
     const brands = await this.prisma.brands.findMany({
       where: {
         state: 'active',
+        store_id,
       },
       orderBy: { name: 'asc' },
       select: {
