@@ -66,10 +66,6 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
   readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
-<<<<<<< HEAD
-=======
-  readonly dateRange = toSignal(this.dateRange$, { initialValue: null! });
->>>>>>> origin/dev
 
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
@@ -80,6 +76,8 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   topSellersChartOptions= signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
+  private chartLoaded = signal(false);
+  private tableLoaded = signal(false);
 
   readonly productsViews: AnalyticsView[] = getViewsByCategory('products').filter(
     (v) => v.key !== 'products_top_sellers'
@@ -136,7 +134,7 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
-    this.store.dispatch(ProductsActions.loadTopSellers());
+    this.loadActiveView();
 
     this.topSellers$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((topSellers) => {
       this.updateChart(topSellers);
@@ -144,7 +142,30 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.store.dispatch(ProductsActions.setDateRange({ dateRange: range }));
+    this.chartLoaded.set(false);
+    this.tableLoaded.set(false);
+    this.store.dispatch(ProductsActions.setDateRange({ dateRange: range, reload: false }));
+    this.loadActiveView();
+  }
+
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      if (!this.chartLoaded()) {
+        this.store.dispatch(ProductsActions.loadTopSellers({ limit: 10 }));
+        this.chartLoaded.set(true);
+      }
+      return;
+    }
+
+    if (!this.tableLoaded()) {
+      this.store.dispatch(ProductsActions.loadTopSellers({ limit: 50 }));
+      this.tableLoaded.set(true);
+    }
   }
 
   private updateChart(topSellers: TopSellingProduct[]): void {
@@ -159,7 +180,7 @@ onDateRangeChange(range: DateRangeFilter): void {
       return;
     }
 
-    const reversed = [...topSellers].reverse();
+    const reversed = [...topSellers].slice(0, 10).reverse();
     const names = reversed.map((p) =>
       p.product_name.length > 25
         ? p.product_name.substring(0, 25) + '...'

@@ -37,35 +37,15 @@
 
       <!-- Right: View Toggle + New Button -->
       <div class="flex items-center gap-2 md:gap-3 shrink-0">
-        <!-- View Toggle -->
-        <div class="view-toggle">
-          <app-tooltip
-            content="Vista de calendario"
-            position="bottom"
-            size="sm"
-          >
-            <button
-              type="button"
-              class="toggle-btn"
-              [class.active]="activeView() === 'calendar'"
-              (click)="activeView.set('calendar')"
-            >
-              <app-icon name="calendar" [size]="14"></app-icon>
-              <span class="hidden sm:inline">Calendario</span>
-            </button>
-          </app-tooltip>
-          <app-tooltip content="Vista de lista" position="bottom" size="sm">
-            <button
-              type="button"
-              class="toggle-btn"
-              [class.active]="activeView() === 'list'"
-              (click)="activeView.set('list')"
-            >
-              <app-icon name="list" [size]="14"></app-icon>
-              <span class="hidden sm:inline">Lista</span>
-            </button>
-          </app-tooltip>
-        </div>
+        <app-input-buttons
+          [options]="viewOptions"
+          [ngModel]="activeView()"
+          (ngModelChange)="setActiveView($event)"
+          [hideLabelsOnMobile]="true"
+          [equalWidth]="false"
+          customWrapperClass="!w-auto !mt-0"
+          customContainerClass="!h-9 !rounded-lg"
+        ></app-input-buttons>
 
         <!-- New Reservation Button -->
         <app-tooltip

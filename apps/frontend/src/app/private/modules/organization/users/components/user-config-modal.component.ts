@@ -319,7 +319,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
         settings: true, accounting: true, payroll: true,
       },
       STORE_ADMIN: {
-<<<<<<< HEAD
         dashboard: true,
         pos: true,
         products: true,
@@ -394,12 +393,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
         settings_roles: true,
         settings_cash_registers: false,
         settings_habeas_data: true},
-=======
-        dashboard: true, pos: true, products: true, ecommerce: true, orders: true,
-        inventory: true, customers: true, marketing: true, analytics: true,
-        expenses: true, invoicing: true, accounting: true, payroll: true, help: true, settings: true,
-      },
->>>>>>> origin/dev
       STORE_ECOMMERCE: {
         profile: true, history: true, dashboard: true, favorites: true, orders: true, settings: true,
       },

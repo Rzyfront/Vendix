@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, viewChild, effect, TemplateRef } from '@angular/core';
+import { Component, DestroyRef, OnInit, computed, effect, inject, signal, viewChild, TemplateRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -24,7 +25,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Proveedores"
-          [value]="data().length"
+          [value]="activeData().length"
           smallText=" proveedores"
           iconName="truck"
           iconBgColor="bg-blue-100"
@@ -77,7 +78,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
           ></vendix-date-range-filter>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -85,7 +86,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
               Gráficas
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -102,7 +103,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      @if (loading()) {
+      @if (activeLoading()) {
         <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
@@ -122,7 +123,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 
         @if (activeView() === 'table') {
         <app-card shadow="none" [responsivePadding]="true">
-          <app-table [data]="data()" [columns]="tableColumns" [loading]="loading()">
+          <app-table [data]="tableData()" [columns]="tableColumns" [loading]="tableLoading()">
           </app-table>
         </app-card>
         }
@@ -163,6 +164,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
   `,
 })
 export class PurchasesBySupplierComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
 
   readonly supplierTemplate = viewChild<TemplateRef<any>>('supplierCell');
@@ -171,11 +173,21 @@ export class PurchasesBySupplierComponent implements OnInit {
   readonly pendingOrdersTemplate = viewChild<TemplateRef<any>>('pendingOrdersCell');
   readonly lastOrderDateTemplate = viewChild<TemplateRef<any>>('lastOrderDateCell');
 
-  loading = signal(true);
-  data = signal<PurchasesBySupplier[]>([]);
+  chartLoading = signal(false);
+  tableLoading = signal(false);
+  chartData = signal<PurchasesBySupplier[]>([]);
+  tableData = signal<PurchasesBySupplier[]>([]);
   chartOptions = signal<EChartsOption>({});
   activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
+  private chartQueryKey = signal<string | null>(null);
+  private tableQueryKey = signal<string | null>(null);
+  readonly activeData = computed(() =>
+    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
+  );
+  readonly activeLoading = computed(() =>
+    this.activeView() === 'chart' ? this.chartLoading() : this.tableLoading(),
+  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -219,27 +231,90 @@ export class PurchasesBySupplierComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.analyticsService.getPurchasesBySupplier({}).subscribe({
+    this.loadActiveView();
+  }
+
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadChartData();
+      return;
+    }
+    this.loadTableData();
+  }
+
+  private buildQuery(mode: 'chart' | 'table') {
+    return {
+      date_range: this.dateRange(),
+      limit: mode === 'chart' ? 10 : 25,
+      ...(mode === 'table' && { page: 1 }),
+    };
+  }
+
+  private buildQueryKey(mode: 'chart' | 'table'): string {
+    return JSON.stringify({ mode, query: this.buildQuery(mode) });
+  }
+
+  private invalidateModeData(): void {
+    this.chartQueryKey.set(null);
+    this.tableQueryKey.set(null);
+  }
+
+  private loadChartData(): void {
+    const queryKey = this.buildQueryKey('chart');
+    if (this.chartQueryKey() === queryKey) return;
+
+    this.chartLoading.set(true);
+
+    this.analyticsService
+      .getPurchasesBySupplier(this.buildQuery('chart'))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (response) => {
-        const responseData = response?.data;
-        if (Array.isArray(responseData)) {
-          this.data.set(responseData);
-          this.updateChart(responseData);
-        } else if (responseData && (responseData as any).data) {
-          this.data.set((responseData as any).data);
-          this.updateChart((responseData as any).data);
-        } else {
-          this.data.set([]);
-          this.updateChart([]);
-        }
-        this.loading.set(false);
+        const rows = this.extractRows(response);
+        this.chartData.set(rows);
+        this.updateChart(rows);
+        this.chartQueryKey.set(queryKey);
+        this.chartLoading.set(false);
       },
       error: () => {
-        this.data.set([]);
+        this.chartData.set([]);
         this.updateChart([]);
-        this.loading.set(false);
+        this.chartLoading.set(false);
       }
-    });
+      });
+  }
+
+  private loadTableData(): void {
+    const queryKey = this.buildQueryKey('table');
+    if (this.tableQueryKey() === queryKey) return;
+
+    this.tableLoading.set(true);
+
+    this.analyticsService
+      .getPurchasesBySupplier(this.buildQuery('table'))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+      next: (response) => {
+        this.tableData.set(this.extractRows(response));
+        this.tableQueryKey.set(queryKey);
+        this.tableLoading.set(false);
+      },
+      error: () => {
+        this.tableData.set([]);
+        this.tableLoading.set(false);
+      }
+      });
+  }
+
+  private extractRows(response: any): PurchasesBySupplier[] {
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.data)) return response.data.data;
+    return [];
   }
 
   private updateChart(data: PurchasesBySupplier[]): void {
@@ -300,26 +375,44 @@ legend: {
   }
 
   getTotalOrders(): number {
-    return this.data().reduce((sum, s) => sum + (s.order_count || 0), 0);
+    return this.activeData().reduce((sum, s) => sum + (s.order_count || 0), 0);
   }
 
   getTotalSpent(): string {
-    const total = this.data().reduce((sum, s) => sum + (s.total_spent || 0), 0);
+    const total = this.activeData().reduce((sum, s) => sum + (s.total_spent || 0), 0);
     return '$' + total.toLocaleString('es-CO', { maximumFractionDigits: 0 });
   }
 
   getTopSupplier(): string {
-    if (!this.data().length) return '-';
-    const top = [...this.data()].sort((a, b) => b.total_spent - a.total_spent)[0];
+    if (!this.activeData().length) return '-';
+    const top = [...this.activeData()].sort((a, b) => b.total_spent - a.total_spent)[0];
     return top?.supplier_name?.substring(0, 15) || '-';
   }
 
   exportReport(): void {
     this.exporting.set(true);
-    setTimeout(() => this.exporting.set(false), 1000);
+    this.analyticsService
+      .exportPurchasesAnalytics({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `compras_proveedor_${new Date().toISOString().split('T')[0]}.xlsx`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          this.exporting.set(false);
+        },
+        error: () => {
+          this.exporting.set(false);
+        },
+      });
   }
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
+    this.invalidateModeData();
+    this.loadActiveView();
   }
 }

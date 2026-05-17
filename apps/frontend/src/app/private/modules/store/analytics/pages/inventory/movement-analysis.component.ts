@@ -11,7 +11,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
-import { SelectorOption, SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -46,7 +46,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     ChartComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
-    SelectorComponent,
     AnalyticsCardComponent,
   ],
   template: `
@@ -110,7 +109,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           ></vendix-date-range-filter>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -118,7 +117,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
               Gráficas
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -354,6 +353,7 @@ export class MovementAnalysisComponent implements OnInit {
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
+    this.movements.set([]);
     this.loadChartData();
     if (this.activeView() === 'table') {
       this.loadMovements();
@@ -363,6 +363,13 @@ onDateRangeChange(range: DateRangeFilter): void {
   onGranularityChange(value: string): void {
     this.granularity.set(value);
     this.loadTrends();
+  }
+
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    if (view === 'table' && this.movements().length === 0) {
+      this.loadMovements();
+    }
   }
 
   private buildQuery(): InventoryAnalyticsQueryDto {
@@ -380,28 +387,22 @@ onDateRangeChange(range: DateRangeFilter): void {
       summary: this.analyticsService.getMovementSummary(query),
       trends: this.analyticsService.getMovementTrends({
         ...query,
-        granularity: this.granularity() as any}),
-      movements: this.analyticsService.getStockMovements({
-        ...query,
-        limit: 100})})
+        granularity: this.granularity() as any})})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: ({ summary, trends, movements }) => {
+        next: ({ summary, trends }) => {
           this.summary.set(summary.data);
           this.trends.set(trends.data);
-          this.movements.set(movements.data);
           this.updateStats(summary.data);
           this.updateTrendsChart(trends.data);
           this.updateDistributionChart(summary.data);
           this.loadingSummary.set(false);
           this.loadingTrends.set(false);
-          this.loadingMovements.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar análisis de movimientos');
           this.loadingSummary.set(false);
           this.loadingTrends.set(false);
-          this.loadingMovements.set(false);
         }});
   }
 

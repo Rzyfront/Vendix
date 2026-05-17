@@ -48,10 +48,10 @@ export class ProductsAnalyticsEffects {
     this.actions$.pipe(
       ofType(ProductsActions.loadTopSellers),
       withLatestFrom(this.store.select(selectDateRange)),
-      mergeMap(([, dateRange]) => {
+      mergeMap(([action, dateRange]) => {
         const query: ProductsAnalyticsQueryDto = {
           date_range: dateRange,
-          limit: 10,
+          limit: action.limit || 10,
         };
         return this.analyticsService.getTopSellingProducts(query).pipe(
           map((response) =>
@@ -133,12 +133,16 @@ export class ProductsAnalyticsEffects {
   filterChanged$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ProductsActions.setDateRange, ProductsActions.setGranularity),
-      mergeMap(() => [
-        ProductsActions.loadProductsSummary(),
-        ProductsActions.loadTopSellers(),
-        ProductsActions.loadProductsTrends(),
-        ProductsActions.loadProductsTable(),
-      ]),
+      mergeMap((action) =>
+        'reload' in action && action.reload === false
+          ? []
+          : [
+              ProductsActions.loadProductsSummary(),
+              ProductsActions.loadTopSellers({ limit: 10 }),
+              ProductsActions.loadProductsTrends(),
+              ProductsActions.loadProductsTable(),
+            ],
+      ),
     ),
   );
 

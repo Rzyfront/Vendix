@@ -1,11 +1,12 @@
-import { Component, input, output, computed, signal } from '@angular/core';
+import { Component, input, output, computed } from '@angular/core';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AnalyticsCategory, AnalyticsCategoryId } from '../../config/analytics-registry';
 
 @Component({
   selector: 'app-analytics-category-chips',
   standalone: true,
-  imports: [IconComponent],
+  imports: [ButtonComponent, IconComponent],
   templateUrl: './analytics-category-chips.component.html',
   styleUrls: ['./analytics-category-chips.component.scss'],
 })
@@ -23,10 +24,19 @@ export class AnalyticsCategoryChipsComponent {
   });
 
   onChipClick(categoryId: AnalyticsCategoryId | null): void {
-    this.categoryChange.emit(categoryId === this.selectedCategory() ? null : categoryId);
+    this.categoryChange.emit(
+      categoryId === this.selectedCategory() ? null : categoryId,
+    );
   }
 
-  trackByCategoryId(index: number, chip: AnalyticsCategory & { isSelected: boolean }): string {
+  getChipVariant(isSelected: boolean): 'primary' | 'outline' {
+    return isSelected ? 'primary' : 'outline';
+  }
+
+  trackByCategoryId(
+    index: number,
+    chip: AnalyticsCategory & { isSelected: boolean },
+  ): string {
     return chip.id;
   }
 }

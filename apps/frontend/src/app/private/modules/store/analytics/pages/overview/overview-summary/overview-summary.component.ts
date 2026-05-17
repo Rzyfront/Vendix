@@ -10,6 +10,7 @@ import { CardComponent } from '../../../../../../../shared/components/card/card.
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import {
   CurrencyPipe,
   CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -53,6 +54,7 @@ import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../..
     StatsComponent,
     ChartComponent,
     IconComponent,
+    InputsearchComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
     AnalyticsCategoryChipsComponent,

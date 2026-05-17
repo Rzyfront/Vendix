@@ -100,6 +100,7 @@ export type { PaginationInfoStyle } from './pagination/pagination.component';
 export type { ExtendedChartType, ChartTheme, EChartsOption } from './chart';
 export type {
   StickyHeaderActionButton,
+  StickyHeaderTab,
   StickyHeaderVariant,
   StickyHeaderBadgeColor,
 } from './sticky-header/sticky-header.component';

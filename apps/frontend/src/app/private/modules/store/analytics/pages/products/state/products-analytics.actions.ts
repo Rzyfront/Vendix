@@ -5,7 +5,7 @@ import { ProductsSummary, TopSellingProduct, ProductAnalyticsRow, ProductTrend }
 // Filters
 export const setDateRange = createAction(
   '[Products Analytics] Set Date Range',
-  props<{ dateRange: DateRangeFilter }>(),
+  props<{ dateRange: DateRangeFilter; reload?: boolean }>(),
 );
 export const setGranularity = createAction(
   '[Products Analytics] Set Granularity',
@@ -36,7 +36,10 @@ export const loadProductsSummaryFailure = createAction(
 );
 
 // Load Top Sellers
-export const loadTopSellers = createAction('[Products Analytics] Load Top Sellers');
+export const loadTopSellers = createAction(
+  '[Products Analytics] Load Top Sellers',
+  props<{ limit?: number }>(),
+);
 export const loadTopSellersSuccess = createAction(
   '[Products Analytics] Load Top Sellers Success',
   props<{ topSellers: TopSellingProduct[] }>(),

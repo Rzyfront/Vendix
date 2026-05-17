@@ -26,41 +26,37 @@ export class OverviewAnalyticsService {
       endDate,
     );
 
-    // Current period income (completed orders)
-    const currentIncome = await this.prisma.orders.aggregate({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        created_at: { gte: startDate, lte: endDate },
-      },
-      _sum: { grand_total: true, tax_amount: true },
-    });
-
-    // Current period expenses
-    const currentExpenses = await this.prisma.expenses.aggregate({
-      where: {
-        state: { in: this.VALID_EXPENSE_STATES },
-        expense_date: { gte: startDate, lte: endDate },
-      },
-      _sum: { amount: true },
-    });
-
-    // Previous period income
-    const previousIncome = await this.prisma.orders.aggregate({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        created_at: { gte: previousStartDate, lte: previousEndDate },
-      },
-      _sum: { grand_total: true, tax_amount: true },
-    });
-
-    // Previous period expenses
-    const previousExpenses = await this.prisma.expenses.aggregate({
-      where: {
-        state: { in: this.VALID_EXPENSE_STATES },
-        expense_date: { gte: previousStartDate, lte: previousEndDate },
-      },
-      _sum: { amount: true },
-    });
+    const [currentIncome, currentExpenses, previousIncome, previousExpenses] =
+      await Promise.all([
+        this.prisma.orders.aggregate({
+          where: {
+            state: { in: this.COMPLETED_STATES },
+            created_at: { gte: startDate, lte: endDate },
+          },
+          _sum: { grand_total: true, tax_amount: true },
+        }),
+        this.prisma.expenses.aggregate({
+          where: {
+            state: { in: this.VALID_EXPENSE_STATES },
+            expense_date: { gte: startDate, lte: endDate },
+          },
+          _sum: { amount: true },
+        }),
+        this.prisma.orders.aggregate({
+          where: {
+            state: { in: this.COMPLETED_STATES },
+            created_at: { gte: previousStartDate, lte: previousEndDate },
+          },
+          _sum: { grand_total: true, tax_amount: true },
+        }),
+        this.prisma.expenses.aggregate({
+          where: {
+            state: { in: this.VALID_EXPENSE_STATES },
+            expense_date: { gte: previousStartDate, lte: previousEndDate },
+          },
+          _sum: { amount: true },
+        }),
+      ]);
 
     const totalIncome =
       Number(currentIncome._sum.grand_total || 0) -

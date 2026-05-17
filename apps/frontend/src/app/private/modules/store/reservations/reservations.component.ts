@@ -1,4 +1,5 @@
 import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 import { Router } from '@angular/router';
 import { finalize } from 'rxjs';
@@ -20,7 +21,16 @@ import {
   BookingQuery,
   BookingStatus,
 } from './interfaces/reservation.interface';
-import { ToastService, DialogService, IconComponent, TooltipComponent } from '../../../../shared/components';
+import {
+  ToastService,
+  DialogService,
+  IconComponent,
+  TooltipComponent,
+  InputButtonsComponent,
+} from '../../../../shared/components';
+import type { InputButtonOption } from '../../../../shared/components';
+
+type ReservationView = 'calendar' | 'list';
 
 @Component({
   selector: 'app-reservations',
@@ -37,8 +47,10 @@ import { ToastService, DialogService, IconComponent, TooltipComponent } from '..
     QuickActionsPanelComponent,
     CardComponent,
     IconComponent,
-    TooltipComponent
-],
+    TooltipComponent,
+    InputButtonsComponent,
+    FormsModule,
+  ],
   templateUrl: './reservations.component.html',
   styleUrls: ['./reservations.component.scss'],
 })
@@ -66,7 +78,11 @@ export class ReservationsComponent {
   dateTo = signal('');
 
   // View toggle
-  activeView = signal<'calendar' | 'list'>('calendar');
+  readonly activeView = signal<ReservationView>('calendar');
+  readonly viewOptions: InputButtonOption[] = [
+    { value: 'calendar', label: 'Calendario', icon: 'calendar' },
+    { value: 'list', label: 'Lista', icon: 'list' },
+  ];
 
   // Modal
   isFormModalOpen = signal(false);
@@ -94,6 +110,11 @@ export class ReservationsComponent {
     this.loadStats();
     this.loadBookings();
     this.loadTodayBookings();
+  }
+
+  setActiveView(view: string): void {
+    if (view !== 'calendar' && view !== 'list') return;
+    this.activeView.set(view);
   }
 
   loadStats(): void {

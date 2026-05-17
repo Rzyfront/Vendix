@@ -2,7 +2,6 @@ import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule } from '@angular/router';
-import { forkJoin } from 'rxjs';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -106,7 +105,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           ></vendix-date-range-filter>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -114,7 +113,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
               Gráfica
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -139,7 +138,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             Distribución por Estado
           </span>
         </div>
-        @if (!loading() && chartOptions()) {
+        @if (!summaryLoading() && chartOptions()) {
         <app-chart
           [options]="chartOptions()"
           size="large"
@@ -164,7 +163,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             </span>
           </span>
         </div>
-        @if (loading()) {
+        @if (tableLoading()) {
           <div class="p-4 md:p-6 text-center">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             <p class="mt-2 text-text-secondary">Cargando alertas...</p>
@@ -175,7 +174,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
               [data]="data()"
               [columns]="columns"
               [cardConfig]="cardConfig"
-              [loading]="loading()"
+              [loading]="tableLoading()"
               emptyMessage="No hay productos con stock bajo"
               emptyIcon="check-circle"
             ></app-responsive-data-view>
@@ -201,7 +200,8 @@ export class LowStockComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
 // Signals
-  loading = signal(true);
+  summaryLoading = signal(false);
+  tableLoading = signal(false);
   exporting = signal(false);
   data = signal<StockLevelReport[]>([]);
   summary = signal<InventorySummary | null>(null);
@@ -307,35 +307,65 @@ export class LowStockComponent implements OnInit {
     ]};
 
   ngOnInit(): void {
-    this.loadData();
+    this.loadActiveView();
   }
-  loadData(): void {
-    this.loading.set(true);
 
-    forkJoin({
-      alerts: this.analyticsService.getLowStockAlerts({ limit: 100 }),
-      summary: this.analyticsService.getInventorySummary()})
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadSummary();
+      return;
+    }
+    this.loadAlerts();
+  }
+
+  private loadSummary(): void {
+    this.summaryLoading.set(true);
+
+    this.analyticsService.getInventorySummary()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: ({ alerts, summary }) => {
-          this.data.set(alerts.data);
+        next: (summary) => {
           this.summary.set(summary.data);
-          this.updateChart(alerts.data);
-          this.loading.set(false);
+          this.updateChart(summary.data);
+          this.summaryLoading.set(false);
         },
         error: () => {
-          this.toastService.error('Error al cargar alertas de stock');
-          this.loading.set(false);
+          this.toastService.error('Error al cargar resumen de stock');
+          this.summaryLoading.set(false);
         }});
   }
 
-  private updateChart(alerts: StockLevelReport[]): void {
+  private loadAlerts(): void {
+    this.tableLoading.set(true);
+
+    this.analyticsService.getLowStockAlerts({ page: 1, limit: 25 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (alerts) => {
+          this.data.set(Array.isArray(alerts?.data) ? alerts.data : []);
+          this.tableLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar alertas de stock');
+          this.tableLoading.set(false);
+        }});
+  }
+
+  private updateChart(summary: InventorySummary): void {
     const borderColor = '#e5e7eb';
     const textSecondary = '#6b7280';
 
-    const outOfStock = alerts.filter(a => a.status === 'out_of_stock').length;
-    const lowStock = alerts.filter(a => a.status === 'low_stock').length;
-    const inStock = alerts.filter(a => a.status === 'in_stock').length;
+    const outOfStock = summary.out_of_stock_count || 0;
+    const lowStock = summary.low_stock_count || 0;
+    const inStock = Math.max(
+      (summary.total_sku_count || 0) - outOfStock - lowStock,
+      0,
+    );
 
     this.chartOptions.set({
       tooltip: {
@@ -401,7 +431,7 @@ legend: {
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadData();
+    this.loadActiveView();
   }
 
   exportReport(): void {

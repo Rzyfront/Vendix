@@ -168,19 +168,6 @@
   text-decoration: underline;
 }
 
-.vlink-tooltip {
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: var(--z-tooltip);
-
-  ::ng-deep .tooltip-content {
-    white-space: normal;
-    max-width: 220px;
-  }
-}
-
 /* Menu */
 .menu-wrapper {
   flex: 1;

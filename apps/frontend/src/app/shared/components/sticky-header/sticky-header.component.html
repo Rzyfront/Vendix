@@ -1,10 +1,70 @@
 <div [ngClass]="{
-    'sticky top-0 z-30 border-b border-gray-200 shadow-sm rounded-b-xl mb-4 md:mb-6': true,
+    'border-b border-gray-200 shadow-sm rounded-b-lg mb-2 md:mb-3': true,
     'bg-white/95 backdrop-blur-sm -mx-2 md:-mx-4': variant() === 'default',
-    'bg-white/80 backdrop-blur-md px-2 py-1.5 md:px-6 md:py-3': variant() === 'glass'
+    'bg-white/80 backdrop-blur-md': variant() === 'glass'
   }">
-  <div class="max-w-[1600px] mx-auto flex flex-row items-center justify-between gap-2 md:gap-3"
-    [ngClass]="{ 'p-1.5 md:px-6 md:py-2.5': variant() === 'default' }">
+  @if (visibleTabs().length) {
+    <div class="sticky-header-tabs-row">
+      <nav
+        class="sticky-header-tabs"
+        role="tablist"
+        [attr.aria-label]="tabsAriaLabel()"
+      >
+        @for (tab of visibleTabs(); track tab.id) {
+          @if (tab.route) {
+            <a
+              [routerLink]="tab.route"
+              routerLinkActive
+              #rla="routerLinkActive"
+              [routerLinkActiveOptions]="{ exact: tab.exact === true }"
+              class="sticky-header-tab"
+              role="tab"
+              [class.sticky-header-tab--active]="isTabActive(tab, rla.isActive)"
+              [class.sticky-header-tab--disabled]="tab.disabled"
+              [attr.aria-selected]="isTabActive(tab, rla.isActive)"
+              [attr.aria-current]="isTabActive(tab, rla.isActive) ? 'page' : null"
+              [attr.aria-disabled]="tab.disabled ? 'true' : null"
+              [attr.tabindex]="tab.disabled ? -1 : null"
+              (click)="onTabClick(tab, $event)"
+            >
+              @if (tab.icon) {
+                <app-icon [name]="tab.icon" size="13"></app-icon>
+              }
+              @if (tab.shortLabel) {
+                <span class="sm:hidden">{{ tab.shortLabel }}</span>
+                <span class="hidden sm:inline">{{ tab.label }}</span>
+              } @else {
+                <span>{{ tab.label }}</span>
+              }
+            </a>
+          } @else {
+            <button
+              type="button"
+              class="sticky-header-tab"
+              role="tab"
+              [disabled]="tab.disabled"
+              [class.sticky-header-tab--active]="isTabActive(tab)"
+              [class.sticky-header-tab--disabled]="tab.disabled"
+              [attr.aria-selected]="isTabActive(tab)"
+              (click)="onTabClick(tab)"
+            >
+              @if (tab.icon) {
+                <app-icon [name]="tab.icon" size="13"></app-icon>
+              }
+              @if (tab.shortLabel) {
+                <span class="sm:hidden">{{ tab.shortLabel }}</span>
+                <span class="hidden sm:inline">{{ tab.label }}</span>
+              } @else {
+                <span>{{ tab.label }}</span>
+              }
+            </button>
+          }
+        }
+      </nav>
+    </div>
+  }
+
+  <div class="max-w-[1600px] mx-auto flex flex-row items-center justify-between gap-2 md:gap-3 p-1.5 md:px-6 md:py-2">
 
     <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
       <!-- Back Button -->
@@ -18,14 +78,22 @@
       <!-- Icon & Title Section -->
       <div class="flex items-center gap-2 md:gap-2.5 min-w-0">
         <!-- Icon - Hidden on mobile, visible from md -->
-        <div class="hidden md:flex w-10 h-10 rounded-lg bg-bg items-center justify-center border border-border shadow-sm flex-shrink-0">
-          <app-icon [name]="icon()" size="20" class="text-primary-600"></app-icon>
+        <div
+          class="hidden md:flex w-10 h-10 rounded-lg bg-bg items-center justify-center border border-border shadow-sm flex-shrink-0"
+        >
+          <app-icon
+            [name]="icon()"
+            size="20"
+            class="text-primary-600"
+          ></app-icon>
         </div>
 
         <!-- Title & Subtitle -->
-        <div class="flex flex-col min-w-0">
+        <div class="sticky-header-title-stack flex flex-col min-w-0">
           <div class="flex items-center gap-2">
-            <h1 class="text-base md:text-lg font-bold text-gray-900 leading-tight truncate">
+            <h1
+              class="sticky-header-title text-base md:text-lg font-bold text-gray-900 truncate"
+            >
               {{ title() }}
             </h1>
             <!-- Badge - Hidden on mobile -->
@@ -41,7 +109,7 @@
           </div>
           <!-- Subtitle - Hidden on very small screens, visible from sm -->
           @if (subtitle()) {
-            <p class="hidden sm:block text-xs text-gray-500 font-medium truncate">
+            <p class="sticky-header-subtitle hidden sm:block text-xs text-gray-500 font-medium truncate">
               {{ subtitle() }}
             </p>
           }

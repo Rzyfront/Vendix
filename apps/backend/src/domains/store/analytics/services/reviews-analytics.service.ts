@@ -63,4 +63,58 @@ export class ReviewsAnalyticsService {
       total_helpful_votes: totalHelpfulVotes,
     };
   }
+
+  async getReviewsForExport(query: AnalyticsQueryDto) {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const { startDate, endDate } = parseDateRange(query);
+
+    const reviews = await this.prisma.reviews.findMany({
+      where: {
+        store_id: context.store_id,
+        created_at: {
+          gte: startDate,
+          lte: endDate,
+        },
+      },
+      include: {
+        products: {
+          select: {
+            name: true,
+            sku: true,
+          },
+        },
+        users: {
+          select: {
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        created_at: 'desc',
+      },
+      take: 10000,
+    });
+
+    return reviews.map((review) => ({
+      Fecha: review.created_at?.toISOString().split('T')[0] || '',
+      Producto: review.products?.name || '',
+      SKU: review.products?.sku || '',
+      Cliente: review.users
+        ? `${review.users.first_name || ''} ${review.users.last_name || ''}`.trim()
+        : '',
+      Email: review.users?.email || '',
+      Calificación: review.rating,
+      Título: review.title || '',
+      Comentario: review.comment,
+      Estado: review.state,
+      'Compra Verificada': review.verified_purchase ? 'Sí' : 'No',
+      'Votos Útiles': review.helpful_count,
+    }));
+  }
 }

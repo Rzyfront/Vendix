@@ -1,7 +1,11 @@
 import { Component, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
@@ -18,10 +22,7 @@ type DatePreset =
 @Component({
   selector: 'vendix-date-range-filter',
   standalone: true,
-  imports: [
-    FormsModule,
-    SelectorComponent,
-  ],
+  imports: [FormsModule, InputComponent, SelectorComponent],
   template: `
     <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
       <!-- Preset Selector -->
@@ -36,12 +37,14 @@ type DatePreset =
       </div>
 
       <!-- Date Input -->
-      <input
-        type="date"
-        [ngModel]="selectedDate()"
-        (ngModelChange)="onDateChange($event)"
-        class="px-3 py-2 text-sm border border-black rounded-xl bg-[var(--color-background)] text-[var(--color-text-primary)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 transition-colors w-full sm:w-40"
-      />
+      <div class="w-full sm:w-40 flex-shrink-0">
+        <app-input
+          type="date"
+          size="sm"
+          [ngModel]="selectedDate()"
+          (ngModelChange)="onDateChange($event)"
+        ></app-input>
+      </div>
     </div>
   `,
 })
@@ -80,7 +83,6 @@ export class DateRangeFilterComponent {
     const range = this.getDateRange(preset as DatePreset);
     if (range) {
       this.selectedDate.set(range.start_date);
-      console.log('=== Preset changed ===', preset, JSON.stringify(range));
       this.valueChange.emit(range);
     }
   }
@@ -92,7 +94,6 @@ export class DateRangeFilterComponent {
       end_date: date,
       preset: this.selectedPreset(),
     };
-    console.log('=== Date changed ===', date, JSON.stringify(range));
     this.valueChange.emit(range);
   }
 

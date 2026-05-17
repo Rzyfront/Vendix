@@ -59,7 +59,7 @@
         ></vendix-date-range-filter>
       <div class="flex rounded-lg border border-border overflow-hidden">
         <button
-          (click)="activeView.set('chart')"
+          (click)="setActiveView('chart')"
           class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
           [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
         >
@@ -67,7 +67,7 @@
           Gráficas
         </button>
         <button
-          (click)="activeView.set('table')"
+          (click)="setActiveView('table')"
           class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
           [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
         >

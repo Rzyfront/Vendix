@@ -22,7 +22,7 @@ menuItems: MenuItem[] = [
 ```
 
 ```html
-<app-sidebar [menuItems]="menuItems" [title]="'Mi Tienda'" [vlink]="'mi-tienda'" [logoUrl]="storeLogo" [collapsed]="sidebarCollapsed" [isOpen]="sidebarOpen" [showFooter]="true" [isVendixDomain]="false" (expandSidebar)="onExpandSidebar()">
+<app-sidebar [menuItems]="menuItems" [title]="'Mi Tienda'" [vlink]="'mi-tienda'" [logoUrl]="storeLogo" [collapsed]="sidebarCollapsed" [isOpen]="sidebarOpen" [showFooter]="true" (expandSidebar)="onExpandSidebar()">
   <div slot="footer" class="p-4">
     <app-version></app-version>
   </div>
@@ -41,7 +41,6 @@ menuItems: MenuItem[] = [
 | collapsed      | boolean    | false         | Modo colapsado (solo iconos, para desktop)  |
 | isOpen         | boolean    | false         | Control de visibilidad en mobile (drawer)   |
 | showFooter     | boolean    | false         | Mostrar slot para footer                    |
-| isVendixDomain | boolean    | false         | Activa tooltip promocional en el vlink      |
 | shimmer        | boolean    | false         | Activa efecto shimmer en el sidebar         |
 
 ## Outputs
@@ -69,7 +68,6 @@ interface MenuItem {
 
 - El sidebar es responsive: en mobile se convierte en un drawer con backdrop y lock de scroll; en desktop puede colapsar a iconos.
 - Los submenus usan comportamiento accordion exclusivo (solo uno abierto a la vez).
-- El tooltip promocional para dominios Vendix (`isVendixDomain`) se muestra automaticamente al montar y se oculta tras 5s.
 - La navegacion de submenus auto-navega al primer hijo con ruta valida.
 - El slot `<ng-content select="[slot=footer]"></ng-content>` permite inyectar contenido en el footer.
 - `alwaysVisible: true` en un MenuItem hace que se ignore el filtro de `panel_ui` (para datos dinamicos como tiendas).

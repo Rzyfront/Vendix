@@ -5,7 +5,7 @@ import {
   inject,
   effect,
 } from '@angular/core';
-import { RouterModule, Router } from '@angular/router';
+import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -57,7 +57,6 @@ import './product-list.component.css';
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
-  private router = inject(Router);
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -203,20 +202,6 @@ export class ProductListComponent {
         value === 'service' ? 'Servicio' : 'Producto',
     },
     {
-      key: 'stock_quantity',
-      label: 'Stock',
-      sortable: true,
-      width: '100px',
-      align: 'center',
-      priority: 1,
-      transform: (value: number, item?: any) =>
-        item?.product_type === 'service'
-          ? 'Servicio'
-          : item?.track_inventory === false
-            ? 'Disponible'
-            : value?.toString() || '0',
-    },
-    {
       key: 'state',
       label: 'Estado',
       sortable: true,
@@ -250,14 +235,6 @@ export class ProductListComponent {
       action: (product: Product) => this.delete.emit(product),
       variant: 'danger',
     },
-    {
-      label: 'Stock por bodega',
-      icon: 'warehouse',
-      action: (product: Product) =>
-        this.router.navigate([`/admin/inventory/stock/${product.id}`]),
-      variant: 'info',
-      show: (product: Product) => product.track_inventory !== false && product.product_type !== 'service',
-    },
   ];
 
   // Card Config
@@ -286,16 +263,6 @@ export class ProductListComponent {
       {
         key: 'sku',
         label: 'SKU',
-      },
-      {
-        key: 'stock_quantity',
-        label: 'Stock',
-        transform: (val: any, item?: any) =>
-          item?.product_type === 'service'
-            ? 'Servicio'
-            : item?.track_inventory === false
-              ? 'Disponible'
-              : val?.toString() || '0',
       },
     ],
   };

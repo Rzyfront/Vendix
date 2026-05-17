@@ -740,7 +740,4 @@ export class CustomersAnalyticsService {
       };
     });
   }
-
-=======
->>>>>>> origin/dev
 }

@@ -10,9 +10,7 @@ import { TableColumn } from '../../../../../../shared/components/table/table.com
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig} from '../../../../../../shared/components/index';
-import {
-  SelectorComponent,
-  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
+import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -22,6 +20,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
+  MovementSummaryItem,
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
 import { EChartsOption } from 'echarts';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
@@ -37,7 +36,6 @@ imports: [
     ChartComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
-    SelectorComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
@@ -49,7 +47,7 @@ imports: [
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Movimientos"
-          [value]="data().length"
+          [value]="getTotalMovements()"
           smallText=" registros"
           iconName="repeat"
           iconBgColor="bg-blue-100"
@@ -104,7 +102,7 @@ imports: [
           ></vendix-date-range-filter>
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -112,7 +110,7 @@ imports: [
               Gráficas
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
             >
@@ -153,7 +151,7 @@ imports: [
             [data]="data()"
             [columns]="columns"
             [cardConfig]="cardConfig"
-            [loading]="loading()"
+            [loading]="tableLoading()"
             emptyMessage="No hay movimientos registrados"
             emptyIcon="activity"
           ></app-responsive-data-view>
@@ -169,7 +167,7 @@ imports: [
             Tendencia de Movimientos
           </span>
         </div>
-        @if (!loading() && movementsChartOptions()) {
+        @if (!chartLoading() && movementsChartOptions()) {
         <app-chart
           [options]="movementsChartOptions()"
           size="large"
@@ -195,10 +193,12 @@ export class StockMovementsComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
-  loading = signal(true);
+  tableLoading = signal(false);
+  chartLoading = signal(false);
   exporting = signal(false);
   activeView = signal<'chart' | 'table'>('table');
   data = signal<StockMovementReport[]>([]);
+  summary = signal<MovementSummaryItem[]>([]);
   movementsChartOptions = signal<EChartsOption>({});
   typeFilter = signal<string>('');
   dateRange = signal<DateRangeFilter>({
@@ -301,38 +301,82 @@ export class StockMovementsComponent implements OnInit {
     ]};
 
   ngOnInit(): void {
-    this.loadData();
+    this.loadActiveView();
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadData();
+    this.loadActiveView();
   }
 
   onTypeChange(type: string): void {
     this.typeFilter.set(type);
-    this.loadData();
+    this.loadActiveView();
   }
 
-  loadData(): void {
-    this.loading.set(true);
-    const query: InventoryAnalyticsQueryDto = {
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadChartData();
+      return;
+    }
+    this.loadTableData();
+  }
+
+  private buildQuery(): InventoryAnalyticsQueryDto {
+    return {
       date_range: this.dateRange(),
       movement_type: this.typeFilter() || undefined,
-      limit: 100};
+    };
+  }
+
+  private loadTableData(): void {
+    this.tableLoading.set(true);
+    const query: InventoryAnalyticsQueryDto = {
+      ...this.buildQuery(),
+      page: 1,
+      limit: 25,
+    };
 
     this.analyticsService
       .getStockMovements(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.data.set(response.data);
-          this.updateChart(response.data);
-          this.loading.set(false);
+          this.data.set(this.extractRows(response));
+          this.tableLoading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar movimientos');
-          this.loading.set(false);
+          this.tableLoading.set(false);
         }});
+  }
+
+  private loadChartData(): void {
+    this.chartLoading.set(true);
+
+    this.analyticsService
+      .getMovementSummary(this.buildQuery())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.summary.set(response.data);
+          this.updateChart(response.data);
+          this.chartLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar resumen de movimientos');
+          this.chartLoading.set(false);
+        }});
+  }
+
+  private extractRows(response: any): StockMovementReport[] {
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.data)) return response.data.data;
+    return [];
   }
 
   exportReport(): void {
@@ -358,7 +402,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         }});
   }
 
-  private updateChart(data: StockMovementReport[]): void {
+  private updateChart(data: MovementSummaryItem[]): void {
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
@@ -386,9 +430,9 @@ onDateRangeChange(range: DateRangeFilter): void {
 
     const movementsByType: Record<string, number> = {};
     types.forEach((t) => (movementsByType[t] = 0));
-    data.forEach((m) => {
-      if (movementsByType[m.movement_type] !== undefined) {
-        movementsByType[m.movement_type] += Math.abs(m.quantity);
+    data.forEach((item) => {
+      if (movementsByType[item.movement_type] !== undefined) {
+        movementsByType[item.movement_type] += Math.abs(item.total_quantity);
       }
     });
 
@@ -446,12 +490,33 @@ onDateRangeChange(range: DateRangeFilter): void {
     });
   }
 
+  getTotalMovements(): number {
+    if (this.activeView() === 'chart') {
+      return this.summary().reduce((sum, item) => sum + (item.count || 0), 0);
+    }
+    return this.data().length;
+  }
+
   getInCount(): number {
-    return this.data().filter(m => m.movement_type === 'in').length;
+    if (this.activeView() === 'chart') {
+      return this.summary()
+        .filter((item) => ['stock_in', 'return'].includes(item.movement_type))
+        .reduce((sum, item) => sum + (item.count || 0), 0);
+    }
+    return this.data().filter(m => ['stock_in', 'return'].includes(m.movement_type)).length;
   }
 
   getOutCount(): number {
-    return this.data().filter(m => m.movement_type === 'out').length;
+    if (this.activeView() === 'chart') {
+      return this.summary()
+        .filter((item) =>
+          ['stock_out', 'sale', 'damage', 'expiration'].includes(item.movement_type),
+        )
+        .reduce((sum, item) => sum + (item.count || 0), 0);
+    }
+    return this.data().filter(m =>
+      ['stock_out', 'sale', 'damage', 'expiration'].includes(m.movement_type),
+    ).length;
   }
 
   getNetCount(): number {

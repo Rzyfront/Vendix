@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -44,7 +45,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
         <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
           <app-stats
             title="Impuestos Cobrados"
-            [value]="data()?.tax_collected | currency"
+            [value]="data()?.total_tax_collected | currency"
             smallText="Total recaudado"
             iconName="plus-circle"
             iconBgColor="bg-green-100"
@@ -53,7 +54,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 
           <app-stats
             title="Impuestos Devueltos"
-            [value]="data()?.tax_refunded | currency"
+            [value]="data()?.total_tax_refunded | currency"
             smallText="Por reembolsos"
             iconName="minus-circle"
             iconBgColor="bg-red-100"
@@ -71,7 +72,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 
           <app-stats
             title="Tasa Efectiva"
-            [value]="data()?.effective_rate || 0"
+            [value]="data()?.effective_tax_rate || 0"
             valueUnit="%"
             smallText="Porcentaje sobre ingresos"
             iconName="percent"
@@ -175,6 +176,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
   `,
 })
 export class TaxSummaryComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private currencyService = inject(CurrencyFormatService);
 
@@ -199,7 +201,10 @@ export class TaxSummaryComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService.getTaxSummary({ date_range: this.dateRange() }).subscribe({
+    this.analyticsService
+      .getTaxSummary({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (response) => {
         if (response?.data) {
           this.data.set(response.data);
@@ -215,7 +220,10 @@ export class TaxSummaryComponent implements OnInit {
 
   exportReport(): void {
     this.exporting.set(true);
-    this.analyticsService.exportFinancialAnalytics({ date_range: this.dateRange() }).subscribe({
+    this.analyticsService
+      .exportFinancialAnalytics({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -244,7 +252,7 @@ export class TaxSummaryComponent implements OnInit {
     if (!d) return;
 
     const taxCategories = ['Cobrados', 'Devueltos', 'Neto'];
-    const taxValues = [d.tax_collected || 0, d.tax_refunded || 0, d.net_tax || 0];
+    const taxValues = [d.total_tax_collected || 0, d.total_tax_refunded || 0, d.net_tax || 0];
     const taxColors = ['#22c55e', '#ef4444', '#3b82f6'];
 
     this.taxComparisonChartOptions.set({
@@ -303,7 +311,7 @@ export class TaxSummaryComponent implements OnInit {
     });
 
     // Effective Rate Gauge
-    const rate = Math.min((d.effective_rate || 0), 30);
+    const rate = Math.min((d.effective_tax_rate || 0), 30);
     this.effectiveRateChartOptions.set({
       legend: {
         data: ['Tasa Efectiva'],

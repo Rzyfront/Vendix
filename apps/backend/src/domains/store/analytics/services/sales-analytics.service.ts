@@ -29,74 +29,70 @@ export class SalesAnalyticsService {
       endDate,
     );
 
-    // Current period metrics (store scoping is automatic)
-    const currentPeriod = await this.prisma.orders.aggregate({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        ...(query.channel && { channel: query.channel }),
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-      _sum: {
-        grand_total: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    // Previous period for comparison
-    const previousPeriod = await this.prisma.orders.aggregate({
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        ...(query.channel && { channel: query.channel }),
-        created_at: {
-          gte: previousStartDate,
-          lte: previousEndDate,
-        },
-      },
-      _sum: {
-        grand_total: true,
-      },
-      _count: {
-        id: true,
-      },
-    });
-
-    // Total units sold
-    const unitsSold = await this.prisma.order_items.aggregate({
-      where: {
-        orders: {
-          state: { in: this.COMPLETED_STATES },
-          ...(query.channel && { channel: query.channel }),
-          created_at: {
-            gte: startDate,
-            lte: endDate,
+    const [currentPeriod, previousPeriod, unitsSold, customers] =
+      await Promise.all([
+        this.prisma.orders.aggregate({
+          where: {
+            state: { in: this.COMPLETED_STATES },
+            ...(query.channel && { channel: query.channel }),
+            created_at: {
+              gte: startDate,
+              lte: endDate,
+            },
           },
-        },
-      },
-      _sum: {
-        quantity: true,
-      },
-    });
-
-    // Unique customers
-    const customers = await this.prisma.orders.groupBy({
-      by: ['customer_id'],
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        ...(query.channel && { channel: query.channel }),
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-        customer_id: {
-          not: null,
-        },
-      },
-    });
+          _sum: {
+            grand_total: true,
+          },
+          _count: {
+            id: true,
+          },
+        }),
+        this.prisma.orders.aggregate({
+          where: {
+            state: { in: this.COMPLETED_STATES },
+            ...(query.channel && { channel: query.channel }),
+            created_at: {
+              gte: previousStartDate,
+              lte: previousEndDate,
+            },
+          },
+          _sum: {
+            grand_total: true,
+          },
+          _count: {
+            id: true,
+          },
+        }),
+        this.prisma.order_items.aggregate({
+          where: {
+            orders: {
+              state: { in: this.COMPLETED_STATES },
+              ...(query.channel && { channel: query.channel }),
+              created_at: {
+                gte: startDate,
+                lte: endDate,
+              },
+            },
+          },
+          _sum: {
+            quantity: true,
+          },
+        }),
+        this.prisma.orders.groupBy({
+          by: ['customer_id'],
+          where: {
+            state: { in: this.COMPLETED_STATES },
+            ...(query.channel && { channel: query.channel }),
+            created_at: {
+              gte: startDate,
+              lte: endDate,
+            },
+            customer_id: {
+              not: null,
+            },
+          },
+        }),
+      ]);
 
     const totalRevenue = Number(currentPeriod._sum.grand_total || 0);
     const totalOrders = currentPeriod._count.id || 0;
@@ -425,7 +421,7 @@ export class SalesAnalyticsService {
       };
     }
 
-    return allResults;
+    return allResults.slice(0, query.limit || allResults.length);
   }
 
   async getSalesByPaymentMethod(query: SalesAnalyticsQueryDto) {
@@ -508,7 +504,7 @@ export class SalesAnalyticsService {
       };
     }
 
-    return allResults;
+    return allResults.slice(0, query.limit || allResults.length);
   }
 
   async getSalesTrends(query: SalesAnalyticsQueryDto) {
@@ -767,7 +763,7 @@ export class SalesAnalyticsService {
       };
     }
 
-    return allResults;
+    return allResults.slice(0, query.limit || allResults.length);
   }
 
   async getOrdersForExport(query: SalesAnalyticsQueryDto) {

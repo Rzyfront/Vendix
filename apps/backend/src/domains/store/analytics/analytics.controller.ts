@@ -406,6 +406,22 @@ export class AnalyticsController {
     return this.response_service.success(result);
   }
 
+  @Get('inventory/aging')
+  @Permissions('store:analytics:read')
+  async getInventoryAging(@Query() query: InventoryAnalyticsQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getInventoryAging(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('inventory/expiring')
+  @Permissions('store:analytics:read')
+  async getExpiringProducts(@Query() query: InventoryAnalyticsQueryDto) {
+    const result =
+      await this.inventory_analytics_service.getExpiringProducts(query);
+    return this.response_service.success(result);
+  }
+
   @Get('inventory/movement-summary')
   @Permissions('store:analytics:read')
   async getMovementSummary(@Query() query: InventoryAnalyticsQueryDto) {
@@ -632,6 +648,40 @@ export class AnalyticsController {
     );
   }
 
+  @Get('purchases/export')
+  @Permissions('store:analytics:read')
+  async exportPurchasesAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rows =
+      await this.purchases_analytics_service.getPurchasesBySupplier(query);
+    const data = Array.isArray(rows) ? rows : rows.data;
+
+    const exportData = data.map((row) => ({
+      Proveedor: row.supplier_name,
+      Órdenes: row.order_count,
+      'Total Gastado': row.total_spent,
+      Pendientes: row.pending_orders,
+      'Última Orden': row.last_order_date || '',
+    }));
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(exportData);
+    XLSX.utils.book_append_sheet(wb, ws, 'Compras');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `compras_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
+  }
+
   // ==================== REVIEWS ANALYTICS ====================
 
   @Get('reviews/summary')
@@ -639,6 +689,30 @@ export class AnalyticsController {
   async getReviewsSummary(@Query() query: AnalyticsQueryDto) {
     const result = await this.reviews_analytics_service.getReviewsSummary(query);
     return this.response_service.success(result);
+  }
+
+  @Get('reviews/export')
+  @Permissions('store:analytics:read')
+  async exportReviewsAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data = await this.reviews_analytics_service.getReviewsForExport(query);
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Reseñas');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `resenas_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   // ==================== FINANCIAL ANALYTICS ====================
@@ -669,6 +743,40 @@ export class AnalyticsController {
     const result =
       await this.financial_analytics_service.getProfitLossSummary(query);
     return this.response_service.success(result);
+  }
+
+  @Get('financial/refunds')
+  @Permissions('store:analytics:read')
+  async getRefundsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.financial_analytics_service.getRefundsSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('financial/export')
+  @Permissions('store:analytics:read')
+  async exportFinancialAnalytics(
+    @Query() query: AnalyticsQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const data =
+      await this.financial_analytics_service.getFinancialSummaryForExport(
+        query,
+      );
+
+    const XLSX = await import('xlsx');
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(data);
+    XLSX.utils.book_append_sheet(wb, ws, 'Financiero');
+    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+    const filename = `financiero_${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.set({
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+
+    return new StreamableFile(buffer);
   }
 
   @Get('financial/tax-summary/export')

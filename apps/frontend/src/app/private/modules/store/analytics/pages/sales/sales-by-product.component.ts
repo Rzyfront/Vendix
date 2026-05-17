@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal,
+import {Component, OnInit, computed, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule } from '@angular/router';
@@ -46,7 +46,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Productos"
-          [value]="data().length"
+          [value]="activeData().length"
           smallText=" productos en el período"
           iconName="package"
           iconBgColor="bg-blue-100"
@@ -106,7 +106,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <!-- Toggle Chart/Table -->
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'chart'
@@ -118,7 +118,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
               Gráficas
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'table'
@@ -151,12 +151,12 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
             <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-              ({{ data().length }} productos)
+              ({{ chartData().length }} productos)
             </span>
           </span>
         </div>
         <div class="p-4">
-          @if (!loading() && topProductsChartOptions()) {
+          @if (!chartLoading() && topProductsChartOptions()) {
           <app-chart
             [options]="topProductsChartOptions()"
             size="large"
@@ -179,16 +179,16 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Productos Vendidos
             <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-              ({{ data().length }} productos)
+              ({{ tableData().length }} productos)
             </span>
           </span>
         </div>
         <div class="p-4">
           <app-responsive-data-view
-            [data]="data()"
+            [data]="tableData()"
             [columns]="columns"
             [cardConfig]="cardConfig"
-            [loading]="loading()"
+            [loading]="tableLoading()"
             emptyMessage="No hay datos de ventas por producto"
             emptyIcon="package"
           ></app-responsive-data-view>
@@ -213,11 +213,18 @@ export class SalesByProductComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  loading = signal(true);
+  chartLoading = signal(false);
+  tableLoading = signal(false);
   exporting = signal(false);
   activeView = signal<'chart' | 'table'>('chart');
-  data = signal<SalesByProduct[]>([]);
+  chartData = signal<SalesByProduct[]>([]);
+  tableData = signal<SalesByProduct[]>([]);
   topProductsChartOptions = signal<EChartsOption>({});
+  private chartQueryKey = signal<string | null>(null);
+  private tableQueryKey = signal<string | null>(null);
+  readonly activeData = computed(() =>
+    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
+  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -287,32 +294,92 @@ export class SalesByProductComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.loadData();
+    this.loadActiveView();
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadData();
+    this.invalidateModeData();
+    this.loadActiveView();
   }
 
-  loadData(): void {
-    this.loading.set(true);
-    const query: SalesAnalyticsQueryDto = {
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadChartData();
+      return;
+    }
+    this.loadTableData();
+  }
+
+  private buildQuery(mode: 'chart' | 'table'): SalesAnalyticsQueryDto {
+    return {
       date_range: this.dateRange(),
-      limit: 100};
+      limit: mode === 'chart' ? 10 : 25,
+      ...(mode === 'table' && { page: 1 }),
+    };
+  }
+
+  private buildQueryKey(mode: 'chart' | 'table'): string {
+    return JSON.stringify({ mode, query: this.buildQuery(mode) });
+  }
+
+  private invalidateModeData(): void {
+    this.chartQueryKey.set(null);
+    this.tableQueryKey.set(null);
+  }
+
+  private loadChartData(): void {
+    const queryKey = this.buildQueryKey('chart');
+    if (this.chartQueryKey() === queryKey) return;
+
+    this.chartLoading.set(true);
 
     this.analyticsService
-      .getSalesByProduct(query)
+      .getSalesByProduct(this.buildQuery('chart'))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.data.set(response.data);
-          this.updateChart(response.data);
-          this.loading.set(false);
+          const rows = this.extractRows(response);
+          this.chartData.set(rows);
+          this.updateChart(rows);
+          this.chartQueryKey.set(queryKey);
+          this.chartLoading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar ventas por producto');
-          this.loading.set(false);
+          this.chartLoading.set(false);
         }});
+  }
+
+  private loadTableData(): void {
+    const queryKey = this.buildQueryKey('table');
+    if (this.tableQueryKey() === queryKey) return;
+
+    this.tableLoading.set(true);
+
+    this.analyticsService
+      .getSalesByProduct(this.buildQuery('table'))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.tableData.set(this.extractRows(response));
+          this.tableQueryKey.set(queryKey);
+          this.tableLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar tabla de ventas por producto');
+          this.tableLoading.set(false);
+        }});
+  }
+
+  private extractRows(response: any): SalesByProduct[] {
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.data)) return response.data.data;
+    return [];
   }
 
   private updateChart(data: SalesByProduct[]): void {
@@ -402,17 +469,17 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   getTotalUnits(): number {
-    return this.data().reduce((sum, p) => sum + (p.units_sold || 0), 0);
+    return this.activeData().reduce((sum, p) => sum + (p.units_sold || 0), 0);
   }
 
   getTotalRevenue(): string {
-    const total = this.data().reduce((sum, p) => sum + (p.revenue || 0), 0);
+    const total = this.activeData().reduce((sum, p) => sum + (p.revenue || 0), 0);
     return this.currencyService.format(total, 0);
   }
 
   getTopProductName(): string {
-    if (!this.data().length) return '-';
-    const top = [...this.data()].sort((a, b) => b.units_sold - a.units_sold)[0];
+    if (!this.activeData().length) return '-';
+    const top = [...this.activeData()].sort((a, b) => b.units_sold - a.units_sold)[0];
     return top?.product_name?.substring(0, 15) + (top.product_name.length > 15 ? '...' : '') || '-';
   }
 

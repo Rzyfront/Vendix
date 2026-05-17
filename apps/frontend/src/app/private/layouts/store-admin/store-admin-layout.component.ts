@@ -54,7 +54,6 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
         subtitle="Administrador de Tienda"
         [vlink]="storeSlug() || 'slug'"
         [domainHostname]="storeDomainHostname()"
-        [isVendixDomain]="isVendixDomain()"
         [collapsed]="sidebarCollapsed()"
         [showFooter]="true"
         [shimmer]="sidebarShimmer()"
@@ -181,11 +180,6 @@ export class StoreAdminLayoutComponent {
   readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
   readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
   readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
-
-  // --- isVendixDomain: resolved once from config ---
-  readonly isVendixDomain = signal(
-    !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain,
-  );
 
   // --- storeLogo: computed from store$ + domainConfig ---
   private readonly storeSignal = toSignal(this.authFacade.userStore$, { initialValue: null });

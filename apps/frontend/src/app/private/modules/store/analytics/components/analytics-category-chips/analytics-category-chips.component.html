@@ -1,26 +1,23 @@
 <div class="chips-container" role="group" aria-label="Filtrar por categoria">
-  <button
-    type="button"
-    class="chip"
-    [class.selected]="selectedCategory() === null"
-    (click)="onChipClick(null)"
-    [attr.aria-pressed]="selectedCategory() === null"
+  <app-button
+    size="sm"
+    [variant]="getChipVariant(selectedCategory() === null)"
+    customClasses="!rounded-full"
+    (clicked)="onChipClick(null)"
   >
-    <app-icon name="layout-grid" [size]="14"></app-icon>
-    <span>Todas</span>
-  </button>
+    <app-icon slot="icon" name="layout-grid" [size]="14"></app-icon>
+    Todas
+  </app-button>
 
   @for (chip of chips(); track trackByCategoryId($index, chip)) {
-    <button
-      type="button"
-      class="chip"
-      [class.selected]="chip.isSelected"
-      [style.--chip-color]="chip.color"
-      (click)="onChipClick(chip.id)"
-      [attr.aria-pressed]="chip.isSelected"
+    <app-button
+      size="sm"
+      [variant]="getChipVariant(chip.isSelected)"
+      customClasses="!rounded-full"
+      (clicked)="onChipClick(chip.id)"
     >
-      <app-icon [name]="chip.icon" [size]="14"></app-icon>
-      <span>{{ chip.label }}</span>
-    </button>
+      <app-icon slot="icon" [name]="chip.icon" [size]="14"></app-icon>
+      {{ chip.label }}
+    </app-button>
   }
 </div>

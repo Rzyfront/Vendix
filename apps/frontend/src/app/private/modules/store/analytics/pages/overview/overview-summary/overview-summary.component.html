@@ -108,13 +108,8 @@
             ></div>
           </div>
         } @else {
-<<<<<<< HEAD
-          @defer (on viewport) {
-            <app-chart [options]="gaugeChartOptions()" size="medium"></app-chart>
-=======
           @defer (on immediate) {
-            <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
->>>>>>> origin/dev
+            <app-chart [options]="gaugeChartOptions()" size="medium"></app-chart>
           } @placeholder {
             <div
               class="h-64 bg-surface-secondary animate-pulse rounded-xl"
@@ -208,6 +203,7 @@
       </div>
     </app-card>
   </div>
+  </div>
 
   <!-- Analytics Catalog -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
@@ -229,26 +225,13 @@
         (categoryChange)="onCategoryChange($event)"
       ></app-analytics-category-chips>
 
-      <div class="search-wrapper">
-        <app-icon name="search" [size]="16" class="search-icon"></app-icon>
-        <input
-          type="text"
-          class="search-input"
-          placeholder="Buscar analiticas..."
-          [ngModel]="searchTerm()"
-          (ngModelChange)="onSearchChange($event)"
-        />
-        @if (searchTerm()) {
-          <button
-            type="button"
-            class="search-clear"
-            (click)="onSearchChange('')"
-            aria-label="Limpiar busqueda"
-          >
-            <app-icon name="x" [size]="14"></app-icon>
-          </button>
-        }
-      </div>
+      <app-inputsearch
+        type="search"
+        placeholder="Buscar analiticas..."
+        size="md"
+        [ngModel]="searchTerm()"
+        (ngModelChange)="onSearchChange($event)"
+      ></app-inputsearch>
 
       @if (filteredViews().length === 0) {
         <div class="empty-state">

@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -174,6 +175,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
   `,
 })
 export class ProfitLossComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private currencyService = inject(CurrencyFormatService);
 
@@ -198,7 +200,10 @@ export class ProfitLossComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService.getProfitLossSummary({ date_range: this.dateRange() }).subscribe({
+    this.analyticsService
+      .getProfitLossSummary({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (response) => {
         if (response?.data) {
           this.data.set(response.data);
@@ -214,7 +219,10 @@ export class ProfitLossComponent implements OnInit {
 
   exportReport(): void {
     this.exporting.set(true);
-    this.analyticsService.exportFinancialAnalytics({ date_range: this.dateRange() }).subscribe({
+    this.analyticsService
+      .exportFinancialAnalytics({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');

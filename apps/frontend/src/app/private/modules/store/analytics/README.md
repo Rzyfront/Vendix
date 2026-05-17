@@ -12,8 +12,7 @@ The Analytics module provides a centralized catalog of analytics views organized
 ┌─ Sidebar entry (ej. "Ventas") ──► /admin/analytics/sales
 │
 └─ AnalyticsShellComponent (wrapper reutilizable)
-   ├─ Header: título + descripción del módulo
-   ├─ TabBar: tabs horizontales scrollables (mobile-first)
+   ├─ app-sticky-header: título + descripción + tabs de ruta
    └─ <router-outlet>  ◄── hija activa según tab seleccionada
 ```
 
@@ -22,8 +21,7 @@ The Analytics module provides a centralized catalog of analytics views organized
 | File | Purpose |
 |------|---------|
 | `config/analytics-registry.ts` | Central registry with all views and categories |
-| `components/analytics-shell/` | Wrapper component with tabs layout |
-| `components/analytics-tab-bar/` | Horizontal scrollable tab bar |
+| `components/analytics-shell/` | Wrapper component using `app-sticky-header` route tabs |
 | `components/analytics-card/` | Card component for view catalog |
 | `pages/*/` | Individual view components |
 

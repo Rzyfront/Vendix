@@ -518,6 +518,139 @@ export class InventoryAnalyticsService {
       .sort((a, b) => b.total_value - a.total_value);
   }
 
+  async getInventoryAging(query: InventoryAnalyticsQueryDto) {
+    const daysThreshold = query.days_threshold || 90;
+    const now = new Date();
+
+    const stockLevels = await this.prisma.stock_levels.findMany({
+      where: {
+        quantity_on_hand: { gt: 0 },
+        ...(query.location_id && { location_id: query.location_id }),
+      },
+      include: {
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+          },
+        },
+      },
+      orderBy: {
+        quantity_on_hand: 'desc',
+      },
+      take: query.limit || 100,
+    });
+
+    const productIds = stockLevels.map((level) => level.product_id);
+    const lastMovementByProduct =
+      productIds.length > 0
+        ? await this.prisma.inventory_movements.groupBy({
+            by: ['product_id'],
+            where: {
+              product_id: { in: productIds },
+              ...(query.location_id && {
+                OR: [
+                  { from_location_id: query.location_id },
+                  { to_location_id: query.location_id },
+                ],
+              }),
+            },
+            _max: {
+              created_at: true,
+            },
+          })
+        : [];
+
+    const lastMovementMap = new Map<number | null, Date | null>(
+      lastMovementByProduct.map((movement) => [
+        movement.product_id,
+        movement._max.created_at,
+      ]),
+    );
+
+    return stockLevels.map((level) => {
+      const lastMovementDate = lastMovementMap.get(level.product_id) || null;
+      const daysWithoutMovement = lastMovementDate
+        ? Math.floor(
+            (now.getTime() - lastMovementDate.getTime()) /
+              (1000 * 60 * 60 * 24),
+          )
+        : daysThreshold + 1;
+
+      return {
+        product_id: level.product_id,
+        product_name: level.products?.name || 'Desconocido',
+        sku: level.products?.sku || '',
+        quantity_on_hand: Number(level.quantity_on_hand || 0),
+        days_without_movement: daysWithoutMovement,
+        last_movement_date: lastMovementDate?.toISOString() || null,
+        status:
+          daysWithoutMovement <= 30
+            ? 'active'
+            : daysWithoutMovement <= daysThreshold
+              ? 'slow'
+              : 'dead',
+      };
+    });
+  }
+
+  async getExpiringProducts(query: InventoryAnalyticsQueryDto) {
+    const daysThreshold = query.days_threshold || 30;
+    const now = new Date();
+    const thresholdDate = new Date(now);
+    thresholdDate.setUTCDate(thresholdDate.getUTCDate() + daysThreshold);
+
+    const batches = await this.prisma.inventory_batches.findMany({
+      where: {
+        quantity: { gt: 0 },
+        expiration_date: {
+          not: null,
+          lte: thresholdDate,
+        },
+        ...(query.location_id && { location_id: query.location_id }),
+      },
+      include: {
+        products: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+          },
+        },
+      },
+      orderBy: {
+        expiration_date: 'asc',
+      },
+      take: query.limit || 100,
+    });
+
+    return batches.map((batch) => {
+      const expirationDate = batch.expiration_date!;
+      const daysUntilExpiry = Math.ceil(
+        (expirationDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      return {
+        product_id: batch.product_id,
+        product_name: batch.products?.name || 'Desconocido',
+        sku: batch.products?.sku || '',
+        lot_number: batch.batch_number,
+        expiration_date: expirationDate.toISOString(),
+        quantity: Number(batch.quantity || 0),
+        days_until_expiry: daysUntilExpiry,
+        status:
+          daysUntilExpiry < 0
+            ? 'expired'
+            : daysUntilExpiry <= 7
+              ? 'critical'
+              : daysUntilExpiry <= daysThreshold
+                ? 'warning'
+                : 'ok',
+      };
+    });
+  }
+
   private async getHistoricalInventoryValuation(
     baseClient: any,
     params: {

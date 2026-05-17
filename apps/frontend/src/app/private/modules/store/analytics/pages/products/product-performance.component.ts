@@ -100,7 +100,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
 
     // Dispatch initial loads
     this.store.dispatch(ProductsActions.loadProductsSummary());
-    this.store.dispatch(ProductsActions.loadTopSellers());
+    this.store.dispatch(ProductsActions.loadTopSellers({ limit: 10 }));
     this.store.dispatch(ProductsActions.loadProductsTrends());
 
     // Subscribe to trends to build chart

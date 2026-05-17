@@ -64,19 +64,19 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         ></app-stats>
 
         <app-stats
-          title="Stock Bajo"
-          [value]="stats().low_stock_products"
-          [smallText]="stats().out_of_stock_products + ' sin stock'"
-          iconName="alert-triangle"
+          title="Categorías"
+          [value]="stats().categories_count"
+          smallText="Clasificación del catálogo"
+          iconName="tags"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
 
         <app-stats
-          title="Valor Total"
-          [value]="formatCurrencyValue(stats().total_value)"
-          smallText="Valor del inventario"
-          iconName="dollar-sign"
+          title="Marcas"
+          [value]="stats().brands_count"
+          smallText="Asociadas al catálogo"
+          iconName="building-2"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
         ></app-stats>

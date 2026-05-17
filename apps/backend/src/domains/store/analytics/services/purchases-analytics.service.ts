@@ -4,15 +4,17 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
-import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class PurchasesAnalyticsService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  private readonly PENDING_STATES = ['draft', 'approved', 'partial'] as const;
+  private readonly COMPLETED_STATES = ['received'] as const;
+
   async getPurchasesSummary(query: AnalyticsQueryDto) {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
+    if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
@@ -24,9 +26,7 @@ export class PurchasesAnalyticsService {
       where: {
         organization_id: organizationId,
         suppliers: {
-          store_suppliers: {
-            some: { store_id: storeId },
-          },
+          store_id: storeId,
         },
         order_date: {
           gte: startDate,
@@ -45,13 +45,10 @@ export class PurchasesAnalyticsService {
       0,
     );
     const pendingOrders = purchaseOrders.filter(
-      (po) =>
-        po.status === 'draft' ||
-        po.status === 'sent' ||
-        po.status === 'confirmed',
+      (po) => this.PENDING_STATES.includes(po.status as any),
     ).length;
     const completedOrders = purchaseOrders.filter(
-      (po) => po.status === 'completed' || po.status === 'received',
+      (po) => this.COMPLETED_STATES.includes(po.status as any),
     ).length;
     const totalItemsOrdered = purchaseOrders.reduce(
       (sum, po) =>
@@ -86,7 +83,7 @@ export class PurchasesAnalyticsService {
     query: AnalyticsQueryDto & { page?: number; limit?: number },
   ) {
     const context = RequestContextService.getContext();
-    if (!context?.store_id) {
+    if (!context?.store_id || !context.organization_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
@@ -94,32 +91,62 @@ export class PurchasesAnalyticsService {
 
     const { startDate, endDate } = parseDateRange(query);
 
-    const supplierStats = await this.prisma.$queryRaw<
-      Array<{
-        supplier_id: number;
-        supplier_name: string;
-        order_count: bigint;
-        total_spent: Prisma.Decimal;
-        pending_orders: bigint;
-        last_order_date: Date;
-      }>
-    >`
-      SELECT
-        s.id as supplier_id,
-        s.name as supplier_name,
-        COUNT(po.id) as order_count,
-        COALESCE(SUM(po.total_amount), 0) as total_spent,
-        COUNT(CASE WHEN po.status IN ('draft', 'sent', 'confirmed') THEN 1 END) as pending_orders,
-        MAX(po.order_date) as last_order_date
-      FROM suppliers s
-      INNER JOIN store_suppliers ss ON ss.supplier_id = s.id AND ss.store_id = ${storeId}
-      LEFT JOIN purchase_orders po ON po.supplier_id = s.id
-        AND po.organization_id = ${organizationId}
-        AND po.order_date >= ${startDate}
-        AND po.order_date <= ${endDate}
-      GROUP BY s.id, s.name
-      ORDER BY total_spent DESC
-    `;
+    const suppliers = await this.prisma.suppliers.findMany({
+      where: {
+        organization_id: organizationId,
+        store_id: storeId,
+      },
+      select: {
+        id: true,
+        name: true,
+        purchase_orders: {
+          where: {
+            organization_id: organizationId,
+            location: { store_id: storeId },
+            order_date: {
+              gte: startDate,
+              lte: endDate,
+            },
+          },
+          select: {
+            status: true,
+            total_amount: true,
+            order_date: true,
+          },
+        },
+      },
+    });
+
+    const supplierStats = suppliers
+      .map((supplier) => {
+        const orders = supplier.purchase_orders;
+        const totalSpent = orders.reduce(
+          (sum, order) => sum + Number(order.total_amount || 0),
+          0,
+        );
+        const pendingOrders = orders.filter((order) =>
+          this.PENDING_STATES.includes(order.status as any),
+        ).length;
+        let lastOrderDate: Date | null = null;
+        for (const order of orders) {
+          if (
+            order.order_date &&
+            (!lastOrderDate || order.order_date > lastOrderDate)
+          ) {
+            lastOrderDate = order.order_date;
+          }
+        }
+
+        return {
+          supplier_id: supplier.id,
+          supplier_name: supplier.name,
+          order_count: orders.length,
+          total_spent: totalSpent,
+          pending_orders: pendingOrders,
+          last_order_date: lastOrderDate,
+        };
+      })
+      .sort((a, b) => b.total_spent - a.total_spent);
 
     const isPaginated = query.page !== undefined && query.limit !== undefined;
 
@@ -130,11 +157,7 @@ export class PurchasesAnalyticsService {
       const paginatedData = supplierStats.slice((page - 1) * limit, page * limit);
 
       const mapped = paginatedData.map((s) => ({
-        supplier_id: s.supplier_id,
-        supplier_name: s.supplier_name,
-        order_count: Number(s.order_count),
-        total_spent: Number(s.total_spent),
-        pending_orders: Number(s.pending_orders),
+        ...s,
         last_order_date: s.last_order_date?.toISOString() || null,
       }));
 
@@ -151,12 +174,8 @@ export class PurchasesAnalyticsService {
       };
     }
 
-    return supplierStats.map((s) => ({
-      supplier_id: s.supplier_id,
-      supplier_name: s.supplier_name,
-      order_count: Number(s.order_count),
-      total_spent: Number(s.total_spent),
-      pending_orders: Number(s.pending_orders),
+    return supplierStats.slice(0, query.limit || supplierStats.length).map((s) => ({
+      ...s,
       last_order_date: s.last_order_date?.toISOString() || null,
     }));
   }

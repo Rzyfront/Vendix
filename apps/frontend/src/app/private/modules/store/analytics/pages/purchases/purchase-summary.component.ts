@@ -1,5 +1,7 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { forkJoin } from 'rxjs';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -174,6 +176,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
   `,
 })
 export class PurchaseSummaryComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private currencyService = inject(CurrencyFormatService);
 
@@ -199,24 +202,20 @@ export class PurchaseSummaryComponent implements OnInit {
   loadData(): void {
     this.loading.set(true);
 
-    this.analyticsService.getPurchasesBySupplier({ date_range: this.dateRange() }).subscribe({
-      next: (response: any) => {
-        const data = Array.isArray(response?.data) ? response.data : (response?.data?.data || []);
-        this.suppliers.set(data);
-        this.updateCharts();
-        this.loading.set(false);
-      },
-      error: () => {
-        this.updateCharts();
-        this.loading.set(false);
-      },
-    });
-
-    this.analyticsService.getPurchasesSummary({ date_range: this.dateRange() }).subscribe({
-      next: (response) => {
-        if (response?.data) {
-          this.summary.set(response.data);
-        }
+    forkJoin({
+      suppliers: this.analyticsService.getPurchasesBySupplier({
+        date_range: this.dateRange(),
+        limit: 5,
+      }),
+      summary: this.analyticsService.getPurchasesSummary({
+        date_range: this.dateRange(),
+      }),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+      next: ({ suppliers, summary }) => {
+        this.suppliers.set(this.extractSupplierRows(suppliers));
+        this.summary.set(summary.data);
         this.updateCharts();
         this.loading.set(false);
       },
@@ -227,9 +226,18 @@ export class PurchaseSummaryComponent implements OnInit {
     });
   }
 
+  private extractSupplierRows(response: any): PurchasesBySupplier[] {
+    if (Array.isArray(response?.data)) return response.data;
+    if (Array.isArray(response?.data?.data)) return response.data.data;
+    return [];
+  }
+
   exportReport(): void {
     this.exporting.set(true);
-    this.analyticsService.exportPurchasesAnalytics({ date_range: this.dateRange() }).subscribe({
+    this.analyticsService
+      .exportPurchasesAnalytics({ date_range: this.dateRange() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');

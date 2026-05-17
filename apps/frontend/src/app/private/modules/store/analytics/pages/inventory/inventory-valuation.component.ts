@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal,
+import {Component, OnInit, computed, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -106,7 +106,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           <!-- Toggle Chart/Table -->
           <div class="flex rounded-lg border border-border overflow-hidden">
             <button
-              (click)="activeView.set('chart')"
+              (click)="setActiveView('chart')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'chart'
@@ -118,7 +118,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
               Gráficas
             </button>
             <button
-              (click)="activeView.set('table')"
+              (click)="setActiveView('table')"
               class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
               [class]="
                 activeView() === 'table'
@@ -138,7 +138,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
       </div>
 
       <!-- Total Value Card -->
-      @if (!loading()) {
+      @if (!activeLoading()) {
         <div
           class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white"
         >
@@ -147,7 +147,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             {{ formatCurrency(totalValue()) }}
           </p>
           <p class="text-green-100 text-sm mt-2">
-            {{ totalQuantity() }} unidades en {{ data().length }} ubicaciones
+            {{ totalQuantity() }} unidades en {{ activeData().length }} ubicaciones
           </p>
         </div>
       }
@@ -168,11 +168,11 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             >
           </div>
           <div class="p-4">
-            @if (loading()) {
+            @if (chartLoading()) {
               <div class="h-80 flex items-center justify-center">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            } @else if (data().length === 0) {
+            } @else if (chartData().length === 0) {
               <div class="h-80 flex flex-col items-center justify-center text-text-secondary">
                 <app-icon name="bar-chart-2" [size]="48" class="mb-2 opacity-50"></app-icon>
                 <p>No hay datos para el período seleccionado</p>
@@ -199,10 +199,10 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         </div>
         <div class="p-4">
           <app-responsive-data-view
-            [data]="data()"
+            [data]="tableData()"
             [columns]="columns"
             [cardConfig]="cardConfig"
-            [loading]="loading()"
+            [loading]="tableLoading()"
             emptyMessage="No hay datos de valoración"
             emptyIcon="dollar-sign"
           ></app-responsive-data-view>
@@ -227,13 +227,23 @@ export class InventoryValuationComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-loading = signal(true);
+  chartLoading = signal(false);
+  tableLoading = signal(false);
   exporting = signal(false);
   activeView = signal<'chart' | 'table'>('chart');
-  data = signal<InventoryValuation[]>([]);
+  chartData = signal<InventoryValuation[]>([]);
+  tableData = signal<InventoryValuation[]>([]);
   chartOptions = signal<EChartsOption>({});
   totalValue = signal(0);
   totalQuantity = signal(0);
+  private chartQueryKey = signal<string | null>(null);
+  private tableQueryKey = signal<string | null>(null);
+  readonly activeData = computed(() =>
+    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
+  );
+  readonly activeLoading = computed(() =>
+    this.activeView() === 'chart' ? this.chartLoading() : this.tableLoading(),
+  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -293,24 +303,73 @@ loading = signal(true);
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
-    this.loadData();
+    this.loadActiveView();
   }
-loadData(): void {
-    this.loading.set(true);
+
+  setActiveView(view: 'chart' | 'table'): void {
+    this.activeView.set(view);
+    this.loadActiveView();
+  }
+
+  private loadActiveView(): void {
+    if (this.activeView() === 'chart') {
+      this.loadChartData();
+      return;
+    }
+    this.loadTableData();
+  }
+
+  private buildQueryKey(mode: 'chart' | 'table'): string {
+    return JSON.stringify({ mode, dateRange: this.dateRange() });
+  }
+
+  private invalidateModeData(): void {
+    this.chartQueryKey.set(null);
+    this.tableQueryKey.set(null);
+  }
+
+  private loadChartData(): void {
+    const queryKey = this.buildQueryKey('chart');
+    if (this.chartQueryKey() === queryKey) return;
+
+    this.chartLoading.set(true);
 
     this.analyticsService
       .getInventoryValuation({ date_range: this.dateRange() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.data.set(response.data);
+          this.chartData.set(response.data);
           this.calculateTotals(response.data);
           this.updateChart(response.data);
-          this.loading.set(false);
+          this.chartQueryKey.set(queryKey);
+          this.chartLoading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar valoración');
-          this.loading.set(false);
+          this.chartLoading.set(false);
+        }});
+  }
+
+  private loadTableData(): void {
+    const queryKey = this.buildQueryKey('table');
+    if (this.tableQueryKey() === queryKey) return;
+
+    this.tableLoading.set(true);
+
+    this.analyticsService
+      .getInventoryValuation({ date_range: this.dateRange(), page: 1, limit: 25 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.tableData.set(response.data);
+          this.calculateTotals(response.data);
+          this.tableQueryKey.set(queryKey);
+          this.tableLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar tabla de valoración');
+          this.tableLoading.set(false);
         }});
   }
 
@@ -391,7 +450,8 @@ legend: {
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadData();
+    this.invalidateModeData();
+    this.loadActiveView();
   }
 
   formatCurrency(value: number): string {
@@ -399,21 +459,21 @@ legend: {
   }
 
   getLocationCount(): number {
-    return this.data().length;
+    return this.activeData().length;
   }
 
   getTotalValue(): string {
-    const total = this.data().reduce((sum, l) => sum + (l.total_value || 0), 0);
+    const total = this.activeData().reduce((sum, l) => sum + (l.total_value || 0), 0);
     return this.currencyService.format(total, 0);
   }
 
   getTotalUnits(): number {
-    return this.data().reduce((sum, l) => sum + (l.total_quantity || 0), 0);
+    return this.activeData().reduce((sum, l) => sum + (l.total_quantity || 0), 0);
   }
 
   getTopLocation(): string {
-    if (!this.data().length) return '-';
-    const top = [...this.data()].sort((a, b) => b.total_value - a.total_value)[0];
+    if (!this.activeData().length) return '-';
+    const top = [...this.activeData()].sort((a, b) => b.total_value - a.total_value)[0];
     return top?.location_name?.substring(0, 15) || '-';
   }
 }
