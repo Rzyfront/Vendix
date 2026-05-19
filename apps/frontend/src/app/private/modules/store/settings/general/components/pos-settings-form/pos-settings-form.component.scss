@@ -3,8 +3,6 @@
 }
 
 // ─── Day Row (mobile-first) ────────────────────────────
-// Mobile: stacked — day name + toggle on top, times below
-// Desktop: single row, compact to fit in CSS column (~50vw)
 
 .day-row {
   background: #fff;
@@ -63,7 +61,6 @@
   cursor: pointer;
   transition: all 200ms ease;
 
-  // Expand touch target without visual size (mobile)
   @media (max-width: 767px) {
     min-height: 44px;
     padding: 6px 12px;
@@ -92,12 +89,12 @@
   align-items: flex-end;
   gap: 6px;
   flex: 1;
-  min-width: 0; // Prevent overflow
+  min-width: 0;
 }
 
 .time-field {
   flex: 1;
-  min-width: 0; // Prevent overflow
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -117,7 +114,7 @@
 
 .time-input {
   width: 100%;
-  min-width: 0; // Prevent flex overflow
+  min-width: 0;
   padding: 8px 6px;
   min-height: 36px;
   font-size: 13px;
@@ -128,11 +125,10 @@
   cursor: pointer;
   transition: border-color 200ms ease, box-shadow 200ms ease;
 
-  // Mobile: larger for touch
   @media (max-width: 767px) {
     padding: 10px 10px;
     min-height: 44px;
-    font-size: 16px; // Prevent iOS zoom
+    font-size: 16px;
     border-radius: 10px;
   }
 
@@ -141,6 +137,11 @@
     border-color: #3b82f6;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
     background: #fff;
+  }
+
+  &:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
   }
 }
 
@@ -156,4 +157,87 @@
   font-weight: 500;
   font-style: italic;
   color: #ef4444;
+}
+
+// ─── Custom Mode Blocks ──────────────────────────────
+
+.blocks-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.block-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.block-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  min-width: 56px;
+  flex-shrink: 0;
+}
+
+.remove-block-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+
+  @media (max-width: 767px) {
+    width: 36px;
+    height: 36px;
+  }
+
+  &:active {
+    transform: scale(0.92);
+  }
+
+  &:hover {
+    background: #fee2e2;
+  }
+}
+
+.add-block-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 150ms ease;
+
+  @media (max-width: 767px) {
+    width: 36px;
+    height: 36px;
+  }
+
+  &:active {
+    transform: scale(0.92);
+  }
+
+  &:hover {
+    background: #dcfce7;
+  }
 }

@@ -1,6 +1,7 @@
 
 import { Component, input, output } from '@angular/core';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import type { BusinessHours } from '../../../../../core/models/store-settings.interface';
 
 @Component({
   selector: 'app-pos-schedule-indicator',
@@ -101,7 +102,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 })
 export class PosScheduleIndicatorComponent {
   readonly isWithinHours = input<boolean>(false);
-  readonly todayHours = input<{ open: string; close: string } | null>(null);
+  readonly todayHours = input<BusinessHours | null>(null);
   readonly isDayClosed = input<boolean>(false);
   readonly enabled = input<boolean>(false);
 
@@ -110,6 +111,12 @@ export class PosScheduleIndicatorComponent {
   hoursText(): string {
     const hours = this.todayHours();
     if (!hours) return '';
+    if (hours.blocks && hours.blocks.length > 0) {
+      return hours.blocks
+        .filter(b => b.open !== 'closed' && b.close !== 'closed')
+        .map(b => `${b.open} – ${b.close}`)
+        .join(', ');
+    }
     return `${hours.open} – ${hours.close}`;
   }
 }

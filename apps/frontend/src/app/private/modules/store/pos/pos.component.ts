@@ -56,6 +56,7 @@ import { PosMobileFooterComponent } from './components/pos-mobile-footer.compone
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
+import type { BusinessHours } from '../../../../core/models/store-settings.interface';
 import { QuotationsService } from '../quotations/services/quotations.service';
 import { LayawayApiService } from '../layaway/services/layaway.service';
 import { LayawayConfigModalComponent } from './components/layaway-config-modal/layaway-config-modal.component';
@@ -867,14 +868,19 @@ export class PosComponent {
     }
   }
 
-  get todaySchedule(): { open: string; close: string } | null {
+  get todaySchedule(): BusinessHours | null {
     const hours = this.businessHours()[this.todayKey];
-    if (!hours || !hours.open || !hours.close) return null;
+    if (!hours) return null;
     return hours;
   }
 
   get isTodayClosed(): boolean {
-    return this.todaySchedule === null;
+    const schedule = this.todaySchedule;
+    if (!schedule) return true;
+    if (schedule.blocks && schedule.blocks.length > 0) {
+      return schedule.blocks.every(b => b.open === 'closed' || b.close === 'closed');
+    }
+    return !schedule.open || !schedule.close || schedule.open === 'closed';
   }
 
   // Customer Queue
@@ -903,7 +909,7 @@ export class PosComponent {
 
   // Store settings for schedule validation
   enableScheduleValidation = signal(false);
-  businessHours = signal<Record<string, { open: string; close: string }>>({});
+  businessHours = signal<Record<string, BusinessHours>>({});
 
   // Admin bypass for schedule validation
   isAdmin = signal(false);
@@ -2244,11 +2250,25 @@ export class PosComponent {
       return true;
     }
 
-    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+    const currentTime = hours * 60 + minutes;
+
+    // Custom mode: multiple blocks
+    if (todayHours.blocks && todayHours.blocks.length > 0) {
+      for (const block of todayHours.blocks) {
+        if (block.open === 'closed' || block.close === 'closed') continue;
+        const [oH, oM] = block.open.split(':').map(Number);
+        const [cH, cM] = block.close.split(':').map(Number);
+        const openTime = oH * 60 + oM;
+        const closeTime = cH * 60 + cM;
+        if (currentTime >= openTime && currentTime <= closeTime) return true;
+      }
       return false;
     }
 
-    const currentTime = hours * 60 + minutes;
+    // Continuous mode: single block
+    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+      return false;
+    }
 
     const [openHour, openMinute] = todayHours.open.split(':').map(Number);
     const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
@@ -2284,14 +2304,22 @@ export class PosComponent {
 
     const todayName = dayNames[day];
     const todayHours = this.businessHours()?.[todayName];
-    if (
-      todayHours &&
-      todayHours.open !== 'closed' &&
-      todayHours.close !== 'closed'
-    ) {
-      const [openH, openM] = todayHours.open.split(':').map(Number);
-      if (curMinutes < openH * 60 + openM) {
-        return `Hoy ${todayHours.open} - ${todayHours.close}`;
+
+    if (todayHours) {
+      if (todayHours.blocks && todayHours.blocks.length > 0) {
+        for (const block of todayHours.blocks) {
+          if (block.open !== 'closed' && block.close !== 'closed') {
+            const [openH, openM] = block.open.split(':').map(Number);
+            if (curMinutes < openH * 60 + openM) {
+              return `Hoy ${this.formatBlocksForDisplay(todayHours.blocks)}`;
+            }
+          }
+        }
+      } else if (todayHours.open !== 'closed' && todayHours.close !== 'closed') {
+        const [openH, openM] = todayHours.open.split(':').map(Number);
+        if (curMinutes < openH * 60 + openM) {
+          return `Hoy ${todayHours.open} - ${todayHours.close}`;
+        }
       }
     }
 
@@ -2299,12 +2327,26 @@ export class PosComponent {
       const dayIndex = (day + i) % 7;
       const dayName = dayNames[dayIndex];
       const bh = this.businessHours()?.[dayName];
-      if (bh && bh.open !== 'closed' && bh.close !== 'closed') {
+      if (!bh) continue;
+
+      if (bh.blocks && bh.blocks.length > 0) {
+        const hasOpen = bh.blocks.some(b => b.open !== 'closed' && b.close !== 'closed');
+        if (hasOpen) {
+          return `${spanishDays[dayName]} ${this.formatBlocksForDisplay(bh.blocks)}`;
+        }
+      } else if (bh.open !== 'closed' && bh.close !== 'closed') {
         return `${spanishDays[dayName]} ${bh.open} - ${bh.close}`;
       }
     }
 
     return 'Consultar configuración';
+  }
+
+  private formatBlocksForDisplay(blocks: Array<{ open: string; close: string }>): string {
+    return blocks
+      .filter(b => b.open !== 'closed' && b.close !== 'closed')
+      .map(b => `${b.open} - ${b.close}`)
+      .join(', ');
   }
 
   private initCashRegisterSession(): void {

@@ -162,6 +162,7 @@ export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
+  schedule_mode?: 'continuous' | 'custom';
   enable_schedule_validation: boolean;
   show_onscreen_keypad: boolean;
   require_cash_drawer_open: boolean;
@@ -210,9 +211,15 @@ export interface ReceiptsSettings {
   receipt_footer: string;
 }
 
+export interface BusinessHoursBlock {
+  open: string;
+  close: string;
+}
+
 export interface BusinessHours {
   open: string;
   close: string;
+  blocks?: BusinessHoursBlock[];
 }
 
 export interface ApiResponse<T> {

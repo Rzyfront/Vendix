@@ -4,7 +4,7 @@ import { Injectable, Logger } from '@nestjs/common';
  * Current schema version for store_settings JSON.
  * Bump when adding a new migration entry to MIGRATIONS.
  */
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export interface SettingsMigration {
   from: number;
@@ -36,6 +36,16 @@ export const MIGRATIONS: SettingsMigration[] = [
       // Drop legacy `app` block — branding is the source of truth.
       if (raw && raw.app !== undefined) {
         delete raw.app;
+      }
+      return raw;
+    },
+  },
+  {
+    from: 1,
+    to: 2,
+    apply: (raw: any) => {
+      if (raw?.pos && !raw.pos.schedule_mode) {
+        raw.pos.schedule_mode = 'continuous';
       }
       return raw;
     },
