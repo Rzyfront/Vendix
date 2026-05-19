@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Image,
   Animated,
+  Dimensions,
 } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -38,10 +39,14 @@ import type {
   PosCustomer,
 } from '@/features/store/types';
 
+const GRID_HORIZONTAL_PADDING = spacing[3];
+const GRID_COLUMN_GAP = spacing[3];
+const PRODUCT_CARD_WIDTH =
+  (Dimensions.get('window').width - GRID_HORIZONTAL_PADDING * 2 - GRID_COLUMN_GAP) / 2;
+
 const productCardStyles = StyleSheet.create({
   card: {
-    flex: 1,
-    flexBasis: 0,
+    width: PRODUCT_CARD_WIDTH,
     backgroundColor: colors.background,
     borderRadius: borderRadius.xl,
     padding: spacing[3],
@@ -935,16 +940,14 @@ const ProductCard = ({
         </View>
 
         {/* Product Name */}
-        <Text style={productCardStyles.name} numberOfLines={2}>
+        <Text style={productCardStyles.name} numberOfLines={1} ellipsizeMode="tail">
           {product.name}
         </Text>
 
-        {/* Description */}
-        {product.description ? (
-          <Text style={productCardStyles.description} numberOfLines={1}>
-            {product.description}
-          </Text>
-        ) : null}
+        {/* Description — siempre renderizada para mantener altura uniforme */}
+        <Text style={productCardStyles.description} numberOfLines={1} ellipsizeMode="tail">
+          {product.description || ' '}
+        </Text>
 
         {/* Price + Stock row */}
         <View style={productCardStyles.row}>
@@ -2062,8 +2065,11 @@ const PosScreen = () => {
           data={productList}
           keyExtractor={(item) => item.id.toString()}
           numColumns={2}
-          columnWrapperStyle={{ flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[3] }}
-          contentContainerStyle={{ paddingHorizontal: spacing[2], paddingBottom: spacing[24] }}
+          columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
+          contentContainerStyle={{
+            paddingHorizontal: GRID_HORIZONTAL_PADDING,
+            paddingBottom: spacing[24],
+          }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <ProductCard product={item} onPress={handleProductPress} />
