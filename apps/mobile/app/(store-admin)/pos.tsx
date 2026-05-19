@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Platform,
   StyleSheet,
   Image,
+  Animated,
 } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -39,7 +40,8 @@ import type {
 
 const productCardStyles = StyleSheet.create({
   card: {
-    width: '48%' as any,
+    flex: 1,
+    flexBasis: 0,
     backgroundColor: colors.background,
     borderRadius: borderRadius.xl,
     padding: spacing[3],
@@ -47,26 +49,99 @@ const productCardStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[100],
     ...shadows.sm,
+    overflow: 'hidden',
   },
   imageArea: {
     width: '100%',
-    height: 96,
+    aspectRatio: 1,
     borderRadius: borderRadius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: spacing[2],
     overflow: 'hidden',
+  },
+  imageGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colorScales.gray[50],
+  },
+  imageGradientOverlay: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: colorScales.gray[100],
+    opacity: 0.3,
   },
   productImage: {
     width: '100%',
     height: '100%',
+  },
+  imageFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageFallbackIcon: {
+    width: 48,
+    height: 48,
     borderRadius: borderRadius.lg,
+    backgroundColor: colorScales.green[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgesContainer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  stockBadge: {
+    position: 'absolute',
+    top: spacing[2],
+    right: spacing[2],
+    zIndex: 1,
+  },
+  variantsBadge: {
+    position: 'absolute',
+    top: spacing[2],
+    left: spacing[2],
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  variantsBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: '#FFFFFF',
+  },
+  weightBadge: {
+    position: 'absolute',
+    bottom: spacing[2],
+    left: spacing[2],
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(37,99,235,0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  weightBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: '#FFFFFF',
   },
   name: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
+    fontWeight: typography.fontWeight.medium as any,
     color: colorScales.gray[900],
+    lineHeight: 18,
+  },
+  description: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    lineHeight: 16,
+    marginTop: 2,
   },
   row: {
     flexDirection: 'row',
@@ -74,25 +149,58 @@ const productCardStyles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: spacing[1],
   },
+  priceContainer: {
+    flexDirection: 'column',
+  },
   price: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.primary,
+    fontWeight: typography.fontWeight.bold as any,
+    color: colorScales.gray[900],
   },
-  lowStock: {
+  priceWeightUnit: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.normal as any,
+    color: colorScales.gray[400],
+  },
+  stockText: {
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 1,
+  },
+  bottomSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing[2],
+    paddingTop: spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  bottomLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    minWidth: 0,
+  },
+  skuText: {
     fontSize: typography.fontSize.xs,
-    marginTop: spacing[1],
-    color: colors.warning,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colorScales.gray[400],
+    maxWidth: 80,
   },
-  outOfStock: {
+  categoryText: {
     fontSize: typography.fontSize.xs,
-    marginTop: spacing[1],
-    fontWeight: typography.fontWeight.medium,
-    color: colors.error,
+    color: colorScales.gray[400],
   },
-  firstLetter: {
-    fontSize: typography.fontSize['2xl'],
-    fontWeight: typography.fontWeight.bold,
+  addButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 });
 
@@ -706,59 +814,184 @@ const ProductCard = ({
   product: Product;
   onPress: (product: Product) => void;
 }) => {
-  const firstLetter = product.name?.charAt(0)?.toUpperCase() || '?';
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const hasVariants = (product.product_variants?.length ?? 0) > 0;
   const tracksInventory = product.track_inventory !== false;
-  const isLowStock = tracksInventory && product.stock_quantity != null && product.stock_quantity > 0 && product.stock_quantity <= 5;
   const isOutOfStock = tracksInventory && product.stock_quantity === 0;
+  const isLowStock = tracksInventory && product.stock_quantity != null && product.stock_quantity > 0 && product.stock_quantity <= 5;
+  const isUnavailable = !hasVariants && tracksInventory && product.stock_quantity === 0;
+  const categoryName = product.categories?.[0]?.name;
+
+  const stockQty = product.stock_quantity ?? 0;
+
+  const getStockTextColor = () => {
+    if (!tracksInventory) return colorScales.blue[600];
+    if (stockQty === 0) return colors.error;
+    if (stockQty <= 5) return colors.warning;
+    return colorScales.gray[400];
+  };
+
+  const getStockText = () => {
+    if (hasVariants) return null;
+    if (!tracksInventory) return 'Disponible';
+    if (stockQty === 0) return 'Sin stock';
+    return `${stockQty} en stock`;
+  };
+
+  const getStockBadge = () => {
+    if (tracksInventory) {
+      if (isOutOfStock) return { label: 'AGOTADO', variant: 'error' as const };
+      if (isLowStock) return { label: `Últimas ${stockQty}`, variant: 'warning' as const };
+    } else {
+      return { label: 'Disponible', variant: 'info' as const };
+    }
+    return null;
+  };
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.97,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  };
+
+  const stockBadge = getStockBadge();
+  const stockText = getStockText();
+  const stockTextColor = getStockTextColor();
 
   return (
-    <Pressable
-      onPress={() => onPress(product)}
-      style={productCardStyles.card}
-    >
-      <View
-        style={[productCardStyles.imageArea, { backgroundColor: isOutOfStock ? '#E5E7EB' : colors.primary + '20' }]}
+    <Animated.View style={[{ transform: [{ scale: scaleAnim }] }]}>
+      <Pressable
+        onPress={isUnavailable ? undefined : () => onPress(product)}
+        onPressIn={isUnavailable ? undefined : handlePressIn}
+        onPressOut={isUnavailable ? undefined : handlePressOut}
+        style={[
+          productCardStyles.card,
+          isUnavailable && { opacity: 0.6 },
+        ]}
       >
-        {product.image_url ? (
-          <Image
-            source={{ uri: product.image_url }}
-            style={productCardStyles.productImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text
-            style={[productCardStyles.firstLetter, { color: isOutOfStock ? '#9CA3AF' : colors.primary }]}
-          >
-            {firstLetter}
+        {/* Image Area */}
+        <View style={productCardStyles.imageArea}>
+          {/* Gradient background simulation */}
+          <View style={productCardStyles.imageGradient} />
+          <View style={productCardStyles.imageGradientOverlay} />
+
+          {product.image_url ? (
+            <Image
+              source={{ uri: product.image_url }}
+              style={productCardStyles.productImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={productCardStyles.imageFallback}>
+              <View style={productCardStyles.imageFallbackIcon}>
+                <Icon name="image" size={24} color={colors.primary + '99'} />
+              </View>
+            </View>
+          )}
+
+          {/* Badges overlaid on image */}
+          <View style={productCardStyles.badgesContainer} pointerEvents="none">
+            {/* Stock badge - top right */}
+            {stockBadge && (
+              <View style={productCardStyles.stockBadge}>
+                <Badge
+                  label={stockBadge.label}
+                  variant={stockBadge.variant}
+                  size="sm"
+                />
+              </View>
+            )}
+
+            {/* Variants badge - top left */}
+            {hasVariants && (
+              <View style={productCardStyles.variantsBadge}>
+                <Icon name="layers" size={12} color="#FFFFFF" />
+                <Text style={productCardStyles.variantsBadgeText}>
+                  {product.product_variants?.length}
+                </Text>
+              </View>
+            )}
+
+            {/* Weight badge - bottom left */}
+            {product.pricing_type === 'weight' && (
+              <View style={productCardStyles.weightBadge}>
+                <Icon name="scale" size={12} color="#FFFFFF" />
+                <Text style={productCardStyles.weightBadgeText}>Peso</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Product Name */}
+        <Text style={productCardStyles.name} numberOfLines={2}>
+          {product.name}
+        </Text>
+
+        {/* Description */}
+        {product.description ? (
+          <Text style={productCardStyles.description} numberOfLines={1}>
+            {product.description}
           </Text>
-        )}
-      </View>
+        ) : null}
 
-      <Text style={productCardStyles.name} numberOfLines={2}>
-        {product.name}
-      </Text>
+        {/* Price + Stock row */}
+        <View style={productCardStyles.row}>
+          <View style={productCardStyles.priceContainer}>
+            <Text style={productCardStyles.price}>
+              {formatCurrency(product.final_price)}
+              {product.pricing_type === 'weight' && (
+                <Text style={productCardStyles.priceWeightUnit}>
+                  {' /kg'}
+                </Text>
+              )}
+            </Text>
+            {stockText && (
+              <Text style={[productCardStyles.stockText, { color: stockTextColor }]}>
+                {stockText}
+              </Text>
+            )}
+          </View>
+        </View>
 
-      <View style={productCardStyles.row}>
-        <Text style={productCardStyles.price}>
-          {formatCurrency(product.final_price)}
-        </Text>
-        {hasVariants && (
-          <Badge label="Var." variant="info" size="sm" />
-        )}
-      </View>
-
-      {isLowStock && (
-        <Text style={productCardStyles.lowStock}>
-          Stock: {product.stock_quantity}
-        </Text>
-      )}
-      {isOutOfStock && (
-        <Text style={productCardStyles.outOfStock}>
-          Agotado
-        </Text>
-      )}
-    </Pressable>
+        {/* Bottom section: SKU + Category + Add button */}
+        <View style={productCardStyles.bottomSection}>
+          <View style={productCardStyles.bottomLeft}>
+            {product.sku ? (
+              <Text style={productCardStyles.skuText} numberOfLines={1}>
+                {product.sku}
+              </Text>
+            ) : null}
+            {categoryName ? (
+              <Text style={productCardStyles.categoryText} numberOfLines={1}>
+                {categoryName}
+              </Text>
+            ) : null}
+          </View>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.();
+              if (!isUnavailable) onPress(product);
+            }}
+            style={productCardStyles.addButton}
+            disabled={isUnavailable}
+          >
+            <Icon name="plus" size={14} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 };
 
@@ -785,7 +1018,9 @@ const VariantPicker = ({
           keyExtractor={(item) => item.id.toString()}
           style={s.sheetFlex}
           renderItem={({ item }) => {
-            const price = item.price_override != null ? item.price_override : product.final_price;
+            const hasSale = item.is_on_sale === true && item.sale_price != null;
+            const displayPrice = hasSale ? item.sale_price! : (item.price_override != null ? item.price_override : product.final_price);
+            const comparePrice = hasSale ? (item.price_override ?? product.final_price) : null;
             const tracksInventory = item.effective_track_inventory ?? product.track_inventory ?? true;
             const isUnavailable = tracksInventory && item.stock_quantity === 0;
 
@@ -798,19 +1033,35 @@ const VariantPicker = ({
                 ]}
               >
                 <View style={s.flex1}>
-                  <Text style={s.variantName}>
-                    {item.name || item.attributes || item.sku}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={s.variantName}>
+                      {item.name || item.attributes || item.sku}
+                    </Text>
+                    {hasSale && (
+                      <Badge label="OFERTA" variant="warning" size="sm" />
+                    )}
+                  </View>
                   <Text style={s.skuText}>SKU: {item.sku}</Text>
                 </View>
                 <View style={s.itemsEnd}>
-                  <Text style={s.variantPrice}>
-                    {formatCurrency(price)}
-                  </Text>
-                  {isUnavailable ? (
-                    <Text style={s.outOfStockText}>Agotado</Text>
+                  {hasSale && comparePrice != null ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={[s.variantPrice, { color: colors.error }]}>
+                        {formatCurrency(displayPrice)}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colorScales.gray[400], textDecorationLine: 'line-through' }}>
+                        {formatCurrency(comparePrice)}
+                      </Text>
+                    </View>
                   ) : (
-                    <Text style={s.stockText}>Stock: {item.stock_quantity}</Text>
+                    <Text style={s.variantPrice}>
+                      {formatCurrency(displayPrice)}
+                    </Text>
+                  )}
+                  {isUnavailable ? (
+                    <Text style={[s.outOfStockText, { color: colors.error }]}>Agotado</Text>
+                  ) : (
+                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>Stock: {item.stock_quantity}</Text>
                   )}
                 </View>
               </Pressable>
@@ -1738,7 +1989,19 @@ const PosScreen = () => {
 
   const handleProductPress = useCallback(
     (product: Product) => {
-      if (product.product_variants && product.product_variants.length > 0) {
+      const hasVariants = (product.product_variants?.length ?? 0) > 0;
+      const tracksInventory = product.track_inventory !== false;
+      const isUnavailable = !hasVariants && tracksInventory && product.stock_quantity === 0;
+
+      if (isUnavailable) return;
+
+      if (product.pricing_type === 'weight') {
+        toastWarning('Ingresa el peso del producto');
+        addItem(product, null, 1);
+        return;
+      }
+
+      if (hasVariants) {
         setSelectedProduct(product);
         setShowVariants(true);
       } else {
@@ -1799,8 +2062,8 @@ const PosScreen = () => {
           data={productList}
           keyExtractor={(item) => item.id.toString()}
           numColumns={2}
-          columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: spacing[4] }}
-          contentContainerStyle={{ paddingBottom: spacing[24] }}
+          columnWrapperStyle={{ flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[3] }}
+          contentContainerStyle={{ paddingHorizontal: spacing[2], paddingBottom: spacing[24] }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <ProductCard product={item} onPress={handleProductPress} />

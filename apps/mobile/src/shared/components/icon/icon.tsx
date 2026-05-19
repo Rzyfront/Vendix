@@ -59,6 +59,9 @@ import {
   Sliders,
   ShoppingBag,
   Edit2,
+  Layers,
+  Image as LucideImage,
+  Scale,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -122,6 +125,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   sliders: Sliders,
   'shopping-bag': ShoppingBag,
   'edit-2': Edit2,
+  layers: Layers,
+  image: LucideImage,
+  scale: Scale,
 };
 
 interface IconProps {
