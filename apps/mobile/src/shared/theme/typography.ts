@@ -1,11 +1,7 @@
-import { TextStyle, Platform } from 'react-native';
+import { TextStyle } from 'react-native';
 
 export const typography = {
-  fontFamily: Platform.select({
-    ios: 'Helvetica Neue',
-    android: 'Roboto',
-    default: 'System',
-  }) as TextStyle['fontFamily'],
+  fontFamily: 'Inter' as TextStyle['fontFamily'],
   fontSize: {
     xs: 12,
     sm: 14,
