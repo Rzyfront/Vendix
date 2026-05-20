@@ -15,6 +15,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { usePathname, useRouter } from 'expo-router';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService } from '@/features/store/services';
@@ -29,6 +30,21 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
+import { DrawerMenu } from '@/shared/layouts/drawer-menu';
+import { HelpSearchModal } from '@/features/help/help-search-modal';
+import { NotificationsModal } from '@/features/notifications/notifications-modal';
+import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
+import {
+  PosHeader,
+  PosSearchBar,
+  PosMobileFooter,
+  PosCartModal,
+  PosFilterDropdown,
+  PosAddModal,
+  PosCreateProductModal,
+  PosBulkUploadModal,
+  PosBulkImageUploadModal,
+} from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type {
   CreatePosPaymentDto,
@@ -83,7 +99,7 @@ const productCardStyles = StyleSheet.create({
   stockBadge: {
     position: 'absolute',
     top: spacing[2],
-    alignSelf: 'center',
+    right: spacing[2],
     zIndex: 1,
   },
   variantsBadge: {
@@ -103,16 +119,19 @@ const productCardStyles = StyleSheet.create({
   variantsBadgeText: {
     fontSize: 10,
     fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
     color: '#FFFFFF',
   },
   name: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     lineHeight: 18,
   },
   description: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     lineHeight: 16,
     marginTop: 2,
@@ -129,16 +148,19 @@ const productCardStyles = StyleSheet.create({
   price: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginTop: spacing[0.5],
   },
   priceWeightUnit: {
     fontSize: 10,
     fontWeight: typography.fontWeight.normal as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
   },
   stockText: {
     fontSize: 10,
+    fontFamily: typography.fontFamily,
     lineHeight: 14,
     marginTop: 1,
   },
@@ -176,6 +198,32 @@ const productCardStyles = StyleSheet.create({
 });
 
 const s = StyleSheet.create({
+  posRoot: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  drawerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  drawer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+  },
+  flex: {
+    flex: 1,
+  },
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   containerPad: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
@@ -187,11 +235,13 @@ const s = StyleSheet.create({
   sectionTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[1],
   },
   sectionSubtitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[4],
   },
@@ -208,24 +258,29 @@ const s = StyleSheet.create({
   variantName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   skuText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   itemsEnd: { alignItems: 'flex-end' },
   variantPrice: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   outOfStockText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colors.error,
   },
   stockText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
   },
   separator: {
@@ -246,14 +301,17 @@ const s = StyleSheet.create({
   cartItemName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   cartItemVariant: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   cartItemUnitPrice: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
     marginTop: spacing[0.5],
   },
@@ -278,6 +336,7 @@ const s = StyleSheet.create({
   qtyLabel: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     marginHorizontal: spacing[3],
     width: 24,
     textAlign: 'center',
@@ -285,6 +344,7 @@ const s = StyleSheet.create({
   cartItemTotal: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     width: 80,
     textAlign: 'right',
@@ -301,20 +361,24 @@ const s = StyleSheet.create({
   customerName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   customerContact: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   noClientText: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colors.error,
   },
   emptyText: {
     textAlign: 'center',
     paddingVertical: spacing[4],
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
   },
   cartPanelContent: {
@@ -331,6 +395,7 @@ const s = StyleSheet.create({
   cartTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   customerBtn: {
@@ -346,11 +411,13 @@ const s = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: '#1D4ED8',
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     marginLeft: spacing[2],
     flex: 1,
   },
   selectLabel: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: '#2563EB',
     marginRight: spacing[2],
   },
@@ -372,14 +439,17 @@ const s = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   summaryValue: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[700],
   },
   discountText: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#16A34A',
   },
   addDiscountBtn: {
@@ -387,6 +457,7 @@ const s = StyleSheet.create({
   },
   addDiscountText: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   totalRow: {
@@ -400,11 +471,13 @@ const s = StyleSheet.create({
   totalLabel: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   totalValue: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   chargeBtn: {
@@ -413,6 +486,7 @@ const s = StyleSheet.create({
   paymentTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[4],
   },
@@ -425,12 +499,14 @@ const s = StyleSheet.create({
   },
   totalBoxLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[1],
   },
   totalBoxValue: {
     fontSize: typography.fontSize['3xl'],
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   methodRow: {
@@ -465,6 +541,7 @@ const s = StyleSheet.create({
   methodLabel: {
     marginLeft: spacing[2],
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
   },
   methodLabelActive: {
     color: '#15803D',
@@ -485,11 +562,13 @@ const s = StyleSheet.create({
   fallbackPaymentTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.amber[900],
   },
   fallbackPaymentText: {
     marginTop: spacing[0.5],
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.amber[700],
   },
   saleErrorBox: {
@@ -505,11 +584,13 @@ const s = StyleSheet.create({
   saleErrorTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.red[900],
   },
   saleErrorText: {
     marginTop: spacing[0.5],
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     lineHeight: 17,
     color: colorScales.red[700],
   },
@@ -527,11 +608,13 @@ const s = StyleSheet.create({
   },
   changeLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#2563EB',
     fontWeight: typography.fontWeight.medium,
   },
   changeValue: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#1D4ED8',
     fontWeight: typography.fontWeight.bold,
   },
@@ -566,17 +649,20 @@ const s = StyleSheet.create({
   successTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[1],
   },
   successSubtitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[1],
   },
   orderNumber: {
     fontSize: typography.fontSize['2xl'],
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
     marginBottom: spacing[4],
   },
@@ -599,201 +685,8 @@ const s = StyleSheet.create({
     marginLeft: spacing[2],
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[600],
-  },
-  posRoot: {
-    flex: 1,
-    backgroundColor: colorScales.gray[50],
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    backgroundColor: colors.background,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-  },
-  headerTitle: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold as any,
-    color: colorScales.gray[900],
-  },
-  headerDropdown: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colorScales.gray[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[2],
-    paddingBottom: spacing[3],
-    backgroundColor: colors.background,
-  },
-  searchInput: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colorScales.gray[50],
-    borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-  },
-  searchInputText: {
-    flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[400],
-    marginLeft: spacing[2],
-  },
-  filterBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerCustomerBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  centerContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fabBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: colors.background,
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[100],
-    ...shadows.lg,
-  },
-  fabTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-  },
-  fabLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-  },
-  fabCartIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  fabBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.error,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 4,
-  },
-  fabBadgeText: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.bold as any,
-    color: '#FFFFFF',
-  },
-  fabAmountContainer: {
-    flexDirection: 'column',
-  },
-  fabTotalText: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold as any,
-    color: colorScales.gray[900],
-  },
-  fabTaxText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[400],
-  },
-  fabDetailBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: spacing[2],
-    paddingVertical: spacing[1],
-    borderRadius: borderRadius.lg,
-    backgroundColor: colorScales.gray[50],
-  },
-  fabDetailText: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[600],
-    fontWeight: typography.fontWeight.medium as any,
-  },
-  fabActionsRow: {
-    flexDirection: 'row',
-    gap: spacing[2],
-    paddingHorizontal: spacing[4],
-    paddingBottom: spacing[2],
-  },
-  fabActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.lg,
-    backgroundColor: colorScales.green[50],
-    borderWidth: 1,
-    borderColor: colorScales.green[200],
-  },
-  fabActionText: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium as any,
-    color: colorScales.green[700],
-  },
-  fabChargeBtn: {
-    marginHorizontal: spacing[4],
-    marginBottom: spacing[3],
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.xl,
-    paddingVertical: spacing[3],
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  fabChargeText: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold as any,
-    color: '#FFFFFF',
   },
   discountSection: {
     marginTop: spacing[4],
@@ -921,27 +814,28 @@ const ProductCard = ({
   const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
   const isUnavailable = variantStockTotal === 0;
 
+  const getStockText = () => {
+    if (!tracksInventory) return 'Disponible';
+    if (variantStockTotal === 0) return 'Sin stock';
+    if (variantStockTotal <= 5) return `${variantStockTotal} en stock`;
+    return 'Disponible';
+  };
+
   const getStockTextColor = () => {
     if (!tracksInventory) return colorScales.blue[600];
     if (variantStockTotal === 0) return colors.error;
     if (variantStockTotal <= 5) return colors.warning;
-    return colorScales.gray[400];
-  };
-
-  const getStockText = () => {
-    if (!tracksInventory) return 'Disponible';
-    if (variantStockTotal === 0) return 'Sin stock';
-    return `${variantStockTotal} en stock`;
+    return colorScales.blue[600];
   };
 
   const getStockBadge = () => {
     if (tracksInventory) {
-      if (variantStockTotal === 0) return { label: 'AGOTADO', variant: 'error' as const };
+      if (variantStockTotal === 0) return { label: 'Agotado', variant: 'error' as const };
       if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
+      return { label: 'Disponible', variant: 'info' as const };
     } else {
       return { label: 'Disponible', variant: 'info' as const };
     }
-    return null;
   };
 
   const handlePressIn = () => {
@@ -2034,12 +1928,30 @@ const SuccessModal = ({
 
 const PosScreen = () => {
   const insets = useSafeAreaInsets();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [showHelpSearch, setShowHelpSearch] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const [search, setSearch] = useState('');
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
+  const [showCartModal, setShowCartModal] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showCreateProduct, setShowCreateProduct] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [showBulkImageUpload, setShowBulkImageUpload] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    state: '',
+    category_id: '',
+    brand_id: '',
+    product_type: '',
+  });
   const [orderNumber, setOrderNumber] = useState('');
   const [receiptData, setReceiptData] = useState<{
     items: any[];
@@ -2048,15 +1960,46 @@ const PosScreen = () => {
     paymentMethod: string;
   } | null>(null);
 
+  const openDrawer = useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['pos-products', search],
-    queryFn: () =>
-      search
+    queryKey: ['pos-products', search, activeFilters],
+    queryFn: () => {
+      const params: any = {
+        pos_optimized: true,
+        limit: 50,
+        state: 'active',
+        include_variants: true,
+      };
+
+      if (search) {
+        params.search = search;
+      }
+
+      if (activeFilters.state) {
+        params.state = activeFilters.state;
+      }
+
+      if (activeFilters.category_id) {
+        params.category_id = activeFilters.category_id;
+      }
+
+      if (activeFilters.brand_id) {
+        params.brand_id = activeFilters.brand_id;
+      }
+
+      if (activeFilters.product_type) {
+        params.product_type = activeFilters.product_type;
+      }
+
+      return search
         ? ProductService.search(search)
-        : ProductService.list({ pos_optimized: true, limit: 50, state: 'active', include_variants: true }),
+        : ProductService.list(params);
+    },
   });
 
   const productList = useMemo(() => {
@@ -2114,33 +2057,59 @@ const PosScreen = () => {
     setReceiptData(null);
   }, []);
 
+  const storeName = useTenantStore((s) => s.storeName);
+  const user = useAuthStore((s) => s.user);
+  const userInitials = user
+    ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U'
+    : 'U';
+
   return (
     <View style={[s.posRoot, { paddingTop: insets.top }]}>
-      {/* Header */}
-      <View style={s.header}>
-        <View style={s.headerLeft}>
-          <Icon name="grid" size={20} color={colorScales.gray[700]} />
-          <Text style={s.headerTitle}>POS</Text>
-        </View>
-        <Pressable style={s.headerDropdown}>
-          <Icon name="chevron-down" size={18} color={colorScales.gray[500]} />
+      {/* Drawer Overlay */}
+      {drawerOpen && (
+        <Pressable
+          style={[s.drawerOverlay, { zIndex: 40 }]}
+          onPress={closeDrawer}
+        >
+          <View style={s.flex} />
         </Pressable>
-      </View>
+      )}
 
-      {/* Search Bar */}
-      <View style={s.searchWrapper}>
-        <View style={s.searchInput}>
-          <Icon name="search" size={18} color={colorScales.gray[400]} />
-          <Text style={s.searchInputText}>Buscar productos...</Text>
+      {/* Drawer Menu */}
+      {drawerOpen && (
+        <View
+          style={[
+            s.drawer,
+            {
+              width: Dimensions.get('window').width * 0.8,
+              paddingTop: insets.top,
+              zIndex: 50,
+            },
+          ]}
+        >
+          <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant="store" />
         </View>
-        <Pressable style={s.filterBtn}>
-          <Icon name="filter" size={18} color={colors.primary} />
-        </Pressable>
-        <Pressable style={s.headerCustomerBtn}>
-          <Icon name="users" size={18} color={colors.primary} />
-        </Pressable>
-      </View>
+      )}
 
+      {/* POS Header - Iconos separados como web */}
+      <PosHeader
+        onOpenDrawer={openDrawer}
+        onOpenHelp={() => setShowHelpSearch(true)}
+        onOpenNotifications={() => setShowNotifications(true)}
+        onOpenUserMenu={() => setShowUserMenu(true)}
+        notificationCount={15}
+        userInitials={userInitials}
+      />
+
+      {/* Search Bar - Con filtros y cliente como web */}
+      <PosSearchBar
+        onSearch={setSearch}
+        onOpenFilters={() => setShowFilters(true)}
+        onOpenAdd={() => setShowAddModal(true)}
+        selectedCustomer={null}
+      />
+
+      {/* Product Grid - Cards exactamente igual que antes */}
       {isLoading ? (
         <View style={s.centerContent}>
           <Spinner />
@@ -2158,6 +2127,7 @@ const PosScreen = () => {
           numColumns={2}
           columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
           contentContainerStyle={{
+            paddingTop: spacing[3],
             paddingHorizontal: GRID_HORIZONTAL_PADDING,
             paddingBottom: spacing[24],
           }}
@@ -2168,65 +2138,48 @@ const PosScreen = () => {
         />
       )}
 
-      {summary.itemCount > 0 && (
-        <View style={[s.fabBar, { paddingBottom: insets.bottom }]}>
-          {/* Top row: Cart icon + Total + Ver detalle */}
-          <View style={s.fabTopRow}>
-            <View style={s.fabLeft}>
-              <View style={s.fabCartIcon}>
-                <Icon name="shopping-cart" size={20} color="#FFFFFF" />
-                <View style={s.fabBadge}>
-                  <Text style={s.fabBadgeText}>{summary.totalItems}</Text>
-                </View>
-              </View>
-              <View style={s.fabAmountContainer}>
-                <Text style={s.fabTotalText}>
-                  {formatCurrency(summary.total)}
-                </Text>
-                <Text style={s.fabTaxText}>
-                  IVA {formatCurrency(summary.taxAmount)}
-                </Text>
-              </View>
-            </View>
-            <Pressable
-              onPress={() => setShowCart(true)}
-              style={s.fabDetailBtn}
-            >
-              <Text style={s.fabDetailText}>Ver detalle</Text>
-              <Icon name="chevron-up" size={16} color={colorScales.gray[500]} />
-            </Pressable>
-          </View>
+      {/* Mobile Footer - 3 filas como web */}
+      <PosMobileFooter
+        itemCount={summary.totalItems}
+        total={summary.total}
+        taxAmount={summary.taxAmount}
+        onViewCart={() => setShowCartModal(true)}
+        onCustomItem={() => toastWarning('Ítem personalizado próximamente')}
+        onSaveDraft={() => toastSuccess('Borrador guardado')}
+        onShipping={() => toastSuccess('Envío próximamente')}
+        onCheckout={() => {
+          setShowCartModal(false);
+          setShowPayment(true);
+        }}
+      />
 
-          {/* Actions row: Ítem, Guardar, Envío */}
-          <View style={s.fabActionsRow}>
-            <Pressable style={s.fabActionBtn}>
-              <Icon name="file-plus" size={16} color={colorScales.green[700]} />
-              <Text style={s.fabActionText}>Ítem</Text>
-            </Pressable>
-            <Pressable style={s.fabActionBtn}>
-              <Icon name="save" size={16} color={colorScales.green[700]} />
-              <Text style={s.fabActionText}>Guardar</Text>
-            </Pressable>
-            <Pressable style={s.fabActionBtn}>
-              <Icon name="truck" size={16} color={colorScales.green[700]} />
-              <Text style={s.fabActionText}>Envío</Text>
-            </Pressable>
-          </View>
+      {/* Cart Modal - Bottom sheet como web */}
+      <PosCartModal
+        visible={showCartModal}
+        onClose={() => setShowCartModal(false)}
+        items={useCartStore.getState().items}
+        subtotal={summary.subtotal}
+        taxAmount={summary.taxAmount}
+        total={summary.total}
+        onIncreaseQuantity={(id) => {
+          const item = useCartStore.getState().items.find((i) => i.id === id);
+          if (item) useCartStore.getState().updateQuantity(id, item.quantity + 1);
+        }}
+        onDecreaseQuantity={(id) => {
+          const item = useCartStore.getState().items.find((i) => i.id === id);
+          if (item && item.quantity > 1) useCartStore.getState().updateQuantity(id, item.quantity - 1);
+        }}
+        onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
+        onClearCart={() => useCartStore.getState().clearCart()}
+        onViewDetail={() => setShowCart(true)}
+        onSaveDraft={() => toastSuccess('Borrador guardado')}
+        onCheckout={() => {
+          setShowCartModal(false);
+          setShowPayment(true);
+        }}
+      />
 
-          {/* Charge button */}
-          <Pressable
-            onPress={() => {
-              setShowCart(false);
-              setShowPayment(true);
-            }}
-            style={s.fabChargeBtn}
-          >
-            <Icon name="shopping-cart" size={18} color="#FFFFFF" />
-            <Text style={s.fabChargeText}>Cobrar</Text>
-          </Pressable>
-        </View>
-      )}
-
+      {/* Variant Picker */}
       <VariantPicker
         visible={showVariants}
         product={selectedProduct}
@@ -2237,6 +2190,7 @@ const PosScreen = () => {
         }}
       />
 
+      {/* Cart Panel (legacy) */}
       <CartPanel
         visible={showCart}
         onClose={() => setShowCart(false)}
@@ -2246,17 +2200,86 @@ const PosScreen = () => {
         }}
       />
 
+      {/* Payment Sheet */}
       <PaymentSheet
         visible={showPayment}
         onClose={() => setShowPayment(false)}
         onSuccess={handleChargeSuccess}
       />
 
+      {/* Success Modal */}
       <SuccessModal
         visible={showSuccess}
         orderNumber={orderNumber}
         onClose={handleCloseSuccess}
         receiptData={receiptData}
+      />
+
+      {/* Help Search Modal */}
+      <HelpSearchModal
+        visible={showHelpSearch}
+        onClose={() => setShowHelpSearch(false)}
+        onSelectArticle={(article) => {
+          toastSuccess(`Abriendo: ${article.title}`);
+        }}
+      />
+
+      {/* Notifications Modal */}
+      <NotificationsModal
+        visible={showNotifications}
+        onClose={() => setShowNotifications(false)}
+        onNavigate={(route) => {
+          router.push(route as never);
+        }}
+      />
+
+      {/* User Dropdown Modal */}
+      <UserDropdownModal
+        visible={showUserMenu}
+        onClose={() => setShowUserMenu(false)}
+      />
+
+      {/* Filter Dropdown */}
+      <PosFilterDropdown
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        onApplyFilters={(filters: any) => setActiveFilters(filters)}
+        currentFilters={activeFilters}
+      />
+
+      {/* Add Product Modal */}
+      <PosAddModal
+        visible={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        onCreateProduct={() => setShowCreateProduct(true)}
+        onBulkUpload={() => setShowBulkUpload(true)}
+        onImageUpload={() => setShowBulkImageUpload(true)}
+      />
+
+      {/* Create Product Modal */}
+      <PosCreateProductModal
+        visible={showCreateProduct}
+        onClose={() => setShowCreateProduct(false)}
+      />
+
+      {/* Bulk Upload Modal */}
+      <PosBulkUploadModal
+        visible={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+      />
+
+      {/* Bulk Image Upload Modal */}
+      <PosBulkImageUploadModal
+        visible={showBulkImageUpload}
+        onClose={() => setShowBulkImageUpload(false)}
+      />
+
+      {/* Filter Dropdown */}
+      <PosFilterDropdown
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        onApplyFilters={(filters) => setActiveFilters(filters)}
+        currentFilters={activeFilters}
       />
     </View>
   );

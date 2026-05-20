@@ -154,7 +154,7 @@ export function Button({
       ) : (
         <View style={baseStyle.contentRow}>
           {leftIcon && <View style={{ marginRight: spacing[2] }}>{leftIcon}</View>}
-          <Text style={[{ fontWeight: '500' as TextStyle['fontWeight'] }, sizeStyles[sizeTextKey], variantStyles[`${variant}Text` as keyof typeof variantStyles]]}>
+          <Text style={[{ fontWeight: '500' as TextStyle['fontWeight'], fontFamily: typography.fontFamily }, sizeStyles[sizeTextKey], variantStyles[`${variant}Text` as keyof typeof variantStyles]]}>
             {title}
           </Text>
           {rightIcon && <View style={{ marginLeft: spacing[2] }}>{rightIcon}</View>}

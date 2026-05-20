@@ -25,6 +25,8 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
 };
 
+const noShellRoutes = ['pos'];
+
 export default function StoreAdminLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -47,6 +49,11 @@ export default function StoreAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
+  const useShell = !noShellRoutes.includes(currentSegment);
+
+  if (!useShell) {
+    return <Slot />;
+  }
 
   return (
     <AdminShell title={title} variant="store">

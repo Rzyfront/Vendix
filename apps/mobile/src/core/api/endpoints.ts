@@ -186,6 +186,8 @@ export const Endpoints = {
       },
     },
   },
+  HELP_CENTER: '/help-center',
+  NOTIFICATIONS: '/store/notifications',
 } as const;
 
 export type EndpointKey = keyof typeof Endpoints;

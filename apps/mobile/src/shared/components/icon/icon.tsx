@@ -65,6 +65,9 @@ import {
   FilePlus,
   Save,
   ChevronUp,
+  Bell,
+  HelpCircle,
+  Upload,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -134,6 +137,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'file-plus': FilePlus,
   save: Save,
   'chevron-up': ChevronUp,
+  bell: Bell,
+  'help-circle': HelpCircle,
+  upload: Upload,
 };
 
 interface IconProps {

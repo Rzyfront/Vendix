@@ -45,16 +45,19 @@ const styles = StyleSheet.create({
   },
   icon: {
     fontSize: typography.fontSize.lg,
+    fontFamily: typography.fontFamily,
     marginRight: spacing[3],
   },
   message: {
     flex: 1,
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[800],
   },
   dismiss: {
     color: colorScales.gray[400],
     fontSize: typography.fontSize.lg,
+    fontFamily: typography.fontFamily,
   },
   container: {
     position: 'absolute',

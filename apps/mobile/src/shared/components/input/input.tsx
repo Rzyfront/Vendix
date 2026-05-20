@@ -17,6 +17,7 @@ const styles = StyleSheet.create({
   label: {
     fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colors.text.secondary,
     marginBottom: spacing[1.5],
     letterSpacing: 1.5,
@@ -43,6 +44,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 48,
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colors.text.primary,
   },
   iconWrapper: {
@@ -50,11 +52,13 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colors.error,
     marginTop: spacing[1],
   },
   helperText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colors.text.muted,
     marginTop: spacing[1],
   },

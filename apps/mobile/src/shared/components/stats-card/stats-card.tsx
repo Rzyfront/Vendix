@@ -26,6 +26,7 @@ const styles = StyleSheet.create({
   label: {
     flex: 1,
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     fontWeight: '500',
     letterSpacing: 0.2,
@@ -40,6 +41,7 @@ const styles = StyleSheet.create({
   },
   value: {
     fontSize: typography.fontSize.lg,
+    fontFamily: typography.fontFamily,
     fontWeight: '700',
     color: colorScales.gray[900],
     marginTop: spacing[1.5],
@@ -53,6 +55,7 @@ const styles = StyleSheet.create({
   },
   trendText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     fontWeight: '600',
   },
   trendPositive: {
@@ -63,6 +66,7 @@ const styles = StyleSheet.create({
   },
   trendLabel: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
     marginLeft: spacing[1],
     flexShrink: 1,

@@ -1,5 +1,5 @@
 import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
-import { colors, spacing, borderRadius, shadows, colorScales } from '@/shared/theme';
+import { colors, spacing, borderRadius, shadows, colorScales, typography } from '@/shared/theme';
 
 interface CardProps extends ViewProps {
   children: React.ReactNode;
@@ -48,10 +48,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   subtitle: {
     fontSize: 14,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginTop: 2,
   },

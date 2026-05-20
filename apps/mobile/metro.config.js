@@ -12,5 +12,8 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, 'node_modules'),
 ];
 config.resolver.disableHierarchicalLookup = true;
+config.resolver.extraNodeModules = {
+  punycode: require.resolve('punycode'),
+};
 
 module.exports = config;
