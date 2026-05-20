@@ -605,10 +605,77 @@ const s = StyleSheet.create({
     flex: 1,
     backgroundColor: colorScales.gray[50],
   },
-  searchWrapper: {
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
-    paddingBottom: spacing[2],
+    paddingVertical: spacing[3],
+    backgroundColor: colors.background,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  headerTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold as any,
+    color: colorScales.gray[900],
+  },
+  headerDropdown: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colorScales.gray[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
+    paddingBottom: spacing[3],
+    backgroundColor: colors.background,
+  },
+  searchInput: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  searchInputText: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[400],
+    marginLeft: spacing[2],
+  },
+  filterBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerCustomerBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   centerContent: {
     flex: 1,
@@ -2049,12 +2116,29 @@ const PosScreen = () => {
 
   return (
     <View style={[s.posRoot, { paddingTop: insets.top }]}>
+      {/* Header */}
+      <View style={s.header}>
+        <View style={s.headerLeft}>
+          <Icon name="grid" size={20} color={colorScales.gray[700]} />
+          <Text style={s.headerTitle}>POS</Text>
+        </View>
+        <Pressable style={s.headerDropdown}>
+          <Icon name="chevron-down" size={18} color={colorScales.gray[500]} />
+        </Pressable>
+      </View>
+
+      {/* Search Bar */}
       <View style={s.searchWrapper}>
-        <SearchBar
-          placeholder="Buscar productos..."
-          value={search}
-          onChangeText={setSearch}
-        />
+        <View style={s.searchInput}>
+          <Icon name="search" size={18} color={colorScales.gray[400]} />
+          <Text style={s.searchInputText}>Buscar productos...</Text>
+        </View>
+        <Pressable style={s.filterBtn}>
+          <Icon name="filter" size={18} color={colors.primary} />
+        </Pressable>
+        <Pressable style={s.headerCustomerBtn}>
+          <Icon name="users" size={18} color={colors.primary} />
+        </Pressable>
       </View>
 
       {isLoading ? (
