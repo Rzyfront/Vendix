@@ -62,15 +62,11 @@ const productCardStyles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     marginBottom: spacing[2],
     overflow: 'hidden',
+    backgroundColor: colorScales.gray[100],
   },
   imageGradient: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colorScales.gray[50],
-  },
-  imageGradientOverlay: {
-    ...StyleSheet.absoluteFillObject,
     backgroundColor: colorScales.gray[100],
-    opacity: 0.3,
   },
   productImage: {
     width: '100%',
@@ -81,21 +77,13 @@ const productCardStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  imageFallbackIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colorScales.green[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   badgesContainer: {
     ...StyleSheet.absoluteFillObject,
   },
   stockBadge: {
     position: 'absolute',
     top: spacing[2],
-    right: spacing[2],
+    alignSelf: 'center',
     zIndex: 1,
   },
   variantsBadge: {
@@ -113,25 +101,6 @@ const productCardStyles = StyleSheet.create({
     gap: 4,
   },
   variantsBadgeText: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.semibold as any,
-    color: '#FFFFFF',
-  },
-  weightBadge: {
-    position: 'absolute',
-    bottom: spacing[2],
-    left: spacing[2],
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: borderRadius.md,
-    backgroundColor: 'rgba(37,99,235,0.8)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  weightBadgeText: {
     fontSize: 10,
     fontWeight: typography.fontWeight.semibold as any,
     color: '#FFFFFF',
@@ -161,6 +130,7 @@ const productCardStyles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     color: colorScales.gray[900],
+    marginTop: spacing[0.5],
   },
   priceWeightUnit: {
     fontSize: 10,
@@ -650,58 +620,113 @@ const s = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+    backgroundColor: colors.background,
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+    ...shadows.lg,
+  },
+  fabTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing[5],
-    paddingVertical: 14,
-    ...shadows.lg,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
   },
   fabLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[2],
   },
-  fabBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  fabCartIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing[2],
+    position: 'relative',
+  },
+  fabBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   fabBadgeText: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.bold,
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
     color: '#FFFFFF',
   },
-  fabCountText: {
-    color: '#FFFFFF',
-    fontSize: typography.fontSize.sm,
-  },
-  fabRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  fabAmountContainer: {
+    flexDirection: 'column',
   },
   fabTotalText: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.bold,
     fontSize: typography.fontSize.lg,
-    marginRight: spacing[2],
+    fontWeight: typography.fontWeight.bold as any,
+    color: colorScales.gray[900],
   },
-  fabCartBtn: {
+  fabTaxText: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  fabDetailBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    gap: 4,
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[1],
     borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing[3],
-    paddingVertical: 6,
+    backgroundColor: colorScales.gray[50],
   },
-  fabCartText: {
-    color: '#FFFFFF',
+  fabDetailText: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    marginRight: spacing[1],
+    color: colorScales.gray[600],
+    fontWeight: typography.fontWeight.medium as any,
+  },
+  fabActionsRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  fabActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.lg,
+    backgroundColor: colorScales.green[50],
+    borderWidth: 1,
+    borderColor: colorScales.green[200],
+  },
+  fabActionText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium as any,
+    color: colorScales.green[700],
+  },
+  fabChargeBtn: {
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[3],
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.xl,
+    paddingVertical: spacing[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  fabChargeText: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold as any,
+    color: '#FFFFFF',
   },
   discountSection: {
     marginTop: spacing[4],
@@ -887,9 +912,7 @@ const ProductCard = ({
       >
         {/* Image Area */}
         <View style={productCardStyles.imageArea}>
-          {/* Gradient background simulation */}
           <View style={productCardStyles.imageGradient} />
-          <View style={productCardStyles.imageGradientOverlay} />
 
           {product.image_url ? (
             <Image
@@ -899,15 +922,13 @@ const ProductCard = ({
             />
           ) : (
             <View style={productCardStyles.imageFallback}>
-              <View style={productCardStyles.imageFallbackIcon}>
-                <Icon name="image" size={24} color={colors.primary + '99'} />
-              </View>
+              <Icon name="image" size={32} color={colorScales.gray[400]} />
             </View>
           )}
 
           {/* Badges overlaid on image */}
           <View style={productCardStyles.badgesContainer} pointerEvents="none">
-            {/* Stock badge - top right */}
+            {/* Stock badge - top center */}
             {stockBadge && (
               <View style={productCardStyles.stockBadge}>
                 <Badge
@@ -925,14 +946,6 @@ const ProductCard = ({
                 <Text style={productCardStyles.variantsBadgeText}>
                   {product.product_variants?.length}
                 </Text>
-              </View>
-            )}
-
-            {/* Weight badge - bottom left */}
-            {product.pricing_type === 'weight' && (
-              <View style={productCardStyles.weightBadge}>
-                <Icon name="scale" size={12} color="#FFFFFF" />
-                <Text style={productCardStyles.weightBadgeText}>Peso</Text>
               </View>
             )}
           </View>
@@ -2072,34 +2085,62 @@ const PosScreen = () => {
       )}
 
       {summary.itemCount > 0 && (
-        <Pressable
-          onPress={() => setShowCart(true)}
-          style={[
-            s.fabBar,
-            {
-              backgroundColor: colors.primary,
-              paddingBottom: insets.bottom + spacing[3],
-            },
-          ]}
-        >
-          <View style={s.fabLeft}>
-            <View style={s.fabBadge}>
-              <Text style={s.fabBadgeText}>{summary.totalItems}</Text>
+        <View style={[s.fabBar, { paddingBottom: insets.bottom }]}>
+          {/* Top row: Cart icon + Total + Ver detalle */}
+          <View style={s.fabTopRow}>
+            <View style={s.fabLeft}>
+              <View style={s.fabCartIcon}>
+                <Icon name="shopping-cart" size={20} color="#FFFFFF" />
+                <View style={s.fabBadge}>
+                  <Text style={s.fabBadgeText}>{summary.totalItems}</Text>
+                </View>
+              </View>
+              <View style={s.fabAmountContainer}>
+                <Text style={s.fabTotalText}>
+                  {formatCurrency(summary.total)}
+                </Text>
+                <Text style={s.fabTaxText}>
+                  IVA {formatCurrency(summary.taxAmount)}
+                </Text>
+              </View>
             </View>
-            <Text style={s.fabCountText}>
-              {summary.itemCount} {summary.itemCount === 1 ? 'producto' : 'productos'}
-            </Text>
+            <Pressable
+              onPress={() => setShowCart(true)}
+              style={s.fabDetailBtn}
+            >
+              <Text style={s.fabDetailText}>Ver detalle</Text>
+              <Icon name="chevron-up" size={16} color={colorScales.gray[500]} />
+            </Pressable>
           </View>
-          <View style={s.fabRight}>
-            <Text style={s.fabTotalText}>
-              {formatCurrency(summary.total)}
-            </Text>
-            <View style={s.fabCartBtn}>
-              <Text style={s.fabCartText}>Ver Carrito</Text>
-              <Icon name="shopping-cart" size={14} color="#fff" />
-            </View>
+
+          {/* Actions row: Ítem, Guardar, Envío */}
+          <View style={s.fabActionsRow}>
+            <Pressable style={s.fabActionBtn}>
+              <Icon name="file-plus" size={16} color={colorScales.green[700]} />
+              <Text style={s.fabActionText}>Ítem</Text>
+            </Pressable>
+            <Pressable style={s.fabActionBtn}>
+              <Icon name="save" size={16} color={colorScales.green[700]} />
+              <Text style={s.fabActionText}>Guardar</Text>
+            </Pressable>
+            <Pressable style={s.fabActionBtn}>
+              <Icon name="truck" size={16} color={colorScales.green[700]} />
+              <Text style={s.fabActionText}>Envío</Text>
+            </Pressable>
           </View>
-        </Pressable>
+
+          {/* Charge button */}
+          <Pressable
+            onPress={() => {
+              setShowCart(false);
+              setShowPayment(true);
+            }}
+            style={s.fabChargeBtn}
+          >
+            <Icon name="shopping-cart" size={18} color="#FFFFFF" />
+            <Text style={s.fabChargeText}>Cobrar</Text>
+          </Pressable>
+        </View>
       )}
 
       <VariantPicker

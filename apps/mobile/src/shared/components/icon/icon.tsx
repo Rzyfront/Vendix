@@ -62,6 +62,9 @@ import {
   Layers,
   Image as LucideImage,
   Scale,
+  FilePlus,
+  Save,
+  ChevronUp,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -128,6 +131,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   layers: Layers,
   image: LucideImage,
   scale: Scale,
+  'file-plus': FilePlus,
+  save: Save,
+  'chevron-up': ChevronUp,
 };
 
 interface IconProps {
