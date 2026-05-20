@@ -194,10 +194,6 @@ const productCardStyles = StyleSheet.create({
     color: colorScales.gray[400],
     maxWidth: 80,
   },
-  categoryText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[400],
-  },
   addButton: {
     width: 28,
     height: 28,
@@ -832,7 +828,6 @@ const ProductCard = ({
   const isOutOfStock = tracksInventory && variantStockTotal === 0;
   const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
   const isUnavailable = variantStockTotal === 0;
-  const categoryName = product.categories?.[0]?.name;
 
   const getStockTextColor = () => {
     if (!tracksInventory) return colorScales.blue[600];
@@ -972,17 +967,12 @@ const ProductCard = ({
           </View>
         </View>
 
-        {/* Bottom section: SKU + Category + Add button */}
+        {/* Bottom section: SKU + Add button */}
         <View style={productCardStyles.bottomSection}>
           <View style={productCardStyles.bottomLeft}>
             {product.sku ? (
               <Text style={productCardStyles.skuText} numberOfLines={1}>
                 {product.sku}
-              </Text>
-            ) : null}
-            {categoryName ? (
-              <Text style={productCardStyles.categoryText} numberOfLines={1}>
-                {categoryName}
               </Text>
             ) : null}
           </View>
