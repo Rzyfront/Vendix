@@ -822,31 +822,35 @@ const ProductCard = ({
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const hasVariants = (product.product_variants?.length ?? 0) > 0;
   const tracksInventory = product.track_inventory !== false;
-  const isOutOfStock = tracksInventory && product.stock_quantity === 0;
-  const isLowStock = tracksInventory && product.stock_quantity != null && product.stock_quantity > 0 && product.stock_quantity <= 5;
-  const isUnavailable = !hasVariants && tracksInventory && product.stock_quantity === 0;
-  const categoryName = product.categories?.[0]?.name;
-
   const stockQty = product.stock_quantity ?? 0;
+  const variantStockTotal = hasVariants
+    ? (product.product_variants ?? []).reduce(
+        (sum, v) => sum + ((v.stock_quantity ?? 0) * ((v.effective_track_inventory ?? product.track_inventory ?? true) ? 1 : 0)),
+        0,
+      )
+    : stockQty;
+  const isOutOfStock = tracksInventory && variantStockTotal === 0;
+  const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
+  const isUnavailable = variantStockTotal === 0;
+  const categoryName = product.categories?.[0]?.name;
 
   const getStockTextColor = () => {
     if (!tracksInventory) return colorScales.blue[600];
-    if (stockQty === 0) return colors.error;
-    if (stockQty <= 5) return colors.warning;
+    if (variantStockTotal === 0) return colors.error;
+    if (variantStockTotal <= 5) return colors.warning;
     return colorScales.gray[400];
   };
 
   const getStockText = () => {
-    if (hasVariants) return null;
     if (!tracksInventory) return 'Disponible';
-    if (stockQty === 0) return 'Sin stock';
-    return `${stockQty} en stock`;
+    if (variantStockTotal === 0) return 'Sin stock';
+    return `${variantStockTotal} en stock`;
   };
 
   const getStockBadge = () => {
     if (tracksInventory) {
-      if (isOutOfStock) return { label: 'AGOTADO', variant: 'error' as const };
-      if (isLowStock) return { label: `Últimas ${stockQty}`, variant: 'warning' as const };
+      if (variantStockTotal === 0) return { label: 'AGOTADO', variant: 'error' as const };
+      if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
     } else {
       return { label: 'Disponible', variant: 'info' as const };
     }
