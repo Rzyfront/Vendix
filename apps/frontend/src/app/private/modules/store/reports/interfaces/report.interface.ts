@@ -35,6 +35,7 @@ export interface ReportDefinition {
   dataEndpoint: string;
   exportEndpoint?: string;
   fullViewRoute?: string;
+  route: string;
   type?: ReportType;
   keyMapping?: Record<string, string>;
   trackKey?: string;
@@ -59,6 +60,8 @@ export interface ReportColumn {
 export interface ReportCategory {
   id: ReportCategoryId;
   label: string;
+  description: string;
   icon: string;
   color: string;
+  panelUiKey?: string;
 }

@@ -1,13 +1,13 @@
 import { ReportCategory, ReportCategoryId, ReportDefinition, ReportType } from '../interfaces/report.interface';
 
 export const REPORT_CATEGORIES: ReportCategory[] = [
-  { id: 'sales', label: 'Ventas', icon: 'shopping-cart', color: 'var(--color-primary)' },
-  { id: 'inventory', label: 'Inventario', icon: 'warehouse', color: 'var(--color-warning)' },
-  { id: 'products', label: 'Productos', icon: 'package', color: 'var(--color-accent)' },
-  { id: 'customers', label: 'Clientes', icon: 'users', color: 'var(--color-info)' },
-  { id: 'accounting', label: 'Contabilidad', icon: 'book-open', color: 'var(--color-secondary)' },
-  { id: 'payroll', label: 'Nomina', icon: 'banknote', color: 'var(--color-success)' },
-  { id: 'financial', label: 'Financiero', icon: 'wallet', color: 'var(--color-destructive)' },
+  { id: 'sales', label: 'Ventas', description: 'Reportes de ventas y facturacion', icon: 'shopping-cart', color: 'var(--color-primary)' },
+  { id: 'inventory', label: 'Inventario', description: 'Reportes de stock y movimientos', icon: 'warehouse', color: 'var(--color-warning)' },
+  { id: 'products', label: 'Productos', description: 'Reportes de rendimiento y rentabilidad', icon: 'package', color: 'var(--color-accent)' },
+  { id: 'customers', label: 'Clientes', description: 'Reportes de cartera y cuentas por cobrar', icon: 'users', color: 'var(--color-info)' },
+  { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables y financieros', icon: 'book-open', color: 'var(--color-secondary)' },
+  { id: 'payroll', label: 'Nomina', description: 'Reportes de nomina y provisiones', icon: 'banknote', color: 'var(--color-success)' },
+  { id: 'financial', label: 'Financiero', description: 'Reportes financieros y de caja', icon: 'wallet', color: 'var(--color-destructive)' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -21,6 +21,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Visualiza un resumen completo de las ventas del periodo seleccionado, incluyendo total facturado, cantidad de ordenes, ticket promedio, descuentos aplicados y comparativa con periodo anterior.',
     icon: 'bar-chart-3',
+    route: '/admin/reports/sales/sales-summary',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -55,6 +56,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Identifica tus productos estrella con un ranking detallado por cantidad vendida e ingreso generado. Incluye margen de ganancia por producto.',
     icon: 'package-search',
+    route: '/admin/reports/sales/sales-by-product',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -78,6 +80,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Analiza que categorias de productos generan mas ingresos. Util para decisiones de inventario y marketing.',
     icon: 'tags',
+    route: '/admin/reports/sales/sales-by-category',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -100,6 +103,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Descubre quienes son tus mejores clientes por volumen de compra. Incluye frecuencia de compra y ticket promedio por cliente.',
     icon: 'user-check',
+    route: '/admin/reports/sales/sales-by-customer',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -123,6 +127,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Conoce como prefieren pagar tus clientes. Desglose por metodo de pago con porcentaje de participacion y montos.',
     icon: 'credit-card',
+    route: '/admin/reports/sales/sales-by-payment',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -146,6 +151,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Compara el rendimiento de tus canales de venta: punto de venta fisico, tienda en linea y otros. Identifica oportunidades de crecimiento.',
     icon: 'store',
+    route: '/admin/reports/sales/sales-by-channel',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -168,6 +174,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Observa como evolucionan tus ventas en el tiempo. Detecta patrones estacionales, dias de mayor venta y tendencias de crecimiento.',
     icon: 'trending-up',
+    route: '/admin/reports/sales/sales-trends',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -193,6 +200,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Calcula el valor total de tu inventario actual, tanto a precio de costo como a precio de venta. Incluye desglose por ubicacion y categoria.',
     icon: 'calculator',
+    route: '/admin/reports/inventory/inventory-valuation',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -216,6 +224,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Revisa el estado actual del inventario con detalle por producto y ubicacion. Incluye stock disponible, reservado y punto de reorden.',
     icon: 'layers',
+    route: '/admin/reports/inventory/inventory-stock-levels',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -241,6 +250,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Alertas de productos que necesitan reabastecimiento. Muestra los productos cuyo stock disponible esta por debajo del punto de reorden configurado.',
     icon: 'alert-triangle',
+    route: '/admin/reports/inventory/inventory-low-stock',
     requiresDateRange: false,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -264,6 +274,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Rastrea todos los movimientos de inventario: compras, ventas, ajustes manuales y transferencias entre ubicaciones. Ideal para auditorias.',
     icon: 'arrow-left-right',
+    route: '/admin/reports/inventory/inventory-movements',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -289,6 +300,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Analisis agregado de movimientos de inventario por tipo y periodo. Identifica patrones de rotacion y detecta anomalias.',
     icon: 'activity',
+    route: '/admin/reports/inventory/inventory-movement-analysis',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -314,6 +326,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Evaluacion integral del rendimiento de cada producto: ventas, margen de ganancia, rotacion de inventario e indice de rentabilidad.',
     icon: 'gauge',
+    route: '/admin/reports/products/product-performance',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -338,6 +351,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Los productos mas exitosos de tu catalogo. Ranking dual: por unidades vendidas y por ingresos generados, para tomar decisiones de reabastecimiento.',
     icon: 'trophy',
+    route: '/admin/reports/products/product-top-sellers',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -361,6 +375,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Analisis de rentabilidad linea por linea. Compara precio de costo, precio de venta y margen real para optimizar tu catalogo de precios.',
     icon: 'percent',
+    route: '/admin/reports/products/product-profitability',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -387,6 +402,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Panorama general de tu base de clientes: cuantos son nuevos, cuantos repiten compra, y metricas clave como valor de vida del cliente y frecuencia de compra.',
     icon: 'users',
+    route: '/admin/reports/customers/customer-summary',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -417,6 +433,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Identifica a tus clientes mas valiosos por volumen de compra. Incluye historial de compras, frecuencia y ultimo pedido para estrategias de fidelizacion.',
     icon: 'crown',
+    route: '/admin/reports/customers/customer-top',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -439,6 +456,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Control de cartera de clientes con saldos pendientes. Muestra monto original, pagado, saldo y dias de mora para gestion efectiva de cobros.',
     icon: 'receipt',
+    route: '/admin/reports/customers/customer-receivables',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -468,6 +486,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Clasificacion de cartera por antiguedad: corriente, 1-30 dias, 31-60 dias, 61-90 dias y mas de 90 dias. Esencial para gestion de riesgo crediticio.',
     icon: 'clock',
+    route: '/admin/reports/customers/customer-aging',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'nested' as ReportType,
@@ -495,6 +514,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Reporte contable fundamental que muestra los debitos y creditos totales de cada cuenta. Verifica que la contabilidad este balanceada.',
     icon: 'scale',
+    route: '/admin/reports/accounting/trial-balance',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
     type: 'summary' as ReportType,
@@ -524,6 +544,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Estado de situacion financiera: activos, pasivos y patrimonio neto. Fotografia de la salud financiera de tu negocio en un momento dado.',
     icon: 'landmark',
+    route: '/admin/reports/accounting/balance-sheet',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
     type: 'nested' as ReportType,
@@ -546,6 +567,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Tu negocio genera ganancias? Este reporte muestra ingresos, costos y gastos para determinar la utilidad neta del periodo fiscal.',
     icon: 'file-bar-chart',
+    route: '/admin/reports/accounting/income-statement',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
     type: 'nested' as ReportType,
@@ -568,6 +590,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Detalle completo de todos los movimientos contables por cuenta. Filtra por cuenta especifica para ver cada debito y credito registrado.',
     icon: 'book-open',
+    route: '/admin/reports/accounting/general-ledger',
     requiresDateRange: false,
     requiresFiscalPeriod: true,
     type: 'list' as ReportType,
@@ -593,6 +616,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Consolidado de impuestos del periodo: IVA generado, IVA descontable, retenciones en la fuente, retencion de ICA y otros impuestos. Util para declaraciones tributarias.',
     icon: 'file-stack',
+    route: '/admin/reports/accounting/tax-summary',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -625,6 +649,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Resumen consolidado de nomina con totales de devengados (salarios, auxilios, horas extra), deducciones (salud, pension, otros) y neto a pagar.',
     icon: 'banknote',
+    route: '/admin/reports/payroll/payroll-summary',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -649,6 +674,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Desglose individual por empleado: salario base, auxilios, horas extra, deducciones de ley, deducciones voluntarias y neto a pagar.',
     icon: 'user-cog',
+    route: '/admin/reports/payroll/payroll-by-employee',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -672,6 +698,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Estado actual de las provisiones de prestaciones sociales: cesantias, intereses de cesantias, prima de servicios y vacaciones acumuladas por empleado.',
     icon: 'piggy-bank',
+    route: '/admin/reports/payroll/payroll-provisions',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -698,6 +725,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'En que se va tu dinero? Desglose de gastos por categoria con montos, porcentaje de participacion y comparativa con periodo anterior.',
     icon: 'receipt',
+    route: '/admin/reports/financial/expense-summary',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -724,6 +752,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'El reporte mas importante para duenos de negocio: cuanto ganaste realmente? Ingresos por ventas menos costos de mercancia, gastos operativos y otros gastos.',
     icon: 'trending-up',
+    route: '/admin/reports/financial/profit-loss',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'nested' as ReportType,
@@ -745,6 +774,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Control de caja con apertura, ventas por metodo de pago, gastos, movimientos de efectivo y cuadre de cierre. Detecta diferencias de caja.',
     icon: 'monitor-check',
+    route: '/admin/reports/financial/cash-register-report',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'list' as ReportType,
@@ -770,6 +800,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     detailedDescription:
       'Clasificacion de cuentas por pagar por antiguedad. Gestiona el flujo de caja planificando que proveedores pagar segun vencimiento.',
     icon: 'calendar-clock',
+    route: '/admin/reports/financial/accounts-payable-aging',
     requiresDateRange: true,
     requiresFiscalPeriod: false,
     type: 'summary' as ReportType,
@@ -806,4 +837,8 @@ export function getReportsByCategory(categoryId: ReportCategoryId): ReportDefini
 
 export function getCategoryById(id: ReportCategoryId): ReportCategory | undefined {
   return REPORT_CATEGORIES.find((category) => category.id === id);
+}
+
+export function getDefaultReportForCategory(categoryId: ReportCategoryId): ReportDefinition | undefined {
+  return getReportsByCategory(categoryId)[0];
 }
