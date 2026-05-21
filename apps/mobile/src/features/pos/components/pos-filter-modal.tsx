@@ -161,7 +161,11 @@ export function PosFilterModal({
           {/* Categoría */}
           <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>Categoría</Text>
-            <View style={styles.optionsList}>
+            <ScrollView
+              style={styles.optionsListScroll}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
               <Pressable
                 style={[
                   styles.listOptionBtn,
@@ -197,13 +201,17 @@ export function PosFilterModal({
                   </Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           </View>
 
           {/* Marca */}
           <View style={styles.filterSection}>
             <Text style={styles.filterLabel}>Marca</Text>
-            <View style={styles.optionsList}>
+            <ScrollView
+              style={styles.optionsListScroll}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator={false}
+            >
               <Pressable
                 style={[
                   styles.listOptionBtn,
@@ -239,7 +247,7 @@ export function PosFilterModal({
                   </Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           </View>
         </ScrollView>
 
@@ -333,6 +341,9 @@ const styles = StyleSheet.create({
   },
   optionsList: {
     gap: spacing[2],
+  },
+  optionsListScroll: {
+    maxHeight: 180,
   },
   listOptionBtn: {
     paddingVertical: spacing[3],

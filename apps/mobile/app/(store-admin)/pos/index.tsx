@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter } from 'expo-router';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
-import { CustomerService, OrderService, ProductService } from '@/features/store/services';
+import { CustomerService, OrderService, ProductService, QuotationService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
@@ -40,8 +40,8 @@ import {
   PosMobileFooter,
   PosCartModal,
   PosFilterDropdown,
-  PosAddModal,
   PosCustomerModal,
+  ShippingModal,
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type {
@@ -1940,8 +1940,9 @@ const PosScreen = () => {
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showShippingModal, setShowShippingModal] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
     category_id: '',
     brand_id: '',
@@ -2043,6 +2044,46 @@ const PosScreen = () => {
     setReceiptData(null);
   }, []);
 
+  const handleSaveDraft = useCallback(async () => {
+    const items = useCartStore.getState().items;
+    if (items.length === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const quotationItems = items.map((i) => ({
+        product_id: Number(i.product.id),
+        product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
+        product_name: i.product.name,
+        variant_sku: i.variant?.sku,
+        quantity: i.quantity,
+        unit_price: Number(i.unitPrice.toFixed(2)),
+        total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+        tax_rate: i.taxAmount > 0 ? Number((i.taxAmount / (i.unitPrice * i.quantity)).toFixed(2)) : undefined,
+        notes: i.variant_display_name,
+      }));
+
+      await QuotationService.create({
+        customer_id: useCartStore.getState().customer?.id,
+        notes: useCartStore.getState().notes || undefined,
+        items: quotationItems,
+      });
+
+      useCartStore.getState().clearCart();
+      toastSuccess('Cotización guardada exitosamente');
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Error al guardar la cotización';
+      toastError(message);
+    } finally {
+      setSavingDraft(false);
+    }
+  }, []);
+
+  const handleShipping = useCallback(() => {
+    setShowShippingModal(true);
+  }, []);
+
   const storeName = useTenantStore((s) => s.storeName);
   const user = useAuthStore((s) => s.user);
   const userInitials = user
@@ -2091,7 +2132,7 @@ const PosScreen = () => {
       <PosSearchBar
         onSearch={setSearch}
         onOpenFilters={() => setShowFilters(true)}
-        onOpenAdd={() => setShowAddModal(true)}
+        onOpenAdd={() => setShowCustomerModal(true)}
         selectedCustomer={null}
       />
 
@@ -2131,8 +2172,8 @@ const PosScreen = () => {
         taxAmount={summary.taxAmount}
         onViewCart={() => setShowCartModal(true)}
         onCustomItem={() => toastWarning('Ítem personalizado próximamente')}
-        onSaveDraft={() => toastSuccess('Borrador guardado')}
-        onShipping={() => toastSuccess('Envío próximamente')}
+        onSaveDraft={handleSaveDraft}
+        onShipping={handleShipping}
         onCheckout={() => {
           setShowCartModal(false);
           setShowPayment(true);
@@ -2158,7 +2199,7 @@ const PosScreen = () => {
         onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
         onClearCart={() => useCartStore.getState().clearCart()}
         onViewDetail={() => setShowCart(true)}
-        onSaveDraft={() => toastSuccess('Borrador guardado')}
+        onSaveDraft={handleSaveDraft}
         onCheckout={() => {
           setShowCartModal(false);
           setShowPayment(true);
@@ -2233,26 +2274,22 @@ const PosScreen = () => {
         currentFilters={activeFilters}
       />
 
-      {/* Add Customer Modal */}
-      <PosAddModal
-        visible={showAddModal}
-        onClose={() => setShowAddModal(false)}
-        onSearchCustomer={() => {
-          setShowAddModal(false);
-          setShowCustomerModal(true);
-        }}
-        onCreateCustomer={() => {
-          setShowAddModal(false);
-          setShowCustomerModal(true);
-        }}
-      />
-
       {/* Customer Modal */}
       <PosCustomerModal
         visible={showCustomerModal}
         onClose={() => setShowCustomerModal(false)}
         onSelectCustomer={(customer) => {
           toastSuccess(`Cliente seleccionado: ${customer.first_name} ${customer.last_name}`);
+        }}
+      />
+
+      {/* Shipping Modal */}
+      <ShippingModal
+        visible={showShippingModal}
+        onClose={() => setShowShippingModal(false)}
+        onSelectShipping={(method) => {
+          toastSuccess(`Envío seleccionado: ${method.name}`);
+          setShowShippingModal(false);
         }}
       />
 

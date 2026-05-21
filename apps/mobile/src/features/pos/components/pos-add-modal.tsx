@@ -7,14 +7,12 @@ interface PosAddModalProps {
   visible: boolean;
   onClose: () => void;
   onSearchCustomer: () => void;
-  onCreateCustomer: () => void;
 }
 
 export function PosAddModal({
   visible,
   onClose,
   onSearchCustomer,
-  onCreateCustomer,
 }: PosAddModalProps) {
   const options = [
     {
@@ -23,13 +21,6 @@ export function PosAddModal({
       title: 'Buscar cliente',
       description: 'Buscar un cliente existente',
       action: onSearchCustomer,
-    },
-    {
-      id: 'create',
-      icon: 'user-plus' as const,
-      title: 'Crear cliente rápido',
-      description: 'Crear un nuevo cliente rápidamente',
-      action: onCreateCustomer,
     },
   ];
 

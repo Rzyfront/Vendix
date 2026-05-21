@@ -31,3 +31,11 @@ export type {
   PayPayableDto,
 } from './accounting.service';
 export { SettingsService } from './settings.service';
+export { QuotationService } from './quotation.service';
+export type {
+  CreateQuotationDto,
+  QuotationItem,
+  Quotation,
+} from './quotation.service';
+export { ShippingService } from './shipping.service';
+export type { StoreShippingMethod } from './shipping.service';

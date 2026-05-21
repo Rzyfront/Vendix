@@ -7,6 +7,7 @@ import {
   EyeOff,
   ArrowLeft,
   User,
+  UserCog,
   UserCheck,
   UserPlus,
   Mail,
@@ -68,6 +69,9 @@ import {
   Bell,
   HelpCircle,
   Upload,
+  Maximize2,
+  Minimize2,
+  Info,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -79,6 +83,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'eye-off': EyeOff,
   'arrow-left': ArrowLeft,
   user: User,
+  'user-cog': UserCog,
   'user-check': UserCheck,
   'user-plus': UserPlus,
   mail: Mail,
@@ -140,6 +145,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   bell: Bell,
   'help-circle': HelpCircle,
   upload: Upload,
+  'maximize-2': Maximize2,
+  'minimize-2': Minimize2,
+  info: Info,
 };
 
 interface IconProps {

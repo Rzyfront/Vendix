@@ -78,4 +78,39 @@ export class AuthService {
     const response = await apiClient.get(Endpoints.AUTH.ME);
     return unwrap<User>(response);
   }
+
+  static async updateProfile(data: {
+    first_name?: string;
+    last_name?: string;
+    phone?: string;
+    document_type?: string;
+    document_number?: string;
+    avatar_url?: string | null;
+    address?: {
+      address_line_1?: string;
+      address_line_2?: string;
+      country?: string;
+      state?: string;
+      city?: string;
+      postal_code?: string;
+    };
+  }): Promise<User> {
+    const response = await apiClient.put(Endpoints.AUTH.PROFILE, data);
+    const updatedUser = unwrap<User>(response);
+    useAuthStore.getState().setUser(updatedUser);
+    return updatedUser;
+  }
+
+  static async changePassword(current_password: string, new_password: string): Promise<void> {
+    await apiClient.post('/auth/change-password', { current_password, new_password });
+  }
+
+  static async getUserSettings(): Promise<any> {
+    const response = await apiClient.get(Endpoints.AUTH.SETTINGS);
+    return unwrap<any>(response);
+  }
+
+  static async updateUserSettings(config: any): Promise<void> {
+    await apiClient.put(Endpoints.AUTH.SETTINGS, { config });
+  }
 }

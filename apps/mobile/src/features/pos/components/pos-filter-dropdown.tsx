@@ -244,7 +244,6 @@ const styles = StyleSheet.create({
     padding: spacing[3],
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[100],
-    position: 'relative',
   },
   filterLabel: {
     fontSize: typography.fontSize.sm,
@@ -270,10 +269,6 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900],
   },
   dropdownList: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
@@ -283,7 +278,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 4,
-    zIndex: 10,
     marginTop: 4,
     maxHeight: 200,
   },

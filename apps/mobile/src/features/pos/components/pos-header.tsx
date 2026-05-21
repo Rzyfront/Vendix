@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Image } from 'react-native';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -26,7 +26,11 @@ export function PosHeader({
       {/* Left: Logo + Title + Badge */}
       <View style={styles.headerLeft}>
         <Pressable onPress={onOpenDrawer} hitSlop={8} style={styles.logoBox}>
-          <Icon name="shopping-cart" size={18} color="#FFFFFF" />
+          <Image
+            source={require('@/assets/logo.png')}
+            style={styles.logoImage}
+            resizeMode="cover"
+          />
         </Pressable>
         <View style={styles.titleContainer}>
           <Text style={styles.title}>POS</Text>
@@ -82,12 +86,14 @@ const styles = StyleSheet.create({
     gap: spacing[3],
   },
   logoBox: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.lg,
-    backgroundColor: '#166534',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 62,
+    height: 62,
+    borderRadius: borderRadius.xl,
+    overflow: 'hidden',
+  },
+  logoImage: {
+    width: 62,
+    height: 62,
   },
   titleContainer: {
     flexDirection: 'column',
