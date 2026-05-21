@@ -66,7 +66,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile()"
         [style.margin-left]="
           !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'

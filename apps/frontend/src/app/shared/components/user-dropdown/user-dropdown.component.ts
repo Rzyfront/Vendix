@@ -3,13 +3,8 @@ import {Component,
   inject,
   OnInit,
   output,
-  computed,
-  signal,
-  DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+  signal} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
-import { Observable } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserUiService } from '../../services/user-ui.service';
@@ -18,7 +13,6 @@ import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
-import { FullscreenService } from '../../services/fullscreen.service';
 
 export interface UserMenuOption {
   label: string;
@@ -128,19 +122,15 @@ export interface UserMenuOption {
   `,
   styleUrls: ['./user-dropdown.component.scss']})
 export class UserDropdownComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
   readonly closeDropdown = output<void>();
 
   readonly isOpen = signal(false);
-  readonly isFullscreen = signal(false);
-private router = inject(Router);
-  private authFacade = inject(AuthFacade);
+private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
 
-  private fullscreenService = inject(FullscreenService);
   private userUiService = inject(UserUiService);
 
   // Signal-based properties from facades
@@ -150,14 +140,6 @@ private router = inject(Router);
   constructor() {}
 
   ngOnInit() {
-    // Suscribirse a cambios de fullscreen
-    this.fullscreenService.isFullscreen
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((isFullscreen) => {
-        this.isFullscreen.set(isFullscreen);
-        this.updateFullscreenOption();
-      });
-
     // Refresh default_panel_ui from API to detect new modules accurately
     // This ensures badges work even if localStorage has stale defaults
     this.authService.getSettings().subscribe({
@@ -204,26 +186,10 @@ get user() {
       icon: 'user-cog',
       action: () => this.goToSettings()},
     {
-      label: 'Pantalla Completa',
-      icon: 'fullscreen-enter',
-      action: () => this.toggleFullscreen(),
-      condition: () =>
-        this.fullscreenService.isFullscreenSupported() && !this.isFullscreen()},
-    {
-      label: 'Salir de Pantalla Completa',
-      icon: 'fullscreen-exit',
-      action: () => this.exitFullscreen(),
-      condition: () => this.isFullscreen()},
-    {
       label: 'Administrar Organización',
       icon: 'building',
       action: () => this.switchToOrganization(),
       condition: () => this.canSwitchToOrganization()},
-    {
-      label: 'Ir a Tienda',
-      icon: 'store',
-      action: () => this.switchToStore(),
-      condition: () => this.canSwitchToStore()},
     {
       label: 'Cerrar Sesión',
       icon: 'logout',
@@ -345,54 +311,4 @@ get user() {
     }
   }
 
-  private async switchToStore(): Promise<void> {
-    try {
-      // Obtener la primera tienda disponible del usuario
-      const user = this.globalFacade.getUserContext()?.user;
-      const availableStores = user?.stores || [];
-
-      if (availableStores.length === 0) {
-        return;
-      }
-
-      const firstStore = availableStores[0];
-      const success =
-        await this.environmentSwitchService.performEnvironmentSwitch(
-          'STORE_ADMIN',
-          firstStore.slug,
-        );
-
-      if (!success) {
-        // El fallo se maneja en el servicio con la redirección
-      }
-    } catch (error) {
-      // Error al cambiar de entorno
-    }
-  }
-
-  private canSwitchToStore(): boolean {
-    const canSwitch = this.environmentContextService.canSwitchToStore();
-    return canSwitch;
-  }
-
-  private async toggleFullscreen(): Promise<void> {
-    try {
-      await this.fullscreenService.toggleFullscreen();
-    } catch (error) {
-      // Error al entrar en pantalla completa
-    }
-  }
-
-  private async exitFullscreen(): Promise<void> {
-    try {
-      await this.fullscreenService.exitFullscreen();
-    } catch (error) {
-      // Error al salir de pantalla completa
-    }
-  }
-
-  private updateFullscreenOption(): void {
-    // Las opciones se actualizan automáticamente mediante las condiciones
-    // Esto asegura que el menú se actualice cuando cambia el estado de fullscreen
-  }
 }
