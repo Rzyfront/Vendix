@@ -11,10 +11,8 @@ interface FilterOption {
 }
 
 interface FilterValues {
-  state: string;
   category_id: string;
   brand_id: string;
-  product_type: string;
 }
 
 interface PosFilterDropdownProps {
@@ -28,17 +26,13 @@ export function PosFilterDropdown({
   visible,
   onClose,
   onApplyFilters,
-  currentFilters = { state: '', category_id: '', brand_id: '', product_type: '' },
+  currentFilters = { category_id: '', brand_id: '' },
 }: PosFilterDropdownProps) {
-  const [selectedState, setSelectedState] = useState(currentFilters.state);
   const [selectedCategory, setSelectedCategory] = useState(currentFilters.category_id);
   const [selectedBrand, setSelectedBrand] = useState(currentFilters.brand_id);
-  const [selectedType, setSelectedType] = useState(currentFilters.product_type);
 
-  const [showStateDropdown, setShowStateDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const [showBrandDropdown, setShowBrandDropdown] = useState(false);
-  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
 
   const { data: categories = [] } = useQuery({
     queryKey: ['pos-categories'],
@@ -49,19 +43,6 @@ export function PosFilterDropdown({
     queryKey: ['pos-brands'],
     queryFn: () => ProductService.getBrands(),
   });
-
-  const stateOptions = [
-    { id: '', name: 'Todos' },
-    { id: 'active', name: 'Activo' },
-    { id: 'inactive', name: 'Inactivo' },
-    { id: 'archived', name: 'Archivado' },
-  ];
-
-  const typeOptions = [
-    { id: '', name: 'Todos' },
-    { id: 'product', name: 'Producto' },
-    { id: 'service', name: 'Servicio' },
-  ];
 
   const getCategoryName = (id: string) => {
     if (!id) return 'Todas las categorías';
@@ -75,36 +56,20 @@ export function PosFilterDropdown({
     return brand?.name || 'Todas las marcas';
   };
 
-  const getStateName = (id: string) => {
-    const state = stateOptions.find((s) => s.id === id);
-    return state?.name || 'Todos';
-  };
-
-  const getTypeName = (id: string) => {
-    const type = typeOptions.find((t) => t.id === id);
-    return type?.name || 'Todos';
-  };
-
   const handleApply = () => {
     onApplyFilters({
-      state: selectedState,
       category_id: selectedCategory,
       brand_id: selectedBrand,
-      product_type: selectedType,
     });
     onClose();
   };
 
   const handleClear = () => {
-    setSelectedState('');
     setSelectedCategory('');
     setSelectedBrand('');
-    setSelectedType('');
     onApplyFilters({
-      state: '',
       category_id: '',
       brand_id: '',
-      product_type: '',
     });
     onClose();
   };
@@ -127,78 +92,6 @@ export function PosFilterDropdown({
           </View>
 
           <ScrollView style={styles.content}>
-            {/* Estado */}
-            <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>Estado</Text>
-              <Pressable
-                style={styles.selectBtn}
-                onPress={() => {
-                  setShowStateDropdown(!showStateDropdown);
-                  setShowCategoryDropdown(false);
-                  setShowBrandDropdown(false);
-                  setShowTypeDropdown(false);
-                }}
-              >
-                <Text style={styles.selectText}>{getStateName(selectedState)}</Text>
-                <Icon name="chevron-down" size={16} color={colorScales.gray[500]} />
-              </Pressable>
-              {showStateDropdown && (
-                <View style={styles.dropdownList}>
-                  {stateOptions.map((option) => (
-                    <Pressable
-                      key={option.id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setSelectedState(option.id);
-                        setShowStateDropdown(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{option.name}</Text>
-                      {selectedState === option.id && (
-                        <Icon name="check" size={16} color={colors.primary} />
-                      )}
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Tipo */}
-            <View style={styles.filterSection}>
-              <Text style={styles.filterLabel}>Tipo</Text>
-              <Pressable
-                style={styles.selectBtn}
-                onPress={() => {
-                  setShowTypeDropdown(!showTypeDropdown);
-                  setShowStateDropdown(false);
-                  setShowCategoryDropdown(false);
-                  setShowBrandDropdown(false);
-                }}
-              >
-                <Text style={styles.selectText}>{getTypeName(selectedType)}</Text>
-                <Icon name="chevron-down" size={16} color={colorScales.gray[500]} />
-              </Pressable>
-              {showTypeDropdown && (
-                <View style={styles.dropdownList}>
-                  {typeOptions.map((option) => (
-                    <Pressable
-                      key={option.id}
-                      style={styles.dropdownItem}
-                      onPress={() => {
-                        setSelectedType(option.id);
-                        setShowTypeDropdown(false);
-                      }}
-                    >
-                      <Text style={styles.dropdownItemText}>{option.name}</Text>
-                      {selectedType === option.id && (
-                        <Icon name="check" size={16} color={colors.primary} />
-                      )}
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
-
             {/* Categoría */}
             <View style={styles.filterSection}>
               <Text style={styles.filterLabel}>Categoría</Text>
@@ -206,9 +99,7 @@ export function PosFilterDropdown({
                 style={styles.selectBtn}
                 onPress={() => {
                   setShowCategoryDropdown(!showCategoryDropdown);
-                  setShowStateDropdown(false);
                   setShowBrandDropdown(false);
-                  setShowTypeDropdown(false);
                 }}
               >
                 <Text style={styles.selectText}>{getCategoryName(selectedCategory)}</Text>
@@ -254,9 +145,7 @@ export function PosFilterDropdown({
                 style={styles.selectBtn}
                 onPress={() => {
                   setShowBrandDropdown(!showBrandDropdown);
-                  setShowStateDropdown(false);
                   setShowCategoryDropdown(false);
-                  setShowTypeDropdown(false);
                 }}
               >
                 <Text style={styles.selectText}>{getBrandName(selectedBrand)}</Text>

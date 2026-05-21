@@ -6,39 +6,30 @@ import { Icon } from '@/shared/components/icon/icon';
 interface PosAddModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreateProduct: () => void;
-  onBulkUpload: () => void;
-  onImageUpload: () => void;
+  onSearchCustomer: () => void;
+  onCreateCustomer: () => void;
 }
 
 export function PosAddModal({
   visible,
   onClose,
-  onCreateProduct,
-  onBulkUpload,
-  onImageUpload,
+  onSearchCustomer,
+  onCreateCustomer,
 }: PosAddModalProps) {
   const options = [
     {
+      id: 'search',
+      icon: 'search' as const,
+      title: 'Buscar cliente',
+      description: 'Buscar un cliente existente',
+      action: onSearchCustomer,
+    },
+    {
       id: 'create',
-      icon: 'plus-circle' as const,
-      title: 'Crear Producto',
-      description: 'Agregar un nuevo producto al inventario',
-      action: onCreateProduct,
-    },
-    {
-      id: 'bulk',
-      icon: 'upload' as const,
-      title: 'Carga Masiva',
-      description: 'Importar productos desde archivo CSV/Excel',
-      action: onBulkUpload,
-    },
-    {
-      id: 'images',
-      icon: 'image' as const,
-      title: 'Carga de Imágenes',
-      description: 'Subir imágenes para productos existentes',
-      action: onImageUpload,
+      icon: 'user-plus' as const,
+      title: 'Crear cliente rápido',
+      description: 'Crear un nuevo cliente rápidamente',
+      action: onCreateCustomer,
     },
   ];
 

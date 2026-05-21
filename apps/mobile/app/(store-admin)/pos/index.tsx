@@ -41,9 +41,7 @@ import {
   PosCartModal,
   PosFilterDropdown,
   PosAddModal,
-  PosCreateProductModal,
-  PosBulkUploadModal,
-  PosBulkImageUploadModal,
+  PosCustomerModal,
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type {
@@ -1943,14 +1941,10 @@ const PosScreen = () => {
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showCreateProduct, setShowCreateProduct] = useState(false);
-  const [showBulkUpload, setShowBulkUpload] = useState(false);
-  const [showBulkImageUpload, setShowBulkImageUpload] = useState(false);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
-    state: '',
     category_id: '',
     brand_id: '',
-    product_type: '',
   });
   const [orderNumber, setOrderNumber] = useState('');
   const [receiptData, setReceiptData] = useState<{
@@ -1980,20 +1974,12 @@ const PosScreen = () => {
         params.search = search;
       }
 
-      if (activeFilters.state) {
-        params.state = activeFilters.state;
-      }
-
       if (activeFilters.category_id) {
         params.category_id = activeFilters.category_id;
       }
 
       if (activeFilters.brand_id) {
         params.brand_id = activeFilters.brand_id;
-      }
-
-      if (activeFilters.product_type) {
-        params.product_type = activeFilters.product_type;
       }
 
       return search
@@ -2247,38 +2233,34 @@ const PosScreen = () => {
         currentFilters={activeFilters}
       />
 
-      {/* Add Product Modal */}
+      {/* Add Customer Modal */}
       <PosAddModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onCreateProduct={() => setShowCreateProduct(true)}
-        onBulkUpload={() => setShowBulkUpload(true)}
-        onImageUpload={() => setShowBulkImageUpload(true)}
+        onSearchCustomer={() => {
+          setShowAddModal(false);
+          setShowCustomerModal(true);
+        }}
+        onCreateCustomer={() => {
+          setShowAddModal(false);
+          setShowCustomerModal(true);
+        }}
       />
 
-      {/* Create Product Modal */}
-      <PosCreateProductModal
-        visible={showCreateProduct}
-        onClose={() => setShowCreateProduct(false)}
-      />
-
-      {/* Bulk Upload Modal */}
-      <PosBulkUploadModal
-        visible={showBulkUpload}
-        onClose={() => setShowBulkUpload(false)}
-      />
-
-      {/* Bulk Image Upload Modal */}
-      <PosBulkImageUploadModal
-        visible={showBulkImageUpload}
-        onClose={() => setShowBulkImageUpload(false)}
+      {/* Customer Modal */}
+      <PosCustomerModal
+        visible={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        onSelectCustomer={(customer) => {
+          toastSuccess(`Cliente seleccionado: ${customer.first_name} ${customer.last_name}`);
+        }}
       />
 
       {/* Filter Dropdown */}
       <PosFilterDropdown
         visible={showFilters}
         onClose={() => setShowFilters(false)}
-        onApplyFilters={(filters) => setActiveFilters(filters)}
+        onApplyFilters={(filters: any) => setActiveFilters(filters)}
         currentFilters={activeFilters}
       />
     </View>
