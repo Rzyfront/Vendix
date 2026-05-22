@@ -184,7 +184,8 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
       return;
     }
     if (!state.customer) {
-      toastWarning('Debe seleccionar un cliente para guardar un borrador');
+      toastWarning('Debe seleccionar un cliente para guardar');
+      setShowCustomerSearch(true);
       return;
     }
     setIsProcessing(true);
@@ -206,7 +207,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         customer_phone: customer.phone ?? undefined,
         store_id: storeId,
         items: items.map((i) => ({
-          product_id: i.product.id === 0 ? 0 : Number(i.product.id),
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
           product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
           product_name: i.product.name,
           product_sku: i.product.sku || undefined,
@@ -231,17 +232,20 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
 
       const response = await OrderService.processPosPayment(payload);
       if (!response.success) {
-        toastError(response.message || 'Error al guardar el borrador');
+        toastError(response.message || 'Error al guardar');
         return;
       }
 
       state.clearCart();
       handleReset();
       onClose();
-      toastSuccess('Borrador guardado correctamente');
+      toastSuccess('Guardado correctamente');
     } catch (err: any) {
-      const message = err?.response?.data?.message || err?.message || 'Error al guardar el borrador';
-      toastError(message);
+      const data = err?.response?.data;
+      const baseMsg = data?.message || err?.message || 'Error al guardar';
+      const details = data?.details?.validationErrors;
+      const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
+      toastError(fullMsg);
     } finally {
       setIsProcessing(false);
     }
@@ -283,7 +287,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
         customer_phone: isAnonymous ? undefined : (customer?.phone ?? undefined),
         store_id: storeId,
         items: items.map((i) => ({
-          product_id: i.product.id === 0 ? 0 : Number(i.product.id),
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
           product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
           product_name: i.product.name,
           product_sku: i.product.sku || undefined,
@@ -760,7 +764,7 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
               disabled={isProcessing || items.length === 0}
             >
               <Icon name="save" size={16} color={isProcessing ? colorScales.gray[400] : colors.primary} />
-              <Text style={[styles.draftBtnText, isProcessing && { color: colorScales.gray[400] }]}>Borrador</Text>
+              <Text style={[styles.draftBtnText, isProcessing && { color: colorScales.gray[400] }]}>Guardar</Text>
             </Pressable>
           </View>
           <Pressable

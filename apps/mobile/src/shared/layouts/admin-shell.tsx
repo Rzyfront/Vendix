@@ -2,12 +2,14 @@ import { useState, useCallback, type ReactNode } from 'react';
 import { View, Pressable, Dimensions, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter } from 'expo-router';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { colorScales } from '@/shared/theme';
 import { PosHeader } from '@/features/pos/components/pos-header';
 import { DrawerMenu } from './drawer-menu';
 import { HelpSearchModal } from '@/features/help/help-search-modal';
 import { NotificationsModal } from '@/features/notifications/notifications-modal';
 import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
+import { NotificationsService } from '@/features/notifications/notifications.service';
 import { useAuthStore } from '@/core/store/auth.store';
 import { ToastContainer } from '@/shared/components/toast/toast';
 
@@ -33,6 +35,13 @@ export function AdminShell({ children, title = 'Vendix', variant = 'store' }: Ad
 
   const openDrawer = useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+  const queryClient = useQueryClient();
+
+  const { data: unreadCount = 0 } = useQuery({
+    queryKey: ['unread-notifications-count'],
+    queryFn: () => NotificationsService.getUnreadCount(),
+    refetchInterval: 30000,
+  });
 
   return (
     <View style={styles.container}>
@@ -41,7 +50,7 @@ export function AdminShell({ children, title = 'Vendix', variant = 'store' }: Ad
         onOpenHelp={() => setShowHelpSearch(true)}
         onOpenNotifications={() => setShowNotifications(true)}
         onOpenUserMenu={() => setShowUserMenu(true)}
-        notificationCount={15}
+        notificationCount={unreadCount}
         userInitials={userInitials}
         title={title}
         showBadge={variant === 'store'}
@@ -62,7 +71,10 @@ export function AdminShell({ children, title = 'Vendix', variant = 'store' }: Ad
 
       <NotificationsModal
         visible={showNotifications}
-        onClose={() => setShowNotifications(false)}
+        onClose={() => {
+          setShowNotifications(false);
+          queryClient.invalidateQueries({ queryKey: ['unread-notifications-count'] });
+        }}
         onNavigate={(route) => {
           setShowNotifications(false);
           router.push(route as never);

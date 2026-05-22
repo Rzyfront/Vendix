@@ -812,7 +812,7 @@ const ProductCard = ({
     if (!tracksInventory) return 'Disponible';
     if (variantStockTotal === 0) return 'Sin stock';
     if (variantStockTotal <= 5) return `${variantStockTotal} en stock`;
-    return 'Disponible';
+    return `${variantStockTotal} en stock`;
   };
 
   const getStockTextColor = () => {
@@ -826,7 +826,7 @@ const ProductCard = ({
     if (tracksInventory) {
       if (variantStockTotal === 0) return { label: 'Agotado', variant: 'error' as const };
       if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
-      return { label: 'Disponible', variant: 'info' as const };
+      return { label: `${variantStockTotal} en stock`, variant: 'info' as const };
     } else {
       return { label: 'Disponible', variant: 'info' as const };
     }
@@ -2042,7 +2042,8 @@ const PosScreen = () => {
       return;
     }
     if (!customer) {
-      toastWarning('Debe seleccionar un cliente antes de guardar un borrador');
+      toastWarning('Debe seleccionar un cliente antes de guardar');
+      setShowCustomerModal(true);
       return;
     }
     setSavingDraft(true);
@@ -2062,7 +2063,7 @@ const PosScreen = () => {
         customer_phone: customer.phone ?? undefined,
         store_id: storeId,
         items: items.map((i) => ({
-          product_id: i.product.id === 0 ? 0 : Number(i.product.id),
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
           product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
           product_name: i.product.name,
           product_sku: i.product.sku || undefined,
@@ -2087,15 +2088,18 @@ const PosScreen = () => {
 
       const response = await OrderService.processPosPayment(payload);
       if (!response.success) {
-        toastError(response.message || 'Error al guardar el borrador');
+        toastError(response.message || 'Error al guardar');
         return;
       }
 
       state.clearCart();
-      toastSuccess('Borrador guardado correctamente');
+      toastSuccess('Guardado correctamente');
     } catch (error: any) {
-      const message = error?.response?.data?.message || error?.message || 'Error al guardar el borrador';
-      toastError(message);
+      const data = error?.response?.data;
+      const baseMsg = data?.message || error?.message || 'Error al guardar';
+      const details = data?.details?.validationErrors;
+      const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
+      toastError(fullMsg);
     } finally {
       setSavingDraft(false);
     }

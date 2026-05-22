@@ -9,6 +9,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter, usePathname } from 'expo-router';
+import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { AuthService } from '@/core/auth/auth.service';
@@ -41,6 +42,14 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
   const storeSlug = useTenantStore((s) => s.storeSlug);
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // Fetch fresh user settings so the module count is real
+  const { data: freshSettings } = useQuery({
+    queryKey: ['user-settings'],
+    queryFn: () => AuthService.getUserSettings(),
+    enabled: visible,
+    staleTime: 60000,
+  });
+
   const isOrgAdmin = pathname.startsWith('/(org-admin)');
 
   const userInitials = user
@@ -61,13 +70,14 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
     ? 'Dueño'
     : user?.roles?.[0] || 'Usuario';
 
-  // Calculate new modules count
+  // Calculate new modules count (fresh settings from API, fallback to auth store)
+  const panelUi = freshSettings?.config?.panel_ui ?? userSettings?.config?.panel_ui;
   const newModuleCount = (() => {
-    if (!defaultPanelUi || !userSettings?.config?.panel_ui) return 0;
+    if (!defaultPanelUi || !panelUi) return 0;
     let count = 0;
     const editableTypes = ['ORG_ADMIN', 'STORE_ADMIN'];
     for (const appType of editableTypes) {
-      const userKeys = userSettings.config.panel_ui[appType] || {};
+      const userKeys = panelUi[appType] || {};
       const defaultKeys = defaultPanelUi[appType] || {};
       for (const key of Object.keys(defaultKeys)) {
         if (!userKeys.hasOwnProperty(key)) {
