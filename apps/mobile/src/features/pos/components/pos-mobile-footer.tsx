@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -27,10 +28,11 @@ export function PosMobileFooter({
   onCheckout,
   canCreateCustomItems = false,
 }: PosMobileFooterProps) {
+  const insets = useSafeAreaInsets();
   if (itemCount === 0) return null;
 
   return (
-    <View style={styles.footer}>
+    <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
       {/* Row 1: Cart Summary + View Detail Button */}
       <View style={styles.summaryRow}>
         <View style={styles.cartSummary}>
@@ -129,7 +131,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
-    minWidth: 0,
   },
   cartIconWrapper: {
     position: 'relative',
@@ -162,26 +163,22 @@ const styles = StyleSheet.create({
   },
   cartTotals: {
     flexDirection: 'column',
-    minWidth: 0,
   },
   totalLabel: {
     fontSize: 11,
     fontWeight: typography.fontWeight.medium as any,
-    color: colorScales.gray[500],
-    lineHeight: 1,
+    color: colorScales.gray[700],
   },
   totalAmount: {
     fontSize: 18,
     fontWeight: typography.fontWeight.bold as any,
     color: colorScales.gray[900],
-    lineHeight: 1.2,
   },
   taxAmount: {
     marginTop: 2,
     fontSize: 11,
     fontWeight: typography.fontWeight.semibold as any,
-    color: colorScales.gray[500],
-    lineHeight: 1.1,
+    color: colorScales.gray[600],
   },
   viewDetailBtn: {
     flexDirection: 'row',

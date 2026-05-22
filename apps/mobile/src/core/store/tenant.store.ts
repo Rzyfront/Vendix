@@ -7,10 +7,12 @@ interface TenantState {
   organizationName: string | null;
   storeId: string | null;
   storeName: string | null;
+  storeSlug: string | null;
   setOrganizationId: (id: string | null) => void;
   setOrganizationName: (name: string | null) => void;
   setStoreId: (id: string | null) => void;
   setStoreName: (name: string | null) => void;
+  setStoreSlug: (slug: string | null) => void;
   clearTenant: () => void;
 }
 
@@ -21,16 +23,19 @@ export const useTenantStore = create<TenantState>()(
       organizationName: null,
       storeId: null,
       storeName: null,
+      storeSlug: null,
       setOrganizationId: (id) => set({ organizationId: id }),
       setOrganizationName: (name) => set({ organizationName: name }),
       setStoreId: (id) => set({ storeId: id }),
       setStoreName: (name) => set({ storeName: name }),
+      setStoreSlug: (slug) => set({ storeSlug: slug }),
       clearTenant: () =>
         set({
           organizationId: null,
           organizationName: null,
           storeId: null,
           storeName: null,
+          storeSlug: null,
         }),
     }),
     {

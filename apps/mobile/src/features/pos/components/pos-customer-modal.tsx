@@ -79,15 +79,6 @@ export function PosCustomerModal({ visible, onClose, onSelectCustomer }: PosCust
 
   const createMutation = useMutation({
     mutationFn: (data: any) => CustomerService.create(data),
-    onSuccess: (customer) => {
-      toastSuccess('Cliente creado exitosamente');
-      queryClient.invalidateQueries({ queryKey: ['pos-customers'] });
-      onSelectCustomer(customer);
-      handleClose();
-    },
-    onError: () => {
-      toastError('Error al crear el cliente');
-    },
   });
 
   const handleDocumentLookup = useCallback(() => {
@@ -114,6 +105,17 @@ export function PosCustomerModal({ visible, onClose, onSelectCustomer }: PosCust
     handleClose();
   }, [onSelectCustomer]);
 
+  const handleClose = useCallback(() => {
+    onClose();
+    setActiveTab('search');
+    setSearchQuery('');
+    setDocumentLookupQuery('');
+    setLookupResult(null);
+    setLookupPerformed(false);
+    setSearchPerformed(false);
+    setNewCustomer(emptyForm);
+  }, [onClose]);
+
   const handleCreate = useCallback(() => {
     if (!newCustomer.first_name.trim()) {
       Alert.alert('Error', 'El nombre es obligatorio');
@@ -128,26 +130,36 @@ export function PosCustomerModal({ visible, onClose, onSelectCustomer }: PosCust
       return;
     }
 
-    createMutation.mutate({
-      email: newCustomer.email.trim(),
-      first_name: newCustomer.first_name.trim(),
-      last_name: newCustomer.last_name.trim() || undefined,
-      phone: newCustomer.phone.trim() || undefined,
-      document_type: newCustomer.document_type || undefined,
-      document_number: newCustomer.document_number.trim(),
-    });
-  }, [newCustomer]);
-
-  const handleClose = useCallback(() => {
-    onClose();
-    setActiveTab('search');
-    setSearchQuery('');
-    setDocumentLookupQuery('');
-    setLookupResult(null);
-    setLookupPerformed(false);
-    setSearchPerformed(false);
-    setNewCustomer(emptyForm);
-  }, [onClose]);
+    createMutation.mutate(
+      {
+        email: newCustomer.email.trim(),
+        first_name: newCustomer.first_name.trim(),
+        last_name: newCustomer.last_name.trim() || undefined,
+        phone: newCustomer.phone.trim() || undefined,
+        document_type: newCustomer.document_type || undefined,
+        document_number: newCustomer.document_number.trim(),
+      },
+      {
+        onSuccess: (customer) => {
+          toastSuccess('Cliente creado exitosamente');
+          queryClient.invalidateQueries({ queryKey: ['pos-customers'] });
+          onSelectCustomer(customer);
+          onClose();
+          setActiveTab('search');
+          setSearchQuery('');
+          setDocumentLookupQuery('');
+          setLookupResult(null);
+          setLookupPerformed(false);
+          setSearchPerformed(false);
+          setNewCustomer(emptyForm);
+        },
+        onError: (err) => {
+          console.error('Error creating customer:', err);
+          toastError('Error al crear el cliente');
+        },
+      },
+    );
+  }, [newCustomer, queryClient, onSelectCustomer, onClose]);
 
   const handleCreateFromLookup = useCallback(() => {
     setNewCustomer((prev) => ({

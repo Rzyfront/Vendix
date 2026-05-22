@@ -77,43 +77,47 @@ export function PosCartModal({
               <View style={styles.cartItem}>
                 {/* Product Image */}
                 <View style={styles.itemImage}>
-                  {item.product.image_url ? (
+                  {item.product.image_url && item.product.image_url !== 'custom' ? (
                     <Image
                       source={{ uri: item.product.image_url }}
                       style={styles.itemImageImg}
                     />
                   ) : (
                     <View style={styles.imagePlaceholder}>
-                      <Icon name="image" size={18} color={colorScales.gray[400]} />
+                      <Icon name={item.product.id === 0 ? 'file-plus' : 'image'} size={18} color={colorScales.gray[400]} />
                     </View>
                   )}
                 </View>
 
                 {/* Item Info */}
                 <View style={styles.itemInfo}>
-                  <Text style={styles.itemName} numberOfLines={1}>
+                  <Text style={styles.itemName}>
                     {item.product.name}
                   </Text>
                   {item.variant_display_name && (
-                    <Text style={styles.variantName} numberOfLines={1}>
+                    <Text style={styles.variantName}>
                       {item.variant_display_name}
                     </Text>
                   )}
                   <Text style={styles.unitPrice}>
                     {formatCurrency(item.finalPrice)} c/u
                   </Text>
+                  {item.product.description && item.product.id === 0 && (
+                    <Text style={styles.itemDesc} numberOfLines={2}>
+                      {item.product.description}
+                    </Text>
+                  )}
                 </View>
 
-                {/* Remove Button */}
-                <Pressable
-                  onPress={() => onRemoveItem(item.id)}
-                  style={styles.removeBtn}
-                >
-                  <Icon name="x" size={16} color={colorScales.gray[400]} />
-                </Pressable>
-
-                {/* Actions Row: Quantity + Total */}
+                {/* Actions Column: Remove + Qty + Total */}
                 <View style={styles.itemActions}>
+                  <Pressable
+                    onPress={() => onRemoveItem(item.id)}
+                    style={styles.removeBtn}
+                    hitSlop={8}
+                  >
+                    <Icon name="x" size={16} color={colorScales.gray[400]} />
+                  </Pressable>
                   <View style={styles.qtyControls}>
                     <Pressable
                       onPress={() => onDecreaseQuantity(item.id)}
@@ -279,6 +283,7 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+    flexShrink: 1,
   },
   variantName: {
     fontSize: 11,
@@ -287,6 +292,13 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: 2,
   },
+  itemDesc: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    marginTop: 2,
+    lineHeight: 16,
+  },
   unitPrice: {
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
@@ -294,22 +306,23 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   removeBtn: {
-    padding: spacing[1],
-    marginRight: spacing[2],
+    padding: spacing[2],
   },
   itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: spacing[2],
+    minWidth: 80,
   },
   qtyControls: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   qtyBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -324,15 +337,14 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     marginHorizontal: spacing[2],
-    width: 20,
+    minWidth: 24,
     textAlign: 'center',
   },
   itemTotal: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
-    color: colorScales.gray[900],
-    width: 70,
+    color: colors.primary,
     textAlign: 'right',
   },
   summarySection: {

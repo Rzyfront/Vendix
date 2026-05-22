@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { Badge } from '@/shared/components/badge/badge';
@@ -11,6 +12,9 @@ interface PosHeaderProps {
   onOpenUserMenu: () => void;
   notificationCount?: number;
   userInitials: string;
+  title?: string;
+  badgeLabel?: string;
+  showBadge?: boolean;
 }
 
 export function PosHeader({
@@ -20,9 +24,13 @@ export function PosHeader({
   onOpenUserMenu,
   notificationCount = 0,
   userInitials,
+  title = 'Punto de venta',
+  badgeLabel = 'Punto de venta',
+  showBadge = true,
 }: PosHeaderProps) {
+  const insets = useSafeAreaInsets();
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingTop: insets.top + spacing[3] }]}>
       {/* Left: Logo + Title + Badge */}
       <View style={styles.headerLeft}>
         <Pressable onPress={onOpenDrawer} hitSlop={8} style={styles.logoBox}>
@@ -33,8 +41,8 @@ export function PosHeader({
           />
         </Pressable>
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>POS</Text>
-          <Badge label="Punto de venta" variant="success" size="sm" />
+          <Text style={styles.title}>{title}</Text>
+          {showBadge && <Badge label={badgeLabel} variant="success" size="sm" />}
         </View>
       </View>
 
@@ -75,7 +83,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
+    paddingBottom: spacing[3],
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[100],

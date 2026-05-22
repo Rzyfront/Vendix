@@ -113,4 +113,25 @@ export class AuthService {
   static async updateUserSettings(config: any): Promise<void> {
     await apiClient.put(Endpoints.AUTH.SETTINGS, { config });
   }
+
+  static async switchEnvironment(targetEnvironment: 'STORE_ADMIN' | 'ORG_ADMIN', storeSlug?: string): Promise<AuthResponse> {
+    const response = await apiClient.post(Endpoints.AUTH.SWITCH_ENVIRONMENT, {
+      target_environment: targetEnvironment,
+      store_slug: storeSlug,
+    });
+    const data = unwrap<AuthResponse>(response);
+
+    await setToken(data.access_token);
+    await setRefreshToken(data.refresh_token);
+    useAuthStore.getState().setAuthData({
+      user: data.user,
+      user_settings: data.user_settings,
+      store_settings: data.store_settings,
+      default_panel_ui: data.default_panel_ui,
+      access_token: data.access_token,
+      refresh_token: data.refresh_token,
+    });
+
+    return data;
+  }
 }

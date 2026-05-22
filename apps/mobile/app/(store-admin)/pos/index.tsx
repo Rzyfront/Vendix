@@ -15,10 +15,9 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter } from 'expo-router';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
-import { CustomerService, OrderService, ProductService, QuotationService, ShippingService } from '@/features/store/services';
+import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
@@ -30,18 +29,15 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
-import { DrawerMenu } from '@/shared/layouts/drawer-menu';
-import { HelpSearchModal } from '@/features/help/help-search-modal';
-import { NotificationsModal } from '@/features/notifications/notifications-modal';
-import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
 import {
-  PosHeader,
   PosSearchBar,
   PosMobileFooter,
   PosCartModal,
   PosFilterDropdown,
   PosCustomerModal,
   ShippingModal,
+  PosCustomItemModal,
+  PosPaymentModal,
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type {
@@ -1750,7 +1746,7 @@ const PaymentSheet = ({
             <View style={{ flex: 1 }}>
               <Text style={s.fallbackPaymentTitle}>Sin métodos de pago configurados</Text>
               <Text style={s.fallbackPaymentText}>
-                La venta se cerrará como venta sin pago para no bloquear el POS.
+                La venta se cerrará como venta sin pago para no bloquear el punto de venta.
               </Text>
             </View>
           </View>
@@ -1925,22 +1921,17 @@ const SuccessModal = ({
 };
 
 const PosScreen = () => {
-  const insets = useSafeAreaInsets();
-  const pathname = usePathname();
-  const router = useRouter();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [showHelpSearch, setShowHelpSearch] = useState(false);
-  const [showNotifications, setShowNotifications] = useState(false);
-  const [showUserMenu, setShowUserMenu] = useState(false);
   const [search, setSearch] = useState('');
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
   const [showCartModal, setShowCartModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [activeFilters, setActiveFilters] = useState({
@@ -1954,9 +1945,6 @@ const PosScreen = () => {
     customer: any;
     paymentMethod: string;
   } | null>(null);
-
-  const openDrawer = useCallback(() => setDrawerOpen(true), []);
-  const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
@@ -2045,89 +2033,93 @@ const PosScreen = () => {
   }, []);
 
   const handleSaveDraft = useCallback(async () => {
-    const items = useCartStore.getState().items;
+    const state = useCartStore.getState();
+    const items = state.items;
+    const summary = state.summary;
+    const customer = state.customer;
     if (items.length === 0) {
       toastWarning('El carrito está vacío');
       return;
     }
+    if (!customer) {
+      toastWarning('Debe seleccionar un cliente antes de guardar un borrador');
+      return;
+    }
     setSavingDraft(true);
     try {
-      const quotationItems = items.map((i) => ({
-        product_id: Number(i.product.id),
-        product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
-        product_name: i.product.name,
-        variant_sku: i.variant?.sku,
-        quantity: i.quantity,
-        unit_price: Number(i.unitPrice.toFixed(2)),
-        total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
-        tax_rate: i.taxAmount > 0 ? Number((i.taxAmount / (i.unitPrice * i.quantity)).toFixed(2)) : undefined,
-        notes: i.variant_display_name,
-      }));
+      const tenantStoreId = useTenantStore.getState().storeId;
+      const authStoreId = useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id;
+      const storeId = resolvePositiveId(tenantStoreId, authStoreId);
+      if (!storeId) {
+        toastError('La sesión no tiene una tienda activa');
+        return;
+      }
 
-      await QuotationService.create({
-        customer_id: useCartStore.getState().customer?.id,
-        notes: useCartStore.getState().notes || undefined,
-        items: quotationItems,
-      });
+      const payload: CreatePosPaymentDto = {
+        customer_id: Number(customer.id),
+        customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
+        customer_email: customer.email ?? undefined,
+        customer_phone: customer.phone ?? undefined,
+        store_id: storeId,
+        items: items.map((i) => ({
+          product_id: i.product.id === 0 ? 0 : Number(i.product.id),
+          product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
+          product_name: i.product.name,
+          product_sku: i.product.sku || undefined,
+          variant_sku: i.variant?.sku || undefined,
+          quantity: i.quantity,
+          unit_price: Number(i.unitPrice.toFixed(2)),
+          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          tax_amount_item: Number(i.taxAmount.toFixed(2)),
+          cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+        })),
+        subtotal: Number(summary.subtotal.toFixed(2)),
+        tax_amount: Number(summary.taxAmount.toFixed(2)),
+        discount_amount: Number(summary.discountAmount.toFixed(2)),
+        total_amount: Number(summary.total.toFixed(2)),
+        requires_payment: false,
+        delivery_type: 'direct_delivery',
+        internal_notes: state.notes || undefined,
+        update_inventory: false,
+        allow_oversell: true,
+        print_receipt: false,
+      };
 
-      useCartStore.getState().clearCart();
-      toastSuccess('Cotización guardada exitosamente');
+      const response = await OrderService.processPosPayment(payload);
+      if (!response.success) {
+        toastError(response.message || 'Error al guardar el borrador');
+        return;
+      }
+
+      state.clearCart();
+      toastSuccess('Borrador guardado correctamente');
     } catch (error: any) {
-      const message = error?.response?.data?.message || error?.message || 'Error al guardar la cotización';
+      const message = error?.response?.data?.message || error?.message || 'Error al guardar el borrador';
       toastError(message);
     } finally {
       setSavingDraft(false);
     }
   }, []);
 
+  const handleCustomItem = useCallback(() => {
+    setShowCustomItemModal(true);
+  }, []);
+
   const handleShipping = useCallback(() => {
     setShowShippingModal(true);
   }, []);
 
-  const storeName = useTenantStore((s) => s.storeName);
-  const user = useAuthStore((s) => s.user);
-  const userInitials = user
-    ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U'
-    : 'U';
+  const handleShippingSuccess = useCallback((orderNumber: string) => {
+    setOrderNumber(orderNumber);
+    setShowSuccess(true);
+  }, []);
+
+  const handleAddCustomItem = useCallback((data: { name: string; description?: string; quantity: number; price: number; taxRate?: number }) => {
+    useCartStore.getState().addCustomItem(data);
+  }, []);
 
   return (
-    <View style={[s.posRoot, { paddingTop: insets.top }]}>
-      {/* Drawer Overlay */}
-      {drawerOpen && (
-        <Pressable
-          style={[s.drawerOverlay, { zIndex: 40 }]}
-          onPress={closeDrawer}
-        >
-          <View style={s.flex} />
-        </Pressable>
-      )}
-
-      {/* Drawer Menu */}
-      {drawerOpen && (
-        <View
-          style={[
-            s.drawer,
-            {
-              width: Dimensions.get('window').width * 0.8,
-              paddingTop: insets.top,
-              zIndex: 50,
-            },
-          ]}
-        >
-          <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant="store" />
-        </View>
-      )}
-
-      {/* POS Header - Iconos separados como web */}
-      <PosHeader
-        onOpenDrawer={openDrawer}
-        onOpenHelp={() => setShowHelpSearch(true)}
-        onOpenNotifications={() => setShowNotifications(true)}
-        onOpenUserMenu={() => setShowUserMenu(true)}
-        notificationCount={15}
-        userInitials={userInitials}
-      />
-
+    <View style={[s.posRoot]}>
       {/* Search Bar - Con filtros y cliente como web */}
       <PosSearchBar
         onSearch={setSearch}
@@ -2171,16 +2163,16 @@ const PosScreen = () => {
         total={summary.total}
         taxAmount={summary.taxAmount}
         onViewCart={() => setShowCartModal(true)}
-        onCustomItem={() => toastWarning('Ítem personalizado próximamente')}
+        onCustomItem={handleCustomItem}
         onSaveDraft={handleSaveDraft}
         onShipping={handleShipping}
         onCheckout={() => {
-          setShowCartModal(false);
-          setShowPayment(true);
+          setShowPaymentModal(true);
         }}
+        canCreateCustomItems
       />
 
-      {/* Cart Modal - Bottom sheet como web */}
+      {/* Cart Modal */}
       <PosCartModal
         visible={showCartModal}
         onClose={() => setShowCartModal(false)}
@@ -2202,7 +2194,7 @@ const PosScreen = () => {
         onSaveDraft={handleSaveDraft}
         onCheckout={() => {
           setShowCartModal(false);
-          setShowPayment(true);
+          setShowPaymentModal(true);
         }}
       />
 
@@ -2223,15 +2215,19 @@ const PosScreen = () => {
         onClose={() => setShowCart(false)}
         onCharge={() => {
           setShowCart(false);
-          setShowPayment(true);
+          setShowPaymentModal(true);
         }}
       />
 
-      {/* Payment Sheet */}
-      <PaymentSheet
-        visible={showPayment}
-        onClose={() => setShowPayment(false)}
-        onSuccess={handleChargeSuccess}
+      {/* Payment Modal */}
+      <PosPaymentModal
+        visible={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        onSuccess={(orderNumber) => {
+          setShowPaymentModal(false);
+          setOrderNumber(orderNumber);
+          setShowSuccess(true);
+        }}
       />
 
       {/* Success Modal */}
@@ -2240,30 +2236,6 @@ const PosScreen = () => {
         orderNumber={orderNumber}
         onClose={handleCloseSuccess}
         receiptData={receiptData}
-      />
-
-      {/* Help Search Modal */}
-      <HelpSearchModal
-        visible={showHelpSearch}
-        onClose={() => setShowHelpSearch(false)}
-        onSelectArticle={(article) => {
-          toastSuccess(`Abriendo: ${article.title}`);
-        }}
-      />
-
-      {/* Notifications Modal */}
-      <NotificationsModal
-        visible={showNotifications}
-        onClose={() => setShowNotifications(false)}
-        onNavigate={(route) => {
-          router.push(route as never);
-        }}
-      />
-
-      {/* User Dropdown Modal */}
-      <UserDropdownModal
-        visible={showUserMenu}
-        onClose={() => setShowUserMenu(false)}
       />
 
       {/* Filter Dropdown */}
@@ -2278,8 +2250,10 @@ const PosScreen = () => {
       <PosCustomerModal
         visible={showCustomerModal}
         onClose={() => setShowCustomerModal(false)}
-        onSelectCustomer={(customer) => {
+        onSelectCustomer={(customer: PosCustomer) => {
+          useCartStore.getState().setCustomer(customer);
           toastSuccess(`Cliente seleccionado: ${customer.first_name} ${customer.last_name}`);
+          setShowCustomerModal(false);
         }}
       />
 
@@ -2287,10 +2261,18 @@ const PosScreen = () => {
       <ShippingModal
         visible={showShippingModal}
         onClose={() => setShowShippingModal(false)}
-        onSelectShipping={(method) => {
-          toastSuccess(`Envío seleccionado: ${method.name}`);
+        onSuccess={handleShippingSuccess}
+        onSelectCustomer={() => {
           setShowShippingModal(false);
+          setShowCustomerModal(true);
         }}
+      />
+
+      {/* Custom Item Modal */}
+      <PosCustomItemModal
+        visible={showCustomItemModal}
+        onClose={() => setShowCustomItemModal(false)}
+        onAdd={handleAddCustomItem}
       />
 
       {/* Filter Dropdown */}

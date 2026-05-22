@@ -12,6 +12,7 @@ export const Endpoints = {
     ME: '/auth/me',
     PROFILE: '/auth/profile',
     SETTINGS: '/auth/settings',
+    SWITCH_ENVIRONMENT: '/auth/switch-environment',
   },
   STORE: {
     DASHBOARD_STATS: '/store/stores/dashboard/stats',
@@ -206,6 +207,15 @@ export const Endpoints = {
   },
   HELP_CENTER: '/help-center',
   NOTIFICATIONS: '/store/notifications',
+  ORGANIZATION: {
+    STORES: {
+      LIST: '/organization/stores',
+      GET: '/organization/stores/:id',
+      STATS: '/organization/stores/stats',
+      SETTINGS: '/organization/stores/:id/settings',
+      DASHBOARD: '/organization/stores/:id/stats',
+    },
+  },
 } as const;
 
 export type EndpointKey = keyof typeof Endpoints;

@@ -46,7 +46,7 @@ const STATE_VARIANT_MAP: Record<string, 'default' | 'success' | 'warning' | 'err
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
-  pos: 'POS',
+  pos: 'Punto de venta',
   ecommerce: 'E-commerce',
   agent: 'Agente',
   whatsapp: 'WhatsApp',

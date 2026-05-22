@@ -6,3 +6,5 @@ export { PosFilterDropdown } from './pos-filter-dropdown';
 export { PosAddModal } from './pos-add-modal';
 export { PosCustomerModal } from './pos-customer-modal';
 export { ShippingModal } from './shipping-modal';
+export { PosCustomItemModal } from './pos-custom-item-modal';
+export { PosPaymentModal } from './pos-payment-modal';

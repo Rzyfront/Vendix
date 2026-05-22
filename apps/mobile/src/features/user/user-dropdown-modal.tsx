@@ -8,11 +8,13 @@ import {
   Modal as RNModal,
   TouchableWithoutFeedback,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { useAuthStore } from '@/core/store/auth.store';
+import { useTenantStore } from '@/core/store/tenant.store';
 import { AuthService } from '@/core/auth/auth.service';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
+import { toastError } from '@/shared/components/toast/toast.store';
 
 interface UserDropdownModalProps {
   visible: boolean;
@@ -30,10 +32,16 @@ interface MenuOption {
 
 export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const userSettings = useAuthStore((s) => s.user_settings);
   const defaultPanelUi = useAuthStore((s) => s.default_panel_ui);
+  const storeId = useTenantStore((s) => s.storeId);
+  const storeName = useTenantStore((s) => s.storeName);
+  const storeSlug = useTenantStore((s) => s.storeSlug);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  const isOrgAdmin = pathname.startsWith('/(org-admin)');
 
   const userInitials = user
     ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U'
@@ -93,13 +101,36 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
     router.push('/(store-admin)/user-settings' as never);
   };
 
-  const handleGoToOrganization = () => {
+  const handleGoToOrganization = async () => {
     onClose();
-    router.push('/(org-admin)/dashboard' as never);
+    setIsProcessing(true);
+    try {
+      await AuthService.switchEnvironment('ORG_ADMIN');
+      router.replace('/(org-admin)/dashboard' as never);
+    } catch {
+      toastError('Error al cambiar de entorno');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const canSwitchToOrganization = () => {
-    return user?.roles?.includes('owner') || user?.roles?.includes('admin') || user?.roles?.includes('super_admin');
+  const handleGoToStore = async () => {
+    onClose();
+    setIsProcessing(true);
+    try {
+      if (storeSlug) {
+        await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
+      }
+      router.replace('/(store-admin)/dashboard' as never);
+    } catch {
+      toastError('Error al cambiar a la tienda');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const canSwitchToOrganization = (): boolean => {
+    return !!(user?.roles?.includes('owner') || user?.roles?.includes('admin') || user?.roles?.includes('super_admin'));
   };
 
   const menuOptions: MenuOption[] = [
@@ -114,6 +145,13 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
       action: handleGoToSettings,
       badge: newModuleCount > 0 ? newModuleCount : undefined,
     },
+    ...(storeId
+      ? ([{
+          label: storeName ? `Volver a ${storeName}` : 'Volver a tienda',
+          icon: 'arrow-left',
+          action: handleGoToStore,
+        }] as MenuOption[])
+      : []),
     {
       label: 'Administrar Organización',
       icon: 'building',
