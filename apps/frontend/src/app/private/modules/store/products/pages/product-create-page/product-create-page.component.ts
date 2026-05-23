@@ -1001,7 +1001,7 @@ export class ProductCreatePageComponent {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
           label: cat.name,
-          description: cat.description,
+          description: cat.description ?? undefined,
         }));
       },
       error: (error: any) => {
@@ -1048,7 +1048,7 @@ export class ProductCreatePageComponent {
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
           label: brand.name,
-          description: brand.description,
+          description: brand.description ?? undefined,
         }));
 
         // Re-set the brand value to force selector sync after options load

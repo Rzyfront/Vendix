@@ -150,15 +150,11 @@ export class BrandsController {
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
+    @Query('force') force?: string,
   ) {
-    try {
-      await this.brandsService.remove(id, req.user);
-      return this.responseService.deleted('Marca eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al eliminar marca',
-        error.message,
-      );
-    }
+    await this.brandsService.remove(id, req.user, {
+      force: force === 'true',
+    });
+    return this.responseService.deleted('Marca eliminada exitosamente');
   }
 }

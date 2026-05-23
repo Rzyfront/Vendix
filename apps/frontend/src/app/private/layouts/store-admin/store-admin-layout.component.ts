@@ -309,7 +309,11 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Productos',
       icon: 'package',
-      route: '/admin/products',
+      children: [
+        { label: 'Lista', icon: 'list', route: '/admin/products' },
+        { label: 'Categorías', icon: 'layers', route: '/admin/products/categories' },
+        { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
+      ],
     },
     {
       label: 'Inventario',

@@ -89,6 +89,24 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
       key: 'products',
       label: 'Productos',
       description: 'Gestionar cat\u00e1logo de productos',
+      isParent: true,
+      children: [
+        {
+          key: 'products_list',
+          label: 'Lista',
+          description: 'Listado y gesti\u00f3n de productos',
+        },
+        {
+          key: 'products_categories',
+          label: 'Categor\u00edas',
+          description: 'Gestionar categor\u00edas de productos',
+        },
+        {
+          key: 'products_brands',
+          label: 'Marcas',
+          description: 'Gestionar marcas de productos',
+        },
+      ],
     },
     {
       key: 'ecommerce',

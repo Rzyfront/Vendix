@@ -73,6 +73,20 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'categories',
+            loadComponent: () =>
+              import('../../private/modules/store/products/pages/categories-page/categories-page.component').then(
+                (c) => c.CategoriesPageComponent,
+              ),
+          },
+          {
+            path: 'brands',
+            loadComponent: () =>
+              import('../../private/modules/store/products/pages/brands-page/brands-page.component').then(
+                (c) => c.BrandsPageComponent,
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/products/components/product-details/product-details.component').then(

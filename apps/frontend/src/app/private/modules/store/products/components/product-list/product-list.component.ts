@@ -70,6 +70,7 @@ export class ProductListComponent {
   readonly create = output<void>();
   readonly edit = output<Product>();
   readonly delete = output<Product>();
+  readonly toggleState = output<Product>();
   readonly bulkUpload = output<void>();
   readonly bulkImageUpload = output<void>();
   readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
@@ -224,10 +225,23 @@ export class ProductListComponent {
 
   tableActions: TableAction[] = [
     {
-      label: 'Edit',
+      label: 'Editar',
       icon: 'edit',
       action: (product: Product) => this.edit.emit(product),
       variant: 'info',
+    },
+    {
+      label: (product: Product) =>
+        product.state === ProductState.ACTIVE ? 'Desactivar' : 'Activar',
+      icon: (product: Product) =>
+        product.state === ProductState.ACTIVE ? 'toggle-right' : 'toggle-left',
+      variant: (product: Product) =>
+        product.state === ProductState.ACTIVE ? 'warning' : 'success',
+      tooltip: (product: Product) =>
+        product.state === ProductState.ACTIVE
+          ? 'Desactivar producto'
+          : 'Activar producto',
+      action: (product: Product) => this.toggleState.emit(product),
     },
     {
       label: 'Eliminar',

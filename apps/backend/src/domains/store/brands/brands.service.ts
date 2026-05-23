@@ -37,7 +37,9 @@ export class BrandsService {
 
     try {
       const sanitizedLogoUrl = extractS3KeyFromUrl(createBrandDto.logo_url);
-      const slug = this.generateSlug(createBrandDto.name);
+      const slug = createBrandDto.slug?.trim()
+        ? this.generateSlug(createBrandDto.slug)
+        : this.generateSlug(createBrandDto.name);
 
       const brand = await this.prisma.brands.create({
         data: {
@@ -46,6 +48,7 @@ export class BrandsService {
           description: createBrandDto.description,
           logo_url: sanitizedLogoUrl,
           store_id,
+          state: createBrandDto.state ?? 'active',
         },
       });
 
@@ -66,6 +69,7 @@ export class BrandsService {
       page = 1,
       limit = 10,
       search,
+      state,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
@@ -73,6 +77,9 @@ export class BrandsService {
     const skip = (page - 1) * limit;
 
     const where: any = {};
+
+    if (state) where.state = state;
+    else where.state = { not: 'archived' }; // Excluir archivados por defecto
 
     if (search) {
       where.OR = [
@@ -149,12 +156,20 @@ export class BrandsService {
       updateData.slug = this.generateSlug(updateBrandDto.name);
     }
 
+    if (updateBrandDto.slug !== undefined && updateBrandDto.slug.trim()) {
+      updateData.slug = this.generateSlug(updateBrandDto.slug);
+    }
+
     if (updateBrandDto.description !== undefined) {
       updateData.description = updateBrandDto.description;
     }
 
     if (updateBrandDto.logo_url !== undefined) {
       updateData.logo_url = extractS3KeyFromUrl(updateBrandDto.logo_url);
+    }
+
+    if (updateBrandDto.state !== undefined) {
+      updateData.state = updateBrandDto.state;
     }
 
     try {
@@ -180,17 +195,30 @@ export class BrandsService {
     }
   }
 
-  async remove(id: number, user: any) {
+  async remove(
+    id: number,
+    user: any,
+    options: { force?: boolean } = {},
+  ) {
     const brand = await this.findOne(id);
 
     const productCount = await this.prisma.products.count({
       where: { brand_id: id },
     });
 
-    if (productCount > 0) {
-      throw new BadRequestException(
-        'Cannot delete brand with assigned products',
+    if (productCount > 0 && !options.force) {
+      throw new VendixHttpException(
+        ErrorCodes.BRAND_DELETE_HAS_PRODUCTS,
+        undefined,
+        { product_count: productCount },
       );
+    }
+
+    if (productCount > 0 && options.force) {
+      await this.prisma.products.updateMany({
+        where: { brand_id: id },
+        data: { brand_id: null },
+      });
     }
 
     await this.prisma.brands.update({

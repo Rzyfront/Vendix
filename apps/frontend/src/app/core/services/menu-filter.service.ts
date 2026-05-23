@@ -52,6 +52,9 @@ export class MenuFilterService {
     // STORE_ADMIN - Módulos principales (sin hijos)
     'Punto de Venta': 'pos',
     Productos: 'products',
+    Lista: 'products_list',
+    Categorías: 'products_categories',
+    Marcas: 'products_brands',
     'Tienda en línea': 'ecommerce',
 
     // STORE_ADMIN - Órdenes (padre + submódulos)
