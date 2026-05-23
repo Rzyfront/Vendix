@@ -91,20 +91,23 @@ export async function seedProductsAndCategories(
         ? techStore1.id
         : fashionStore1.id;
 
-    const createdTaxCategory = await client.tax_categories.upsert({
+    const existing = await client.tax_categories.findFirst({
       where: {
-        store_id_name: {
-          store_id: store_id,
-          name: taxCategory.name,
-        },
-      } as any,
-      update: {},
-      create: {
-        name: taxCategory.name,
-        description: taxCategory.description,
         store_id: store_id,
+        name: taxCategory.name,
+        organization_id: null,
       },
     });
+
+    const createdTaxCategory =
+      existing ??
+      (await client.tax_categories.create({
+        data: {
+          name: taxCategory.name,
+          description: taxCategory.description,
+          store_id: store_id,
+        },
+      }));
     createdTaxCategories.push(createdTaxCategory);
   }
 
