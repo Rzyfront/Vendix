@@ -28,6 +28,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colorScales.gray[900],
     fontSize: typography.fontSize.base,
+    fontFamily: typography.fontFamily,
     paddingVertical: 0,
   },
   clearButton: {

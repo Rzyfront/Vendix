@@ -16,9 +16,18 @@ import { CufeCalculator } from '../utils/cufe-calculator';
 export class MockInvoiceProvider implements InvoiceProviderAdapter {
   private readonly logger = new Logger(MockInvoiceProvider.name);
 
+  private assertNonProduction(): void {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'Mock invoice provider is disabled in production. Configure DIAN own-software credentials and the customer certificate.',
+      );
+    }
+  }
+
   async sendInvoice(
     invoiceData: ProviderInvoiceData,
   ): Promise<ProviderResponse> {
+    this.assertNonProduction();
     this.logger.log(
       `[MOCK] Sending invoice ${invoiceData.invoice_number} to provider`,
     );
@@ -59,6 +68,7 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
   async sendCreditNote(
     creditNoteData: ProviderInvoiceData,
   ): Promise<ProviderResponse> {
+    this.assertNonProduction();
     this.logger.log(
       `[MOCK] Sending credit note ${creditNoteData.invoice_number} to provider`,
     );
@@ -68,14 +78,35 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     return {
       success: true,
       tracking_id,
-      cufe: `mock-cufe-cn-${tracking_id.substring(0, 8)}`,
+      cude: `mock-cude-cn-${tracking_id.substring(0, 8)}`,
       qr_code: `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=mock-cn-${tracking_id.substring(0, 8)}`,
       message: 'Credit note accepted by mock provider',
       provider_data: { mock: true, timestamp: new Date().toISOString() },
     };
   }
 
+  async sendDebitNote(
+    debitNoteData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    this.assertNonProduction();
+    this.logger.log(
+      `[MOCK] Sending debit note ${debitNoteData.invoice_number} to provider`,
+    );
+
+    const tracking_id = randomUUID();
+
+    return {
+      success: true,
+      tracking_id,
+      cude: `mock-cude-dn-${tracking_id.substring(0, 8)}`,
+      qr_code: `https://catalogo-vpfe.dian.gov.co/document/searchqr?documentkey=mock-dn-${tracking_id.substring(0, 8)}`,
+      message: 'Debit note accepted by mock provider',
+      provider_data: { mock: true, timestamp: new Date().toISOString() },
+    };
+  }
+
   async checkStatus(trackingId: string): Promise<StatusResponse> {
+    this.assertNonProduction();
     this.logger.log(`[MOCK] Checking status for tracking ID: ${trackingId}`);
 
     return {
@@ -91,6 +122,7 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     invoiceId: string,
     reason: string,
   ): Promise<ProviderResponse> {
+    this.assertNonProduction();
     this.logger.log(
       `[MOCK] Cancelling invoice ${invoiceId}. Reason: ${reason}`,
     );

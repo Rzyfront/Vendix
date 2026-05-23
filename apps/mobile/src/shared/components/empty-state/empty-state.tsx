@@ -27,12 +27,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     textAlign: 'center',
     marginBottom: spacing[2],
   },
   description: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     textAlign: 'center',
     marginBottom: spacing[6],

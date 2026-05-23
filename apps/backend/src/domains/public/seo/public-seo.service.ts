@@ -238,11 +238,11 @@ ${entries}
       };
     } catch {
       this.logger.warn(
-        `Domain resolution failed for ${hostname}, falling back to vendix-corp`,
+        `Domain resolution failed for ${hostname}, falling back to vendix`,
       );
     }
 
-    // Fallback: vendix-corp landing
+    // Fallback: vendix landing
     return this.resolveVendixCoreFallback();
   }
 
@@ -250,7 +250,7 @@ ${entries}
     const base_domain = DomainConfigService.getBaseDomain();
 
     const org = await this.globalPrisma.organizations.findFirst({
-      where: { slug: 'vendix-corp' },
+      where: { slug: 'vendix' },
       select: { id: true },
     });
 

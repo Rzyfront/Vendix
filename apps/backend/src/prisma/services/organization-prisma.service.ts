@@ -49,6 +49,8 @@ export class OrganizationPrismaService extends BasePrismaService {
     'fiscal_periods',
     'accounting_entries',
     'accounting_entry_lines',
+    'fiscal_transmissions',
+    'fiscal_evidences',
     'employees',
     'payroll_runs',
     'payroll_items',
@@ -375,6 +377,14 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get invoice_resolutions() {
     return this.scoped_client.invoice_resolutions;
+  }
+
+  get fiscal_transmissions() {
+    return this.scoped_client.fiscal_transmissions;
+  }
+
+  get fiscal_evidences() {
+    return this.scoped_client.fiscal_evidences;
   }
 
   // Accounting models

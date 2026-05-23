@@ -20,6 +20,7 @@ export interface CartItem {
   taxAmount: number;
   notes?: string;
   variant_display_name?: string;
+  itemType?: 'product' | 'custom';
 }
 
 export interface CartDiscount {

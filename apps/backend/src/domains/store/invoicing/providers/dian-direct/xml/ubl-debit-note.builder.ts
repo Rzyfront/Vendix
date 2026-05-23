@@ -80,6 +80,7 @@ export class UblDebitNoteBuilder {
     doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(debit_note_data.issue_date);
 
     const issue_time =
+      debit_note_data.issue_time ||
       new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
     doc.ele(UBL_NAMESPACES.CBC, 'IssueTime').txt(issue_time);
 

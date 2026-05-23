@@ -9,8 +9,17 @@ import type {
   ProductVariant,
 } from '@/features/store/types';
 
+interface CustomItemData {
+  name: string;
+  description?: string;
+  quantity: number;
+  price: number;
+  taxRate?: number;
+}
+
 interface CartActions {
   addItem: (product: Product, variant?: ProductVariant | null, quantity?: number) => void;
+  addCustomItem: (custom: CustomItemData) => void;
   removeItem: (itemId: string) => void;
   updateQuantity: (itemId: string, quantity: number) => void;
   setCustomer: (customer: PosCustomer | null) => void;
@@ -115,6 +124,61 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
       const summary = computeSummary(updated, get().discounts);
       set({ items: updated, summary });
     }
+  },
+
+  addCustomItem: (custom) => {
+    const { items, discounts } = get();
+    const taxAmount = custom.price * custom.quantity * (custom.taxRate ?? 0);
+    const finalPrice = custom.price * (1 + (custom.taxRate ?? 0));
+    const newItem: CartItem = {
+      id: generateItemId(),
+      product: {
+        id: 0,
+        store_id: 0,
+        name: custom.name,
+        slug: 'custom-' + Date.now(),
+        description: custom.description ?? null,
+        base_price: custom.price,
+        state: 'active',
+        final_price: finalPrice,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        track_inventory: false,
+        pricing_type: 'unit',
+        product_type: 'service',
+        is_on_sale: false,
+        sale_price: null,
+        cost_price: null,
+        profit_margin: null,
+        available_for_ecommerce: false,
+        sku: null,
+        stock_quantity: null,
+        weight: null,
+        service_duration_minutes: null,
+        service_modality: null,
+        requires_booking: false,
+        image_url: 'custom',
+        brand: null,
+        categories: [],
+        product_variants: [],
+        product_images: [],
+        tax_assignments: custom.taxRate
+          ? [{ id: 0, tax_category: { id: 0, name: '', tax_rates: [{ id: 0, rate: custom.taxRate }] } } as any]
+          : [],
+        total_stock_available: 0,
+      } as Product,
+      variant: null,
+      quantity: custom.quantity,
+      unitPrice: custom.price,
+      finalPrice,
+      totalPrice: custom.quantity * finalPrice,
+      taxAmount: taxAmount,
+      variant_display_name: custom.description || undefined,
+      itemType: 'custom',
+    };
+    const updated = [...items, newItem];
+    const summary = computeSummary(updated, discounts);
+    set({ items: updated, summary });
   },
 
   removeItem: (itemId) => {

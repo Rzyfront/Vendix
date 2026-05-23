@@ -81,6 +81,7 @@ export class UblCreditNoteBuilder {
     doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(credit_note_data.issue_date);
 
     const issue_time =
+      credit_note_data.issue_time ||
       new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
     doc.ele(UBL_NAMESPACES.CBC, 'IssueTime').txt(issue_time);
 

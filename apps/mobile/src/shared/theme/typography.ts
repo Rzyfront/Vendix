@@ -1,6 +1,7 @@
 import { TextStyle } from 'react-native';
 
 export const typography = {
+  fontFamily: 'Inter' as TextStyle['fontFamily'],
   fontSize: {
     xs: 12,
     sm: 14,

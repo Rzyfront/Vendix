@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import {
   CreateCreditNoteDto,
   CreateDebitNoteDto,
@@ -33,6 +34,7 @@ export class CreditNotesService {
     private readonly prisma: StorePrismaService,
     private readonly invoice_number_generator: InvoiceNumberGenerator,
     private readonly event_emitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -41,6 +43,25 @@ export class CreditNotesService {
       throw new Error('No request context found');
     }
     return context;
+  }
+
+  private async resolveAccountingEntityIdForContext(context: {
+    organization_id?: number;
+    store_id?: number;
+  }): Promise<number> {
+    if (
+      typeof context.organization_id !== 'number' ||
+      typeof context.store_id !== 'number'
+    ) {
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+    }
+
+    const entity = await this.fiscalScope.resolveAccountingEntityForFiscal({
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+    });
+
+    return entity.id;
   }
 
   async createCreditNote(dto: CreateCreditNoteDto) {
@@ -56,6 +77,8 @@ export class CreditNotesService {
     type: 'credit_note' | 'debit_note',
   ) {
     const context = this.getContext();
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
 
     // Validate the related invoice exists and is accepted
     const related_invoice = await this.prisma.invoices.findFirst({
@@ -66,18 +89,32 @@ export class CreditNotesService {
       throw new VendixHttpException(ErrorCodes.INVOICING_FIND_001);
     }
 
-    if (
-      related_invoice.status !== 'accepted' &&
-      related_invoice.status !== 'sent'
-    ) {
+    if (related_invoice.status !== 'accepted') {
       throw new VendixHttpException(
         ErrorCodes.INVOICING_STATUS_002,
-        `Cannot create ${type} for invoice in '${related_invoice.status}' status. Invoice must be accepted or sent.`,
+        `Cannot create ${type} for invoice in '${related_invoice.status}' status. Invoice must be accepted by DIAN first.`,
+      );
+    }
+
+    const note_accounting_entity_id =
+      related_invoice.accounting_entity_id || accounting_entity_id;
+    if (note_accounting_entity_id !== accounting_entity_id) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_SCOPE_INVALID,
+        'The related invoice belongs to a different fiscal entity.',
+        {
+          related_invoice_id: related_invoice.id,
+          related_accounting_entity_id: related_invoice.accounting_entity_id,
+          current_accounting_entity_id: accounting_entity_id,
+        },
       );
     }
 
     const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber();
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: type,
+        accounting_entity_id: note_accounting_entity_id,
+      });
 
     // Calculate amounts
     let subtotal = 0;
@@ -94,6 +131,8 @@ export class CreditNotesService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        accounting_entity_id: note_accounting_entity_id,
+        fiscal_document_type: type,
         invoice_number,
         invoice_type: type,
         status: 'draft',

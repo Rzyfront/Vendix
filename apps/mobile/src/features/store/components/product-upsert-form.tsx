@@ -335,7 +335,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     <View style={styles.container}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-          <Section title="Datos básicos" subtitle="Información visible en POS, catálogo e inventario">
+          <Section title="Datos básicos" subtitle="Información visible en punto de venta, catálogo e inventario">
             <Input label="Nombre" value={form.name} onChangeText={(value) => updateField('name', value)} error={errors.name} />
             <Input label="SKU" value={form.sku} onChangeText={(value) => updateField('sku', value.toUpperCase())} autoCapitalize="characters" />
             <Input label="Descripción" value={form.description} onChangeText={(value) => updateField('description', value)} multiline />

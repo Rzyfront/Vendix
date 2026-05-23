@@ -246,7 +246,7 @@ export class AppConfigService {
         hostname: 'vendix.store',
         domainType: 'PRIMARY',
         environment: AppType.VENDIX_LANDING,
-        organization_slug: 'vendix-corp',
+        organization_slug: 'vendix',
         organization_name: 'Vendix Corp',
         store_slug: undefined,
         store_name: undefined,
@@ -329,7 +329,7 @@ export class AppConfigService {
         currency: domainInfo.currency,
         security: domainInfo.config?.security,
       },
-      isVendixDomain: domainInfo.organization_slug === 'vendix-corp',
+      isVendixDomain: domainInfo.organization_slug === 'vendix',
       isMainVendixDomain:
         hostname === environment.vendixDomain ||
         hostname === `www.${environment.vendixDomain}`,

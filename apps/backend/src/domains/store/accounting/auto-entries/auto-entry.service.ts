@@ -91,7 +91,6 @@ export class AutoEntryService {
           where: {
             id: accounting_entity_id,
             organization_id,
-            ...(store_id ? { store_id } : {}),
             is_active: true,
           },
         })
@@ -264,6 +263,22 @@ export class AutoEntryService {
     }
     const entry_number = `${prefix}${String(sequence).padStart(6, '0')}`;
 
+    const existing_entry = await this.prisma.accounting_entries.findFirst({
+      where: {
+        organization_id,
+        source_type,
+        source_id,
+        accounting_entity_id: accounting_entity.id,
+      },
+    });
+    if (existing_entry) {
+      this.logger.warn(
+        `Skipping duplicate auto-entry for ${source_type}#${source_id} ` +
+          `(entry #${existing_entry.id})`,
+      );
+      return existing_entry;
+    }
+
     // Create the entry and lines in a transaction, auto-posted
     const entry = await this.prisma.$transaction(async (tx: any) => {
       const created_entry = await tx.accounting_entries.create({
@@ -300,6 +315,50 @@ export class AutoEntryService {
         }),
       });
 
+      if (source_type === 'invoice.validated') {
+        await tx.invoices.updateMany({
+          where: {
+            id: source_id,
+            organization_id,
+            accounting_entity_id: accounting_entity.id,
+          },
+          data: {
+            accounting_entry_id: created_entry.id,
+            accounting_status: 'posted',
+          },
+        });
+        await tx.fiscal_transmissions.updateMany({
+          where: {
+            source_type: 'invoice',
+            source_id,
+            accounting_entity_id: accounting_entity.id,
+          },
+          data: { accounting_status: 'posted' },
+        });
+      }
+
+      if (source_type === 'payroll.approved') {
+        await tx.payroll_runs.updateMany({
+          where: {
+            id: source_id,
+            organization_id,
+            accounting_entity_id: accounting_entity.id,
+          },
+          data: {
+            accounting_entry_id: created_entry.id,
+            accounting_status: 'posted',
+          },
+        });
+        await tx.payroll_items.updateMany({
+          where: {
+            payroll_run_id: source_id,
+            accounting_entity_id: accounting_entity.id,
+            dian_status: 'accepted',
+          },
+          data: { accounting_status: 'posted' },
+        });
+      }
+
       return created_entry;
     });
 
@@ -315,7 +374,8 @@ export class AutoEntryService {
   // These can be called directly by other services or wired via @OnEvent()
 
   /**
-   * invoice.validated: Debit Accounts Receivable, Credit Revenue + VAT Payable
+   * Fiscal invoice acceptance: Debit Accounts Receivable, Credit Revenue + VAT Payable.
+   * Mapping/source keys keep the legacy invoice.validated name for compatibility.
    */
   async onInvoiceValidated(data: {
     invoice_id: number;
@@ -325,6 +385,7 @@ export class AutoEntryService {
     tax_amount: number;
     total: number;
     user_id?: number;
+    accounting_entity_id?: number;
   }) {
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
@@ -363,6 +424,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
       entry_date: new Date(),
       description: `Invoice validated #${data.invoice_id}`,
       lines,
@@ -698,6 +760,7 @@ export class AutoEntryService {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    accounting_entity_id?: number;
     user_id?: number;
     cost_center_breakdown?: Record<
       string,
@@ -827,6 +890,7 @@ export class AutoEntryService {
       source_id: data.payroll_run_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
       entry_date: new Date(),
       description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
       lines,

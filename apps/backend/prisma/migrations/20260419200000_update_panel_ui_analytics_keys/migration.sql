@@ -1,32 +1,47 @@
--- Update panel_ui JSON: replace analytics_traffic/performance with analytics_purchases/reviews
--- This migration ensures existing tenants get the new analytics keys
+-- DATA IMPACT:
+-- Tables affected: store_settings, organization_settings
+-- Expected row changes: rename legacy panel_ui keys (analytics_traffic/performance)
+--                      to new keys (analytics_purchases/reviews) inside settings JSON
+-- Destructive operations: none (jsonb_set preserves other keys)
+-- FK/cascade risk: none
+-- Idempotency: WHERE clause checks for legacy keys; safe to re-run
+-- NOTE: original migration referenced a non-existent top-level `panel_ui` column.
+--       panel_ui is a nested key inside settings JSON. Corrected before any environment applied.
 
--- Store settings
 UPDATE store_settings
-SET panel_ui = jsonb_build_object(
-    'analytics', COALESCE((panel_ui->>'analytics')::boolean, true),
-    'analytics_overview', COALESCE((panel_ui->>'analytics_overview')::boolean, true),
-    'analytics_sales', COALESCE((panel_ui->>'analytics_sales')::boolean, true),
-    'analytics_purchases', COALESCE((panel_ui->>'analytics_traffic')::boolean, true),
-    'analytics_reviews', COALESCE((panel_ui->>'analytics_performance')::boolean, true),
-    'analytics_inventory', COALESCE((panel_ui->>'analytics_inventory')::boolean, true),
-    'analytics_products', COALESCE((panel_ui->>'analytics_products')::boolean, true),
-    'analytics_customers', COALESCE((panel_ui->>'analytics_customers')::boolean, true),
-    'analytics_financial', COALESCE((panel_ui->>'analytics_financial')::boolean, true)
+SET settings = jsonb_set(
+    COALESCE(settings, '{}'::jsonb),
+    '{panel_ui}',
+    jsonb_build_object(
+        'analytics', COALESCE((settings->'panel_ui'->>'analytics')::boolean, true),
+        'analytics_overview', COALESCE((settings->'panel_ui'->>'analytics_overview')::boolean, true),
+        'analytics_sales', COALESCE((settings->'panel_ui'->>'analytics_sales')::boolean, true),
+        'analytics_purchases', COALESCE((settings->'panel_ui'->>'analytics_traffic')::boolean, true),
+        'analytics_reviews', COALESCE((settings->'panel_ui'->>'analytics_performance')::boolean, true),
+        'analytics_inventory', COALESCE((settings->'panel_ui'->>'analytics_inventory')::boolean, true),
+        'analytics_products', COALESCE((settings->'panel_ui'->>'analytics_products')::boolean, true),
+        'analytics_customers', COALESCE((settings->'panel_ui'->>'analytics_customers')::boolean, true),
+        'analytics_financial', COALESCE((settings->'panel_ui'->>'analytics_financial')::boolean, true)
+    )
 )
-WHERE panel_ui ? 'analytics_traffic' OR panel_ui ? 'analytics_performance';
+WHERE settings IS NOT NULL
+  AND (settings->'panel_ui' ? 'analytics_traffic' OR settings->'panel_ui' ? 'analytics_performance');
 
--- Organization settings
 UPDATE organization_settings
-SET panel_ui = jsonb_build_object(
-    'analytics', COALESCE((panel_ui->>'analytics')::boolean, true),
-    'analytics_overview', COALESCE((panel_ui->>'analytics_overview')::boolean, true),
-    'analytics_sales', COALESCE((panel_ui->>'analytics_sales')::boolean, true),
-    'analytics_purchases', COALESCE((panel_ui->>'analytics_traffic')::boolean, true),
-    'analytics_reviews', COALESCE((panel_ui->>'analytics_performance')::boolean, true),
-    'analytics_inventory', COALESCE((panel_ui->>'analytics_inventory')::boolean, true),
-    'analytics_products', COALESCE((panel_ui->>'analytics_products')::boolean, true),
-    'analytics_customers', COALESCE((panel_ui->>'analytics_customers')::boolean, true),
-    'analytics_financial', COALESCE((panel_ui->>'analytics_financial')::boolean, true)
+SET settings = jsonb_set(
+    COALESCE(settings, '{}'::jsonb),
+    '{panel_ui}',
+    jsonb_build_object(
+        'analytics', COALESCE((settings->'panel_ui'->>'analytics')::boolean, true),
+        'analytics_overview', COALESCE((settings->'panel_ui'->>'analytics_overview')::boolean, true),
+        'analytics_sales', COALESCE((settings->'panel_ui'->>'analytics_sales')::boolean, true),
+        'analytics_purchases', COALESCE((settings->'panel_ui'->>'analytics_traffic')::boolean, true),
+        'analytics_reviews', COALESCE((settings->'panel_ui'->>'analytics_performance')::boolean, true),
+        'analytics_inventory', COALESCE((settings->'panel_ui'->>'analytics_inventory')::boolean, true),
+        'analytics_products', COALESCE((settings->'panel_ui'->>'analytics_products')::boolean, true),
+        'analytics_customers', COALESCE((settings->'panel_ui'->>'analytics_customers')::boolean, true),
+        'analytics_financial', COALESCE((settings->'panel_ui'->>'analytics_financial')::boolean, true)
+    )
 )
-WHERE panel_ui ? 'analytics_traffic' OR panel_ui ? 'analytics_performance';
+WHERE settings IS NOT NULL
+  AND (settings->'panel_ui' ? 'analytics_traffic' OR settings->'panel_ui' ? 'analytics_performance');

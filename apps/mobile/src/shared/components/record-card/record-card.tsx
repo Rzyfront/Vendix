@@ -205,6 +205,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
     fontSize: 10,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.green[800],
   },
   titleBlock: {
@@ -214,6 +215,7 @@ const styles = StyleSheet.create({
   eyebrow: {
     fontSize: 11,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
     textTransform: 'uppercase',
     letterSpacing: 0.8,
@@ -223,12 +225,14 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.base,
     lineHeight: 21,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   subtitle: {
     marginTop: spacing[1],
     fontSize: typography.fontSize.sm,
     lineHeight: 18,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   badgeColumn: {
@@ -262,6 +266,7 @@ const styles = StyleSheet.create({
   detailLabel: {
     fontSize: 11,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -270,6 +275,7 @@ const styles = StyleSheet.create({
     marginTop: spacing[0.5],
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[800],
   },
   footer: {
@@ -285,6 +291,7 @@ const styles = StyleSheet.create({
   },
   footerLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   footerValue: {
@@ -292,5 +299,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
   },
 });

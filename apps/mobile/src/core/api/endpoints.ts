@@ -12,6 +12,7 @@ export const Endpoints = {
     ME: '/auth/me',
     PROFILE: '/auth/profile',
     SETTINGS: '/auth/settings',
+    SWITCH_ENVIRONMENT: '/auth/switch-environment',
   },
   STORE: {
     DASHBOARD_STATS: '/store/stores/dashboard/stats',
@@ -99,6 +100,24 @@ export const Endpoints = {
       LIST: '/store/cash-registers',
       SESSIONS: '/store/cash-registers/sessions',
     },
+    QUOTATIONS: {
+      LIST: '/store/quotations',
+      GET: '/store/quotations/:id',
+      CREATE: '/store/quotations',
+      UPDATE: '/store/quotations/:id',
+      DELETE: '/store/quotations/:id',
+      STATS: '/store/quotations/stats',
+      SEND: '/store/quotations/:id/send',
+      ACCEPT: '/store/quotations/:id/accept',
+      REJECT: '/store/quotations/:id/reject',
+      CANCEL: '/store/quotations/:id/cancel',
+      CONVERT: '/store/quotations/:id/convert',
+      DUPLICATE: '/store/quotations/:id/duplicate',
+    },
+    SHIPPING_METHODS: {
+      LIST: '/store/shipping-methods',
+      ENABLE: '/store/shipping-methods/enable',
+    },
     INVOICES: {
       LIST: '/store/invoices',
       GET: '/store/invoices/:id',
@@ -184,6 +203,17 @@ export const Endpoints = {
         LIST: '/store/accounting/payables',
         PAY: '/store/accounting/payables/:id/pay',
       },
+    },
+  },
+  HELP_CENTER: '/help-center',
+  NOTIFICATIONS: '/store/notifications',
+  ORGANIZATION: {
+    STORES: {
+      LIST: '/organization/stores',
+      GET: '/organization/stores/:id',
+      STATS: '/organization/stores/stats',
+      SETTINGS: '/organization/stores/:id/settings',
+      DASHBOARD: '/organization/stores/:id/stats',
     },
   },
 } as const;

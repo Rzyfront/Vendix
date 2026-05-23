@@ -79,12 +79,13 @@ export class AccountingEventsListener {
     return accounting_flows[flow_key] !== false;
   }
 
-  @OnEvent('invoice.validated')
-  async handleInvoiceValidated(event: {
+  @OnEvent('invoice.accepted')
+  async handleInvoiceAccepted(event: {
     invoice_id: number;
     invoice_number: string;
     organization_id: number;
     store_id?: number;
+    accounting_entity_id?: number;
     subtotal_amount: number;
     tax_amount: number;
     total_amount: number;
@@ -96,17 +97,18 @@ export class AccountingEventsListener {
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
         subtotal: event.subtotal_amount,
         tax_amount: event.tax_amount,
         total: event.total_amount,
         user_id: event.user_id,
       });
       this.logger.log(
-        `Auto-entry created for invoice.validated #${event.invoice_id}`,
+        `Auto-entry created for invoice.accepted #${event.invoice_id}`,
       );
     } catch (error) {
       this.logger.error(
-        `Failed to create auto-entry for invoice.validated #${event.invoice_id}: ${error.message}`,
+        `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
         error.stack,
       );
     }
@@ -260,6 +262,56 @@ export class AccountingEventsListener {
     payroll_run_id: number;
     organization_id: number;
     store_id?: number;
+    accounting_entity_id?: number;
+    total_earnings: number;
+    total_employer_costs: number;
+    total_deductions: number;
+    total_net_pay: number;
+    health_deduction: number;
+    pension_deduction: number;
+    approved_by: number;
+    dian_accepted?: boolean;
+    cost_center_breakdown?: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    >;
+  }) {
+    if (!event.dian_accepted) {
+      this.logger.warn(
+        `Skipping fiscal payroll auto-entry for payroll.approved #${event.payroll_run_id}: DIAN acceptance is required`,
+      );
+      return;
+    }
+
+    await this.createPayrollAcceptedEntry(event);
+  }
+
+  @OnEvent('payroll.dian_accepted')
+  async handlePayrollDianAccepted(event: {
+    payroll_run_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    total_earnings: number;
+    total_employer_costs: number;
+    total_deductions: number;
+    total_net_pay: number;
+    health_deduction: number;
+    pension_deduction: number;
+    approved_by: number;
+    cost_center_breakdown?: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    >;
+  }) {
+    await this.createPayrollAcceptedEntry(event);
+  }
+
+  private async createPayrollAcceptedEntry(event: {
+    payroll_run_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
     total_earnings: number;
     total_employer_costs: number;
     total_deductions: number;
@@ -278,6 +330,7 @@ export class AccountingEventsListener {
         payroll_run_id: event.payroll_run_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
         total_earnings: Number(event.total_earnings),
         total_employer_costs: Number(event.total_employer_costs),
         total_deductions: Number(event.total_deductions),

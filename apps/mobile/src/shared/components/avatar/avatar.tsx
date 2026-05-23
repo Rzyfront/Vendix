@@ -66,6 +66,7 @@ const styles = StyleSheet.create({
   },
   initials: {
     fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
     color: colors.background,
   },
   image: {

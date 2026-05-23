@@ -10,6 +10,14 @@ import { randomUUID } from 'crypto';
 export class MockPayrollProvider implements PayrollProviderAdapter {
   private readonly logger = new Logger(MockPayrollProvider.name);
 
+  private assertNonProduction(): void {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        'Mock payroll provider is disabled in production. Configure DIAN own-software payroll credentials and the customer certificate.',
+      );
+    }
+  }
+
   async sendPayroll(payroll_data: {
     payroll_run_id: number;
     payroll_number: string;
@@ -17,6 +25,7 @@ export class MockPayrollProvider implements PayrollProviderAdapter {
     period_end: Date;
     items: Array<Record<string, any>>;
   }): Promise<PayrollProviderResponse> {
+    this.assertNonProduction();
     const tracking_id = randomUUID();
     const fake_cune = `CUNE-MOCK-${Date.now()}-${randomUUID().slice(0, 8)}`;
 
@@ -38,6 +47,7 @@ export class MockPayrollProvider implements PayrollProviderAdapter {
   }
 
   async checkStatus(tracking_id: string): Promise<PayrollStatusResponse> {
+    this.assertNonProduction();
     this.logger.log(`[MOCK] Checking status for tracking: ${tracking_id}`);
 
     return {

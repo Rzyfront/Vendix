@@ -14,12 +14,14 @@ export class PayrollProviderModule {
         MockPayrollProvider,
         {
           provide: PAYROLL_PROVIDER,
-          useClass: MockPayrollProvider,
-          // TODO: Use factory to select provider based on
-          // dian_configurations.configuration_type='payroll' existence.
-          // For now, default to MockPayrollProvider.
-          // The DianPayrollProvider can be injected directly via DianPayrollModule
-          // when the store has a payroll DIAN configuration.
+          useFactory: (
+            mockProvider: MockPayrollProvider,
+            dianProvider: DianPayrollProvider,
+          ) =>
+            process.env.NODE_ENV === 'production'
+              ? dianProvider
+              : mockProvider,
+          inject: [MockPayrollProvider, DianPayrollProvider],
         },
       ],
       exports: [PAYROLL_PROVIDER, DianPayrollModule],

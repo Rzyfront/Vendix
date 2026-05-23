@@ -38,10 +38,12 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   subtitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginTop: spacing[0.5],
   },
@@ -50,12 +52,14 @@ const styles = StyleSheet.create({
   },
   rightText: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginRight: spacing[2],
   },
   chevron: {
     color: colorScales.gray[400],
     fontSize: typography.fontSize.lg,
+    fontFamily: typography.fontFamily,
   },
   pressedContainer: {
     backgroundColor: colorScales.gray[50],
@@ -75,6 +79,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colorScales.blue[600],
     fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
   },
   deleteButton: {
     paddingHorizontal: spacing[3],
@@ -86,6 +91,7 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colorScales.red[600],
     fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
   },
 });
 

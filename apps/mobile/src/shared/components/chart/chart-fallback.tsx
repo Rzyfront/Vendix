@@ -104,6 +104,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colors.text.secondary,
     marginBottom: spacing[3],
   },
@@ -117,6 +118,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colors.text.secondary,
     width: 50,
   },
@@ -142,6 +144,7 @@ const styles = StyleSheet.create({
   value: {
     fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colors.text.primary,
     width: 50,
     textAlign: 'right',
@@ -163,11 +166,13 @@ const styles = StyleSheet.create({
   channelLabel: {
     flex: 1,
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colors.text.primary,
   },
   channelValue: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colors.text.primary,
   },
 });

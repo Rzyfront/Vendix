@@ -6,6 +6,7 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateDianConfigDto } from '../../../store/invoicing/dian-config/dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/update-dian-config.dto';
+import { CertificateValidationResult } from '../../../store/invoicing/dian-config/certificates/certificate-issuer.interface';
 
 /**
  * Organization-level twin of the store DIAN config service.
@@ -44,6 +45,10 @@ export class OrgDianConfigService {
         ? '****'
         : null,
     };
+  }
+
+  private onlyDigits(value?: string | null): string {
+    return String(value ?? '').replace(/\D/g, '');
   }
 
   /**
@@ -119,11 +124,15 @@ export class OrgDianConfigService {
         store_id: resolved_store_id,
       });
 
+    const configuration_type = dto.configuration_type || 'invoicing';
+    const operation_mode = dto.operation_mode || 'own_software';
+
     const existing_count = await this.prisma
       .withoutScope()
       .dian_configurations.count({
         where: {
           organization_id,
+          configuration_type,
           ...(resolved_store_id === null
             ? { store_id: null }
             : { store_id: resolved_store_id }),
@@ -144,6 +153,8 @@ export class OrgDianConfigService {
           nit_type: dto.nit_type || 'NIT',
           nit_dv: dto.nit_dv,
           is_default: should_be_default,
+          configuration_type,
+          operation_mode,
           software_id: dto.software_id,
           software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
           environment: dto.environment || 'test',
@@ -184,6 +195,12 @@ export class OrgDianConfigService {
     if (dto.nit_type !== undefined) update_data.nit_type = dto.nit_type;
     if (dto.nit_dv !== undefined) update_data.nit_dv = dto.nit_dv;
     if (dto.is_default !== undefined) update_data.is_default = dto.is_default;
+    if (dto.configuration_type !== undefined) {
+      update_data.configuration_type = dto.configuration_type;
+    }
+    if (dto.operation_mode !== undefined) {
+      update_data.operation_mode = dto.operation_mode;
+    }
     if (dto.software_id !== undefined) update_data.software_id = dto.software_id;
     if (dto.software_pin !== undefined && dto.software_pin !== '****')
       update_data.software_pin_encrypted = this.encryption.encrypt(
@@ -225,6 +242,7 @@ export class OrgDianConfigService {
     s3_key: string,
     password: string,
     expiry: Date | null,
+    certificate_info?: CertificateValidationResult,
   ) {
     const organization_id = this.requireOrganizationId();
     const config = await this.prisma
@@ -237,6 +255,23 @@ export class OrgDianConfigService {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    const config_nit = this.onlyDigits(config.nit);
+    const certificate_nit = this.onlyDigits(certificate_info?.tax_id);
+    if (config_nit && !certificate_nit) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: id,
+        expected_nit: config_nit,
+        certificate_nit: null,
+      });
+    }
+    if (config_nit && certificate_nit && config_nit !== certificate_nit) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: id,
+        expected_nit: config_nit,
+        certificate_nit,
+      });
+    }
+
     const updated = await this.prisma
       .withoutScope()
       .dian_configurations.update({
@@ -245,6 +280,13 @@ export class OrgDianConfigService {
           certificate_s3_key: s3_key,
           certificate_password_encrypted: this.encryption.encrypt(password),
           certificate_expiry: expiry,
+          certificate_fingerprint: certificate_info?.fingerprint,
+          certificate_subject: certificate_info?.subject,
+          certificate_issuer: certificate_info?.issuer,
+          certificate_serial_number: certificate_info?.serial_number,
+          certificate_nit: certificate_info?.tax_id,
+          certificate_source: 'manual_upload_validated',
+          certificate_uploaded_at: new Date(),
         },
       });
 
@@ -315,12 +357,20 @@ export class OrgDianConfigService {
     store_id: number | null,
   ) {
     const organization_id = this.requireOrganizationId();
+    const config = await this.prisma
+      .withoutScope()
+      .dian_configurations.findUnique({
+        where: { id: config_id },
+        select: { configuration_type: true },
+      });
+
     await this.prisma.withoutScope().dian_configurations.updateMany({
       where: {
         organization_id,
         // For STORE scope: limit "default" cohort to the same store.
         // For ORGANIZATION scope: cohort is the org-wide (store_id NULL) bucket.
         ...(store_id === null ? { store_id: null } : { store_id }),
+        configuration_type: config?.configuration_type,
         id: { not: config_id },
         is_default: true,
       },

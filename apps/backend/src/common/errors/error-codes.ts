@@ -1008,6 +1008,56 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'Invoice provider communication error',
   },
+  INVOICING_PROVIDER_002: {
+    code: 'INVOICING_PROVIDER_002',
+    httpStatus: 412,
+    devMessage: 'DIAN own-software fiscal configuration is not enabled',
+  },
+  INVOICING_PROVIDER_003: {
+    code: 'INVOICING_PROVIDER_003',
+    httpStatus: 412,
+    devMessage: 'DIAN own-software production prerequisites are incomplete',
+  },
+  INVOICING_PROVIDER_004: {
+    code: 'INVOICING_PROVIDER_004',
+    httpStatus: 422,
+    devMessage: 'Invoice provider rejected the document',
+  },
+  FISCAL_CONFIG_INCOMPLETE: {
+    code: 'FISCAL_CONFIG_INCOMPLETE',
+    httpStatus: 412,
+    devMessage: 'Fiscal configuration is incomplete for this accounting entity',
+  },
+  FISCAL_SCOPE_INVALID: {
+    code: 'FISCAL_SCOPE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Invalid fiscal scope for this operation',
+  },
+  FISCAL_RESOLUTION_MISSING: {
+    code: 'FISCAL_RESOLUTION_MISSING',
+    httpStatus: 412,
+    devMessage: 'No active fiscal resolution exists for this document type',
+  },
+  FISCAL_RESOLUTION_EXHAUSTED: {
+    code: 'FISCAL_RESOLUTION_EXHAUSTED',
+    httpStatus: 409,
+    devMessage: 'Fiscal resolution range is exhausted',
+  },
+  FISCAL_IDEMPOTENCY_CONFLICT: {
+    code: 'FISCAL_IDEMPOTENCY_CONFLICT',
+    httpStatus: 409,
+    devMessage: 'Fiscal retry is not idempotent',
+  },
+  FISCAL_ACCOUNTING_BLOCKED: {
+    code: 'FISCAL_ACCOUNTING_BLOCKED',
+    httpStatus: 412,
+    devMessage: 'Fiscal accounting is blocked until DIAN acceptance exists',
+  },
+  FISCAL_DOCUMENT_UNSUPPORTED: {
+    code: 'FISCAL_DOCUMENT_UNSUPPORTED',
+    httpStatus: 501,
+    devMessage: 'This fiscal document type is not implemented for DIAN own software',
+  },
 
   // Payroll
   PAYROLL_FIND_001: {
@@ -1069,6 +1119,11 @@ export const ErrorCodes = {
     code: 'PAYROLL_PROVIDER_001',
     httpStatus: 502,
     devMessage: 'Payroll provider error',
+  },
+  PAYROLL_PROVIDER_002: {
+    code: 'PAYROLL_PROVIDER_002',
+    httpStatus: 412,
+    devMessage: 'DIAN own-software payroll configuration is not enabled',
   },
   PAYROLL_PERM_001: {
     code: 'PAYROLL_PERM_001',
@@ -1200,6 +1255,26 @@ export const ErrorCodes = {
     code: 'DIAN_CERT_003',
     httpStatus: 400,
     devMessage: 'Certificate expired',
+  },
+  DIAN_CERT_004: {
+    code: 'DIAN_CERT_004',
+    httpStatus: 400,
+    devMessage: 'Certificate tax identifier does not match the fiscal entity',
+  },
+  DIAN_TEST_SET_001: {
+    code: 'DIAN_TEST_SET_001',
+    httpStatus: 412,
+    devMessage: 'DIAN test set evidence is required before production enablement',
+  },
+  DIAN_ENABLEMENT_001: {
+    code: 'DIAN_ENABLEMENT_001',
+    httpStatus: 412,
+    devMessage: 'DIAN production enablement prerequisites are incomplete',
+  },
+  DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED: {
+    code: 'DIAN_PROVIDER_OWN_SOFTWARE_REQUIRED',
+    httpStatus: 412,
+    devMessage: 'DIAN production requires own-software mode for this tenant',
   },
   DIAN_CONN_001: {
     code: 'DIAN_CONN_001',

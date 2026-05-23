@@ -13,7 +13,7 @@ interface MenuItem {
 
 const storeMenuItems: MenuItem[] = [
   { label: 'Dashboard', icon: 'home', href: '/(store-admin)/dashboard' },
-  { label: 'POS', icon: 'shopping-cart', href: '/(store-admin)/pos' },
+  { label: 'Punto de venta', icon: 'shopping-cart', href: '/(store-admin)/pos' },
   { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
   { label: 'Órdenes', icon: 'clipboard-list', href: '/(store-admin)/orders' },
   { label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory' },
@@ -93,6 +93,9 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
               {user?.email || config.label}
             </Text>
           </View>
+          <Pressable onPress={onClose} hitSlop={8} style={styles.closeBtn}>
+            <Icon name="x" size={20} color={colorScales.gray[500]} />
+          </Pressable>
         </View>
       </View>
 
@@ -181,6 +184,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingVertical: spacing[2],
+  },
+  closeBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.full,
+    marginLeft: spacing[2],
   },
   menuItem: {
     flexDirection: 'row',

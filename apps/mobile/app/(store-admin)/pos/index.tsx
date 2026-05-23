@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Platform,
   StyleSheet,
   Image,
+  Animated,
+  Dimensions,
 } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -15,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
-import { CustomerService, OrderService, ProductService } from '@/features/store/services';
+import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
@@ -27,6 +29,16 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
+import {
+  PosSearchBar,
+  PosMobileFooter,
+  PosCartModal,
+  PosFilterDropdown,
+  PosCustomerModal,
+  ShippingModal,
+  PosCustomItemModal,
+  PosPaymentModal,
+} from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type {
   CreatePosPaymentDto,
@@ -37,9 +49,14 @@ import type {
   PosCustomer,
 } from '@/features/store/types';
 
+const GRID_HORIZONTAL_PADDING = spacing[3];
+const GRID_COLUMN_GAP = spacing[3];
+const PRODUCT_CARD_WIDTH =
+  (Dimensions.get('window').width - GRID_HORIZONTAL_PADDING * 2 - GRID_COLUMN_GAP) / 2;
+
 const productCardStyles = StyleSheet.create({
   card: {
-    width: '48%' as any,
+    width: PRODUCT_CARD_WIDTH,
     backgroundColor: colors.background,
     borderRadius: borderRadius.xl,
     padding: spacing[3],
@@ -47,26 +64,71 @@ const productCardStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[100],
     ...shadows.sm,
+    overflow: 'hidden',
   },
   imageArea: {
     width: '100%',
-    height: 96,
+    aspectRatio: 1,
     borderRadius: borderRadius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
     marginBottom: spacing[2],
     overflow: 'hidden',
+    backgroundColor: colorScales.gray[100],
+  },
+  imageGradient: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: colorScales.gray[100],
   },
   productImage: {
     width: '100%',
     height: '100%',
-    borderRadius: borderRadius.lg,
+  },
+  imageFallback: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgesContainer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  stockBadge: {
+    position: 'absolute',
+    top: spacing[2],
+    right: spacing[2],
+    zIndex: 1,
+  },
+  variantsBadge: {
+    position: 'absolute',
+    top: spacing[2],
+    left: spacing[2],
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  variantsBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
+    color: '#FFFFFF',
   },
   name: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
+    fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+    lineHeight: 18,
+  },
+  description: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    lineHeight: 16,
+    marginTop: 2,
   },
   row: {
     flexDirection: 'row',
@@ -74,29 +136,88 @@ const productCardStyles = StyleSheet.create({
     justifyContent: 'space-between',
     marginTop: spacing[1],
   },
+  priceContainer: {
+    flexDirection: 'column',
+  },
   price: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.primary,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+    marginTop: spacing[0.5],
   },
-  lowStock: {
+  priceWeightUnit: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.normal as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[400],
+  },
+  stockText: {
+    fontSize: 10,
+    fontFamily: typography.fontFamily,
+    lineHeight: 14,
+    marginTop: 1,
+  },
+  bottomSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing[2],
+    paddingTop: spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  bottomLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    minWidth: 0,
+  },
+  skuText: {
     fontSize: typography.fontSize.xs,
-    marginTop: spacing[1],
-    color: colors.warning,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colorScales.gray[400],
+    maxWidth: 80,
   },
-  outOfStock: {
-    fontSize: typography.fontSize.xs,
-    marginTop: spacing[1],
-    fontWeight: typography.fontWeight.medium,
-    color: colors.error,
-  },
-  firstLetter: {
-    fontSize: typography.fontSize['2xl'],
-    fontWeight: typography.fontWeight.bold,
+  addButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 });
 
 const s = StyleSheet.create({
+  posRoot: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  drawerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+  },
+  drawer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    bottom: 0,
+  },
+  flex: {
+    flex: 1,
+  },
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   containerPad: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
@@ -108,11 +229,13 @@ const s = StyleSheet.create({
   sectionTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[1],
   },
   sectionSubtitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[4],
   },
@@ -129,24 +252,29 @@ const s = StyleSheet.create({
   variantName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   skuText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   itemsEnd: { alignItems: 'flex-end' },
   variantPrice: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   outOfStockText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colors.error,
   },
   stockText: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
   },
   separator: {
@@ -167,14 +295,17 @@ const s = StyleSheet.create({
   cartItemName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   cartItemVariant: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   cartItemUnitPrice: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
     marginTop: spacing[0.5],
   },
@@ -199,6 +330,7 @@ const s = StyleSheet.create({
   qtyLabel: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     marginHorizontal: spacing[3],
     width: 24,
     textAlign: 'center',
@@ -206,6 +338,7 @@ const s = StyleSheet.create({
   cartItemTotal: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     width: 80,
     textAlign: 'right',
@@ -222,20 +355,24 @@ const s = StyleSheet.create({
   customerName: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   customerContact: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   noClientText: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colors.error,
   },
   emptyText: {
     textAlign: 'center',
     paddingVertical: spacing[4],
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[400],
   },
   cartPanelContent: {
@@ -252,6 +389,7 @@ const s = StyleSheet.create({
   cartTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   customerBtn: {
@@ -267,11 +405,13 @@ const s = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: '#1D4ED8',
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     marginLeft: spacing[2],
     flex: 1,
   },
   selectLabel: {
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: '#2563EB',
     marginRight: spacing[2],
   },
@@ -293,14 +433,17 @@ const s = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
   },
   summaryValue: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[700],
   },
   discountText: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#16A34A',
   },
   addDiscountBtn: {
@@ -308,6 +451,7 @@ const s = StyleSheet.create({
   },
   addDiscountText: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   totalRow: {
@@ -321,11 +465,13 @@ const s = StyleSheet.create({
   totalLabel: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
   },
   totalValue: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   chargeBtn: {
@@ -334,6 +480,7 @@ const s = StyleSheet.create({
   paymentTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[4],
   },
@@ -346,12 +493,14 @@ const s = StyleSheet.create({
   },
   totalBoxLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[1],
   },
   totalBoxValue: {
     fontSize: typography.fontSize['3xl'],
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
   },
   methodRow: {
@@ -386,6 +535,7 @@ const s = StyleSheet.create({
   methodLabel: {
     marginLeft: spacing[2],
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
   },
   methodLabelActive: {
     color: '#15803D',
@@ -406,11 +556,13 @@ const s = StyleSheet.create({
   fallbackPaymentTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.amber[900],
   },
   fallbackPaymentText: {
     marginTop: spacing[0.5],
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     color: colorScales.amber[700],
   },
   saleErrorBox: {
@@ -426,11 +578,13 @@ const s = StyleSheet.create({
   saleErrorTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
+    fontFamily: typography.fontFamily,
     color: colorScales.red[900],
   },
   saleErrorText: {
     marginTop: spacing[0.5],
     fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
     lineHeight: 17,
     color: colorScales.red[700],
   },
@@ -448,11 +602,13 @@ const s = StyleSheet.create({
   },
   changeLabel: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#2563EB',
     fontWeight: typography.fontWeight.medium,
   },
   changeValue: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: '#1D4ED8',
     fontWeight: typography.fontWeight.bold,
   },
@@ -487,17 +643,20 @@ const s = StyleSheet.create({
   successTitle: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[1],
   },
   successSubtitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     marginBottom: spacing[1],
   },
   orderNumber: {
     fontSize: typography.fontSize['2xl'],
     fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
     color: colors.primary,
     marginBottom: spacing[4],
   },
@@ -520,79 +679,8 @@ const s = StyleSheet.create({
     marginLeft: spacing[2],
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.medium,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[600],
-  },
-  posRoot: {
-    flex: 1,
-    backgroundColor: colorScales.gray[50],
-  },
-  searchWrapper: {
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
-    paddingBottom: spacing[2],
-  },
-  centerContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fabBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[5],
-    paddingVertical: 14,
-    ...shadows.lg,
-  },
-  fabLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  fabBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: borderRadius.full,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing[2],
-  },
-  fabBadgeText: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.bold,
-    color: '#FFFFFF',
-  },
-  fabCountText: {
-    color: '#FFFFFF',
-    fontSize: typography.fontSize.sm,
-  },
-  fabRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  fabTotalText: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.bold,
-    fontSize: typography.fontSize.lg,
-    marginRight: spacing[2],
-  },
-  fabCartBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing[3],
-    paddingVertical: 6,
-  },
-  fabCartText: {
-    color: '#FFFFFF',
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    marginRight: spacing[1],
   },
   discountSection: {
     marginTop: spacing[4],
@@ -706,59 +794,169 @@ const ProductCard = ({
   product: Product;
   onPress: (product: Product) => void;
 }) => {
-  const firstLetter = product.name?.charAt(0)?.toUpperCase() || '?';
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const hasVariants = (product.product_variants?.length ?? 0) > 0;
   const tracksInventory = product.track_inventory !== false;
-  const isLowStock = tracksInventory && product.stock_quantity != null && product.stock_quantity > 0 && product.stock_quantity <= 5;
-  const isOutOfStock = tracksInventory && product.stock_quantity === 0;
+  const stockQty = product.stock_quantity ?? 0;
+  const variantStockTotal = hasVariants
+    ? (product.product_variants ?? []).reduce(
+        (sum, v) => sum + ((v.stock_quantity ?? 0) * ((v.effective_track_inventory ?? product.track_inventory ?? true) ? 1 : 0)),
+        0,
+      )
+    : stockQty;
+  const isOutOfStock = tracksInventory && variantStockTotal === 0;
+  const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
+  const isUnavailable = variantStockTotal === 0;
+
+  const getStockText = () => {
+    if (!tracksInventory) return 'Disponible';
+    if (variantStockTotal === 0) return 'Sin stock';
+    if (variantStockTotal <= 5) return `${variantStockTotal} en stock`;
+    return `${variantStockTotal} en stock`;
+  };
+
+  const getStockTextColor = () => {
+    if (!tracksInventory) return colorScales.blue[600];
+    if (variantStockTotal === 0) return colors.error;
+    if (variantStockTotal <= 5) return colors.warning;
+    return colorScales.blue[600];
+  };
+
+  const getStockBadge = () => {
+    if (tracksInventory) {
+      if (variantStockTotal === 0) return { label: 'Agotado', variant: 'error' as const };
+      if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
+      return { label: `${variantStockTotal} en stock`, variant: 'info' as const };
+    } else {
+      return { label: 'Disponible', variant: 'info' as const };
+    }
+  };
+
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.97,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 50,
+      bounciness: 4,
+    }).start();
+  };
+
+  const stockBadge = getStockBadge();
+  const stockText = getStockText();
+  const stockTextColor = getStockTextColor();
 
   return (
-    <Pressable
-      onPress={() => onPress(product)}
-      style={productCardStyles.card}
-    >
-      <View
-        style={[productCardStyles.imageArea, { backgroundColor: isOutOfStock ? '#E5E7EB' : colors.primary + '20' }]}
+    <Animated.View style={[{ transform: [{ scale: scaleAnim }] }]}>
+      <Pressable
+        onPress={isUnavailable ? undefined : () => onPress(product)}
+        onPressIn={isUnavailable ? undefined : handlePressIn}
+        onPressOut={isUnavailable ? undefined : handlePressOut}
+        style={[
+          productCardStyles.card,
+          isUnavailable && { opacity: 0.6 },
+        ]}
       >
-        {product.image_url ? (
-          <Image
-            source={{ uri: product.image_url }}
-            style={productCardStyles.productImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text
-            style={[productCardStyles.firstLetter, { color: isOutOfStock ? '#9CA3AF' : colors.primary }]}
+        {/* Image Area */}
+        <View style={productCardStyles.imageArea}>
+          <View style={productCardStyles.imageGradient} />
+
+          {product.image_url ? (
+            <Image
+              source={{ uri: product.image_url }}
+              style={productCardStyles.productImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={productCardStyles.imageFallback}>
+              <Icon name="image" size={32} color={colorScales.gray[400]} />
+            </View>
+          )}
+
+          {/* Badges overlaid on image */}
+          <View style={productCardStyles.badgesContainer} pointerEvents="none">
+            {/* Stock badge - top center */}
+            {stockBadge && (
+              <View style={productCardStyles.stockBadge}>
+                <Badge
+                  label={stockBadge.label}
+                  variant={stockBadge.variant}
+                  size="sm"
+                />
+              </View>
+            )}
+
+            {/* Variants badge - top left */}
+            {hasVariants && (
+              <View style={productCardStyles.variantsBadge}>
+                <Icon name="layers" size={12} color="#FFFFFF" />
+                <Text style={productCardStyles.variantsBadgeText}>
+                  {product.product_variants?.length}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Product Name */}
+        <Text style={productCardStyles.name} numberOfLines={1} ellipsizeMode="tail">
+          {product.name}
+        </Text>
+
+        {/* Description — siempre renderizada para mantener altura uniforme */}
+        <Text style={productCardStyles.description} numberOfLines={1} ellipsizeMode="tail">
+          {product.description || ' '}
+        </Text>
+
+        {/* Price + Stock row */}
+        <View style={productCardStyles.row}>
+          <View style={productCardStyles.priceContainer}>
+            <Text style={productCardStyles.price}>
+              {formatCurrency(product.final_price)}
+              {product.pricing_type === 'weight' && (
+                <Text style={productCardStyles.priceWeightUnit}>
+                  {' /kg'}
+                </Text>
+              )}
+            </Text>
+            {stockText && (
+              <Text style={[productCardStyles.stockText, { color: stockTextColor }]}>
+                {stockText}
+              </Text>
+            )}
+          </View>
+        </View>
+
+        {/* Bottom section: SKU + Add button */}
+        <View style={productCardStyles.bottomSection}>
+          <View style={productCardStyles.bottomLeft}>
+            {product.sku ? (
+              <Text style={productCardStyles.skuText} numberOfLines={1}>
+                {product.sku}
+              </Text>
+            ) : null}
+          </View>
+          <Pressable
+            onPress={(e) => {
+              e.stopPropagation?.();
+              if (!isUnavailable) onPress(product);
+            }}
+            style={productCardStyles.addButton}
+            disabled={isUnavailable}
           >
-            {firstLetter}
-          </Text>
-        )}
-      </View>
-
-      <Text style={productCardStyles.name} numberOfLines={2}>
-        {product.name}
-      </Text>
-
-      <View style={productCardStyles.row}>
-        <Text style={productCardStyles.price}>
-          {formatCurrency(product.final_price)}
-        </Text>
-        {hasVariants && (
-          <Badge label="Var." variant="info" size="sm" />
-        )}
-      </View>
-
-      {isLowStock && (
-        <Text style={productCardStyles.lowStock}>
-          Stock: {product.stock_quantity}
-        </Text>
-      )}
-      {isOutOfStock && (
-        <Text style={productCardStyles.outOfStock}>
-          Agotado
-        </Text>
-      )}
-    </Pressable>
+            <Icon name="plus" size={14} color="#FFFFFF" />
+          </Pressable>
+        </View>
+      </Pressable>
+    </Animated.View>
   );
 };
 
@@ -785,7 +983,9 @@ const VariantPicker = ({
           keyExtractor={(item) => item.id.toString()}
           style={s.sheetFlex}
           renderItem={({ item }) => {
-            const price = item.price_override != null ? item.price_override : product.final_price;
+            const hasSale = item.is_on_sale === true && item.sale_price != null;
+            const displayPrice = hasSale ? item.sale_price! : (item.price_override != null ? item.price_override : product.final_price);
+            const comparePrice = hasSale ? (item.price_override ?? product.final_price) : null;
             const tracksInventory = item.effective_track_inventory ?? product.track_inventory ?? true;
             const isUnavailable = tracksInventory && item.stock_quantity === 0;
 
@@ -798,19 +998,35 @@ const VariantPicker = ({
                 ]}
               >
                 <View style={s.flex1}>
-                  <Text style={s.variantName}>
-                    {item.name || item.attributes || item.sku}
-                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={s.variantName}>
+                      {item.name || item.attributes || item.sku}
+                    </Text>
+                    {hasSale && (
+                      <Badge label="OFERTA" variant="warning" size="sm" />
+                    )}
+                  </View>
                   <Text style={s.skuText}>SKU: {item.sku}</Text>
                 </View>
                 <View style={s.itemsEnd}>
-                  <Text style={s.variantPrice}>
-                    {formatCurrency(price)}
-                  </Text>
-                  {isUnavailable ? (
-                    <Text style={s.outOfStockText}>Agotado</Text>
+                  {hasSale && comparePrice != null ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={[s.variantPrice, { color: colors.error }]}>
+                        {formatCurrency(displayPrice)}
+                      </Text>
+                      <Text style={{ fontSize: 10, color: colorScales.gray[400], textDecorationLine: 'line-through' }}>
+                        {formatCurrency(comparePrice)}
+                      </Text>
+                    </View>
                   ) : (
-                    <Text style={s.stockText}>Stock: {item.stock_quantity}</Text>
+                    <Text style={s.variantPrice}>
+                      {formatCurrency(displayPrice)}
+                    </Text>
+                  )}
+                  {isUnavailable ? (
+                    <Text style={[s.outOfStockText, { color: colors.error }]}>Agotado</Text>
+                  ) : (
+                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>Stock: {item.stock_quantity}</Text>
                   )}
                 </View>
               </Pressable>
@@ -1530,7 +1746,7 @@ const PaymentSheet = ({
             <View style={{ flex: 1 }}>
               <Text style={s.fallbackPaymentTitle}>Sin métodos de pago configurados</Text>
               <Text style={s.fallbackPaymentText}>
-                La venta se cerrará como venta sin pago para no bloquear el POS.
+                La venta se cerrará como venta sin pago para no bloquear el punto de venta.
               </Text>
             </View>
           </View>
@@ -1705,13 +1921,23 @@ const SuccessModal = ({
 };
 
 const PosScreen = () => {
-  const insets = useSafeAreaInsets();
   const [search, setSearch] = useState('');
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
+  const [showCartModal, setShowCartModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showCustomItemModal, setShowCustomItemModal] = useState(false);
+  const [showShippingModal, setShowShippingModal] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [activeFilters, setActiveFilters] = useState({
+    category_id: '',
+    brand_id: '',
+  });
   const [orderNumber, setOrderNumber] = useState('');
   const [receiptData, setReceiptData] = useState<{
     items: any[];
@@ -1724,11 +1950,31 @@ const PosScreen = () => {
   const addItem = useCartStore((s) => s.addItem);
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['pos-products', search],
-    queryFn: () =>
-      search
+    queryKey: ['pos-products', search, activeFilters],
+    queryFn: () => {
+      const params: any = {
+        pos_optimized: true,
+        limit: 50,
+        state: 'active',
+        include_variants: true,
+      };
+
+      if (search) {
+        params.search = search;
+      }
+
+      if (activeFilters.category_id) {
+        params.category_id = activeFilters.category_id;
+      }
+
+      if (activeFilters.brand_id) {
+        params.brand_id = activeFilters.brand_id;
+      }
+
+      return search
         ? ProductService.search(search)
-        : ProductService.list({ pos_optimized: true, limit: 50, state: 'active', include_variants: true }),
+        : ProductService.list(params);
+    },
   });
 
   const productList = useMemo(() => {
@@ -1738,7 +1984,19 @@ const PosScreen = () => {
 
   const handleProductPress = useCallback(
     (product: Product) => {
-      if (product.product_variants && product.product_variants.length > 0) {
+      const hasVariants = (product.product_variants?.length ?? 0) > 0;
+      const tracksInventory = product.track_inventory !== false;
+      const isUnavailable = !hasVariants && tracksInventory && product.stock_quantity === 0;
+
+      if (isUnavailable) return;
+
+      if (product.pricing_type === 'weight') {
+        toastWarning('Ingresa el peso del producto');
+        addItem(product, null, 1);
+        return;
+      }
+
+      if (hasVariants) {
         setSelectedProduct(product);
         setShowVariants(true);
       } else {
@@ -1774,16 +2032,107 @@ const PosScreen = () => {
     setReceiptData(null);
   }, []);
 
-  return (
-    <View style={[s.posRoot, { paddingTop: insets.top }]}>
-      <View style={s.searchWrapper}>
-        <SearchBar
-          placeholder="Buscar productos..."
-          value={search}
-          onChangeText={setSearch}
-        />
-      </View>
+  const handleSaveDraft = useCallback(async () => {
+    const state = useCartStore.getState();
+    const items = state.items;
+    const summary = state.summary;
+    const customer = state.customer;
+    if (items.length === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    if (!customer) {
+      toastWarning('Debe seleccionar un cliente antes de guardar');
+      setShowCustomerModal(true);
+      return;
+    }
+    setSavingDraft(true);
+    try {
+      const tenantStoreId = useTenantStore.getState().storeId;
+      const authStoreId = useAuthStore.getState().user?.store?.id ?? useAuthStore.getState().user?.main_store_id;
+      const storeId = resolvePositiveId(tenantStoreId, authStoreId);
+      if (!storeId) {
+        toastError('La sesión no tiene una tienda activa');
+        return;
+      }
 
+      const payload: CreatePosPaymentDto = {
+        customer_id: Number(customer.id),
+        customer_name: `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim(),
+        customer_email: customer.email ?? undefined,
+        customer_phone: customer.phone ?? undefined,
+        store_id: storeId,
+        items: items.map((i) => ({
+          product_id: i.product.id === 0 ? undefined : Number(i.product.id),
+          product_variant_id: i.variant?.id ? Number(i.variant.id) : undefined,
+          product_name: i.product.name,
+          product_sku: i.product.sku || undefined,
+          variant_sku: i.variant?.sku || undefined,
+          quantity: i.quantity,
+          unit_price: Number(i.unitPrice.toFixed(2)),
+          total_price: Number((i.unitPrice * i.quantity).toFixed(2)),
+          tax_amount_item: Number(i.taxAmount.toFixed(2)),
+          cost: i.variant?.cost_price ?? i.product.cost_price ?? undefined,
+        })),
+        subtotal: Number(summary.subtotal.toFixed(2)),
+        tax_amount: Number(summary.taxAmount.toFixed(2)),
+        discount_amount: Number(summary.discountAmount.toFixed(2)),
+        total_amount: Number(summary.total.toFixed(2)),
+        requires_payment: false,
+        delivery_type: 'direct_delivery',
+        internal_notes: state.notes || undefined,
+        update_inventory: false,
+        allow_oversell: true,
+        print_receipt: false,
+      };
+
+      const response = await OrderService.processPosPayment(payload);
+      if (!response.success) {
+        toastError(response.message || 'Error al guardar');
+        return;
+      }
+
+      state.clearCart();
+      toastSuccess('Guardado correctamente');
+    } catch (error: any) {
+      const data = error?.response?.data;
+      const baseMsg = data?.message || error?.message || 'Error al guardar';
+      const details = data?.details?.validationErrors;
+      const fullMsg = details ? `${baseMsg}: ${details.join(', ')}` : baseMsg;
+      toastError(fullMsg);
+    } finally {
+      setSavingDraft(false);
+    }
+  }, []);
+
+  const handleCustomItem = useCallback(() => {
+    setShowCustomItemModal(true);
+  }, []);
+
+  const handleShipping = useCallback(() => {
+    setShowShippingModal(true);
+  }, []);
+
+  const handleShippingSuccess = useCallback((orderNumber: string) => {
+    setOrderNumber(orderNumber);
+    setShowSuccess(true);
+  }, []);
+
+  const handleAddCustomItem = useCallback((data: { name: string; description?: string; quantity: number; price: number; taxRate?: number }) => {
+    useCartStore.getState().addCustomItem(data);
+  }, []);
+
+  return (
+    <View style={[s.posRoot]}>
+      {/* Search Bar - Con filtros y cliente como web */}
+      <PosSearchBar
+        onSearch={setSearch}
+        onOpenFilters={() => setShowFilters(true)}
+        onOpenAdd={() => setShowCustomerModal(true)}
+        selectedCustomer={null}
+      />
+
+      {/* Product Grid - Cards exactamente igual que antes */}
       {isLoading ? (
         <View style={s.centerContent}>
           <Spinner />
@@ -1799,8 +2148,12 @@ const PosScreen = () => {
           data={productList}
           keyExtractor={(item) => item.id.toString()}
           numColumns={2}
-          columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: spacing[4] }}
-          contentContainerStyle={{ paddingBottom: spacing[24] }}
+          columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
+          contentContainerStyle={{
+            paddingTop: spacing[3],
+            paddingHorizontal: GRID_HORIZONTAL_PADDING,
+            paddingBottom: spacing[24],
+          }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <ProductCard product={item} onPress={handleProductPress} />
@@ -1808,37 +2161,48 @@ const PosScreen = () => {
         />
       )}
 
-      {summary.itemCount > 0 && (
-        <Pressable
-          onPress={() => setShowCart(true)}
-          style={[
-            s.fabBar,
-            {
-              backgroundColor: colors.primary,
-              paddingBottom: insets.bottom + spacing[3],
-            },
-          ]}
-        >
-          <View style={s.fabLeft}>
-            <View style={s.fabBadge}>
-              <Text style={s.fabBadgeText}>{summary.totalItems}</Text>
-            </View>
-            <Text style={s.fabCountText}>
-              {summary.itemCount} {summary.itemCount === 1 ? 'producto' : 'productos'}
-            </Text>
-          </View>
-          <View style={s.fabRight}>
-            <Text style={s.fabTotalText}>
-              {formatCurrency(summary.total)}
-            </Text>
-            <View style={s.fabCartBtn}>
-              <Text style={s.fabCartText}>Ver Carrito</Text>
-              <Icon name="shopping-cart" size={14} color="#fff" />
-            </View>
-          </View>
-        </Pressable>
-      )}
+      {/* Mobile Footer - 3 filas como web */}
+      <PosMobileFooter
+        itemCount={summary.totalItems}
+        total={summary.total}
+        taxAmount={summary.taxAmount}
+        onViewCart={() => setShowCartModal(true)}
+        onCustomItem={handleCustomItem}
+        onSaveDraft={handleSaveDraft}
+        onShipping={handleShipping}
+        onCheckout={() => {
+          setShowPaymentModal(true);
+        }}
+        canCreateCustomItems
+      />
 
+      {/* Cart Modal */}
+      <PosCartModal
+        visible={showCartModal}
+        onClose={() => setShowCartModal(false)}
+        items={useCartStore.getState().items}
+        subtotal={summary.subtotal}
+        taxAmount={summary.taxAmount}
+        total={summary.total}
+        onIncreaseQuantity={(id) => {
+          const item = useCartStore.getState().items.find((i) => i.id === id);
+          if (item) useCartStore.getState().updateQuantity(id, item.quantity + 1);
+        }}
+        onDecreaseQuantity={(id) => {
+          const item = useCartStore.getState().items.find((i) => i.id === id);
+          if (item && item.quantity > 1) useCartStore.getState().updateQuantity(id, item.quantity - 1);
+        }}
+        onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
+        onClearCart={() => useCartStore.getState().clearCart()}
+        onViewDetail={() => setShowCart(true)}
+        onSaveDraft={handleSaveDraft}
+        onCheckout={() => {
+          setShowCartModal(false);
+          setShowPaymentModal(true);
+        }}
+      />
+
+      {/* Variant Picker */}
       <VariantPicker
         visible={showVariants}
         product={selectedProduct}
@@ -1849,26 +2213,78 @@ const PosScreen = () => {
         }}
       />
 
+      {/* Cart Panel (legacy) */}
       <CartPanel
         visible={showCart}
         onClose={() => setShowCart(false)}
         onCharge={() => {
           setShowCart(false);
-          setShowPayment(true);
+          setShowPaymentModal(true);
         }}
       />
 
-      <PaymentSheet
-        visible={showPayment}
-        onClose={() => setShowPayment(false)}
-        onSuccess={handleChargeSuccess}
+      {/* Payment Modal */}
+      <PosPaymentModal
+        visible={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        onSuccess={(orderNumber) => {
+          setShowPaymentModal(false);
+          setOrderNumber(orderNumber);
+          setShowSuccess(true);
+        }}
       />
 
+      {/* Success Modal */}
       <SuccessModal
         visible={showSuccess}
         orderNumber={orderNumber}
         onClose={handleCloseSuccess}
         receiptData={receiptData}
+      />
+
+      {/* Filter Dropdown */}
+      <PosFilterDropdown
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        onApplyFilters={(filters: any) => setActiveFilters(filters)}
+        currentFilters={activeFilters}
+      />
+
+      {/* Customer Modal */}
+      <PosCustomerModal
+        visible={showCustomerModal}
+        onClose={() => setShowCustomerModal(false)}
+        onSelectCustomer={(customer: PosCustomer) => {
+          useCartStore.getState().setCustomer(customer);
+          toastSuccess(`Cliente seleccionado: ${customer.first_name} ${customer.last_name}`);
+          setShowCustomerModal(false);
+        }}
+      />
+
+      {/* Shipping Modal */}
+      <ShippingModal
+        visible={showShippingModal}
+        onClose={() => setShowShippingModal(false)}
+        onSuccess={handleShippingSuccess}
+        onSelectCustomer={() => {
+          setShowShippingModal(false);
+          setShowCustomerModal(true);
+        }}
+      />
+
+      {/* Custom Item Modal */}
+      <PosCustomItemModal
+        visible={showCustomItemModal}
+        onClose={() => setShowCustomItemModal(false)}
+        onAdd={handleAddCustomItem}
+      />
+
+      {/* Filter Dropdown */}
+      <PosFilterDropdown
+        visible={showFilters}
+        onClose={() => setShowFilters(false)}
+        onApplyFilters={(filters: any) => setActiveFilters(filters)}
+        currentFilters={activeFilters}
       />
     </View>
   );

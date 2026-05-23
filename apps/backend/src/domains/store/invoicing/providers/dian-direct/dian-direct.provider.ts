@@ -18,6 +18,7 @@ import { DianXmlSignerService } from './dian-xml-signer.service';
 import { DianResponseParserService } from './dian-response-parser.service';
 import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
 import { UblCreditNoteBuilder } from './xml/ubl-credit-note.builder';
+import { UblDebitNoteBuilder } from './xml/ubl-debit-note.builder';
 import { UblCommonBuilder } from './xml/ubl-common.builder';
 import {
   DianConfigDecrypted,
@@ -62,7 +63,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     this.validateCertificateExpiry(config);
 
     try {
-      // Build issuer data from org
+      // Build issuer data from the fiscal accounting entity.
       const issuer = await this.loadIssuerData(config);
 
       // Build customer data
@@ -108,8 +109,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const cufe = CufeCalculator.generate({
         invoice_number: invoice_data.invoice_number,
         issue_date: invoice_data.issue_date,
-        issue_time:
-          new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+        issue_time: this.issueTime(invoice_data),
         total_before_tax: invoice_data.subtotal_amount,
         tax_iva: iva_amount,
         tax_inc: inc_amount,
@@ -258,8 +258,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       const cude = CufeCalculator.generate({
         invoice_number: credit_note_data.invoice_number,
         issue_date: credit_note_data.issue_date,
-        issue_time:
-          new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+        issue_time: this.issueTime(credit_note_data),
         total_before_tax: credit_note_data.subtotal_amount,
         tax_iva: cn_iva_amount,
         tax_inc: cn_inc_amount,
@@ -271,6 +270,8 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         environment: config.environment === 'production' ? '1' : '2',
       });
 
+      this.assertOriginalInvoiceReference(credit_note_data, 'credit note');
+
       const xml = UblCreditNoteBuilder.build({
         credit_note_data,
         issuer,
@@ -278,8 +279,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         software_security,
         cude,
         environment: config.environment,
-        original_invoice_number: credit_note_data.order_reference,
-        original_invoice_cufe: undefined, // TODO: retrieve from original invoice
+        original_invoice_number:
+          credit_note_data.original_invoice_number ||
+          credit_note_data.order_reference,
+        original_invoice_cufe: credit_note_data.original_invoice_cufe,
+        original_invoice_date: credit_note_data.original_invoice_issue_date,
       });
 
       const signed_xml = await this.signXml(xml, config);
@@ -319,7 +323,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       return {
         success: parsed.is_valid,
         tracking_id: parsed.document_key || cude,
-        cufe: parsed.document_key || cude,
+        cude: parsed.document_key || cude,
         qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
         xml_document: signed_xml,
         message: parsed.is_valid
@@ -338,6 +342,134 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         action: 'send_credit_note',
         document_type: 'credit_note',
         document_number: credit_note_data.invoice_number,
+        status: 'error',
+        error_message: error.message,
+        duration_ms: Date.now() - start_time,
+      });
+
+      throw error;
+    }
+  }
+
+  async sendDebitNote(
+    debit_note_data: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    const start_time = Date.now();
+    const config = await this.loadConfig();
+    this.validateCertificateExpiry(config);
+
+    try {
+      const issuer = await this.loadIssuerData(config);
+      const customer = this.buildCustomerData(debit_note_data);
+      const software_security = {
+        software_id: config.software_id,
+        software_pin: config.software_pin,
+        software_security_code: UblCommonBuilder.generateSoftwareSecurityCode(
+          config.software_id,
+          config.software_pin,
+          debit_note_data.invoice_number,
+        ),
+      };
+
+      const iva_taxes = debit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('IVA'),
+      );
+      const ica_taxes = debit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('ICA'),
+      );
+      const inc_taxes = debit_note_data.taxes.filter((t) =>
+        t.tax_name.toUpperCase().includes('INC'),
+      );
+
+      const cude = CufeCalculator.generate({
+        invoice_number: debit_note_data.invoice_number,
+        issue_date: debit_note_data.issue_date,
+        issue_time: this.issueTime(debit_note_data),
+        total_before_tax: debit_note_data.subtotal_amount,
+        tax_iva: iva_taxes
+          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+          .toFixed(2),
+        tax_inc: inc_taxes
+          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+          .toFixed(2),
+        tax_ica: ica_taxes
+          .reduce((sum, t) => sum + parseFloat(t.tax_amount), 0)
+          .toFixed(2),
+        total_amount: debit_note_data.total_amount,
+        issuer_nit: config.nit,
+        customer_nit: debit_note_data.customer_tax_id || '222222222222',
+        technical_key: config.software_pin,
+        environment: config.environment === 'production' ? '1' : '2',
+      });
+
+      this.assertOriginalInvoiceReference(debit_note_data, 'debit note');
+
+      const xml = UblDebitNoteBuilder.build({
+        debit_note_data,
+        issuer,
+        customer,
+        software_security,
+        cude,
+        environment: config.environment,
+        original_invoice_number:
+          debit_note_data.original_invoice_number ||
+          debit_note_data.order_reference,
+        original_invoice_cufe: debit_note_data.original_invoice_cufe,
+        original_invoice_date: debit_note_data.original_invoice_issue_date,
+      });
+
+      const signed_xml = await this.signXml(xml, config);
+      const zip_base64 = await this.compressToZipBase64(
+        signed_xml,
+        `${debit_note_data.invoice_number}.xml`,
+      );
+      const ws_credentials = await this.loadWsCredentials(config);
+      const dian_response = await this.soap_client.sendBillSync(
+        zip_base64,
+        `${debit_note_data.invoice_number}.zip`,
+        config.environment,
+        ws_credentials,
+      );
+      const parsed = this.response_parser.parseApplicationResponse(
+        dian_response.raw_response,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_debit_note',
+        document_type: 'debit_note',
+        document_number: debit_note_data.invoice_number,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        status: parsed.is_valid ? 'success' : 'error',
+        error_message: parsed.is_valid
+          ? null
+          : parsed.errors.map((e) => e.message).join('; '),
+        cufe: cude,
+        duration_ms: Date.now() - start_time,
+      });
+
+      return {
+        success: parsed.is_valid,
+        tracking_id: parsed.document_key || cude,
+        cude: parsed.document_key || cude,
+        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cude),
+        xml_document: signed_xml,
+        message: parsed.is_valid
+          ? 'Nota débito aceptada por la DIAN'
+          : `Nota débito rechazada: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        provider_data: {
+          dian_status_code: parsed.status_code,
+          dian_errors: parsed.errors,
+          environment: config.environment,
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Failed to send debit note to DIAN: ${error.message}`);
+
+      await this.createAuditLog(config.id, {
+        action: 'send_debit_note',
+        document_type: 'debit_note',
+        document_number: debit_note_data.invoice_number,
         status: 'error',
         error_message: error.message,
         duration_ms: Date.now() - start_time,
@@ -368,6 +500,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       status: parsed.is_valid ? 'accepted' : 'rejected',
       message: parsed.status_description,
       cufe: parsed.document_key,
+      cude: parsed.document_key,
       provider_data: {
         dian_status_code: parsed.status_code,
         dian_errors: parsed.errors,
@@ -456,7 +589,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       where: {
         accounting_entity_id: accounting_entity.id,
         configuration_type: 'invoicing',
-        enablement_status: { in: ['testing', 'enabled'] },
+        operation_mode: 'own_software',
+        enablement_status: { in: ['testing', 'test_set_passed', 'enabled'] },
+        ...(process.env.NODE_ENV === 'production' && {
+          environment: 'production',
+        }),
       },
       orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
@@ -471,6 +608,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       id: config.id,
       organization_id: config.organization_id,
       store_id: config.store_id,
+      accounting_entity_id: config.accounting_entity_id,
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
@@ -486,39 +624,103 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     };
   }
 
+  private issueTime(document_data: ProviderInvoiceData): string {
+    return (
+      document_data.issue_time ||
+      `${new Date(`${document_data.issue_date}T00:00:00.000Z`)
+        .toISOString()
+        .split('T')[1]
+        .split('.')[0]}-05:00`
+    );
+  }
+
+  private assertOriginalInvoiceReference(
+    document_data: ProviderInvoiceData,
+    document_label: string,
+  ): void {
+    const original_number =
+      document_data.original_invoice_number || document_data.order_reference;
+    if (!original_number || !document_data.original_invoice_cufe) {
+      throw new Error(
+        `DIAN ${document_label} requires the accepted original invoice number and CUFE.`,
+      );
+    }
+  }
+
   /**
-   * Loads issuer data from the organization.
+   * Loads issuer data from the fiscal accounting entity.
    */
   private async loadIssuerData(
     config: DianConfigDecrypted,
   ): Promise<DianIssuerData> {
-    const org = await this.prisma.organizations.findUnique({
-      where: { id: config.organization_id },
+    if (!config.accounting_entity_id) {
+      throw new Error('DIAN configuration is missing fiscal accounting entity.');
+    }
+
+    const entity = await this.prisma.withoutScope().accounting_entities.findFirst({
+      where: {
+        id: config.accounting_entity_id,
+        organization_id: config.organization_id,
+        is_active: true,
+      },
       include: {
-        addresses: { take: 1 },
+        organization: {
+          include: {
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+          },
+        },
+        store: {
+          include: {
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+          },
+        },
       },
     });
 
-    if (!org) {
-      throw new Error(`Organization ${config.organization_id} not found`);
+    if (!entity) {
+      throw new Error(
+        `Fiscal accounting entity ${config.accounting_entity_id} not found`,
+      );
     }
 
-    const address = org.addresses?.[0];
+    const organization = entity.organization;
+    const store = entity.store;
+    const address =
+      entity.fiscal_scope === 'STORE'
+        ? store?.addresses?.[0]
+        : organization.addresses?.[0];
+
+    if (!address?.municipality_code) {
+      throw new Error(
+        `Fiscal entity ${entity.id} requires a primary address with DIAN municipality_code.`,
+      );
+    }
+
+    const legal_name =
+      entity.legal_name ||
+      (entity.fiscal_scope === 'STORE' ? store?.legal_name : organization.legal_name) ||
+      entity.name;
 
     return {
       nit: config.nit,
       nit_dv: config.nit_dv || '0',
-      legal_name: org.legal_name || org.name,
-      trade_name: org.name,
-      address_line: address?.address_line1 || 'N/A',
-      city_code: address?.postal_code || '11001',
-      city_name: address?.city || 'Bogotá',
-      department_code: '11',
-      department_name: address?.state_province || 'Bogotá',
-      country_code: address?.country_code || 'CO',
-      postal_code: address?.postal_code || '110111',
-      phone: org.phone || undefined,
-      email: org.email,
+      legal_name,
+      trade_name: entity.name,
+      address_line: address.address_line1,
+      city_code: address.municipality_code,
+      city_name: address.city,
+      department_code: address.municipality_code.slice(0, 2),
+      department_name: address.state_province || address.municipality_code.slice(0, 2),
+      country_code: address.country_code,
+      postal_code: address.postal_code || undefined,
+      phone: address.phone_number || organization.phone || undefined,
+      email: organization.email,
       tax_regime: '48', // Default: Responsable IVA
       tax_scheme: 'O-15', // Default: Autorretenedor
     };
@@ -549,6 +751,11 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     config: DianConfigDecrypted,
   ): Promise<string> {
     if (!config.certificate_s3_key || !config.certificate_password) {
+      if (config.environment === 'production') {
+        throw new Error(
+          'A valid certificate is required to sign DIAN production documents.',
+        );
+      }
       this.logger.warn('No certificate configured — returning unsigned XML');
       return xml;
     }

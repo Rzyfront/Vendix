@@ -34,6 +34,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     flex: 1,
     textAlign: 'center',
@@ -45,6 +46,7 @@ const styles = StyleSheet.create({
   closeIcon: {
     color: colorScales.gray[400],
     fontSize: typography.fontSize['2xl'],
+    fontFamily: typography.fontFamily,
   },
   scrollView: {
     flex: 1,

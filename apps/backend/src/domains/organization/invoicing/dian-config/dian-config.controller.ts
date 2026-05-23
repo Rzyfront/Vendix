@@ -22,15 +22,15 @@ import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { CreateDianConfigDto } from '../../../store/invoicing/dian-config/dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/update-dian-config.dto';
-import { DianXmlSignerService } from '../../../store/invoicing/providers/dian-direct/dian-xml-signer.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 
 @Controller('organization/invoicing/dian-config')
 @UseGuards(PermissionsGuard)
 export class OrgDianConfigController {
   constructor(
     private readonly dian_config_service: OrgDianConfigService,
-    private readonly xml_signer: DianXmlSignerService,
+    private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
   ) {}
@@ -112,14 +112,18 @@ export class OrgDianConfigController {
     const config_id_int = parseInt(config_id, 10);
 
     // Ensure the config belongs to the org context before letting the cert in.
-    await this.dian_config_service.getConfigById(config_id_int);
+    const config = await this.dian_config_service.getConfigById(config_id_int);
 
-    const validation = await this.xml_signer.validateCertificate(
-      file.buffer,
+    const validation = await this.certificate_adapter.validateCertificate({
+      p12_buffer: file.buffer,
       password,
-    );
+      expected_tax_id: config.nit,
+    });
 
     if (!validation.valid) {
+      if (validation.error?.includes('tax identifier')) {
+        throw new VendixHttpException(ErrorCodes.DIAN_CERT_004);
+      }
       if (validation.error?.includes('expired')) {
         throw new VendixHttpException(ErrorCodes.DIAN_CERT_003);
       }
@@ -141,6 +145,7 @@ export class OrgDianConfigController {
       s3_key,
       password,
       validation.expires || null,
+      validation,
     );
 
     return this.response_service.success({
@@ -149,6 +154,9 @@ export class OrgDianConfigController {
         subject: validation.subject,
         issuer: validation.issuer,
         expires: validation.expires,
+        fingerprint: validation.fingerprint,
+        serial_number: validation.serial_number,
+        tax_id: validation.tax_id,
       },
     });
   }

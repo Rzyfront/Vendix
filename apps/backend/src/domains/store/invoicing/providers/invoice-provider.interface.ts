@@ -15,6 +15,11 @@ export interface InvoiceProviderAdapter {
   ): Promise<ProviderResponse>;
 
   /**
+   * Sends a debit note to the provider.
+   */
+  sendDebitNote?(debitNoteData: ProviderInvoiceData): Promise<ProviderResponse>;
+
+  /**
    * Checks the status of a previously sent document.
    */
   checkStatus(trackingId: string): Promise<StatusResponse>;
@@ -29,6 +34,7 @@ export interface ProviderInvoiceData {
   invoice_number: string;
   invoice_type: string;
   issue_date: string;
+  issue_time?: string;
   due_date?: string;
   customer_name?: string;
   customer_tax_id?: string;
@@ -57,6 +63,9 @@ export interface ProviderInvoiceData {
   payment_form?: string; // DIAN: '1' = contado, '2' = crédito
   payment_method?: string;
   order_reference?: string;
+  original_invoice_number?: string;
+  original_invoice_cufe?: string;
+  original_invoice_issue_date?: string;
 }
 
 export interface ProviderInvoiceItem {
@@ -79,6 +88,9 @@ export interface ProviderResponse {
   success: boolean;
   tracking_id: string;
   cufe?: string;
+  cude?: string;
+  cuds?: string;
+  cune?: string;
   qr_code?: string;
   xml_document?: string;
   pdf_url?: string;
@@ -91,6 +103,9 @@ export interface StatusResponse {
   status: 'pending' | 'accepted' | 'rejected' | 'error';
   message?: string;
   cufe?: string;
+  cude?: string;
+  cuds?: string;
+  cune?: string;
   provider_data?: any;
 }
 

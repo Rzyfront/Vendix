@@ -83,6 +83,7 @@ export class UblInvoiceBuilder {
     doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(invoice_data.issue_date);
 
     const issue_time =
+      invoice_data.issue_time ||
       new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
     doc.ele(UBL_NAMESPACES.CBC, 'IssueTime').txt(issue_time);
 

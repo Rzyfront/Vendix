@@ -23,11 +23,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginBottom: spacing[2],
   },
   message: {
     fontSize: typography.fontSize.base,
+    fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
     textAlign: 'center',
     marginBottom: spacing[8],

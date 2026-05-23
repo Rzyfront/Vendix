@@ -58,7 +58,7 @@ export function Badge({
       style={[styles.base, variantStyles[variant], sizeContainerStyles[size], style]}
       {...props}
     >
-      <Text style={[{ color: variantTextColors[variant], fontWeight: typography.fontWeight.medium as any }, sizeTextStyles[size]]}>
+      <Text style={[{ color: variantTextColors[variant], fontWeight: typography.fontWeight.medium as any, fontFamily: typography.fontFamily }, sizeTextStyles[size]]}>
         {label}
       </Text>
     </View>

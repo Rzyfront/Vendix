@@ -4,12 +4,16 @@ import { RequestContextService } from '../../../../common/context/request-contex
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateResolutionDto } from './dto/create-resolution.dto';
 import { UpdateResolutionDto } from './dto/update-resolution.dto';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 
 @Injectable()
 export class ResolutionsService {
   private readonly logger = new Logger(ResolutionsService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -39,11 +43,18 @@ export class ResolutionsService {
 
   async create(dto: CreateResolutionDto) {
     const context = this.getContext();
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
 
     const resolution = await this.prisma.invoice_resolutions.create({
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        accounting_entity_id: accounting_entity.id,
+        document_type: dto.document_type || 'sales_invoice',
         resolution_number: dto.resolution_number,
         resolution_date: new Date(dto.resolution_date),
         prefix: dto.prefix,
@@ -74,6 +85,7 @@ export class ResolutionsService {
         resolution_date: new Date(dto.resolution_date),
       }),
       ...(dto.prefix && { prefix: dto.prefix }),
+      ...(dto.document_type && { document_type: dto.document_type }),
       ...(dto.range_from !== undefined && { range_from: dto.range_from }),
       ...(dto.range_to !== undefined && { range_to: dto.range_to }),
       ...(dto.valid_from && { valid_from: new Date(dto.valid_from) }),

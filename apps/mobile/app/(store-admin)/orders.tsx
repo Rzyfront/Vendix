@@ -42,7 +42,7 @@ const FILTER_CHIPS: FilterChip[] = [
 function channelLabel(channel?: OrderChannel | null): string {
   switch (channel) {
     case 'pos':
-      return 'POS';
+      return 'Punto de venta';
     case 'ecommerce':
       return 'Ecommerce';
     case 'agent':

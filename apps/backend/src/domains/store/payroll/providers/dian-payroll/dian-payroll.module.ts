@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../../../../prisma/prisma.module';
 import { S3Module } from '../../../../../common/services/s3.module';
 import { DianDirectModule } from '../../../../store/invoicing/providers/dian-direct/dian-direct.module';
+import { FiscalProductionReadinessService } from '../../../../store/invoicing/providers/fiscal-production-readiness.service';
 import { DianPayrollProvider } from './dian-payroll.provider';
 
 /**
@@ -15,7 +16,7 @@ import { DianPayrollProvider } from './dian-payroll.provider';
  */
 @Module({
   imports: [PrismaModule, S3Module, DianDirectModule],
-  providers: [DianPayrollProvider],
+  providers: [DianPayrollProvider, FiscalProductionReadinessService],
   exports: [DianPayrollProvider],
 })
 export class DianPayrollModule {}
