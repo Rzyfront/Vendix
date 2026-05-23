@@ -155,6 +155,9 @@ export class CategoriesService {
       // CRITICAL: Sanitize image_url to extract S3 key before storing
       updateData.image_url = extractS3KeyFromUrl(updateCategoryDto.image_url);
     }
+    if (updateCategoryDto.state !== undefined) {
+      updateData.state = updateCategoryDto.state;
+    }
     // store_id se gestiona automáticamente por el contexto de Prisma
     // if (updateCategoryDto.store_id !== undefined) {
     //   updateData.store_id = updateCategoryDto.store_id;
@@ -172,18 +175,31 @@ export class CategoriesService {
     };
   }
 
-  async remove(id: number, user: any) {
+  async remove(
+    id: number,
+    user: any,
+    options: { force?: boolean } = {},
+  ) {
     const category = await this.findOne(id, { includeInactive: true });
 
     const productCount = await this.prisma.product_categories.count({
       where: { category_id: id },
     });
-    if (productCount > 0)
-      throw new BadRequestException(
-        'Cannot delete category with assigned products',
-      );
 
-    // Eliminación lógica: cambiar estado a archived
+    if (productCount > 0 && !options.force) {
+      throw new VendixHttpException(
+        ErrorCodes.CAT_DELETE_HAS_PRODUCTS,
+        undefined,
+        { product_count: productCount },
+      );
+    }
+
+    if (productCount > 0 && options.force) {
+      await this.prisma.product_categories.deleteMany({
+        where: { category_id: id },
+      });
+    }
+
     await this.prisma.categories.update({
       where: { id },
       data: {

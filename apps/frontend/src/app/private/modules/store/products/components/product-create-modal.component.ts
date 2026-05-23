@@ -222,7 +222,7 @@ export class ProductCreateModalComponent {
         this.categoryOptions.set(categories.map((cat: ProductCategory) => ({
           value: cat.id,
           label: cat.name,
-          description: cat.description,
+          description: cat.description ?? undefined,
         })));
       },
       error: (error: any) => {
@@ -265,7 +265,7 @@ export class ProductCreateModalComponent {
         this.brandOptions.set(brands.map((brand: Brand) => ({
           value: brand.id,
           label: brand.name,
-          description: brand.description,
+          description: brand.description ?? undefined,
         })));
       },
       error: (error: any) => {
@@ -282,7 +282,7 @@ export class ProductCreateModalComponent {
       {
         value: category.id,
         label: category.name,
-        description: category.description,
+        description: category.description ?? undefined,
       },
     ]);
     this.productForm.patchValue({ category_ids: [category.id] });
@@ -295,7 +295,7 @@ export class ProductCreateModalComponent {
       {
         value: brand.id,
         label: brand.name,
-        description: brand.description,
+        description: brand.description ?? undefined,
       },
     ]);
     this.productForm.patchValue({ brand_ids: [brand.id] });

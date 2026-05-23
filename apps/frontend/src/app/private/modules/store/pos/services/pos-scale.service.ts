@@ -204,7 +204,7 @@ export class PosScaleService implements OnDestroy {
     this.readLoopAbortController = new AbortController();
     const textDecoder = new TextDecoderStream();
     const readableStreamClosed = this.port.readable
-      .pipeTo(textDecoder.writable, {
+      .pipeTo(textDecoder.writable as WritableStream<Uint8Array<ArrayBufferLike>>, {
         signal: this.readLoopAbortController.signal,
       })
       .catch(() => {

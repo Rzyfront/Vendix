@@ -181,16 +181,11 @@ export class CategoriesController {
   async remove(
     @Param('id', ParseIntPipe) id: number,
     @Req() req: AuthenticatedRequest,
+    @Query('force') force?: string,
   ) {
-    try {
-      await this.categoriesService.remove(id, req.user);
-      return this.responseService.deleted('Categoría eliminada exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al eliminar la categoría',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    await this.categoriesService.remove(id, req.user, {
+      force: force === 'true',
+    });
+    return this.responseService.deleted('Categoría eliminada exitosamente');
   }
 }

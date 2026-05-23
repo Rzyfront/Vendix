@@ -7,10 +7,17 @@ import {
   MaxLength,
   Min,
   IsUrl,
+  IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
+
+// Enums - matching the Prisma schema (brand_state_enum)
+export enum BrandState {
+  ACTIVE = 'active',
+  INACTIVE = 'inactive',
+}
 
 export class CreateBrandDto {
   @ApiProperty({ example: 'Nike', description: 'Nombre de la marca' })
@@ -19,6 +26,15 @@ export class CreateBrandDto {
   @MinLength(2, { message: 'El nombre debe tener al menos 2 caracteres' })
   @MaxLength(100)
   name: string;
+
+  @ApiPropertyOptional({
+    example: 'nike',
+    description: 'Slug de la marca (opcional, se genera automáticamente)',
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  slug?: string;
 
   @ApiPropertyOptional({
     example: 'Marca deportiva internacional',
@@ -36,6 +52,15 @@ export class CreateBrandDto {
   @IsOptional()
   @IsUrl()
   logo_url?: string;
+
+  @ApiPropertyOptional({
+    example: BrandState.ACTIVE,
+    enum: BrandState,
+    description: 'Estado de la marca (opcional)',
+  })
+  @IsEnum(BrandState)
+  @IsOptional()
+  state?: BrandState = BrandState.ACTIVE;
 }
 
 // Update Brand DTO
@@ -70,6 +95,15 @@ export class BrandQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({
+    example: BrandState.ACTIVE,
+    enum: BrandState,
+    description: 'Estado de la marca (opcional)',
+  })
+  @IsOptional()
+  @IsEnum(BrandState)
+  state?: BrandState;
 
   @ApiPropertyOptional({
     example: 'created_at',

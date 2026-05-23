@@ -797,10 +797,20 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Category not found',
   },
+  CAT_DELETE_HAS_PRODUCTS: {
+    code: 'CAT_DELETE_HAS_PRODUCTS',
+    httpStatus: 409,
+    devMessage: 'Category has assigned products',
+  },
   BRAND_FIND_001: {
     code: 'BRAND_FIND_001',
     httpStatus: 404,
     devMessage: 'Brand not found',
+  },
+  BRAND_DELETE_HAS_PRODUCTS: {
+    code: 'BRAND_DELETE_HAS_PRODUCTS',
+    httpStatus: 409,
+    devMessage: 'Brand has assigned products',
   },
 
   // Refunds

@@ -15,6 +15,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 // Models
 import {
   Product,
+  ProductState,
   CreateProductDto,
   UpdateProductDto,
   ProductQueryDto,
@@ -95,6 +96,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (create)="openCreateModal()"
         (edit)="navigateToEditPage($event)"
         (delete)="deleteProduct($event)"
+        (toggleState)="onToggleProductState($event)"
         (bulkUpload)="openBulkUploadModal()"
         (bulkImageUpload)="openBulkImageUploadModal()"
         (pageChange)="changePage($event)"
@@ -320,6 +322,28 @@ export class ProductsComponent {
           const message = extractApiErrorMessage(error);
           this.toastService.error(message, 'Error al crear producto');
           this.isCreatingProduct = false;
+        },
+      });
+  }
+
+  onToggleProductState(product: Product): void {
+    const nextState =
+      product.state === ProductState.ACTIVE
+        ? ProductState.INACTIVE
+        : ProductState.ACTIVE;
+    const verb = nextState === ProductState.ACTIVE ? 'activado' : 'desactivado';
+    this.productsService
+      .updateProduct(product.id, { state: nextState } as UpdateProductDto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(`Producto ${verb} correctamente`);
+          this.loadProducts();
+          this.loadStats();
+        },
+        error: (error: any) => {
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message, 'Error al actualizar producto');
         },
       });
   }

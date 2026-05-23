@@ -12,6 +12,12 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SYS_UNAUTHORIZED_001: 'Debe iniciar sesion para continuar.',
   SYS_CONFLICT_001: 'El recurso ya existe o esta en conflicto.',
 
+  // Categories & Brands extra codes
+  CAT_DELETE_HAS_PRODUCTS:
+    'Esta categoría tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta categoría.',
+  BRAND_DELETE_HAS_PRODUCTS:
+    'Esta marca tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta marca.',
+
   // Uploads
   UPLOAD_FILE_001: 'Seleccione un archivo para subir.',
   UPLOAD_CONTEXT_001: 'Debe seleccionar una organizacion para subir archivos.',

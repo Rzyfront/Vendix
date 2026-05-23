@@ -166,25 +166,69 @@ export interface ProductImage {
   product?: Product;
 }
 
+export type CategoryState = 'active' | 'inactive';
+export type BrandState = 'active' | 'inactive';
+
 export interface ProductCategory {
   id: number;
   name: string;
   slug: string;
-  description?: string;
-  store_id: number;
-  created_at: Date;
-  updated_at: Date;
+  description?: string | null;
+  image_url?: string | null;
+  state?: CategoryState;
+  store_id?: number | null;
+  created_at?: string | Date;
+  updated_at?: string | Date;
 }
 
 export interface Brand {
   id: number;
   name: string;
   slug: string;
+  description?: string | null;
+  logo_url?: string | null;
+  state?: BrandState;
+  store_id: number;
+  created_at?: string | Date;
+  updated_at?: string | Date;
+}
+
+export interface CreateCategoryDto {
+  name: string;
+  slug?: string;
+  description?: string;
+  image_url?: string;
+  state?: CategoryState;
+}
+
+export type UpdateCategoryDto = Partial<CreateCategoryDto>;
+
+export interface CreateBrandDto {
+  name: string;
+  slug?: string;
   description?: string;
   logo_url?: string;
-  store_id: number;
-  created_at: Date;
-  updated_at: Date;
+  state?: BrandState;
+}
+
+export type UpdateBrandDto = Partial<CreateBrandDto>;
+
+export interface CategoryQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: CategoryState | 'all';
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface BrandQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: BrandState | 'all';
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface ProductTaxAssignment {

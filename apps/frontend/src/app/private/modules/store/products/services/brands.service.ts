@@ -9,7 +9,27 @@ interface ApiResponse<T> {
   data: T;
   message: string;
 }
-import { Brand } from '../interfaces';
+
+interface PaginatedApiResponse<T> {
+  success: boolean;
+  data: T[];
+  message?: string;
+  meta: {
+    pagination: {
+      total: number;
+      page: number;
+      limit: number;
+      pages?: number;
+    };
+  };
+}
+import {
+  Brand,
+  CreateBrandDto,
+  UpdateBrandDto,
+  BrandQuery,
+  BrandState,
+} from '../interfaces';
 
 @Injectable({
   providedIn: 'root',
@@ -41,6 +61,29 @@ export class BrandsService {
       );
   }
 
+  /**
+   * Paginated fetch returning the FULL envelope including meta.pagination.
+   * Used by the admin Marcas list page.
+   */
+  getPaginated(
+    query: BrandQuery = {},
+  ): Observable<PaginatedApiResponse<Brand>> {
+    let params = new HttpParams();
+    if (query.page != null) params = params.set('page', String(query.page));
+    if (query.limit != null) params = params.set('limit', String(query.limit));
+    if (query.search) params = params.set('search', query.search);
+    if (query.state && query.state !== 'all') {
+      params = params.set('state', query.state);
+    }
+    if (query.sort_by) params = params.set('sort_by', query.sort_by);
+    if (query.sort_order) params = params.set('sort_order', query.sort_order);
+    return this.http
+      .get<
+        PaginatedApiResponse<Brand>
+      >(`${this.apiUrl}/store/brands`, { params })
+      .pipe(catchError(this.handleError));
+  }
+
   getBrandById(id: number): Observable<Brand> {
     return this.http
       .get<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`)
@@ -50,7 +93,7 @@ export class BrandsService {
       );
   }
 
-  createBrand(brand: Partial<Brand>): Observable<Brand> {
+  createBrand(brand: CreateBrandDto): Observable<Brand> {
     return this.http
       .post<ApiResponse<Brand>>(`${this.apiUrl}/store/brands`, brand)
       .pipe(
@@ -59,7 +102,7 @@ export class BrandsService {
       );
   }
 
-  updateBrand(id: number, brand: Partial<Brand>): Observable<Brand> {
+  updateBrand(id: number, brand: UpdateBrandDto): Observable<Brand> {
     return this.http
       .patch<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`, brand)
       .pipe(
@@ -68,9 +111,20 @@ export class BrandsService {
       );
   }
 
-  deleteBrand(id: number): Observable<void> {
+  toggleBrandState(id: number, state: BrandState): Observable<Brand> {
     return this.http
-      .delete<void>(`${this.apiUrl}/store/brands/${id}`)
+      .patch<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`, { state })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  deleteBrand(id: number, force = false): Observable<void> {
+    let params = new HttpParams();
+    if (force) params = params.set('force', 'true');
+    return this.http
+      .delete<void>(`${this.apiUrl}/store/brands/${id}`, { params })
       .pipe(catchError(this.handleError));
   }
 
