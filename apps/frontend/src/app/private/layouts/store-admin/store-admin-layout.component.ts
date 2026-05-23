@@ -448,6 +448,12 @@ export class StoreAdminLayoutComponent {
       icon: 'file-bar-chart',
       children: [
         {
+          label: 'Resumen',
+          icon: 'circle',
+          route: '/admin/reports/overview',
+          alwaysVisible: true,
+        },
+        {
           label: 'Ventas',
           icon: 'circle',
           route: '/admin/reports/sales',
@@ -469,6 +475,18 @@ export class StoreAdminLayoutComponent {
           label: 'Clientes',
           icon: 'circle',
           route: '/admin/reports/customers',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Compras',
+          icon: 'circle',
+          route: '/admin/reports/purchases',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Reseñas',
+          icon: 'circle',
+          route: '/admin/reports/reviews',
           alwaysVisible: true,
         },
         {

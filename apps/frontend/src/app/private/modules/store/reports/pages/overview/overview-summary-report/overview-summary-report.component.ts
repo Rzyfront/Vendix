@@ -6,7 +6,7 @@ import { selectLoading, selectReportData, selectSummaryData, selectSelectedRepor
 import { ReportViewerComponent } from '../../../components/report-viewer/report-viewer.component';
 
 @Component({
-  selector: 'app-cash-register-report-report',
+  selector: 'app-overview-summary-report',
   standalone: true,
   imports: [ReportViewerComponent],
   template: `
@@ -24,7 +24,7 @@ import { ReportViewerComponent } from '../../../components/report-viewer/report-
     />
   `,
 })
-export class CashRegisterReportReportComponent {
+export class OverviewSummaryReportComponent {
   private readonly store = inject(Store);
   readonly report = toSignal(this.store.select(selectSelectedReport));
   readonly loading = toSignal(this.store.select(selectLoading), { initialValue: false });
@@ -36,7 +36,7 @@ export class CashRegisterReportReportComponent {
   readonly itemsPerPage = toSignal(this.store.select(selectItemsPerPage), { initialValue: 10 });
 
   constructor() {
-    this.store.dispatch(ReportsActions.selectReport({ reportId: 'cash-register-report' }));
+    this.store.dispatch(ReportsActions.selectReport({ reportId: 'overview-summary' }));
   }
 
   onDateRangeChange(dateRange: any): void {

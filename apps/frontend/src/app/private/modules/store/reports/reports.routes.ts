@@ -17,9 +17,18 @@ export const reportsRoutes: Routes = [
     ],
     children: [
       // Redirect base to first category
-      { path: '', redirectTo: 'sales', pathMatch: 'full' },
+      { path: '', redirectTo: 'overview', pathMatch: 'full' },
 
       // Each category has its own shell with tabs
+      {
+        path: 'overview',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'overview' },
+        children: [
+          { path: '', redirectTo: 'overview-summary', pathMatch: 'full' },
+          { path: 'overview-summary', loadComponent: () => import('./pages/overview/overview-summary-report/overview-summary-report.component').then(c => c.OverviewSummaryReportComponent) },
+        ],
+      },
       {
         path: 'sales',
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
@@ -69,6 +78,27 @@ export const reportsRoutes: Routes = [
           { path: 'customer-top', loadComponent: () => import('./pages/customers/customer-top-report/customer-top-report.component').then(c => c.CustomerTopReportComponent) },
           { path: 'customer-receivables', loadComponent: () => import('./pages/customers/customer-receivables-report/customer-receivables-report.component').then(c => c.CustomerReceivablesReportComponent) },
           { path: 'customer-aging', loadComponent: () => import('./pages/customers/customer-aging-report/customer-aging-report.component').then(c => c.CustomerAgingReportComponent) },
+        ],
+      },
+      {
+        path: 'purchases',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'purchases' },
+        children: [
+          { path: '', redirectTo: 'purchase-summary', pathMatch: 'full' },
+          { path: 'purchase-summary', loadComponent: () => import('./pages/purchases/purchase-summary-report/purchase-summary-report.component').then(c => c.PurchaseSummaryReportComponent) },
+          { path: 'purchase-by-supplier', loadComponent: () => import('./pages/purchases/purchase-by-supplier-report/purchase-by-supplier-report.component').then(c => c.PurchaseBySupplierReportComponent) },
+          { path: 'purchase-trends', loadComponent: () => import('./pages/purchases/purchase-trends-report/purchase-trends-report.component').then(c => c.PurchaseTrendsReportComponent) },
+        ],
+      },
+      {
+        path: 'reviews',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'reviews' },
+        children: [
+          { path: '', redirectTo: 'reviews-summary', pathMatch: 'full' },
+          { path: 'reviews-summary', loadComponent: () => import('./pages/reviews/reviews-summary-report/reviews-summary-report.component').then(c => c.ReviewsSummaryReportComponent) },
+          { path: 'reviews-by-product', loadComponent: () => import('./pages/reviews/reviews-by-product-report/reviews-by-product-report.component').then(c => c.ReviewsByProductReportComponent) },
         ],
       },
       {

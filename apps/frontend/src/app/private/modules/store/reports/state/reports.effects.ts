@@ -17,6 +17,13 @@ export class ReportsEffects {
   private reportExportService = inject(ReportExportService);
   private toastService = inject(ToastService);
 
+  selectReportAndLoad$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ReportsActions.selectReport),
+      map(() => ReportsActions.loadReportData()),
+    ),
+  );
+
   loadReportData$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ReportsActions.loadReportData),

@@ -45,5 +45,5 @@ export const initialReportsState: ReportsState = {
   currentPage: 1,
   totalPages: 1,
   totalItems: 0,
-  itemsPerPage: 25,
+  itemsPerPage: 10,
 };

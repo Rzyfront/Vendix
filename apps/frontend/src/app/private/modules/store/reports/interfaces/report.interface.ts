@@ -1,8 +1,11 @@
 export type ReportCategoryId =
+  | 'overview'
   | 'sales'
   | 'inventory'
   | 'products'
   | 'customers'
+  | 'purchases'
+  | 'reviews'
   | 'accounting'
   | 'payroll'
   | 'financial';
