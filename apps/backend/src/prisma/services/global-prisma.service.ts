@@ -444,6 +444,14 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.invoice_items;
   }
 
+  get fiscal_transmissions() {
+    return this.baseClient.fiscal_transmissions;
+  }
+
+  get fiscal_evidences() {
+    return this.baseClient.fiscal_evidences;
+  }
+
   // ICA Municipal Rates (global - no scoping)
   get ica_municipal_rates() {
     return this.baseClient.ica_municipal_rates;

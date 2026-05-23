@@ -115,6 +115,85 @@ export class PayrollFlowService {
     }
   }
 
+  private async persistPayrollItemDianResults(
+    run: any,
+    item_results: Array<{
+      employee_document: string;
+      success: boolean;
+      cune?: string;
+      message?: string;
+    }>,
+  ) {
+    const result_by_document = new Map(
+      item_results.map((result) => [result.employee_document, result]),
+    );
+
+    await Promise.all(
+      (run.payroll_items || []).map((item: any) => {
+        const result = result_by_document.get(item.employee.document_number);
+        if (!result) return Promise.resolve();
+        return this.prisma.payroll_items.update({
+          where: { id: item.id },
+          data: {
+            send_status: result.success ? 'sent_ok' : 'sent_error',
+            dian_status: result.success ? 'accepted' : 'rejected',
+            accounting_status: result.success ? 'provisional' : 'blocked',
+            cune: result.cune || null,
+            provider_response: result as any,
+            sent_at: new Date(),
+            accepted_at: result.success ? new Date() : null,
+            rejected_at: result.success ? null : new Date(),
+          },
+        });
+      }),
+    );
+  }
+
+  private buildCostCenterBreakdown(run: any): Record<
+    string,
+    { earnings: number; employer_costs: number }
+  > {
+    const cost_center_breakdown: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    > = {};
+
+    for (const item of run.payroll_items || []) {
+      const cost_center = item.employee?.cost_center || 'administrative';
+      if (!cost_center_breakdown[cost_center]) {
+        cost_center_breakdown[cost_center] = {
+          earnings: 0,
+          employer_costs: 0,
+        };
+      }
+      cost_center_breakdown[cost_center].earnings += Number(
+        item.total_earnings || 0,
+      );
+      cost_center_breakdown[cost_center].employer_costs += Number(
+        item.total_employer_costs || 0,
+      );
+    }
+
+    return cost_center_breakdown;
+  }
+
+  private emitPayrollDianAcceptedAccounting(run: any, user_id?: number) {
+    this.event_emitter.emit('payroll.dian_accepted', {
+      payroll_run_id: run.id,
+      organization_id: run.organization_id,
+      store_id: run.store_id ?? undefined,
+      accounting_entity_id: run.accounting_entity_id ?? undefined,
+      total_earnings: Number(run.total_earnings || 0),
+      total_employer_costs: Number(run.total_employer_costs || 0),
+      total_deductions: Number(run.total_deductions || 0),
+      total_net_pay: Number(run.total_net_pay || 0),
+      health_deduction: Number(run.health_deduction || 0),
+      pension_deduction: Number(run.pension_deduction || 0),
+      approved_by: user_id ?? run.approved_by_user_id,
+      cost_center_breakdown: this.buildCostCenterBreakdown(run),
+    });
+  }
+
   /**
    * Calculate all employee payroll items for a run.
    * Transitions: draft -> calculated
@@ -181,36 +260,6 @@ export class PayrollFlowService {
       include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
 
-    // Build cost center breakdown from payroll items
-    const cost_center_breakdown: Record<
-      string,
-      { earnings: number; employer_costs: number }
-    > = {};
-    for (const item of run.payroll_items || []) {
-      const cc = item.employee?.cost_center || 'administrative';
-      if (!cost_center_breakdown[cc]) {
-        cost_center_breakdown[cc] = { earnings: 0, employer_costs: 0 };
-      }
-      cost_center_breakdown[cc].earnings += Number(item.total_earnings || 0);
-      cost_center_breakdown[cc].employer_costs += Number(
-        item.total_employer_costs || 0,
-      );
-    }
-
-    this.event_emitter.emit('payroll.approved', {
-      payroll_run_id: id,
-      organization_id: run.organization_id,
-      store_id: run.store_id ?? undefined,
-      total_earnings: Number(run.total_earnings || 0),
-      total_employer_costs: Number(run.total_employer_costs || 0),
-      total_deductions: Number(run.total_deductions || 0),
-      total_net_pay: Number(run.total_net_pay || 0),
-      health_deduction: Number(run.health_deduction || 0),
-      pension_deduction: Number(run.pension_deduction || 0),
-      approved_by: context.user_id,
-      cost_center_breakdown,
-    });
-
     this.logger.log(`Payroll run #${id} approved by user #${context.user_id}`);
 
     return updated;
@@ -252,12 +301,25 @@ export class PayrollFlowService {
     const new_status: PayrollStatus = provider_response.success
       ? 'sent'
       : 'approved';
+    const item_results =
+      ((provider_response.raw_response as any)?.results as any[]) ||
+      items.map((item) => ({
+        employee_document: item.document_number,
+        success: provider_response.success,
+        cune: provider_response.cune,
+        message: provider_response.message,
+      }));
+    await this.persistPayrollItemDianResults(run, item_results);
 
     const updated = await this.prisma.payroll_runs.update({
       where: { id },
       data: {
         status: new_status,
         send_status: provider_response.success ? 'sent_ok' : 'sent_error',
+        dian_status: provider_response.success ? 'accepted' : 'rejected',
+        accounting_status: provider_response.success
+          ? 'provisional'
+          : 'blocked',
         provider_response: provider_response.raw_response as any,
         cune: provider_response.cune || null,
         xml_document: provider_response.xml_document || null,
@@ -269,6 +331,13 @@ export class PayrollFlowService {
     this.logger.log(
       `Payroll run #${id} sent to provider: ${provider_response.success ? 'OK' : 'FAILED'}`,
     );
+
+    if (provider_response.success) {
+      this.emitPayrollDianAcceptedAccounting(
+        updated,
+        RequestContextService.getContext()?.user_id,
+      );
+    }
 
     return updated;
   }
@@ -400,6 +469,7 @@ export class PayrollFlowService {
 
     const sent_count = item_results.filter((r) => r.success).length;
     const failed_count = item_results.filter((r) => !r.success).length;
+    await this.persistPayrollItemDianResults(run, item_results);
 
     // If the run was approved and all items were sent successfully, transition to 'sent'
     const new_status: PayrollStatus =
@@ -412,6 +482,10 @@ export class PayrollFlowService {
       data: {
         status: new_status,
         send_status: provider_response.success ? 'sent_ok' : 'sent_partial',
+        dian_status: provider_response.success ? 'accepted' : 'rejected',
+        accounting_status: provider_response.success
+          ? 'provisional'
+          : 'blocked',
         provider_response: provider_response.raw_response as any,
         cune: provider_response.cune || null,
         xml_document: provider_response.xml_document || null,
@@ -423,6 +497,13 @@ export class PayrollFlowService {
     this.logger.log(
       `Payroll run #${id} sent to DIAN: ${sent_count} sent, ${failed_count} failed`,
     );
+
+    if (provider_response.success) {
+      this.emitPayrollDianAcceptedAccounting(
+        updated,
+        RequestContextService.getContext()?.user_id,
+      );
+    }
 
     return {
       payroll_run: updated,
@@ -535,17 +616,30 @@ export class PayrollFlowService {
 
     // If status changed to accepted, update the payroll run
     if (status_response.status === 'accepted' && run.status === 'sent') {
-      await this.prisma.payroll_runs.update({
+      const updated = await this.prisma.payroll_runs.update({
         where: { id },
-        data: { status: 'accepted' },
+        data: {
+          status: 'accepted',
+          dian_status: 'accepted',
+          accounting_status: 'provisional',
+        },
+        include: PAYROLL_RUN_DETAIL_INCLUDE,
       });
+      this.emitPayrollDianAcceptedAccounting(
+        updated,
+        RequestContextService.getContext()?.user_id,
+      );
     }
 
     // If status changed to rejected, update the payroll run
     if (status_response.status === 'rejected' && run.status === 'sent') {
       await this.prisma.payroll_runs.update({
         where: { id },
-        data: { status: 'rejected' },
+        data: {
+          status: 'rejected',
+          dian_status: 'rejected',
+          accounting_status: 'blocked',
+        },
       });
     }
 

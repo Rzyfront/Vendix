@@ -68,8 +68,19 @@ export class CreateInvoiceTaxDto {
 }
 
 export class CreateInvoiceDto {
-  @IsEnum(['sales_invoice', 'purchase_invoice', 'export_invoice'])
-  invoice_type: 'sales_invoice' | 'purchase_invoice' | 'export_invoice';
+  @IsEnum([
+    'sales_invoice',
+    'purchase_invoice',
+    'export_invoice',
+    'support_document',
+    'support_adjustment_note',
+  ])
+  invoice_type:
+    | 'sales_invoice'
+    | 'purchase_invoice'
+    | 'export_invoice'
+    | 'support_document'
+    | 'support_adjustment_note';
 
   @IsOptional()
   @IsNumber()

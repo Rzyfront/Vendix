@@ -374,6 +374,15 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_CONN_001: 'No se pudo conectar con la DIAN. Intenta de nuevo.',
   DIAN_SEND_001: 'La DIAN rechazo el documento.',
   DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
+  DIAN_CERT_004: 'El certificado no coincide con el NIT de la entidad fiscal.',
+  DIAN_ENABLEMENT_001: 'Faltan requisitos para habilitar DIAN en produccion.',
+  FISCAL_CONFIG_INCOMPLETE: 'La configuracion fiscal de esta entidad esta incompleta.',
+  FISCAL_SCOPE_INVALID: 'La operacion no corresponde a la entidad fiscal actual.',
+  FISCAL_IDEMPOTENCY_CONFLICT: 'El reintento fiscal no coincide con el envio original.',
+  FISCAL_ACCOUNTING_BLOCKED: 'La contabilidad fiscal esta bloqueada hasta que exista aceptacion DIAN.',
+  FISCAL_RESOLUTION_MISSING: 'No hay una resolucion DIAN activa para esta entidad fiscal.',
+  FISCAL_RESOLUTION_EXHAUSTED: 'La numeracion DIAN de esta resolucion esta agotada.',
+  FISCAL_DOCUMENT_UNSUPPORTED: 'Este tipo de documento fiscal aun no esta implementado para DIAN propio.',
 
   // Invoicing
   INVOICING_FIND_001: 'No se encontro la factura.',

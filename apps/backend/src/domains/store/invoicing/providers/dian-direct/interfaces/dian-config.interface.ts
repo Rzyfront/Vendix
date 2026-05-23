@@ -5,11 +5,8 @@
 export interface DianConfigDecrypted {
   id: number;
   organization_id: number;
-  /**
-   * Null when organizations.fiscal_scope=ORGANIZATION (config is org-wide).
-   * Non-null when fiscal_scope=STORE (config is per-store).
-   */
   store_id: number | null;
+  accounting_entity_id: number;
   nit: string;
   nit_dv: string | null;
   software_id: string;
@@ -18,7 +15,13 @@ export interface DianConfigDecrypted {
   certificate_password: string | null; // Decrypted
   certificate_expiry: Date | null;
   environment: 'test' | 'production';
-  enablement_status: 'not_started' | 'testing' | 'enabled' | 'suspended';
+  enablement_status:
+    | 'not_started'
+    | 'testing'
+    | 'test_set_passed'
+    | 'enabled'
+    | 'suspended'
+    | 'expired';
   test_set_id: string | null;
 }
 

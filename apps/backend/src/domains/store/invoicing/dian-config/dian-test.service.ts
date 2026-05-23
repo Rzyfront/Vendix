@@ -209,11 +209,17 @@ export class DianTestService {
 
     // 4. Download certificate from S3
     let p12_buffer: Buffer | null = null;
-    if (config.certificate_s3_key && cert_password) {
-      p12_buffer = await this.s3_service.downloadImage(
-        config.certificate_s3_key,
+    if (!config.certificate_s3_key || !cert_password) {
+      throw new VendixHttpException(
+        ErrorCodes.DIAN_CERT_001,
+        'DIAN test set requires the fiscal entity certificate before generating signed XML.',
+        { dian_configuration_id: config_id },
       );
     }
+
+    p12_buffer = await this.s3_service.downloadImage(
+      config.certificate_s3_key,
+    );
 
     // 4b. Extract WS-Security credentials from certificate
     let ws_credentials: WsSecurityCredentials | undefined;
@@ -523,7 +529,8 @@ export class DianTestService {
       where: { id: config_id },
       data: {
         last_test_result: result_data,
-        enablement_status: response.success ? 'enabled' : 'testing',
+        enablement_status: response.success ? 'test_set_passed' : 'testing',
+        enablement_evidence: response.success ? result_data : undefined,
       },
     });
 

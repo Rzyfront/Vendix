@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
@@ -35,6 +36,7 @@ export class InvoicingService {
     private readonly prisma: StorePrismaService,
     private readonly invoice_number_generator: InvoiceNumberGenerator,
     private readonly event_emitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   private getContext() {
@@ -43,6 +45,36 @@ export class InvoicingService {
       throw new Error('No request context found');
     }
     return context;
+  }
+
+  private async resolveAccountingEntityIdForContext(context: {
+    organization_id?: number;
+    store_id?: number;
+  }): Promise<number> {
+    if (
+      typeof context.organization_id !== 'number' ||
+      typeof context.store_id !== 'number'
+    ) {
+      throw new VendixHttpException(ErrorCodes.AUTH_CONTEXT_001);
+    }
+
+    const entity = await this.fiscalScope.resolveAccountingEntityForFiscal({
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+    });
+
+    return entity.id;
+  }
+
+  private toFiscalDocumentType(invoice_type: string) {
+    if (invoice_type === 'purchase_invoice') return 'support_document';
+    if (invoice_type === 'export_invoice') return 'sales_invoice';
+    return invoice_type as
+      | 'sales_invoice'
+      | 'credit_note'
+      | 'debit_note'
+      | 'support_document'
+      | 'support_adjustment_note';
   }
 
   async findAll(query: QueryInvoiceDto) {
@@ -132,10 +164,16 @@ export class InvoicingService {
 
   async create(dto: CreateInvoiceDto) {
     const context = this.getContext();
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
 
     // Generate invoice number from resolution
     const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber(dto.resolution_id);
+      await this.invoice_number_generator.generateNextNumber({
+        resolution_id: dto.resolution_id,
+        document_type: this.toFiscalDocumentType(dto.invoice_type),
+        accounting_entity_id,
+      });
 
     // Calculate amounts from items
     const { subtotal, discount, tax, total } = this.calculateAmounts(dto.items);
@@ -144,6 +182,8 @@ export class InvoicingService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        accounting_entity_id,
+        fiscal_document_type: this.toFiscalDocumentType(dto.invoice_type),
         invoice_number,
         invoice_type: dto.invoice_type,
         status: 'draft',
@@ -210,6 +250,8 @@ export class InvoicingService {
 
   async createFromOrder(order_id: number) {
     const context = this.getContext();
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
 
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
@@ -241,7 +283,10 @@ export class InvoicingService {
     }
 
     const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber();
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: 'sales_invoice',
+        accounting_entity_id,
+      });
 
     const productItems = (order.order_items || []).map((item: any) => {
       const description =
@@ -308,6 +353,8 @@ export class InvoicingService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        accounting_entity_id,
+        fiscal_document_type: 'sales_invoice',
         invoice_number,
         invoice_type: 'sales_invoice',
         status: 'draft',
@@ -349,6 +396,8 @@ export class InvoicingService {
 
   async createFromSalesOrder(sales_order_id: number) {
     const context = this.getContext();
+    const accounting_entity_id =
+      await this.resolveAccountingEntityIdForContext(context);
 
     const sales_order = await this.prisma.sales_orders.findFirst({
       where: { id: sales_order_id },
@@ -379,7 +428,10 @@ export class InvoicingService {
     });
 
     const { invoice_number, resolution_id } =
-      await this.invoice_number_generator.generateNextNumber();
+      await this.invoice_number_generator.generateNextNumber({
+        document_type: 'sales_invoice',
+        accounting_entity_id,
+      });
 
     const items = (sales_order.sales_order_items || []).map((item: any) => {
       const description =
@@ -424,6 +476,8 @@ export class InvoicingService {
       data: {
         organization_id: context.organization_id,
         store_id: context.store_id,
+        accounting_entity_id,
+        fiscal_document_type: 'sales_invoice',
         invoice_number,
         invoice_type: 'sales_invoice',
         status: 'draft',

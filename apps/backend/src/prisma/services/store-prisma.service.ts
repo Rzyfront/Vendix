@@ -76,6 +76,8 @@ export class StorePrismaService extends BasePrismaService {
     'fiscal_periods',
     'accounting_entries',
     'accounting_account_mappings',
+    'fiscal_transmissions',
+    'fiscal_evidences',
     'payroll_runs',
     'payroll_settlements',
     'withholding_concepts',
@@ -87,6 +89,8 @@ export class StorePrismaService extends BasePrismaService {
     'invoice_resolutions',
     'accounting_entries',
     'accounting_account_mappings',
+    'fiscal_transmissions',
+    'fiscal_evidences',
     'payroll_runs',
     'payroll_settlements',
     'withholding_calculations',
@@ -188,6 +192,8 @@ export class StorePrismaService extends BasePrismaService {
       'invoice_items', // Relational
       'invoice_taxes', // Relational
       'dian_audit_logs', // Relational
+      'fiscal_transmissions', // Fiscal entity scoped
+      'fiscal_evidences', // Fiscal entity scoped
       'accounting_entry_lines', // Relational
       'payroll_items', // Relational
       'promotion_products', // Relational
@@ -979,6 +985,14 @@ export class StorePrismaService extends BasePrismaService {
 
   get dian_audit_logs() {
     return this.scoped_client.dian_audit_logs;
+  }
+
+  get fiscal_transmissions() {
+    return this.scoped_client.fiscal_transmissions;
+  }
+
+  get fiscal_evidences() {
+    return this.scoped_client.fiscal_evidences;
   }
 
   // Promotions models

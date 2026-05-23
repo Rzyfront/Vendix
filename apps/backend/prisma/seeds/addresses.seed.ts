@@ -19,7 +19,7 @@ export async function seedAddresses(
 
   // Fetch required organizations, stores, and users
   const vendixOrg = await client.organizations.findUnique({
-    where: { slug: 'vendix-corp' },
+    where: { slug: 'vendix' },
   });
   const techSolutionsOrg = await client.organizations.findUnique({
     where: { slug: 'tech-solutions' },

@@ -21,15 +21,15 @@ import { S3Service } from '../../../../common/services/s3.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
-import { DianXmlSignerService } from '../providers/dian-direct/dian-xml-signer.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { ManualCertificateIssuerAdapter } from './certificates/manual-certificate-issuer.adapter';
 
 @Controller('store/invoicing/dian-config')
 export class DianConfigController {
   constructor(
     private readonly dian_config_service: DianConfigService,
     private readonly dian_test_service: DianTestService,
-    private readonly xml_signer: DianXmlSignerService,
+    private readonly certificate_adapter: ManualCertificateIssuerAdapter,
     private readonly response_service: ResponseService,
     private readonly s3_service: S3Service,
   ) {}
@@ -131,13 +131,19 @@ export class DianConfigController {
       );
     }
 
-    // Validate the certificate
-    const validation = await this.xml_signer.validateCertificate(
-      file.buffer,
+    const config_id_int = parseInt(config_id, 10);
+    const config = await this.dian_config_service.getConfigById(config_id_int);
+
+    const validation = await this.certificate_adapter.validateCertificate({
+      p12_buffer: file.buffer,
       password,
-    );
+      expected_tax_id: config.nit,
+    });
 
     if (!validation.valid) {
+      if (validation.error?.includes('tax identifier')) {
+        throw new VendixHttpException(ErrorCodes.DIAN_CERT_004);
+      }
       if (validation.error?.includes('expired')) {
         throw new VendixHttpException(ErrorCodes.DIAN_CERT_003);
       }
@@ -147,7 +153,7 @@ export class DianConfigController {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_001, validation.error);
     }
 
-    const s3_key = `dian/certificates/${config_id}/certificate.p12`;
+    const s3_key = `dian/certificates/${config_id_int}/certificate.p12`;
     await this.s3_service.uploadFile(
       file.buffer,
       s3_key,
@@ -155,10 +161,11 @@ export class DianConfigController {
     );
 
     const result = await this.dian_config_service.updateCertificate(
-      parseInt(config_id, 10),
+      config_id_int,
       s3_key,
       password,
       validation.expires || null,
+      validation,
     );
 
     return this.response_service.success({
@@ -167,6 +174,9 @@ export class DianConfigController {
         subject: validation.subject,
         issuer: validation.issuer,
         expires: validation.expires,
+        fingerprint: validation.fingerprint,
+        serial_number: validation.serial_number,
+        tax_id: validation.tax_id,
       },
     });
   }

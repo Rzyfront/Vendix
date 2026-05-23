@@ -26,7 +26,7 @@ export async function seedUsers(
 
   // Fetch required organizations
   const vendixOrg = await client.organizations.findUnique({
-    where: { slug: 'vendix-corp' },
+    where: { slug: 'vendix' },
   });
   const techSolutionsOrg = await client.organizations.findUnique({
     where: { slug: 'tech-solutions' },
@@ -82,7 +82,7 @@ export async function seedUsers(
   const users = [
     // Super Admin (Vendix Corp)
     {
-      email: 'superadmin@vendix.com',
+      email: 'admin@vendix.online',
       password: hashedPassword,
       first_name: 'Super',
       last_name: 'Admin',

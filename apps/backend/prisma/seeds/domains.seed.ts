@@ -25,7 +25,7 @@ export async function seedDomains(
 
   // Fetch required organizations and stores
   const vendixOrg = await client.organizations.findUnique({
-    where: { slug: 'vendix-corp' },
+    where: { slug: 'vendix' },
   });
   const techSolutionsOrg = await client.organizations.findUnique({
     where: { slug: 'tech-solutions' },

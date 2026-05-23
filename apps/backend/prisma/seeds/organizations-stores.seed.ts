@@ -18,7 +18,7 @@ export async function seedOrganizationsAndStores(
   const organizations = [
     {
       name: 'Vendix Corp',
-      slug: 'vendix-corp',
+      slug: 'vendix',
       email: 'admin@vendix.com',
       legal_name: 'Vendix Corporation S.A.S.',
       tax_id: '900123456-7',

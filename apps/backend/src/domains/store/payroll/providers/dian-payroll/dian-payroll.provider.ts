@@ -10,6 +10,7 @@ import { S3Service } from '../../../../../common/services/s3.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../../common/context/request-context.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalProductionReadinessService } from '../../../../store/invoicing/providers/fiscal-production-readiness.service';
 import {
   DianSoapClient,
   WsSecurityCredentials,
@@ -62,6 +63,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     private readonly soap_client: DianSoapClient,
     private readonly xml_signer: DianXmlSignerService,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly readiness: FiscalProductionReadinessService,
   ) {}
 
   async sendPayroll(payroll_data: {
@@ -88,7 +90,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
     const config = await this.loadPayrollConfig();
 
     try {
-      // Load employer data from organization
+      // Load employer data from the fiscal accounting entity.
       const employer = await this.loadEmployerData(config);
 
       // Download certificate once for all items
@@ -308,6 +310,10 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         cert_buffer,
         config.certificate_password,
       );
+    } else if (config.environment === 'production') {
+      throw new Error(
+        'A valid certificate is required to sign DIAN production payroll adjustment documents.',
+      );
     } else {
       this.logger.warn(
         'No certificate configured — sending unsigned adjustment XML',
@@ -457,6 +463,10 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         cert_buffer,
         config.certificate_password,
       );
+    } else if (config.environment === 'production') {
+      throw new Error(
+        'A valid certificate is required to sign DIAN production payroll documents.',
+      );
     } else {
       this.logger.warn(
         'No certificate configured — sending unsigned DSPNE XML',
@@ -520,11 +530,23 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
         store_id: context.store_id ?? null,
       });
 
+    await this.readiness.resolveOwnSoftwareConfig({
+      organization_id: context.organization_id,
+      store_id: context.store_id ?? null,
+      accounting_entity_id: accounting_entity.id,
+      configuration_type: 'payroll',
+      document_type: 'payroll',
+    });
+
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
         accounting_entity_id: accounting_entity.id,
         configuration_type: 'payroll',
-        enablement_status: { in: ['testing', 'enabled'] },
+        operation_mode: 'own_software',
+        enablement_status: { in: ['testing', 'test_set_passed', 'enabled'] },
+        ...(process.env.NODE_ENV === 'production' && {
+          environment: 'production',
+        }),
       },
       orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
@@ -539,6 +561,7 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       id: config.id,
       organization_id: config.organization_id,
       store_id: config.store_id,
+      accounting_entity_id: config.accounting_entity_id,
       nit: config.nit,
       nit_dv: config.nit_dv,
       software_id: config.software_id,
@@ -555,30 +578,77 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
   }
 
   /**
-   * Loads employer data from the organization.
+   * Loads employer data from the fiscal accounting entity.
    */
   private async loadEmployerData(
     config: DianConfigDecrypted,
   ): Promise<NominaEmpleadorData> {
-    const org = await this.prisma.organizations.findUnique({
-      where: { id: config.organization_id },
-      include: { addresses: { take: 1 } },
-    });
-
-    if (!org) {
-      throw new Error(`Organization ${config.organization_id} not found`);
+    if (!config.accounting_entity_id) {
+      throw new Error(
+        'DIAN payroll configuration is missing fiscal accounting entity.',
+      );
     }
 
-    const address = org.addresses?.[0];
+    const entity = await this.prisma.withoutScope().accounting_entities.findFirst({
+      where: {
+        id: config.accounting_entity_id,
+        organization_id: config.organization_id,
+        is_active: true,
+      },
+      include: {
+        organization: {
+          include: {
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+          },
+        },
+        store: {
+          include: {
+            addresses: {
+              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+
+    if (!entity) {
+      throw new Error(
+        `Fiscal accounting entity ${config.accounting_entity_id} not found`,
+      );
+    }
+
+    const organization = entity.organization;
+    const store = entity.store;
+    const address =
+      entity.fiscal_scope === 'STORE'
+        ? store?.addresses?.[0]
+        : organization.addresses?.[0];
+
+    if (!address?.municipality_code) {
+      throw new Error(
+        `Fiscal entity ${entity.id} requires a primary address with DIAN municipality_code.`,
+      );
+    }
+
+    const legal_name =
+      entity.legal_name ||
+      (entity.fiscal_scope === 'STORE'
+        ? store?.legal_name
+        : organization.legal_name) ||
+      entity.name;
 
     return {
       nit: config.nit,
       dv: config.nit_dv || '0',
-      country: address?.country_code || DEFAULT_COUNTRY_CODE,
-      department: address?.state_province || '11',
-      city: address?.city || '11001',
-      address: address?.address_line1 || 'N/A',
-      legal_name: org.legal_name || org.name,
+      country: address.country_code || DEFAULT_COUNTRY_CODE,
+      department: address.municipality_code.slice(0, 2),
+      city: address.municipality_code,
+      address: address.address_line1,
+      legal_name,
     };
   }
 

@@ -16,6 +16,8 @@ import { DianConfigService } from './dian-config/dian-config.service';
 import { DianTestService } from './dian-config/dian-test.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
+import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-ledger.service';
+import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
 
 @Module({
   imports: [
@@ -40,12 +42,15 @@ import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service
     DianTestService,
     InvoicePdfService,
     InvoiceRetryQueueService,
+    FiscalTransmissionLedgerService,
+    ManualCertificateIssuerAdapter,
   ],
   exports: [
     InvoicingService,
     InvoiceFlowService,
     InvoicePdfService,
     InvoiceRetryQueueService,
+    FiscalTransmissionLedgerService,
   ],
 })
 export class InvoicingModule {}

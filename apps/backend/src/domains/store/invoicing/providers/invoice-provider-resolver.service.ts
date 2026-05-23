@@ -1,58 +1,118 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RequestContextService } from '../../../../common/context/request-context.service';
-import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { InvoiceProviderAdapter } from './invoice-provider.interface';
 import { MockInvoiceProvider } from './mock-invoice.provider';
 import { DianDirectProvider } from './dian-direct/dian-direct.provider';
+import { FiscalProductionReadinessService } from './fiscal-production-readiness.service';
+
+type FiscalAccountingEntityRef = {
+  id: number;
+};
 
 /**
  * Resolves the correct invoice provider for the current store at runtime.
- * If the store has an active DIAN configuration, uses DianDirectProvider.
- * Otherwise falls back to MockInvoiceProvider.
+ * Vendix's default production model is DIAN own software per fiscal entity:
+ * the customer is the electronic issuer and signs with their own certificate.
  */
 @Injectable()
 export class InvoiceProviderResolver {
   private readonly logger = new Logger(InvoiceProviderResolver.name);
 
   constructor(
-    private readonly prisma: StorePrismaService,
     private readonly mock_provider: MockInvoiceProvider,
     private readonly dian_provider: DianDirectProvider,
+    private readonly fiscalScope: FiscalScopeService,
+    private readonly readiness: FiscalProductionReadinessService,
   ) {}
 
+  private isProductionRuntime(): boolean {
+    return this.readiness.isProductionRuntime();
+  }
+
   /**
-   * Resolves the appropriate provider based on the store's DIAN configuration.
-   * Checks if the store has an active DIAN config (testing or enabled).
-   * Falls back to MockInvoiceProvider if not configured.
+   * Resolves the appropriate provider based on the fiscal entity's DIAN configuration.
+   * Falls back to MockInvoiceProvider only outside production.
    */
   async resolve(): Promise<InvoiceProviderAdapter> {
     const context = RequestContextService.getContext();
 
-    if (!context?.store_id) {
-      this.logger.debug('No store context — using mock provider');
+    if (!context?.organization_id) {
+      if (this.isProductionRuntime()) {
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_PROVIDER_002,
+          'Organization context is required to resolve DIAN own-software configuration.',
+        );
+      }
+      this.logger.debug('No organization context — using mock provider');
       return this.mock_provider;
     }
 
-    try {
-      // Consider both store-scoped and org-scoped DIAN configs (the latter
-      // applies when organizations.fiscal_scope=ORGANIZATION).
-      const dian_config = await this.prisma.dian_configurations.findFirst({
-        where: {
-          OR: [{ store_id: context.store_id }, { store_id: null }],
-          enablement_status: { in: ['testing', 'enabled'] },
-        },
-        orderBy: [{ store_id: 'desc' }, { is_default: 'desc' }],
-      });
+    let accounting_entity_id: number | null = null;
+    let dian_config: {
+      id: number;
+      enablement_status: string;
+      environment: string;
+    } | null = null;
 
-      if (dian_config) {
-        this.logger.debug(
-          `Store ${context.store_id} has active DIAN config (status: ${dian_config.enablement_status}) — using DIAN provider`,
-        );
-        return this.dian_provider;
-      }
+    try {
+      const accounting_entity =
+        (await this.fiscalScope.resolveAccountingEntityForFiscal({
+          organization_id: context.organization_id,
+          store_id: context.store_id ?? null,
+        })) as FiscalAccountingEntityRef;
+      accounting_entity_id = accounting_entity.id;
+
+      dian_config = await this.readiness.resolveOwnSoftwareConfig({
+        organization_id: context.organization_id,
+        store_id: context.store_id ?? null,
+        accounting_entity_id,
+        configuration_type: 'invoicing',
+      });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       this.logger.warn(
-        `Failed to check DIAN config for store ${context.store_id}: ${error.message}`,
+        `Failed to check DIAN config for organization ${context.organization_id}: ${message}`,
+      );
+      if (this.isProductionRuntime()) {
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+        throw new VendixHttpException(
+          ErrorCodes.INVOICING_PROVIDER_002,
+          'Could not verify DIAN own-software configuration for this fiscal scope.',
+          {
+            organization_id: context.organization_id,
+            store_id: context.store_id,
+            accounting_entity_id,
+          },
+        );
+      }
+    }
+
+    if (dian_config) {
+      this.logger.debug(
+        `Fiscal entity ${accounting_entity_id} has DIAN own-software config (environment: ${dian_config.environment}, status: ${dian_config.enablement_status})`,
+      );
+      return this.dian_provider;
+    }
+
+    if (this.isProductionRuntime()) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_PROVIDER_002,
+        'No production DIAN own-software configuration is enabled for this fiscal scope.',
+        {
+          organization_id: context.organization_id,
+          store_id: context.store_id,
+          accounting_entity_id,
+        },
+      );
+    }
+
+    if (context.store_id) {
+      this.logger.debug(
+        `No active DIAN own-software config for store ${context.store_id} — using mock provider`,
       );
     }
 

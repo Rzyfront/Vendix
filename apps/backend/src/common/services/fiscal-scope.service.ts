@@ -14,6 +14,14 @@ export interface ResolveFiscalAccountingEntityParams {
   tx?: any;
 }
 
+export interface FiscalContext {
+  organization_id: number;
+  operational_store_id: number | null;
+  fiscal_scope: OrganizationFiscalScope;
+  accounting_entity_id: number;
+  accounting_entity: any;
+}
+
 interface FiscalScopeCacheEntry {
   scope: OrganizationFiscalScope;
   expires_at: number;
@@ -131,6 +139,28 @@ export class FiscalScopeService {
       store_id: storeId,
       client,
     });
+  }
+
+  async resolveFiscalContext(
+    params: ResolveFiscalAccountingEntityParams,
+  ): Promise<FiscalContext> {
+    const client = params.tx || this.prisma.withoutScope();
+    const fiscal_scope = await this.getFiscalScope(
+      params.organization_id,
+      client,
+    );
+    const accounting_entity = await this.resolveAccountingEntityForFiscal({
+      ...params,
+      tx: client,
+    });
+
+    return {
+      organization_id: params.organization_id,
+      operational_store_id: params.store_id ?? null,
+      fiscal_scope,
+      accounting_entity_id: accounting_entity.id,
+      accounting_entity,
+    };
   }
 
   async isIntercompanyTransfer(params: {

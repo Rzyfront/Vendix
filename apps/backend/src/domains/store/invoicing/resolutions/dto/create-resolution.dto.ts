@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsBoolean,
   IsDateString,
+  IsEnum,
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -12,6 +13,21 @@ export class CreateResolutionDto {
   @IsString()
   @MaxLength(100)
   resolution_number: string;
+
+  @IsOptional()
+  @IsEnum([
+    'sales_invoice',
+    'credit_note',
+    'debit_note',
+    'support_document',
+    'support_adjustment_note',
+  ])
+  document_type?:
+    | 'sales_invoice'
+    | 'credit_note'
+    | 'debit_note'
+    | 'support_document'
+    | 'support_adjustment_note';
 
   @IsDateString()
   resolution_date: string;

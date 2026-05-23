@@ -6,6 +6,8 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateDianConfigDto } from './dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from './dto/update-dian-config.dto';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { CertificateValidationResult } from './certificates/certificate-issuer.interface';
+import { FiscalProductionReadinessService } from '../providers/fiscal-production-readiness.service';
 
 @Injectable()
 export class DianConfigService {
@@ -15,6 +17,7 @@ export class DianConfigService {
     private readonly prisma: StorePrismaService,
     private readonly encryption: EncryptionService,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly readiness: FiscalProductionReadinessService,
   ) {}
 
   private getContext() {
@@ -47,6 +50,10 @@ export class DianConfigService {
         ? '****'
         : null,
     };
+  }
+
+  private onlyDigits(value?: string | null): string {
+    return String(value ?? '').replace(/\D/g, '');
   }
 
   /**
@@ -243,8 +250,11 @@ export class DianConfigService {
     }
 
     // Check if this is the first config for this store
+    const configuration_type = dto.configuration_type || 'invoicing';
+    const operation_mode = dto.operation_mode || 'own_software';
+
     const existing_count = await this.prisma.dian_configurations.count({
-      where: { store_id },
+      where: { store_id, configuration_type },
     });
 
     const should_be_default = dto.is_default || existing_count === 0;
@@ -263,6 +273,8 @@ export class DianConfigService {
         nit_type: dto.nit_type || 'NIT',
         nit_dv: dto.nit_dv,
         is_default: should_be_default,
+        configuration_type,
+        operation_mode,
         software_id: dto.software_id,
         software_pin_encrypted: this.encryption.encrypt(dto.software_pin),
         environment: dto.environment || 'test',
@@ -306,6 +318,12 @@ export class DianConfigService {
     if (dto.nit_type !== undefined) update_data.nit_type = dto.nit_type;
     if (dto.nit_dv !== undefined) update_data.nit_dv = dto.nit_dv;
     if (dto.is_default !== undefined) update_data.is_default = dto.is_default;
+    if (dto.configuration_type !== undefined) {
+      update_data.configuration_type = dto.configuration_type;
+    }
+    if (dto.operation_mode !== undefined) {
+      update_data.operation_mode = dto.operation_mode;
+    }
     if (dto.software_id !== undefined)
       update_data.software_id = dto.software_id;
     // Skip if masked sentinel — frontend sends '****' to indicate "no change"
@@ -361,6 +379,7 @@ export class DianConfigService {
     s3_key: string,
     password: string,
     expiry: Date | null,
+    certificate_info?: CertificateValidationResult,
   ) {
     const config = await this.prisma.dian_configurations.findFirst({
       where: { id },
@@ -375,12 +394,36 @@ export class DianConfigService {
       );
     }
 
+    const config_nit = this.onlyDigits(config.nit);
+    const certificate_nit = this.onlyDigits(certificate_info?.tax_id);
+    if (config_nit && !certificate_nit) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: id,
+        expected_nit: config_nit,
+        certificate_nit: null,
+      });
+    }
+    if (config_nit && certificate_nit && config_nit !== certificate_nit) {
+      throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
+        dian_configuration_id: id,
+        expected_nit: config_nit,
+        certificate_nit,
+      });
+    }
+
     const updated = await this.prisma.dian_configurations.update({
       where: { id },
       data: {
         certificate_s3_key: s3_key,
         certificate_password_encrypted: this.encryption.encrypt(password),
         certificate_expiry: expiry,
+        certificate_fingerprint: certificate_info?.fingerprint,
+        certificate_subject: certificate_info?.subject,
+        certificate_issuer: certificate_info?.issuer,
+        certificate_serial_number: certificate_info?.serial_number,
+        certificate_nit: certificate_info?.tax_id,
+        certificate_source: 'manual_upload_validated',
+        certificate_uploaded_at: new Date(),
       },
     });
 
@@ -394,7 +437,13 @@ export class DianConfigService {
    */
   async updateStatus(
     id: number,
-    status: 'not_started' | 'testing' | 'enabled' | 'suspended',
+    status:
+      | 'not_started'
+      | 'testing'
+      | 'test_set_passed'
+      | 'enabled'
+      | 'suspended'
+      | 'expired',
   ) {
     const config = await this.prisma.dian_configurations.findFirst({
       where: { id },
@@ -404,9 +453,19 @@ export class DianConfigService {
       throw new VendixHttpException(ErrorCodes.DIAN_CONFIG_001);
     }
 
+    if (status === 'enabled') {
+      this.readiness.assertProductionReady({
+        ...config,
+        enablement_status: status,
+      });
+    }
+
     return this.prisma.dian_configurations.update({
       where: { id },
-      data: { enablement_status: status },
+      data: {
+        enablement_status: status,
+        enabled_at: status === 'enabled' ? new Date() : null,
+      },
     });
   }
 
@@ -545,10 +604,22 @@ export class DianConfigService {
    */
   private async ensureSingleDefault(config_id: number) {
     const context = this.getContext();
+    const config = await this.prisma.withoutScope().dian_configurations.findUnique({
+      where: { id: config_id },
+      select: {
+        organization_id: true,
+        store_id: true,
+        configuration_type: true,
+      },
+    });
+
+    if (!config) return;
 
     await this.prisma.dian_configurations.updateMany({
       where: {
-        store_id: context.store_id,
+        organization_id: config.organization_id,
+        store_id: config.store_id ?? context.store_id,
+        configuration_type: config.configuration_type,
         id: { not: config_id },
         is_default: true,
       },

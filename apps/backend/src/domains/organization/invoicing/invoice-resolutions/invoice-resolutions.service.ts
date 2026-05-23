@@ -81,6 +81,7 @@ export class OrgInvoiceResolutionsService {
       where: {
         organization_id,
         accounting_entity_id: accounting_entity.id,
+        document_type: dto.document_type || 'sales_invoice',
         prefix: dto.prefix,
       },
       select: { id: true },
@@ -97,6 +98,7 @@ export class OrgInvoiceResolutionsService {
         organization_id,
         store_id,
         accounting_entity_id: accounting_entity.id,
+        document_type: dto.document_type || 'sales_invoice',
         resolution_number: dto.resolution_number,
         resolution_date: new Date(dto.resolution_date),
         prefix: dto.prefix,
@@ -134,6 +136,9 @@ export class OrgInvoiceResolutionsService {
       update_data.resolution_date = new Date(dto.resolution_date);
     }
     if (dto.prefix !== undefined) update_data.prefix = dto.prefix;
+    if (dto.document_type !== undefined) {
+      update_data.document_type = dto.document_type;
+    }
     if (dto.range_from !== undefined) update_data.range_from = dto.range_from;
     if (dto.range_to !== undefined) update_data.range_to = dto.range_to;
     if (dto.valid_from !== undefined) {

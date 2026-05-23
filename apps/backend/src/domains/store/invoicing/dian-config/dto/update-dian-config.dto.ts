@@ -34,6 +34,14 @@ export class UpdateDianConfigDto {
   is_default?: boolean;
 
   @IsOptional()
+  @IsEnum(['invoicing', 'support_document', 'payroll'])
+  configuration_type?: 'invoicing' | 'support_document' | 'payroll';
+
+  @IsOptional()
+  @IsEnum(['own_software', 'technological_provider'])
+  operation_mode?: 'own_software' | 'technological_provider';
+
+  @IsOptional()
   @IsString()
   @MaxLength(100)
   software_id?: string;

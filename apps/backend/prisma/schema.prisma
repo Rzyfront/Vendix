@@ -394,6 +394,8 @@ model organizations {
   employees                     employees[]
   payroll_runs                  payroll_runs[]
   dian_configurations           dian_configurations[]
+  fiscal_transmissions          fiscal_transmissions[]
+  fiscal_evidences              fiscal_evidences[]
   accounting_account_mappings   accounting_account_mappings[]
   inventory_cost_layers         inventory_cost_layers[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
@@ -634,6 +636,8 @@ model stores {
   employee_stores             employee_stores[]
   payroll_runs                payroll_runs[]
   dian_configurations         dian_configurations[]
+  fiscal_transmissions        fiscal_transmissions[]
+  fiscal_evidences            fiscal_evidences[]
   accounting_account_mappings accounting_account_mappings[]
   quotations                  quotations[]
   promotions                  promotions[]
@@ -2914,6 +2918,8 @@ enum invoice_type_enum {
   credit_note
   debit_note
   export_invoice
+  support_document
+  support_adjustment_note
 }
 
 enum document_send_status_enum {
@@ -2922,6 +2928,57 @@ enum document_send_status_enum {
   sent_ok
   sent_error
   not_applicable
+}
+
+enum fiscal_document_type_enum {
+  sales_invoice
+  credit_note
+  debit_note
+  support_document
+  support_adjustment_note
+  payroll
+  payroll_adjustment
+}
+
+enum fiscal_transmission_status_enum {
+  draft
+  queued
+  signing
+  signed
+  submitted
+  accepted
+  rejected
+  error
+  retrying
+  cancelled
+}
+
+enum dian_document_status_enum {
+  pending
+  accepted
+  rejected
+  error
+  not_applicable
+}
+
+enum fiscal_accounting_status_enum {
+  blocked
+  provisional
+  posted
+  reversed
+  not_applicable
+}
+
+enum fiscal_evidence_type_enum {
+  xml_signed
+  xml_response
+  zip_request
+  pdf
+  qr
+  dian_response
+  certificate
+  test_set
+  resolution
 }
 
 enum accounting_entry_status_enum {
@@ -3490,8 +3547,10 @@ enum dian_environment_enum {
 enum dian_enablement_status_enum {
   not_started
   testing
+  test_set_passed
   enabled
   suspended
+  expired
 }
 
 model help_article_categories {
@@ -3541,48 +3600,54 @@ model help_articles {
 // ===== ELECTRONIC INVOICING DOMAIN =====
 
 model invoices {
-  id                  Int                       @id @default(autoincrement())
-  organization_id     Int
-  store_id            Int
-  invoice_number      String                    @db.VarChar(50)
-  invoice_type        invoice_type_enum
-  status              invoice_status_enum       @default(draft)
-  customer_id         Int?
-  supplier_id         Int?
-  customer_name       String?                   @db.VarChar(255)
-  customer_tax_id     String?                   @db.VarChar(50)
-  customer_address    Json?
-  order_id            Int?
-  sales_order_id      Int?
-  related_invoice_id  Int?
-  subtotal_amount     Decimal                   @default(0) @db.Decimal(12, 2)
-  discount_amount     Decimal                   @default(0) @db.Decimal(12, 2)
-  tax_amount          Decimal                   @default(0) @db.Decimal(12, 2)
-  withholding_amount  Decimal                   @default(0) @db.Decimal(12, 2)
-  total_amount        Decimal                   @default(0) @db.Decimal(12, 2)
-  currency            String?                   @db.VarChar(10)
-  exchange_rate       Decimal?                  @db.Decimal(12, 6)
-  resolution_id       Int?
-  cufe                String?                   @db.VarChar(255)
-  qr_code             String?
-  xml_document        String?
-  pdf_url             String?
-  send_status         document_send_status_enum @default(not_applicable)
-  provider_response   Json?
-  sent_at             DateTime?                 @db.Timestamp(6)
-  accepted_at         DateTime?                 @db.Timestamp(6)
-  email_sent_at       DateTime?                 @db.Timestamp(6)
-  issue_date          DateTime                  @db.Timestamp(6)
-  due_date            DateTime?                 @db.Timestamp(6)
-  payment_date        DateTime?                 @db.Timestamp(6)
-  accounting_entry_id Int?
-  created_by_user_id  Int?
-  notes               String?
-  created_at          DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at          DateTime?                 @default(now()) @db.Timestamp(6)
+  id                   Int                       @id @default(autoincrement())
+  organization_id      Int
+  store_id             Int
+  accounting_entity_id Int
+  fiscal_document_type fiscal_document_type_enum?
+  invoice_number       String                    @db.VarChar(50)
+  invoice_type         invoice_type_enum
+  status               invoice_status_enum       @default(draft)
+  transmission_status  fiscal_transmission_status_enum @default(draft)
+  dian_status          dian_document_status_enum  @default(not_applicable)
+  accounting_status    fiscal_accounting_status_enum @default(blocked)
+  customer_id          Int?
+  supplier_id          Int?
+  customer_name        String?                   @db.VarChar(255)
+  customer_tax_id      String?                   @db.VarChar(50)
+  customer_address     Json?
+  order_id             Int?
+  sales_order_id       Int?
+  related_invoice_id   Int?
+  subtotal_amount      Decimal                   @default(0) @db.Decimal(12, 2)
+  discount_amount      Decimal                   @default(0) @db.Decimal(12, 2)
+  tax_amount           Decimal                   @default(0) @db.Decimal(12, 2)
+  withholding_amount   Decimal                   @default(0) @db.Decimal(12, 2)
+  total_amount         Decimal                   @default(0) @db.Decimal(12, 2)
+  currency             String?                   @db.VarChar(10)
+  exchange_rate        Decimal?                  @db.Decimal(12, 6)
+  resolution_id        Int?
+  cufe                 String?                   @db.VarChar(255)
+  qr_code              String?
+  xml_document         String?
+  pdf_url              String?
+  send_status          document_send_status_enum @default(not_applicable)
+  provider_response    Json?
+  sent_at              DateTime?                 @db.Timestamp(6)
+  accepted_at          DateTime?                 @db.Timestamp(6)
+  email_sent_at        DateTime?                 @db.Timestamp(6)
+  issue_date           DateTime                  @db.Timestamp(6)
+  due_date             DateTime?                 @db.Timestamp(6)
+  payment_date         DateTime?                 @db.Timestamp(6)
+  accounting_entry_id  Int?
+  created_by_user_id   Int?
+  notes                String?
+  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
   organization             organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                    stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  accounting_entity        accounting_entities        @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   customer                 users?                     @relation("invoices_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   supplier                 suppliers?                 @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   order                    orders?                    @relation(fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -3598,8 +3663,11 @@ model invoices {
   invoice_retry_queue      invoice_retry_queue[]
   dispatch_notes           dispatch_notes[]
 
-  @@unique([organization_id, invoice_type, invoice_number])
+  @@unique([accounting_entity_id, invoice_type, invoice_number])
   @@index([store_id, status])
+  @@index([accounting_entity_id])
+  @@index([organization_id, accounting_entity_id])
+  @@index([accounting_entity_id, fiscal_document_type])
   @@index([organization_id, issue_date])
   @@index([customer_id])
 }
@@ -3643,7 +3711,8 @@ model invoice_resolutions {
   id                   Int       @id @default(autoincrement())
   organization_id      Int
   store_id             Int?
-  accounting_entity_id Int?
+  accounting_entity_id Int
+  document_type        fiscal_document_type_enum @default(sales_invoice)
   resolution_number    String    @db.VarChar(100)
   resolution_date      DateTime  @db.Timestamp(6)
   prefix               String    @db.VarChar(10)
@@ -3659,12 +3728,13 @@ model invoice_resolutions {
 
   organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
   invoices          invoices[]
 
   @@index([store_id, is_active])
-  @@index([accounting_entity_id, is_active])
+  @@index([accounting_entity_id, document_type, is_active])
   @@index([organization_id, accounting_entity_id])
+  @@index([organization_id, accounting_entity_id, document_type])
 }
 
 // ===== ACCOUNTING DOMAIN =====
@@ -3688,8 +3758,11 @@ model accounting_entities {
   accounting_account_mappings   accounting_account_mappings[]
   dian_configurations           dian_configurations[]
   invoice_resolutions           invoice_resolutions[]
+  fiscal_transmissions          fiscal_transmissions[]
+  fiscal_evidences              fiscal_evidences[]
   fiscal_periods                fiscal_periods[]
   accounting_entries            accounting_entries[]
+  invoices                      invoices[]
   payroll_runs                  payroll_runs[]
   payroll_items                 payroll_items[]
   payroll_settlements           payroll_settlements[]
@@ -3826,6 +3899,7 @@ model accounting_entries {
   @@index([accounting_entity_id, entry_number])
   @@index([accounting_entity_id])
   @@index([source_type, source_id])
+  @@index([organization_id, source_type, source_id, accounting_entity_id])
   @@index([organization_id, is_historical_consolidated])
 }
 
@@ -3911,7 +3985,7 @@ model payroll_runs {
   id                   Int                       @id @default(autoincrement())
   organization_id      Int
   store_id             Int?
-  accounting_entity_id Int?
+  accounting_entity_id Int
   payroll_number       String                    @db.VarChar(50)
   status               payroll_status_enum       @default(draft)
   frequency            payroll_frequency_enum
@@ -3923,6 +3997,8 @@ model payroll_runs {
   total_employer_costs Decimal                   @default(0) @db.Decimal(12, 2)
   total_net_pay        Decimal                   @default(0) @db.Decimal(12, 2)
   send_status          document_send_status_enum @default(not_applicable)
+  dian_status          dian_document_status_enum  @default(not_applicable)
+  accounting_status    fiscal_accounting_status_enum @default(blocked)
   applied_rules        Json?
   provider_response    Json?
   cune                 String?                   @db.VarChar(255)
@@ -3937,7 +4013,7 @@ model payroll_runs {
 
   organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   accounting_entry  accounting_entries?  @relation(fields: [accounting_entry_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   approved_by_user  users?               @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user   users?               @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -3953,7 +4029,17 @@ model payroll_items {
   id                   Int       @id @default(autoincrement())
   payroll_run_id       Int
   employee_id          Int
-  accounting_entity_id Int?
+  accounting_entity_id Int
+  send_status          document_send_status_enum @default(not_applicable)
+  dian_status          dian_document_status_enum @default(not_applicable)
+  accounting_status    fiscal_accounting_status_enum @default(blocked)
+  cune                 String?   @db.VarChar(255)
+  qr_code              String?
+  xml_document         String?
+  provider_response    Json?
+  sent_at              DateTime? @db.Timestamp(6)
+  accepted_at          DateTime? @db.Timestamp(6)
+  rejected_at          DateTime? @db.Timestamp(6)
   base_salary          Decimal   @db.Decimal(12, 2)
   worked_days          Int
   earnings             Json?
@@ -3969,13 +4055,14 @@ model payroll_items {
 
   payroll_run          payroll_runs                    @relation(fields: [payroll_run_id], references: [id], onDelete: Cascade)
   employee             employees                       @relation(fields: [employee_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  accounting_entity    accounting_entities?            @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entity    accounting_entities             @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   advance_payments     employee_advance_payments[]
   advance_installments employee_advance_installments[]
 
   @@index([payroll_run_id])
   @@index([employee_id])
   @@index([accounting_entity_id])
+  @@index([accounting_entity_id, dian_status])
 }
 
 // ===== DIAN ELECTRONIC INVOICING =====
@@ -3991,7 +4078,18 @@ enum dian_nit_type_enum {
 
 enum dian_configuration_type_enum {
   invoicing
+  support_document
   payroll
+}
+
+enum dian_operation_mode_enum {
+  own_software
+  technological_provider
+}
+
+enum certificate_source_enum {
+  manual_upload_validated
+  issuer_adapter
 }
 
 /// store_id is nullable to support organizations.fiscal_scope=ORGANIZATION,
@@ -4008,33 +4106,45 @@ model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
   store_id                       Int?
-  accounting_entity_id           Int?
+  accounting_entity_id           Int
   name                           String                       @db.VarChar(100)
   nit                            String                       @db.VarChar(20)
   nit_type                       dian_nit_type_enum           @default(NIT)
   nit_dv                         String?                      @db.VarChar(1)
   is_default                     Boolean                      @default(false)
   configuration_type             dian_configuration_type_enum @default(invoicing)
+  operation_mode                 dian_operation_mode_enum     @default(own_software)
   software_id                    String                       @db.VarChar(100)
   software_pin_encrypted         String                       @db.Text
   certificate_s3_key             String?                      @db.Text
   certificate_password_encrypted String?                      @db.Text
   certificate_expiry             DateTime?                    @db.Timestamp(6)
+  certificate_fingerprint        String?                      @db.VarChar(128)
+  certificate_subject            String?                      @db.Text
+  certificate_issuer             String?                      @db.Text
+  certificate_serial_number      String?                      @db.VarChar(128)
+  certificate_nit                String?                      @db.VarChar(20)
+  certificate_source             certificate_source_enum      @default(manual_upload_validated)
+  certificate_uploaded_at        DateTime?                    @db.Timestamp(6)
   environment                    dian_environment_enum        @default(test)
   enablement_status              dian_enablement_status_enum  @default(not_started)
   test_set_id                    String?                      @db.VarChar(100)
+  enablement_evidence            Json?
+  enabled_at                     DateTime?                    @db.Timestamp(6)
   last_test_result               Json?
   created_at                     DateTime?                    @default(now()) @db.Timestamp(6)
   updated_at                     DateTime?                    @default(now()) @db.Timestamp(6)
 
   organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
-  accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  accounting_entity accounting_entities  @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   dian_audit_logs   dian_audit_logs[]
+  fiscal_transmissions fiscal_transmissions[]
 
   @@index([store_id])
   @@index([organization_id])
-  @@index([accounting_entity_id])
+  @@index([accounting_entity_id, configuration_type])
+  @@index([operation_mode, environment, enablement_status])
 }
 
 model dian_audit_logs {
@@ -4056,6 +4166,83 @@ model dian_audit_logs {
   @@index([dian_configuration_id])
   @@index([action])
   @@index([created_at])
+}
+
+model fiscal_transmissions {
+  id                    Int                             @id @default(autoincrement())
+  organization_id       Int
+  store_id              Int?
+  accounting_entity_id  Int
+  dian_configuration_id Int?
+  document_type         fiscal_document_type_enum
+  source_type           String                          @db.VarChar(50)
+  source_id             Int
+  document_number       String                          @db.VarChar(50)
+  idempotency_key       String                          @db.VarChar(160)
+  request_hash          String?                         @db.VarChar(128)
+  xml_hash              String?                         @db.VarChar(128)
+  zip_hash              String?                         @db.VarChar(128)
+  tracking_id           String?                         @db.VarChar(255)
+  cufe                  String?                         @db.VarChar(255)
+  cude                  String?                         @db.VarChar(255)
+  cuds                  String?                         @db.VarChar(255)
+  cune                  String?                         @db.VarChar(255)
+  qr_code               String?
+  xml_document          String?                         @db.Text
+  pdf_url               String?                         @db.Text
+  transmission_status   fiscal_transmission_status_enum @default(queued)
+  dian_status           dian_document_status_enum       @default(pending)
+  accounting_status     fiscal_accounting_status_enum   @default(blocked)
+  provider_response     Json?
+  error_code            String?                         @db.VarChar(100)
+  error_message         String?                         @db.Text
+  retry_count           Int                             @default(0)
+  last_retry_at         DateTime?                       @db.Timestamp(6)
+  sent_at               DateTime?                       @db.Timestamp(6)
+  accepted_at           DateTime?                       @db.Timestamp(6)
+  rejected_at           DateTime?                       @db.Timestamp(6)
+  created_by_user_id    Int?
+  created_at            DateTime?                       @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?                       @default(now()) @db.Timestamp(6)
+
+  organization       organizations         @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store              stores?               @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity  accounting_entities   @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  dian_configuration dian_configurations?  @relation(fields: [dian_configuration_id], references: [id], onDelete: Restrict)
+  evidences          fiscal_evidences[]
+
+  @@unique([accounting_entity_id, document_type, idempotency_key])
+  @@unique([accounting_entity_id, document_type, document_number])
+  @@index([organization_id, accounting_entity_id, document_type])
+  @@index([store_id])
+  @@index([source_type, source_id])
+  @@index([tracking_id])
+  @@index([dian_status, transmission_status])
+  @@index([created_at])
+}
+
+model fiscal_evidences {
+  id                     Int                       @id @default(autoincrement())
+  organization_id        Int
+  store_id               Int?
+  accounting_entity_id   Int
+  fiscal_transmission_id Int?
+  evidence_type          fiscal_evidence_type_enum
+  storage_key            String?                   @db.Text
+  content_hash           String?                   @db.VarChar(128)
+  metadata               Json?
+  created_by_user_id     Int?
+  created_at             DateTime?                 @default(now()) @db.Timestamp(6)
+
+  organization        organizations          @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store               stores?                @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity   accounting_entities    @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  fiscal_transmission fiscal_transmissions?  @relation(fields: [fiscal_transmission_id], references: [id], onDelete: Restrict)
+
+  @@index([organization_id, accounting_entity_id, evidence_type])
+  @@index([fiscal_transmission_id])
+  @@index([content_hash])
+  @@unique([fiscal_transmission_id, evidence_type, content_hash])
 }
 
 // ===== QUOTATIONS =====
