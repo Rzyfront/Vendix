@@ -194,16 +194,18 @@ import { ButtonComponent } from '../button/button.component';
           </div>
         </div>
 
-        <div class="flex justify-end gap-2">
-          <app-button variant="outline" (clicked)="close()">
-            <app-icon slot="icon" name="x" size="16"></app-icon>
-            Cancelar
-          </app-button>
-          <app-button variant="primary" (clicked)="capture()" [disabled]="!cameraReady()">
-            <app-icon slot="icon" name="camera" size="16"></app-icon>
-            Capturar
-          </app-button>
-        </div>
+        @if (!embedActions()) {
+          <div class="flex justify-end gap-2">
+            <app-button variant="outline" (clicked)="close()">
+              <app-icon slot="icon" name="x" size="16"></app-icon>
+              Cancelar
+            </app-button>
+            <app-button variant="primary" (clicked)="capture()" [disabled]="!cameraReady()">
+              <app-icon slot="icon" name="camera" size="16"></app-icon>
+              Capturar
+            </app-button>
+          </div>
+        }
       </div>
     }
   `,
@@ -213,6 +215,9 @@ export class CameraComponent implements OnDestroy {
   readonly isOpen = input<boolean>(false);
   readonly fileNamePrefix = input<string>('foto');
   readonly imageQuality = input<number>(0.92);
+  // When true, the desktop branch hides its Cancelar/Capturar buttons so the
+  // host can render them externally (e.g. inside a modal footer).
+  readonly embedActions = input<boolean>(false);
 
   // Outputs
   readonly captured = output<{ dataUrl: string; fileName: string }>();

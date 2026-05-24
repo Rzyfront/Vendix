@@ -9,6 +9,7 @@ import {
   output,
   signal,
   ViewChild,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -261,12 +262,33 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
         }
 
         @case ('camera') {
-          <app-camera
-            [isOpen]="stage() === 'camera'"
-            fileNamePrefix="foto"
-            (captured)="onCameraCaptured($event)"
-            (closed)="backToSelect()"
-          ></app-camera>
+          <div class="space-y-4">
+            <app-camera
+              [isOpen]="stage() === 'camera'"
+              [embedActions]="true"
+              fileNamePrefix="foto"
+              (captured)="onCameraCaptured($event)"
+              (closed)="backToSelect()"
+            ></app-camera>
+
+            <!-- Footer actions: hidden on mobile (camera renders its own fullscreen controls) -->
+            @if (!cameraRef()?.isMobile()) {
+              <div class="flex justify-end gap-2 pt-3 border-t border-gray-200">
+                <app-button variant="outline" (clicked)="backToSelect()">
+                  <app-icon slot="icon" name="x" size="16"></app-icon>
+                  Cancelar
+                </app-button>
+                <app-button
+                  variant="primary"
+                  (clicked)="cameraRef()?.capture()"
+                  [disabled]="!cameraRef()?.cameraReady()"
+                >
+                  <app-icon slot="icon" name="camera" size="16"></app-icon>
+                  Capturar
+                </app-button>
+              </div>
+            }
+          </div>
         }
 
         @case ('crop') {
@@ -539,6 +561,7 @@ export class ProductImageSourceModalComponent {
 
   @ViewChild('fileInput') fileInputRef?: ElementRef<HTMLInputElement>;
   @ViewChild('cropCanvas') cropCanvasRef?: ElementRef<HTMLCanvasElement>;
+  readonly cameraRef = viewChild(CameraComponent);
 
   private loadedImages = new Map<number, HTMLImageElement>();
 
