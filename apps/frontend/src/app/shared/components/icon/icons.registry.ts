@@ -255,6 +255,12 @@ import {
   // Inventory redesign icons
   Boxes,
   ArrowUpDown,
+  // Camera + crop transforms icons
+  RotateCw,
+  FlipHorizontal,
+  FlipVertical,
+  SwitchCamera,
+  ZapOff,
 } from 'lucide-angular';
 
 /**
@@ -587,6 +593,13 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   // Inventory redesign icons
   boxes: Boxes,
   'arrow-up-down': ArrowUpDown,
+
+  // Camera + crop transforms icons
+  'rotate-cw': RotateCw,
+  'flip-horizontal': FlipHorizontal,
+  'flip-vertical': FlipVertical,
+  'switch-camera': SwitchCamera,
+  'zap-off': ZapOff,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;
