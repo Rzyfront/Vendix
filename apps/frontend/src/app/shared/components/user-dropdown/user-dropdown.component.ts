@@ -1,10 +1,14 @@
-import {Component,
+import {
+  Component,
+  DestroyRef,
   HostListener,
   inject,
   OnInit,
   output,
-  signal} from '@angular/core';
+  signal,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserUiService } from '../../services/user-ui.service';
@@ -13,6 +17,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
+import { FullscreenService } from '../../services/fullscreen.service';
 
 export interface UserMenuOption {
   label: string;
@@ -120,17 +125,21 @@ export interface UserMenuOption {
       </div>
     </div>
   `,
-  styleUrls: ['./user-dropdown.component.scss']})
+  styleUrls: ['./user-dropdown.component.scss'],
+})
 export class UserDropdownComponent implements OnInit {
   readonly closeDropdown = output<void>();
 
   readonly isOpen = signal(false);
-private authFacade = inject(AuthFacade);
+  readonly isFullscreen = signal(false);
+  private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
   private environmentSwitchService = inject(EnvironmentSwitchService);
   private environmentContextService = inject(EnvironmentContextService);
+  private destroyRef = inject(DestroyRef);
 
+  private fullscreenService = inject(FullscreenService);
   private userUiService = inject(UserUiService);
 
   // Signal-based properties from facades
@@ -140,24 +149,36 @@ private authFacade = inject(AuthFacade);
   constructor() {}
 
   ngOnInit() {
+    this.fullscreenService.isFullscreen
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((isFullscreen) => {
+        this.isFullscreen.set(isFullscreen);
+        this.updateFullscreenOption();
+      });
+
     // Refresh default_panel_ui from API to detect new modules accurately
     // This ensures badges work even if localStorage has stale defaults
-    this.authService.getSettings().subscribe({
-      next: (response) => {
-        const settings = response.data || response;
-        if (settings.default_panel_ui) {
-          this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
-        }
-      }});
+    this.authService
+      .getSettings()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const settings = response.data || response;
+          if (settings.default_panel_ui) {
+            this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
+          }
+        },
+      });
   }
-get user() {
+  get user() {
     const context = this.globalFacade.getUserContext();
     if (!context?.user) {
       return {
         name: 'Usuario',
         email: 'user@example.com',
         role: 'Administrador',
-        initials: 'US'};
+        initials: 'US',
+      };
     }
 
     const { user } = context;
@@ -173,28 +194,52 @@ get user() {
       name,
       email,
       role: this.getRoleDisplay(context),
-      initials};
+      initials,
+    };
   }
 
   menuOptions: UserMenuOption[] = [
     {
       label: 'Mi Perfil',
       icon: 'user',
-      action: () => this.goToProfile()},
+      action: () => this.goToProfile(),
+    },
     {
       label: 'Configuración de usuario',
       icon: 'user-cog',
-      action: () => this.goToSettings()},
+      action: () => this.goToSettings(),
+    },
+    {
+      label: 'Pantalla Completa',
+      icon: 'fullscreen-enter',
+      action: () => this.toggleFullscreen(),
+      condition: () =>
+        this.fullscreenService.isFullscreenSupported() && !this.isFullscreen(),
+    },
+    {
+      label: 'Salir de Pantalla Completa',
+      icon: 'fullscreen-exit',
+      action: () => this.exitFullscreen(),
+      condition: () => this.isFullscreen(),
+    },
     {
       label: 'Administrar Organización',
       icon: 'building',
       action: () => this.switchToOrganization(),
-      condition: () => this.canSwitchToOrganization()},
+      condition: () => this.canSwitchToOrganization(),
+    },
+    {
+      label: 'Ir a Tienda',
+      icon: 'store',
+      action: () => this.switchToStore(),
+      condition: () => this.canSwitchToStore(),
+    },
     {
       label: 'Cerrar Sesión',
       icon: 'logout',
       action: () => this.logout(),
-      type: 'danger'},
+      type: 'danger',
+    },
   ];
 
   get visibleMenuOptions(): UserMenuOption[] {
@@ -311,4 +356,52 @@ get user() {
     }
   }
 
+  private async switchToStore(): Promise<void> {
+    try {
+      const user = this.globalFacade.getUserContext()?.user;
+      const availableStores = user?.stores || [];
+
+      if (availableStores.length === 0) {
+        return;
+      }
+
+      const firstStore = availableStores[0];
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'STORE_ADMIN',
+          firstStore.slug,
+        );
+
+      if (!success) {
+        // El fallo se maneja en el servicio con la redirección
+      }
+    } catch (error) {
+      // Error al cambiar de entorno
+    }
+  }
+
+  private canSwitchToStore(): boolean {
+    const canSwitch = this.environmentContextService.canSwitchToStore();
+    return canSwitch;
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.toggleFullscreen();
+    } catch (error) {
+      // Error al entrar en pantalla completa
+    }
+  }
+
+  private async exitFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.exitFullscreen();
+    } catch (error) {
+      // Error al salir de pantalla completa
+    }
+  }
+
+  private updateFullscreenOption(): void {
+    // Las opciones se actualizan automáticamente mediante las condiciones.
+  }
 }

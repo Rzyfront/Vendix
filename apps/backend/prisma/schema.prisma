@@ -707,6 +707,8 @@ model stores {
   booking_confirmation_tokens booking_confirmation_tokens[]
   email_templates             email_templates[]
   messaging_channels          messaging_channels[]
+  social_channels             social_channels[]
+  social_webhook_events       social_webhook_events[]
 
   // SaaS Subscription (one per store)
   subscription                  store_subscriptions?
@@ -6195,6 +6197,62 @@ model email_templates {
 
   @@unique([store_id, event_type])
   @@index([event_type, is_active])
+}
+
+// ============================================
+// SOCIAL SALES HUB (WhatsApp Embedded Signup)
+// ============================================
+
+model social_channels {
+  id                     Int       @id @default(autoincrement())
+  store_id               Int
+  channel_type           String    @default("whatsapp") @db.VarChar(30)
+  provider               String    @default("meta_cloud") @db.VarChar(30)
+  status                 String    @default("disconnected") @db.VarChar(30)
+  waba_id                String?   @db.VarChar(100)
+  phone_number_id        String?   @db.VarChar(100)
+  display_phone_number   String?   @db.VarChar(30)
+  business_account_id    String?   @db.VarChar(100)
+  access_token_encrypted String?   @db.Text
+  token_type             String?   @db.VarChar(30)
+  token_expires_at       DateTime? @db.Timestamp(6)
+  metadata               Json?
+  last_error             String?   @db.Text
+  connected_at           DateTime? @db.Timestamp(6)
+  disconnected_at        DateTime? @db.Timestamp(6)
+  created_at             DateTime  @default(now()) @db.Timestamp(6)
+  updated_at             DateTime  @default(now()) @updatedAt @db.Timestamp(6)
+
+  store          stores                  @relation(fields: [store_id], references: [id])
+  webhook_events social_webhook_events[]
+
+  @@unique([store_id, channel_type, provider])
+  @@index([store_id, status])
+  @@index([waba_id])
+  @@index([phone_number_id])
+}
+
+model social_webhook_events {
+  id                  Int       @id @default(autoincrement())
+  store_id            Int?
+  social_channel_id   Int?
+  provider            String    @default("meta_cloud") @db.VarChar(30)
+  event_type          String    @default("unknown") @db.VarChar(60)
+  provider_message_id String?   @db.VarChar(120)
+  payload             Json
+  processing_status   String    @default("received") @db.VarChar(30)
+  error               String?   @db.Text
+  received_at         DateTime  @default(now()) @db.Timestamp(6)
+  processed_at        DateTime? @db.Timestamp(6)
+  created_at          DateTime  @default(now()) @db.Timestamp(6)
+
+  store   stores?          @relation(fields: [store_id], references: [id], onDelete: SetNull)
+  channel social_channels? @relation(fields: [social_channel_id], references: [id], onDelete: SetNull)
+
+  @@index([store_id, received_at])
+  @@index([social_channel_id])
+  @@index([event_type])
+  @@index([provider_message_id])
 }
 
 // ============================================

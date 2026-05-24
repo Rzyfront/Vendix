@@ -16,13 +16,9 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
 import { toTitleCase } from '@common/utils/format.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
+import { PRIVILEGED_ROLE_NAMES } from '../../../common/utils/privileged-roles.util';
 
-const ELIGIBLE_ROLES = [
-  'super_admin',
-  'org_admin',
-  'store_owner',
-  'store_admin',
-];
+const ELIGIBLE_ROLES = Array.from(PRIVILEGED_ROLE_NAMES);
 
 @Injectable()
 export class UsersService {

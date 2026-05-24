@@ -1,4 +1,15 @@
-import { Component, OnInit, inject, OnChanges, input, output, model, signal, DestroyRef, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  inject,
+  OnChanges,
+  input,
+  output,
+  model,
+  signal,
+  DestroyRef,
+  computed,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 
@@ -99,7 +110,9 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
               @case ('general') {
                 <div class="space-y-4">
                   <div class="space-y-2">
-                    <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+                    <label
+                      class="block text-sm font-medium text-[var(--color-text-primary)]"
+                    >
                       Aplicación Asignada
                     </label>
                     <select
@@ -112,7 +125,8 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
                       <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
                     </select>
                     <p class="text-xs text-gray-500">
-                      Selecciona la aplicación principal a la que tendrá acceso el usuario.
+                      Selecciona la aplicación principal a la que tendrá acceso
+                      el usuario.
                     </p>
                   </div>
                 </div>
@@ -234,7 +248,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
       value: r.id,
       label: r.name,
       description: r.description || undefined,
-    }))
+    })),
   );
 
   readonly storeOptions = computed<MultiSelectorOption[]>(() =>
@@ -242,7 +256,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
       value: s.id,
       label: s.name,
       description: s.store_code ? `Código: ${s.store_code}` : undefined,
-    }))
+    })),
   );
 
   constructor() {
@@ -279,34 +293,36 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
 
   private loadRoles(): void {
     this.isLoadingRoles.set(true);
-    this.rolesService.getRoles({ limit: 100 }).pipe(
-      takeUntilDestroyed(this.destroyRef)
-    ).subscribe({
-      next: (response) => {
-        this.roles.set(response.data);
-        this.isLoadingRoles.set(false);
-      },
-      error: () => {
-        this.isLoadingRoles.set(false);
-        this.toastService.error('Error cargando roles');
-      }
-    });
+    this.rolesService
+      .getRoles({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.roles.set(response.data);
+          this.isLoadingRoles.set(false);
+        },
+        error: () => {
+          this.isLoadingRoles.set(false);
+          this.toastService.error('Error cargando roles');
+        },
+      });
   }
 
   private loadStores(): void {
     this.isLoadingStores.set(true);
-    this.storesService.getStores({ limit: 100 }).pipe(
-      takeUntilDestroyed(this.destroyRef)
-    ).subscribe({
-      next: (response) => {
-        this.stores.set(response.data?.flat() || []);
-        this.isLoadingStores.set(false);
-      },
-      error: () => {
-        this.isLoadingStores.set(false);
-        this.toastService.error('Error cargando tiendas');
-      }
-    });
+    this.storesService
+      .getStores({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.stores.set(response.data?.flat() || []);
+          this.isLoadingStores.set(false);
+        },
+        error: () => {
+          this.isLoadingStores.set(false);
+          this.toastService.error('Error cargando tiendas');
+        },
+      });
   }
 
   loadConfiguration(): void {
@@ -315,8 +331,14 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
 
     const defaultPanelUi = {
       ORG_ADMIN: {
-        dashboard: true, stores: true, users: true, domains: true, audit: true,
-        settings: true, accounting: true, payroll: true,
+        dashboard: true,
+        stores: true,
+        users: true,
+        domains: true,
+        audit: true,
+        settings: true,
+        accounting: true,
+        payroll: true,
       },
       STORE_ADMIN: {
         dashboard: true,
@@ -344,6 +366,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
         marketing: true,
         marketing_promotions: false,
         marketing_coupons: false,
+        marketing_social_sales: false,
         analytics: true,
         analytics_overview: true,
         analytics_sales: true,
@@ -392,9 +415,15 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: false,
-        settings_habeas_data: true},
+        settings_habeas_data: true,
+      },
       STORE_ECOMMERCE: {
-        profile: true, history: true, dashboard: true, favorites: true, orders: true, settings: true,
+        profile: true,
+        history: true,
+        dashboard: true,
+        favorites: true,
+        orders: true,
+        settings: true,
       },
     };
 

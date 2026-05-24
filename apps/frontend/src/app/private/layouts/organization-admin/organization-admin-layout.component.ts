@@ -49,7 +49,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     FiscalObligationBannerComponent,
   ],
   template: `
-    <div class="flex">
+    <div class="admin-layout-shell flex">
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
@@ -66,17 +66,21 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col h-screen transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile()"
         [style.margin-left]="
-          !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
+          !sidebarRef?.isMobile()
+            ? sidebarCollapsed()
+              ? '3.5rem'
+              : '12.5rem'
+            : '0'
+        "
+        [style.--sidebar-width-current]="
+          sidebarCollapsed() ? '3.5rem' : '12.5rem'
         "
       >
         <!-- Header (Fixed) -->
-        <app-header
-          (toggleSidebar)="toggleSidebar()"
-        >
-        </app-header>
+        <app-header (toggleSidebar)="toggleSidebar()"> </app-header>
 
         <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
         <app-fiscal-obligation-banner />
@@ -189,7 +193,8 @@ export class OrganizationAdminLayoutComponent {
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
-          lockedTooltip: 'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
+          lockedTooltip:
+            'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
         },
         {
           label: 'Niveles de Stock',
@@ -199,7 +204,8 @@ export class OrganizationAdminLayoutComponent {
           requiredOperatingScope: 'ORGANIZATION',
           showLocked: true,
           lockedBadge: 'ORG',
-          lockedTooltip: 'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
+          lockedTooltip:
+            'Disponible solo en modo ORGANIZATION. Selecciona una tienda.',
         },
         {
           label: 'Ubicaciones',
@@ -460,7 +466,9 @@ export class OrganizationAdminLayoutComponent {
     const organizationOnboarding = currentUser?.organizations?.onboarding;
     const actuallyNeedsOnboarding = !organizationOnboarding;
 
-    this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
+    this.showOnboardingModal.set(
+      actuallyNeedsOnboarding && this.needsOnboarding(),
+    );
   }
 
   loadStores(): void {
@@ -489,7 +497,11 @@ export class OrganizationAdminLayoutComponent {
                 slug: 'unknown',
               },
               addresses: store.addresses || [],
-              _count: store._count || { products: 0, orders: 0, store_users: 0 },
+              _count: store._count || {
+                products: 0,
+                orders: 0,
+                store_users: 0,
+              },
             })),
           );
         } else {

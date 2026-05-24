@@ -540,6 +540,15 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.messaging_channels;
   }
 
+  // Social Sales Hub
+  get social_channels() {
+    return this.baseClient.social_channels;
+  }
+
+  get social_webhook_events() {
+    return this.baseClient.social_webhook_events;
+  }
+
   // Subscription / SaaS billing models — global access (no tenant scope)
   // because SaaS billing operations cross stores (cron jobs, listeners,
   // platform-level webhook reconciliation, etc.).

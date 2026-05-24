@@ -44,7 +44,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     PaywallOutletComponent,
   ],
   template: `
-    <div class="flex">
+    <div class="admin-layout-shell flex">
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
@@ -65,7 +65,9 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
             class="footer-info-item footer-info-item--clickable"
             routerLink="/admin/subscription"
             role="button"
-            [attr.aria-label]="'Ir al módulo de suscripción · ' + planDisplayName()"
+            [attr.aria-label]="
+              'Ir al módulo de suscripción · ' + planDisplayName()
+            "
           >
             <div class="footer-info-row">
               <div class="footer-info-block footer-block-gradient-primary">
@@ -74,10 +76,21 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
                     <div
                       class="footer-progress-ring"
                       role="img"
-                      [attr.aria-label]="'Consumo del ciclo: ' + cyclePercent() + ' por ciento'"
+                      [attr.aria-label]="
+                        'Consumo del ciclo: ' + cyclePercent() + ' por ciento'
+                      "
                     >
-                      <svg viewBox="0 0 36 36" class="ring-svg" aria-hidden="true">
-                        <circle class="ring-bg" cx="18" cy="18" r="15.915"></circle>
+                      <svg
+                        viewBox="0 0 36 36"
+                        class="ring-svg"
+                        aria-hidden="true"
+                      >
+                        <circle
+                          class="ring-bg"
+                          cx="18"
+                          cy="18"
+                          r="15.915"
+                        ></circle>
                         <circle
                           class="ring-fg"
                           cx="18"
@@ -94,12 +107,17 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
                       <app-icon name="tag" [size]="9"></app-icon>
                       <span class="footer-info-label">Plan</span>
                       @if (hasPendingChange()) {
-                        <span class="pending-plan-badge" title="Cambio de plan pendiente de pago">
+                        <span
+                          class="pending-plan-badge"
+                          title="Cambio de plan pendiente de pago"
+                        >
                           <app-icon name="clock" [size]="9"></app-icon>
                         </span>
                       }
                     </div>
-                    <span class="footer-info-value">{{ planDisplayName() }}</span>
+                    <span class="footer-info-value">{{
+                      planDisplayName()
+                    }}</span>
                     @if (hasPendingChange()) {
                       <span class="pending-plan-label">Cambio pendiente</span>
                     }
@@ -113,18 +131,21 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col h-screen transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="sidebarReady() && !sidebarRef?.isMobile()"
         [style.margin-left]="
-          sidebarReady() && !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
+          sidebarReady() && !sidebarRef?.isMobile()
+            ? sidebarCollapsed()
+              ? '3.5rem'
+              : '12.5rem'
+            : '0'
         "
-        [style.--sidebar-width-current]="sidebarCollapsed() ? '3.5rem' : '12.5rem'"
+        [style.--sidebar-width-current]="
+          sidebarCollapsed() ? '3.5rem' : '12.5rem'
+        "
       >
         <!-- Header -->
-        <app-header
-          (toggleSidebar)="toggleSidebar()"
-        >
-        </app-header>
+        <app-header (toggleSidebar)="toggleSidebar()"> </app-header>
 
         <app-subscription-banner />
         <app-fiscal-obligation-banner />
@@ -177,12 +198,20 @@ export class StoreAdminLayoutComponent {
   readonly sidebarShimmer = signal(false);
 
   // --- Facade data as signals ---
-  readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
-  readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
-  readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
+  readonly storeName = toSignal(this.authFacade.userStoreName$, {
+    initialValue: null,
+  });
+  readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, {
+    initialValue: null,
+  });
+  readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, {
+    initialValue: null,
+  });
 
   // --- storeLogo: computed from store$ + domainConfig ---
-  private readonly storeSignal = toSignal(this.authFacade.userStore$, { initialValue: null });
+  private readonly storeSignal = toSignal(this.authFacade.userStore$, {
+    initialValue: null,
+  });
 
   readonly storeLogo = computed(() => {
     const store = this.storeSignal();
@@ -203,7 +232,11 @@ export class StoreAdminLayoutComponent {
     if (sub.state === 'trial' || sub.state === 'trialing') {
       return sub.plan?.name ?? sub.paid_plan?.name ?? 'Plan de prueba';
     }
-    if (sub.state === 'active' && sub.plan_id != null && sub.paid_plan_id == null) {
+    if (
+      sub.state === 'active' &&
+      sub.plan_id != null &&
+      sub.paid_plan_id == null
+    ) {
       return sub.plan?.name ?? 'Plan activo';
     }
     // RNC-PaidPlan — Always reflect the PAID plan; never the pending one.
@@ -220,7 +253,9 @@ export class StoreAdminLayoutComponent {
    */
   readonly hasPendingChange = computed(() => {
     const kind = this.subscriptionFacade.subscriptionUiState().kind;
-    return kind === 'pending_initial_payment' || kind === 'pending_change_abandoned';
+    return (
+      kind === 'pending_initial_payment' || kind === 'pending_change_abandoned'
+    );
   });
 
   /**
@@ -311,7 +346,11 @@ export class StoreAdminLayoutComponent {
       icon: 'package',
       children: [
         { label: 'Lista', icon: 'list', route: '/admin/products' },
-        { label: 'Categorías', icon: 'layers', route: '/admin/products/categories' },
+        {
+          label: 'Categorías',
+          icon: 'layers',
+          route: '/admin/products/categories',
+        },
         { label: 'Marcas', icon: 'tag', route: '/admin/products/brands' },
       ],
     },
@@ -390,6 +429,11 @@ export class StoreAdminLayoutComponent {
           label: 'Cupones',
           icon: 'circle',
           route: '/admin/marketing/coupons',
+        },
+        {
+          label: 'Social Sales',
+          icon: 'message-circle',
+          route: '/admin/marketing/social-sales',
         },
       ],
     },
@@ -689,15 +733,21 @@ export class StoreAdminLayoutComponent {
     combineLatest([
       this.authFacade.userStoreType$,
       this.authFacade.storeSettings$,
-    ]).pipe(
-      map(([loginType, settings]) => settings?.general?.store_type || loginType),
-      distinctUntilChanged(),
-      skip(1),
-      takeUntilDestroyed(this.destroyRef),
-    ).subscribe(() => {
-      this.sidebarShimmer.set(true);
-      setTimeout(() => { this.sidebarShimmer.set(false); }, 950);
-    });
+    ])
+      .pipe(
+        map(
+          ([loginType, settings]) => settings?.general?.store_type || loginType,
+        ),
+        distinctUntilChanged(),
+        skip(1),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => {
+        this.sidebarShimmer.set(true);
+        setTimeout(() => {
+          this.sidebarShimmer.set(false);
+        }, 950);
+      });
 
     // Onboarding needs subscription
     this.authFacade.needsOnboarding$
@@ -761,14 +811,16 @@ export class StoreAdminLayoutComponent {
     const storeOnboarding = currentUser?.stores?.onboarding;
     const actuallyNeedsOnboarding = !storeOnboarding;
 
-    this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
+    this.showOnboardingModal.set(
+      actuallyNeedsOnboarding && this.needsOnboarding(),
+    );
   }
 
   toggleSidebar() {
     if (this.sidebarRef?.isMobile()) {
       this.sidebarRef.toggleSidebarState();
     } else {
-      this.sidebarCollapsed.update(v => !v);
+      this.sidebarCollapsed.update((v) => !v);
     }
   }
 

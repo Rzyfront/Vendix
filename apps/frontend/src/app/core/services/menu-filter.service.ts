@@ -88,12 +88,13 @@ export class MenuFilterService {
     Marketing: 'marketing',
     Promociones: 'marketing_promotions',
     Cupones: 'marketing_coupons',
+    'Social Sales': 'marketing_social_sales',
 
-// STORE_ADMIN - Analíticas (padre + submódulos)
+    // STORE_ADMIN - Analíticas (padre + submódulos)
     // Solo mapear los que NO conflictuan con otros módulos
     Analíticas: 'analytics',
-    'Resumen': 'analytics_overview',
-    'Ventas': 'analytics_sales',
+    Resumen: 'analytics_overview',
+    Ventas: 'analytics_sales',
 
     // STORE_ADMIN - Reportes
     Reportes: ['reports', 'accounting_reports'],
@@ -115,7 +116,7 @@ export class MenuFilterService {
     'Periodos Fiscales': 'accounting_fiscal_periods',
     'Mapeo de Cuentas': 'accounting_account_mappings',
     'Flujos Contables': 'accounting_flows_dashboard',
-    'Cartera': 'cartera_dashboard',
+    Cartera: 'cartera_dashboard',
     'Cuentas por Cobrar': 'cartera_receivables',
     'Cuentas por Pagar': 'cartera_payables',
     'Cartera por Vencimiento': 'cartera_aging',
@@ -123,8 +124,8 @@ export class MenuFilterService {
     Empleados: 'payroll_employees',
     'Períodos de Nómina': 'payroll_runs',
     'Configuración Nómina': 'payroll_settings',
-    'Liquidaciones': 'payroll_settlements',
-    'Adelantos': 'payroll_advances',
+    Liquidaciones: 'payroll_settlements',
+    Adelantos: 'payroll_advances',
 
     // Legal / Tax modules
     Retenciones: 'accounting_withholding_tax',
@@ -140,7 +141,11 @@ export class MenuFilterService {
     'Manejo fiscal': ['settings_fiscal_management', 'settings'],
     'Configuración de Aplicación': ['settings_application', 'settings'],
     General: ['settings_general', 'settings_application'],
-    'Métodos de Pago': ['settings_payment_methods', 'settings_payments', 'settings'],
+    'Métodos de Pago': [
+      'settings_payment_methods',
+      'settings_payments',
+      'settings',
+    ],
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)
@@ -174,12 +179,19 @@ export class MenuFilterService {
         // Remove modules hidden by store type from visible list
         const hiddenByStoreType =
           this.storeTypeHiddenModules[storeType || ''] || [];
-        const effectiveModules = hiddenByStoreType.length > 0
-          ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
-          : visibleModules;
+        const effectiveModules =
+          hiddenByStoreType.length > 0
+            ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
+            : visibleModules;
         const operatingScope: OrganizationOperatingScope =
-          (organization?.operating_scope as OrganizationOperatingScope | undefined) ?? 'STORE';
-        return this.filterItemsRecursive(menuItems, effectiveModules, operatingScope);
+          (organization?.operating_scope as
+            | OrganizationOperatingScope
+            | undefined) ?? 'STORE';
+        return this.filterItemsRecursive(
+          menuItems,
+          effectiveModules,
+          operatingScope,
+        );
       }),
     );
   }
@@ -261,7 +273,10 @@ export class MenuFilterService {
       // Case 1: Item marked as alwaysVisible (skip panel_ui filtering)
       // Used for dynamic data like stores that should always show if parent is visible
       if (item.alwaysVisible) {
-        if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+        if (
+          item.requiresFeature &&
+          !this.subscriptionAccess.canUseAI(item.requiresFeature)()
+        ) {
           return filtered;
         }
         const alwaysVisibleItem: MenuItem = { ...item, _locked: locked };
@@ -284,7 +299,10 @@ export class MenuFilterService {
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
         if (this.isModuleKeyVisible(moduleKey, visibleModules)) {
-          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+          if (
+            item.requiresFeature &&
+            !this.subscriptionAccess.canUseAI(item.requiresFeature)()
+          ) {
             return filtered;
           }
           const filteredItem: MenuItem = { ...item, _locked: locked };
@@ -312,8 +330,15 @@ export class MenuFilterService {
         );
 
         if (filteredChildren.length > 0) {
-          const filteredItem: MenuItem = { ...item, children: filteredChildren, _locked: locked };
-          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+          const filteredItem: MenuItem = {
+            ...item,
+            children: filteredChildren,
+            _locked: locked,
+          };
+          if (
+            item.requiresFeature &&
+            !this.subscriptionAccess.canUseAI(item.requiresFeature)()
+          ) {
             return filtered;
           }
           filtered.push(filteredItem);

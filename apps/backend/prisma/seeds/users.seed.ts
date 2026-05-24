@@ -343,6 +343,7 @@ export async function seedUsers(
           marketing: true,
           marketing_promotions: true,
           marketing_coupons: true,
+          marketing_social_sales: true,
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
@@ -398,6 +399,7 @@ export async function seedUsers(
           marketing: true,
           marketing_promotions: true,
           marketing_coupons: true,
+          marketing_social_sales: true,
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
@@ -440,6 +442,7 @@ export async function seedUsers(
           marketing: true,
           marketing_promotions: true,
           marketing_coupons: true,
+          marketing_social_sales: true,
           // Analytics - ALL enabled
           analytics: true,
           analytics_sales: true,
