@@ -55,7 +55,6 @@
                             formControlName="state_province"
                             placeholder="{{ loading_departments() ? 'Cargando...' : 'Seleccionar' }}"
                             [options]="department_options()"
-                            [disabled]="loading_departments()"
                             [required]="true">
                         </app-selector>
                     </div>
@@ -87,7 +86,6 @@
                         formControlName="city"
                         placeholder="{{ loading_cities() ? 'Cargando...' : 'Seleccionar' }}"
                         [options]="city_options()"
-                        [disabled]="loading_cities() || !address_form.value.state_province"
                         [required]="true">
                     </app-selector>
                 </div>

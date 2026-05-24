@@ -93,8 +93,8 @@ export class AddressModalComponent {
         this.address_form = this.fb.group({
             address_line1: ['', [Validators.required, Validators.minLength(5)]],
             address_line2: [''],
-            city: ['', [Validators.required, Validators.minLength(2)]],
-            state_province: [''],
+            city: [{ value: '', disabled: true }, [Validators.required, Validators.minLength(2)]],
+            state_province: [{ value: '', disabled: true }],
             country_code: ['CO', Validators.required], // Default to Colombia
             postal_code: [''],
             phone_number: ['', [Validators.pattern(/^[\d+#*\s()-]*$/)]],
@@ -123,6 +123,8 @@ export class AddressModalComponent {
                     this.cities.set([]);
                     depControl?.setValue('');
                     cityControl?.setValue('');
+                    depControl?.disable({ emitEvent: false });
+                    cityControl?.disable({ emitEvent: false });
                 }
             });
 
@@ -138,22 +140,29 @@ export class AddressModalComponent {
                 } else {
                     this.cities.set([]);
                     cityControl?.setValue('');
+                    cityControl?.disable({ emitEvent: false });
                 }
             });
     }
 
     private async loadDepartments(): Promise<void> {
+        const ctrl = this.address_form.get('state_province');
+        ctrl?.disable({ emitEvent: false });
         this.loading_departments.set(true);
         const deps = await this.country_service.getDepartments();
         this.departments.set(deps);
         this.loading_departments.set(false);
+        if (this.departments().length > 0) ctrl?.enable({ emitEvent: false });
     }
 
     private async loadCities(depId: number): Promise<void> {
+        const ctrl = this.address_form.get('city');
+        ctrl?.disable({ emitEvent: false });
         this.loading_cities.set(true);
         const cities = await this.country_service.getCitiesByDepartment(depId);
         this.cities.set(cities);
         this.loading_cities.set(false);
+        if (this.cities().length > 0) ctrl?.enable({ emitEvent: false });
     }
 
     private async patchForm(address: Address): Promise<void> {
