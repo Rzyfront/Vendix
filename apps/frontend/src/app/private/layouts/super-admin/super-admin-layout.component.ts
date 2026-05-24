@@ -46,20 +46,21 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col h-screen transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="!sidebarRef?.isMobile()"
         [style.margin-left]="
-          !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
+          !sidebarRef?.isMobile()
+            ? sidebarCollapsed()
+              ? '3.5rem'
+              : '12.5rem'
+            : '0'
         "
         [style.--sidebar-width-current]="
           sidebarCollapsed() ? '3.5rem' : '12.5rem'
         "
       >
         <!-- Header (Fixed) -->
-        <app-header
-          (toggleSidebar)="toggleSidebar()"
-        >
-        </app-header>
+        <app-header (toggleSidebar)="toggleSidebar()"> </app-header>
 
         <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
 

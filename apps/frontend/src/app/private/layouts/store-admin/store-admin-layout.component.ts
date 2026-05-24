@@ -131,7 +131,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
 
       <!-- Main Content -->
       <div
-        class="main-content flex-1 flex flex-col h-screen transition-all duration-300 ease-in-out"
+        class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
         [class.margin-desktop]="sidebarReady() && !sidebarRef?.isMobile()"
         [style.margin-left]="
           sidebarReady() && !sidebarRef?.isMobile()

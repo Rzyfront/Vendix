@@ -17,6 +17,7 @@ import { AuthService } from '../../../core/services/auth.service';
 import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
+import { FullscreenService } from '../../services/fullscreen.service';
 
 export interface UserMenuOption {
   label: string;
@@ -130,6 +131,7 @@ export class UserDropdownComponent implements OnInit {
   readonly closeDropdown = output<void>();
 
   readonly isOpen = signal(false);
+  readonly isFullscreen = signal(false);
   private authFacade = inject(AuthFacade);
   private authService = inject(AuthService);
   private globalFacade = inject(GlobalFacade);
@@ -137,6 +139,7 @@ export class UserDropdownComponent implements OnInit {
   private environmentContextService = inject(EnvironmentContextService);
   private destroyRef = inject(DestroyRef);
 
+  private fullscreenService = inject(FullscreenService);
   private userUiService = inject(UserUiService);
 
   // Signal-based properties from facades
@@ -146,6 +149,13 @@ export class UserDropdownComponent implements OnInit {
   constructor() {}
 
   ngOnInit() {
+    this.fullscreenService.isFullscreen
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((isFullscreen) => {
+        this.isFullscreen.set(isFullscreen);
+        this.updateFullscreenOption();
+      });
+
     // Refresh default_panel_ui from API to detect new modules accurately
     // This ensures badges work even if localStorage has stale defaults
     this.authService
@@ -200,10 +210,29 @@ export class UserDropdownComponent implements OnInit {
       action: () => this.goToSettings(),
     },
     {
+      label: 'Pantalla Completa',
+      icon: 'fullscreen-enter',
+      action: () => this.toggleFullscreen(),
+      condition: () =>
+        this.fullscreenService.isFullscreenSupported() && !this.isFullscreen(),
+    },
+    {
+      label: 'Salir de Pantalla Completa',
+      icon: 'fullscreen-exit',
+      action: () => this.exitFullscreen(),
+      condition: () => this.isFullscreen(),
+    },
+    {
       label: 'Administrar Organización',
       icon: 'building',
       action: () => this.switchToOrganization(),
       condition: () => this.canSwitchToOrganization(),
+    },
+    {
+      label: 'Ir a Tienda',
+      icon: 'store',
+      action: () => this.switchToStore(),
+      condition: () => this.canSwitchToStore(),
     },
     {
       label: 'Cerrar Sesión',
@@ -325,5 +354,54 @@ export class UserDropdownComponent implements OnInit {
     } catch (error) {
       // Error al cambiar de entorno
     }
+  }
+
+  private async switchToStore(): Promise<void> {
+    try {
+      const user = this.globalFacade.getUserContext()?.user;
+      const availableStores = user?.stores || [];
+
+      if (availableStores.length === 0) {
+        return;
+      }
+
+      const firstStore = availableStores[0];
+      const success =
+        await this.environmentSwitchService.performEnvironmentSwitch(
+          'STORE_ADMIN',
+          firstStore.slug,
+        );
+
+      if (!success) {
+        // El fallo se maneja en el servicio con la redirección
+      }
+    } catch (error) {
+      // Error al cambiar de entorno
+    }
+  }
+
+  private canSwitchToStore(): boolean {
+    const canSwitch = this.environmentContextService.canSwitchToStore();
+    return canSwitch;
+  }
+
+  private async toggleFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.toggleFullscreen();
+    } catch (error) {
+      // Error al entrar en pantalla completa
+    }
+  }
+
+  private async exitFullscreen(): Promise<void> {
+    try {
+      await this.fullscreenService.exitFullscreen();
+    } catch (error) {
+      // Error al salir de pantalla completa
+    }
+  }
+
+  private updateFullscreenOption(): void {
+    // Las opciones se actualizan automáticamente mediante las condiciones.
   }
 }
