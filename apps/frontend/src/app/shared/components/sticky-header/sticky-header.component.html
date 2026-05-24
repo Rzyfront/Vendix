@@ -1,14 +1,29 @@
-<div [ngClass]="{
+<div
+  [ngClass]="{
     'border-b border-gray-200 shadow-sm rounded-b-lg mb-2 md:mb-3': true,
     'bg-white/95 backdrop-blur-sm -mx-2 md:-mx-4': variant() === 'default',
-    'bg-white/80 backdrop-blur-md': variant() === 'glass'
-  }">
+    'bg-white/80 backdrop-blur-md': variant() === 'glass',
+  }"
+>
   @if (visibleTabs().length) {
     <div class="sticky-header-tabs-row">
+      @if (showLeftArrow()) {
+        <button
+          type="button"
+          class="sticky-header-tabs-arrow sticky-header-tabs-arrow--left"
+          aria-label="Ver pestañas anteriores"
+          (click)="scrollTabs('left')"
+        >
+          <app-icon name="chevron-left" size="14"></app-icon>
+        </button>
+      }
+
       <nav
+        #tabsScrollContainer
         class="sticky-header-tabs"
         role="tablist"
         [attr.aria-label]="tabsAriaLabel()"
+        (scroll)="onTabsScroll()"
       >
         @for (tab of visibleTabs(); track tab.id) {
           @if (tab.route) {
@@ -19,10 +34,13 @@
               [routerLinkActiveOptions]="{ exact: tab.exact === true }"
               class="sticky-header-tab"
               role="tab"
+              [attr.data-tab-id]="tab.id"
               [class.sticky-header-tab--active]="isTabActive(tab, rla.isActive)"
               [class.sticky-header-tab--disabled]="tab.disabled"
               [attr.aria-selected]="isTabActive(tab, rla.isActive)"
-              [attr.aria-current]="isTabActive(tab, rla.isActive) ? 'page' : null"
+              [attr.aria-current]="
+                isTabActive(tab, rla.isActive) ? 'page' : null
+              "
               [attr.aria-disabled]="tab.disabled ? 'true' : null"
               [attr.tabindex]="tab.disabled ? -1 : null"
               (click)="onTabClick(tab, $event)"
@@ -42,6 +60,7 @@
               type="button"
               class="sticky-header-tab"
               role="tab"
+              [attr.data-tab-id]="tab.id"
               [disabled]="tab.disabled"
               [class.sticky-header-tab--active]="isTabActive(tab)"
               [class.sticky-header-tab--disabled]="tab.disabled"
@@ -61,17 +80,37 @@
           }
         }
       </nav>
+
+      @if (showRightArrow()) {
+        <button
+          type="button"
+          class="sticky-header-tabs-arrow sticky-header-tabs-arrow--right"
+          aria-label="Ver más pestañas"
+          (click)="scrollTabs('right')"
+        >
+          <app-icon name="chevron-right" size="14"></app-icon>
+        </button>
+      }
     </div>
   }
 
-  <div class="max-w-[1600px] mx-auto flex flex-row items-center justify-between gap-2 md:gap-3 p-1.5 md:px-6 md:py-2">
-
+  <div
+    class="max-w-[1600px] mx-auto flex flex-row items-center justify-between gap-2 md:gap-3 p-1.5 md:px-6 md:py-2"
+  >
     <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1">
       <!-- Back Button -->
       @if (showBackButton()) {
-        <app-button variant="ghost" [routerLink]="backRoute()" size="xsm"
-          customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200">
-          <app-icon name="arrow-left" size="16" class="md:!w-[18px] md:!h-[18px] text-gray-500"></app-icon>
+        <app-button
+          variant="ghost"
+          [routerLink]="backRoute()"
+          size="xsm"
+          customClasses="!p-0 !w-7 !h-7 md:!w-8 md:!h-8 flex-shrink-0 !rounded-lg border border-transparent hover:border-gray-200"
+        >
+          <app-icon
+            name="arrow-left"
+            size="16"
+            class="md:!w-[18px] md:!h-[18px] text-gray-500"
+          ></app-icon>
         </app-button>
       }
 
@@ -98,9 +137,17 @@
             </h1>
             <!-- Badge - Hidden on mobile -->
             @if (badgeText()) {
-              <div class="hidden md:flex items-center gap-1.5 px-1.5 py-0.5 rounded-md flex-shrink-0"
-                [ngClass]="[getBadgeClasses(), badgePulse() ? 'animate-pulse' : '']">
-                <span class="w-1.5 h-1.5 rounded-full" [ngClass]="getBadgeDotClasses()"></span>
+              <div
+                class="hidden md:flex items-center gap-1.5 px-1.5 py-0.5 rounded-md flex-shrink-0"
+                [ngClass]="[
+                  getBadgeClasses(),
+                  badgePulse() ? 'animate-pulse' : '',
+                ]"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full"
+                  [ngClass]="getBadgeDotClasses()"
+                ></span>
                 <span class="text-[9px] font-bold uppercase tracking-wide">
                   {{ badgeText() }}
                 </span>
@@ -109,7 +156,9 @@
           </div>
           <!-- Subtitle - Hidden on very small screens, visible from sm -->
           @if (subtitle()) {
-            <p class="sticky-header-subtitle hidden sm:block text-xs text-gray-500 font-medium truncate">
+            <p
+              class="sticky-header-subtitle hidden sm:block text-xs text-gray-500 font-medium truncate"
+            >
               {{ subtitle() }}
             </p>
           }
@@ -130,13 +179,22 @@
       <div class="flex items-center gap-1.5 md:gap-2 pr-1 md:pr-0">
         @for (action of actions(); track action) {
           @if (action.visible !== false) {
-            <app-button [variant]="action.variant" [loading]="!!action.loading"
-              [disabled]="!!action.disabled" (clicked)="onActionClick(action.id)" size="xsm"
+            <app-button
+              [variant]="action.variant"
+              [loading]="!!action.loading"
+              [disabled]="!!action.disabled"
+              (clicked)="onActionClick(action.id)"
+              size="xsm"
               [iconOnlyMobile]="!!action.icon"
-              customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto">
+              customClasses="!rounded-[10px] !h-9 !w-9 !px-0 font-bold shadow-sm shadow-primary-200 active:scale-95 transition-all md:!rounded-lg md:!h-9 md:!px-3 md:!w-auto"
+            >
               @if (action.icon) {
-                <app-icon [name]="action.icon" size="14" slot="icon"
-                class="md:!w-[16px] md:!h-[16px]"></app-icon>
+                <app-icon
+                  [name]="action.icon"
+                  size="14"
+                  slot="icon"
+                  class="md:!w-[16px] md:!h-[16px]"
+                ></app-icon>
               }
               <span class="text-[10px] md:text-sm">{{ action.label }}</span>
             </app-button>

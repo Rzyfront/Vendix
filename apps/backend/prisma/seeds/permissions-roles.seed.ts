@@ -666,6 +666,20 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Social Sales Hub
+    {
+      name: 'store:social_sales:read',
+      description: 'Leer estado de Social Sales',
+      path: '/api/store/social-sales',
+      method: 'GET',
+    },
+    {
+      name: 'store:social_sales:manage',
+      description: 'Administrar conexiones de Social Sales',
+      path: '/api/store/social-sales',
+      method: 'POST',
+    },
+
     // Reseñas
     {
       name: 'store:reviews:read',
@@ -867,7 +881,8 @@ export async function seedPermissionsAndRoles(
     // Metadata y Recolección de Datos
     {
       name: 'store:settings:write',
-      description: 'Escribir configuración de tienda (metadata, templates, email)',
+      description:
+        'Escribir configuración de tienda (metadata, templates, email)',
       path: '/api/store/settings',
       method: 'POST',
     },
@@ -2341,8 +2356,7 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:payroll:settings:read',
-      description:
-        'Leer configuración mínima de nómina a nivel organización',
+      description: 'Leer configuración mínima de nómina a nivel organización',
       path: '/api/organization/payroll/settings',
       method: 'GET',
     },
@@ -2696,7 +2710,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'superadmin:subscriptions:update',
-      description: 'Acciones de gestión sobre suscripciones (remind, force cancel)',
+      description:
+        'Acciones de gestión sobre suscripciones (remind, force cancel)',
       path: '/api/superadmin/subscriptions/dunning/:id/*',
       method: 'POST',
     },
@@ -2797,6 +2812,18 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'superadmin:social_sales:config:read',
+      description: 'Leer configuración Meta para Social Sales',
+      path: '/api/superadmin/social-sales/meta/config',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:social_sales:config:write',
+      description: 'Actualizar configuración Meta para Social Sales',
+      path: '/api/superadmin/social-sales/meta/config',
+      method: 'PATCH',
+    },
+    {
       name: 'super_admin.settings.sync_all',
       description:
         'Sincronizar (migrar) settings de todas las tiendas desde super-admin',
@@ -2826,7 +2853,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:invoicing:resolutions:write',
-      description: 'Crear/actualizar/eliminar resoluciones a nivel organización',
+      description:
+        'Crear/actualizar/eliminar resoluciones a nivel organización',
       path: '/api/organization/invoicing/resolutions',
       method: 'POST',
     },
@@ -2870,7 +2898,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:invoicing:dian:write',
-      description: 'Crear/actualizar/eliminar configuraciones DIAN a nivel organización',
+      description:
+        'Crear/actualizar/eliminar configuraciones DIAN a nivel organización',
       path: '/api/organization/invoicing/dian-config',
       method: 'POST',
     },
@@ -2916,7 +2945,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:accounting:chart_of_accounts:update',
-      description: 'Actualizar cuentas del plan de cuentas a nivel organización',
+      description:
+        'Actualizar cuentas del plan de cuentas a nivel organización',
       path: '/api/organization/accounting/chart-of-accounts/:id',
       method: 'PATCH',
     },
@@ -2994,7 +3024,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:accounting:journal_entries:post',
-      description: 'Contabilizar/postear asientos contables a nivel organización',
+      description:
+        'Contabilizar/postear asientos contables a nivel organización',
       path: '/api/organization/accounting/journal-entries/:id/post',
       method: 'POST',
     },

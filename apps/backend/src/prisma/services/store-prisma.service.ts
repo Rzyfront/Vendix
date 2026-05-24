@@ -63,6 +63,8 @@ export class StorePrismaService extends BasePrismaService {
     'booking_confirmation_tokens',
     'email_templates',
     'messaging_channels',
+    'social_channels',
+    'social_webhook_events',
     'brands',
     'store_subscriptions',
     'subscription_invoices',
@@ -1371,6 +1373,15 @@ export class StorePrismaService extends BasePrismaService {
   // Messaging Channels
   get messaging_channels() {
     return this.scoped_client.messaging_channels;
+  }
+
+  // Social Sales Hub
+  get social_channels() {
+    return this.scoped_client.social_channels;
+  }
+
+  get social_webhook_events() {
+    return this.scoped_client.social_webhook_events;
   }
 
   // Subscription models

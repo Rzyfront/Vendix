@@ -26,6 +26,7 @@ import {
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { TOKEN_DEFAULTS } from './constants/token.constants';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -438,18 +439,33 @@ export class AuthService {
   }
 
   async getSettings(userId: number) {
-    const [settings, defaults] = await Promise.all([
+    const [settings, defaults, userRoles] = await Promise.all([
       this.prismaService.user_settings.findUnique({
         where: { user_id: userId },
       }),
       this.defaultPanelUIService.generatePanelUI(''),
+      this.prismaService.user_roles.findMany({
+        where: { user_id: userId },
+        include: { roles: { select: { name: true } } },
+      }),
     ]);
 
     if (!settings) {
       return null;
     }
+
+    const roleNames = userRoles
+      .map((ur) => ur.roles?.name)
+      .filter((n): n is string => !!n);
+    const mergedConfig = mergeUserConfigPanelUi(
+      settings.config as any,
+      defaults.panel_ui,
+      roleNames,
+    );
+
     return {
       ...settings,
+      config: mergedConfig,
       default_panel_ui: defaults.panel_ui,
     };
   }
@@ -839,11 +855,17 @@ export class AuthService {
       throw new Error('User settings not found after registration');
     }
 
+    const defaultsForRegister =
+      await this.defaultPanelUIService.generatePanelUI('');
     const userSettingsForResponse = {
       id: userSettings.id,
       user_id: userSettings.user_id,
       app_type: userSettings.app_type,
-      config: userSettings.config || {},
+      config: mergeUserConfigPanelUi(
+        userSettings.config as any,
+        defaultsForRegister.panel_ui,
+        roles,
+      ),
     };
 
     return {
@@ -1100,11 +1122,17 @@ export class AuthService {
     // Remover password del response
     const { password: _, ...userWithRolesAndPassword } = userWithRolesArray;
 
+    const defaultsForCustomerRegister =
+      await this.defaultPanelUIService.generatePanelUI('');
     const userSettingsForResponse = {
       id: userSettings.id,
       user_id: userSettings.user_id,
       app_type: userSettings.app_type,
-      config: userSettings.config || {},
+      config: mergeUserConfigPanelUi(
+        userSettings.config as any,
+        defaultsForCustomerRegister.panel_ui,
+        roles,
+      ),
     };
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
@@ -1862,15 +1890,19 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
     }
 
+    // Obtener defaults para detectar módulos nuevos en el frontend
+    const defaults = await this.defaultPanelUIService.generatePanelUI('');
+
     const userSettingsForResponse = {
       id: userSettings.id,
       user_id: userSettings.user_id,
       app_type: userSettings.app_type,
-      config: userSettings.config || {},
+      config: mergeUserConfigPanelUi(
+        userSettings.config as any,
+        defaults.panel_ui,
+        roles,
+      ),
     };
-
-    // Obtener defaults para detectar módulos nuevos en el frontend
-    const defaults = await this.defaultPanelUIService.generatePanelUI('');
 
     // Hidratar permisos planos para el frontend (gating de UI vía hasPermission()).
     // findUserAccountsByEmail no incluye role_permissions.permissions, por eso refetcheamos.

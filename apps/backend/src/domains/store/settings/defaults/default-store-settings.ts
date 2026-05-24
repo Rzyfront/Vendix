@@ -162,6 +162,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         marketing: true,
         marketing_promotions: true,
         marketing_coupons: true,
+        marketing_social_sales: true,
 
         // Analíticas
         analytics: true,

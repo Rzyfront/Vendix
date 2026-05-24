@@ -49,7 +49,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     FiscalObligationBannerComponent,
   ],
   template: `
-    <div class="flex">
+    <div class="admin-layout-shell flex">
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
@@ -70,6 +70,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         [class.margin-desktop]="!sidebarRef?.isMobile()"
         [style.margin-left]="
           !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
+        "
+        [style.--sidebar-width-current]="
+          sidebarCollapsed() ? '3.5rem' : '12.5rem'
         "
       >
         <!-- Header (Fixed) -->

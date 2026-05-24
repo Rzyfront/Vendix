@@ -21,6 +21,7 @@ import { BackupModule } from './backups/backups.module';
 import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.module';
 import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
+import { SuperadminSocialSalesModule } from './social-sales/social-sales.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.modu
     PayrollDefaultsModule,
     SuperadminSubscriptionsModule,
     SuperadminSettingsSyncModule,
+    SuperadminSocialSalesModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

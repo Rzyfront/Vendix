@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
+import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { S3Service } from '@common/services/s3.service';
 import {
   AuditService,
@@ -414,7 +415,11 @@ export class EnvironmentSwitchService {
           id: user_settings.id,
           user_id: user_settings.user_id,
           app_type: user_settings.app_type,
-          config: user_settings.config || {},
+          config: mergeUserConfigPanelUi(
+            user_settings.config as any,
+            defaults.panel_ui,
+            roles,
+          ),
         }
       : null;
 

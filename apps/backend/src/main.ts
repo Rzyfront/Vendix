@@ -14,7 +14,14 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // Increase payload limit for base64 images
-  app.use(json({ limit: '50mb' }));
+  app.use(
+    json({
+      limit: '50mb',
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf.toString('utf8');
+      },
+    }),
+  );
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
   // Initialize domain configuration

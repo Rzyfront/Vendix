@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PublicDomainsModule } from './domains/public-domains.module';
 import { PublicSeoModule } from './seo/public-seo.module';
 import { PublicPlansModule } from './subscriptions/public-plans.module';
+import { MetaWhatsappWebhookModule } from './meta-whatsapp/meta-whatsapp-webhook.module';
 
 /**
  * 🌐 Public Domain Module
@@ -15,6 +16,11 @@ import { PublicPlansModule } from './subscriptions/public-plans.module';
  * - PublicPlansModule: SaaS pricing plans (rate-limited, public-safe fields only)
  */
 @Module({
-  imports: [PublicDomainsModule, PublicSeoModule, PublicPlansModule],
+  imports: [
+    PublicDomainsModule,
+    PublicSeoModule,
+    PublicPlansModule,
+    MetaWhatsappWebhookModule,
+  ],
 })
 export class PublicDomainModule {}

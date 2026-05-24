@@ -51,6 +51,7 @@ import { MetadataModule } from './metadata/metadata.module';
 import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { SocialSalesModule } from './social-sales/social-sales.module';
 
 @Module({
   imports: [
@@ -104,6 +105,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     DataCollectionModule,
     ConsultationsModule,
     SubscriptionsModule,
+    SocialSalesModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

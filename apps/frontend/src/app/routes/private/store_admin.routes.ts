@@ -12,7 +12,6 @@ import { StoreUsersEffects } from '../../private/modules/store/settings/users/st
 import { layawayReducer } from '../../private/modules/store/layaway/state/reducers/layaway.reducer';
 import { LayawayEffects } from '../../private/modules/store/layaway/state/effects/layaway.effects';
 
-
 export const storeAdminRoutes: Routes = [
   {
     path: 'admin',
@@ -239,16 +238,16 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'dispatch-notes',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/dispatch-notes/dispatch-notes.component'
-              ).then((c) => c.DispatchNotesComponent),
+              import('../../private/modules/store/dispatch-notes/dispatch-notes.component').then(
+                (c) => c.DispatchNotesComponent,
+              ),
           },
           {
             path: 'dispatch-notes/:id',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component'
-              ).then((c) => c.DispatchNoteDetailPageComponent),
+              import('../../private/modules/store/dispatch-notes/pages/dispatch-note-detail-page/dispatch-note-detail-page.component').then(
+                (c) => c.DispatchNoteDetailPageComponent,
+              ),
           },
           {
             path: ':id',
@@ -274,9 +273,9 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'schedules',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/reservations/components/schedule-management/schedule-management.component'
-              ).then((c) => c.ScheduleManagementComponent),
+              import('../../private/modules/store/reservations/components/schedule-management/schedule-management.component').then(
+                (c) => c.ScheduleManagementComponent,
+              ),
           },
         ],
       },
@@ -355,6 +354,13 @@ export const storeAdminRoutes: Routes = [
               provideEffects(CouponEffects),
             ],
           },
+          {
+            path: 'social-sales',
+            loadComponent: () =>
+              import('../../private/modules/store/marketing/social-sales/social-sales.component').then(
+                (c) => c.SocialSalesComponent,
+              ),
+          },
         ],
       },
       // Analytics Routes
@@ -411,16 +417,16 @@ export const storeAdminRoutes: Routes = [
                 path: '',
                 pathMatch: 'full',
                 loadComponent: () =>
-                  import(
-                    '../../private/modules/store/settings/shipping/pages/shipping-dashboard/shipping-dashboard.component'
-                  ).then((c) => c.ShippingDashboardComponent),
+                  import('../../private/modules/store/settings/shipping/pages/shipping-dashboard/shipping-dashboard.component').then(
+                    (c) => c.ShippingDashboardComponent,
+                  ),
               },
               {
                 path: ':methodId',
                 loadComponent: () =>
-                  import(
-                    '../../private/modules/store/settings/shipping/pages/method-detail/method-detail.component'
-                  ).then((c) => c.MethodDetailComponent),
+                  import('../../private/modules/store/settings/shipping/pages/method-detail/method-detail.component').then(
+                    (c) => c.MethodDetailComponent,
+                  ),
               },
             ],
           },
@@ -532,16 +538,16 @@ export const storeAdminRoutes: Routes = [
           {
             path: 'center',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/help/help-center/help-center.component'
-              ).then((c) => c.HelpCenterComponent),
+              import('../../private/modules/store/help/help-center/help-center.component').then(
+                (c) => c.HelpCenterComponent,
+              ),
           },
           {
             path: 'center/:slug',
             loadComponent: () =>
-              import(
-                '../../private/modules/store/help/help-center/help-center.component'
-              ).then((c) => c.HelpCenterComponent),
+              import('../../private/modules/store/help/help-center/help-center.component').then(
+                (c) => c.HelpCenterComponent,
+              ),
           },
         ],
       },
@@ -557,9 +563,9 @@ export const storeAdminRoutes: Routes = [
       {
         path: 'cash-registers',
         loadComponent: () =>
-          import(
-            '../../private/modules/store/cash-registers/cash-registers.component'
-          ).then((c) => c.CashRegistersComponent),
+          import('../../private/modules/store/cash-registers/cash-registers.component').then(
+            (c) => c.CashRegistersComponent,
+          ),
       },
       // Invoicing Routes
       {

@@ -7,7 +7,11 @@ export interface AppModule {
 }
 
 // Constant: Configuration of modules per app type
-export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; STORE_ADMIN: AppModule[] } = {
+export const APP_MODULES: {
+  [key: string]: AppModule[];
+  ORG_ADMIN: AppModule[];
+  STORE_ADMIN: AppModule[];
+} = {
   ORG_ADMIN: [
     {
       key: 'dashboard',
@@ -48,7 +52,8 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
         {
           key: 'settings_fiscal_scope',
           label: 'Modo fiscal',
-          description: 'Alcance fiscal y modelo DIAN por tienda u organizaci\u00f3n',
+          description:
+            'Alcance fiscal y modelo DIAN por tienda u organizaci\u00f3n',
         },
         {
           key: 'settings_application',
@@ -236,6 +241,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           label: 'Cupones',
           description: 'Cupones de descuento',
         },
+        {
+          key: 'marketing_social_sales',
+          label: 'Social Sales',
+          description: 'WhatsApp, inbox social y automatización de ventas',
+        },
       ],
     },
 
@@ -316,7 +326,8 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
         {
           key: 'invoicing_dian_config',
           label: 'Configuraci\u00f3n DIAN',
-          description: 'Par\u00e1metros y credenciales para facturaci\u00f3n electr\u00f3nica DIAN',
+          description:
+            'Par\u00e1metros y credenciales para facturaci\u00f3n electr\u00f3nica DIAN',
         },
       ],
     },
@@ -381,7 +392,8 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
         {
           key: 'accounting_withholding_tax',
           label: 'Retenciones',
-          description: 'Gesti\u00f3n de retenciones en la fuente y autoretenciones',
+          description:
+            'Gesti\u00f3n de retenciones en la fuente y autoretenciones',
         },
         {
           key: 'accounting_exogenous',
@@ -400,7 +412,8 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
     {
       key: 'payroll',
       label: 'N\u00f3mina',
-      description: 'Gesti\u00f3n de empleados y liquidaci\u00f3n de n\u00f3mina',
+      description:
+        'Gesti\u00f3n de empleados y liquidaci\u00f3n de n\u00f3mina',
       isParent: true,
       children: [
         {
@@ -466,12 +479,14 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
         {
           key: 'settings_shipping',
           label: 'M\u00e9todos de Env\u00edo',
-          description: 'Configuraci\u00f3n de m\u00e9todos de env\u00edo y zonas',
+          description:
+            'Configuraci\u00f3n de m\u00e9todos de env\u00edo y zonas',
         },
         {
           key: 'settings_legal_documents',
           label: 'Documentos Legales',
-          description: 'Gestionar t\u00e9rminos, privacidad y documentos legales',
+          description:
+            'Gestionar t\u00e9rminos, privacidad y documentos legales',
         },
         {
           key: 'settings_users',
