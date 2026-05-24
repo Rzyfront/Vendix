@@ -6,8 +6,6 @@ export type ReportCategoryId =
   | 'customers'
   | 'purchases'
   | 'reviews'
-  | 'accounting'
-  | 'payroll'
   | 'financial';
 
 export type ReportType = 'summary' | 'list' | 'nested';

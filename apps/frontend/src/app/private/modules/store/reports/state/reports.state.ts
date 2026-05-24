@@ -14,6 +14,7 @@ export interface ReportsState {
   loading: boolean;
   exporting: boolean;
   error: string | null;
+  isForbidden: boolean;
   currentPage: number;
   totalPages: number;
   totalItems: number;
@@ -42,6 +43,7 @@ export const initialReportsState: ReportsState = {
   loading: false,
   exporting: false,
   error: null,
+  isForbidden: false,
   currentPage: 1,
   totalPages: 1,
   totalItems: 0,

@@ -8,9 +8,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'customers', label: 'Clientes', description: 'Reportes de cartera y cuentas por cobrar', icon: 'users', color: 'var(--color-info)' },
   { id: 'purchases', label: 'Compras', description: 'Reportes de ordenes de compra y proveedores', icon: 'truck', color: 'var(--color-warning)' },
   { id: 'reviews', label: 'Reseñas', description: 'Reportes de reseñas y satisfaccion de clientes', icon: 'star', color: 'var(--color-accent)' },
-  { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables y financieros', icon: 'book-open', color: 'var(--color-secondary)' },
-  { id: 'payroll', label: 'Nomina', description: 'Reportes de nomina y provisiones', icon: 'banknote', color: 'var(--color-success)' },
-  { id: 'financial', label: 'Financiero', description: 'Reportes financieros y de caja', icon: 'wallet', color: 'var(--color-destructive)' },
+  { id: 'financial', label: 'Financiero', description: 'Reportes contables, financieros, nomina y caja', icon: 'wallet', color: 'var(--color-destructive)' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -655,11 +653,11 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/accounts-receivable/aging',
   },
 
-  // ─── CONTABILIDAD (5) ─────────────────────────────────────────────────────────
+  // ─── FINANCIERO - Contabilidad (5) ─────────────────────────────────────────────────────────
 
   {
     id: 'trial-balance',
-    category: 'accounting',
+    category: 'financial',
     title: 'Balance de Prueba',
     description: 'Sumas y saldos por cuenta contable',
     detailedDescription:
@@ -689,7 +687,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'balance-sheet',
-    category: 'accounting',
+    category: 'financial',
     title: 'Balance General',
     description: 'Activos, pasivos y patrimonio de la empresa',
     detailedDescription:
@@ -712,7 +710,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'income-statement',
-    category: 'accounting',
+    category: 'financial',
     title: 'Estado de Resultados',
     description: 'Ingresos menos gastos del periodo',
     detailedDescription:
@@ -735,7 +733,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'general-ledger',
-    category: 'accounting',
+    category: 'financial',
     title: 'Libro Mayor',
     description: 'Movimientos detallados por cuenta contable',
     detailedDescription:
@@ -761,7 +759,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'tax-summary',
-    category: 'accounting',
+    category: 'financial',
     title: 'Resumen de Impuestos',
     description: 'IVA, retenciones e ICA del periodo',
     detailedDescription:
@@ -790,11 +788,11 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/analytics/financial/tax-summary',
   },
 
-  // ─── NOMINA (3) ───────────────────────────────────────────────────────────────
+  // ─── FINANCIERO - Nómina (3) ───────────────────────────────────────────────────────────────
 
   {
     id: 'payroll-summary',
-    category: 'payroll',
+    category: 'financial',
     title: 'Resumen de Nomina',
     description: 'Totales por periodo: devengados, deducciones y neto a pagar',
     detailedDescription:
@@ -819,7 +817,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'payroll-by-employee',
-    category: 'payroll',
+    category: 'financial',
     title: 'Nomina por Empleado',
     description: 'Detalle de cada empleado en el periodo de pago',
     detailedDescription:
@@ -843,7 +841,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
 
   {
     id: 'payroll-provisions',
-    category: 'payroll',
+    category: 'financial',
     title: 'Provisiones Laborales',
     description: 'Cesantias, primas, vacaciones e intereses acumulados',
     detailedDescription:
@@ -866,7 +864,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     dataEndpoint: 'store/reports/payroll/provisions',
   },
 
-  // ─── FINANCIERO (4) ───────────────────────────────────────────────────────────
+  // ─── FINANCIERO - Finanzas (4) ───────────────────────────────────────────────────────────
 
   {
     id: 'expense-summary',

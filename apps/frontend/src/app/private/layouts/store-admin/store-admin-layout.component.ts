@@ -490,18 +490,6 @@ export class StoreAdminLayoutComponent {
           alwaysVisible: true,
         },
         {
-          label: 'Contabilidad',
-          icon: 'circle',
-          route: '/admin/reports/accounting',
-          alwaysVisible: true,
-        },
-        {
-          label: 'Nómina',
-          icon: 'circle',
-          route: '/admin/reports/payroll',
-          alwaysVisible: true,
-        },
-        {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/reports/financial',

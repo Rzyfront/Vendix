@@ -53,13 +53,17 @@ export class ReportsEffects {
               isSummary: adapted.isSummary,
               summaryData: adapted.summaryData,
             })),
-            catchError((error) =>
-              of(
+            catchError((error) => {
+              const isForbidden = error.status === 403;
+              return of(
                 ReportsActions.loadReportDataFailure({
-                  error: error.error?.message || error.message || 'Error al cargar el reporte',
+                  error: isForbidden
+                    ? 'Sin permisos para ver este reporte'
+                    : (error.error?.message || error.message || 'Error al cargar el reporte'),
+                  isForbidden,
                 }),
-              ),
-            ),
+              );
+            }),
           );
       }),
     ),
@@ -124,7 +128,11 @@ export class ReportsEffects {
     () =>
       this.actions$.pipe(
         ofType(ReportsActions.loadReportDataFailure, ReportsActions.exportReportFailure),
-        tap(({ error }) => this.toastService.error(error)),
+        tap((action) => {
+          if (!('isForbidden' in action && action.isForbidden)) {
+            this.toastService.error(action.error);
+          }
+        }),
       ),
     { dispatch: false },
   );

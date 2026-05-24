@@ -7,6 +7,7 @@ import { PaginationComponent } from '../../../../../../shared/components/paginat
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   ResponsiveDataViewComponent,
+  IconComponent,
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../../shared/components';
@@ -29,6 +30,7 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
     PaginationComponent,
     CardComponent,
     ResponsiveDataViewComponent,
+    IconComponent,
   ],
   template: `
     <div class="flex flex-col gap-6">
@@ -68,7 +70,13 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
             </div>
           }
 
-          @switch (report()?.type) {
+          @if (isForbidden()) {
+            <div class="flex flex-col items-center justify-center py-20 text-text-secondary">
+              <app-icon name="shield-off" [size]="48" />
+              <p class="mt-4 text-sm font-medium">No tienes permisos para ver este reporte</p>
+              <p class="mt-1 text-xs text-text-tertiary">Contacta al administrador para obtener acceso</p>
+            </div>
+          } @switch (report()?.type) {
             @case ('nested') {
               <app-nested-report
                 [data]="data()!"
@@ -112,6 +120,7 @@ export class ReportViewerComponent {
   readonly data = input<any[] | null>(null);
   readonly summaryData = input<Record<string, any> | null>(null);
   readonly loading = input<boolean>(false);
+  readonly isForbidden = input<boolean>(false);
   readonly currentPage = input<number>(1);
   readonly totalPages = input<number>(0);
   readonly totalItems = input<number>(0);

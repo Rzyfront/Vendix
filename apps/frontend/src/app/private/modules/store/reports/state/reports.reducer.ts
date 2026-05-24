@@ -67,10 +67,11 @@ export const reportsReducer = createReducer(
     };
   }),
 
-  on(ReportsActions.loadReportDataFailure, (state, { error }) => ({
+  on(ReportsActions.loadReportDataFailure, (state, { error, isForbidden }) => ({
     ...state,
     loading: false,
     error,
+    isForbidden: isForbidden ?? false,
   })),
 
   on(ReportsActions.setPage, (state, { page }) => ({

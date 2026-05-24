@@ -102,35 +102,22 @@ export const reportsRoutes: Routes = [
         ],
       },
       {
-        path: 'accounting',
+        path: 'financial',
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
-        data: { categoryId: 'accounting' },
+        data: { categoryId: 'financial' },
         children: [
           { path: '', redirectTo: 'trial-balance', pathMatch: 'full' },
+          // Accounting reports
           { path: 'trial-balance', loadComponent: () => import('./pages/accounting/trial-balance-report/trial-balance-report.component').then(c => c.TrialBalanceReportComponent) },
           { path: 'balance-sheet', loadComponent: () => import('./pages/accounting/balance-sheet-report/balance-sheet-report.component').then(c => c.BalanceSheetReportComponent) },
           { path: 'income-statement', loadComponent: () => import('./pages/accounting/income-statement-report/income-statement-report.component').then(c => c.IncomeStatementReportComponent) },
           { path: 'general-ledger', loadComponent: () => import('./pages/accounting/general-ledger-report/general-ledger-report.component').then(c => c.GeneralLedgerReportComponent) },
           { path: 'tax-summary', loadComponent: () => import('./pages/accounting/tax-summary-report/tax-summary-report.component').then(c => c.TaxSummaryReportComponent) },
-        ],
-      },
-      {
-        path: 'payroll',
-        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
-        data: { categoryId: 'payroll' },
-        children: [
-          { path: '', redirectTo: 'payroll-summary', pathMatch: 'full' },
+          // Payroll reports
           { path: 'payroll-summary', loadComponent: () => import('./pages/payroll/payroll-summary-report/payroll-summary-report.component').then(c => c.PayrollSummaryReportComponent) },
           { path: 'payroll-by-employee', loadComponent: () => import('./pages/payroll/payroll-by-employee-report/payroll-by-employee-report.component').then(c => c.PayrollByEmployeeReportComponent) },
           { path: 'payroll-provisions', loadComponent: () => import('./pages/payroll/payroll-provisions-report/payroll-provisions-report.component').then(c => c.PayrollProvisionsReportComponent) },
-        ],
-      },
-      {
-        path: 'financial',
-        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
-        data: { categoryId: 'financial' },
-        children: [
-          { path: '', redirectTo: 'expense-summary', pathMatch: 'full' },
+          // Financial reports
           { path: 'expense-summary', loadComponent: () => import('./pages/financial/expense-summary-report/expense-summary-report.component').then(c => c.ExpenseSummaryReportComponent) },
           { path: 'profit-loss', loadComponent: () => import('./pages/financial/profit-loss-report/profit-loss-report.component').then(c => c.ProfitLossReportComponent) },
           { path: 'cash-register-report', loadComponent: () => import('./pages/financial/cash-register-report-report/cash-register-report-report.component').then(c => c.CashRegisterReportReportComponent) },

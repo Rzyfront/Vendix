@@ -2,7 +2,7 @@ import { Component, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ReportsActions } from '../../../state/reports.actions';
-import { selectLoading, selectReportData, selectSummaryData, selectSelectedReport, selectCurrentPage, selectTotalPages, selectTotalItems, selectItemsPerPage } from '../../../state/reports.selectors';
+import { selectLoading, selectIsForbidden, selectReportData, selectSummaryData, selectSelectedReport, selectCurrentPage, selectTotalPages, selectTotalItems, selectItemsPerPage } from '../../../state/reports.selectors';
 import { ReportViewerComponent } from '../../../components/report-viewer/report-viewer.component';
 
 @Component({
@@ -14,7 +14,7 @@ import { ReportViewerComponent } from '../../../components/report-viewer/report-
       [report]="report() ?? null"
       [data]="data() ?? null"
       [summaryData]="summaryData() ?? null"
-      [loading]="loading()"
+      [loading]="loading()" [isForbidden]="isForbidden()"
       [currentPage]="currentPage()"
       [totalPages]="totalPages()"
       [totalItems]="totalItems()"
@@ -28,6 +28,7 @@ export class ProductPerformanceReportComponent {
   private readonly store = inject(Store);
   readonly report = toSignal(this.store.select(selectSelectedReport));
   readonly loading = toSignal(this.store.select(selectLoading), { initialValue: false });
+  readonly isForbidden = toSignal(this.store.select(selectIsForbidden), { initialValue: false });
   readonly data = toSignal(this.store.select(selectReportData));
   readonly summaryData = toSignal(this.store.select(selectSummaryData));
   readonly currentPage = toSignal(this.store.select(selectCurrentPage), { initialValue: 1 });
