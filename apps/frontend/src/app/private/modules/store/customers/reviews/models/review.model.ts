@@ -24,15 +24,50 @@ export interface Review {
     image_url: string | null;
   };
   review_responses: ReviewResponse | null;
+  review_votes?: ReviewVote[];
+  review_reports?: ReviewReport[];
 }
 
-export type ReviewState = 'pending' | 'approved' | 'rejected' | 'hidden' | 'flagged';
+export type ReviewState =
+  | 'pending'
+  | 'approved'
+  | 'rejected'
+  | 'hidden'
+  | 'flagged';
 
 export interface ReviewResponse {
   id: number;
   review_id: number;
   user_id: number;
   content: string;
+  created_at: string;
+  updated_at?: string | null;
+  users?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+  };
+}
+
+export interface ReviewVote {
+  id: number;
+  review_id: number;
+  user_id: number;
+  is_helpful: boolean;
+  created_at: string;
+  users?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+  };
+}
+
+export interface ReviewReport {
+  id: number;
+  review_id: number;
+  user_id: number;
+  reason: string;
+  status?: string;
   created_at: string;
   users?: {
     id: number;

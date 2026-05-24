@@ -60,6 +60,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       track_inventory: true,
       allow_negative_stock: false,
       costing_method: 'cpp',
+      // POS limited to the store's main location by default; override to
+      // `all_locations` to allow POS sales to consume from any active location.
+      pos_stock_scope: 'main_location',
+      // Low-stock alerts evaluate the main location only by default; override
+      // to `all_locations` to aggregate stock across the entire store.
+      low_stock_alerts_scope: 'main_location',
     },
     checkout: {
       require_customer_data: true,
@@ -162,6 +168,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         marketing: true,
         marketing_promotions: true,
         marketing_coupons: true,
+        marketing_anuncios: true,
         marketing_social_sales: true,
 
         // Analíticas

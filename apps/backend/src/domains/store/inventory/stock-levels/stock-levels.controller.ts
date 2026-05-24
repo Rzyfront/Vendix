@@ -4,6 +4,7 @@ import { UseGuards } from '@nestjs/common';
 import { Controller, Get, Param, Query } from '@nestjs/common';
 import { StockLevelsService } from './stock-levels.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
+import { SourcingSuggestionQueryDto } from './dto/sourcing-suggestion-query.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { InventoryBatchesService } from '../batches/inventory-batches.service';
 
@@ -128,6 +129,25 @@ export class StockLevelsController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener las alertas de stock',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Get('sourcing-suggestion')
+  @Permissions('store:inventory:stock_levels:read')
+  async getSourcingSuggestion(@Query() query: SourcingSuggestionQueryDto) {
+    try {
+      const result =
+        await this.stockLevelsService.getSourcingSuggestion(query);
+      return this.responseService.success(
+        result,
+        'Sugerencia de sourcing obtenida exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la sugerencia de sourcing',
         error.response?.message || error.message,
         error.status || 400,
       );

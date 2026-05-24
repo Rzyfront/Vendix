@@ -7,11 +7,20 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 import { Observable } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { createEmployee } from '../../../state/actions/payroll.actions';
+import {
+  createEmployee,
+  createEmployeeSuccess,
+  createEmployeeFailure,
+} from '../../../state/actions/payroll.actions';
 import { selectEmployeesLoading } from '../../../state/selectors/payroll.selectors';
-import { AvailableUser } from '../../../interfaces/payroll.interface';
+import {
+  AvailableUser,
+  CreateEmployeeDto,
+  ExistingEmployeePayload,
+} from '../../../interfaces/payroll.interface';
 import { PayrollService } from '../../../services/payroll.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -259,6 +268,50 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
         </div>
       </div>
     </app-modal>
+
+    <app-modal
+      [isOpen]="associateConfirmOpen()"
+      (isOpenChange)="associateConfirmOpen.set($event)"
+      (cancel)="onAssociateCancel()"
+      title="Empleado ya existe en la organización"
+      size="sm"
+    >
+      <div class="p-4 space-y-3">
+        <p class="text-sm text-text-primary">
+          El empleado <strong>{{ existingEmployee()?.full_name }}</strong>
+          (documento {{ existingEmployee()?.document_number }}) ya está
+          registrado en la organización
+          @if (existingEmployee()?.primary_store_name) {
+            con tienda primaria
+            <strong>{{ existingEmployee()?.primary_store_name }}</strong>.
+          } @else {
+            .
+          }
+        </p>
+        <p class="text-sm text-text-secondary">
+          ¿Confirmas asociarlo también a esta tienda? Los datos de nómina y
+          contrato existentes se mantienen.
+        </p>
+      </div>
+
+      <div slot="footer">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" (clicked)="onAssociateCancel()">
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onAssociateConfirm()"
+            [disabled]="submitting()"
+            [loading]="submitting()"
+          >
+            Asociar a esta tienda
+          </app-button>
+        </div>
+      </div>
+    </app-modal>
   `,
 })
 export class EmployeeCreateComponent {
@@ -266,11 +319,15 @@ export class EmployeeCreateComponent {
 
   private payrollService = inject(PayrollService);
   private destroyRef = inject(DestroyRef);
+  private actions$ = inject(Actions);
 
   employeeForm: FormGroup;
   loading$: Observable<boolean>;
   readonly submitting = signal(false);
   readonly availableUsers = signal<SelectorOption[]>([]);
+  readonly associateConfirmOpen = signal<boolean>(false);
+  readonly existingEmployee = signal<ExistingEmployeePayload | null>(null);
+  private pendingDto: CreateEmployeeDto | null = null;
   private availableUsersData: AvailableUser[] = [];
 
   documentTypeOptions: SelectorOption[] = [
@@ -350,6 +407,33 @@ export class EmployeeCreateComponent {
       .subscribe((value) => {
         this.onUserSelected(value);
       });
+
+    this.actions$
+      .pipe(ofType(createEmployeeSuccess), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.submitting.set(false);
+        this.pendingDto = null;
+        this.existingEmployee.set(null);
+        this.associateConfirmOpen.set(false);
+        this.resetForm();
+        this.onClose();
+      });
+
+    this.actions$
+      .pipe(ofType(createEmployeeFailure), takeUntilDestroyed(this.destroyRef))
+      .subscribe((action) => {
+        this.submitting.set(false);
+
+        if (
+          action.errorCode === 'PAYROLL_ASSOCIATE_CONFIRM_001' &&
+          action.existingEmployee &&
+          action.pendingDto
+        ) {
+          this.existingEmployee.set(action.existingEmployee);
+          this.pendingDto = action.pendingDto;
+          this.associateConfirmOpen.set(true);
+        }
+      });
   }
 
   loadAvailableUsers(): void {
@@ -390,37 +474,47 @@ export class EmployeeCreateComponent {
     this.submitting.set(true);
     const formValue = this.employeeForm.value;
 
+    const dto: CreateEmployeeDto = {
+      first_name: formValue.first_name,
+      last_name: formValue.last_name,
+      document_type: formValue.document_type,
+      document_number: formValue.document_number,
+      hire_date: formValue.hire_date,
+      contract_type: formValue.contract_type,
+      position: formValue.position || undefined,
+      department: formValue.department || undefined,
+      cost_center: formValue.cost_center || undefined,
+      base_salary: Number(formValue.base_salary),
+      payment_frequency: formValue.payment_frequency,
+      bank_name: formValue.bank_name || undefined,
+      bank_account_number: formValue.bank_account_number || undefined,
+      health_provider: formValue.health_provider || undefined,
+      pension_fund: formValue.pension_fund || undefined,
+      arl_risk_level: formValue.arl_risk_level
+        ? Number(formValue.arl_risk_level)
+        : undefined,
+      severance_fund: formValue.severance_fund || undefined,
+      compensation_fund: formValue.compensation_fund || undefined,
+      user_id: formValue.user_id || undefined,
+    };
+
+    this.store.dispatch(createEmployee({ employee: dto }));
+  }
+
+  onAssociateConfirm() {
+    if (!this.pendingDto) return;
+    this.submitting.set(true);
     this.store.dispatch(
       createEmployee({
-        employee: {
-          first_name: formValue.first_name,
-          last_name: formValue.last_name,
-          document_type: formValue.document_type,
-          document_number: formValue.document_number,
-          hire_date: formValue.hire_date,
-          contract_type: formValue.contract_type,
-          position: formValue.position || undefined,
-          department: formValue.department || undefined,
-          cost_center: formValue.cost_center || undefined,
-          base_salary: Number(formValue.base_salary),
-          payment_frequency: formValue.payment_frequency,
-          bank_name: formValue.bank_name || undefined,
-          bank_account_number: formValue.bank_account_number || undefined,
-          health_provider: formValue.health_provider || undefined,
-          pension_fund: formValue.pension_fund || undefined,
-          arl_risk_level: formValue.arl_risk_level
-            ? Number(formValue.arl_risk_level)
-            : undefined,
-          severance_fund: formValue.severance_fund || undefined,
-          compensation_fund: formValue.compensation_fund || undefined,
-          user_id: formValue.user_id || undefined,
-        },
+        employee: { ...this.pendingDto, associate_if_exists: true },
       }),
     );
+  }
 
-    this.submitting.set(false);
-    this.resetForm();
-    this.onClose();
+  onAssociateCancel() {
+    this.associateConfirmOpen.set(false);
+    this.existingEmployee.set(null);
+    this.pendingDto = null;
   }
 
   private resetForm(): void {

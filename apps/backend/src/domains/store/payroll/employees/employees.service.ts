@@ -209,6 +209,7 @@ export class EmployeesService {
         await tx.employee_stores.create({
           data: {
             employee_id: employee.id,
+            store_id: context.store_id,
             is_primary: true,
           },
         });
@@ -285,8 +286,43 @@ export class EmployeesService {
     }
 
     // --- ASSOCIATE existing employee with current store ---
+    // Block silent cross-store association based on organizations.fiscal_scope.
+    // STORE mode: each store is its own legal employer (NIT); association is fiscally invalid.
+    // ORGANIZATION mode: shared NIT, association allowed only with explicit confirmation.
+    const org = await unscoped.organizations.findUnique({
+      where: { id: context.organization_id },
+      select: { fiscal_scope: true },
+    });
+
+    const primaryStoreRelation = await unscoped.employee_stores.findFirst({
+      where: { employee_id: existing.id, is_primary: true },
+      include: { store: { select: { name: true } } },
+    });
+
+    const existing_employee_payload = {
+      id: existing.id,
+      full_name: `${existing.first_name} ${existing.last_name}`,
+      document_number: existing.document_number,
+      primary_store_name: primaryStoreRelation?.store?.name ?? null,
+    };
+
+    if (org?.fiscal_scope === 'STORE') {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_CROSS_STORE_FISCAL_001,
+        undefined,
+        { existing_employee: existing_employee_payload },
+      );
+    }
+
+    if (!dto.associate_if_exists) {
+      throw new VendixHttpException(
+        ErrorCodes.PAYROLL_ASSOCIATE_CONFIRM_001,
+        undefined,
+        { existing_employee: existing_employee_payload },
+      );
+    }
+
     const employee = await this.prisma.$transaction(async (tx) => {
-      // Ensure employee has at least one primary store
       const activePrimaries = await this.prisma
         .withoutScope()
         .employee_stores.count({
@@ -301,6 +337,7 @@ export class EmployeesService {
       await tx.employee_stores.create({
         data: {
           employee_id: existing.id,
+          store_id: context.store_id,
           is_primary: shouldBePrimary,
         },
       });

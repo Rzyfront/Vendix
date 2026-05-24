@@ -56,7 +56,7 @@ export class CreateAIAppDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['text', 'json', 'markdown', 'html'])
+  @IsIn(['text', 'json', 'markdown', 'html', 'image'])
   output_format?: string;
 
   @IsOptional()
@@ -74,4 +74,16 @@ export class CreateAIAppDto {
   @IsOptional()
   @IsObject()
   metadata?: Record<string, any>;
+
+  @IsOptional()
+  @IsString()
+  @IsIn([
+    'text_generation',
+    'streaming_chat',
+    'conversations',
+    'tool_agents',
+    'rag_embeddings',
+    'async_queue',
+  ])
+  ai_feature_category?: string;
 }

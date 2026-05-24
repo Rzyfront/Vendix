@@ -132,8 +132,20 @@ export class ReviewsService {
             },
           },
         },
-        review_votes: true,
-        review_reports: true,
+        review_votes: {
+          include: {
+            users: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+          },
+        },
+        review_reports: {
+          include: {
+            users: {
+              select: { id: true, first_name: true, last_name: true },
+            },
+          },
+        },
       },
     });
 
@@ -149,7 +161,7 @@ export class ReviewsService {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
-    const updated = await this.prisma.reviews.update({
+    await this.prisma.reviews.updateMany({
       where: { id },
       data: { state: 'approved' },
     });
@@ -162,7 +174,7 @@ export class ReviewsService {
       new_state: 'approved',
     });
 
-    return updated;
+    return this.findOne(id);
   }
 
   async reject(id: number) {
@@ -170,7 +182,7 @@ export class ReviewsService {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
 
-    const updated = await this.prisma.reviews.update({
+    await this.prisma.reviews.updateMany({
       where: { id },
       data: { state: 'rejected' },
     });
@@ -183,24 +195,28 @@ export class ReviewsService {
       new_state: 'rejected',
     });
 
-    return updated;
+    return this.findOne(id);
   }
 
   async hide(id: number) {
     await this.findOne(id);
 
-    return this.prisma.reviews.update({
+    await this.prisma.reviews.updateMany({
       where: { id },
       data: { state: 'hidden' },
     });
+
+    return this.findOne(id);
   }
 
   async remove(id: number) {
     await this.findOne(id);
 
-    return this.prisma.reviews.delete({
+    await this.prisma.reviews.deleteMany({
       where: { id },
     });
+
+    return { deleted: true };
   }
 
   async createResponse(review_id: number, dto: CreateReviewResponseDto) {
@@ -235,9 +251,13 @@ export class ReviewsService {
       throw new VendixHttpException(ErrorCodes.REV_FIND_001);
     }
 
-    return this.prisma.review_responses.update({
+    await this.prisma.review_responses.updateMany({
       where: { id: response.id },
       data: { content: dto.content },
+    });
+
+    return this.prisma.review_responses.findFirst({
+      where: { id: response.id },
     });
   }
 
@@ -250,8 +270,10 @@ export class ReviewsService {
       throw new VendixHttpException(ErrorCodes.REV_FIND_001);
     }
 
-    return this.prisma.review_responses.delete({
+    await this.prisma.review_responses.deleteMany({
       where: { id: response.id },
     });
+
+    return { deleted: true };
   }
 }

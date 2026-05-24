@@ -22,6 +22,8 @@ import {
 } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-reviews',
@@ -37,6 +39,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     OptionsDropdownComponent,
     PaginationComponent,
     IconComponent,
+    ModalComponent,
   ],
   template: `
     <!-- Stats: sticky on mobile, static on desktop -->
@@ -128,6 +131,12 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         </div>
       }
 
+      @if (listError()) {
+        <div class="mx-2 mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700 md:mx-4">
+          {{ listError() }}
+        </div>
+      }
+
       <!-- Data + Pagination -->
       @if (!loading()) {
         <div class="px-2 pb-2 pt-3 md:p-4">
@@ -152,40 +161,35 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       }
     </app-card>
 
-    <!-- Detail overlay -->
-    @if (selectedReview()) {
-      <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-        (click)="closeDetail()"
-      >
-        <div
-          class="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-6"
-          (click)="$event.stopPropagation()"
-        >
-          <!-- Header -->
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-semibold text-gray-900">
-              Detalle de Reseña
-            </h3>
-            <button
-              class="text-gray-400 hover:text-gray-600 transition-colors"
-              (click)="closeDetail()"
-            >
-              <app-icon name="x" [size]="20"></app-icon>
-            </button>
-          </div>
-
-          <!-- Product info -->
-          <div class="flex items-center gap-3 mb-4">
-            @if (selectedReview()!.products.image_url) {
+    <app-modal
+      [(isOpen)]="detailOpen"
+      title="Detalle de Reseña"
+      size="lg"
+      (closed)="onDetailClosed()"
+    >
+      @if (detailLoading()) {
+        <div class="py-10 text-center text-sm text-gray-500">
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3"
+          ></div>
+          Cargando detalle...
+        </div>
+      } @else if (detailError()) {
+        <div class="rounded-lg bg-red-50 p-4 text-sm text-red-700">
+          {{ detailError() }}
+        </div>
+      } @else if (selectedReview(); as review) {
+        <div class="space-y-5">
+          <div class="flex items-center gap-3">
+            @if (review.products.image_url) {
               <img
-                [src]="selectedReview()!.products.image_url"
-                [alt]="selectedReview()!.products.name"
-                class="w-12 h-12 rounded-lg object-cover"
+                [src]="review.products.image_url"
+                [alt]="review.products.name"
+                class="h-12 w-12 rounded-lg object-cover"
               />
             } @else {
               <div
-                class="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center"
+                class="flex h-12 w-12 items-center justify-center rounded-lg bg-gray-100"
               >
                 <app-icon
                   name="package"
@@ -194,139 +198,195 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                 ></app-icon>
               </div>
             }
-            <div>
-              <p class="font-medium text-gray-900">
-                {{ selectedReview()!.products.name || '-' }}
+            <div class="min-w-0">
+              <p class="truncate font-medium text-gray-900">
+                {{ review.products.name || '-' }}
               </p>
               <p class="text-sm text-gray-500">
-                {{ selectedReview()!.users.first_name }}
-                {{ selectedReview()!.users.last_name }}
+                {{ review.users.first_name }} {{ review.users.last_name }}
               </p>
             </div>
           </div>
 
-          <!-- Rating -->
-          <div class="mb-3">
-            <span class="text-yellow-500 text-lg tracking-wider">
-              {{ getStars(selectedReview()!.rating) }}
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-lg tracking-wider text-yellow-500">
+              {{ getStars(review.rating) }}
             </span>
-            @if (selectedReview()!.verified_purchase) {
+            <span
+              class="text-xs font-medium px-2.5 py-1 rounded-full"
+              [class]="getStateBadgeClass(review.state)"
+            >
+              {{ getStateLabel(review.state) }}
+            </span>
+            @if (review.verified_purchase) {
               <span
-                class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
+                class="rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700"
               >
                 Compra verificada
               </span>
             }
           </div>
 
-          <!-- Title & Comment -->
-          @if (selectedReview()!.title) {
-            <h4 class="font-medium text-gray-900 mb-1">
-              {{ selectedReview()!.title }}
-            </h4>
-          }
-          <p class="text-gray-700 text-sm mb-4 whitespace-pre-wrap">
-            {{ selectedReview()!.comment }}
-          </p>
-
-          <!-- Meta -->
-          <div class="flex items-center gap-4 text-xs text-gray-500 mb-4">
-            <span>{{ selectedReview()!.created_at | date: 'dd/MM/yyyy' }}</span>
-            <span>👍 {{ selectedReview()!.helpful_count }}</span>
-            @if (selectedReview()!.report_count > 0) {
-              <span class="text-red-500"
-                >⚠ {{ selectedReview()!.report_count }} reportes</span
-              >
+          <div>
+            @if (review.title) {
+              <h4 class="mb-1 font-medium text-gray-900">
+                {{ review.title }}
+              </h4>
             }
+            <p class="whitespace-pre-wrap text-sm text-gray-700">
+              {{ review.comment }}
+            </p>
           </div>
 
-          <!-- State badge -->
-          <div class="mb-4">
-            <span
-              class="text-xs font-medium px-2.5 py-1 rounded-full"
-              [class]="getStateBadgeClass(selectedReview()!.state)"
-            >
-              {{ getStateLabel(selectedReview()!.state) }}
+          <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+            <span>{{ review.created_at | date: 'dd/MM/yyyy' }}</span>
+            <span>{{ review.helpful_count }} votos útiles</span>
+            <span [class.text-red-600]="review.report_count > 0">
+              {{ review.report_count }} reportes
             </span>
           </div>
 
-          <!-- Actions -->
-          <div class="flex gap-2 mb-6">
-            @if (selectedReview()!.state !== 'approved') {
+          <div class="flex flex-wrap gap-2">
+            @if (review.state !== 'approved') {
               <button
-                class="flex-1 px-3 py-2 text-sm font-medium rounded-lg bg-green-50 text-green-700 hover:bg-green-100 transition-colors"
-                (click)="onApprove(selectedReview()!)"
+                class="inline-flex items-center gap-1 rounded-lg bg-green-50 px-3 py-2 text-sm font-medium text-green-700 transition-colors hover:bg-green-100"
+                (click)="onApprove(review)"
               >
+                <app-icon name="check" [size]="16"></app-icon>
                 Aprobar
               </button>
             }
-            @if (selectedReview()!.state !== 'rejected') {
+            @if (review.state !== 'rejected') {
               <button
-                class="flex-1 px-3 py-2 text-sm font-medium rounded-lg bg-red-50 text-red-700 hover:bg-red-100 transition-colors"
-                (click)="onReject(selectedReview()!)"
+                class="inline-flex items-center gap-1 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
+                (click)="onReject(review)"
               >
+                <app-icon name="x" [size]="16"></app-icon>
                 Rechazar
               </button>
             }
+            @if (review.state !== 'hidden') {
+              <button
+                class="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+                (click)="onHide(review)"
+              >
+                <app-icon name="eye-off" [size]="16"></app-icon>
+                Ocultar
+              </button>
+            }
             <button
-              class="px-3 py-2 text-sm font-medium rounded-lg bg-gray-50 text-gray-700 hover:bg-gray-100 transition-colors"
-              (click)="onDelete(selectedReview()!)"
+              class="inline-flex items-center gap-1 rounded-lg bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-100"
+              (click)="onDelete(review)"
             >
+              <app-icon name="trash-2" [size]="16"></app-icon>
               Eliminar
             </button>
           </div>
 
-          <!-- Existing response -->
-          @if (selectedReview()!.review_responses) {
-            <div class="bg-blue-50 rounded-lg p-4 mb-4">
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs font-medium text-blue-800">
-                  Respuesta de la tienda
-                </p>
-                <button
-                  class="text-xs text-red-500 hover:text-red-700"
-                  (click)="onDeleteResponse(selectedReview()!.id)"
-                >
-                  Eliminar respuesta
-                </button>
-              </div>
-              <p class="text-sm text-blue-900 whitespace-pre-wrap">
-                {{ selectedReview()!.review_responses!.content }}
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="mb-3 flex items-center justify-between">
+              <p class="text-sm font-semibold text-gray-900">
+                Reportes de clientes
               </p>
-              <p class="text-xs text-blue-600 mt-2">
-                {{
-                  selectedReview()!.review_responses!.created_at
-                    | date: 'dd/MM/yyyy HH:mm'
-                }}
-              </p>
+              <span class="text-xs text-gray-500">
+                {{ review.review_reports?.length || 0 }}
+              </span>
             </div>
-          }
+            @if ((review.review_reports?.length || 0) > 0) {
+              <div class="space-y-3">
+                @for (report of review.review_reports || []; track report.id) {
+                  <div class="rounded-lg bg-red-50 p-3 text-sm">
+                    <p class="font-medium text-red-800">
+                      {{ report.reason }}
+                    </p>
+                    <p class="mt-1 text-xs text-red-600">
+                      {{ report.users?.first_name || 'Cliente' }}
+                      {{ report.users?.last_name || '' }} ·
+                      {{ report.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                    </p>
+                  </div>
+                }
+              </div>
+            } @else {
+              <p class="text-sm text-gray-500">
+                Esta reseña no tiene reportes.
+              </p>
+            }
+          </div>
 
-          <!-- Response form -->
-          @if (!selectedReview()!.review_responses) {
-            <div class="border-t pt-4">
-              <label class="block text-sm font-medium text-gray-700 mb-2"
-                >Responder a esta reseña</label
-              >
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <p class="text-sm font-semibold text-gray-900">
+                Respuesta de la tienda
+              </p>
+              @if (review.review_responses && !responseEditing()) {
+                <div class="flex gap-2">
+                  <button
+                    class="text-xs font-medium text-primary hover:underline"
+                    (click)="startEditResponse(review)"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    class="text-xs font-medium text-red-600 hover:underline"
+                    (click)="onDeleteResponse(review.id)"
+                  >
+                    Eliminar
+                  </button>
+                </div>
+              }
+            </div>
+
+            @if (responseError()) {
+              <p class="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+                {{ responseError() }}
+              </p>
+            }
+
+            @if (review.review_responses && !responseEditing()) {
+              <div class="rounded-lg bg-blue-50 p-4">
+                <p class="whitespace-pre-wrap text-sm text-blue-900">
+                  {{ review.review_responses.content }}
+                </p>
+                <p class="mt-2 text-xs text-blue-600">
+                  {{ review.review_responses.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                </p>
+              </div>
+            } @else {
               <textarea
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm resize-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                rows="3"
+                class="w-full resize-none rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-transparent focus:ring-2 focus:ring-primary"
+                rows="4"
                 placeholder="Escribe una respuesta..."
                 [ngModel]="responseContent()"
                 (ngModelChange)="responseContent.set($event)"
               ></textarea>
-              <button
-                class="mt-2 w-full px-4 py-2 text-sm font-medium text-white bg-primary rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
-                [disabled]="!responseContent().trim()"
-                (click)="submitResponse()"
-              >
-                Enviar Respuesta
-              </button>
-            </div>
-          }
+              <div class="mt-3 flex justify-end gap-2">
+                @if (responseEditing()) {
+                  <button
+                    class="rounded-lg px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                    (click)="cancelEditResponse()"
+                  >
+                    Cancelar
+                  </button>
+                }
+                <button
+                  class="inline-flex items-center gap-1 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+                  [disabled]="!responseContent().trim() || responseSubmitting()"
+                  (click)="submitResponse()"
+                >
+                  @if (responseSubmitting()) {
+                    <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
+                  } @else {
+                    <app-icon name="save" [size]="16"></app-icon>
+                  }
+                  {{ responseEditing() ? 'Guardar respuesta' : 'Enviar respuesta' }}
+                </button>
+              </div>
+            }
+          </div>
         </div>
-      </div>
-    }
+      }
+    </app-modal>
   `,
   styles: [
     `
@@ -354,8 +414,15 @@ export class ReviewsComponent {
   totalItems = signal(0);
   totalPages = signal(0);
   currentPage = signal(1);
+  detailOpen = signal(false);
+  detailLoading = signal(false);
+  detailError = signal<string | null>(null);
   selectedReview = signal<Review | null>(null);
   responseContent = signal('');
+  responseEditing = signal(false);
+  responseSubmitting = signal(false);
+  responseError = signal<string | null>(null);
+  listError = signal<string | null>(null);
 
   // Filters
   filters = signal<ReviewFilters>({ page: 1, limit: 10 });
@@ -502,6 +569,13 @@ export class ReviewsComponent {
       action: (item: Review) => this.onReject(item),
     },
     {
+      label: 'Ocultar',
+      icon: 'eye-off',
+      variant: 'muted',
+      show: (item: Review) => item.state !== 'hidden',
+      action: (item: Review) => this.onHide(item),
+    },
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
@@ -522,12 +596,13 @@ export class ReviewsComponent {
         next: (res) => {
           this.stats.set(res.data || res);
         },
-        error: (err) => console.error('Error loading review stats:', err),
+        error: (error) => this.listError.set(extractApiErrorMessage(error)),
       });
   }
 
   loadReviews(): void {
     this.loading.set(true);
+    this.listError.set(null);
     this.reviewsService
       .getAll(this.filters())
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -543,8 +618,8 @@ export class ReviewsComponent {
           }
           this.loading.set(false);
         },
-        error: (err) => {
-          console.error('Error loading reviews:', err);
+        error: (error) => {
+          this.listError.set(extractApiErrorMessage(error));
           this.loading.set(false);
         },
       });
@@ -581,7 +656,7 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (err) => console.error('Error approving review:', err),
+        error: (error) => this.listError.set(extractApiErrorMessage(error)),
       });
   }
 
@@ -595,7 +670,21 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (err) => console.error('Error rejecting review:', err),
+        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+      });
+  }
+
+  onHide(review: Review): void {
+    this.reviewsService
+      .hide(review.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.loadReviews();
+          this.loadStats();
+          this.closeDetail();
+        },
+        error: (error) => this.listError.set(extractApiErrorMessage(error)),
       });
   }
 
@@ -611,42 +700,84 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (err) => console.error('Error deleting review:', err),
+        error: (error) => this.listError.set(extractApiErrorMessage(error)),
       });
   }
 
   openDetail(review: Review): void {
+    this.detailOpen.set(true);
     this.selectedReview.set(review);
     this.responseContent.set('');
+    this.responseEditing.set(false);
+    this.responseError.set(null);
+    this.detailError.set(null);
+    this.detailLoading.set(true);
+
+    this.reviewsService
+      .getOne(review.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.selectedReview.set(res.data || res);
+          this.detailLoading.set(false);
+        },
+        error: (error) => {
+          this.detailError.set(extractApiErrorMessage(error));
+          this.detailLoading.set(false);
+        },
+      });
   }
 
   closeDetail(): void {
+    this.detailOpen.set(false);
+    this.clearDetailState();
+  }
+
+  onDetailClosed(): void {
+    this.clearDetailState();
+  }
+
+  private clearDetailState(): void {
     this.selectedReview.set(null);
     this.responseContent.set('');
+    this.responseEditing.set(false);
+    this.responseSubmitting.set(false);
+    this.responseError.set(null);
+    this.detailLoading.set(false);
+    this.detailError.set(null);
   }
 
   submitResponse(): void {
     const review = this.selectedReview();
     if (!review || !this.responseContent().trim()) return;
 
-    this.reviewsService
-      .createResponse(review.id, this.responseContent().trim())
+    this.responseSubmitting.set(true);
+    this.responseError.set(null);
+    const request =
+      this.responseEditing() && review.review_responses
+        ? this.reviewsService.updateResponse(
+            review.id,
+            this.responseContent().trim(),
+          )
+        : this.reviewsService.createResponse(
+            review.id,
+            this.responseContent().trim(),
+          );
+
+    request
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          // Reload the detail
-          this.reviewsService
-            .getOne(review.id)
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-              next: (res) => {
-                this.selectedReview.set(res.data || res);
-                this.responseContent.set('');
-              },
-            });
+          this.responseSubmitting.set(false);
+          this.responseEditing.set(false);
+          this.responseContent.set('');
+          this.reloadSelectedReview(review.id);
           this.loadReviews();
         },
-        error: (err) => console.error('Error creating response:', err),
+        error: (error) => {
+          this.responseSubmitting.set(false);
+          this.responseError.set(extractApiErrorMessage(error));
+        },
       });
   }
 
@@ -657,14 +788,38 @@ export class ReviewsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.reviewsService
-            .getOne(reviewId)
-            .pipe(takeUntilDestroyed(this.destroyRef))
-            .subscribe({
-              next: (res) => this.selectedReview.set(res.data || res),
-            });
+          this.responseEditing.set(false);
+          this.responseContent.set('');
+          this.reloadSelectedReview(reviewId);
+          this.loadReviews();
         },
-        error: (err) => console.error('Error deleting response:', err),
+        error: (error) => {
+          this.responseError.set(extractApiErrorMessage(error));
+        },
+      });
+  }
+
+  startEditResponse(review: Review): void {
+    this.responseContent.set(review.review_responses?.content || '');
+    this.responseEditing.set(true);
+    this.responseError.set(null);
+  }
+
+  cancelEditResponse(): void {
+    this.responseContent.set('');
+    this.responseEditing.set(false);
+    this.responseError.set(null);
+  }
+
+  private reloadSelectedReview(reviewId: number): void {
+    this.reviewsService
+      .getOne(reviewId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => this.selectedReview.set(res.data || res),
+        error: (error) => {
+          this.detailError.set(extractApiErrorMessage(error));
+        },
       });
   }
 

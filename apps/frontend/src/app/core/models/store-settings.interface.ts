@@ -34,12 +34,28 @@ export interface GeneralSettings {
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
 }
 
+export type InventoryScope = 'main_location' | 'all_locations';
+
 export interface InventorySettings {
   low_stock_threshold: number;
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
   costing_method: 'cpp' | 'fifo';
+  /**
+   * Scope used by POS when looking up stock for sale.
+   * - `main_location`: POS only consumes stock from the store's main location.
+   * - `all_locations`: POS may consume stock from any active location of the store.
+   * Default: `main_location`.
+   */
+  pos_stock_scope: InventoryScope;
+  /**
+   * Scope used by low-stock alert evaluation.
+   * - `main_location`: alerts only consider stock at the main location.
+   * - `all_locations`: alerts aggregate stock across all active locations.
+   * Default: `main_location`.
+   */
+  low_stock_alerts_scope: InventoryScope;
 }
 
 export interface OperationsSettings {

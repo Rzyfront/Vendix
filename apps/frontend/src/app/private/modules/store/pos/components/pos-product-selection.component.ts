@@ -38,6 +38,8 @@ import {
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
+import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
+import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
 import { environment } from '../../../../../../environments/environment';
 import {
   selectAccessToken,
@@ -61,6 +63,7 @@ import {
     OptionsDropdownComponent,
     CurrencyPipe,
     PosVariantSelectorComponent,
+    PosStockSourcingModalComponent,
     BadgeComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
@@ -403,6 +406,15 @@ import {
         (closed)="onVariantSelectorClosed()"
       ></app-pos-variant-selector>
     }
+
+    <!-- Stock Sourcing Suggestion Modal -->
+    <app-pos-stock-sourcing-modal
+      [(isOpen)]="showSourcingModal"
+      [suggestion]="sourcingResponse()"
+      [productName]="sourcingProductName()"
+      [variantLabel]="sourcingVariantLabel()"
+      (closed)="onSourcingModalClosed()"
+    ></app-pos-stock-sourcing-modal>
   `,
   styles: [
     `
@@ -488,6 +500,15 @@ export class PosProductSelectionComponent {
   // Variant selection state
   readonly showVariantSelector = signal(false);
   readonly selectedProductForVariant = signal<any>(null);
+
+  // Stock sourcing modal state — surfaced when in-scope stock is insufficient
+  // and `pos_stock_scope === 'main_location'`.
+  readonly showSourcingModal = signal(false);
+  readonly sourcingResponse = signal<StockSourcingSuggestionResponse | null>(
+    null,
+  );
+  readonly sourcingProductName = signal<string>('');
+  readonly sourcingVariantLabel = signal<string>('');
 
   // Scale/weight settings from store
   readonly scaleEnabled = signal(false);
@@ -901,9 +922,7 @@ export class PosProductSelectionComponent {
           },
           error: (error) => {
             this.addingToCart.delete(product.id);
-            this.toastService.warning(
-              error.message || 'Error al agregar variante al carrito',
-            );
+            this.handleAddToCartError(error, product, variant, 1);
           },
         });
       return;
@@ -930,9 +949,7 @@ export class PosProductSelectionComponent {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(
-            error.message || 'Error al agregar variante al carrito',
-          );
+          this.handleAddToCartError(error, product, variant, 1);
         },
       });
   }
@@ -940,6 +957,89 @@ export class PosProductSelectionComponent {
   onVariantSelectorClosed(): void {
     this.showVariantSelector.set(false);
     this.selectedProductForVariant.set(null);
+  }
+
+  /**
+   * Detect when the cart-service rejection was caused by insufficient stock.
+   * The cart service throws an Error whose `.message` includes "Stock
+   * insuficiente"; we match defensively against both `error.message` and the
+   * stringified error so future refactors of the cart service do not break
+   * this check silently.
+   */
+  private isInsufficientStockError(error: any): boolean {
+    const msg = (error?.message ?? String(error ?? '')).toString();
+    return msg.toLowerCase().includes('stock insuficiente');
+  }
+
+  /**
+   * Try to surface a sourcing-suggestion modal when add-to-cart was rejected
+   * due to insufficient stock under the `main_location` POS scope.
+   * Falls back to a plain warning toast otherwise.
+   */
+  private handleAddToCartError(
+    error: any,
+    product: any,
+    variant?: PosProductVariant,
+    quantity: number = 1,
+  ): void {
+    const isStockError = this.isInsufficientStockError(error);
+    const scope = this.productService.getPosStockScope();
+
+    if (!isStockError || scope !== 'main_location') {
+      this.toastService.warning(
+        error?.message || 'Error al agregar producto al carrito',
+      );
+      return;
+    }
+
+    const productId = Number(product?.id);
+    if (!Number.isFinite(productId)) {
+      this.toastService.warning(
+        error?.message || 'Error al agregar producto al carrito',
+      );
+      return;
+    }
+
+    this.productService
+      .getStockSourcingSuggestion({
+        product_id: productId,
+        product_variant_id: variant?.id ?? null,
+        quantity,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          // If by the time we asked there is in-scope stock, just inform the
+          // cashier — the cart-service local cache is stale relative to the
+          // backend. They can re-tap "add to cart".
+          if (response.suggestion === 'available') {
+            this.toastService.info(
+              'Hay stock disponible; intenta agregar nuevamente.',
+            );
+            return;
+          }
+          const variantLabel =
+            variant?.attributes
+              ?.map((a) => a.attribute_value)
+              .join(' / ') || '';
+          this.sourcingResponse.set(response);
+          this.sourcingProductName.set(product?.name ?? '');
+          this.sourcingVariantLabel.set(variantLabel);
+          this.showSourcingModal.set(true);
+        },
+        error: () => {
+          // Endpoint failed — fall back to the original error message.
+          this.toastService.warning(
+            error?.message || 'Error al agregar producto al carrito',
+          );
+        },
+      });
+  }
+
+  onSourcingModalClosed(): void {
+    this.sourcingResponse.set(null);
+    this.sourcingProductName.set('');
+    this.sourcingVariantLabel.set('');
   }
 
   private async addToCartNormal(product: any): Promise<void> {
@@ -1000,9 +1100,7 @@ export class PosProductSelectionComponent {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(
-            error.message || 'Error al agregar producto al carrito',
-          );
+          this.handleAddToCartError(error, product, undefined, 1);
         },
       });
   }
@@ -1031,9 +1129,7 @@ export class PosProductSelectionComponent {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(
-            error.message || 'Error al agregar producto al carrito',
-          );
+          this.handleAddToCartError(error, product, undefined, 1);
         },
       });
   }

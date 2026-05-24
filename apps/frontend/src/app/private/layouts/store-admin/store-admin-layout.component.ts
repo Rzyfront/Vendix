@@ -431,6 +431,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/marketing/coupons',
         },
         {
+          label: 'Anuncios',
+          icon: 'image',
+          route: '/admin/marketing/anuncios',
+        },
+        {
           label: 'Social Sales',
           icon: 'message-circle',
           route: '/admin/marketing/social-sales',

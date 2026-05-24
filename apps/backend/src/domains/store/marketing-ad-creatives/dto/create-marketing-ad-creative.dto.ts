@@ -1,0 +1,71 @@
+import { Type } from 'class-transformer';
+import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+} from 'class-validator';
+
+export class CreateMarketingAdCreativeDto {
+  @IsString()
+  @MaxLength(255)
+  title: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  prompt?: string;
+
+  @IsOptional()
+  @IsIn(['square', 'story', 'landscape'])
+  format?: 'square' | 'story' | 'landscape';
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(12)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  product_ids: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(12)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  product_image_ids?: number[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  @Matches(/^[a-z][a-z0-9_]*$/)
+  ai_app_key?: string;
+}
+
+export class CreateManualMarketingAdCreativeDto extends CreateMarketingAdCreativeDto {
+  @IsString()
+  @MaxLength(16_000_000)
+  @Matches(/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/)
+  image_base64: string;
+}
+
+export class UpdateMarketingAdCreativeDetailsDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
+  description?: string;
+}

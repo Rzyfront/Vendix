@@ -91,6 +91,7 @@ model users {
 
   // Promotions
   order_promotions_customer order_promotions[] @relation("order_promotions_customer")
+  marketing_ad_creatives marketing_ad_creatives[] @relation("marketing_ad_creatives_created_by")
 
   // Invoicing, Accounting & Payroll relations
   invoices_created           invoices[]           @relation("invoices_created_by")
@@ -642,6 +643,7 @@ model stores {
   quotations                  quotations[]
   promotions                  promotions[]
   coupons                     coupons[]
+  marketing_ad_creatives      marketing_ad_creatives[]
   reviews                     reviews[]
 
   // Cash Register
@@ -1154,6 +1156,7 @@ model product_images {
   created_at       DateTime?          @default(now()) @db.Timestamp(6)
   products         products?          @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_variants product_variants[]
+  marketing_ad_creative_images marketing_ad_creative_images[]
 }
 
 model product_tax_assignments {
@@ -1285,6 +1288,7 @@ model products {
   quotation_items               quotation_items[]
   promotion_products            promotion_products[]
   coupon_products               coupon_products[]
+  marketing_ad_creative_products marketing_ad_creative_products[]
   inventory_cost_layers         inventory_cost_layers[]
   inventory_valuation_snapshots inventory_valuation_snapshots[]
   layaway_items                 layaway_items[]
@@ -2292,6 +2296,78 @@ enum promotion_scope_enum {
   order
   product
   category
+}
+
+// ===== MARKETING AD CREATIVES =====
+
+enum marketing_ad_creative_status_enum {
+  draft
+  processing
+  completed
+  failed
+}
+
+enum marketing_ad_creative_format_enum {
+  square
+  story
+  landscape
+}
+
+model marketing_ad_creatives {
+  id                  Int                               @id @default(autoincrement())
+  store_id            Int
+  created_by_user_id  Int?
+  title               String                            @db.VarChar(255)
+  description         String?                           @db.Text
+  prompt              String?                           @db.Text
+  format              marketing_ad_creative_format_enum @default(square)
+  status              marketing_ad_creative_status_enum @default(draft)
+  image_url           String?                           @db.Text
+  thumb_url           String?                           @db.Text
+  ai_app_key          String                            @default("marketing_ad_image_generator") @db.VarChar(100)
+  provider_model      String?                           @db.VarChar(100)
+  error_message       String?                           @db.Text
+  generation_metadata Json?
+  created_at          DateTime?                         @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                         @default(now()) @db.Timestamp(6)
+  completed_at        DateTime?                         @db.Timestamp(6)
+
+  stores            stores                           @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by        users?                           @relation("marketing_ad_creatives_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  creative_products marketing_ad_creative_products[]
+  creative_images   marketing_ad_creative_images[]
+
+  @@index([store_id, status])
+  @@index([store_id, created_at])
+  @@index([created_by_user_id])
+}
+
+model marketing_ad_creative_products {
+  id          Int @id @default(autoincrement())
+  creative_id Int
+  product_id  Int
+
+  creative marketing_ad_creatives @relation(fields: [creative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product  products               @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([creative_id, product_id])
+  @@index([creative_id])
+  @@index([product_id])
+}
+
+model marketing_ad_creative_images {
+  id               Int     @id @default(autoincrement())
+  creative_id      Int
+  product_image_id Int?
+  image_url        String? @db.Text
+  source_type      String  @default("product") @db.VarChar(30)
+  sort_order       Int?    @default(0)
+
+  creative      marketing_ad_creatives @relation(fields: [creative_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product_image product_images?        @relation(fields: [product_image_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([creative_id])
+  @@index([product_image_id])
 }
 
 // ===== NOTIFICATIONS =====

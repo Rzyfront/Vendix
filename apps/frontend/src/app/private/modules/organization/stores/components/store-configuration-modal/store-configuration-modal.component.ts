@@ -422,6 +422,8 @@ export class StoreConfigurationModalComponent
       track_inventory: true,
       allow_negative_stock: false,
       costing_method: 'cpp',
+      pos_stock_scope: 'main_location',
+      low_stock_alerts_scope: 'main_location',
     },
     checkout: {
       require_customer_data: false,

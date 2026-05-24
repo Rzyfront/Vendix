@@ -366,6 +366,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
         marketing: true,
         marketing_promotions: false,
         marketing_coupons: false,
+        marketing_anuncios: false,
         marketing_social_sales: false,
         analytics: true,
         analytics_overview: true,

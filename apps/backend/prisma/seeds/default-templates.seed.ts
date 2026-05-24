@@ -272,6 +272,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             marketing: true,
             marketing_promotions: true,
             marketing_coupons: true,
+            marketing_anuncios: true,
             marketing_social_sales: true,
             analytics: true,
             analytics_sales: true,

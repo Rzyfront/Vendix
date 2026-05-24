@@ -8,12 +8,16 @@ import {
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
 
+export type InventoryScope = 'main_location' | 'all_locations';
+
 export interface InventorySettings {
   low_stock_threshold: number;
   out_of_stock_action: 'hide' | 'show' | 'disable' | 'allow_backorder';
   track_inventory: boolean;
   allow_negative_stock: boolean;
   costing_method: 'cpp' | 'fifo';
+  pos_stock_scope: InventoryScope;
+  low_stock_alerts_scope: InventoryScope;
 }
 
 import { IconComponent } from '../../../../../../../shared/components/index';
@@ -36,6 +40,8 @@ export class InventorySettingsForm {
     track_inventory: new FormControl(true),
     allow_negative_stock: new FormControl(false),
     costing_method: new FormControl('cpp'),
+    pos_stock_scope: new FormControl<InventoryScope>('main_location'),
+    low_stock_alerts_scope: new FormControl<InventoryScope>('main_location'),
   });
 
   outOfStockActions: SelectorOption[] = [
@@ -48,6 +54,32 @@ export class InventorySettingsForm {
   costingMethods: SelectorOption[] = [
     { value: 'cpp', label: 'CPP (Costo Promedio Ponderado)' },
     { value: 'fifo', label: 'FIFO (Primero en Entrar, Primero en Salir)' },
+  ];
+
+  posStockScopes: SelectorOption[] = [
+    {
+      value: 'main_location',
+      label: 'Solo bodega principal (recomendado)',
+      description: 'El POS solo descuenta stock de la bodega principal de la tienda.',
+    },
+    {
+      value: 'all_locations',
+      label: 'Todas las bodegas',
+      description: 'El POS puede consumir stock de cualquier bodega activa de la tienda.',
+    },
+  ];
+
+  lowStockAlertsScopes: SelectorOption[] = [
+    {
+      value: 'main_location',
+      label: 'Solo bodega principal (recomendado)',
+      description: 'Las alertas evalúan únicamente el stock de la bodega principal.',
+    },
+    {
+      value: 'all_locations',
+      label: 'Todas las bodegas',
+      description: 'Las alertas suman el stock de todas las bodegas activas de la tienda.',
+    },
   ];
 
   // Typed getters for FormControls
@@ -69,6 +101,14 @@ export class InventorySettingsForm {
 
   get costingMethodControl(): FormControl<string> {
     return this.form.get('costing_method') as FormControl<string>;
+  }
+
+  get posStockScopeControl(): FormControl<InventoryScope> {
+    return this.form.get('pos_stock_scope') as FormControl<InventoryScope>;
+  }
+
+  get lowStockAlertsScopeControl(): FormControl<InventoryScope> {
+    return this.form.get('low_stock_alerts_scope') as FormControl<InventoryScope>;
   }
 
   constructor() {

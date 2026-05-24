@@ -355,6 +355,13 @@ export const storeAdminRoutes: Routes = [
             ],
           },
           {
+            path: 'anuncios',
+            loadChildren: () =>
+              import('../../private/modules/store/marketing/anuncios/anuncios.routes').then(
+                (m) => m.anunciosRoutes,
+              ),
+          },
+          {
             path: 'social-sales',
             loadComponent: () =>
               import('../../private/modules/store/marketing/social-sales/social-sales.component').then(

@@ -7,6 +7,7 @@ import {
   CreatePayrollRunDto,
   EmployeeStats,
   PayrollStats,
+  ExistingEmployeePayload,
 } from '../../interfaces/payroll.interface';
 
 // ─── Load Employees ───────────────────────────────────────
@@ -45,7 +46,12 @@ export const createEmployeeSuccess = createAction(
 );
 export const createEmployeeFailure = createAction(
   '[Payroll] Create Employee Failure',
-  props<{ error: string }>(),
+  props<{
+    error: string;
+    errorCode?: string;
+    existingEmployee?: ExistingEmployeePayload;
+    pendingDto?: CreateEmployeeDto;
+  }>(),
 );
 
 // ─── Update Employee ──────────────────────────────────────

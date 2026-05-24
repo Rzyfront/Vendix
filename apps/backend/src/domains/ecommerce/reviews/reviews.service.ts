@@ -18,6 +18,27 @@ export class EcommerceReviewsService {
     private readonly event_emitter: EventEmitter2,
   ) {}
 
+  private emptyRatingDistribution() {
+    return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  }
+
+  private async areReviewsEnabled(): Promise<boolean> {
+    const settings = await this.prisma.store_settings.findFirst({
+      where: {},
+      select: { settings: true },
+    });
+    const allow_reviews = (settings?.settings as any)?.ecommerce?.catalog
+      ?.allow_reviews;
+
+    return allow_reviews !== false;
+  }
+
+  private async ensureReviewsEnabled(): Promise<void> {
+    if (!(await this.areReviewsEnabled())) {
+      throw new VendixHttpException(ErrorCodes.REV_DISABLED_001);
+    }
+  }
+
   async getProductReviews(query: ReviewListQueryDto) {
     const {
       product_id,
@@ -26,6 +47,22 @@ export class EcommerceReviewsService {
       sort_by = 'recent',
       rating,
     } = query;
+
+    if (!(await this.areReviewsEnabled())) {
+      return {
+        enabled: false,
+        reviews: [],
+        meta: {
+          total: 0,
+          page,
+          limit,
+          totalPages: 0,
+        },
+        rating_distribution: this.emptyRatingDistribution(),
+        avg_rating: 0,
+        total_count: 0,
+      };
+    }
 
     const where: any = { product_id, state: 'approved' };
     if (rating) {
@@ -63,7 +100,7 @@ export class EcommerceReviewsService {
       where: { product_id, state: 'approved' },
       _count: true,
     });
-    const rating_distribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    const rating_distribution = this.emptyRatingDistribution();
     for (const r of distribution_raw) {
       rating_distribution[r.rating as keyof typeof rating_distribution] =
         r._count;
@@ -83,6 +120,7 @@ export class EcommerceReviewsService {
         : 0;
 
     return {
+      enabled: true,
       reviews,
       meta: {
         total,
@@ -97,6 +135,10 @@ export class EcommerceReviewsService {
   }
 
   async canReview(productId: number) {
+    if (!(await this.areReviewsEnabled())) {
+      return { can_review: false, reason: 'reviews_disabled' };
+    }
+
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
@@ -138,6 +180,9 @@ export class EcommerceReviewsService {
       if (check.reason === 'already_reviewed') {
         throw new VendixHttpException(ErrorCodes.REV_DUP_001);
       }
+      if (check.reason === 'reviews_disabled') {
+        throw new VendixHttpException(ErrorCodes.REV_DISABLED_001);
+      }
     }
 
     // Rate limit: max 3 reviews per day
@@ -171,7 +216,7 @@ export class EcommerceReviewsService {
         title: dto.title,
         comment: dto.comment,
         verified_purchase: true,
-        state: 'pending',
+        state: 'approved',
       },
     });
 
@@ -189,6 +234,8 @@ export class EcommerceReviewsService {
   }
 
   async update(id: number, dto: UpdateReviewDto) {
+    await this.ensureReviewsEnabled();
+
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
@@ -200,24 +247,25 @@ export class EcommerceReviewsService {
     if (review.user_id !== user_id) {
       throw new VendixHttpException(ErrorCodes.REV_PERM_001);
     }
-    if (review.state !== 'pending') {
-      throw new VendixHttpException(ErrorCodes.REV_STATE_001);
-    }
-
     const update_data: any = {};
     if (dto.rating !== undefined) update_data.rating = dto.rating;
     if (dto.title !== undefined) update_data.title = dto.title;
     if (dto.comment !== undefined) update_data.comment = dto.comment;
 
-    const updated = await this.prisma.reviews.update({
-      where: { id },
+    const result = await this.prisma.reviews.updateMany({
+      where: { id, user_id },
       data: update_data,
     });
+    if (result.count === 0) {
+      throw new VendixHttpException(ErrorCodes.REV_FIND_001);
+    }
 
-    return updated;
+    return this.prisma.reviews.findFirst({ where: { id, user_id } });
   }
 
   async remove(id: number) {
+    await this.ensureReviewsEnabled();
+
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
@@ -230,12 +278,19 @@ export class EcommerceReviewsService {
       throw new VendixHttpException(ErrorCodes.REV_PERM_001);
     }
 
-    await this.prisma.reviews.delete({ where: { id } });
+    const result = await this.prisma.reviews.deleteMany({
+      where: { id, user_id },
+    });
+    if (result.count === 0) {
+      throw new VendixHttpException(ErrorCodes.REV_FIND_001);
+    }
 
     return { deleted: true };
   }
 
   async vote(reviewId: number, dto: VoteReviewDto) {
+    await this.ensureReviewsEnabled();
+
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
@@ -272,7 +327,7 @@ export class EcommerceReviewsService {
     const helpful = await this.prisma.review_votes.count({
       where: { review_id: reviewId, is_helpful: true },
     });
-    await this.prisma.reviews.update({
+    await this.prisma.reviews.updateMany({
       where: { id: reviewId },
       data: { helpful_count: helpful },
     });
@@ -281,6 +336,8 @@ export class EcommerceReviewsService {
   }
 
   async report(reviewId: number, dto: ReportReviewDto) {
+    await this.ensureReviewsEnabled();
+
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
@@ -318,7 +375,7 @@ export class EcommerceReviewsService {
       update_data.state = 'flagged';
     }
 
-    await this.prisma.reviews.update({
+    await this.prisma.reviews.updateMany({
       where: { id: reviewId },
       data: update_data,
     });

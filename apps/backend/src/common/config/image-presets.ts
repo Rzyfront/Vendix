@@ -12,6 +12,7 @@ export enum ImageContext {
   AVATAR = 'avatar',
   LOGO = 'logo',
   CATEGORY = 'category',
+  MARKETING_AD = 'marketing_ad',
   RECEIPT = 'receipt',
   HELP_CENTER = 'help_center',
   SUPPORT = 'support',
@@ -69,6 +70,14 @@ export const IMAGE_PRESETS: Record<ImageContext, ImagePreset> = {
     quality: 82,
     fit: 'inside',
     thumbnail: { width: 200, height: 200, quality: 72, fit: 'cover' },
+  },
+  [ImageContext.MARKETING_AD]: {
+    maxWidth: 1536,
+    maxHeight: 1536,
+    quality: 88,
+    fit: 'inside',
+    thumbnail: { width: 360, height: 360, quality: 76, fit: 'cover' },
+    skipIfAlreadyOptimized: true,
   },
   [ImageContext.RECEIPT]: {
     maxWidth: 1200,

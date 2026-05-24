@@ -36,8 +36,8 @@ import {
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -45,7 +45,11 @@ import {
       (cancel)="onCancel()"
       [size]="'lg'"
       [title]="app() ? 'Editar Aplicacion IA' : 'Nueva Aplicacion IA'"
-      [subtitle]="app() ? 'Editando: ' + app()!.name : 'Configura un caso de uso de IA con prompts y parametros'"
+      [subtitle]="
+        app()
+          ? 'Editando: ' + app()!.name
+          : 'Configura un caso de uso de IA con prompts y parametros'
+      "
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-4">
@@ -89,7 +93,8 @@ import {
             [disabled]="isSubmitting()"
           ></app-selector>
           <p class="text-xs text-text-secondary -mt-2">
-            Si no seleccionas una, se usara la configuracion marcada como default.
+            Si no seleccionas una, se usara la configuracion marcada como
+            default.
           </p>
 
           <!-- System Prompt -->
@@ -123,7 +128,8 @@ import {
               [attr.disabled]="isSubmitting() ? '' : null"
             ></textarea>
             <p class="text-xs text-text-secondary">
-              Usa {{'{{variable}}'}} para variables dinamicas. Ej: {{'{{name}}'}}, {{'{{context}}'}}
+              Usa {{'{{variable}}'}} para variables dinamicas. Ej:
+              {{'{{name}}'}}, {{'{{context}}'}}
             </p>
           </div>
 
@@ -260,6 +266,7 @@ export class AIEngineAppModalComponent implements OnChanges {
     { value: 'json', label: 'JSON' },
     { value: 'markdown', label: 'Markdown' },
     { value: 'html', label: 'HTML' },
+    { value: 'image', label: 'Imagen' },
   ];
 
   form: FormGroup = this.fb.group({
@@ -327,7 +334,8 @@ export class AIEngineAppModalComponent implements OnChanges {
       config_id: raw.config_id ? Number(raw.config_id) : undefined,
       system_prompt: raw.system_prompt || undefined,
       prompt_template: raw.prompt_template || undefined,
-      temperature: raw.temperature != null ? Number(raw.temperature) : undefined,
+      temperature:
+        raw.temperature != null ? Number(raw.temperature) : undefined,
       max_tokens: raw.max_tokens != null ? Number(raw.max_tokens) : undefined,
       output_format: raw.output_format as OutputFormat,
       is_active: raw.is_active,

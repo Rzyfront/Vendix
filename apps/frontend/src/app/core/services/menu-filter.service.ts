@@ -88,6 +88,7 @@ export class MenuFilterService {
     Marketing: 'marketing',
     Promociones: 'marketing_promotions',
     Cupones: 'marketing_coupons',
+    Anuncios: 'marketing_anuncios',
     'Social Sales': 'marketing_social_sales',
 
     // STORE_ADMIN - Analíticas (padre + submódulos)

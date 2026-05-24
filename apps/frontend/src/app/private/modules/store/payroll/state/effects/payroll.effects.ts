@@ -85,11 +85,15 @@ export class PayrollEffects {
           map((response) =>
             PayrollActions.createEmployeeSuccess({ employee: response.data })
           ),
-          catchError((error) =>
-            of(PayrollActions.createEmployeeFailure({
-              error: parseApiError(error).userMessage
-            }))
-          )
+          catchError((error) => {
+            const parsed = parseApiError(error);
+            return of(PayrollActions.createEmployeeFailure({
+              error: parsed.userMessage,
+              errorCode: parsed.errorCode ?? undefined,
+              existingEmployee: parsed.details?.existing_employee ?? undefined,
+              pendingDto: employee,
+            }));
+          })
         )
       )
     )
@@ -405,7 +409,12 @@ export class PayrollEffects {
         PayrollActions.updateEmployeeFailure,
         PayrollActions.terminateEmployeeFailure,
       ),
-      tap(({ error }) => this.toastService.error(error)),
+      tap((action: any) => {
+        if (action.errorCode === 'PAYROLL_ASSOCIATE_CONFIRM_001') {
+          return;
+        }
+        this.toastService.error(action.error);
+      }),
     ), { dispatch: false }
   );
 

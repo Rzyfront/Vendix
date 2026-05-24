@@ -35,6 +35,7 @@ export class StorePrismaService extends BasePrismaService {
     // organization-scoped config that applies to their store.
     'promotions',
     'coupons',
+    'marketing_ad_creatives',
     'quotations',
     'cash_registers',
     'cash_register_sessions',
@@ -204,6 +205,8 @@ export class StorePrismaService extends BasePrismaService {
       'coupon_products', // Relational
       'coupon_categories', // Relational
       'coupon_uses', // Relational
+      'marketing_ad_creative_products', // Relational
+      'marketing_ad_creative_images', // Relational
       'quotation_items', // Relational
       'chart_of_accounts', // Org scoped
       'fiscal_periods', // Org scoped
@@ -393,6 +396,12 @@ export class StorePrismaService extends BasePrismaService {
       coupon_products: { coupon: { store_id: context.store_id } },
       coupon_categories: { coupon: { store_id: context.store_id } },
       coupon_uses: { coupon: { store_id: context.store_id } },
+      marketing_ad_creative_products: {
+        creative: { store_id: context.store_id },
+      },
+      marketing_ad_creative_images: {
+        creative: { store_id: context.store_id },
+      },
       quotation_items: { quotation: { store_id: context.store_id } },
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
@@ -1012,6 +1021,19 @@ export class StorePrismaService extends BasePrismaService {
 
   get order_promotions() {
     return this.scoped_client.order_promotions;
+  }
+
+  // Marketing ad creative models
+  get marketing_ad_creatives() {
+    return this.scoped_client.marketing_ad_creatives;
+  }
+
+  get marketing_ad_creative_products() {
+    return this.scoped_client.marketing_ad_creative_products;
+  }
+
+  get marketing_ad_creative_images() {
+    return this.scoped_client.marketing_ad_creative_images;
   }
 
   // Accounting models

@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
@@ -6,6 +6,16 @@ import { toObservable } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import {
+  InventoryScope,
+  InventorySettings,
+} from '../../../../../core/models/store-settings.interface';
+import {
+  StockSourcingSuggestionQuery,
+  StockSourcingSuggestionResponse,
+} from '../models/sourcing.model';
 
 export interface Product {
   id: string;
@@ -124,16 +134,82 @@ export interface SearchResult {
 })
 export class PosProductService {
   private readonly apiUrl = `${environment.apiUrl}/store/products`;
+  private readonly stockLevelsUrl = `${environment.apiUrl}/store/inventory/stock-levels`;
   private categories: Category[] = [];
   private brands: Brand[] = [];
   readonly searchHistory = signal<string[]>([]);
   readonly searchHistory$ = toObservable(this.searchHistory);
+
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
+  private readonly authFacade = inject(AuthFacade);
 
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
   ) {
     this.initializeMockData();
+  }
+
+  /**
+   * Resolved POS stock scope for the current store. Defaults to
+   * `'all_locations'` when settings are not yet hydrated so behavior matches
+   * the legacy "sum every location" path during boot.
+   */
+  getPosStockScope(): InventoryScope {
+    const inventory = this.storeSettingsFacade.settings()?.inventory as
+      | InventorySettings
+      | undefined;
+    return inventory?.pos_stock_scope ?? 'all_locations';
+  }
+
+  /**
+   * Active store's `default_location_id` exposed by the auth response.
+   * Returns `null` if no active store is loaded yet or the store has no
+   * default location wired — callers must degrade to `'all_locations'`.
+   */
+  getDefaultLocationId(): number | null {
+    const store = this.authFacade.userStore() as
+      | { default_location_id?: number | null }
+      | null;
+    const id = store?.default_location_id;
+    return typeof id === 'number' && Number.isFinite(id) ? id : null;
+  }
+
+  /**
+   * Ask the backend for a sourcing recommendation when the in-scope stock
+   * does not cover `quantity`. Returns the typed response or throws.
+   */
+  getStockSourcingSuggestion(
+    query: StockSourcingSuggestionQuery,
+  ): Observable<StockSourcingSuggestionResponse> {
+    const httpQuery: Record<string, string | number> = {
+      product_id: query.product_id,
+      quantity: query.quantity,
+    };
+    if (query.product_variant_id != null) {
+      httpQuery['product_variant_id'] = query.product_variant_id;
+    }
+    const params = this.buildParams(httpQuery);
+
+    return this.http
+      .get<any>(`${this.stockLevelsUrl}/sourcing-suggestion`, { params })
+      .pipe(
+        map((response) => {
+          const data = response?.success ? response.data : response;
+          return data as StockSourcingSuggestionResponse;
+        }),
+        catchError((error: any) => {
+          console.error(
+            'PosProductService.getStockSourcingSuggestion Error:',
+            error,
+          );
+          return throwError(
+            () =>
+              error?.error?.message ||
+              'No se pudo consultar la disponibilidad en otras bodegas',
+          );
+        }),
+      );
   }
 
   private initializeMockData(): void {
@@ -275,23 +351,36 @@ export class PosProductService {
   }
 
   private transformProducts(products: any[]): any[] {
+    // Resolve scope + default location once per batch to avoid re-reading
+    // signals inside the row loop.
+    const scope = this.getPosStockScope();
+    const defaultLocationId = this.getDefaultLocationId();
+    // Defensive degrade: scope=main_location but no default_location_id ⇒
+    // behave like all_locations (match backend `resolvePosStockLocationIds`).
+    const useMainLocationOnly =
+      scope === 'main_location' && defaultLocationId !== null;
+
     return products.map((product) => {
-      // Calculate total stock from stock_levels
+      // Calculate total stock from stock_levels filtered by POS scope.
       let totalStock = 0;
       if (product.stock_levels && Array.isArray(product.stock_levels)) {
-        // Sum stock from all locations
-        const storeStockLevels = product.stock_levels.filter((level: any) => {
-          return level.quantity_available > 0;
-        });
+        const scopedLevels = useMainLocationOnly
+          ? product.stock_levels.filter(
+              (level: any) =>
+                Number(level?.location_id) === defaultLocationId,
+            )
+          : product.stock_levels;
 
-        totalStock = storeStockLevels.reduce(
+        totalStock = scopedLevels.reduce(
           (sum: number, level: any) => sum + (level.quantity_available || 0),
           0,
         );
       }
 
-      // Fallback to stock_quantity if no stock_levels
-      if (totalStock === 0) {
+      // Fallback to stock_quantity if no stock_levels and scope is global
+      // (under main_location scope, an empty filtered list means zero — do not
+      // fall back to the denormalized aggregate which mixes all locations).
+      if (totalStock === 0 && !useMainLocationOnly) {
         totalStock = product.stock_quantity || 0;
       }
 
@@ -318,14 +407,30 @@ export class PosProductService {
           sale_price: v.sale_price != null ? Number(v.sale_price) : null,
           track_inventory_override: v.track_inventory_override ?? null,
           stock: (() => {
-            if (typeof v.stock === 'number') return v.stock;
+            // Variants prefer stock_levels (scope-filtered) over the cached
+            // `stock` / `stock_quantity` fields so the cashier sees the same
+            // number used for add-to-cart validation.
             if (Array.isArray(v.stock_levels) && v.stock_levels.length > 0) {
-              return v.stock_levels.reduce(
+              const scopedLevels = useMainLocationOnly
+                ? v.stock_levels.filter(
+                    (sl: any) =>
+                      Number(sl?.location_id) === defaultLocationId,
+                  )
+                : v.stock_levels;
+              return scopedLevels.reduce(
                 (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
                 0,
               );
             }
-            return v.stock_quantity ?? 0;
+            // No per-location detail available — only trust the denormalized
+            // aggregate when we are NOT restricting to the main location.
+            if (typeof v.stock === 'number' && !useMainLocationOnly) {
+              return v.stock;
+            }
+            if (!useMainLocationOnly) {
+              return v.stock_quantity ?? 0;
+            }
+            return 0;
           })(),
           is_active: v.is_active ?? true,
           attributes: Array.isArray(v.attributes)

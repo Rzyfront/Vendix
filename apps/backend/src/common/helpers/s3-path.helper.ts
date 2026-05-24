@@ -77,6 +77,14 @@ export class S3PathHelper {
   }
 
   /**
+   * Builds the path for AI-generated marketing ad assets
+   * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/marketing/anuncios
+   */
+  buildMarketingAnunciosPath(org: S3OrgContext, store: S3StoreContext): string {
+    return `${this.buildStorePath(org, store)}/marketing/anuncios`;
+  }
+
+  /**
    * Builds the path for favicon assets
    * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/favicons
    */

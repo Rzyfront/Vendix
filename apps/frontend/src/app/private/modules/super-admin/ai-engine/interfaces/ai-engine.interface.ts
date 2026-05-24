@@ -10,7 +10,12 @@ export interface AIEngineConfig {
   api_key_ref?: string;
   is_default: boolean;
   is_active: boolean;
-  settings?: { temperature?: number; maxTokens?: number; thinking?: boolean; [key: string]: any };
+  settings?: {
+    temperature?: number;
+    maxTokens?: number;
+    thinking?: boolean;
+    [key: string]: any;
+  };
   last_tested_at?: string;
   last_test_ok?: boolean;
   created_at?: string;
@@ -82,7 +87,7 @@ export interface KnownProvider {
 
 // --- AI Applications ---
 
-export type OutputFormat = 'text' | 'json' | 'markdown' | 'html';
+export type OutputFormat = 'text' | 'json' | 'markdown' | 'html' | 'image';
 
 export interface AIEngineApp {
   id: number;
@@ -90,7 +95,12 @@ export interface AIEngineApp {
   name: string;
   description?: string;
   config_id?: number;
-  config?: { id: number; label: string; provider: string; model_id: string } | null;
+  config?: {
+    id: number;
+    label: string;
+    provider: string;
+    model_id: string;
+  } | null;
   system_prompt?: string;
   prompt_template?: string;
   temperature?: number;
@@ -158,7 +168,11 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
   {
     name: 'Anthropic',
     sdkType: 'anthropic_compatible',
-    models: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001', 'claude-opus-4-20250115'],
+    models: [
+      'claude-sonnet-4-20250514',
+      'claude-haiku-4-5-20251001',
+      'claude-opus-4-20250115',
+    ],
   },
   {
     name: 'Google AI',
