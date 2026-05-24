@@ -1129,6 +1129,8 @@ model payments {
   created_at              DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                 @default(now()) @db.Timestamp(6)
   store_payment_method_id Int?
+  receipt_s3_key          String?                   @db.VarChar(512)
+  receipt_uploaded_at     DateTime?                 @db.Timestamp(6)
   orders                  orders                    @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   store_payment_method    store_payment_methods?    @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]

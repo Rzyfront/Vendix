@@ -476,4 +476,6 @@ export class PosPaymentResponseDto {
   };
   errors?: string[];
   warnings?: string[];
+  // Flag to indicate the response came from a draft save (no payment flow).
+  _isDraft?: boolean;
 }

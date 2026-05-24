@@ -103,6 +103,12 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'Remote image could not be downloaded',
   },
+  VALIDATION_FILE_TYPE: {
+    code: 'VALIDATION_FILE_TYPE',
+    httpStatus: 400,
+    devMessage:
+      'Uploaded file type is not allowed (expected one of: image/jpeg, image/png, image/webp, application/pdf)',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {

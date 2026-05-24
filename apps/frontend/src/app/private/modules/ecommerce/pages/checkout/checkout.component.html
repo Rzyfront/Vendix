@@ -304,7 +304,25 @@
                   }
                   <div class="payment-info">
                     <span class="payment-name">{{ method.name }}</span>
-                    <span class="payment-type">{{ method.type }}</span>
+                    @if (
+                      selected_payment_method_id() === method.id &&
+                      payment_receipt_file()
+                    ) {
+                      <div class="receipt-chip">
+                        <span
+                          >Comprobante: {{ payment_receipt_file()!.name }}</span
+                        >
+                        <button
+                          type="button"
+                          (click)="
+                            show_payment_instructions_modal.set(true);
+                            $event.stopPropagation()
+                          "
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    }
                   </div>
                 </div>
               }
@@ -524,6 +542,14 @@
   <app-guest-checkout-data-modal
     [invoicingEnabled]="invoicingEnabled()"
     (completed)="onGuestDataCompleted($event)"
+  />
+
+  <app-payment-instructions-modal
+    [isOpen]="show_payment_instructions_modal()"
+    [method]="selectedPaymentMethodObj()"
+    [currentFile]="payment_receipt_file()"
+    (isOpenChange)="show_payment_instructions_modal.set($event)"
+    (fileChange)="onReceiptFile($event)"
   />
 
   @if (wompiWidgetLoading()) {

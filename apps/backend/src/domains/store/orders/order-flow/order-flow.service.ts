@@ -29,6 +29,7 @@ import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 type OrderState = order_state_enum;
 
 const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
+  draft: ['created', 'cancelled'],
   created: ['pending_payment', 'processing', 'finished', 'cancelled'],
   pending_payment: ['processing', 'finished', 'cancelled'],
   processing: ['shipped', 'cancelled'],

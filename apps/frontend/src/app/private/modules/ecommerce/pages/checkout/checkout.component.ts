@@ -62,6 +62,7 @@ import {
   GuestCheckoutData,
   GuestCheckoutDataModalComponent,
 } from '../../components/guest-checkout-data-modal/guest-checkout-data-modal.component';
+import { PaymentInstructionsModalComponent } from '../../components/payment-instructions-modal/payment-instructions-modal.component';
 
 @Component({
   selector: 'app-checkout',
@@ -80,6 +81,7 @@ import {
     SelectorComponent,
     BookingSlotPickerComponent,
     GuestCheckoutDataModalComponent,
+    PaymentInstructionsModalComponent,
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
@@ -123,6 +125,16 @@ export class CheckoutComponent implements OnInit {
   // Wompi Widget
   readonly isWompiPayment = signal(false);
   readonly wompiWidgetLoading = signal(false);
+
+  // Payment instructions modal + receipt file (bank_transfer / voucher)
+  readonly show_payment_instructions_modal = signal(false);
+  readonly payment_receipt_file = signal<File | null>(null);
+  readonly selectedPaymentMethodObj = computed(
+    () =>
+      this.payment_methods().find(
+        (m) => m.id === this.selected_payment_method_id(),
+      ) ?? null,
+  );
 
   // Flag to prevent cart-empty redirect after successful checkout
   private orderPlaced = false;
@@ -437,6 +449,18 @@ export class CheckoutComponent implements OnInit {
     this.isWompiPayment.set(
       selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi',
     );
+
+    const t = selectedMethod?.type;
+    if (t === 'bank_transfer' || t === 'voucher') {
+      this.payment_receipt_file.set(null);
+      this.show_payment_instructions_modal.set(true);
+    } else {
+      this.payment_receipt_file.set(null);
+    }
+  }
+
+  onReceiptFile(file: File | null): void {
+    this.payment_receipt_file.set(file);
   }
 
   // Shipping
@@ -873,7 +897,9 @@ export class CheckoutComponent implements OnInit {
       this.wompiWidgetLoading.set(true);
       this.is_submitting.set(false);
 
-      this.checkout_service.checkout(request).subscribe({
+      this.checkout_service
+        .checkout(request, this.payment_receipt_file())
+        .subscribe({
         next: (response) => {
           if (response.success) {
             this.orderPlaced = true;
@@ -917,7 +943,9 @@ export class CheckoutComponent implements OnInit {
       return;
     }
 
-    this.checkout_service.checkout(request).subscribe({
+    this.checkout_service
+      .checkout(request, this.payment_receipt_file())
+      .subscribe({
       next: (response) => {
         if (response.success) {
           this.orderPlaced = true;

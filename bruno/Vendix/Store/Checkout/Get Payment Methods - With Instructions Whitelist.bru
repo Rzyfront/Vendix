@@ -1,0 +1,88 @@
+meta {
+  name: Get Payment Methods - With Instructions Whitelist
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{url}}/ecommerce/checkout/payment-methods?shipping_type=pickup
+  body: none
+  auth: inherit
+}
+
+params:query {
+  shipping_type: pickup
+}
+
+docs {
+  Valida que el mapper de payment-methods devuelve `payment_instructions` SOLO para
+  los tipos permitidos por la whitelist:
+    - type === 'bank_transfer' -> debe incluir { bank_name, account_holder, account_number, account_type, instructions }
+    - type === 'voucher'       -> debe incluir { voucher_instructions, redemption_phone, notes }
+    - cualquier otro tipo (cash, wompi, pos, ...) -> el campo debe estar AUSENTE.
+
+  Requiere que el store activo tenga al menos un metodo bank_transfer configurado
+  para que la assertion sobre bank_transfer no se salte silenciosamente.
+}
+
+assert {
+  res.status: eq 200
+  res.body.success: eq true
+  res.body.data: isArray
+}
+
+tests {
+  test("Status 200 y data array no vacio", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.equal(true);
+    expect(res.body.data).to.be.an("array");
+    expect(res.body.data.length).to.be.greaterThan(0);
+  });
+
+  test("bank_transfer expone payment_instructions con shape correcto", function() {
+    const bankTransfer = (res.body.data || []).find(function(pm) {
+      return pm.type === "bank_transfer";
+    });
+    if (!bankTransfer) {
+      console.warn("[WARN] No hay payment method tipo bank_transfer configurado; assertion saltada.");
+      return;
+    }
+    expect(bankTransfer.payment_instructions, "bank_transfer.payment_instructions").to.be.an("object");
+    expect(bankTransfer.payment_instructions).to.have.property("bank_name");
+    expect(bankTransfer.payment_instructions).to.have.property("account_holder");
+    expect(bankTransfer.payment_instructions).to.have.property("account_number");
+    expect(bankTransfer.payment_instructions).to.have.property("account_type");
+    expect(bankTransfer.payment_instructions).to.have.property("instructions");
+  });
+
+  test("voucher (si existe) expone payment_instructions con shape correcto", function() {
+    const voucher = (res.body.data || []).find(function(pm) {
+      return pm.type === "voucher";
+    });
+    if (!voucher) {
+      console.info("[INFO] No hay payment method tipo voucher; assertion opcional saltada.");
+      return;
+    }
+    expect(voucher.payment_instructions, "voucher.payment_instructions").to.be.an("object");
+    expect(voucher.payment_instructions).to.have.property("voucher_instructions");
+    expect(voucher.payment_instructions).to.have.property("redemption_phone");
+    expect(voucher.payment_instructions).to.have.property("notes");
+  });
+
+  test("tipos fuera de la whitelist NO exponen payment_instructions", function() {
+    const allowed = ["bank_transfer", "voucher"];
+    const others = (res.body.data || []).filter(function(pm) {
+      return allowed.indexOf(pm.type) === -1;
+    });
+    if (others.length === 0) {
+      console.warn("[WARN] No hay metodos fuera de la whitelist para validar ausencia; assertion saltada.");
+      return;
+    }
+    others.forEach(function(pm) {
+      expect(
+        pm.payment_instructions,
+        "payment_instructions debe estar AUSENTE para type=" + pm.type
+      ).to.be.undefined;
+    });
+  });
+}

@@ -860,7 +860,9 @@ export class MarketingAdCreativesService {
         'Se requiere contexto de tienda.',
       );
     }
-    return context;
+    // Narrow store_id to number after the guard above (TypeScript does not
+    // propagate the narrowing through the function return type).
+    return context as typeof context & { store_id: number };
   }
 
   private async assertDailyGenerationQuota(storeId: number) {
