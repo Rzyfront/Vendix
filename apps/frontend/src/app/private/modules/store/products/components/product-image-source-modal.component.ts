@@ -6,7 +6,6 @@ import {
   inject,
   input,
   model,
-  OnDestroy,
   output,
   signal,
   ViewChild,
@@ -19,6 +18,7 @@ import {
   IconComponent,
   InputComponent,
   ToastService,
+  CameraComponent,
 } from '../../../../../shared/components';
 import { ProductsService } from '../services/products.service';
 
@@ -83,6 +83,7 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
     ButtonComponent,
     IconComponent,
     InputComponent,
+    CameraComponent,
   ],
   template: `
     <app-modal
@@ -260,56 +261,34 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
         }
 
         @case ('camera') {
-          <div class="space-y-4">
-            <button
-              type="button"
-              (click)="backToSelect()"
-              class="inline-flex items-center gap-1 text-xs font-medium text-primary-600 hover:text-primary-700"
-            >
-              <app-icon name="chevron-left" size="14"></app-icon>
-              Volver
-            </button>
-
-            @if (cameraError()) {
-              <div
-                class="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2"
-              >
-                <app-icon name="alert-triangle" size="16"></app-icon>
-                <span>{{ cameraError() }}</span>
-              </div>
-            }
-
-            <div
-              class="relative aspect-video w-full bg-black rounded-xl overflow-hidden"
-            >
-              <video
-                #videoEl
-                class="w-full h-full object-contain"
-                autoplay
-                playsinline
-                muted
-              ></video>
-            </div>
-
-            <div class="flex justify-end gap-2">
-              <app-button variant="outline" (clicked)="backToSelect()">
-                <app-icon slot="icon" name="x" size="16"></app-icon>
-                Cancelar
-              </app-button>
-              <app-button
-                variant="primary"
-                (clicked)="capturePhoto()"
-                [disabled]="!cameraReady()"
-              >
-                <app-icon slot="icon" name="camera" size="16"></app-icon>
-                Capturar
-              </app-button>
-            </div>
-          </div>
+          <app-camera
+            [isOpen]="stage() === 'camera'"
+            fileNamePrefix="foto"
+            (captured)="onCameraCaptured($event)"
+            (closed)="backToSelect()"
+          ></app-camera>
         }
 
         @case ('crop') {
           <div class="space-y-4">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-xs font-semibold text-gray-700">Transformar:</span>
+              <app-button variant="outline" size="sm" (clicked)="rotateBy(-90)" title="Rotar izquierda">
+                <app-icon slot="icon" name="rotate-ccw" size="14"></app-icon>
+              </app-button>
+              <app-button variant="outline" size="sm" (clicked)="rotateBy(90)" title="Rotar derecha">
+                <app-icon slot="icon" name="rotate-cw" size="14"></app-icon>
+              </app-button>
+              <app-button variant="outline" size="sm" (clicked)="toggleFlipH()"
+                          [class.bg-primary-600]="flipH()" [class.text-white]="flipH()" title="Voltear horizontal">
+                <app-icon slot="icon" name="flip-horizontal" size="14"></app-icon>
+              </app-button>
+              <app-button variant="outline" size="sm" (clicked)="toggleFlipV()"
+                          [class.bg-primary-600]="flipV()" [class.text-white]="flipV()" title="Voltear vertical">
+                <app-icon slot="icon" name="flip-vertical" size="14"></app-icon>
+              </app-button>
+            </div>
+
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-xs font-semibold text-gray-700"
                 >Relación de aspecto:</span
@@ -495,7 +474,7 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
     </app-modal>
   `,
 })
-export class ProductImageSourceModalComponent implements OnDestroy {
+export class ProductImageSourceModalComponent {
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
@@ -513,9 +492,10 @@ export class ProductImageSourceModalComponent implements OnDestroy {
   readonly urlError = signal<string | null>(null);
   readonly isFetchingUrl = signal(false);
 
-  readonly cameraError = signal<string | null>(null);
-  readonly cameraReady = signal(false);
-  private cameraStream: MediaStream | null = null;
+  readonly rotation = signal<0 | 90 | 180 | 270>(0);
+  readonly flipH    = signal<boolean>(false);
+  readonly flipV    = signal<boolean>(false);
+  readonly axesSwapped = computed(() => this.rotation() === 90 || this.rotation() === 270);
 
   readonly cropFrame = signal<CropFrame | null>(null);
   readonly canvasSize = signal<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -558,35 +538,29 @@ export class ProductImageSourceModalComponent implements OnDestroy {
   });
 
   @ViewChild('fileInput') fileInputRef?: ElementRef<HTMLInputElement>;
-  @ViewChild('videoEl') videoRef?: ElementRef<HTMLVideoElement>;
   @ViewChild('cropCanvas') cropCanvasRef?: ElementRef<HTMLCanvasElement>;
 
   private loadedImages = new Map<number, HTMLImageElement>();
 
-  ngOnDestroy(): void {
-    this.stopCamera();
-  }
-
   onClose(): void {
-    this.stopCamera();
     this.stage.set('select');
     this.queue.set([]);
     this.queueCursor.set(0);
     this.aspect.set('free');
+    this.rotation.set(0);
+    this.flipH.set(false);
+    this.flipV.set(false);
     this.cropFrame.set(null);
     this.canvasSize.set({ w: 0, h: 0 });
     this.urlInput = '';
     this.urlError.set(null);
     this.isFetchingUrl.set(false);
-    this.cameraError.set(null);
-    this.cameraReady.set(false);
     this.loadedImages.clear();
     this.dragState = null;
     this.isOpen.set(false);
   }
 
   backToSelect(): void {
-    this.stopCamera();
     this.stage.set('select');
   }
 
@@ -667,66 +641,13 @@ export class ProductImageSourceModalComponent implements OnDestroy {
       });
   }
 
-  async goToCamera(): Promise<void> {
+  goToCamera(): void {
     if (this.remainingSlots() <= 0) return;
-    this.cameraError.set(null);
-    this.cameraReady.set(false);
     this.stage.set('camera');
-
-    setTimeout(() => this.initCamera(), 0);
   }
 
-  private async initCamera(): Promise<void> {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      this.cameraError.set('Este navegador no soporta acceso a la cámara');
-      return;
-    }
-    try {
-      this.cameraStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-        audio: false,
-      });
-      const video = this.videoRef?.nativeElement;
-      if (video) {
-        video.srcObject = this.cameraStream;
-        video.onloadedmetadata = () => this.cameraReady.set(true);
-      }
-    } catch (err: any) {
-      const message =
-        err?.name === 'NotAllowedError'
-          ? 'Permiso de cámara denegado'
-          : 'No pudimos acceder a la cámara';
-      this.cameraError.set(message);
-    }
-  }
-
-  private stopCamera(): void {
-    if (this.cameraStream) {
-      for (const track of this.cameraStream.getTracks()) {
-        track.stop();
-      }
-      this.cameraStream = null;
-    }
-    if (this.videoRef?.nativeElement) {
-      this.videoRef.nativeElement.srcObject = null;
-    }
-    this.cameraReady.set(false);
-  }
-
-  capturePhoto(): void {
-    const video = this.videoRef?.nativeElement;
-    if (!video || !video.videoWidth) return;
-
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
-    this.stopCamera();
-    this.startCropFlow([{ dataUrl, fileName: `foto-${Date.now()}.jpg` }]);
+  onCameraCaptured(payload: { dataUrl: string; fileName: string }): void {
+    this.startCropFlow([payload]);
   }
 
   private startCropFlow(items: PendingImage[]): void {
@@ -734,6 +655,9 @@ export class ProductImageSourceModalComponent implements OnDestroy {
     this.queue.set(items);
     this.queueCursor.set(0);
     this.aspect.set('free');
+    this.rotation.set(0);
+    this.flipH.set(false);
+    this.flipV.set(false);
     this.cropFrame.set(null);
     this.canvasSize.set({ w: 0, h: 0 });
     this.stage.set('crop');
@@ -751,6 +675,22 @@ export class ProductImageSourceModalComponent implements OnDestroy {
     this.resetFrameForCurrentAspect();
   }
 
+  rotateBy(delta: 90 | -90): void {
+    const next = (((this.rotation() + delta) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+    this.rotation.set(next);
+    this.renderCropPreview();
+  }
+
+  toggleFlipH(): void {
+    this.flipH.update(v => !v);
+    this.renderCropPreview();
+  }
+
+  toggleFlipV(): void {
+    this.flipV.update(v => !v);
+    this.renderCropPreview();
+  }
+
   private async renderCropPreview(): Promise<void> {
     const canvas = this.cropCanvasRef?.nativeElement;
     const item = this.queue()[this.queueCursor()];
@@ -760,13 +700,23 @@ export class ProductImageSourceModalComponent implements OnDestroy {
 
     const maxDim = 1200;
     const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-    canvas.width = Math.round(img.width * scale);
-    canvas.height = Math.round(img.height * scale);
+    const drawW = Math.round(img.width * scale);
+    const drawH = Math.round(img.height * scale);
+
+    const swapped = this.axesSwapped();
+    canvas.width = swapped ? drawH : drawW;
+    canvas.height = swapped ? drawW : drawH;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((this.rotation() * Math.PI) / 180);
+    ctx.scale(this.flipH() ? -1 : 1, this.flipV() ? -1 : 1);
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
 
     this.canvasSize.set({ w: canvas.width, h: canvas.height });
     this.resetFrameForCurrentAspect();
@@ -1026,23 +976,44 @@ export class ProductImageSourceModalComponent implements OnDestroy {
     if (!item || !f || !canvas) return;
 
     const img = await this.loadImage(this.queueCursor(), item.dataUrl);
-    const scaleX = img.width / canvas.width;
-    const scaleY = img.height / canvas.height;
+    const swapped = this.axesSwapped();
+
+    const MAX_OUT = 4096;
+    const srcScale = Math.min(1, MAX_OUT / Math.max(img.width, img.height));
+    const baseW = Math.round(img.width * srcScale);
+    const baseH = Math.round(img.height * srcScale);
+    const fullW = swapped ? baseH : baseW;
+    const fullH = swapped ? baseW : baseH;
+
+    const tmp = document.createElement('canvas');
+    tmp.width = fullW;
+    tmp.height = fullH;
+    const tctx = tmp.getContext('2d');
+    if (!tctx) return;
+    tctx.save();
+    tctx.translate(fullW / 2, fullH / 2);
+    tctx.rotate((this.rotation() * Math.PI) / 180);
+    tctx.scale(this.flipH() ? -1 : 1, this.flipV() ? -1 : 1);
+    tctx.drawImage(img, -baseW / 2, -baseH / 2, baseW, baseH);
+    tctx.restore();
+
+    const scaleX = fullW / canvas.width;
+    const scaleY = fullH / canvas.height;
     let sx = Math.max(0, Math.round(f.x * scaleX));
     let sy = Math.max(0, Math.round(f.y * scaleY));
     let sw = Math.max(1, Math.round(f.w * scaleX));
     let sh = Math.max(1, Math.round(f.h * scaleY));
-    sw = Math.min(sw, img.width - sx);
-    sh = Math.min(sh, img.height - sy);
+    sw = Math.min(sw, fullW - sx);
+    sh = Math.min(sh, fullH - sy);
 
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width = sw;
-    outCanvas.height = sh;
-    const ctx = outCanvas.getContext('2d');
-    if (!ctx) return;
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    const out = document.createElement('canvas');
+    out.width = sw;
+    out.height = sh;
+    const octx = out.getContext('2d');
+    if (!octx) return;
+    octx.drawImage(tmp, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const dataUrl = outCanvas.toDataURL('image/jpeg', 0.9);
+    const dataUrl = out.toDataURL('image/jpeg', 0.9);
     this.appendResult(dataUrl);
     this.advanceQueue();
   }
@@ -1054,6 +1025,9 @@ export class ProductImageSourceModalComponent implements OnDestroy {
   cancelCrop(): void {
     this.queue.set([]);
     this.queueCursor.set(0);
+    this.rotation.set(0);
+    this.flipH.set(false);
+    this.flipV.set(false);
     this.cropFrame.set(null);
     this.canvasSize.set({ w: 0, h: 0 });
     this.loadedImages.clear();
@@ -1080,6 +1054,9 @@ export class ProductImageSourceModalComponent implements OnDestroy {
     }
     this.queueCursor.set(next);
     this.aspect.set('free');
+    this.rotation.set(0);
+    this.flipH.set(false);
+    this.flipV.set(false);
     this.cropFrame.set(null);
     this.canvasSize.set({ w: 0, h: 0 });
     setTimeout(() => this.renderCropPreview(), 0);
