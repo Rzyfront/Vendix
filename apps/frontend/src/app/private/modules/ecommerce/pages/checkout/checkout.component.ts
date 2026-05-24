@@ -129,12 +129,17 @@ export class CheckoutComponent implements OnInit {
   // Payment instructions modal + receipt file (bank_transfer / voucher)
   readonly show_payment_instructions_modal = signal(false);
   readonly payment_receipt_file = signal<File | null>(null);
+  readonly payment_instructions_acknowledged = signal(false);
   readonly selectedPaymentMethodObj = computed(
     () =>
       this.payment_methods().find(
         (m) => m.id === this.selected_payment_method_id(),
       ) ?? null,
   );
+  readonly requiresPaymentInstructions = computed(() => {
+    const t = this.selectedPaymentMethodObj()?.type;
+    return t === 'bank_transfer' || t === 'voucher';
+  });
 
   // Flag to prevent cart-empty redirect after successful checkout
   private orderPlaced = false;
@@ -292,8 +297,8 @@ export class CheckoutComponent implements OnInit {
     this.address_form = this.fb.group({
       address_line1: ['', Validators.required],
       address_line2: [''],
-      city: ['', Validators.required],
-      state_province: [''],
+      city: [{ value: '', disabled: true }, Validators.required],
+      state_province: [{ value: '', disabled: true }],
       country_code: ['CO', Validators.required],
       postal_code: [''],
       phone_number: [
@@ -321,6 +326,8 @@ export class CheckoutComponent implements OnInit {
         this.cities.set([]);
         depControl?.setValue('');
         cityControl?.setValue('');
+        depControl?.disable({ emitEvent: false });
+        cityControl?.disable({ emitEvent: false });
       }
     });
 
@@ -333,6 +340,7 @@ export class CheckoutComponent implements OnInit {
       } else {
         this.cities.set([]);
         cityControl?.setValue('');
+        cityControl?.disable({ emitEvent: false });
       }
     });
 
@@ -341,15 +349,21 @@ export class CheckoutComponent implements OnInit {
   }
 
   private async loadDepartments(): Promise<void> {
+    const ctrl = this.address_form.get('state_province');
+    ctrl?.disable({ emitEvent: false });
     this.loading_departments.set(true);
     this.departments.set(await this.countryService.getDepartments());
     this.loading_departments.set(false);
+    if (this.departments().length > 0) ctrl?.enable({ emitEvent: false });
   }
 
   private async loadCities(depId: number): Promise<void> {
+    const ctrl = this.address_form.get('city');
+    ctrl?.disable({ emitEvent: false });
     this.loading_cities.set(true);
     this.cities.set(await this.countryService.getCitiesByDepartment(depId));
     this.loading_cities.set(false);
+    if (this.cities().length > 0) ctrl?.enable({ emitEvent: false });
   }
 
   loadData(): void {
@@ -453,14 +467,21 @@ export class CheckoutComponent implements OnInit {
     const t = selectedMethod?.type;
     if (t === 'bank_transfer' || t === 'voucher') {
       this.payment_receipt_file.set(null);
+      this.payment_instructions_acknowledged.set(false);
       this.show_payment_instructions_modal.set(true);
     } else {
       this.payment_receipt_file.set(null);
+      this.payment_instructions_acknowledged.set(false);
     }
   }
 
   onReceiptFile(file: File | null): void {
     this.payment_receipt_file.set(file);
+  }
+
+  onPaymentInstructionsConfirmed(): void {
+    this.payment_instructions_acknowledged.set(true);
+    this.show_payment_instructions_modal.set(false);
   }
 
   // Shipping
@@ -701,6 +722,19 @@ export class CheckoutComponent implements OnInit {
         !this.selected_shipping_method_id
       ) {
         this.error_message.set('Por favor selecciona un método de envío');
+        return;
+      }
+
+      // bank_transfer / voucher require the customer to see the
+      // payment-instructions modal at least once before advancing. Catches
+      // the case where the method is pre-selected (default) and the user
+      // never clicked the card to trigger selectPaymentMethod.
+      if (
+        this.requiresPaymentInstructions() &&
+        !this.payment_instructions_acknowledged()
+      ) {
+        this.error_message.set('');
+        this.show_payment_instructions_modal.set(true);
         return;
       }
     }

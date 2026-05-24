@@ -141,9 +141,6 @@
                         ? 'Cargando...'
                         : 'Selecciona un departamento'
                     "
-                    [disabled]="
-                      loading_departments() || departmentOptions.length === 0
-                    "
                     [errorText]="getFieldError('state_province')"
                   ></app-selector>
                 </div>
@@ -156,7 +153,6 @@
                     [placeholder]="
                       loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
                     "
-                    [disabled]="loading_cities() || cityOptions.length === 0"
                     [errorText]="getFieldError('city')"
                     [required]="true"
                   ></app-selector>
@@ -550,6 +546,7 @@
     [currentFile]="payment_receipt_file()"
     (isOpenChange)="show_payment_instructions_modal.set($event)"
     (fileChange)="onReceiptFile($event)"
+    (confirmed)="onPaymentInstructionsConfirmed()"
   />
 
   @if (wompiWidgetLoading()) {
