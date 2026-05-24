@@ -1,4 +1,5 @@
 import { Module, forwardRef } from '@nestjs/common';
+import { MulterModule } from '@nestjs/platform-express';
 import { CheckoutController } from './checkout.controller';
 import { CheckoutService } from './checkout.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -14,6 +15,7 @@ import { PaymentsModule } from '../../store/payments/payments.module';
 import { ReservationsModule } from '../../store/reservations/reservations.module';
 import { InvoicingModule } from '../../store/invoicing/invoicing.module';
 import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
+import { S3Module } from '../../../common/services/s3.module';
 
 @Module({
   imports: [
@@ -32,6 +34,11 @@ import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-re
     ReservationsModule,
     InvoicingModule,
     InvoiceDataRequestsModule,
+    S3Module,
+    // 5 MB max upload — matches what the checkout controller's
+    // FileInterceptor advertises so multer rejects oversized uploads early
+    // (before the buffer is even allocated).
+    MulterModule.register({ limits: { fileSize: 5 * 1024 * 1024 } }),
   ],
   controllers: [CheckoutController],
   providers: [CheckoutService, PaymentEncryptionService],

@@ -1,13 +1,19 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
-  Post,
-  Body,
   Param,
   ParseIntPipe,
+  Post,
   Query,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { plainToInstance } from 'class-transformer';
+import { validateOrReject, ValidationError } from 'class-validator';
 import { CheckoutService } from './checkout.service';
 import { CheckoutDto } from './dto/checkout.dto';
 import { WhatsappCheckoutDto } from './dto/whatsapp-checkout.dto';
@@ -45,12 +51,77 @@ export class CheckoutController {
     return { success: true, data };
   }
 
+  /**
+   * Checkout endpoint. Accepts `multipart/form-data` so the customer can
+   * optionally attach a payment receipt (`file`) when paying with
+   * bank_transfer / voucher. The actual CheckoutDto travels as a JSON string
+   * under the `data` field — global ValidationPipe cannot validate it
+   * automatically because multipart fields arrive as strings, so we
+   * parse + transform + validate manually here before delegating to the
+   * service.
+   *
+   * Backwards-compatibility: JSON-body clients still work because Nest's
+   * FileInterceptor falls through gracefully when `Content-Type` is
+   * `application/json` — in that case `file` is undefined and the parsed
+   * body is `dto` directly under @Body().
+   */
   @Post()
   @OptionalAuth()
-  async checkout(@Body() dto: CheckoutDto) {
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  async checkout(
+    @Body() body: any,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    const dto = await this.parseCheckoutBody(body);
     // store_id y user_id se resuelven automáticamente
-    const data = await this.checkout_service.checkout(dto);
+    const data = await this.checkout_service.checkout(dto, file);
     return { success: true, data };
+  }
+
+  /**
+   * Resolve and validate the CheckoutDto from a hybrid body shape:
+   *  - multipart: a `data` field carrying the DTO as a JSON string.
+   *  - JSON: the body itself is already the DTO.
+   */
+  private async parseCheckoutBody(body: any): Promise<CheckoutDto> {
+    let raw: any = body;
+    if (body && typeof body === 'object' && typeof body.data === 'string') {
+      try {
+        raw = JSON.parse(body.data);
+      } catch {
+        throw new BadRequestException(
+          'El campo "data" del formulario debe ser JSON válido',
+        );
+      }
+    }
+
+    const instance = plainToInstance(CheckoutDto, raw ?? {});
+    try {
+      await validateOrReject(instance, {
+        whitelist: true,
+        forbidNonWhitelisted: false,
+      });
+    } catch (errors) {
+      const messages = this.collectValidationMessages(
+        errors as ValidationError[],
+      );
+      throw new BadRequestException(messages);
+    }
+    return instance;
+  }
+
+  private collectValidationMessages(errors: ValidationError[]): string[] {
+    const out: string[] = [];
+    const walk = (err: ValidationError) => {
+      if (err.constraints) {
+        for (const msg of Object.values(err.constraints)) out.push(msg);
+      }
+      if (err.children?.length) err.children.forEach(walk);
+    };
+    errors.forEach(walk);
+    return out.length ? out : ['Checkout payload validation failed'];
   }
 
   @Post('prepare-wompi')

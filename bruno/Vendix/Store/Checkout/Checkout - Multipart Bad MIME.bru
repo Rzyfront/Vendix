@@ -1,0 +1,48 @@
+meta {
+  name: Checkout - Multipart Bad MIME
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: multipartForm
+  auth: inherit
+}
+
+docs {
+  Valida que el endpoint multipart rechaza archivos cuyo MIME NO esta en la allowlist
+  (image/jpeg, image/png, image/webp, application/pdf).
+
+  El test usa el fixture `bruno/test-files/test-bad.exe` (MIME application/x-msdownload
+  o similar). Si el archivo no existe en tu copia local, crealo asi:
+
+      printf 'MZ\x90\0\0' > bruno/test-files/test-bad.exe
+
+  o copia cualquier binario que no caiga en la allowlist (.exe, .zip, .txt, etc.)
+  en esa ruta. El nombre exacto es importante porque la ruta esta hardcodeada abajo.
+
+  Codigo de error esperado: VALIDATION_FILE_TYPE
+  (ver apps/backend/src/common/errors/error-codes.ts).
+}
+
+body:multipartForm {
+  data: {"payment_method_id": {{bank_transfer_payment_method_id}}, "items": [{"product_id": {{ecommerce_product_id}}, "quantity": 1}], "customer_data": {"email": "guest+badmime@local.test", "first_name": "Guest", "last_name": "BadMime", "phone": "3001234567"}, "shipping_address": {"address_line_1": "Calle 1 #2-3", "city": "Bogota", "state": "Cundinamarca", "country": "CO", "postal_code": "110111"}, "shipping_type": "pickup"}
+  file: @file(./../../../test-files/test-bad.exe)
+}
+
+assert {
+  res.status: eq 400
+}
+
+tests {
+  test("Status 400 por MIME invalido", function() {
+    expect(res.status).to.equal(400);
+  });
+
+  test("Error code es VALIDATION_FILE_TYPE", function() {
+    expect(res.body).to.have.property("error");
+    expect(res.body.error).to.have.property("code");
+    expect(res.body.error.code).to.equal("VALIDATION_FILE_TYPE");
+  });
+}

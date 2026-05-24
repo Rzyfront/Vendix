@@ -14,6 +14,16 @@ export interface PaymentMethod {
   logo_url: string | null;
   min_amount: number | null;
   max_amount: number | null;
+  payment_instructions?: {
+    bank_name?: string;
+    account_holder?: string;
+    account_number?: string;
+    account_type?: string;
+    instructions?: string;
+    voucher_instructions?: string;
+    redemption_phone?: string;
+    notes?: string;
+  };
 }
 
 export interface BookingSelection {
@@ -159,10 +169,18 @@ export class CheckoutService {
 
   checkout(
     request: CheckoutRequest,
+    file?: File | null,
   ): Observable<{ success: boolean; data: CheckoutResponse }> {
+    const formData = new FormData();
+    formData.append('data', JSON.stringify(request));
+    if (file) {
+      formData.append('file', file);
+    }
+    // NOTE: do not set Content-Type manually — the browser sets the
+    // multipart boundary automatically.
     return this.http.post<{ success: boolean; data: CheckoutResponse }>(
       this.api_url,
-      request,
+      formData,
       { headers: this.getHeaders() },
     );
   }

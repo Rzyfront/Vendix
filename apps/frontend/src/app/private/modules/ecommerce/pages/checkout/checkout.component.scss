@@ -326,10 +326,27 @@
         font-weight: var(--fw-medium);
         color: var(--color-text-primary);
     }
+}
 
-    .payment-type {
+.receipt-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-xs);
+    color: var(--color-text-secondary);
+
+    button {
+        background: transparent;
+        border: 0;
+        color: var(--color-primary);
+        cursor: pointer;
         font-size: var(--fs-xs);
-        color: var(--color-text-muted);
+        padding: 0;
     }
 }
 

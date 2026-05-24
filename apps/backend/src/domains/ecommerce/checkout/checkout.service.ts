@@ -27,6 +27,8 @@ import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-r
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
+import { S3Service } from '@common/services/s3.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 
 @Injectable()
 export class CheckoutService {
@@ -51,7 +53,20 @@ export class CheckoutService {
     private readonly invoicingService: InvoicingService,
     private readonly operatingScopeService: OperatingScopeService,
     private readonly fiscalStatusService: FiscalStatusService,
+    private readonly s3Service: S3Service,
+    private readonly s3PathHelper: S3PathHelper,
   ) {}
+
+  /**
+   * MIME types accepted as payment receipts attached to checkout. Aligned with
+   * the customer-facing copy in the modal (image or PDF).
+   */
+  private static readonly RECEIPT_ALLOWED_MIME_TYPES: readonly string[] = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'application/pdf',
+  ];
 
   /**
    * Returns whether the current ecommerce store has invoicing fiscal status
@@ -114,16 +129,70 @@ export class CheckoutService {
       orderBy: { display_order: 'asc' },
     });
 
-    return methods.map((m) => ({
-      id: m.id,
-      name: m.display_name || m.system_payment_method.display_name,
-      type: m.system_payment_method.type,
-      provider: m.system_payment_method.provider,
-      processing_mode: m.system_payment_method.processing_mode,
-      logo_url: m.system_payment_method.logo_url,
-      min_amount: m.min_amount,
-      max_amount: m.max_amount,
-    }));
+    return methods.map((m) => {
+      const base: Record<string, any> = {
+        id: m.id,
+        name: m.display_name || m.system_payment_method.display_name,
+        type: m.system_payment_method.type,
+        provider: m.system_payment_method.provider,
+        processing_mode: m.system_payment_method.processing_mode,
+        logo_url: m.system_payment_method.logo_url,
+        min_amount: m.min_amount,
+        max_amount: m.max_amount,
+      };
+
+      const instructions = this.buildPaymentInstructions(
+        m.system_payment_method.type,
+        m.custom_config,
+      );
+      if (instructions) {
+        base.payment_instructions = instructions;
+      }
+
+      return base;
+    });
+  }
+
+  /**
+   * Returns a whitelisted subset of `custom_config` to expose publicly for
+   * payment methods whose `system_payment_method.type` is `bank_transfer` or
+   * `voucher`. Returns `null` when there is nothing to expose so the caller
+   * can omit the field entirely (we never return an empty `{}`).
+   *
+   * Whitelists:
+   *  - bank_transfer: bank_name, account_holder, account_number, account_type, instructions
+   *  - voucher:       voucher_instructions, redemption_phone, notes
+   */
+  private buildPaymentInstructions(
+    type: string,
+    customConfig: unknown,
+  ): Record<string, unknown> | null {
+    if (type !== 'bank_transfer' && type !== 'voucher') return null;
+    if (!customConfig || typeof customConfig !== 'object') return null;
+
+    const config = customConfig as Record<string, unknown>;
+    const whitelist: string[] =
+      type === 'bank_transfer'
+        ? [
+            'bank_name',
+            'account_holder',
+            'account_number',
+            'account_type',
+            'instructions',
+          ]
+        : ['voucher_instructions', 'redemption_phone', 'notes'];
+
+    const exposed: Record<string, unknown> = {};
+    for (const key of whitelist) {
+      if (Object.prototype.hasOwnProperty.call(config, key)) {
+        const value = config[key];
+        if (value !== null && value !== undefined && value !== '') {
+          exposed[key] = value;
+        }
+      }
+    }
+
+    return Object.keys(exposed).length > 0 ? exposed : null;
   }
 
   private async getCheckoutSettings(): Promise<{
@@ -182,6 +251,13 @@ export class CheckoutService {
   private async createInvoiceIfConfigured(
     orderId: number,
   ): Promise<number | null> {
+    const store_id = RequestContextService.getStoreId();
+    if (store_id) {
+      const state =
+        await this.fiscalStatusService.getStoreInvoicingState(store_id);
+      if (state !== 'ACTIVE') return null;
+    }
+
     const existing = await this.store_prisma.invoices.findFirst({
       where: { order_id: orderId, invoice_type: 'sales_invoice' },
       select: { id: true },
@@ -282,7 +358,7 @@ export class CheckoutService {
     }
   }
 
-  async checkout(dto: CheckoutDto) {
+  async checkout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
 
     const user_id = RequestContextService.getUserId();
@@ -676,6 +752,27 @@ export class CheckoutService {
       currency: order.currency,
     });
 
+    // Upload payment receipt to S3 if the selected method is bank_transfer
+    // or voucher and the customer attached a file. For any other method we
+    // ignore the file silently (don't upload, don't fail) so generic
+    // checkout requests don't break if the frontend keeps sending one.
+    //
+    // NOTE: If `payments.create` (below) fails AFTER a successful upload,
+    // the S3 object will be orphaned. We intentionally don't implement
+    // cleanup here — orphaned receipts are cheap to bulk-purge offline and
+    // adding rollback would complicate the happy path. Tracked as a
+    // follow-up (see plan webpage-annotations-jiggly-pond.md §1.3).
+    let receipt_s3_key: string | null = null;
+    let receipt_uploaded_at: Date | null = null;
+    const receiptEligibleMethodType =
+      payment_method.system_payment_method.type === 'bank_transfer' ||
+      payment_method.system_payment_method.type === 'voucher';
+
+    if (file && receiptEligibleMethodType) {
+      receipt_s3_key = await this.uploadCheckoutReceipt(file);
+      receipt_uploaded_at = new Date();
+    }
+
     // store_id y customer_id se inyectan automáticamente
     await this.prisma.payments.create({
       data: {
@@ -684,6 +781,8 @@ export class CheckoutService {
         currency: cart_currency,
         state: 'pending',
         store_payment_method_id: dto.payment_method_id,
+        receipt_s3_key,
+        receipt_uploaded_at,
       },
     });
 
@@ -1672,6 +1771,84 @@ export class CheckoutService {
       transactionId: finalPayment?.transaction_id ?? payment.transaction_id,
       alreadyConfirmed: false,
     };
+  }
+
+  /**
+   * Validate, sanitize, and upload a checkout receipt to S3. Returns the
+   * S3 key (relative path; no bucket) ready to be persisted on the
+   * `payments` row. Throws `VALIDATION_FILE_TYPE` for missing/null MIME or
+   * a MIME outside the whitelist.
+   *
+   * Path shape:
+   *   organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/receipts/{YYYY}/{MM}/{uuid}-{sanitized_filename}
+   *
+   * `sanitized_filename` only keeps `[a-zA-Z0-9._-]`; everything else is
+   * replaced with `_` to keep keys safe (S3 accepts more, but the helper's
+   * isSafeS3Key guard rejects path-traversal and we want predictable URLs
+   * if these keys ever leak into logs).
+   */
+  private async uploadCheckoutReceipt(
+    file: Express.Multer.File,
+  ): Promise<string> {
+    const mime = file.mimetype;
+    if (
+      !mime ||
+      !CheckoutService.RECEIPT_ALLOWED_MIME_TYPES.includes(mime)
+    ) {
+      throw new VendixHttpException(ErrorCodes.VALIDATION_FILE_TYPE);
+    }
+
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // The ecommerce-scoped client filters by store_id but `select` here
+    // doesn't include it explicitly — we just need slug+id+organization_id.
+    const store = await this.prisma.stores.findFirst({
+      select: {
+        id: true,
+        slug: true,
+        organization_id: true,
+      },
+    });
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    const organization = await this.store_prisma.organizations.findUnique({
+      where: { id: store.organization_id },
+      select: { id: true, slug: true },
+    });
+    if (!organization) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const basePath = this.s3PathHelper.buildReceiptPath(
+      { id: organization.id, slug: organization.slug },
+      { id: store.id, slug: store.slug },
+    );
+
+    const now = new Date();
+    const year = String(now.getUTCFullYear());
+    const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+
+    const safeFilename = this.sanitizeReceiptFilename(file.originalname);
+    const key = `${basePath}/${year}/${month}/${crypto.randomUUID()}-${safeFilename}`;
+
+    await this.s3Service.uploadFile(file.buffer, key, mime);
+    return key;
+  }
+
+  /**
+   * Strip every character that isn't `[a-zA-Z0-9._-]` from a user-supplied
+   * filename. Empty / undefined names collapse to `receipt`. We never
+   * include the original path — just the leaf name.
+   */
+  private sanitizeReceiptFilename(name: string | undefined | null): string {
+    const base = (name ?? '').split(/[\\/]/).pop() ?? '';
+    const sanitized = base.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return sanitized.length > 0 ? sanitized : 'receipt';
   }
 
   private shouldReserveStock(item: any): boolean {

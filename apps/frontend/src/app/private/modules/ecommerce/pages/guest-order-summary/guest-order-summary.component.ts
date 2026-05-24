@@ -136,23 +136,25 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
             </div>
           </section>
 
-          <section class="invoice-box">
-            <h2>Factura electrónica</h2>
-            @if (data.order.invoice) {
-              <p>
-                Factura {{ data.order.invoice.invoice_number }}:
-                {{ data.order.invoice.status }}
-              </p>
-            } @else {
-              <p>
-                Si la tienda tiene facturación configurada, la factura será
-                procesada según su flujo actual.
-              </p>
-            }
-            <a [routerLink]="['/factura', data.token]"
-              >Agregar o actualizar datos de facturación</a
-            >
-          </section>
+          @if (invoicingEnabled()) {
+            <section class="invoice-box">
+              <h2>Factura electrónica</h2>
+              @if (data.order.invoice) {
+                <p>
+                  Factura {{ data.order.invoice.invoice_number }}:
+                  {{ data.order.invoice.status }}
+                </p>
+              } @else {
+                <p>
+                  Si la tienda tiene facturación configurada, la factura será
+                  procesada según su flujo actual.
+                </p>
+              }
+              <a [routerLink]="['/factura', data.token]"
+                >Agregar o actualizar datos de facturación</a
+              >
+            </section>
+          }
 
           <div class="actions no-print">
             <app-button variant="outline" (clicked)="print()">
@@ -351,6 +353,7 @@ export class GuestOrderSummaryComponent implements OnInit {
   readonly loading = signal(true);
   readonly error = signal(false);
   readonly summary = signal<any>(null);
+  readonly invoicingEnabled = signal(false);
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -373,6 +376,14 @@ export class GuestOrderSummaryComponent implements OnInit {
           this.error.set(true);
           this.loading.set(false);
         },
+      });
+
+    this.checkoutService
+      .getInvoicingEligibility()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => this.invoicingEnabled.set(result.invoicing_enabled),
+        error: () => this.invoicingEnabled.set(false),
       });
   }
 

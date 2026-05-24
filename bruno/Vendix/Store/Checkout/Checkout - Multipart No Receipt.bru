@@ -1,0 +1,40 @@
+meta {
+  name: Checkout - Multipart No Receipt
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: multipartForm
+  auth: inherit
+}
+
+docs {
+  POST /ecommerce/checkout en formato multipart/form-data SIN receipt.
+
+  Valida que el endpoint multipart sigue funcionando aunque el campo `file` no este presente.
+  El campo `data` (JSON string del CheckoutDto) es obligatorio.
+}
+
+body:multipartForm {
+  data: {"payment_method_id": {{bank_transfer_payment_method_id}}, "items": [{"product_id": {{ecommerce_product_id}}, "quantity": 1}], "customer_data": {"email": "guest+noreceipt@local.test", "first_name": "Guest", "last_name": "NoReceipt", "phone": "3001234567"}, "shipping_address": {"address_line_1": "Calle 1 #2-3", "city": "Bogota", "state": "Cundinamarca", "country": "CO", "postal_code": "110111"}, "shipping_type": "pickup"}
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+}
+
+tests {
+  test("Status 201 - orden creada sin receipt", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response incluye order_id", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("order_id");
+    expect(res.body.data.order_id).to.not.be.undefined;
+    console.log("[checkout][no-receipt] order_id =", res.body.data.order_id);
+  });
+}

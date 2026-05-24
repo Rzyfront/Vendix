@@ -1,0 +1,46 @@
+meta {
+  name: Checkout - Multipart With Receipt
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: multipartForm
+  auth: inherit
+}
+
+docs {
+  POST /ecommerce/checkout en formato multipart/form-data con receipt adjunto.
+
+  Campos:
+    - data: JSON string del CheckoutDto.
+    - file: archivo PNG (receipt/comprobante de pago).
+
+  El archivo de prueba reside en `bruno/test-files/test-image.png` (ya existe en el repo).
+  El payment_method_id debe apuntar a un metodo bank_transfer del store activo.
+  Si no esta seteado en el environment, se cae al placeholder definido aqui.
+}
+
+body:multipartForm {
+  data: {"payment_method_id": {{bank_transfer_payment_method_id}}, "items": [{"product_id": {{ecommerce_product_id}}, "quantity": 1}], "customer_data": {"email": "guest+receipt@local.test", "first_name": "Guest", "last_name": "Receipt", "phone": "3001234567"}, "shipping_address": {"address_line_1": "Calle 1 #2-3", "city": "Bogota", "state": "Cundinamarca", "country": "CO", "postal_code": "110111"}, "shipping_type": "pickup"}
+  file: @file(./../../../test-files/test-image.png)
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+}
+
+tests {
+  test("Status 201 - orden creada con receipt", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response incluye order_id", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("order_id");
+    expect(res.body.data.order_id).to.not.be.undefined;
+    console.log("[checkout][with-receipt] order_id =", res.body.data.order_id);
+  });
+}
