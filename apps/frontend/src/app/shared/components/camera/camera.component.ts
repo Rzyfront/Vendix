@@ -2,10 +2,12 @@ import {
   Component,
   ElementRef,
   EmbeddedViewRef,
+  Injector,
   OnDestroy,
   Renderer2,
   TemplateRef,
   ViewContainerRef,
+  afterNextRender,
   effect,
   inject,
   input,
@@ -233,6 +235,7 @@ export class CameraComponent implements OnDestroy {
   // DI
   private readonly vcr = inject(ViewContainerRef);
   private readonly doc = inject(DOCUMENT);
+  private readonly injector = inject(Injector);
 
   // Privado
   private stream: MediaStream | null = null;
@@ -285,10 +288,17 @@ export class CameraComponent implements OnDestroy {
       return;
     }
     this.mobileEmbedded = this.vcr.createEmbeddedView(tpl);
-    this.mobileEmbedded.detectChanges();
-    for (const node of this.mobileEmbedded.rootNodes) {
-      if (node instanceof Node) this.doc.body.appendChild(node);
-    }
+    // Teleport rootNodes to <body> after Angular's next render cycle (zoneless-safe).
+    afterNextRender(
+      () => {
+        const view = this.mobileEmbedded;
+        if (!view) return;
+        for (const node of view.rootNodes) {
+          if (node instanceof Node) this.doc.body.appendChild(node);
+        }
+      },
+      { injector: this.injector },
+    );
     // Prevent body scroll while overlay is active
     this.bodyOverflowPrev = this.doc.body.style.overflow;
     this.doc.body.style.overflow = 'hidden';
