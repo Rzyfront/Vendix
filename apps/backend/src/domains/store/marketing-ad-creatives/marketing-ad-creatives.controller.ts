@@ -11,9 +11,13 @@ import {
   Patch,
   Post,
   Query,
+  Req,
+  Res,
   Sse,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { Observable } from 'rxjs';
 import { ResponseService } from '../../../common/responses/response.service';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -70,6 +74,34 @@ export class MarketingAdCreativesController {
   async getEcommerceDomain() {
     const result = await this.adCreativesService.getEcommerceDomain();
     return this.responseService.success(result);
+  }
+
+  @Get('product-images/:imageId/proxy')
+  @Permissions(
+    'store:marketing_anuncios:read',
+    'store:marketing_anuncios:create',
+    'store:marketing_anuncios:generate',
+    'store:promotions:read',
+    'store:social_sales:read',
+  )
+  async proxyProductImage(
+    @Param('imageId', ParseIntPipe) imageId: number,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.adCreativesService.getProductImageAsset(imageId);
+    const origin = request.headers.origin;
+
+    if (typeof origin === 'string') {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+    }
+
+    response.setHeader('Content-Type', result.contentType);
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    return new StreamableFile(result.buffer);
   }
 
   @Post()

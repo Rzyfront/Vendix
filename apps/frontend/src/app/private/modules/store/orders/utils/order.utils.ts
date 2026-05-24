@@ -59,6 +59,7 @@ export class OrderUtils {
    */
   static getOrderProgress(order: Order): number {
     const progressMap: Record<OrderState, number> = {
+      draft: 0,
       created: 10,
       pending_payment: 20,
       processing: 50,

@@ -78,6 +78,31 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'File upload failed',
   },
+  UPLOAD_REMOTE_URL_001: {
+    code: 'UPLOAD_REMOTE_URL_001',
+    httpStatus: 400,
+    devMessage: 'Remote image URL is invalid',
+  },
+  UPLOAD_REMOTE_FORBIDDEN_001: {
+    code: 'UPLOAD_REMOTE_FORBIDDEN_001',
+    httpStatus: 403,
+    devMessage: 'Remote image URL is not allowed',
+  },
+  UPLOAD_REMOTE_TYPE_001: {
+    code: 'UPLOAD_REMOTE_TYPE_001',
+    httpStatus: 415,
+    devMessage: 'Remote URL did not return a supported image',
+  },
+  UPLOAD_REMOTE_SIZE_001: {
+    code: 'UPLOAD_REMOTE_SIZE_001',
+    httpStatus: 413,
+    devMessage: 'Remote image is too large',
+  },
+  UPLOAD_REMOTE_FETCH_001: {
+    code: 'UPLOAD_REMOTE_FETCH_001',
+    httpStatus: 502,
+    devMessage: 'Remote image could not be downloaded',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {

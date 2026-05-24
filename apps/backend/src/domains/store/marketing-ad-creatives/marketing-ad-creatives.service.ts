@@ -157,6 +157,38 @@ export class MarketingAdCreativesService {
     };
   }
 
+  async getProductImageAsset(imageId: number) {
+    const context = this.getContext();
+    const productImage = await this.prisma.product_images.findFirst({
+      where: {
+        id: imageId,
+        products: {
+          store_id: context.store_id,
+        },
+      },
+      select: {
+        image_url: true,
+      },
+    });
+
+    if (!productImage) {
+      throw new VendixHttpException(ErrorCodes.PROD_IMAGE_001);
+    }
+
+    const key = this.s3Service.sanitizeForStorage(productImage.image_url);
+    if (!key) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'La imagen seleccionada no tiene una ruta valida.',
+      );
+    }
+
+    return {
+      buffer: await this.s3Service.downloadImage(key),
+      contentType: this.imageContentType(key),
+    };
+  }
+
   async findOne(id: number) {
     const creativeDelegate = this.getCreativeDelegate();
     await this.ensureAdStorageAvailable();
@@ -1576,6 +1608,20 @@ export class MarketingAdCreativesService {
       .replace(/^https?:\/\//, '')
       .replace(/\/+$/, '');
     return `https://${cleanHostname}`;
+  }
+
+  private imageContentType(key: string): string {
+    const extension = key.split('?')[0].split('.').pop()?.toLowerCase();
+    const contentTypes: Record<string, string> = {
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      png: 'image/png',
+      webp: 'image/webp',
+      gif: 'image/gif',
+      avif: 'image/avif',
+    };
+
+    return contentTypes[extension || ''] || 'application/octet-stream';
   }
 
   private async ensureAdStorageAvailable() {

@@ -66,6 +66,15 @@ export class AnunciosService {
     return this.http.delete<ApiResponse<null>>(`${this.apiUrl}/${id}`);
   }
 
+  productImageProxyUrl(imageId: number): string {
+    const params = new URLSearchParams();
+    const token = this.getAccessToken();
+    if (token) params.set('token', token);
+
+    const query = params.toString();
+    return `${this.apiUrl}/product-images/${imageId}/proxy${query ? `?${query}` : ''}`;
+  }
+
   streamGenerate(id: number): Observable<AdCreativeStreamEvent> {
     return new Observable<AdCreativeStreamEvent>((subscriber) => {
       const params = new URLSearchParams();

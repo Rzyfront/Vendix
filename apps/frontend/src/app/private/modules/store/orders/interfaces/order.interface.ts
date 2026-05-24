@@ -190,6 +190,7 @@ export interface OrderInstallment {
 
 // Types and enums - Aligned with backend enums
 export type OrderState =
+  | 'draft'
   | 'created'
   | 'pending_payment'
   | 'processing'

@@ -26,6 +26,7 @@ import { deriveDeliveryType } from '../../store/shipping/shipping-derivation.uti
 import { InvoiceDataRequestsService } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.service';
 import { InvoicingService } from '../../store/invoicing/invoicing.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { FiscalStatusService } from '@common/services/fiscal-status.service';
 
 @Injectable()
 export class CheckoutService {
@@ -49,7 +50,29 @@ export class CheckoutService {
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
     private readonly invoicingService: InvoicingService,
     private readonly operatingScopeService: OperatingScopeService,
+    private readonly fiscalStatusService: FiscalStatusService,
   ) {}
+
+  /**
+   * Returns whether the current ecommerce store has invoicing fiscal status
+   * set to ACTIVE. Used by guest checkout to decide if the optional invoice
+   * data section should be shown.
+   *
+   * Reads `store_settings.settings.fiscal_status.invoicing.state` for the
+   * store resolved from the domain context. Requires store context (set by
+   * DomainResolverMiddleware) but does not require authentication.
+   */
+  async getInvoicingEligibility(): Promise<{ invoicing_enabled: boolean }> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const state = await this.fiscalStatusService.getStoreInvoicingState(
+      store_id,
+    );
+    return { invoicing_enabled: state === 'ACTIVE' };
+  }
 
   async getPaymentMethods(shippingMethodType?: string) {
     // Determine allowed processing modes based on shipping method type

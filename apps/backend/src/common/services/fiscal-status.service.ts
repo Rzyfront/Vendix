@@ -9,6 +9,7 @@ import {
   FiscalStatusBlock,
   FiscalStatusReadResult,
   FiscalStatusSource,
+  FiscalStatusState,
   FiscalWizardStepId,
   isFiscalArea,
   isFiscalWizardStep,
@@ -75,6 +76,29 @@ export class FiscalStatusService {
       fiscal_scope: resolved.fiscal_scope,
       fiscal_status: resolved.fiscal_status,
     };
+  }
+
+  /**
+   * Reads the invoicing fiscal state for a single store directly from
+   * `store_settings.settings.fiscal_status.invoicing.state`.
+   *
+   * Intended for lightweight public/guest paths (ecommerce checkout eligibility)
+   * where only `store_id` is known and resolving the organization scope is not
+   * required. Bypasses the resolver cache and does not require organization_id.
+   *
+   * Returns `INACTIVE` when no settings row exists yet.
+   */
+  async getStoreInvoicingState(
+    store_id: number,
+  ): Promise<FiscalStatusState> {
+    const client = this.globalPrisma.withoutScope();
+    const row = await client.store_settings.findUnique({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const raw = (row?.settings as any) || {};
+    const block = normalizeFiscalStatusBlock(raw.fiscal_status);
+    return block.invoicing.state;
   }
 
   async startWizard(params: {

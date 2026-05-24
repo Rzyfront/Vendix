@@ -521,7 +521,10 @@
     (addedToCart)="onAddToCartFromSlider($event)"
   />
 
-  <app-guest-checkout-data-modal (completed)="onGuestDataCompleted($event)" />
+  <app-guest-checkout-data-modal
+    [invoicingEnabled]="invoicingEnabled()"
+    (completed)="onGuestDataCompleted($event)"
+  />
 
   @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">

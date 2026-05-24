@@ -157,6 +157,7 @@ import {
   Camera,
   MessageCircle,
   ImagePlus,
+  Crop,
   PanelBottom,
   // Support icons
   Ticket,
@@ -458,6 +459,7 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   camera: Camera,
   'message-circle': MessageCircle,
   'image-plus': ImagePlus,
+  crop: Crop,
   'panel-bottom': PanelBottom,
   'share-2': Share2,
 

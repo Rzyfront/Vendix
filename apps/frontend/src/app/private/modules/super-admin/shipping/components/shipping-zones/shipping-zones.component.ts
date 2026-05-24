@@ -1,8 +1,6 @@
-import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-import { Router } from '@angular/router';
 import { ShippingService } from '../../services/shipping.service';
 import {
   ShippingZone,
@@ -12,6 +10,9 @@ import { ShippingZoneModalComponent } from '../shipping-zone-modal/shipping-zone
 import { ShippingRatesComponent } from '../shipping-rates/shipping-rates.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-superadmin-shipping-zones',
@@ -42,9 +43,16 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
         </app-button>
       </div>
 
-      @if (zones.length > 0) {
+      @if (loading()) {
+        <div
+          class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3"
+        >
+          <app-icon name="loader-2" size="32" [spin]="true"></app-icon>
+          <span class="text-sm font-medium italic">Cargando zonas...</span>
+        </div>
+      } @else if (zones().length > 0) {
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-          @for (zone of zones; track zone) {
+          @for (zone of zones(); track zone.id) {
             <div
               class="bg-white rounded-2xl border border-[var(--color-border)] p-6 hover:shadow-lg transition-all group flex flex-col justify-between h-full"
             >
@@ -162,6 +170,9 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
                   variant="ghost"
                   size="sm"
                   class="col-span-2 !text-xs !text-red-600 hover:!bg-red-50"
+                  [loading]="deletingIds().has(zone.id)"
+                  [disabled]="deletingIds().has(zone.id)"
+                  (clicked)="deleteZone(zone)"
                 >
                   <app-icon
                     name="trash"
@@ -194,17 +205,17 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 
       @defer (when showModal()) {
         <app-superadmin-shipping-zone-modal
-          [zone]="selectedZone"
+          [zone]="selectedZone()"
           (close)="closeModal()"
-          (saved)="loadData()"
+          (saved)="onSaved()"
         >
         </app-superadmin-shipping-zone-modal>
       }
 
-      @defer (when showRatesModal) {
+      @defer (when showRatesModal()) {
         <app-superadmin-shipping-rates
-          [zone]="selectedZone"
-          [methods]="methods"
+          [zone]="selectedZone()"
+          [methods]="methods()"
           (close)="closeRatesModal()"
         >
         </app-superadmin-shipping-rates>
@@ -213,54 +224,99 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   `,
 })
 export class ShippingZonesComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
 
-  zones: ShippingZone[] = [];
-  methods: ShippingMethod[] = [];
-  showModal = signal(false);
-  showRatesModal = false;
-  selectedZone?: ShippingZone;
+  readonly zones = signal<ShippingZone[]>([]);
+  readonly methods = signal<ShippingMethod[]>([]);
+  readonly loading = signal(false);
+  readonly showModal = signal(false);
+  readonly showRatesModal = signal(false);
+  readonly selectedZone = signal<ShippingZone | undefined>(undefined);
+  readonly deletingIds = signal<Set<number>>(new Set());
 
   ngOnInit() {
     this.loadData();
   }
 
   async loadData() {
+    this.loading.set(true);
     try {
       const [zones, methods] = await Promise.all([
         firstValueFrom(this.shippingService.getZones()),
         firstValueFrom(this.shippingService.getMethods()),
       ]);
-      this.zones = zones;
-      this.methods = methods;
+      this.zones.set(zones);
+      this.methods.set(methods);
     } catch (e) {
-      console.error('Error loading shipping zones/methods', e);
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error loading shipping zones/methods', devMessage, e);
+      this.toastService.error(userMessage, 'Error al cargar');
+    } finally {
+      this.loading.set(false);
     }
   }
 
   openCreateModal() {
-    this.selectedZone = undefined;
+    this.selectedZone.set(undefined);
     this.showModal.set(true);
   }
 
   openEditModal(zone: ShippingZone) {
-    this.selectedZone = zone;
+    this.selectedZone.set(zone);
     this.showModal.set(true);
   }
 
   closeModal() {
     this.showModal.set(false);
-    this.selectedZone = undefined;
+    this.selectedZone.set(undefined);
   }
 
   openRatesModal(zone: ShippingZone) {
-    this.selectedZone = zone;
-    this.showRatesModal = true;
+    this.selectedZone.set(zone);
+    this.showRatesModal.set(true);
   }
 
   closeRatesModal() {
-    this.showRatesModal = false;
-    this.selectedZone = undefined;
+    this.showRatesModal.set(false);
+    this.selectedZone.set(undefined);
+  }
+
+  onSaved() {
+    this.loadData();
+  }
+
+  async deleteZone(zone: ShippingZone) {
+    if (this.deletingIds().has(zone.id)) return;
+
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar Zona de Envío del Sistema',
+      message: `¿Estás seguro de que deseas eliminar la zona "${zone.name}"? Esta acción no se puede deshacer y removerá todas sus tarifas asociadas.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+
+    this.deletingIds.update((s) => new Set(s).add(zone.id));
+    try {
+      await firstValueFrom(this.shippingService.deleteZone(zone.id));
+      this.toastService.success(
+        `Zona "${zone.name}" eliminada.`,
+        'Eliminado',
+      );
+      this.zones.update((arr) => arr.filter((z) => z.id !== zone.id));
+    } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error deleting shipping zone', devMessage, e);
+      this.toastService.error(userMessage, 'Error al eliminar');
+    } finally {
+      this.deletingIds.update((s) => {
+        const next = new Set(s);
+        next.delete(zone.id);
+        return next;
+      });
+    }
   }
 }

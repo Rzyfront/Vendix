@@ -837,8 +837,9 @@ export class PaymentsService {
             'pending_payment',
             order.delivery_type,
           );
-        } else {
+        } else if (!createPosPaymentDto.is_draft) {
           // Credit sale - update order status
+          // Drafts skip this branch entirely (no payment status / no credit flow).
           await this.updateOrderPaymentStatus(
             tx,
             order.id,
@@ -859,63 +860,67 @@ export class PaymentsService {
           inventoryCost = await this.updateInventoryFromOrder(tx, order);
         }
 
-        // 4. Emit order.created event
-        this.eventEmitter.emit('order.created', {
-          store_id: createPosPaymentDto.store_id,
-          order_id: order.id,
-          order_number: order.order_number,
-          grand_total: Number(order.grand_total),
-          currency: order.currency || createPosPaymentDto.currency,
-        });
-
-        // 5. Emit payment event (with tax/subtotal for IVA accounting)
-        if (payment) {
-          this.eventEmitter.emit('payment.received', {
-            payment_id: payment.id,
+        // 4. Emit order/payment events — drafts skip ALL events because they
+        // are not real sales (no accounting, no credit_sale, no COGS).
+        if (!createPosPaymentDto.is_draft) {
+          // 4a. Emit order.created event
+          this.eventEmitter.emit('order.created', {
             store_id: createPosPaymentDto.store_id,
-            organization_id: order.stores?.organization_id,
             order_id: order.id,
             order_number: order.order_number,
-            amount: payment.amount,
-            subtotal_amount: Number(order.subtotal_amount || 0),
-            tax_amount: Number(order.tax_amount || 0),
-            discount_amount: Number(order.discount_amount || 0),
-            currency: payment.currency || createPosPaymentDto.currency,
-            payment_method:
-              payment.store_payment_method?.system_payment_method
-                ?.display_name || 'Unknown',
-            user_id: user.id,
+            grand_total: Number(order.grand_total),
+            currency: order.currency || createPosPaymentDto.currency,
           });
 
-          // 5b. Emit order.completed for COGS on direct POS sales
-          if (order.delivery_type === 'direct_delivery') {
-            const total_cost = inventoryCost;
-            if (total_cost > 0) {
-              this.eventEmitter.emit('order.completed', {
-                order_id: order.id,
-                order_number: order.order_number,
-                organization_id: order.stores?.organization_id,
-                store_id: createPosPaymentDto.store_id,
-                total_cost,
-                user_id: user.id,
-              });
+          // 5. Emit payment event (with tax/subtotal for IVA accounting)
+          if (payment) {
+            this.eventEmitter.emit('payment.received', {
+              payment_id: payment.id,
+              store_id: createPosPaymentDto.store_id,
+              organization_id: order.stores?.organization_id,
+              order_id: order.id,
+              order_number: order.order_number,
+              amount: payment.amount,
+              subtotal_amount: Number(order.subtotal_amount || 0),
+              tax_amount: Number(order.tax_amount || 0),
+              discount_amount: Number(order.discount_amount || 0),
+              currency: payment.currency || createPosPaymentDto.currency,
+              payment_method:
+                payment.store_payment_method?.system_payment_method
+                  ?.display_name || 'Unknown',
+              user_id: user.id,
+            });
+
+            // 5b. Emit order.completed for COGS on direct POS sales
+            if (order.delivery_type === 'direct_delivery') {
+              const total_cost = inventoryCost;
+              if (total_cost > 0) {
+                this.eventEmitter.emit('order.completed', {
+                  order_id: order.id,
+                  order_number: order.order_number,
+                  organization_id: order.stores?.organization_id,
+                  store_id: createPosPaymentDto.store_id,
+                  total_cost,
+                  user_id: user.id,
+                });
+              }
             }
           }
-        }
 
-        // 5c. Emit credit_sale.created for credit sales (no payment)
-        if (!createPosPaymentDto.requires_payment) {
-          this.eventEmitter.emit('credit_sale.created', {
-            order_id: order.id,
-            organization_id: order.stores?.organization_id,
-            store_id: createPosPaymentDto.store_id,
-            order_number: order.order_number,
-            subtotal_amount: Number(order.subtotal_amount || 0),
-            tax_amount: Number(order.tax_amount || 0),
-            discount_amount: Number(order.discount_amount || 0),
-            total_amount: Number(order.grand_total || 0),
-            user_id: user.id,
-          });
+          // 5c. Emit credit_sale.created for credit sales (no payment)
+          if (!createPosPaymentDto.requires_payment) {
+            this.eventEmitter.emit('credit_sale.created', {
+              order_id: order.id,
+              organization_id: order.stores?.organization_id,
+              store_id: createPosPaymentDto.store_id,
+              order_number: order.order_number,
+              subtotal_amount: Number(order.subtotal_amount || 0),
+              tax_amount: Number(order.tax_amount || 0),
+              discount_amount: Number(order.discount_amount || 0),
+              total_amount: Number(order.grand_total || 0),
+              user_id: user.id,
+            });
+          }
         }
 
         // 5d. Register coupon use if applicable
@@ -1036,6 +1041,18 @@ export class PaymentsService {
           }
         }
         delete result._digitalPaymentPending;
+      }
+
+      // Drafts: short-circuit before any post-transaction side effects.
+      // No cash movement, no installments, no invoice data request, no
+      // success message tied to a sale.
+      if (result.success && createPosPaymentDto.is_draft) {
+        return {
+          success: true,
+          order: result.order,
+          message: 'Draft saved successfully',
+          _isDraft: true,
+        };
       }
 
       // Record cash register movement AFTER transaction commit (non-critical)
@@ -1674,11 +1691,13 @@ export class PaymentsService {
         );
 
         // Build order data - only include customer_id if provided (for anonymous sales)
-        // Initial state is 'created' - state transitions handled by OrderFlowService
+        // Initial state is 'created' - state transitions handled by OrderFlowService.
+        // Drafts use state='draft' and payment_form=null so they don't get classified
+        // as credit sales by downstream consumers (e.g., reports, listings).
         const orderData: any = {
           store_id: dto.store_id,
           order_number: orderNumber,
-          state: 'created', // Orders start in 'created' state, flow service handles transitions
+          state: dto.is_draft ? 'draft' : 'created',
           channel: 'pos', // POS orders are assigned 'pos' channel
           subtotal_amount: calculatedSubtotal,
           tax_amount: calculatedTaxAmount,
@@ -1692,7 +1711,9 @@ export class PaymentsService {
           internal_notes: dto.internal_notes,
           // Shipping fields (for delivery orders)
           delivery_type: dto.delivery_type || 'direct_delivery',
-          payment_form: dto.payment_form || (dto.requires_payment ? '1' : '2'),
+          payment_form: dto.is_draft
+            ? null
+            : dto.payment_form || (dto.requires_payment ? '1' : '2'),
           shipping_cost: shippingCost,
           shipping_address_snapshot: dto.shipping_address_snapshot || undefined,
           order_items: {

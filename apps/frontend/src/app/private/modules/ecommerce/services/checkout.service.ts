@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map, shareReplay } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -119,11 +120,16 @@ export interface ConfirmWompiPaymentResponse {
   message?: string;
 }
 
+export interface CheckoutEligibility {
+  invoicing_enabled: boolean;
+}
+
 @Injectable({
   providedIn: 'root',
 })
 export class CheckoutService {
   private api_url = `${environment.apiUrl}/ecommerce/checkout`;
+  private eligibility$: Observable<CheckoutEligibility> | null = null;
 
   constructor(
     private http: HttpClient,
@@ -230,5 +236,20 @@ export class CheckoutService {
       `${environment.apiUrl}/ecommerce/invoice-data/${token}/order-summary`,
       { headers: this.getHeaders() },
     );
+  }
+
+  getInvoicingEligibility(): Observable<CheckoutEligibility> {
+    if (!this.eligibility$) {
+      this.eligibility$ = this.http
+        .get<{ success: boolean; data: CheckoutEligibility }>(
+          `${this.api_url}/eligibility`,
+          { headers: this.getHeaders() },
+        )
+        .pipe(
+          map((r) => r.data),
+          shareReplay({ bufferSize: 1, refCount: false }),
+        );
+    }
+    return this.eligibility$;
   }
 }

@@ -2524,6 +2524,7 @@ enum inventory_transaction_type_enum {
 }
 
 enum order_state_enum {
+  draft
   created
   pending_payment
   processing
@@ -2572,6 +2573,7 @@ enum payment_methods_type_enum {
   voucher
   wompi
   wallet
+  cash_on_delivery
 }
 
 enum fee_type_enum {

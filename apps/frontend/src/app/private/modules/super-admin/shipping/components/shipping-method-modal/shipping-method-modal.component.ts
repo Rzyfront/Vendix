@@ -1,5 +1,4 @@
-import {Component, OnInit, inject, input, output, signal, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Component, OnInit, inject, input, output, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -11,6 +10,8 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-superadmin-shipping-method-modal',
@@ -21,7 +22,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
       [isOpen]="true"
       [title]="(method() ? 'Editar' : 'Nuevo') + ' Método de Envío del Sistema'"
       [subtitle]="'Configura los detalles de la opción de entrega del sistema'"
-      (closed)="close.emit()"
+      (closed)="onClose()"
       size="md"
       >
       <div slot="header">
@@ -94,10 +95,10 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
       </form>
     
       <div slot="footer" class="flex items-center justify-end gap-3 w-full">
-        <app-button variant="ghost" (clicked)="close.emit()">
+        <app-button variant="ghost" [disabled]="isSubmitting()" (clicked)="onClose()">
           Cancelar
         </app-button>
-        <app-button variant="primary" [loading]="isSubmitting()" [disabled]="form.invalid" (clicked)="onSubmit()">
+        <app-button variant="primary" [loading]="isSubmitting()" [disabled]="form.invalid || isSubmitting()" (clicked)="onSubmit()">
           <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
           {{ method() ? 'Actualizar Método' : 'Crear Método' }}
         </app-button>
@@ -106,13 +107,13 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
     `
 })
 export class ShippingMethodModalComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
   readonly method = input<ShippingMethod>();
   readonly close = output<void>();
   readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingService);
+  private toastService = inject(ToastService);
 
   ShippingMethodType = ShippingMethodType;
   form: FormGroup;
@@ -145,13 +146,18 @@ export class ShippingMethodModalComponent implements OnInit {
     }
   }
 
+  onClose() {
+    if (this.isSubmitting()) return;
+    this.close.emit();
+  }
+
   get showProviderField(): boolean {
     const type = this.form.get('type')?.value;
     return type === ShippingMethodType.CARRIER || type === ShippingMethodType.THIRD_PARTY_PROVIDER;
   }
 
   async onSubmit() {
-    if (this.form.invalid) return;
+    if (this.form.invalid || this.isSubmitting()) return;
 
     this.isSubmitting.set(true);
     const value = this.form.value;
@@ -163,12 +169,18 @@ export class ShippingMethodModalComponent implements OnInit {
 
     try {
       await firstValueFrom(request$);
-      this.isSubmitting.set(false);
+      this.toastService.success(
+        method ? 'Método actualizado correctamente.' : 'Método creado correctamente.',
+        method ? 'Actualizado' : 'Creado',
+      );
       this.saved.emit();
       this.close.emit();
     } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error saving shipping method', devMessage, e);
+      this.toastService.error(userMessage, 'Error al guardar');
+    } finally {
       this.isSubmitting.set(false);
-      alert('Error al guardar el método de envío.');
     }
   }
 }

@@ -386,7 +386,7 @@ interface GalleryImage {
                     ></app-input-buttons>
 
                     <app-manual-ad-editor
-                      [imageUrl]="selectedManualImage()?.image_url ?? null"
+                      [imageUrl]="selectedManualImageProxyUrl()"
                       [format]="selectedManualFormat()"
                     ></app-manual-ad-editor>
 
@@ -987,6 +987,11 @@ export class AnuncioCreatePageComponent {
         (item) => item.image.id === this.manualImageId(),
       )?.image || null,
   );
+
+  protected readonly selectedManualImageProxyUrl = computed(() => {
+    const image = this.selectedManualImage();
+    return image ? this.anunciosService.productImageProxyUrl(image.id) : null;
+  });
 
   protected readonly isLoadingSelectedProductImages = computed(() => {
     const loadingIds = new Set(this.loadingProductImageIds());

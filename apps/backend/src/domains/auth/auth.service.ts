@@ -1661,6 +1661,7 @@ export class AuthService {
       logo_url: string | null;
       store_type: string;
       onboarding: boolean;
+      default_location_id: number | null;
       organizations: any;
       store_settings?: any;
       domain_settings?: any;
@@ -1875,6 +1876,7 @@ export class AuthService {
           logo_url: signedLogoUrl,
           store_type: storeToUse.store_type,
           onboarding: storeToUse.onboarding,
+          default_location_id: storeToUse.default_location_id,
           organizations: storeToUse.organizations,
           domain_settings: storeToUse.domain_settings,
           // store_settings OMITIDO - ya se envía a nivel raíz como store_settings

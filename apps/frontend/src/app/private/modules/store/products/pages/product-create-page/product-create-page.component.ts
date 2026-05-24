@@ -60,6 +60,7 @@ import { ServiceProvider } from '../../../reservations/interfaces/reservation.in
 import { CategoryQuickCreateComponent } from '../../components/category-quick-create.component';
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
+import { ProductImageSourceModalComponent } from '../../components/product-image-source-modal.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import {
@@ -115,6 +116,7 @@ export type { GeneratedVariant };
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
+    ProductImageSourceModalComponent,
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
     CurrencyPipe,
@@ -570,6 +572,10 @@ export class ProductCreatePageComponent {
   isCategoryCreateOpen = false;
   isBrandCreateOpen = false;
   isTaxCategoryCreateOpen = false;
+  isImageSourceModalOpen = signal(false);
+  readonly remainingImageSlots = computed(() =>
+    Math.max(0, 5 - this.imageUrls.length),
+  );
   isAdjustmentModalOpen = false;
   isAdjusting = false;
   adjustmentLocationOptions: SelectorOption[] = [];
@@ -1647,8 +1653,38 @@ export class ProductCreatePageComponent {
   }
 
   triggerFileUpload(): void {
-    const fileInput = document.querySelector('.file-input') as HTMLInputElement;
-    fileInput?.click();
+    this.openImageSourceModal();
+  }
+
+  openImageSourceModal(): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+    this.isImageSourceModalOpen.set(true);
+  }
+
+  onImagesFromModal(urls: string[]): void {
+    if (!urls?.length) return;
+    const remaining = Math.max(0, 5 - this.imageUrls.length);
+    const toAdd = urls.slice(0, remaining);
+    for (const dataUrl of toAdd) {
+      this.imageUrls.push(dataUrl);
+      this.imageIds.push(null);
+    }
+    if (this.imageUrls.length === toAdd.length) {
+      this.activeImageIndex = 0;
+    }
+    if (toAdd.length > 0) {
+      this.toastService.success(
+        `${toAdd.length} imagen(es) agregada(s)`,
+      );
+    }
+    if (urls.length > toAdd.length) {
+      this.toastService.warning(
+        `Se omitieron ${urls.length - toAdd.length} imagen(es) por el límite de 5`,
+      );
+    }
   }
 
   async onFileSelect(event: Event): Promise<void> {

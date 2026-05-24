@@ -14,7 +14,6 @@ import { CartService, Cart, CartItem } from '../../services/cart.service';
 import {
   CheckoutService,
   GuestCheckoutCustomer,
-  CheckoutShippingAddress,
   WhatsappCheckoutResponse,
 } from '../../services/checkout.service';
 import { AuthFacade } from '../../../../../core/store';
@@ -273,12 +272,7 @@ export class CartComponent implements OnInit {
     }));
 
     this.checkoutService
-      .whatsappCheckout(
-        undefined,
-        items,
-        this.toGuestCustomer(data),
-        this.toGuestShippingAddress(data),
-      )
+      .whatsappCheckout(undefined, items, this.toGuestCustomer(data), null)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -311,21 +305,6 @@ export class CartComponent implements OnInit {
       phone: data.phone,
       document_type: data.document_type,
       document_number: data.document_number,
-    };
-  }
-
-  private toGuestShippingAddress(
-    data: GuestCheckoutData | null,
-  ): CheckoutShippingAddress | null {
-    if (!data?.address_line1 || !data.city) return null;
-    return {
-      address_line1: data.address_line1,
-      address_line2: data.address_line2,
-      city: data.city,
-      state_province: data.state_province,
-      country_code: data.country_code || 'CO',
-      postal_code: data.postal_code,
-      phone_number: data.phone,
     };
   }
 

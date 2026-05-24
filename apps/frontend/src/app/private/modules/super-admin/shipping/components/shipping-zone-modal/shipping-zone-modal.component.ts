@@ -1,5 +1,4 @@
-import {Component, OnInit, inject, input, output, signal, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Component, OnInit, inject, input, output, signal, computed } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import {
@@ -24,6 +23,8 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-superadmin-shipping-zone-modal',
@@ -42,7 +43,7 @@ import {
       [isOpen]="true"
       [title]="(zone() ? 'Editar' : 'Nueva') + ' Zona de Envío del Sistema'"
       [subtitle]="'Define el alcance geográfico para todas las tiendas'"
-      (closed)="close.emit()"
+      (closed)="onClose()"
       size="lg"
       >
       <div slot="header">
@@ -52,7 +53,7 @@ import {
           <app-icon name="map-pin" size="20" class="text-indigo-600"></app-icon>
         </div>
       </div>
-    
+
       <form
         [formGroup]="form"
         id="shippingZoneForm"
@@ -65,12 +66,12 @@ import {
           placeholder="Ej: Zona Nacional, Todo Colombia..."
           [required]="true"
         ></app-input>
-    
+
         <div>
           <app-selector
             label="País de Cobertura"
             formControlName="country"
-            [options]="countryOptions"
+            [options]="countryOptions()"
             [required]="true"
             (valueChange)="onCountryChange()"
           ></app-selector>
@@ -82,9 +83,9 @@ import {
             optimizada.
           </p>
         </div>
-    
+
         <!-- Regions / Departments -->
-        @if (showRegions) {
+        @if (showRegions()) {
           <div
             class="animate-in slide-in-from-top-2 duration-200 mt-6"
             >
@@ -93,17 +94,17 @@ import {
                 class="block text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide"
                 >Departamentos / Regiones</label
                 >
-                @if (!loadingRegions) {
+                @if (!loadingRegions()) {
                   <div class="flex items-center gap-2">
                     <span
                       class="text-[10px] font-bold text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md uppercase"
                       >
-                      {{ selectedRegions.size }} seleccionados
+                      {{ selectedRegionsCount() }} seleccionados
                     </span>
                   </div>
                 }
               </div>
-              @if (loadingRegions) {
+              @if (loadingRegions()) {
                 <div
                   class="flex items-center justify-center p-12 bg-gray-50/50 rounded-2xl border border-dashed text-gray-400 gap-2"
                   >
@@ -111,7 +112,7 @@ import {
                   <span class="text-sm font-medium">Cargando departamentos...</span>
                 </div>
               }
-              @if (!loadingRegions) {
+              @if (!loadingRegions()) {
                 <div
                   class="border border-[var(--color-border)] rounded-2xl p-4 bg-gray-50/30"
                   >
@@ -121,7 +122,7 @@ import {
                     <div class="flex items-center gap-2">
                       <input
                         type="checkbox"
-                        [checked]="allRegionsSelected"
+                        [checked]="allRegionsSelected()"
                         (change)="toggleAllRegions($event)"
                         id="all-regions"
                         class="w-5 h-5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]/20 transition-all cursor-pointer"
@@ -132,7 +133,7 @@ import {
                         >Seleccionar Todos</label
                         >
                       </div>
-                      @if (selectedRegions.size === 0) {
+                      @if (selectedRegionsCount() === 0) {
                         <span
                           class="text-xs text-gray-400 font-medium italic"
                           >Se asume "Todo el país"</span
@@ -142,7 +143,7 @@ import {
                       <div
                         class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar"
                         >
-                        @for (dep of departments; track dep) {
+                        @for (dep of departments(); track dep.id) {
                           <div
                             [class.bg-white]="isRegionSelected(dep.name)"
                 [class.border-[var(--color-primary)]]="
@@ -170,7 +171,7 @@ import {
                     }
                   </div>
                 }
-    
+
                 <!-- Status -->
                 <div
                   class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] bg-gray-50/30 mt-6"
@@ -197,15 +198,15 @@ import {
                     <app-toggle formControlName="is_active"></app-toggle>
                   </div>
                 </form>
-    
+
                 <div slot="footer" class="flex items-center justify-end gap-3 w-full">
-                  <app-button variant="ghost" (clicked)="close.emit()">
+                  <app-button variant="ghost" [disabled]="isSubmitting()" (clicked)="onClose()">
                     Cancelar
                   </app-button>
                   <app-button
                     variant="primary"
                     [loading]="isSubmitting()"
-                    [disabled]="form.invalid"
+                    [disabled]="form.invalid || isSubmitting()"
                     (clicked)="onSubmit()"
                     >
                     <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
@@ -216,7 +217,6 @@ import {
     `,
 })
 export class ShippingZoneModalComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
   readonly zone = input<ShippingZone>();
   readonly close = output<void>();
   readonly saved = output<void>();
@@ -224,15 +224,23 @@ export class ShippingZoneModalComponent implements OnInit {
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingService);
   private countryService: CountryService = inject(CountryService);
+  private toastService = inject(ToastService);
 
   form: FormGroup;
   readonly isSubmitting = signal(false);
 
-  countries: Country[] = [];
-  countryOptions: SelectorOption[] = [];
-  departments: Department[] = [];
-  loadingRegions = false;
-  selectedRegions: Set<string> = new Set();
+  readonly countries = signal<Country[]>([]);
+  readonly countryOptions = signal<SelectorOption[]>([]);
+  readonly departments = signal<Department[]>([]);
+  readonly loadingRegions = signal(false);
+  readonly selectedRegions = signal<Set<string>>(new Set());
+
+  readonly selectedRegionsCount = computed(() => this.selectedRegions().size);
+  readonly showRegions = signal(false);
+  readonly allRegionsSelected = computed(() => {
+    const deps = this.departments();
+    return deps.length > 0 && this.selectedRegions().size === deps.length;
+  });
 
   constructor() {
     this.form = this.fb.group({
@@ -243,11 +251,11 @@ export class ShippingZoneModalComponent implements OnInit {
   }
 
   ngOnInit() {
-    this.countries = this.countryService.getCountries();
-    this.countryOptions = this.countries.map((c) => ({
-      value: c.code,
-      label: c.name,
-    }));
+    const list = this.countryService.getCountries();
+    this.countries.set(list);
+    this.countryOptions.set(
+      list.map((c) => ({ value: c.code, label: c.name })),
+    );
 
     const zone = this.zone();
     if (zone) {
@@ -258,68 +266,74 @@ export class ShippingZoneModalComponent implements OnInit {
       });
 
       if (zone.regions) {
-        this.selectedRegions = new Set(zone.regions);
+        this.selectedRegions.set(new Set(zone.regions));
       }
 
-      // Trigger region load if country is set
+      this.refreshShowRegions();
       this.onCountryChange(false);
     }
   }
 
-  get showRegions(): boolean {
-    return this.form.get('country')?.value === 'CO';
-  }
-
-  get allRegionsSelected(): boolean {
-    return (
-      this.departments.length > 0 &&
-      this.selectedRegions.size === this.departments.length
-    );
+  private refreshShowRegions() {
+    this.showRegions.set(this.form.get('country')?.value === 'CO');
   }
 
   async onCountryChange(resetRegions = true) {
     const countryCode = this.form.get('country')?.value;
+    this.refreshShowRegions();
 
     if (resetRegions) {
-      this.selectedRegions.clear();
+      this.selectedRegions.set(new Set());
     }
 
     if (countryCode === 'CO') {
-      this.loadingRegions = true;
+      this.loadingRegions.set(true);
       try {
-        this.departments = await this.countryService.getDepartments();
+        const deps = await this.countryService.getDepartments();
+        this.departments.set(deps);
       } catch (e) {
-        console.error('Error loading departments', e);
+        const { userMessage, devMessage } = parseApiError(e);
+        console.error('Error loading departments', devMessage, e);
+        this.toastService.error(userMessage, 'Error al cargar departamentos');
       } finally {
-        this.loadingRegions = false;
+        this.loadingRegions.set(false);
       }
     } else {
-      this.departments = [];
+      this.departments.set([]);
     }
   }
 
   isRegionSelected(regionName: string): boolean {
-    return this.selectedRegions.has(regionName);
+    return this.selectedRegions().has(regionName);
   }
 
   toggleRegion(regionName: string) {
-    if (this.selectedRegions.has(regionName)) {
-      this.selectedRegions.delete(regionName);
-    } else {
-      this.selectedRegions.add(regionName);
-    }
+    this.selectedRegions.update((s) => {
+      const next = new Set(s);
+      if (next.has(regionName)) {
+        next.delete(regionName);
+      } else {
+        next.add(regionName);
+      }
+      return next;
+    });
   }
 
   toggleAllRegions(event: any) {
     if (event.target.checked) {
-      this.departments.forEach((d) => this.selectedRegions.add(d.name));
+      this.selectedRegions.set(new Set(this.departments().map((d) => d.name)));
     } else {
-      this.selectedRegions.clear();
+      this.selectedRegions.set(new Set());
     }
   }
 
+  onClose() {
+    if (this.isSubmitting()) return;
+    this.close.emit();
+  }
+
   async onSubmit() {
-    if (this.form.invalid) return;
+    if (this.form.invalid || this.isSubmitting()) return;
 
     this.isSubmitting.set(true);
     const formValue = this.form.value;
@@ -327,7 +341,7 @@ export class ShippingZoneModalComponent implements OnInit {
     const payload: Partial<ShippingZone> = {
       name: formValue.name,
       countries: [formValue.country],
-      regions: Array.from(this.selectedRegions),
+      regions: Array.from(this.selectedRegions()),
       cities: [],
       zip_codes: [],
       is_active: formValue.is_active,
@@ -340,12 +354,18 @@ export class ShippingZoneModalComponent implements OnInit {
 
     try {
       await firstValueFrom(request$);
-      this.isSubmitting.set(false);
+      this.toastService.success(
+        zone ? 'Zona actualizada correctamente.' : 'Zona creada correctamente.',
+        zone ? 'Actualizada' : 'Creada',
+      );
       this.saved.emit();
       this.close.emit();
     } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error saving shipping zone', devMessage, e);
+      this.toastService.error(userMessage, 'Error al guardar');
+    } finally {
       this.isSubmitting.set(false);
-      alert('Error al guardar la zona.');
     }
   }
 }

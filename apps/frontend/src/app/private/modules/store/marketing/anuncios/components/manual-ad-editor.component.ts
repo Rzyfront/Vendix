@@ -48,18 +48,18 @@ interface ManualEditorControls {
     TextareaComponent,
   ],
   template: `
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
       <div
-        class="flex min-h-[320px] items-center justify-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3"
+        class="manual-editor-stage relative flex min-h-[420px] items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] p-4"
       >
         @if (imageUrl()) {
           <div
-            class="flex max-h-[72vh] w-full max-w-[760px] items-center justify-center"
+            class="flex max-h-[72vh] w-full max-w-[820px] items-center justify-center"
             [ngClass]="previewAspectClass()"
           >
             <canvas
               #canvasRef
-              class="h-full w-full rounded-md object-contain shadow-sm"
+              class="h-full w-full rounded-lg bg-white object-contain shadow-lg ring-1 ring-black/10"
               aria-label="Lienzo de edicion manual"
             ></canvas>
           </div>
@@ -74,25 +74,28 @@ interface ManualEditorControls {
         }
       </div>
 
-      <form [formGroup]="form" class="space-y-4">
+      <form
+        [formGroup]="form"
+        class="space-y-5 border-t border-[var(--color-border)] pt-4 xl:border-l xl:border-t-0 xl:pl-5 xl:pt-0"
+      >
         <app-textarea
           formControlName="text"
-          label="Texto"
-          placeholder="Promo de temporada"
-          [rows]="4"
+          label="Mensaje"
+          placeholder="Ej: Oferta especial por tiempo limitado"
+          [rows]="3"
         ></app-textarea>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
           <app-input
             formControlName="textColor"
-            label="Color"
+            label="Color del texto"
             type="color"
             size="md"
           ></app-input>
 
           <app-input
             formControlName="fontSize"
-            label="Tamano"
+            label="Tamano del texto"
             type="number"
             [min]="32"
             [max]="180"
@@ -102,29 +105,26 @@ interface ManualEditorControls {
 
         <app-input
           formControlName="overlay"
-          label="Contraste"
+          label="Oscurecer fondo"
           type="number"
           [min]="0"
           [max]="70"
-          helperText="0 a 70"
           size="md"
         ></app-input>
 
-        <div class="grid grid-cols-2 gap-3">
-          <app-input-buttons
-            formControlName="position"
-            label="Posicion"
-            [options]="positionOptions"
-            [hideLabelsOnMobile]="true"
-          ></app-input-buttons>
+        <app-input-buttons
+          formControlName="position"
+          label="Posicion"
+          [options]="positionOptions"
+          [hideLabelsOnMobile]="false"
+        ></app-input-buttons>
 
-          <app-input-buttons
-            formControlName="align"
-            label="Alineacion"
-            [options]="alignOptions"
-            [hideLabelsOnMobile]="true"
-          ></app-input-buttons>
-        </div>
+        <app-input-buttons
+          formControlName="align"
+          label="Alineacion"
+          [options]="alignOptions"
+          [hideLabelsOnMobile]="false"
+        ></app-input-buttons>
       </form>
     </div>
 
@@ -138,6 +138,40 @@ interface ManualEditorControls {
       </app-alert-banner>
     }
   `,
+  styles: [
+    `
+      .manual-editor-stage {
+        background-color: var(--color-background);
+        background-image:
+          linear-gradient(
+            45deg,
+            var(--color-surface-muted) 25%,
+            transparent 25%
+          ),
+          linear-gradient(
+            -45deg,
+            var(--color-surface-muted) 25%,
+            transparent 25%
+          ),
+          linear-gradient(
+            45deg,
+            transparent 75%,
+            var(--color-surface-muted) 75%
+          ),
+          linear-gradient(
+            -45deg,
+            transparent 75%,
+            var(--color-surface-muted) 75%
+          );
+        background-position:
+          0 0,
+          0 14px,
+          14px -14px,
+          -14px 0;
+        background-size: 28px 28px;
+      }
+    `,
+  ],
 })
 export class ManualAdEditorComponent implements AfterViewInit {
   readonly imageUrl = input<string | null>(null);
@@ -147,6 +181,10 @@ export class ManualAdEditorComponent implements AfterViewInit {
   private readonly canvasRef =
     viewChild<ElementRef<HTMLCanvasElement>>('canvasRef');
   private renderVersion = 0;
+  private loadedImageUrl: string | null = null;
+  private loadedImage: HTMLImageElement | null = null;
+  private loadingImageUrl: string | null = null;
+  private loadingImagePromise: Promise<HTMLImageElement> | null = null;
 
   protected readonly positionOptions: InputButtonOption[] = [
     { value: 'top', label: 'Arriba', icon: 'arrow-up-circle' },
@@ -228,7 +266,7 @@ export class ManualAdEditorComponent implements AfterViewInit {
     context.fillRect(0, 0, canvas.width, canvas.height);
 
     try {
-      const image = await this.loadImage(imageUrl);
+      const image = await this.getLoadedImage(imageUrl);
       if (version !== this.renderVersion) return;
 
       this.drawCover(context, image, canvas.width, canvas.height);
@@ -251,6 +289,35 @@ export class ManualAdEditorComponent implements AfterViewInit {
       image.onerror = () => reject(new Error('Image load failed'));
       image.src = src;
     });
+  }
+
+  private getLoadedImage(src: string): Promise<HTMLImageElement> {
+    if (this.loadedImage && this.loadedImageUrl === src) {
+      return Promise.resolve(this.loadedImage);
+    }
+
+    if (this.loadingImagePromise && this.loadingImageUrl === src) {
+      return this.loadingImagePromise;
+    }
+
+    this.loadingImageUrl = src;
+    this.loadingImagePromise = this.loadImage(src)
+      .then((image) => {
+        if (this.loadingImageUrl === src) {
+          this.loadedImage = image;
+          this.loadedImageUrl = src;
+        }
+
+        return image;
+      })
+      .finally(() => {
+        if (this.loadingImageUrl === src) {
+          this.loadingImageUrl = null;
+          this.loadingImagePromise = null;
+        }
+      });
+
+    return this.loadingImagePromise;
   }
 
   private drawCover(

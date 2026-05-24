@@ -1,0 +1,108 @@
+meta {
+  name: POS Stock Scope - main_location
+  type: http
+  seq: 13
+}
+
+get {
+  url: http://{{url}}/store/products?pos_optimized=true&include_stock=true&limit=5
+  body: none
+  auth: inherit
+}
+
+params:query {
+  pos_optimized: true
+  include_stock: true
+  limit: 5
+}
+
+script:pre-request {
+  // Force pos_stock_scope = 'main_location' before running the GET so the
+  // assertions below verify the server-side scoping contract for POS reads.
+  //
+  // We PATCH /store/settings inline because Bruno requests are single-shot
+  // and the orchestrator does not guarantee that a sibling .bru already
+  // applied this state.
+  const axios = require('axios');
+  const baseUrl = bru.getEnvVar('url') || bru.getVar('url');
+  const token = bru.getEnvVar('token') || bru.getVar('token');
+
+  await axios({
+    method: 'PATCH',
+    url: `http://${baseUrl}/store/settings`,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    data: {
+      inventory: {
+        pos_stock_scope: 'main_location',
+      },
+    },
+    validateStatus: () => true,
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("HTTP 200 and data is an array", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.be.an('array');
+  });
+
+  test("All product.stock_levels entries are scoped to a single location (default_location_id)", function() {
+    const products = res.body.data || [];
+    if (products.length === 0) {
+      // Empty seed: nothing to verify, but flag for orchestrator awareness.
+      this.skip && this.skip();
+      return;
+    }
+
+    // Discover default_location_id self-referentially: under main_location
+    // scope the backend filters stock_levels to a single location id, so the
+    // first non-empty stock_levels entry tells us which id that is.
+    let defaultLocationId = null;
+    for (const product of products) {
+      const levels = product.stock_levels || [];
+      if (levels.length > 0 && levels[0].inventory_locations) {
+        defaultLocationId = levels[0].inventory_locations.id;
+        break;
+      }
+    }
+
+    if (defaultLocationId === null) {
+      // No product has any stock under the configured default location.
+      // Still a valid pass-through of the filter (everything excluded),
+      // but we cannot prove the scoping contract from this dataset.
+      this.skip && this.skip();
+      return;
+    }
+
+    bru.setVar('captured_default_location_id', defaultLocationId);
+
+    for (const product of products) {
+      const levels = product.stock_levels || [];
+      for (const level of levels) {
+        expect(level.inventory_locations, `product ${product.id} stock_level missing inventory_locations`).to.exist;
+        expect(level.inventory_locations.id, `product ${product.id} stock_level location mismatch`).to.equal(defaultLocationId);
+      }
+    }
+  });
+
+  test("Variant stock_quantity equals variant stock (recomputed scoped sum)", function() {
+    const products = res.body.data || [];
+    for (const product of products) {
+      const variants = product.product_variants || [];
+      for (const variant of variants) {
+        expect(variant, `variant ${variant.id} missing stock field`).to.have.property('stock');
+        expect(variant, `variant ${variant.id} missing stock_quantity field`).to.have.property('stock_quantity');
+        expect(variant.stock_quantity, `variant ${variant.id} stock_quantity != stock`).to.equal(variant.stock);
+      }
+    }
+  });
+}

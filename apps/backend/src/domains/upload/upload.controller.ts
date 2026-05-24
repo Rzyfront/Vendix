@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '@common/services/s3.service';
+import { RemoteImageService } from '@common/services/remote-image.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
@@ -22,7 +23,12 @@ import {
   ApiBody,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { UploadFileDto, UploadEntityType, GetPresignedUrlDto } from './dto';
+import {
+  UploadFileDto,
+  UploadEntityType,
+  GetPresignedUrlDto,
+  RemoteImagePreviewDto,
+} from './dto';
 
 @ApiTags('Upload')
 @ApiBearerAuth()
@@ -43,9 +49,18 @@ export class UploadController {
 
   constructor(
     private readonly s3Service: S3Service,
+    private readonly remoteImageService: RemoteImageService,
     private readonly s3PathHelper: S3PathHelper,
     private readonly prisma: GlobalPrismaService,
   ) {}
+
+  @Post('remote-image-preview')
+  @ApiOperation({
+    summary: 'Download a public image URL for client-side preview and cropping',
+  })
+  async getRemoteImagePreview(@Body() body: RemoteImagePreviewDto) {
+    return this.remoteImageService.fetchPreview(body.url);
+  }
 
   @Post()
   @ApiOperation({ summary: 'Upload a file to S3 with structured path' })

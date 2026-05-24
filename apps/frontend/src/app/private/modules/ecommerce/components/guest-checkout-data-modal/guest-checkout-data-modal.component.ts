@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  input,
   output,
   signal,
 } from '@angular/core';
@@ -17,12 +18,6 @@ export interface GuestCheckoutData {
   phone?: string;
   document_type?: string;
   document_number?: string;
-  address_line1?: string;
-  address_line2?: string;
-  city?: string;
-  state_province?: string;
-  country_code?: string;
-  postal_code?: string;
 }
 
 @Component({
@@ -42,15 +37,9 @@ export interface GuestCheckoutData {
       (cancel)="continueWithoutData()"
       title="Datos opcionales"
       subtitle="Puedes continuar sin registrarte. Estos datos solo ayudan a coordinar tu pedido o emitir factura a tu nombre."
-      size="lg"
+      size="md"
     >
       <form [formGroup]="form" class="guest-data-form">
-        <div class="guest-data-notice">
-          <strong>Es opcional.</strong>
-          Si no quieres compartir datos ahora, puedes continuar sin llenar el
-          formulario.
-        </div>
-
         <div class="guest-data-grid">
           <app-input
             label="Nombre"
@@ -76,63 +65,33 @@ export interface GuestCheckoutData {
           />
         </div>
 
-        <div class="guest-data-section-title">
-          Datos para factura electrónica si la necesitas
-        </div>
-        <div class="guest-data-grid">
-          <label class="guest-data-field">
-            <span>Tipo de documento</span>
-            <select formControlName="document_type">
-              <option value="">No indicar</option>
-              <option value="CC">CC</option>
-              <option value="NIT">NIT</option>
-              <option value="CE">CE</option>
-              <option value="PP">PP</option>
-              <option value="TI">TI</option>
-            </select>
-          </label>
-          <app-input
-            label="Número de documento"
-            formControlName="document_number"
-            placeholder="Documento"
-          />
-        </div>
-
-        <div class="guest-data-section-title">
-          Dirección opcional para coordinar entrega
-        </div>
-        <div class="guest-data-grid">
-          <app-input
-            label="Dirección"
-            formControlName="address_line1"
-            placeholder="Calle y número"
-          />
-          <app-input
-            label="Complemento"
-            formControlName="address_line2"
-            placeholder="Apto, piso, oficina"
-          />
-          <app-input
-            label="Ciudad"
-            formControlName="city"
-            placeholder="Ciudad"
-          />
-          <app-input
-            label="Departamento/Estado"
-            formControlName="state_province"
-            placeholder="Departamento"
-          />
-          <app-input
-            label="País"
-            formControlName="country_code"
-            placeholder="CO"
-          />
-          <app-input
-            label="Código postal"
-            formControlName="postal_code"
-            placeholder="Opcional"
-          />
-        </div>
+        @if (invoicingEnabled()) {
+          <div class="guest-data-section-title">
+            Datos para factura electrónica
+          </div>
+          <p class="guest-data-hint">
+            Opcional. Si llenas estos datos te emitiremos factura electrónica a
+            tu nombre; si no, te emitiremos un POS equivalente.
+          </p>
+          <div class="guest-data-grid">
+            <label class="guest-data-field">
+              <span>Tipo de documento</span>
+              <select formControlName="document_type">
+                <option value="">No indicar</option>
+                <option value="CC">CC</option>
+                <option value="NIT">NIT</option>
+                <option value="CE">CE</option>
+                <option value="PP">PP</option>
+                <option value="TI">TI</option>
+              </select>
+            </label>
+            <app-input
+              label="Número de documento"
+              formControlName="document_number"
+              placeholder="Documento"
+            />
+          </div>
+        }
       </form>
 
       <div slot="footer" class="guest-data-actions">
@@ -153,12 +112,10 @@ export interface GuestCheckoutData {
         gap: 1rem;
       }
 
-      .guest-data-notice {
-        padding: 0.875rem 1rem;
-        border-radius: var(--radius-md);
-        background: var(--color-primary-light);
-        color: var(--color-text-primary);
-        font-size: var(--fs-sm);
+      .guest-data-hint {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        margin: 0 0 0.5rem;
       }
 
       .guest-data-grid {
@@ -213,6 +170,7 @@ export interface GuestCheckoutData {
 })
 export class GuestCheckoutDataModalComponent {
   readonly isOpen = signal(false);
+  readonly invoicingEnabled = input<boolean>(false);
   readonly completed = output<GuestCheckoutData | null>();
 
   readonly form = new FormGroup({
@@ -222,12 +180,6 @@ export class GuestCheckoutDataModalComponent {
     phone: new FormControl('', { nonNullable: true }),
     document_type: new FormControl('', { nonNullable: true }),
     document_number: new FormControl('', { nonNullable: true }),
-    address_line1: new FormControl('', { nonNullable: true }),
-    address_line2: new FormControl('', { nonNullable: true }),
-    city: new FormControl('', { nonNullable: true }),
-    state_province: new FormControl('', { nonNullable: true }),
-    country_code: new FormControl('CO', { nonNullable: true }),
-    postal_code: new FormControl('', { nonNullable: true }),
   });
 
   open(): void {
@@ -249,14 +201,11 @@ export class GuestCheckoutDataModalComponent {
       key,
       String(val || '').trim(),
     ]);
-    const hasMeaningfulData = entries.some(
-      ([key, val]) => key !== 'country_code' && val.length > 0,
-    );
-    const cleaned = hasMeaningfulData
-      ? (Object.fromEntries(
-          entries.filter(([, val]) => val.length > 0),
-        ) as GuestCheckoutData)
-      : null;
+    const filtered = entries.filter(([, val]) => val.length > 0);
+    const cleaned =
+      filtered.length > 0
+        ? (Object.fromEntries(filtered) as GuestCheckoutData)
+        : null;
 
     this.isOpen.set(false);
     this.completed.emit(cleaned);
