@@ -1,7 +1,29 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StockLevelQueryDto } from './dto/stock-level-query.dto';
+import { SourcingSuggestionQueryDto } from './dto/sourcing-suggestion-query.dto';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
+import {
+  resolvePosStockScope,
+  resolveLowStockAlertsScope,
+  ResolvedInventoryScope,
+} from '../shared/helpers/pos-stock-scope.helper';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
+import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
+
+type SourcingLocation = {
+  id: number;
+  name: string;
+  quantity_available: number;
+};
+
+type SourcingSuggestionResult = {
+  main_location: SourcingLocation | null;
+  other_locations: SourcingLocation[];
+  suggestion: 'available' | 'transfer' | 'purchase';
+  requested_quantity: number;
+};
 
 @Injectable()
 export class StockLevelsService {
@@ -10,11 +32,15 @@ export class StockLevelsService {
     private stockLevelManager: StockLevelManager,
   ) {}
 
-  findAll(query: StockLevelQueryDto) {
+  async findAll(query: StockLevelQueryDto) {
+    const locationFilter = await this.resolveScopedLocationFilter(
+      query.location_id,
+      'pos',
+    );
     return this.prisma.stock_levels.findMany({
       where: {
         product_id: query.product_id,
-        location_id: query.location_id,
+        ...locationFilter,
       },
       include: {
         products: true,
@@ -24,11 +50,15 @@ export class StockLevelsService {
     });
   }
 
-  findByProduct(productId: number, query: StockLevelQueryDto) {
+  async findByProduct(productId: number, query: StockLevelQueryDto) {
+    const locationFilter = await this.resolveScopedLocationFilter(
+      query.location_id,
+      'pos',
+    );
     return this.prisma.stock_levels.findMany({
       where: {
         product_id: productId,
-        location_id: query.location_id,
+        ...locationFilter,
       },
       include: {
         products: true,
@@ -54,14 +84,18 @@ export class StockLevelsService {
     });
   }
 
-  getStockAlerts(query: StockLevelQueryDto) {
+  async getStockAlerts(query: StockLevelQueryDto) {
+    const locationFilter = await this.resolveScopedLocationFilter(
+      query.location_id,
+      'low_stock_alerts',
+    );
     return this.prisma.stock_levels.findMany({
       where: {
         quantity_available: {
           lte: this.prisma.stock_levels.fields.reorder_point,
         },
         product_id: query.product_id,
-        location_id: query.location_id,
+        ...locationFilter,
       },
       include: {
         products: true,
@@ -113,5 +147,176 @@ export class StockLevelsService {
     });
 
     return result.stock_level;
+  }
+
+  /**
+   * Computes a sourcing recommendation for a given product/variant and
+   * requested quantity. Splits availability between the store's main location
+   * (per inventory scope) and any other locations holding stock so the UI can
+   * suggest selling from main, transferring stock in, or purchasing more.
+   */
+  async getSourcingSuggestion(
+    query: SourcingSuggestionQueryDto,
+  ): Promise<SourcingSuggestionResult> {
+    const requestedQuantity = query.quantity;
+
+    const scope = await this.resolveScope('pos');
+
+    // Pull all stock rows for the product (and variant if provided) in the
+    // current store. StorePrismaService scopes `stock_levels` via the
+    // inventory_locations relation, so no extra tenant guard is needed.
+    const stockRows = await this.prisma.stock_levels.findMany({
+      where: {
+        product_id: query.product_id,
+        product_variant_id: query.product_variant_id ?? null,
+      },
+      select: {
+        location_id: true,
+        quantity_available: true,
+        inventory_locations: {
+          select: { id: true, name: true },
+        },
+      },
+    });
+
+    const mapped: SourcingLocation[] = stockRows.map((row) => ({
+      id: row.location_id,
+      name: row.inventory_locations?.name ?? `Location ${row.location_id}`,
+      quantity_available: row.quantity_available ?? 0,
+    }));
+
+    let mainLocation: SourcingLocation | null = null;
+    let otherLocations: SourcingLocation[] = [];
+
+    if (scope.scope === 'main_location') {
+      const mainId = scope.mainLocationId;
+      mainLocation = mapped.find((l) => l.id === mainId) ?? null;
+      otherLocations = mapped.filter(
+        (l) => l.id !== mainId && l.quantity_available > 0,
+      );
+    } else {
+      // all_locations: surface the store's default location (if any) as
+      // "main" purely for UI convenience; everything else is "other".
+      const defaultId = await this.getStoreDefaultLocationId();
+      if (defaultId != null) {
+        mainLocation = mapped.find((l) => l.id === defaultId) ?? null;
+        otherLocations = mapped.filter(
+          (l) => l.id !== defaultId && l.quantity_available > 0,
+        );
+      } else {
+        mainLocation = null;
+        otherLocations = mapped.filter((l) => l.quantity_available > 0);
+      }
+    }
+
+    const mainAvailable = mainLocation?.quantity_available ?? 0;
+    const otherTotal = otherLocations.reduce(
+      (sum, l) => sum + l.quantity_available,
+      0,
+    );
+
+    let suggestion: 'available' | 'transfer' | 'purchase';
+    if (mainAvailable >= requestedQuantity) {
+      suggestion = 'available';
+    } else {
+      const remaining = requestedQuantity - mainAvailable;
+      suggestion = otherTotal >= remaining ? 'transfer' : 'purchase';
+    }
+
+    return {
+      main_location: mainLocation,
+      other_locations: otherLocations,
+      suggestion,
+      requested_quantity: requestedQuantity,
+    };
+  }
+
+  // --------------------------------------------------------------------------
+  // Internal helpers
+  // --------------------------------------------------------------------------
+
+  /**
+   * Returns a partial `where` fragment that constrains queries to the main
+   * location when the caller did NOT pass an explicit `location_id`.
+   *
+   * - If `explicitLocationId` is set, it is honored as-is (manual override).
+   * - Otherwise, the configured inventory scope is consulted:
+   *     - `main_location` → filter by the resolved main location id
+   *     - `all_locations` → no filter (caller sees all locations)
+   *
+   * Returns `{}` (no constraint) for the `all_locations` case.
+   */
+  private async resolveScopedLocationFilter(
+    explicitLocationId: number | undefined,
+    kind: 'pos' | 'low_stock_alerts',
+  ): Promise<{ location_id?: number }> {
+    if (explicitLocationId != null) {
+      return { location_id: explicitLocationId };
+    }
+
+    const scope = await this.resolveScope(kind);
+    if (scope.scope === 'main_location') {
+      return { location_id: scope.mainLocationId };
+    }
+    return {};
+  }
+
+  /**
+   * Resolves the configured inventory scope for the current store, choosing
+   * between the POS and low-stock-alerts settings keys.
+   */
+  private async resolveScope(
+    kind: 'pos' | 'low_stock_alerts',
+  ): Promise<ResolvedInventoryScope> {
+    const [store, settings] = await Promise.all([
+      this.loadStoreScopeRef(),
+      this.loadMergedSettings(),
+    ]);
+
+    return kind === 'pos'
+      ? resolvePosStockScope(store, settings)
+      : resolveLowStockAlertsScope(store, settings);
+  }
+
+  /**
+   * Loads the minimal store row needed to resolve the inventory scope.
+   *
+   * StorePrismaService exposes `stores` via the unscoped baseClient (the
+   * tenant scope is applied at the relation level on other models), so we
+   * filter explicitly by the current store_id taken from RequestContext.
+   */
+  private async loadStoreScopeRef(): Promise<{
+    default_location_id: number | null;
+  }> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      return { default_location_id: null };
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { default_location_id: true },
+    });
+    return { default_location_id: store?.default_location_id ?? null };
+  }
+
+  /**
+   * Returns the raw default_location_id (or null) without the scope wrapper.
+   */
+  private async getStoreDefaultLocationId(): Promise<number | null> {
+    const ref = await this.loadStoreScopeRef();
+    return ref.default_location_id;
+  }
+
+  /**
+   * Reads the persisted `store_settings.settings` JSON for the current store
+   * and merges it with defaults. We deliberately avoid SettingsService.getSettings()
+   * here because that method also signs S3 URLs and shapes the response for
+   * the frontend — we only need the merged config.
+   */
+  private async loadMergedSettings(): Promise<StoreSettings> {
+    const row = await this.prisma.store_settings.findFirst({
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 }

@@ -787,6 +787,7 @@ export class PosPaymentService {
       discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(cartState.summary.total.toFixed(2)),
+      is_draft: true,
       requires_payment: false,
       ...(register_id ? { register_id } : {}),
       seller_user_id: user_id,

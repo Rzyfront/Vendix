@@ -1,11 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
 export interface ReviewsResponse {
   success: boolean;
+  enabled: boolean;
   reviews: any[];
   meta: {
     total: number;
@@ -34,7 +36,7 @@ export class EcommerceReviewsService {
   constructor(
     private http: HttpClient,
     private domain_service: TenantFacade,
-  ) { }
+  ) {}
 
   private getHeaders(): HttpHeaders {
     const domainConfig = this.domain_service.getCurrentDomainConfig();
@@ -54,29 +56,58 @@ export class EcommerceReviewsService {
     if (query.limit) params = params.set('limit', query.limit.toString());
     if (query.sort_by) params = params.set('sort_by', query.sort_by);
     if (query.rating) params = params.set('rating', query.rating.toString());
+    params = params.set('product_id', productId.toString());
 
-    return this.http.get<ReviewsResponse>(
-      `${this.api_url}/product/${productId}`,
-      {
-        headers: this.getHeaders(),
-        params,
-      },
-    );
+    return this.http
+      .get<{ success: boolean; data: Omit<ReviewsResponse, 'success'> }>(
+        this.api_url,
+        {
+          headers: this.getHeaders(),
+          params,
+        },
+      )
+      .pipe(
+        map((response) => ({
+          success: response.success,
+          enabled: response.data?.enabled !== false,
+          reviews: response.data?.reviews || [],
+          meta: response.data?.meta || {
+            total: 0,
+            page: query.page || 1,
+            limit: query.limit || 10,
+            totalPages: 0,
+          },
+          rating_distribution: response.data?.rating_distribution || {
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0,
+          },
+          avg_rating: response.data?.avg_rating || 0,
+          total_count: response.data?.total_count || 0,
+        })),
+      );
   }
 
   canReview(
     productId: number,
   ): Observable<{ success: boolean; data: { can_review: boolean; reason?: string } }> {
-    return this.http.get<{ success: boolean; data: { can_review: boolean; reason?: string } }>(
-      `${this.api_url}/can-review/${productId}`,
-      {
-        headers: this.getHeaders(),
-      },
-    );
+    return this.http.get<{
+      success: boolean;
+      data: { can_review: boolean; reason?: string };
+    }>(`${this.api_url}/can-review/${productId}`, {
+      headers: this.getHeaders(),
+    });
   }
 
   submitReview(
-    data: { product_id: number; rating: number; title?: string; comment: string },
+    data: {
+      product_id: number;
+      rating: number;
+      title?: string;
+      comment: string;
+    },
   ): Observable<{ success: boolean; data: any }> {
     return this.http.post<{ success: boolean; data: any }>(
       this.api_url,
@@ -91,7 +122,7 @@ export class EcommerceReviewsService {
     id: number,
     data: { rating?: number; title?: string; comment?: string },
   ): Observable<{ success: boolean; data: any }> {
-    return this.http.patch<{ success: boolean; data: any }>(
+    return this.http.put<{ success: boolean; data: any }>(
       `${this.api_url}/${id}`,
       data,
       {

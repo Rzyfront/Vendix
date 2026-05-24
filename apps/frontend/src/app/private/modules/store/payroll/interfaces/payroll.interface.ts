@@ -120,6 +120,14 @@ export interface CreateEmployeeDto {
   severance_fund?: string;
   compensation_fund?: string;
   user_id?: number;
+  associate_if_exists?: boolean;
+}
+
+export interface ExistingEmployeePayload {
+  id: number;
+  full_name: string;
+  document_number: string;
+  primary_store_name: string | null;
 }
 
 export interface AvailableUser {

@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsEnum,
   IsDateString,
+  IsBoolean,
   MaxLength,
   Min,
   IsInt,
@@ -106,4 +107,8 @@ export class CreateEmployeeDto {
   @IsString()
   @MaxLength(100)
   compensation_fund?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  associate_if_exists?: boolean;
 }

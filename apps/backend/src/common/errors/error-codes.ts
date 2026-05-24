@@ -78,6 +78,31 @@ export const ErrorCodes = {
     httpStatus: 502,
     devMessage: 'File upload failed',
   },
+  UPLOAD_REMOTE_URL_001: {
+    code: 'UPLOAD_REMOTE_URL_001',
+    httpStatus: 400,
+    devMessage: 'Remote image URL is invalid',
+  },
+  UPLOAD_REMOTE_FORBIDDEN_001: {
+    code: 'UPLOAD_REMOTE_FORBIDDEN_001',
+    httpStatus: 403,
+    devMessage: 'Remote image URL is not allowed',
+  },
+  UPLOAD_REMOTE_TYPE_001: {
+    code: 'UPLOAD_REMOTE_TYPE_001',
+    httpStatus: 415,
+    devMessage: 'Remote URL did not return a supported image',
+  },
+  UPLOAD_REMOTE_SIZE_001: {
+    code: 'UPLOAD_REMOTE_SIZE_001',
+    httpStatus: 413,
+    devMessage: 'Remote image is too large',
+  },
+  UPLOAD_REMOTE_FETCH_001: {
+    code: 'UPLOAD_REMOTE_FETCH_001',
+    httpStatus: 502,
+    devMessage: 'Remote image could not be downloaded',
+  },
 
   // Payments
   PAY_INVALID_ORDER_001: {
@@ -402,6 +427,23 @@ export const ErrorCodes = {
     code: 'STORE_CONTEXT_001',
     httpStatus: 400,
     devMessage: 'Store context required',
+  },
+
+  // Marketing
+  MKT_AD_STORAGE_001: {
+    code: 'MKT_AD_STORAGE_001',
+    httpStatus: 503,
+    devMessage: 'Marketing ad creatives storage is not available',
+  },
+  MKT_AD_RATE_LIMIT_001: {
+    code: 'MKT_AD_RATE_LIMIT_001',
+    httpStatus: 429,
+    devMessage: 'Daily marketing ad generation limit reached',
+  },
+  MKT_AD_RATE_LIMIT_002: {
+    code: 'MKT_AD_RATE_LIMIT_002',
+    httpStatus: 503,
+    devMessage: 'Marketing ad generation rate limit is not available',
   },
 
   // Products
@@ -1066,7 +1108,8 @@ export const ErrorCodes = {
   FISCAL_DOCUMENT_UNSUPPORTED: {
     code: 'FISCAL_DOCUMENT_UNSUPPORTED',
     httpStatus: 501,
-    devMessage: 'This fiscal document type is not implemented for DIAN own software',
+    devMessage:
+      'This fiscal document type is not implemented for DIAN own software',
   },
 
   // Payroll
@@ -1109,6 +1152,18 @@ export const ErrorCodes = {
     code: 'PAYROLL_DUP_003',
     httpStatus: 409,
     devMessage: 'Payroll number already exists',
+  },
+  PAYROLL_CROSS_STORE_FISCAL_001: {
+    code: 'PAYROLL_CROSS_STORE_FISCAL_001',
+    httpStatus: 409,
+    devMessage:
+      'Employee belongs to another store with a different fiscal entity (NIT). Cross-store association blocked under STORE fiscal_scope.',
+  },
+  PAYROLL_ASSOCIATE_CONFIRM_001: {
+    code: 'PAYROLL_ASSOCIATE_CONFIRM_001',
+    httpStatus: 409,
+    devMessage:
+      'Employee already exists in the organization. Confirmation required to associate to the current store.',
   },
   PAYROLL_VALIDATE_001: {
     code: 'PAYROLL_VALIDATE_001',
@@ -1274,7 +1329,8 @@ export const ErrorCodes = {
   DIAN_TEST_SET_001: {
     code: 'DIAN_TEST_SET_001',
     httpStatus: 412,
-    devMessage: 'DIAN test set evidence is required before production enablement',
+    devMessage:
+      'DIAN test set evidence is required before production enablement',
   },
   DIAN_ENABLEMENT_001: {
     code: 'DIAN_ENABLEMENT_001',
@@ -1681,6 +1737,11 @@ export const ErrorCodes = {
     code: 'REV_REPORT_DUP_001',
     httpStatus: 409,
     devMessage: 'Ya reportó esta reseña',
+  },
+  REV_DISABLED_001: {
+    code: 'REV_DISABLED_001',
+    httpStatus: 403,
+    devMessage: 'Las reseñas están desactivadas para esta tienda',
   },
 
   // AI Agent

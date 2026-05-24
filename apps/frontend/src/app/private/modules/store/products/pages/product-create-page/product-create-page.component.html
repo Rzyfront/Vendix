@@ -437,11 +437,11 @@
                   class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all"
                 >
                   <app-icon
-                    name="plus"
+                    name="image-plus"
                     size="20"
                     class="text-gray-400"
                   ></app-icon>
-                  <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
+                  <span class="text-[9px] text-gray-400 mt-0.5">Agregar</span>
                 </button>
               }
 
@@ -481,13 +481,6 @@
               }
             </div>
 
-            <input
-              type="file"
-              class="hidden file-input"
-              accept="image/*"
-              multiple
-              (change)="onFileSelect($event)"
-            />
           </div>
         </section>
 
@@ -999,7 +992,7 @@
                   class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all group"
                 >
                   <app-icon
-                    name="plus"
+                    name="image-plus"
                     size="20"
                     class="text-gray-400 group-hover:text-primary-500 transition-colors"
                   ></app-icon>
@@ -1036,21 +1029,14 @@
                     class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
                   >
                     <app-icon
-                      name="upload-cloud"
+                      name="image-plus"
                       size="24"
                       class="text-primary-500"
                     ></app-icon>
                   </div>
                   <p class="text-[13px] font-semibold text-gray-700">
-                    Subir imágenes
+                    Agregar imágenes
                   </p>
-                  <input
-                    type="file"
-                    class="hidden file-input"
-                    accept="image/*"
-                    multiple
-                    (change)="onFileSelect($event)"
-                  />
                 </div>
               </div>
             }
@@ -2694,3 +2680,11 @@
   (save)="onAdjustmentSave($event)"
   (saveAndComplete)="onAdjustmentSaveAndComplete($event)"
 ></app-adjustment-create-modal>
+
+<!-- Product Image Source Modal -->
+<app-product-image-source-modal
+  [isOpen]="isImageSourceModalOpen()"
+  (isOpenChange)="isImageSourceModalOpen.set($event)"
+  [remainingSlots]="remainingImageSlots()"
+  (imagesAdded)="onImagesFromModal($event)"
+></app-product-image-source-modal>

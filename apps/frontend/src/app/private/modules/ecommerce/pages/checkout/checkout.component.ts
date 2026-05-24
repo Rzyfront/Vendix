@@ -118,6 +118,7 @@ export class CheckoutComponent implements OnInit {
   readonly is_loading = signal(true);
   readonly is_submitting = signal(false);
   readonly error_message = signal('');
+  readonly invoicingEnabled = signal(false);
 
   // Wompi Widget
   readonly isWompiPayment = signal(false);
@@ -225,6 +226,11 @@ export class CheckoutComponent implements OnInit {
     this.setupLocationData();
     this.loadData();
     this.loadRecommendations();
+
+    this.checkout_service
+      .getInvoicingEligibility()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((r) => this.invoicingEnabled.set(r.invoicing_enabled));
   }
 
   /**

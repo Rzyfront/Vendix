@@ -242,6 +242,11 @@ export const APP_MODULES: {
           description: 'Cupones de descuento',
         },
         {
+          key: 'marketing_anuncios',
+          label: 'Anuncios',
+          description: 'Creatividades promocionales con IA',
+        },
+        {
           key: 'marketing_social_sales',
           label: 'Social Sales',
           description: 'WhatsApp, inbox social y automatización de ventas',

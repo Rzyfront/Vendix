@@ -29,6 +29,35 @@ export interface AIRequestOptions {
     | { type: 'function'; function: { name: string } };
 }
 
+export type AIImageSize =
+  | '1024x1024'
+  | '1024x1536'
+  | '1536x1024'
+  | 'auto'
+  | (string & {});
+
+export type AIImageQuality = 'low' | 'medium' | 'high' | 'auto';
+export type AIImageFormat = 'png' | 'jpeg' | 'webp';
+
+export interface AIImageReference {
+  url: string;
+  detail?: 'auto' | 'low' | 'high' | 'original';
+}
+
+export interface AIImageRequestOptions {
+  model?: string;
+  responseModel?: string;
+  size?: AIImageSize;
+  quality?: AIImageQuality;
+  outputFormat?: AIImageFormat;
+  outputCompression?: number;
+  background?: 'transparent' | 'opaque' | 'auto';
+  partialImages?: number;
+  inputFidelity?: 'high' | 'low';
+  action?: 'auto' | 'generate' | 'edit';
+  referenceImages?: AIImageReference[];
+}
+
 export interface AIResponse {
   success: boolean;
   content?: string;
@@ -51,6 +80,34 @@ export interface AIStreamChunk {
     completionTokens: number;
     totalTokens: number;
   };
+  error?: string;
+}
+
+export interface AIImageResponse {
+  success: boolean;
+  imageBase64?: string;
+  revisedPrompt?: string;
+  model?: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  error?: string;
+}
+
+export interface AIImageStreamChunk {
+  type: 'progress' | 'partial_image' | 'completed' | 'done' | 'error';
+  message?: string;
+  imageBase64?: string;
+  partialImageIndex?: number;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  model?: string;
+  revisedPrompt?: string;
   error?: string;
 }
 
@@ -89,4 +146,12 @@ export interface AIProvider {
     messages: AIMessage[],
     options?: AIRequestOptions,
   ): AsyncGenerator<AIStreamChunk>;
+  generateImage?(
+    prompt: string,
+    options?: AIImageRequestOptions,
+  ): Promise<AIImageResponse>;
+  generateImageStream?(
+    prompt: string,
+    options?: AIImageRequestOptions,
+  ): AsyncGenerator<AIImageStreamChunk>;
 }

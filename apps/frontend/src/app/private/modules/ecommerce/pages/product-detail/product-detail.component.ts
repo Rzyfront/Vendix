@@ -26,6 +26,7 @@ import {
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { EcommerceReviewsService } from '../../services/reviews.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { ProductCarouselComponent } from '../../components/product-carousel';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
@@ -379,6 +380,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           />
 
           <!-- Reviews Section -->
+          @if (reviewsEnabled() === true) {
           <div class="reviews-section">
             <h3 class="rv-section-title">
               Opiniones ({{ reviewsTotalCount() }})
@@ -552,7 +554,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                     [size]="24"
                     class="text-green-500"
                   />
-                  <p>Tu reseña fue enviada y está pendiente de moderación.</p>
+                  <p>Tu reseña fue publicada.</p>
                 </div>
               } @else if (canWriteReview()?.can_review) {
                 <h4 class="rv-form-title">Escribe tu opinión</h4>
@@ -603,8 +605,12 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                   Compra este producto para dejar una reseña.
                 </p>
               }
+              @if (reviewErrorMessage()) {
+                <p class="rv-error">{{ reviewErrorMessage() }}</p>
+              }
             </div>
           </div>
+          }
         </div>
       }
     </div>
@@ -1185,6 +1191,11 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           background: var(--color-surface);
           border-radius: var(--radius-md);
         }
+        .rv-error {
+          font-size: 0.875rem;
+          color: var(--color-error);
+          margin: 0.75rem 0 0;
+        }
       }
 
       /* ─── Mobile Compact ─── */
@@ -1525,6 +1536,7 @@ export class ProductDetailComponent implements OnInit {
   reviewsTotalPages = signal(1);
   reviewsTotalCount = signal(0);
   reviewsSortBy = signal<'recent' | 'helpful'>('recent');
+  reviewsEnabled = signal<boolean | null>(null);
   ratingDistribution = signal<Record<number, number>>({
     1: 0,
     2: 0,
@@ -1538,6 +1550,7 @@ export class ProductDetailComponent implements OnInit {
   );
   reviewSubmitting = signal(false);
   reviewSubmitted = signal(false);
+  reviewErrorMessage = signal<string | null>(null);
 
   // Computed
   latestReviews = computed(() => this.reviewsList());
@@ -1574,6 +1587,7 @@ export class ProductDetailComponent implements OnInit {
   loadProduct(slug: string): void {
     this.isLoading.set(true);
     this.hasError.set(false);
+    this.resetReviewsState();
     this.catalogService.getProductBySlug(slug).subscribe({
       next: (response) => {
         if (response.success) {
@@ -1628,6 +1642,7 @@ export class ProductDetailComponent implements OnInit {
 
   loadReviews(productId: number): void {
     this.reviewsLoading.set(true);
+    this.reviewErrorMessage.set(null);
     this.reviewsService
       .getProductReviews(productId, {
         page: this.reviewsPage(),
@@ -1638,6 +1653,13 @@ export class ProductDetailComponent implements OnInit {
       .subscribe({
         next: (res) => {
           if (res.success !== false) {
+            if (res.enabled === false) {
+              this.reviewsEnabled.set(false);
+              this.clearReviews();
+              this.reviewsLoading.set(false);
+              return;
+            }
+            this.reviewsEnabled.set(true);
             this.reviewsList.set(res.reviews || []);
             this.reviewsTotalPages.set(res.meta?.totalPages || 1);
             this.reviewsTotalCount.set(res.total_count || 0);
@@ -1648,7 +1670,17 @@ export class ProductDetailComponent implements OnInit {
           }
           this.reviewsLoading.set(false);
         },
-        error: () => this.reviewsLoading.set(false),
+        error: (error) => {
+          const parsed = parseApiError(error);
+          if (parsed.errorCode === 'REV_DISABLED_001') {
+            this.reviewsEnabled.set(false);
+            this.clearReviews();
+          } else {
+            this.reviewsEnabled.set(true);
+            this.reviewErrorMessage.set(parsed.userMessage);
+          }
+          this.reviewsLoading.set(false);
+        },
       });
   }
 
@@ -1660,6 +1692,17 @@ export class ProductDetailComponent implements OnInit {
         next: (res) => {
           if (res.success !== false) {
             this.canWriteReview.set(res.data);
+            if (res.data?.reason === 'reviews_disabled') {
+              this.reviewsEnabled.set(false);
+              this.clearReviews();
+            }
+          }
+        },
+        error: (error) => {
+          const parsed = parseApiError(error);
+          if (parsed.errorCode === 'REV_DISABLED_001') {
+            this.reviewsEnabled.set(false);
+            this.clearReviews();
           }
         },
       });
@@ -1679,6 +1722,7 @@ export class ProductDetailComponent implements OnInit {
   }
 
   onVoteReview(reviewId: number, isHelpful: boolean): void {
+    this.reviewErrorMessage.set(null);
     this.reviewsService
       .voteReview(reviewId, isHelpful)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -1687,6 +1731,7 @@ export class ProductDetailComponent implements OnInit {
           const p = this.product();
           if (p) this.loadReviews(p.id);
         },
+        error: (error) => this.handleReviewActionError(error),
       });
   }
 
@@ -1828,6 +1873,7 @@ export class ProductDetailComponent implements OnInit {
     const p = this.product();
     if (!p) return;
     this.reviewSubmitting.set(true);
+    this.reviewErrorMessage.set(null);
     this.reviewsService
       .submitReview({
         product_id: p.id,
@@ -1844,7 +1890,39 @@ export class ProductDetailComponent implements OnInit {
           this.loadReviews(p.id);
           this.checkCanReview(p.id);
         },
-        error: () => this.reviewSubmitting.set(false),
+        error: (error) => {
+          this.reviewSubmitting.set(false);
+          this.handleReviewActionError(error);
+        },
       });
+  }
+
+  private resetReviewsState(): void {
+    this.reviewsEnabled.set(null);
+    this.reviewErrorMessage.set(null);
+    this.reviewSubmitted.set(false);
+    this.canWriteReview.set(null);
+    this.reviewsPage.set(1);
+    this.reviewsSortBy.set('recent');
+    this.clearReviews();
+  }
+
+  private clearReviews(): void {
+    this.reviewsList.set([]);
+    this.reviewsTotalPages.set(1);
+    this.reviewsTotalCount.set(0);
+    this.ratingDistribution.set({ 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+    this.avgRating.set(0);
+  }
+
+  private handleReviewActionError(error: unknown): void {
+    const parsed = parseApiError(error);
+    if (parsed.errorCode === 'REV_DISABLED_001') {
+      this.reviewsEnabled.set(false);
+      this.clearReviews();
+      return;
+    }
+
+    this.reviewErrorMessage.set(parsed.userMessage);
   }
 }

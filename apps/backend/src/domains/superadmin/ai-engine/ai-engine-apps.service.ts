@@ -46,6 +46,7 @@ export class AIEngineAppsService {
         retry_config: dto.retry_config as any,
         is_active: dto.is_active ?? true,
         metadata: dto.metadata as any,
+        ai_feature_category: dto.ai_feature_category ?? null,
         updated_at: new Date(),
       },
       include: {
@@ -166,6 +167,7 @@ export class AIEngineAppsService {
         rate_limit: dto.rate_limit as any,
         retry_config: dto.retry_config as any,
         metadata: dto.metadata as any,
+        ai_feature_category: dto.ai_feature_category,
         updated_at: new Date(),
       },
       include: {

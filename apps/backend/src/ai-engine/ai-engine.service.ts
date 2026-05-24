@@ -9,6 +9,9 @@ import {
   AIRequestOptions,
   AIResponse,
   AIStreamChunk,
+  AIImageRequestOptions,
+  AIImageResponse,
+  AIImageStreamChunk,
 } from './interfaces/ai-provider.interface';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
@@ -534,6 +537,267 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
+  async runImage(
+    appKey: string,
+    variables?: Record<string, string>,
+    imageOptions?: AIImageRequestOptions,
+  ): Promise<AIImageResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AIImageResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+
+    try {
+      const app = await this.prisma.ai_engine_applications.findUnique({
+        where: { key: appKey },
+      });
+
+      if (!app) {
+        throw new VendixHttpException(ErrorCodes.AI_APP_001);
+      }
+
+      if (!app.is_active) {
+        throw new VendixHttpException(ErrorCodes.AI_APP_003);
+      }
+
+      await this.runSubscriptionGate(appKey, app.ai_feature_category);
+      await this.checkRateLimit(app);
+
+      resolvedConfigId = app.config_id || this.defaultConfigId;
+      const provider = app.config_id
+        ? this.providers.get(app.config_id)
+        : this.getDefaultProvider();
+
+      if (!provider) {
+        throw new VendixHttpException(
+          app.config_id ? ErrorCodes.AI_CONFIG_001 : ErrorCodes.AI_PROVIDER_002,
+        );
+      }
+
+      if (!provider.generateImage) {
+        logResponse = {
+          success: false,
+          error: 'Image generation not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const prompt = this.buildImagePrompt(app, variables);
+      const response = await provider.generateImage(
+        prompt,
+        this.buildImageOptions(app, imageOptions),
+      );
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      const latencyMs = Date.now() - startTime;
+      const context = RequestContextService.getContext();
+      const configSettings = resolvedConfigId
+        ? this.configSettings.get(resolvedConfigId)
+        : undefined;
+
+      const costUsd = this.aiLoggingService.calculateCost(
+        configSettings,
+        logResponse.usage?.promptTokens ?? 0,
+        logResponse.usage?.completionTokens ?? 0,
+      );
+
+      this.aiLoggingService.logRequest({
+        app_key: appKey,
+        config_id: resolvedConfigId ?? undefined,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+        user_id: context?.user_id,
+        model: logResponse.model,
+        prompt_tokens: logResponse.usage?.promptTokens ?? 0,
+        completion_tokens: logResponse.usage?.completionTokens ?? 0,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: logStatus,
+        error_message: logStatus === 'error' ? logResponse.error : undefined,
+        input_preview: variables ? JSON.stringify(variables) : undefined,
+      });
+
+      this.eventEmitter.emit('ai.request.completed', {
+        app_key: appKey,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: logStatus,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+      });
+    }
+  }
+
+  async *runImageStream(
+    appKey: string,
+    variables?: Record<string, string>,
+    imageOptions?: AIImageRequestOptions,
+  ): AsyncGenerator<AIImageStreamChunk> {
+    const startTime = Date.now();
+    let lastChunk: AIImageStreamChunk | null = null;
+    let completedChunk: AIImageStreamChunk | null = null;
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const app = await this.prisma.ai_engine_applications.findUnique({
+        where: { key: appKey },
+      });
+
+      if (!app) {
+        lastChunk = { type: 'error', error: 'AI application not found' };
+        yield lastChunk;
+        return;
+      }
+
+      if (!app.is_active) {
+        lastChunk = { type: 'error', error: 'AI application is disabled' };
+        yield lastChunk;
+        return;
+      }
+
+      featureCategory = app.ai_feature_category;
+
+      try {
+        await this.runSubscriptionGate(appKey, app.ai_feature_category);
+      } catch (err: any) {
+        lastChunk = {
+          type: 'error',
+          error: err?.message ?? 'Subscription gate denied',
+        };
+        yield lastChunk;
+        return;
+      }
+
+      await this.checkRateLimit(app);
+
+      resolvedConfigId = app.config_id || this.defaultConfigId;
+      const provider = app.config_id
+        ? this.providers.get(app.config_id)
+        : this.getDefaultProvider();
+
+      if (!provider) {
+        lastChunk = { type: 'error', error: 'No AI provider configured' };
+        yield lastChunk;
+        return;
+      }
+
+      const prompt = this.buildImagePrompt(app, variables);
+      const options = this.buildImageOptions(app, imageOptions);
+
+      if (provider.generateImageStream) {
+        for await (const chunk of provider.generateImageStream(
+          prompt,
+          options,
+        )) {
+          lastChunk = chunk;
+          if (chunk.type === 'completed') {
+            completedChunk = chunk;
+          }
+          yield chunk;
+          if (chunk.type === 'error') return;
+        }
+      } else if (provider.generateImage) {
+        yield {
+          type: 'progress',
+          message: 'Generando imagen',
+          model: options.model,
+        };
+        const response = await provider.generateImage(prompt, options);
+        if (!response.success || !response.imageBase64) {
+          lastChunk = {
+            type: 'error',
+            error: response.error || 'Image model did not return data',
+          };
+          yield lastChunk;
+          return;
+        }
+        completedChunk = {
+          type: 'completed',
+          imageBase64: response.imageBase64,
+          usage: response.usage,
+          model: response.model,
+          revisedPrompt: response.revisedPrompt,
+        };
+        lastChunk = completedChunk;
+        yield completedChunk;
+        lastChunk = {
+          type: 'done',
+          usage: response.usage,
+          model: response.model,
+        };
+        yield lastChunk;
+      } else {
+        lastChunk = {
+          type: 'error',
+          error: 'Image generation not supported by this provider',
+        };
+        yield lastChunk;
+        return;
+      }
+
+      if (completedChunk) {
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+      }
+    } catch (error: any) {
+      lastChunk = { type: 'error', error: error.message };
+      yield lastChunk;
+    } finally {
+      const latencyMs = Date.now() - startTime;
+      const context = RequestContextService.getContext();
+      const configSettings = resolvedConfigId
+        ? this.configSettings.get(resolvedConfigId)
+        : undefined;
+
+      const usage = completedChunk?.usage;
+      const costUsd = this.aiLoggingService.calculateCost(
+        configSettings,
+        usage?.promptTokens ?? 0,
+        usage?.completionTokens ?? 0,
+      );
+
+      this.aiLoggingService.logRequest({
+        app_key: appKey,
+        config_id: resolvedConfigId ?? undefined,
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+        user_id: context?.user_id,
+        model: completedChunk?.model,
+        prompt_tokens: usage?.promptTokens ?? 0,
+        completion_tokens: usage?.completionTokens ?? 0,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: lastChunk?.type === 'error' ? 'error' : 'success',
+        error_message:
+          lastChunk?.type === 'error' ? lastChunk.error : undefined,
+        input_preview: variables ? JSON.stringify(variables) : undefined,
+      });
+
+      this.eventEmitter.emit('ai.request.completed', {
+        app_key: appKey,
+        cost_usd: costUsd,
+        latency_ms: latencyMs,
+        status: lastChunk?.type === 'error' ? 'error' : 'success',
+        organization_id: context?.organization_id,
+        store_id: context?.store_id,
+        feature_category: featureCategory,
+      });
+    }
+  }
+
   async getApplication(appKey: string) {
     const app = await this.prisma.ai_engine_applications.findUnique({
       where: { key: appKey },
@@ -549,6 +813,58 @@ export class AIEngineService implements OnModuleInit {
     }
 
     return app;
+  }
+
+  private buildImagePrompt(
+    app: any,
+    variables?: Record<string, string>,
+  ): string {
+    const parts: string[] = [];
+
+    if (app.system_prompt) {
+      parts.push(this.interpolate(app.system_prompt, variables));
+    }
+
+    if (app.prompt_template) {
+      parts.push(this.interpolate(app.prompt_template, variables));
+    }
+
+    if (parts.length > 0) return parts.join('\n\n');
+    return variables ? JSON.stringify(variables) : '';
+  }
+
+  private buildImageOptions(
+    app: any,
+    overrides?: AIImageRequestOptions,
+  ): AIImageRequestOptions {
+    const metadata = (app.metadata as Record<string, any> | null) || {};
+    const imageConfig = metadata.image_generation || metadata;
+
+    return {
+      model:
+        overrides?.model ||
+        imageConfig.image_model ||
+        imageConfig.model ||
+        undefined,
+      responseModel:
+        overrides?.responseModel || imageConfig.response_model || undefined,
+      size: overrides?.size || imageConfig.size || '1024x1024',
+      quality: overrides?.quality || imageConfig.quality || 'auto',
+      outputFormat:
+        overrides?.outputFormat || imageConfig.output_format || 'png',
+      outputCompression:
+        overrides?.outputCompression ?? imageConfig.output_compression,
+      background: overrides?.background || imageConfig.background || 'auto',
+      partialImages:
+        overrides?.partialImages ?? imageConfig.partial_images ?? 2,
+      inputFidelity:
+        overrides?.inputFidelity || imageConfig.input_fidelity || undefined,
+      action:
+        overrides?.action ||
+        imageConfig.action ||
+        (overrides?.referenceImages?.length ? 'auto' : 'generate'),
+      referenceImages: overrides?.referenceImages,
+    };
   }
 
   private interpolate(
@@ -731,6 +1047,7 @@ export class AIEngineService implements OnModuleInit {
         return content;
       case 'markdown':
       case 'html':
+      case 'image':
       case 'text':
       default:
         return content;

@@ -186,6 +186,49 @@ ESTRUCTURA:
 **Notas marcadas como importantes:**
 {{summary_notes}}`,
     },
+    {
+      key: 'marketing_ad_image_generator',
+      name: 'Generador de Anuncios de Marketing',
+      description:
+        'Genera imagenes promocionales para productos de una tienda usando prompt, catalogo e imagenes de referencia',
+      output_format: 'image',
+      temperature: 0.7,
+      max_tokens: 1200,
+      is_active: true,
+      ai_feature_category: 'async_queue',
+      metadata: {
+        image_generation: {
+          quality: 'high',
+          output_format: 'png',
+          background: 'auto',
+          input_fidelity: 'high',
+          partial_images: 2,
+        },
+      },
+      system_prompt: `Eres un director creativo especializado en anuncios visuales para ecommerce y redes sociales.
+Tu trabajo es generar una pieza visual limpia, comercial y lista para publicar.
+Respeta la identidad de los productos de referencia, evita texto excesivo y prioriza composicion clara.`,
+      prompt_template: `Crea una imagen promocional para una tienda usando esta informacion:
+
+Titulo del anuncio: {{title}}
+Descripcion / texto de apoyo: {{description}}
+Formato solicitado: {{format_label}} ({{size}})
+Instrucciones del usuario: {{prompt}}
+
+Productos a promocionar:
+{{products_context}}
+
+Imagenes de referencia seleccionadas:
+{{reference_images_context}}
+
+Requisitos de diseno:
+- Composicion de anuncio/flyer profesional para redes sociales.
+- Mostrar los productos como protagonistas y mantenerlos reconocibles.
+- Usar el titulo como texto principal si encaja visualmente.
+- No inventar precios, descuentos ni claims no incluidos en los datos.
+- No agregar logos de marcas externas ni informacion legal ficticia.
+- Evitar saturacion visual; dejar margen seguro para recortes de redes.`,
+    },
   ];
 
   let appsCreated = 0;
@@ -197,6 +240,36 @@ ESTRUCTURA:
     });
 
     if (existing) {
+      const updates: Record<string, any> = {};
+
+      if (app.key === 'marketing_ad_image_generator') {
+        if (existing.output_format !== app.output_format) {
+          updates.output_format = app.output_format;
+        }
+
+        const metadata =
+          (existing.metadata as Record<string, any> | null) || {};
+        const imageGeneration =
+          (metadata.image_generation as Record<string, any> | undefined) ||
+          undefined;
+
+        if (imageGeneration?.image_model === 'gpt-image-1') {
+          const nextImageGeneration = { ...imageGeneration };
+          delete nextImageGeneration.image_model;
+          updates.metadata = {
+            ...metadata,
+            image_generation: nextImageGeneration,
+          };
+        }
+      }
+
+      if (Object.keys(updates).length) {
+        await client.ai_engine_applications.update({
+          where: { key: app.key },
+          data: updates,
+        });
+        console.log(`    Updated system config: ${app.key}`);
+      }
       appsSkipped++;
       console.log(`    Skipped (preserved user config): ${app.key}`);
     } else {
@@ -211,6 +284,8 @@ ESTRUCTURA:
           is_active: app.is_active,
           system_prompt: app.system_prompt,
           prompt_template: app.prompt_template,
+          ai_feature_category: (app as any).ai_feature_category ?? null,
+          metadata: (app as any).metadata ?? undefined,
         },
       });
       appsCreated++;
@@ -233,14 +308,74 @@ ESTRUCTURA:
           where: { key: 'invoice_ocr' },
           data: { config_id: minimaxConfig.id },
         });
-        console.log(`    Linked invoice_ocr → MiniMax VL (config #${minimaxConfig.id})`);
+        console.log(
+          `    Linked invoice_ocr → MiniMax VL (config #${minimaxConfig.id})`,
+        );
       }
     } else if (invoiceOcrApp?.config_id != null) {
-      console.log('    Skipped link invoice_ocr (config_id already set by user)');
+      console.log(
+        '    Skipped link invoice_ocr (config_id already set by user)',
+      );
     }
   } catch (err) {
-    console.log('    Could not link invoice_ocr to MiniMax config (may not exist yet)');
+    console.log(
+      '    Could not link invoice_ocr to MiniMax config (may not exist yet)',
+    );
+  }
+
+  try {
+    const marketingAdApp = await client.ai_engine_applications.findUnique({
+      where: { key: 'marketing_ad_image_generator' },
+      select: { config_id: true },
+    });
+
+    if (marketingAdApp && marketingAdApp.config_id == null) {
+      const activeConfigs = await client.ai_engine_configs.findMany({
+        where: { is_active: true },
+        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
+      });
+      const imageConfig = activeConfigs.find((config) =>
+        isImageGenerationConfig(config),
+      );
+
+      if (imageConfig) {
+        await client.ai_engine_applications.update({
+          where: { key: 'marketing_ad_image_generator' },
+          data: { config_id: imageConfig.id },
+        });
+        console.log(
+          `    Linked marketing_ad_image_generator → ${imageConfig.label} (config #${imageConfig.id})`,
+        );
+      }
+    } else if (marketingAdApp?.config_id != null) {
+      console.log(
+        '    Skipped link marketing_ad_image_generator (config_id already set by user)',
+      );
+    }
+  } catch (err) {
+    console.log(
+      '    Could not link marketing_ad_image_generator to image config',
+    );
   }
 
   return { appsCreated, appsSkipped };
+}
+
+function isImageGenerationConfig(config: {
+  base_url: string | null;
+  model_id: string;
+  settings: unknown;
+}) {
+  const settings = (config.settings as Record<string, any> | null) || {};
+  const modelId = config.model_id.toLowerCase();
+
+  return (
+    settings.image_generation_mode === 'chat_completions' ||
+    !!settings.image_model ||
+    config.base_url?.includes('openrouter.ai') === true ||
+    modelId.includes('image') ||
+    modelId.includes('imagine') ||
+    modelId.includes('seedream') ||
+    modelId.includes('dall-e')
+  );
 }

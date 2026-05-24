@@ -300,6 +300,11 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  is_draft?: boolean = false;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   is_partial_payment?: boolean = false;
 
   // Términos de crédito (plan de cuotas para ventas a crédito)

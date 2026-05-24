@@ -1,5 +1,5 @@
-import {Injectable, signal, DestroyRef, inject} from '@angular/core';
-import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { Injectable, signal, DestroyRef, inject } from '@angular/core';
+import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, NavigationEnd } from '@angular/router';
 import { filter } from 'rxjs/operators';
 
@@ -751,6 +751,12 @@ export class BreadcrumbService {
       parent: 'Marketing',
       icon: 'ticket',
     },
+    {
+      path: '/admin/marketing/anuncios',
+      title: 'Anuncios',
+      parent: 'Marketing',
+      icon: 'image',
+    },
 
     // Analytics
     {
@@ -1252,7 +1258,8 @@ export class BreadcrumbService {
   private initializeBreadcrumb() {
     this.router.events
       .pipe(filter((event) => event instanceof NavigationEnd))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((event: NavigationEnd) => {
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((event: NavigationEnd) => {
         this.updateBreadcrumb(event.urlAfterRedirects);
       });
 

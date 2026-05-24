@@ -34,10 +34,22 @@ export class DomainResolverMiddleware implements NestMiddleware {
     try {
       // Prioridad 1: x-store-id header o query param
       if (x_store_id && !isNaN(Number(x_store_id)) && Number(x_store_id) > 0) {
-        req['domain_context'] = {
-          store_id: Number(x_store_id),
-        };
-        this.logger.log(`Store resolved from header/query: ${x_store_id}`);
+        const store_id = Number(x_store_id);
+        const store_cache_key = `domain:store:${store_id}`;
+        const cached_store = await this.cache.get<{
+          store_id: number;
+          organization_id: number;
+        }>(store_cache_key);
+
+        if (cached_store) {
+          req['domain_context'] = cached_store;
+        } else {
+          const resolved = await this.publicDomains.resolveByStoreId(store_id);
+          await this.cache.set(store_cache_key, resolved, 300_000);
+          req['domain_context'] = resolved;
+        }
+
+        this.logger.log(`Store resolved from header/query: ${store_id}`);
         return next();
       }
 

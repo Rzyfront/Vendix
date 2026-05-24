@@ -92,6 +92,28 @@ export class InventorySettingsDto {
   @IsOptional()
   @IsIn(['cpp', 'fifo'])
   costing_method?: 'cpp' | 'fifo';
+
+  @ApiProperty({
+    enum: ['main_location', 'all_locations'],
+    example: 'main_location',
+    required: false,
+    description:
+      'Scope used by POS when locating stock for sale. `main_location` restricts POS to the store default location; `all_locations` allows any active location.',
+  })
+  @IsOptional()
+  @IsEnum(['main_location', 'all_locations'])
+  pos_stock_scope?: 'main_location' | 'all_locations';
+
+  @ApiProperty({
+    enum: ['main_location', 'all_locations'],
+    example: 'main_location',
+    required: false,
+    description:
+      'Scope used by low-stock alerts. `main_location` evaluates only the default location; `all_locations` aggregates across all active locations.',
+  })
+  @IsOptional()
+  @IsEnum(['main_location', 'all_locations'])
+  low_stock_alerts_scope?: 'main_location' | 'all_locations';
 }
 
 export class CheckoutSettingsDto {

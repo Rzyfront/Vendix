@@ -24,4 +24,30 @@
       <p class="text-xs text-amber-600 mt-2">Cambiar el m&eacute;todo de costeo puede tener implicaciones contables. Consulte con su contador antes de modificar esta configuraci&oacute;n.</p>
     </div>
   </div>
+
+  <div class="col-span-1 md:col-span-2 mt-2">
+    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Alcance de Bodegas</h4>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="space-y-2">
+        <app-selector
+          [formControl]="posStockScopeControl"
+          label="Origen de stock en el POS"
+          [options]="posStockScopes"
+          (valueChange)="onFieldChange()"
+          size="sm"
+        ></app-selector>
+        <p class="text-xs text-gray-500">Determina de qu&eacute; bodegas el POS descuenta inventario al vender.</p>
+      </div>
+      <div class="space-y-2">
+        <app-selector
+          [formControl]="lowStockAlertsScopeControl"
+          label="Origen de alertas de stock bajo"
+          [options]="lowStockAlertsScopes"
+          (valueChange)="onFieldChange()"
+          size="sm"
+        ></app-selector>
+        <p class="text-xs text-gray-500">Define qu&eacute; bodegas se consideran al evaluar el umbral de stock bajo.</p>
+      </div>
+    </div>
+  </div>
 </div>

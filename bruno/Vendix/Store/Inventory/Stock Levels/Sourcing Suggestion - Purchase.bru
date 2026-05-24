@@ -1,0 +1,51 @@
+meta {
+  name: Sourcing Suggestion - Purchase
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/store/inventory/stock-levels/sourcing-suggestion?product_id={{product_id}}&quantity=999999
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+params:query {
+  product_id: {{product_id}}
+  quantity: 999999
+}
+
+docs {
+  ## Sourcing Suggestion - Purchase case
+
+  Requests an impossible quantity (999_999). Neither the main location nor
+  the sum of other locations should cover this, so the backend must respond
+  with `suggestion === 'purchase'`.
+}
+
+tests {
+  test("Returns 200 with success envelope", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Suggestion is purchase", function() {
+    const data = res.body.data;
+    expect(data.suggestion).to.equal('purchase');
+    expect(data.requested_quantity).to.equal(999999);
+  });
+
+  test("Coverage really is insufficient", function() {
+    const data = res.body.data;
+    const mainAvail = data.main_location ? data.main_location.quantity_available : 0;
+    const otherTotal = data.other_locations.reduce(
+      (acc, loc) => acc + loc.quantity_available,
+      0,
+    );
+    expect(mainAvail + otherTotal).to.be.lessThan(data.requested_quantity);
+  });
+}

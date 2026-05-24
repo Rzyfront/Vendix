@@ -1,5 +1,4 @@
-import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 import { ShippingService } from '../../services/shipping.service';
@@ -8,6 +7,8 @@ import { ShippingMethodModalComponent } from '../shipping-method-modal/shipping-
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import {
   TableColumn,
   TableAction,
@@ -49,9 +50,18 @@ import {
           </app-button>
         </div>
         <div class="p-2 md:p-4">
-          @if (methods.length > 0) {
+          @if (loading()) {
+            <div
+              class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3"
+            >
+              <app-icon name="loader-2" size="32" [spin]="true"></app-icon>
+              <span class="text-sm font-medium italic"
+                >Cargando métodos...</span
+              >
+            </div>
+          } @else if (methods().length > 0) {
             <app-responsive-data-view
-              [data]="methods"
+              [data]="methods()"
               [columns]="columns"
               [cardConfig]="cardConfig"
               [actions]="actions"
@@ -98,9 +108,9 @@ import {
 
         @defer (when showModal()) {
           <app-superadmin-shipping-method-modal
-            [method]="selectedMethod"
+            [method]="selectedMethod()"
             (close)="closeModal()"
-            (saved)="loadData()"
+            (saved)="onSaved()"
           >
           </app-superadmin-shipping-method-modal>
         }
@@ -109,13 +119,17 @@ import {
   `,
 })
 export class ShippingMethodsComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
   private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
 
-  methods: ShippingMethod[] = [];
-  showModal = signal(false);
-  selectedMethod?: ShippingMethod;
+  readonly methods = signal<ShippingMethod[]>([]);
+  readonly loading = signal(false);
+  readonly showModal = signal(false);
+  readonly selectedMethod = signal<ShippingMethod | undefined>(undefined);
+  readonly deletingIds = signal<Set<number>>(new Set());
+
+  readonly isDeleting = computed(() => this.deletingIds().size > 0);
 
   columns: TableColumn[] = [
     { key: 'name', label: 'Nombre', sortable: true },
@@ -164,10 +178,10 @@ export class ShippingMethodsComponent implements OnInit {
       icon: 'trash-2',
       variant: 'danger',
       action: (method) => this.deleteMethod(method),
+      disabled: (method) => this.deletingIds().has(method.id),
     },
   ];
 
-  // Card configuration for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'code',
@@ -189,46 +203,68 @@ export class ShippingMethodsComponent implements OnInit {
   }
 
   async loadData() {
+    this.loading.set(true);
     try {
-      this.methods = await firstValueFrom(this.shippingService.getMethods());
+      const data = await firstValueFrom(this.shippingService.getMethods());
+      this.methods.set(data);
     } catch (e) {
-      console.error('Error loading shipping methods', e);
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error loading shipping methods', devMessage, e);
+      this.toastService.error(userMessage, 'Error al cargar');
+    } finally {
+      this.loading.set(false);
     }
   }
 
   openCreateModal() {
-    this.selectedMethod = undefined;
+    this.selectedMethod.set(undefined);
     this.showModal.set(true);
   }
 
   openEditModal(method: ShippingMethod) {
-    this.selectedMethod = method;
+    this.selectedMethod.set(method);
     this.showModal.set(true);
   }
 
-  deleteMethod(method: ShippingMethod) {
-    this.dialogService
-      .confirm({
-        title: 'Eliminar Método de Envío del Sistema',
-        message: `¿Estás seguro de que deseas eliminar el método de envío "${method.name}"? Esta acción no se puede deshacer.`,
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
-      .then(async (confirmed) => {
-        if (confirmed) {
-          try {
-            await firstValueFrom(this.shippingService.deleteMethod(method.id));
-            this.loadData();
-          } catch (e) {
-            console.error('Error deleting shipping method', e);
-          }
-        }
+  async deleteMethod(method: ShippingMethod) {
+    if (this.deletingIds().has(method.id)) return;
+
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar Método de Envío del Sistema',
+      message: `¿Estás seguro de que deseas eliminar el método de envío "${method.name}"? Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+
+    this.deletingIds.update((s) => new Set(s).add(method.id));
+    try {
+      await firstValueFrom(this.shippingService.deleteMethod(method.id));
+      this.toastService.success(
+        `Método "${method.name}" eliminado.`,
+        'Eliminado',
+      );
+      this.methods.update((arr) => arr.filter((m) => m.id !== method.id));
+    } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error deleting shipping method', devMessage, e);
+      this.toastService.error(userMessage, 'Error al eliminar');
+    } finally {
+      this.deletingIds.update((s) => {
+        const next = new Set(s);
+        next.delete(method.id);
+        return next;
       });
+    }
+  }
+
+  onSaved() {
+    this.loadData();
   }
 
   closeModal() {
     this.showModal.set(false);
-    this.selectedMethod = undefined;
+    this.selectedMethod.set(undefined);
   }
 }

@@ -52,6 +52,7 @@ import { DataCollectionModule } from './data-collection/data-collection.module';
 import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SocialSalesModule } from './social-sales/social-sales.module';
+import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-ad-creatives.module';
 
 @Module({
   imports: [
@@ -106,6 +107,7 @@ import { SocialSalesModule } from './social-sales/social-sales.module';
     ConsultationsModule,
     SubscriptionsModule,
     SocialSalesModule,
+    MarketingAdCreativesModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

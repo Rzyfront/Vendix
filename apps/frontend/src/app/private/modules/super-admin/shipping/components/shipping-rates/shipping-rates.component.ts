@@ -1,6 +1,5 @@
 // Superadmin Shipping Rates Component
-import {Component, Input, OnInit, inject, SimpleChanges, OnChanges, input, output, signal, DestroyRef} from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Component, OnInit, inject, SimpleChanges, OnChanges, input, output, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { firstValueFrom } from 'rxjs';
 import {
@@ -25,6 +24,8 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-superadmin-shipping-rates',
@@ -44,7 +45,8 @@ import {
         [isOpen]="true"
         title="Gestionar Tarifas del Sistema"
         [subtitle]="
-          'Configura las reglas de precio para la zona del sistema ' + zone.name
+          'Configura las reglas de precio para la zona del sistema ' +
+          (zone()?.name ?? '')
         "
         (closed)="close.emit()"
         size="xl"
@@ -223,6 +225,8 @@ import {
                     <app-button
                       variant="ghost"
                       size="sm"
+                      [loading]="deletingIds().has(selectedRate()!.id)"
+                      [disabled]="deletingIds().has(selectedRate()!.id)"
                       (clicked)="deleteRate(selectedRate()!.id)"
                       customClasses="!text-red-500 hover:!bg-red-50 !h-8 !px-3 !text-xs"
                     >
@@ -384,7 +388,7 @@ import {
                 variant="primary"
                 [fullWidth]="true"
                 [loading]="isSubmitting()"
-                [disabled]="form.invalid"
+                [disabled]="form.invalid || isSubmitting()"
                 (clicked)="onSubmit()"
               >
                 <app-icon
@@ -471,7 +475,6 @@ import {
   `,
 })
 export class ShippingRatesComponent implements OnInit, OnChanges {
-  private destroyRef = inject(DestroyRef);
   readonly zone = input<ShippingZone | undefined>(undefined);
   readonly methods = input<ShippingMethod[]>([]);
   readonly close = output<void>();
@@ -479,6 +482,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingService);
   private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
 
   ShippingRateType = ShippingRateType;
   rates = signal<ShippingRate[]>([]);
@@ -486,6 +490,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   methodOptions = signal<SelectorOption[]>([]);
   loading = signal(false);
   isSubmitting = signal(false);
+  deletingIds = signal<Set<number>>(new Set());
 
   form: FormGroup;
 
@@ -673,7 +678,9 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
       const data = await firstValueFrom(this.shippingService.getRates(z.id));
       this.rates.set(data);
     } catch (e) {
-      console.error('Error loading shipping rates', e);
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error loading shipping rates', devMessage, e);
+      this.toastService.error(userMessage, 'Error al cargar tarifas');
     } finally {
       this.loading.set(false);
     }
@@ -703,7 +710,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   }
 
   async onSubmit() {
-    if (this.form.invalid || !this.zone) return;
+    if (this.form.invalid || !this.zone() || this.isSubmitting()) return;
 
     this.isSubmitting.set(true);
     const formValue = this.form.value;
@@ -722,38 +729,53 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
 
     try {
       await firstValueFrom(request$);
-      this.isSubmitting.set(false);
+      this.toastService.success(
+        rate ? 'Tarifa actualizada correctamente.' : 'Tarifa creada correctamente.',
+        rate ? 'Actualizada' : 'Creada',
+      );
       this.loadRates();
       this.prepareCreate();
     } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error saving shipping rate', devMessage, e);
+      this.toastService.error(userMessage, 'Error al guardar');
+    } finally {
       this.isSubmitting.set(false);
-      alert('Error al guardar la tarifa del sistema');
     }
   }
 
-  deleteRate(id: number) {
-    this.dialogService
-      .confirm({
-        title: 'Eliminar Tarifa del Sistema',
-        message:
-          '¿Estás seguro de que deseas eliminar esta tarifa del sistema? Esta acción no se puede deshacer.',
-        confirmText: 'Eliminar',
-        cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
-      .then(async (confirmed) => {
-        if (confirmed) {
-          try {
-            await firstValueFrom(this.shippingService.deleteRate(id));
-            this.loadRates();
-            if (this.selectedRate()?.id === id) {
-              this.selectedRate.set(undefined);
-              this.form.reset({ type: ShippingRateType.FLAT, is_active: true });
-            }
-          } catch (e) {
-            console.error('Error deleting shipping rate', e);
-          }
-        }
+  async deleteRate(id: number) {
+    if (this.deletingIds().has(id)) return;
+
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar Tarifa del Sistema',
+      message:
+        '¿Estás seguro de que deseas eliminar esta tarifa del sistema? Esta acción no se puede deshacer.',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+
+    this.deletingIds.update((s) => new Set(s).add(id));
+    try {
+      await firstValueFrom(this.shippingService.deleteRate(id));
+      this.toastService.success('Tarifa eliminada.', 'Eliminado');
+      this.rates.update((arr) => arr.filter((r) => r.id !== id));
+      if (this.selectedRate()?.id === id) {
+        this.selectedRate.set(undefined);
+        this.form.reset({ type: ShippingRateType.FLAT, is_active: true });
+      }
+    } catch (e) {
+      const { userMessage, devMessage } = parseApiError(e);
+      console.error('Error deleting shipping rate', devMessage, e);
+      this.toastService.error(userMessage, 'Error al eliminar');
+    } finally {
+      this.deletingIds.update((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
       });
+    }
   }
 }

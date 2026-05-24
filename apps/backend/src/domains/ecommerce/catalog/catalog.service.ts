@@ -291,6 +291,44 @@ export class CatalogService {
   }
 
   async getProductBySlug(slug: string) {
+    const reviews_enabled = await this.areReviewsEnabled();
+    const include: any = {
+      product_images: {
+        orderBy: { sort_order: 'asc' },
+      },
+      brands: true,
+      product_categories: {
+        include: {
+          categories: true,
+        },
+      },
+      product_variants: {
+        include: { product_images: true },
+      },
+      product_tax_assignments: {
+        include: {
+          tax_categories: {
+            include: {
+              tax_rates: true,
+            },
+          },
+        },
+      },
+    };
+
+    if (reviews_enabled) {
+      include.reviews = {
+        where: { state: 'approved' },
+        include: {
+          users: {
+            select: { first_name: true, last_name: true },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+        take: 10,
+      };
+    }
+
     const product = await this.prisma.products.findFirst({
       where: {
         ...(isNaN(Number(slug)) ? { slug } : { id: Number(slug) }),
@@ -298,46 +336,14 @@ export class CatalogService {
         available_for_ecommerce: true,
         // store_id se aplica automáticamente por EcommercePrismaService
       },
-      include: {
-        product_images: {
-          orderBy: { sort_order: 'asc' },
-        },
-        brands: true,
-        product_categories: {
-          include: {
-            categories: true,
-          },
-        },
-        product_variants: {
-          include: { product_images: true },
-        },
-        product_tax_assignments: {
-          include: {
-            tax_categories: {
-              include: {
-                tax_rates: true,
-              },
-            },
-          },
-        },
-        reviews: {
-          where: { state: 'approved' },
-          include: {
-            users: {
-              select: { first_name: true, last_name: true },
-            },
-          },
-          orderBy: { created_at: 'desc' },
-          take: 10,
-        },
-      },
+      include,
     });
 
     if (!product) {
       throw new NotFoundException('Product not found');
     }
 
-    return await this.mapProductDetailToResponse(product);
+    return await this.mapProductDetailToResponse(product, reviews_enabled);
   }
 
   async getCategories() {
@@ -403,6 +409,17 @@ export class CatalogService {
       },
     });
     return store?.store_settings?.settings || {};
+  }
+
+  private async areReviewsEnabled(): Promise<boolean> {
+    const settings = await this.prisma.store_settings.findFirst({
+      where: {},
+      select: { settings: true },
+    });
+    const allow_reviews = (settings?.settings as any)?.ecommerce?.catalog
+      ?.allow_reviews;
+
+    return allow_reviews !== false;
   }
 
   private async getBestSellingFromCache(
@@ -484,13 +501,27 @@ export class CatalogService {
     };
   }
 
-  private async mapProductDetailToResponse(product: any) {
-    const reviews = product.reviews || [];
-    const avg_rating =
-      reviews.length > 0
-        ? reviews.reduce((sum: number, r: any) => sum + (r.rating || 0), 0) /
-          reviews.length
-        : 0;
+  private async mapProductDetailToResponse(
+    product: any,
+    reviews_enabled = true,
+  ) {
+    const reviews = reviews_enabled ? product.reviews || [] : [];
+    let avg_rating = 0;
+    let review_count = 0;
+
+    if (reviews_enabled) {
+      const [rating_aggregate, total_reviews] = await Promise.all([
+        this.prisma.reviews.aggregate({
+          where: { product_id: product.id, state: 'approved' },
+          _avg: { rating: true },
+        }),
+        this.prisma.reviews.count({
+          where: { product_id: product.id, state: 'approved' },
+        }),
+      ]);
+      avg_rating = Number(rating_aggregate._avg.rating || 0);
+      review_count = total_reviews;
+    }
 
     // Firmar todas las imágenes del producto
     const signed_images = await Promise.all(
@@ -527,7 +558,7 @@ export class CatalogService {
           `${r.users?.first_name || ''} ${r.users?.last_name || ''}`.trim(),
       })),
       avg_rating: Math.round(avg_rating * 10) / 10,
-      review_count: reviews.length,
+      review_count,
       product_type: product.product_type,
       requires_booking: product.requires_booking,
       service_duration_minutes: product.service_duration_minutes,

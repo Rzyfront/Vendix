@@ -282,6 +282,24 @@ export class PublicDomainsService {
     }
   }
 
+  async resolveByStoreId(
+    storeId: number,
+  ): Promise<{ store_id: number; organization_id: number }> {
+    const store = await this.globalPrisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+
+    if (!store) {
+      throw new NotFoundException(`Store ${storeId} not found`);
+    }
+
+    return {
+      store_id: store.id,
+      organization_id: store.organization_id,
+    };
+  }
+
   /**
    * Check if a hostname is available
    */

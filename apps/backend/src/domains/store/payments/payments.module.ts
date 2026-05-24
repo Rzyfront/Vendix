@@ -29,12 +29,14 @@ import { PromotionsModule } from '../promotions/promotions.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import {
   CashPaymentModule,
+  CashOnDeliveryPaymentModule,
   StripeModule,
   PaypalModule,
   BankTransferModule,
   WompiModule,
 } from './processors';
 import { CashPaymentProcessor } from './processors/cash/cash.processor';
+import { CashOnDeliveryPaymentProcessor } from './processors/cash-on-delivery/cash-on-delivery.processor';
 import { StripeProcessor } from './processors/stripe/stripe.processor';
 import { PaypalProcessor } from './processors/paypal/paypal.processor';
 import { BankTransferProcessor } from './processors/bank-transfer/bank-transfer.processor';
@@ -49,6 +51,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
     ResponseModule,
     PrismaModule,
     CashPaymentModule,
+    CashOnDeliveryPaymentModule,
     StripeModule,
     PaypalModule,
     BankTransferModule,
@@ -103,6 +106,7 @@ export class PaymentsModule implements OnModuleInit {
   constructor(
     private paymentGateway: PaymentGatewayService,
     private cashProcessor: CashPaymentProcessor,
+    private cashOnDeliveryProcessor: CashOnDeliveryPaymentProcessor,
     private stripeProcessor: StripeProcessor,
     private paypalProcessor: PaypalProcessor,
     private bankTransferProcessor: BankTransferProcessor,
@@ -112,6 +116,10 @@ export class PaymentsModule implements OnModuleInit {
 
   onModuleInit() {
     this.paymentGateway.registerProcessor('cash', this.cashProcessor);
+    this.paymentGateway.registerProcessor(
+      'cash_on_delivery',
+      this.cashOnDeliveryProcessor,
+    );
     this.paymentGateway.registerProcessor('card', this.stripeProcessor);
     this.paymentGateway.registerProcessor('paypal', this.paypalProcessor);
     this.paymentGateway.registerProcessor(

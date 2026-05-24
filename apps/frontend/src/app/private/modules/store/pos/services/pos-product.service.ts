@@ -1,4 +1,4 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
@@ -6,6 +6,15 @@ import { toObservable } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
+import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import {
+  InventoryScope,
+  InventorySettings,
+} from '../../../../../core/models/store-settings.interface';
+import {
+  StockSourcingSuggestionQuery,
+  StockSourcingSuggestionResponse,
+} from '../models/sourcing.model';
 
 export interface Product {
   id: string;
@@ -124,16 +133,68 @@ export interface SearchResult {
 })
 export class PosProductService {
   private readonly apiUrl = `${environment.apiUrl}/store/products`;
+  private readonly stockLevelsUrl = `${environment.apiUrl}/store/inventory/stock-levels`;
   private categories: Category[] = [];
   private brands: Brand[] = [];
   readonly searchHistory = signal<string[]>([]);
   readonly searchHistory$ = toObservable(this.searchHistory);
+
+  private readonly storeSettingsFacade = inject(StoreSettingsFacade);
 
   constructor(
     private http: HttpClient,
     private storeContextService: StoreContextService,
   ) {
     this.initializeMockData();
+  }
+
+  /**
+   * Resolved POS stock scope for the current store. Used by consumers to
+   * decide UX flows (e.g. sourcing suggestion modal); stock filtering itself
+   * is handled server-side.
+   */
+  getPosStockScope(): InventoryScope {
+    const inventory = this.storeSettingsFacade.settings()?.inventory as
+      | InventorySettings
+      | undefined;
+    return inventory?.pos_stock_scope ?? 'all_locations';
+  }
+
+  /**
+   * Ask the backend for a sourcing recommendation when the in-scope stock
+   * does not cover `quantity`. Returns the typed response or throws.
+   */
+  getStockSourcingSuggestion(
+    query: StockSourcingSuggestionQuery,
+  ): Observable<StockSourcingSuggestionResponse> {
+    const httpQuery: Record<string, string | number> = {
+      product_id: query.product_id,
+      quantity: query.quantity,
+    };
+    if (query.product_variant_id != null) {
+      httpQuery['product_variant_id'] = query.product_variant_id;
+    }
+    const params = this.buildParams(httpQuery);
+
+    return this.http
+      .get<any>(`${this.stockLevelsUrl}/sourcing-suggestion`, { params })
+      .pipe(
+        map((response) => {
+          const data = response?.success ? response.data : response;
+          return data as StockSourcingSuggestionResponse;
+        }),
+        catchError((error: any) => {
+          console.error(
+            'PosProductService.getStockSourcingSuggestion Error:',
+            error,
+          );
+          return throwError(
+            () =>
+              error?.error?.message ||
+              'No se pudo consultar la disponibilidad en otras bodegas',
+          );
+        }),
+      );
   }
 
   private initializeMockData(): void {
@@ -276,24 +337,17 @@ export class PosProductService {
 
   private transformProducts(products: any[]): any[] {
     return products.map((product) => {
-      // Calculate total stock from stock_levels
-      let totalStock = 0;
-      if (product.stock_levels && Array.isArray(product.stock_levels)) {
-        // Sum stock from all locations
-        const storeStockLevels = product.stock_levels.filter((level: any) => {
-          return level.quantity_available > 0;
-        });
-
-        totalStock = storeStockLevels.reduce(
-          (sum: number, level: any) => sum + (level.quantity_available || 0),
-          0,
-        );
-      }
-
-      // Fallback to stock_quantity if no stock_levels
-      if (totalStock === 0) {
-        totalStock = product.stock_quantity || 0;
-      }
+      // Backend already scoped stock_quantity under pos_stock_scope; trust it
+      // and fall back to summing per-location levels only if missing.
+      const totalStock =
+        product.stock_quantity ??
+        (Array.isArray(product.stock_levels)
+          ? product.stock_levels.reduce(
+              (sum: number, level: any) =>
+                sum + (level?.quantity_available || 0),
+              0,
+            )
+          : 0);
 
       // Get image URL with fallbacks - PRIORITIZE signed URL at the root
       let imageUrl = '';
@@ -317,16 +371,15 @@ export class PosProductService {
           is_on_sale: v.is_on_sale ?? false,
           sale_price: v.sale_price != null ? Number(v.sale_price) : null,
           track_inventory_override: v.track_inventory_override ?? null,
-          stock: (() => {
-            if (typeof v.stock === 'number') return v.stock;
-            if (Array.isArray(v.stock_levels) && v.stock_levels.length > 0) {
-              return v.stock_levels.reduce(
-                (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
-                0,
-              );
-            }
-            return v.stock_quantity ?? 0;
-          })(),
+          stock:
+            v.stock_quantity ??
+            (Array.isArray(v.stock_levels) && v.stock_levels.length > 0
+              ? v.stock_levels.reduce(
+                  (sum: number, sl: any) =>
+                    sum + (sl?.quantity_available ?? 0),
+                  0,
+                )
+              : (v.stock ?? 0)),
           is_active: v.is_active ?? true,
           attributes: Array.isArray(v.attributes)
             ? v.attributes

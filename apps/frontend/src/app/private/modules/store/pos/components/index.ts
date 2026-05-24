@@ -8,3 +8,4 @@ export { PosCartModalComponent } from './pos-cart-modal.component';
 export { PosShippingModalComponent } from './pos-shipping-modal/pos-shipping-modal.component';
 export { PosReservationsPanelComponent } from './pos-reservations-panel/pos-reservations-panel.component';
 export { PosQuickBookComponent } from './pos-quick-book/pos-quick-book.component';
+export { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';

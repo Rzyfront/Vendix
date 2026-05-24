@@ -19,6 +19,21 @@ import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
 export class CheckoutController {
   constructor(private readonly checkout_service: CheckoutService) {}
 
+  /**
+   * Returns whether the current ecommerce store has invoicing enabled
+   * (fiscal_status.invoicing.state === 'ACTIVE'). Used by guest checkout to
+   * decide if the optional invoice data section should be shown.
+   *
+   * Public-friendly: works with @OptionalAuth() so guests can call it. Store
+   * context is resolved from the ecommerce domain by DomainResolverMiddleware.
+   */
+  @Get('eligibility')
+  @OptionalAuth()
+  async getEligibility() {
+    const data = await this.checkout_service.getInvoicingEligibility();
+    return { success: true, data };
+  }
+
   @Get('payment-methods')
   @OptionalAuth()
   async getPaymentMethods(@Query('shipping_type') shippingType?: string) {

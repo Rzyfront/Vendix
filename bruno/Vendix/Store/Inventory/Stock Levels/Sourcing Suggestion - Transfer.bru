@@ -1,0 +1,57 @@
+meta {
+  name: Sourcing Suggestion - Transfer
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/store/inventory/stock-levels/sourcing-suggestion?product_id={{product_id}}&quantity={{transfer_quantity}}
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+params:query {
+  product_id: {{product_id}}
+  quantity: {{transfer_quantity}}
+}
+
+docs {
+  ## Sourcing Suggestion - Transfer case
+
+  Asks for a quantity larger than what the main location has but
+  achievable by combining other locations. Set `transfer_quantity` to a
+  number greater than main.quantity_available and less than or equal to
+  main + sum(other_locations).
+
+  Expected `suggestion === 'transfer'`.
+}
+
+tests {
+  test("Returns 200 with success envelope", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("Shape is valid", function() {
+    const data = res.body.data;
+    expect(data.suggestion).to.be.oneOf(['available', 'transfer', 'purchase']);
+    expect(data.other_locations).to.be.an('array');
+  });
+
+  test("Transfer implies other locations cover the gap", function() {
+    const data = res.body.data;
+    if (data.suggestion === 'transfer') {
+      const mainAvail = data.main_location ? data.main_location.quantity_available : 0;
+      const otherTotal = data.other_locations.reduce(
+        (acc, loc) => acc + loc.quantity_available,
+        0,
+      );
+      expect(mainAvail).to.be.lessThan(data.requested_quantity);
+      expect(mainAvail + otherTotal).to.be.at.least(data.requested_quantity);
+    }
+  });
+}

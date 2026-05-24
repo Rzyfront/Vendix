@@ -26,6 +26,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
+import { RemoteImageService } from '@common/services/remote-image.service';
 import {
   S3PathHelper,
   S3OrgContext,
@@ -36,6 +37,12 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ImageContext } from '@common/config/image-presets';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { GenerateProductDescriptionDto } from './dto';
+import {
+  resolvePosStockScope,
+  ResolvedInventoryScope,
+} from '../inventory/shared/helpers/pos-stock-scope.helper';
+import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
+import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 
 @Injectable()
 export class ProductsService {
@@ -47,6 +54,7 @@ export class ProductsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
+    private readonly remoteImageService: RemoteImageService,
     private readonly s3PathHelper: S3PathHelper,
     private readonly ai_engine: AIEngineService,
   ) {}
@@ -359,27 +367,38 @@ export class ProductsService {
 
           // Manejar imágenes (combinar image_urls legacy con images structured)
           const finalImages: any[] = [];
+          let imageContext:
+            | { org: S3OrgContext; store: S3StoreContext }
+            | undefined;
 
-          // 1. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
+          // 1. Procesar image_urls (legacy)
           if (image_urls && image_urls.length > 0) {
-            finalImages.push(
-              ...image_urls.map((url, index) => ({
-                product_id: product.id,
-                image_url: extractS3KeyFromUrl(url) || url,
+            imageContext ??= await this.getStoreWithOrgContext(store_id);
+            const uploadedImages = await this.handleImageUploads(
+              image_urls.map((url, index) => ({
+                image_url: url,
                 is_main: index === 0,
+              })),
+              slug,
+              imageContext.org,
+              imageContext.store,
+            );
+            finalImages.push(
+              ...uploadedImages.map((img) => ({
+                ...img,
+                product_id: product.id,
               })),
             );
           }
 
           // 2. Procesar images (structured with possible base64)
           if (images && images.length > 0) {
-            const { org, store: storeContext } =
-              await this.getStoreWithOrgContext(store_id);
+            imageContext ??= await this.getStoreWithOrgContext(store_id);
             const uploadedImages = await this.handleImageUploads(
               images,
               slug,
-              org,
-              storeContext,
+              imageContext.org,
+              imageContext.store,
             );
             finalImages.push(
               ...uploadedImages.map((img) => ({
@@ -625,6 +644,20 @@ export class ProductsService {
       ...(requires_booking !== undefined && { requires_booking }),
     };
 
+    // Resolve POS stock scope so we can constrain the stock_levels includes at
+    // the Prisma layer (server-side filtering) instead of post-filtering rows.
+    const posStockScope: ResolvedInventoryScope | null = pos_optimized
+      ? await this.resolvePosScope()
+      : null;
+    const posStockLevelsWhere =
+      posStockScope?.scope === 'main_location'
+        ? { location_id: posStockScope.mainLocationId }
+        : undefined;
+    // Force stock_levels include under pos_optimized so the recomputed
+    // stock_quantity always reflects the resolved scope, never the
+    // denormalized cross-location aggregate.
+    const includeStockEffective = pos_optimized ? true : include_stock;
+
     const [products, total] = await Promise.all([
       this.prisma.products.findMany({
         where,
@@ -667,8 +700,9 @@ export class ProductsService {
             where: { is_main: true },
             take: 1,
           },
-          ...(include_stock && {
+          ...(includeStockEffective && {
             stock_levels: {
+              ...(posStockLevelsWhere && { where: posStockLevelsWhere }),
               select: {
                 product_variant_id: true,
                 quantity_available: true,
@@ -702,6 +736,7 @@ export class ProductsService {
                 attributes: true,
                 name: true,
                 stock_levels: {
+                  ...(posStockLevelsWhere && { where: posStockLevelsWhere }),
                   select: {
                     quantity_available: true,
                     quantity_reserved: true,
@@ -787,7 +822,10 @@ export class ProductsService {
             sku: product.sku,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
-            stock_quantity: product.stock_quantity,
+            stock_quantity: (product.stock_levels ?? []).reduce(
+              (s: number, l: any) => s + (l.quantity_available ?? 0),
+              0,
+            ),
             state: product.state,
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
@@ -1386,26 +1424,42 @@ export class ProductsService {
 
             const finalImages: any[] = [];
 
-            // 2. Procesar image_urls (legacy) - sanitize to prevent storing signed URLs
+            let imageContext:
+              | { org: S3OrgContext; store: S3StoreContext }
+              | undefined;
+
+            // 2. Procesar image_urls (legacy)
             if (image_urls && image_urls.length > 0) {
-              finalImages.push(
-                ...image_urls.map((url, index) => ({
-                  product_id: id,
-                  image_url: extractS3KeyFromUrl(url) || url,
+              imageContext ??= await this.getStoreWithOrgContext(
+                existingProduct.store_id,
+              );
+              const uploadedImages = await this.handleImageUploads(
+                image_urls.map((url, index) => ({
+                  image_url: url,
                   is_main: index === 0,
+                })),
+                product.slug,
+                imageContext.org,
+                imageContext.store,
+              );
+              finalImages.push(
+                ...uploadedImages.map((img) => ({
+                  ...img,
+                  product_id: id,
                 })),
               );
             }
 
             // 3. Procesar images (structured with possible base64)
             if (images && images.length > 0) {
-              const { org, store: storeContext } =
-                await this.getStoreWithOrgContext(existingProduct.store_id);
+              imageContext ??= await this.getStoreWithOrgContext(
+                existingProduct.store_id,
+              );
               const uploadedImages = await this.handleImageUploads(
                 images,
                 product.slug,
-                org,
-                storeContext,
+                imageContext.org,
+                imageContext.store,
               );
               finalImages.push(
                 ...uploadedImages.map((img) => ({
@@ -2163,6 +2217,23 @@ export class ProductsService {
           { generateThumbnail: true, context: ImageContext.PRODUCT },
         );
         imageUrl = result.key;
+      } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+        const sanitizedKey = extractS3KeyFromUrl(imageUrl);
+
+        if (sanitizedKey && sanitizedKey !== imageUrl) {
+          imageUrl = sanitizedKey;
+        } else {
+          const remoteImage = await this.remoteImageService.fetchPreview(
+            imageUrl,
+          );
+          const result = await this.s3Service.uploadBase64(
+            remoteImage.dataUrl,
+            `${basePath}/${productSlug}-remote-${Date.now()}-${index}`,
+            remoteImage.contentType,
+            { generateThumbnail: true, context: ImageContext.PRODUCT },
+          );
+          imageUrl = result.key;
+        }
       } else {
         // CRITICAL: Sanitize existing URLs to extract S3 key
         // This prevents storing signed URLs that expire after 24 hours
@@ -2280,5 +2351,36 @@ export class ProductsService {
 
     const finalPrice = basePrice * (1 + totalTaxRate);
     return Math.round(finalPrice * 100) / 100;
+  }
+
+  private async resolvePosScope(): Promise<ResolvedInventoryScope> {
+    const [store, settings] = await Promise.all([
+      this.loadStoreScopeRef(),
+      this.loadMergedSettings(),
+    ]);
+    return resolvePosStockScope(store, settings);
+  }
+
+  // StorePrismaService exposes `stores` via the unscoped baseClient, so we
+  // filter explicitly by the current store_id from RequestContext.
+  private async loadStoreScopeRef(): Promise<{
+    default_location_id: number | null;
+  }> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      return { default_location_id: null };
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { default_location_id: true },
+    });
+    return { default_location_id: store?.default_location_id ?? null };
+  }
+
+  private async loadMergedSettings(): Promise<StoreSettings> {
+    const row = await this.prisma.store_settings.findFirst({
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 }

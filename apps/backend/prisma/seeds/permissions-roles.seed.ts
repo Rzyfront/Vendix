@@ -666,6 +666,38 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Anuncios
+    {
+      name: 'store:marketing_anuncios:create',
+      description: 'Crear anuncio con IA',
+      path: '/api/store/marketing/ad-creatives',
+      method: 'POST',
+    },
+    {
+      name: 'store:marketing_anuncios:read',
+      description: 'Leer anuncios',
+      path: '/api/store/marketing/ad-creatives',
+      method: 'GET',
+    },
+    {
+      name: 'store:marketing_anuncios:generate',
+      description: 'Generar imagen de anuncio con IA',
+      path: '/api/store/marketing/ad-creatives/:id/generate-stream',
+      method: 'GET',
+    },
+    {
+      name: 'store:marketing_anuncios:update',
+      description: 'Actualizar detalles de anuncio',
+      path: '/api/store/marketing/ad-creatives/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:marketing_anuncios:delete',
+      description: 'Eliminar anuncio',
+      path: '/api/store/marketing/ad-creatives/:id',
+      method: 'DELETE',
+    },
+
     // Social Sales Hub
     {
       name: 'store:social_sales:read',

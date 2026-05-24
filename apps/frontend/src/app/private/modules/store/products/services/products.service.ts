@@ -233,6 +233,24 @@ export class ProductsService {
       );
   }
 
+  // Preview seguro de imagen remota (URL → dataUrl editable)
+  // Nota: este endpoint devuelve el objeto crudo (sin envoltorio { success, data })
+  getRemoteImagePreview(url: string): Observable<{
+    dataUrl: string;
+    fileName: string;
+    contentType: string;
+    byteLength: number;
+  }> {
+    return this.http
+      .post<{
+        dataUrl: string;
+        fileName: string;
+        contentType: string;
+        byteLength: number;
+      }>(`${this.apiUrl}/upload/remote-image-preview`, { url })
+      .pipe(catchError(this.handleError));
+  }
+
   // Generación de descripción con IA
   generateDescription(data: Record<string, any>): Observable<any> {
     return this.http

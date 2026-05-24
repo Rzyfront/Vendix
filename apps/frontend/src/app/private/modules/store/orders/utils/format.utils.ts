@@ -32,6 +32,7 @@ export class OrderFormatUtils {
    */
   static formatOrderStatus(status: OrderState): string {
     const statusMap: Record<OrderState, string> = {
+      draft: 'Borrador',
       created: 'Created',
       pending_payment: 'Pending Payment',
       processing: 'Processing',
@@ -66,6 +67,7 @@ export class OrderFormatUtils {
    */
   static getStatusColor(status: OrderState): string {
     const colorMap: Record<OrderState, string> = {
+      draft: 'gray',
       created: 'blue',
       pending_payment: 'yellow',
       processing: 'purple',

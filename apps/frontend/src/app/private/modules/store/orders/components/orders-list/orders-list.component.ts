@@ -118,6 +118,7 @@ export class OrdersListComponent {
       type: 'select',
       options: [
         { value: '', label: 'Todos los Estados' },
+        { value: 'draft', label: 'Borrador' },
         { value: 'created', label: 'Creada' },
         { value: 'pending_payment', label: 'Pago Pendiente' },
         { value: 'processing', label: 'Procesando' },
@@ -222,6 +223,7 @@ export class OrdersListComponent {
         type: 'custom',
         size: 'sm',
         colorMap: {
+          draft: '#9ca3af',
           created: '#6b7280',
           pending_payment: '#f59e0b',
           processing: '#3b82f6',
@@ -292,6 +294,7 @@ export class OrdersListComponent {
       type: 'custom',
       size: 'sm',
       colorMap: {
+        draft: '#9ca3af',
         created: '#6b7280',
         pending_payment: '#f59e0b',
         processing: '#3b82f6',
@@ -606,6 +609,7 @@ export class OrdersListComponent {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Unknown';
     const statusMap: Record<string, string> = {
+      draft: 'Borrador',
       created: 'Creada',
       pending_payment: 'Pago Pendiente',
       processing: 'Procesando',

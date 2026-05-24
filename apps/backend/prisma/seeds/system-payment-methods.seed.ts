@@ -234,6 +234,20 @@ export async function seedSystemPaymentMethods(
       processing_mode: 'DIRECT',
       dian_code: '99',
     },
+    {
+      name: 'cash_on_delivery',
+      display_name: 'Pago Contra Entrega',
+      description:
+        'El cliente paga al recibir el pedido. Acepta efectivo o transferencia (Nequi/Bancolombia) al repartidor con comprobante en sitio. El administrador confirma el cobro manualmente una vez entregado.',
+      type: 'cash_on_delivery',
+      provider: 'internal',
+      is_active: true,
+      requires_config: false,
+      supported_currencies: ['USD', 'MXN', 'EUR', 'COP'],
+      min_amount: 0,
+      processing_mode: 'ON_DELIVERY',
+      dian_code: '10',
+    },
   ];
 
   let methodsCreated = 0;
