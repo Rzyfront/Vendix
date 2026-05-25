@@ -210,10 +210,15 @@ export const Endpoints = {
   ORGANIZATION: {
     STORES: {
       LIST: '/organization/stores',
+      CREATE: '/organization/stores',
       GET: '/organization/stores/:id',
+      UPDATE: '/organization/stores/:id',
+      DELETE: '/organization/stores/:id',
       STATS: '/organization/stores/stats',
       SETTINGS: '/organization/stores/:id/settings',
+      SETTINGS_RESET: '/organization/stores/:id/settings/reset',
       DASHBOARD: '/organization/stores/:id/stats',
+      CHECK_CODE: '/organization/stores/check-code',
     },
   },
 } as const;
