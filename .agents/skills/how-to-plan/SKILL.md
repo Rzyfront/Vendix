@@ -125,7 +125,7 @@ Before any step proposes new code, the planner must complete this checklist:
 - [ ] Scan shared frontend assets: `apps/frontend/src/app/shared/` (components, services, pipes, directives).
 - [ ] Scan shared backend assets: `apps/backend/src/common/` (services, decorators, guards, interceptors, DTOs).
 - [ ] Check `libs/` for cross-app primitives.
-- [ ] If mobile (`apps/mobile`) work is identified, load `mobil-dev` and restrict all edits to `apps/mobile/` only.
+- [ ] If mobile (`apps/mobile`) work is identified, load `mobile-dev` and restrict all edits to `apps/mobile/` only.
 - [ ] List the assets found under `Reusable Assets` in the plan, with their paths. If nothing is reusable, state so explicitly.
 
 Skipping this checklist causes duplication (a second `CurrencyFormatService`, a parallel modal wrapper, a redundant guard). Duplication is a planning failure, not a coding failure.
@@ -260,7 +260,7 @@ Run this matrix against every step. If the trigger applies, the skill **must** a
 | Fiscal entity / DIAN / NIT logic | `vendix-fiscal-scope` |
 | API endpoint creation / DTO shape | `vendix-backend-api`, `vendix-validation` |
 | Frontend module / form / component | `vendix-frontend`, `vendix-zoneless-signals`, `vendix-angular-forms` |
-| Mobile app (`apps/mobile`) | `mobil-dev` — strictly read-only outside `apps/mobile` |
+| Mobile app (`apps/mobile`) | `mobile-dev` — strictly read-only outside `apps/mobile` |
 | Money / pricing display | `vendix-currency-formatting`, `vendix-product-pricing` |
 | Migrations | `vendix-prisma-migrations`, `vendix-prisma-schema` |
 | Seeds | `vendix-prisma-seed` |

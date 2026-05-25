@@ -1,5 +1,5 @@
 ---
-name: mobil-dev
+name: mobile-dev
 description: >
   Mobile app development rules for Vendix Expo/React Native project.
   Trigger: When editing, creating, or modifying any file under apps/mobile, or when developing mobile-specific features.
@@ -15,7 +15,7 @@ metadata:
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
-# Mobil Dev
+# Mobile Dev
 
 ## Purpose
 
@@ -70,7 +70,7 @@ ALLOWED:
 
 FORBIDDEN:
   npm install <pkg> at root         ← Breaks monorepo isolation
-  Editing root package.json         ← Belongs to mobiirepo-workspaces
+  Editing root package.json         ← Belongs to vendix-monorepo-workspaces
   Adding deps to apps/frontend/     ← Not mobile's concern
   Adding deps to apps/backend/      ← Not mobile's concern
 ```
