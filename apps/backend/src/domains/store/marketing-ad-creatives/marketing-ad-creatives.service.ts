@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, MessageEvent } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import Redis from 'ioredis';
 import { Observable } from 'rxjs';
+import sharp = require('sharp');
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { ImageContext } from '../../../common/config/image-presets';
 import { RequestContextService } from '../../../common/context/request-context.service';
@@ -14,10 +15,14 @@ import {
   CreateMarketingAdCreativeDto,
   CreateManualMarketingAdCreativeDto,
   QueryMarketingAdCreativesDto,
+  SuggestMarketingAdPromptDto,
   UpdateMarketingAdCreativeDetailsDto,
 } from './dto';
 
 type AdFormat = 'square' | 'story' | 'landscape';
+type ReferenceImageInput = NonNullable<
+  CreateMarketingAdCreativeDto['reference_images']
+>[number];
 
 @Injectable()
 export class MarketingAdCreativesService {
@@ -57,6 +62,7 @@ export class MarketingAdCreativesService {
           { title: { contains: query.search, mode: 'insensitive' } },
           { description: { contains: query.search, mode: 'insensitive' } },
           { prompt: { contains: query.search, mode: 'insensitive' } },
+          { post_copy: { contains: query.search, mode: 'insensitive' } },
         ],
       }),
       ...(query.status && { status: query.status }),
@@ -189,6 +195,45 @@ export class MarketingAdCreativesService {
     };
   }
 
+  async suggestPrompt(dto: SuggestMarketingAdPromptDto) {
+    const productIds = this.uniqueNumbers(dto.product_ids || []);
+    const products = productIds.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            base_price: true,
+            sale_price: true,
+            description: true,
+          },
+        })
+      : [];
+
+    if (products.length !== productIds.length) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'Uno o varios productos no pertenecen a la tienda actual.',
+      );
+    }
+
+    const variables = await this.buildMarketingTextVariables(dto, products, []);
+    const response = await this.aiEngine.run(
+      'marketing_ad_prompt_specialist',
+      variables,
+    );
+
+    if (!response.success || !response.content?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_REQUEST_001,
+        response.error || 'No se pudo sugerir el anuncio.',
+      );
+    }
+
+    return this.parsePromptSuggestion(response.content);
+  }
+
   async findOne(id: number) {
     const creativeDelegate = this.getCreativeDelegate();
     await this.ensureAdStorageAvailable();
@@ -211,7 +256,7 @@ export class MarketingAdCreativesService {
 
   async create(dto: CreateMarketingAdCreativeDto) {
     const context = this.getContext();
-    const productIds = this.uniqueNumbers(dto.product_ids);
+    const productIds = this.uniqueNumbers(dto.product_ids || []);
     const productImageIds = this.uniqueNumbers(dto.product_image_ids || []);
     const creativeDelegate = this.getCreativeDelegate();
     await this.ensureAdStorageAvailable();
@@ -248,9 +293,15 @@ export class MarketingAdCreativesService {
       products,
       productImageIds,
     );
+    const selectedReferenceImages = await this.resolveReferenceImages(
+      dto.reference_images || [],
+      context,
+    );
+    const creativeImages = [...selectedImages, ...selectedReferenceImages];
+    const postCopy = await this.generatePostCopy(dto, products, creativeImages);
 
     if (!creativeDelegate) {
-      return this.createRaw(dto, productIds, selectedImages, context);
+      return this.createRaw(dto, productIds, creativeImages, context, postCopy);
     }
 
     const creative = await this.runWithAdStorageGuard(() =>
@@ -259,20 +310,25 @@ export class MarketingAdCreativesService {
           title: dto.title.trim(),
           description: dto.description?.trim() || null,
           prompt: dto.prompt?.trim() || null,
+          post_copy: postCopy,
           format: dto.format || 'square',
           ai_app_key: dto.ai_app_key || 'marketing_ad_image_generator',
           created_by_user_id: context.user_id ?? null,
-          creative_products: {
-            create: productIds.map((product_id) => ({ product_id })),
-          },
-          creative_images: selectedImages.length
+          ...(productIds.length
             ? {
-                create: selectedImages.map((image, index) => ({
-                  product_image_id: image.id,
+                creative_products: {
+                  create: productIds.map((product_id) => ({ product_id })),
+                },
+              }
+            : {}),
+          creative_images: creativeImages.length
+            ? {
+                create: creativeImages.map((image, index) => ({
+                  product_image_id: image.product_image_id ?? image.id ?? null,
                   image_url:
                     this.s3Service.sanitizeForStorage(image.image_url) ||
                     image.image_url,
-                  source_type: 'product',
+                  source_type: image.source_type || 'product',
                   sort_order: index,
                 })),
               }
@@ -290,9 +346,15 @@ export class MarketingAdCreativesService {
       title: dto.title,
       description: dto.description,
       prompt: dto.prompt,
+      intent: dto.intent,
+      channel: dto.channel,
+      cta: dto.cta,
+      visual_style: dto.visual_style,
+      brief: dto.brief,
       format: dto.format,
       product_ids: dto.product_ids,
       product_image_ids: dto.product_image_ids,
+      reference_images: dto.reference_images,
       ai_app_key: 'manual_ad_editor',
     });
 
@@ -380,7 +442,11 @@ export class MarketingAdCreativesService {
             },
           )) {
             if (chunk.type === 'completed' && chunk.imageBase64) {
-              savedCreative = await this.saveGeneratedImage(id, chunk);
+              savedCreative = await this.saveGeneratedImage(
+                id,
+                chunk,
+                creative,
+              );
               await this.consumeDailyGenerationQuota(
                 currentContext.store_id,
                 generationRequestId,
@@ -558,6 +624,147 @@ export class MarketingAdCreativesService {
       .filter(Boolean);
   }
 
+  private async resolveReferenceImages(
+    references: ReferenceImageInput[],
+    context: { store_id?: number | null },
+  ) {
+    const resolved: Array<{
+      product_image_id: null;
+      image_url: string;
+      source_type: string;
+      label?: string | null;
+    }> = [];
+
+    for (const [index, reference] of references.entries()) {
+      const sourceType = this.normalizeSourceType(reference.source_type);
+      const label = reference.label?.trim() || null;
+      let imageKey: string | null = null;
+
+      if (reference.image_base64) {
+        imageKey = await this.uploadReferenceImage(
+          reference.image_base64,
+          sourceType,
+          context,
+          index,
+        );
+      } else if (reference.image_url) {
+        const sanitized = this.s3Service.sanitizeForStorage(
+          reference.image_url,
+        );
+        if (sanitized && !sanitized.startsWith('http')) {
+          imageKey = sanitized;
+        }
+      }
+
+      if (!imageKey || imageKey.includes('..')) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Una imagen de referencia no tiene una ruta valida.',
+        );
+      }
+
+      resolved.push({
+        product_image_id: null,
+        image_url: imageKey,
+        source_type: sourceType,
+        label,
+      });
+    }
+
+    return resolved;
+  }
+
+  private normalizeSourceType(value?: string): string {
+    const sourceType = (value || 'uploaded')
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 30);
+    return sourceType || 'uploaded';
+  }
+
+  private async uploadReferenceImage(
+    imageBase64: string,
+    sourceType: string,
+    context: { store_id?: number | null },
+    index: number,
+  ): Promise<string> {
+    const parsed = this.parseManualImage(imageBase64);
+    const store = await this.getStoreForAssets(context.store_id);
+    const basePath = this.s3PathHelper.buildMarketingAnunciosPath(
+      store.organizations,
+      store,
+    );
+    const key = `${basePath}/references/${Date.now()}-${index}-${this.slugify(
+      sourceType,
+    )}.${parsed.extension}`;
+    if (this.isQrSourceType(sourceType)) {
+      const upload = await this.s3Service.uploadProcessedImage(
+        this.base64ImageToBuffer(parsed.dataUrl),
+        key.replace(/\.(jpg|jpeg|webp)$/i, '.png'),
+        'image/png',
+        {
+          generateThumbnail: false,
+          context: ImageContext.DEFAULT,
+        },
+      );
+      return upload.key;
+    }
+
+    const upload = await this.s3Service.uploadBase64(
+      parsed.dataUrl,
+      key,
+      parsed.contentType,
+      {
+        generateThumbnail: false,
+        context: this.isQrSourceType(sourceType)
+          ? ImageContext.DEFAULT
+          : ImageContext.MARKETING_AD,
+      },
+    );
+    return upload.key;
+  }
+
+  private async getStoreForAssets(storeId?: number | null) {
+    if (!storeId) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'No se encontro la tienda actual para guardar el anuncio.',
+      );
+    }
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: {
+        id: true,
+        slug: true,
+        name: true,
+        logo_url: true,
+        store_settings: {
+          select: {
+            settings: true,
+          },
+        },
+        organizations: {
+          select: {
+            id: true,
+            slug: true,
+          },
+        },
+      },
+    });
+
+    if (!store?.organizations) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'No se encontro la tienda actual para guardar el anuncio.',
+      );
+    }
+
+    return store;
+  }
+
   private async serializeCreative(creative: any) {
     const signedImages = await Promise.all(
       (creative.creative_images || []).map(async (image: any) => {
@@ -582,11 +789,13 @@ export class MarketingAdCreativesService {
 
   private async buildReferenceImages(creative: any) {
     const images = await Promise.all(
-      (creative.creative_images || []).map(async (image: any) => {
-        const rawKey = image.image_url || image.product_image?.image_url;
-        const url = await this.s3Service.signUrl(rawKey);
-        return url ? { url, detail: 'high' as const } : null;
-      }),
+      (creative.creative_images || [])
+        .filter((image: any) => !this.isQrSourceType(image.source_type))
+        .map(async (image: any) => {
+          const rawKey = image.image_url || image.product_image?.image_url;
+          const url = await this.s3Service.signUrl(rawKey);
+          return url ? { url, detail: 'high' as const } : null;
+        }),
     );
 
     return images.filter(
@@ -632,10 +841,239 @@ export class MarketingAdCreativesService {
       products_context: productsContext || 'Sin productos detallados',
       reference_images_context:
         imageContext || 'No se seleccionaron imagenes de referencia',
+      qr_context: this.hasQrReference(creative)
+        ? 'El QR seleccionado se insertara despues como overlay exacto. Deja una zona limpia, profesional y discreta en una esquina o area de baja interferencia visual.'
+        : 'Sin QR seleccionado',
     };
   }
 
-  private async saveGeneratedImage(id: number, chunk: any) {
+  private hasQrReference(creative: any): boolean {
+    return (creative.creative_images || []).some((image: any) =>
+      this.isQrSourceType(image.source_type),
+    );
+  }
+
+  private isQrSourceType(sourceType?: string | null): boolean {
+    return (sourceType || '').toLowerCase().includes('qr');
+  }
+
+  private async generatePostCopy(
+    dto: CreateMarketingAdCreativeDto,
+    products: any[],
+    creativeImages: any[],
+  ): Promise<string | null> {
+    const variables = await this.buildMarketingTextVariables(
+      dto,
+      products,
+      creativeImages,
+    );
+    const response = await this.aiEngine.run(
+      'marketing_ad_post_copywriter',
+      variables,
+    );
+
+    if (!response.success || !response.content?.trim()) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_REQUEST_001,
+        response.error || 'No se pudo generar el post del anuncio.',
+      );
+    }
+
+    const postCopy = this.parsePostCopy(response.content);
+    if (!postCopy) {
+      throw new VendixHttpException(
+        ErrorCodes.AI_REQUEST_001,
+        'No se pudo generar el post del anuncio.',
+      );
+    }
+
+    return postCopy.slice(0, 4000);
+  }
+
+  private async buildMarketingTextVariables(
+    dto: Partial<CreateMarketingAdCreativeDto> | SuggestMarketingAdPromptDto,
+    products: any[],
+    creativeImages: any[],
+  ): Promise<Record<string, string>> {
+    const data = dto as Partial<CreateMarketingAdCreativeDto>;
+    const context = this.getContext();
+    const store = await this.getStoreForAssets(context.store_id);
+    const settings = (store.store_settings?.settings as any) || {};
+    const branding = settings.branding || {};
+    const ecommerce = settings.ecommerce || {};
+    const format = (dto.format || 'square') as AdFormat;
+
+    return {
+      store_name: store.name || branding.name || 'Tienda',
+      store_branding: JSON.stringify({
+        name: branding.name || store.name,
+        primary_color: branding.primary_color,
+        secondary_color: branding.secondary_color,
+        accent_color: branding.accent_color,
+        logo_url: branding.logo_url || store.logo_url,
+      }),
+      ecommerce_context: JSON.stringify({
+        qr_available: Boolean(
+          ecommerce?.general?.qr_code_url ||
+          ecommerce?.general?.qr_code_data_url,
+        ),
+        slider_count: Array.isArray(ecommerce?.slider?.photos)
+          ? ecommerce.slider.photos.length
+          : 0,
+      }),
+      title: data.title || 'Anuncio de tienda',
+      description: data.description || 'Sin descripcion adicional',
+      intent: dto.intent || 'general',
+      channel: dto.channel || 'redes_sociales',
+      cta: dto.cta || 'Sin CTA especifico',
+      visual_style: dto.visual_style || 'profesional, claro y comercial',
+      brief: dto.brief || 'Sin brief adicional',
+      prompt: data.prompt || 'Sin prompt final todavia',
+      format_label: this.formatLabel(format),
+      size: this.formatToSize(format),
+      products_context:
+        this.productsContext(products) || 'Sin productos seleccionados',
+      resources_context:
+        this.resourcesContext(creativeImages) ||
+        'Sin recursos visuales adicionales',
+      qr_context: creativeImages.some((image) =>
+        this.isQrSourceType(image.source_type),
+      )
+        ? 'Hay un QR seleccionado. El post puede invitar a escanearlo, pero sin asumir descuentos no indicados.'
+        : 'No hay QR seleccionado',
+    };
+  }
+
+  private productsContext(products: any[]): string {
+    return products
+      .map((product, index) => {
+        const salePrice = product.sale_price
+          ? ` | Precio oferta: ${Number(product.sale_price)}`
+          : '';
+        const basePrice = product.base_price
+          ? ` | Precio base: ${Number(product.base_price)}`
+          : '';
+        const sku = product.sku ? ` | SKU: ${product.sku}` : '';
+        const description = product.description
+          ? `\n  Descripcion: ${product.description}`
+          : '';
+        return `${index + 1}. ${product.name}${sku}${basePrice}${salePrice}${description}`;
+      })
+      .join('\n');
+  }
+
+  private resourcesContext(images: any[]): string {
+    return images
+      .map((image, index) => {
+        const sourceType = image.source_type || 'product';
+        const readableType = this.isQrSourceType(sourceType)
+          ? 'QR escaneable'
+          : sourceType;
+        return `${index + 1}. ${readableType}`;
+      })
+      .join('\n');
+  }
+
+  private parsePromptSuggestion(content: string) {
+    const parsed = this.safeJsonParse(content);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const data = parsed as Record<string, any>;
+      return {
+        suggested_prompt:
+          String(data.suggested_prompt || data.prompt || '').trim() ||
+          content.trim(),
+        suggested_title: String(
+          data.suggested_title || data.title || '',
+        ).trim(),
+        notes: String(data.notes || '').trim(),
+      };
+    }
+
+    return {
+      suggested_prompt: content.trim(),
+      suggested_title: '',
+      notes: '',
+    };
+  }
+
+  private parsePostCopy(content: string): string {
+    const parsed = this.safeJsonParse(content);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const data = parsed as Record<string, any>;
+      return String(data.post_copy || data.copy || data.text || '').trim();
+    }
+
+    return content.trim();
+  }
+
+  private safeJsonParse(content: string): unknown | null {
+    try {
+      return JSON.parse(content);
+    } catch {
+      return null;
+    }
+  }
+
+  private async composeQrOverlayIfNeeded(
+    imageBase64: string,
+    creative: any,
+  ): Promise<Buffer | null> {
+    const qrImage = (creative.creative_images || []).find((image: any) =>
+      this.isQrSourceType(image.source_type),
+    );
+    if (!qrImage) return null;
+
+    const baseBuffer = this.base64ImageToBuffer(imageBase64);
+    const qrKey = this.s3Service.sanitizeForStorage(
+      qrImage.image_url || qrImage.product_image?.image_url,
+    );
+    if (!qrKey || qrKey.startsWith('http')) return null;
+
+    const qrBuffer = await this.s3Service.downloadImage(qrKey);
+    const baseMeta = await sharp(baseBuffer).metadata();
+    const width = baseMeta.width || 1024;
+    const height = baseMeta.height || 1024;
+    const shorterSide = Math.min(width, height);
+    const qrSize = Math.round(Math.max(128, Math.min(shorterSide * 0.18, 280)));
+    const padding = Math.round(qrSize * 0.12);
+    const boxSize = qrSize + padding * 2;
+    const margin = Math.round(Math.max(28, shorterSide * 0.045));
+    const left = Math.max(margin, width - boxSize - margin);
+    const top = Math.max(margin, height - boxSize - margin);
+
+    const qr = await sharp(qrBuffer)
+      .resize(qrSize, qrSize, {
+        fit: 'contain',
+        background: { r: 255, g: 255, b: 255, alpha: 1 },
+      })
+      .png()
+      .toBuffer();
+    const qrPanel = await sharp({
+      create: {
+        width: boxSize,
+        height: boxSize,
+        channels: 4,
+        background: { r: 255, g: 255, b: 255, alpha: 0.96 },
+      },
+    })
+      .composite([{ input: qr, top: padding, left: padding }])
+      .png()
+      .toBuffer();
+
+    return sharp(baseBuffer)
+      .composite([{ input: qrPanel, top, left }])
+      .png()
+      .toBuffer();
+  }
+
+  private base64ImageToBuffer(imageBase64: string): Buffer {
+    const match = imageBase64.match(
+      /^data:image\/(?:png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/,
+    );
+    return Buffer.from(match?.[1] || imageBase64, 'base64');
+  }
+
+  private async saveGeneratedImage(id: number, chunk: any, creative: any) {
     const creativeDelegate = this.getCreativeDelegate();
     await this.ensureAdStorageAvailable();
 
@@ -668,18 +1106,30 @@ export class MarketingAdCreativesService {
     const key = `${basePath}/${id}-${Date.now()}-${this.slugify(
       chunk.model || 'ai-image',
     )}.png`;
-    const upload = await this.s3Service.uploadBase64(
+    const composedImage = await this.composeQrOverlayIfNeeded(
       chunk.imageBase64,
-      key,
-      'image/png',
-      {
-        generateThumbnail: true,
-        context: ImageContext.MARKETING_AD,
-      },
+      creative,
     );
+    const upload = composedImage
+      ? await this.s3Service.uploadProcessedImage(
+          composedImage,
+          key,
+          'image/png',
+          {
+            generateThumbnail: true,
+            context: ImageContext.MARKETING_AD,
+          },
+        )
+      : await this.s3Service.uploadBase64(chunk.imageBase64, key, 'image/png', {
+          generateThumbnail: true,
+          context: ImageContext.MARKETING_AD,
+        });
 
     if (!creativeDelegate) {
-      const updated = await this.saveGeneratedImageRaw(id, upload, chunk);
+      const updated = await this.saveGeneratedImageRaw(id, upload, {
+        ...chunk,
+        qrOverlay: Boolean(composedImage),
+      });
       return this.serializeCreative(updated);
     }
 
@@ -697,6 +1147,7 @@ export class MarketingAdCreativesService {
           generation_metadata: {
             usage: chunk.usage || null,
             revised_prompt: chunk.revisedPrompt || null,
+            qr_overlay: Boolean(composedImage),
           },
         },
         include: this.creativeInclude(),
@@ -1208,6 +1659,7 @@ export class MarketingAdCreativesService {
     productIds: number[],
     selectedImages: any[],
     context: { store_id?: number | null; user_id?: number | null },
+    postCopy: string | null,
   ) {
     if (!(await this.hasAdStorage())) {
       throw this.adStorageUnavailableException();
@@ -1218,9 +1670,9 @@ export class MarketingAdCreativesService {
         const created = (await tx.$queryRawUnsafe(
           `
           INSERT INTO "marketing_ad_creatives"
-            ("store_id", "created_by_user_id", "title", "description", "prompt", "format", "ai_app_key")
+            ("store_id", "created_by_user_id", "title", "description", "prompt", "post_copy", "format", "ai_app_key")
           VALUES
-            ($1, $2, $3, $4, $5, $6::marketing_ad_creative_format_enum, $7)
+            ($1, $2, $3, $4, $5, $6, $7::marketing_ad_creative_format_enum, $8)
           RETURNING *
           `,
           context.store_id,
@@ -1228,6 +1680,7 @@ export class MarketingAdCreativesService {
           dto.title.trim(),
           dto.description?.trim() || null,
           dto.prompt?.trim() || null,
+          postCopy,
           dto.format || 'square',
           dto.ai_app_key || 'marketing_ad_image_generator',
         )) as any[];
@@ -1250,13 +1703,14 @@ export class MarketingAdCreativesService {
             `
             INSERT INTO "marketing_ad_creative_images"
               ("creative_id", "product_image_id", "image_url", "source_type", "sort_order")
-            VALUES ($1, $2, $3, 'product', $4)
+            VALUES ($1, $2, $3, $4, $5)
             `,
             creative.id,
-            image.id ?? null,
+            image.product_image_id ?? image.id ?? null,
             this.s3Service.sanitizeForStorage(image.image_url) ||
               image.image_url ||
               null,
+            image.source_type || 'product',
             index,
           );
         }
@@ -1285,7 +1739,7 @@ export class MarketingAdCreativesService {
       values.push(`%${query.search.trim()}%`);
       const index = values.length;
       filters.push(
-        `("title" ILIKE $${index} OR "description" ILIKE $${index} OR "prompt" ILIKE $${index})`,
+        `("title" ILIKE $${index} OR "description" ILIKE $${index} OR "prompt" ILIKE $${index} OR "post_copy" ILIKE $${index})`,
       );
     }
 
@@ -1524,6 +1978,7 @@ export class MarketingAdCreativesService {
       JSON.stringify({
         usage: chunk.usage || null,
         revised_prompt: chunk.revisedPrompt || null,
+        qr_overlay: Boolean(chunk.qrOverlay),
       }),
       id,
       context.store_id,

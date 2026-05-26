@@ -51,7 +51,13 @@ export class AIEngineAppsService {
       },
       include: {
         config: {
-          select: { id: true, label: true, provider: true, model_id: true },
+          select: {
+            id: true,
+            label: true,
+            provider: true,
+            model_id: true,
+            settings: true,
+          },
         },
       },
     });
@@ -95,7 +101,13 @@ export class AIEngineAppsService {
         orderBy: { [sort_by]: sort_order },
         include: {
           config: {
-            select: { id: true, label: true, provider: true, model_id: true },
+            select: {
+              id: true,
+              label: true,
+              provider: true,
+              model_id: true,
+              settings: true,
+            },
           },
         },
       }),
@@ -118,7 +130,13 @@ export class AIEngineAppsService {
       where: { id },
       include: {
         config: {
-          select: { id: true, label: true, provider: true, model_id: true },
+          select: {
+            id: true,
+            label: true,
+            provider: true,
+            model_id: true,
+            settings: true,
+          },
         },
       },
     });
@@ -172,7 +190,13 @@ export class AIEngineAppsService {
       },
       include: {
         config: {
-          select: { id: true, label: true, provider: true, model_id: true },
+          select: {
+            id: true,
+            label: true,
+            provider: true,
+            model_id: true,
+            settings: true,
+          },
         },
       },
     });
@@ -199,12 +223,23 @@ export class AIEngineAppsService {
       context: 'Testing',
     };
 
-    const response = await this.aiEngine.run(app.key, testVars);
+    const modelType = await this.aiEngine.getApplicationModelType(app.key);
+    const executionType = this.resolveExecutionType(
+      app.output_format,
+      modelType,
+    );
+    const response = await this.executeTestByType(
+      app.key,
+      executionType,
+      testVars,
+    );
+
     return {
       success: response.success,
-      content: response.content,
+      content: this.extractTestContent(response),
       usage: response.usage,
       error: response.error,
+      model_type: executionType,
     };
   }
 
@@ -242,5 +277,124 @@ export class AIEngineAppsService {
         .filter((c) => c.config_id !== null)
         .reduce((sum, c) => sum + c._count, 0),
     };
+  }
+
+  private resolveExecutionType(
+    outputFormat: string,
+    modelType: string,
+  ): string {
+    if (
+      [
+        'image',
+        'embedding',
+        'audio',
+        'video',
+        'speech',
+        'transcription',
+        'rerank',
+      ].includes(outputFormat)
+    ) {
+      return outputFormat;
+    }
+
+    if (modelType === 'image') return 'image';
+    if (modelType === 'embedding') return 'embedding';
+    if (modelType === 'audio') return 'audio';
+    if (modelType === 'video') return 'video';
+    if (modelType === 'speech') return 'speech';
+    if (modelType === 'transcription') return 'transcription';
+    if (modelType === 'rerank') return 'rerank';
+    return 'text';
+  }
+
+  private async executeTestByType(
+    appKey: string,
+    executionType: string,
+    testVars: Record<string, string>,
+  ): Promise<any> {
+    switch (executionType) {
+      case 'image':
+        return this.aiEngine.runImage(appKey, testVars);
+      case 'embedding':
+        return this.aiEngine.runEmbedding(appKey, testVars);
+      case 'audio':
+        return this.aiEngine.run(appKey, testVars, [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: 'Reply with OK after reading this audio.',
+              },
+              {
+                type: 'input_audio',
+                input_audio: {
+                  data: this.buildSilentWavBase64(),
+                  format: 'wav',
+                },
+              },
+            ],
+          },
+        ]);
+      case 'video':
+        return this.aiEngine.runVideo(appKey, testVars);
+      case 'speech':
+        return this.aiEngine.runSpeech(appKey, testVars);
+      case 'transcription':
+        return this.aiEngine.runTranscription(
+          appKey,
+          {
+            inputAudio: {
+              data: this.buildSilentWavBase64(),
+              format: 'wav',
+            },
+          },
+          testVars,
+        );
+      case 'rerank':
+        return this.aiEngine.runRerank(appKey, testVars, {
+          query: 'Which document says Test?',
+          documents: ['Test document', 'Unrelated document'],
+          topN: 1,
+        });
+      case 'text':
+      default:
+        return this.aiEngine.run(appKey, testVars);
+    }
+  }
+
+  private extractTestContent(response: any): string | undefined {
+    if ('content' in response) return response.content;
+    if ('imageBase64' in response) return response.imageBase64;
+    if ('embedding' in response) return JSON.stringify(response.embedding);
+    if ('audioBase64' in response) return response.audioBase64;
+    if ('urls' in response) return JSON.stringify(response.urls);
+    if ('text' in response) return response.text;
+    if ('results' in response) return JSON.stringify(response.results);
+    return undefined;
+  }
+
+  private buildSilentWavBase64(): string {
+    const sampleRate = 8000;
+    const durationSeconds = 0.1;
+    const samples = Math.floor(sampleRate * durationSeconds);
+    const dataSize = samples * 2;
+    const buffer = Buffer.alloc(44 + dataSize);
+
+    buffer.write('RIFF', 0);
+    buffer.writeUInt32LE(36 + dataSize, 4);
+    buffer.write('WAVE', 8);
+    buffer.write('fmt ', 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(1, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * 2, 28);
+    buffer.writeUInt16LE(2, 32);
+    buffer.writeUInt16LE(16, 34);
+    buffer.write('data', 36);
+    buffer.writeUInt32LE(dataSize, 40);
+
+    return buffer.toString('base64');
   }
 }

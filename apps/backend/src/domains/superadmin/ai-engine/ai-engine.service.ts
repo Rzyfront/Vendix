@@ -43,7 +43,7 @@ export class AIEngineConfigService {
         sdk_type: dto.sdk_type,
         label: dto.label,
         model_id: dto.model_id,
-        base_url: this.normalizeBaseUrl(dto.base_url) || null,
+        base_url: this.cleanBaseUrl(dto.base_url) || null,
         api_key_ref: dto.api_key_ref || null,
         is_default: dto.is_default || false,
         is_active: dto.is_active ?? true,
@@ -160,7 +160,7 @@ export class AIEngineConfigService {
         ...dto,
         base_url:
           dto.base_url !== undefined
-            ? this.normalizeBaseUrl(dto.base_url) || null
+            ? this.cleanBaseUrl(dto.base_url) || null
             : undefined,
         settings: dto.settings as any,
         updated_at: new Date(),
@@ -253,20 +253,9 @@ export class AIEngineConfigService {
     return { ...config, api_key_ref: masked };
   }
 
-  private normalizeBaseUrl(baseUrl?: string | null): string | undefined {
+  private cleanBaseUrl(baseUrl?: string | null): string | undefined {
     if (!baseUrl) return undefined;
 
-    let normalized = baseUrl.trim().replace(/\/+$/, '');
-    for (const suffix of [
-      '/chat/completions',
-      '/images/generations',
-      '/responses',
-    ]) {
-      if (normalized.endsWith(suffix)) {
-        normalized = normalized.slice(0, -suffix.length);
-      }
-    }
-
-    return normalized;
+    return baseUrl.trim() || undefined;
   }
 }

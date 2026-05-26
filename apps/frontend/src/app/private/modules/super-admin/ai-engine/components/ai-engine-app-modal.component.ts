@@ -5,7 +5,9 @@ import {
   OnChanges,
   inject,
   signal,
+  DestroyRef,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
@@ -16,6 +18,7 @@ import {
 import {
   AIEngineApp,
   AIEngineConfig,
+  AIModelType,
   CreateAIAppDto,
   UpdateAIAppDto,
   OutputFormat,
@@ -250,6 +253,7 @@ import {
   ],
 })
 export class AIEngineAppModalComponent implements OnChanges {
+  private destroyRef = inject(DestroyRef);
   isOpen = input<boolean>(false);
   isSubmitting = input<boolean>(false);
   app = input<AIEngineApp | null>(null);
@@ -267,6 +271,12 @@ export class AIEngineAppModalComponent implements OnChanges {
     { value: 'markdown', label: 'Markdown' },
     { value: 'html', label: 'HTML' },
     { value: 'image', label: 'Imagen' },
+    { value: 'embedding', label: 'Embeddings' },
+    { value: 'audio', label: 'Audio' },
+    { value: 'video', label: 'Video' },
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'speech', label: 'Speech' },
+    { value: 'transcription', label: 'Transcripcion' },
   ];
 
   form: FormGroup = this.fb.group({
@@ -286,6 +296,15 @@ export class AIEngineAppModalComponent implements OnChanges {
     is_active: [true],
   });
 
+  constructor() {
+    this.form
+      .get('config_id')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((configId: string | null) => {
+        this.syncOutputFormatWithConfig(configId);
+      });
+  }
+
   ngOnChanges(): void {
     // Build config options from input
     const cfgs = this.configs();
@@ -293,7 +312,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       { value: '', label: 'Usar configuracion por defecto' },
       ...cfgs.map((c) => ({
         value: c.id.toString(),
-        label: `${c.label} (${c.provider} - ${c.model_id})`,
+        label: `${c.label} (${c.provider} - ${this.formatModelType(this.inferConfigModelType(c))})`,
       })),
     ]);
 
@@ -331,7 +350,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       key: raw.key,
       name: raw.name,
       description: raw.description || undefined,
-      config_id: raw.config_id ? Number(raw.config_id) : undefined,
+      config_id: raw.config_id ? Number(raw.config_id) : null,
       system_prompt: raw.system_prompt || undefined,
       prompt_template: raw.prompt_template || undefined,
       temperature:
@@ -382,5 +401,78 @@ export class AIEngineAppModalComponent implements OnChanges {
       retry_delay: null,
       is_active: true,
     });
+  }
+
+  private syncOutputFormatWithConfig(configId: string | null): void {
+    const selected = this.configs().find((config) => {
+      return config.id.toString() === configId;
+    });
+
+    if (!selected) return;
+
+    const modelType = this.inferConfigModelType(selected);
+    const current = this.form.get('output_format')?.value as OutputFormat;
+
+    if (modelType !== 'text') {
+      this.form.patchValue(
+        { output_format: this.modelTypeToOutputFormat(modelType) },
+        { emitEvent: false },
+      );
+      return;
+    }
+
+    if (
+      [
+        'image',
+        'embedding',
+        'audio',
+        'video',
+        'rerank',
+        'speech',
+        'transcription',
+      ].includes(current)
+    ) {
+      this.form.patchValue({ output_format: 'text' }, { emitEvent: false });
+    }
+  }
+
+  private inferConfigModelType(config: AIEngineConfig): AIModelType {
+    const settings = config.settings || {};
+    const modelId = config.model_id.toLowerCase();
+
+    if (settings.model_type) return settings.model_type;
+
+    if (
+      settings.image_generation_mode ||
+      settings.image_endpoint ||
+      settings.image_model ||
+      settings.modalities?.includes('image') ||
+      modelId.includes('image') ||
+      modelId.includes('imagine') ||
+      modelId.includes('seedream') ||
+      modelId.includes('dall-e')
+    ) {
+      return 'image';
+    }
+
+    return 'text';
+  }
+
+  private modelTypeToOutputFormat(modelType: AIModelType): OutputFormat {
+    return modelType === 'text' ? 'text' : modelType;
+  }
+
+  private formatModelType(modelType: AIModelType): string {
+    const map: Record<AIModelType, string> = {
+      text: 'Texto',
+      image: 'Imagen',
+      embedding: 'Embeddings',
+      audio: 'Audio',
+      video: 'Video',
+      rerank: 'Rerank',
+      speech: 'Speech',
+      transcription: 'Transcripcion',
+    };
+    return map[modelType];
   }
 }

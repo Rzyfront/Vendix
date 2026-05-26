@@ -1,4 +1,12 @@
-import {Component, input, output, OnChanges, inject, signal, DestroyRef} from '@angular/core';
+import {
+  Component,
+  input,
+  output,
+  OnChanges,
+  inject,
+  signal,
+  DestroyRef,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -9,6 +17,7 @@ import {
 } from '@angular/forms';
 import {
   AIEngineConfig,
+  AIModelType,
   CreateAIConfigDto,
   UpdateAIConfigDto,
   KNOWN_PROVIDERS,
@@ -30,8 +39,8 @@ import {
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -39,7 +48,11 @@ import {
       (cancel)="onCancel()"
       [size]="'lg'"
       [title]="config() ? 'Editar Configuracion' : 'Nueva Configuracion AI'"
-      [subtitle]="config() ? 'Editando: ' + config()!.label : 'Configura un proveedor de inteligencia artificial'"
+      [subtitle]="
+        config()
+          ? 'Editando: ' + config()!.label
+          : 'Configura un proveedor de inteligencia artificial'
+      "
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-4">
@@ -63,7 +76,8 @@ import {
               [disabled]="isSubmitting()"
             ></app-selector>
             <p class="text-xs text-text-secondary">
-              OpenAI Compatible cubre OpenAI, Ollama, Groq, Mistral, etc. Anthropic Compatible cubre Claude.
+              OpenAI Compatible cubre OpenAI, Ollama, Groq, Mistral, etc.
+              Anthropic Compatible cubre Claude.
             </p>
           </div>
 
@@ -111,6 +125,14 @@ import {
             helpText="Dejar vacio para usar la URL oficial del SDK"
           ></app-input>
 
+          <!-- Model Type -->
+          <app-selector
+            label="Tipo de modelo"
+            [options]="modelTypeOptions"
+            [formControl]="$any(form.get('model_type'))"
+            [disabled]="isSubmitting()"
+          ></app-selector>
+
           <!-- API Key -->
           <app-input
             formControlName="api_key_ref"
@@ -153,7 +175,9 @@ import {
                 class="rounded border-gray-300 text-primary focus:ring-primary"
                 [disabled]="isSubmitting()"
               />
-              <span class="text-sm text-text-primary">Proveedor por defecto</span>
+              <span class="text-sm text-text-primary"
+                >Proveedor por defecto</span
+              >
             </label>
 
             <label class="flex items-center gap-2 cursor-pointer">
@@ -178,7 +202,8 @@ import {
           </div>
           @if (form.get('thinking')?.value) {
             <p class="text-xs text-amber-600 mt-1">
-              Modelos como DeepSeek R1 generan bloques de razonamiento interno. Con esta opcion activa, se preservaran en la respuesta.
+              Modelos como DeepSeek R1 generan bloques de razonamiento interno.
+              Con esta opcion activa, se preservaran en la respuesta.
               Desactivalo si solo necesitas la respuesta final.
             </p>
           }
@@ -238,12 +263,24 @@ export class AIEngineConfigModalComponent implements OnChanges {
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
   ];
 
+  modelTypeOptions: SelectorOption[] = [
+    { value: 'text', label: 'Texto' },
+    { value: 'image', label: 'Imagen' },
+    { value: 'embedding', label: 'Embeddings' },
+    { value: 'audio', label: 'Audio' },
+    { value: 'video', label: 'Video' },
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'speech', label: 'Speech' },
+    { value: 'transcription', label: 'Transcription' },
+  ];
+
   form: FormGroup = this.fb.group({
     provider: ['', [Validators.required]],
     sdk_type: ['openai_compatible', [Validators.required]],
     label: ['', [Validators.required, Validators.maxLength(255)]],
     model_id: ['', [Validators.required, Validators.maxLength(100)]],
     base_url: [''],
+    model_type: ['text'],
     api_key_ref: [''],
     temperature: [null],
     max_tokens: [null],
@@ -254,29 +291,44 @@ export class AIEngineConfigModalComponent implements OnChanges {
 
   constructor() {
     // Watch provider changes to auto-fill sdk_type and models
-    this.form.get('provider')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((providerName: string) => {
-      const preset = KNOWN_PROVIDERS.find((p) => p.name === providerName);
-      if (preset) {
-        this.selectedProvider.set(preset);
-        this.form.patchValue({ sdk_type: preset.sdkType }, { emitEvent: false });
-        if (preset.defaultUrl && !this.form.get('base_url')?.value) {
-          this.form.patchValue({ base_url: preset.defaultUrl }, { emitEvent: false });
+    this.form
+      .get('provider')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((providerName: string) => {
+        const preset = KNOWN_PROVIDERS.find((p) => p.name === providerName);
+        if (preset) {
+          this.selectedProvider.set(preset);
+          this.form.patchValue(
+            { sdk_type: preset.sdkType },
+            { emitEvent: false },
+          );
+          if (preset.defaultUrl && !this.form.get('base_url')?.value) {
+            this.form.patchValue(
+              { base_url: preset.defaultUrl },
+              { emitEvent: false },
+            );
+          }
+          this.suggestedModels.set(preset.models);
+          this.modelOptions.set(
+            preset.models.map((m) => ({ value: m, label: m })),
+          );
+          // Reset model_id if current value not in new models list
+          const currentModel = this.form.get('model_id')?.value;
+          if (
+            preset.models.length > 0 &&
+            !preset.models.includes(currentModel)
+          ) {
+            this.form.patchValue(
+              { model_id: preset.models[0] },
+              { emitEvent: false },
+            );
+          }
+        } else {
+          this.selectedProvider.set(null);
+          this.suggestedModels.set([]);
+          this.modelOptions.set([]);
         }
-        this.suggestedModels.set(preset.models);
-        this.modelOptions.set(
-          preset.models.map((m) => ({ value: m, label: m })),
-        );
-        // Reset model_id if current value not in new models list
-        const currentModel = this.form.get('model_id')?.value;
-        if (preset.models.length > 0 && !preset.models.includes(currentModel)) {
-          this.form.patchValue({ model_id: preset.models[0] }, { emitEvent: false });
-        }
-      } else {
-        this.selectedProvider.set(null);
-        this.suggestedModels.set([]);
-        this.modelOptions.set([]);
-      }
-    });
+      });
   }
 
   ngOnChanges(): void {
@@ -288,6 +340,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
         label: c.label,
         model_id: c.model_id,
         base_url: c.base_url || '',
+        model_type: c.settings?.model_type || this.inferModelType(c),
         api_key_ref: '',
         temperature: c.settings?.temperature ?? null,
         max_tokens: c.settings?.maxTokens ?? null,
@@ -304,10 +357,21 @@ export class AIEngineConfigModalComponent implements OnChanges {
     if (this.form.invalid) return;
 
     const raw = this.form.value;
-    const settings: Record<string, any> = {};
-    if (raw.temperature != null) settings['temperature'] = Number(raw.temperature);
-    if (raw.max_tokens != null) settings['maxTokens'] = Number(raw.max_tokens);
+    const settings: Record<string, any> = {
+      ...(this.config()?.settings ?? {}),
+    };
+    if (raw.temperature != null) {
+      settings['temperature'] = Number(raw.temperature);
+    } else {
+      delete settings['temperature'];
+    }
+    if (raw.max_tokens != null) {
+      settings['maxTokens'] = Number(raw.max_tokens);
+    } else {
+      delete settings['maxTokens'];
+    }
     settings['thinking'] = !!raw.thinking;
+    settings['model_type'] = (raw.model_type || 'text') as AIModelType;
 
     const data: any = {
       provider: raw.provider,
@@ -319,7 +383,14 @@ export class AIEngineConfigModalComponent implements OnChanges {
       settings: Object.keys(settings).length > 0 ? settings : undefined,
     };
 
-    if (raw.base_url) data.base_url = raw.base_url;
+    const baseUrl = typeof raw.base_url === 'string' ? raw.base_url.trim() : '';
+    this.applyModelTypeSettings(settings, settings['model_type'], baseUrl);
+
+    if (baseUrl) {
+      data.base_url = baseUrl;
+    } else if (this.config()) {
+      data.base_url = null;
+    }
     if (raw.api_key_ref) data.api_key_ref = raw.api_key_ref;
 
     this.submit.emit(data);
@@ -337,6 +408,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
       label: '',
       model_id: '',
       base_url: '',
+      model_type: 'text',
       api_key_ref: '',
       temperature: null,
       max_tokens: null,
@@ -346,5 +418,50 @@ export class AIEngineConfigModalComponent implements OnChanges {
     });
     this.suggestedModels.set([]);
     this.modelOptions.set([]);
+  }
+
+  private inferModelType(config: AIEngineConfig): AIModelType {
+    const settings = config.settings || {};
+    const modelId = config.model_id.toLowerCase();
+
+    if (
+      settings.image_generation_mode ||
+      settings.image_endpoint ||
+      settings.image_model ||
+      settings.modalities?.includes('image') ||
+      modelId.includes('image') ||
+      modelId.includes('imagine') ||
+      modelId.includes('seedream') ||
+      modelId.includes('dall-e')
+    ) {
+      return 'image';
+    }
+
+    return 'text';
+  }
+
+  private applyModelTypeSettings(
+    settings: Record<string, any>,
+    modelType: AIModelType,
+    baseUrl: string,
+  ): void {
+    if (modelType !== 'image') {
+      delete settings['image_generation_mode'];
+      delete settings['image_endpoint'];
+      delete settings['image_model'];
+      delete settings['modalities'];
+      if (modelType === 'embedding' && baseUrl.includes('openrouter.ai')) {
+        settings['encoding_format'] = settings['encoding_format'] || 'float';
+      } else if (modelType !== 'embedding') {
+        delete settings['encoding_format'];
+      }
+      return;
+    }
+
+    if (baseUrl.includes('openrouter.ai')) {
+      settings['image_generation_mode'] = 'chat_completions';
+      settings['modalities'] = ['image'];
+    }
+    delete settings['encoding_format'];
   }
 }

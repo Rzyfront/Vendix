@@ -187,6 +187,22 @@ ESTRUCTURA:
 {{summary_notes}}`,
     },
     {
+      key: 'chat_assistant',
+      name: 'Asistente IA del Chat',
+      description:
+        'Asistente conversacional general para el widget de chat de IA',
+      output_format: 'markdown',
+      temperature: 0.7,
+      max_tokens: 1200,
+      is_active: true,
+      ai_feature_category: 'conversations',
+      system_prompt: `Eres el asistente de IA de Vendix para usuarios del panel administrativo.
+Responde siempre en español, con tono claro, profesional y útil.
+Ayuda con preguntas operativas sobre ventas, clientes, inventario, citas, reportes y configuraciones cuando el contexto esté disponible.
+No inventes datos internos. Si falta información, explica qué dato hace falta o qué acción puede tomar el usuario.`,
+      prompt_template: null,
+    },
+    {
       key: 'marketing_ad_image_generator',
       name: 'Generador de Anuncios de Marketing',
       description:
@@ -227,7 +243,95 @@ Requisitos de diseno:
 - Usar el titulo como texto principal si encaja visualmente.
 - No inventar precios, descuentos ni claims no incluidos en los datos.
 - No agregar logos de marcas externas ni informacion legal ficticia.
+- Si hay un QR seleccionado, no intentes dibujarlo ni recrearlo; deja una zona limpia para componerlo despues como overlay exacto.
 - Evitar saturacion visual; dejar margen seguro para recortes de redes.`,
+    },
+    {
+      key: 'marketing_ad_prompt_specialist',
+      name: 'Especialista de Prompts para Anuncios',
+      description:
+        'Convierte briefs simples de tienda en prompts profesionales para flyers, banners e historias',
+      output_format: 'json',
+      temperature: 0.55,
+      max_tokens: 1200,
+      is_active: true,
+      system_prompt: `Eres un director creativo experto en prompts para generar piezas publicitarias: flyers, banners, posts e historias.
+Responde siempre en español y SOLO con JSON valido.
+No inventes descuentos, precios, fechas, claims, marcas externas ni beneficios no proporcionados.
+Si hay QR, indica que el diseño debe dejar una zona limpia para insertarlo despues como overlay exacto; no pidas que la IA lo redibuje.`,
+      prompt_template: `Crea una sugerencia de anuncio con este contexto:
+
+Tienda: {{store_name}}
+Branding: {{store_branding}}
+Objetivo: {{intent}}
+Canal: {{channel}}
+CTA: {{cta}}
+Estilo visual: {{visual_style}}
+Formato: {{format_label}} ({{size}})
+Brief humano: {{brief}}
+
+Productos:
+{{products_context}}
+
+Recursos visuales:
+{{resources_context}}
+
+QR:
+{{qr_context}}
+
+Devuelve SOLO este JSON:
+{
+  "suggested_title": "titulo corto para identificar el anuncio",
+  "suggested_prompt": "prompt profesional, concreto y listo para imagen",
+  "notes": "nota corta para el usuario si aplica"
+}`,
+    },
+    {
+      key: 'marketing_ad_post_copywriter',
+      name: 'Copywriter de Posts de Anuncios',
+      description:
+        'Genera texto publicable para anuncios creados en el modulo de marketing',
+      output_format: 'json',
+      temperature: 0.65,
+      max_tokens: 900,
+      is_active: true,
+      system_prompt: `Eres un copywriter senior de marketing para tiendas, ecommerce y redes sociales.
+Escribes posts publicables en español, naturales, claros y comerciales.
+No inventes descuentos, precios, fechas, stock, garantías, ubicaciones ni beneficios no proporcionados.
+Si el objetivo no es promocion, no fuerces tono de oferta. Si hay QR, puedes invitar a escanearlo de forma breve.
+Responde SOLO con JSON valido.`,
+      prompt_template: `Crea el texto publicable del anuncio con toda esta informacion:
+
+Tienda: {{store_name}}
+Branding: {{store_branding}}
+Objetivo: {{intent}}
+Canal: {{channel}}
+CTA: {{cta}}
+Estilo visual: {{visual_style}}
+Formato: {{format_label}} ({{size}})
+Brief humano: {{brief}}
+Prompt final de imagen: {{prompt}}
+
+Productos:
+{{products_context}}
+
+Recursos visuales:
+{{resources_context}}
+
+QR:
+{{qr_context}}
+
+Reglas:
+- Maximo 900 caracteres.
+- Debe estar listo para copiar y publicar.
+- Puede incluir 2-5 hashtags solo si encajan.
+- No inventes promociones o precios.
+- Mantén tono profesional y facil de entender.
+
+Devuelve SOLO este JSON:
+{
+  "post_copy": "texto final publicable"
+}`,
     },
   ];
 
@@ -358,7 +462,74 @@ Requisitos de diseno:
     );
   }
 
+  await linkTextAppsWhenNoDefault(client, apps);
+
   return { appsCreated, appsSkipped };
+}
+
+async function linkTextAppsWhenNoDefault(
+  client: PrismaClient,
+  apps: Array<{ key: string; output_format: string }>,
+) {
+  try {
+    const defaultConfig = await client.ai_engine_configs.findFirst({
+      where: { is_active: true, is_default: true },
+      select: { id: true },
+    });
+
+    if (defaultConfig) {
+      return;
+    }
+
+    const activeConfigs = await client.ai_engine_configs.findMany({
+      where: { is_active: true },
+      orderBy: { id: 'asc' },
+    });
+    const textConfigs = activeConfigs.filter((config) =>
+      isTextGenerationConfig(config),
+    );
+
+    if (textConfigs.length !== 1) {
+      if (textConfigs.length === 0) {
+        console.log(
+          '    Skipped text app auto-link (no active text config and no default)',
+        );
+      } else {
+        console.log(
+          '    Skipped text app auto-link (multiple active text configs and no default)',
+        );
+      }
+      return;
+    }
+
+    const textConfig = textConfigs[0];
+    const textAppKeys = apps
+      .filter(
+        (app) =>
+          ['text', 'json', 'markdown', 'html'].includes(app.output_format) &&
+          app.key !== 'invoice_ocr',
+      )
+      .map((app) => app.key);
+
+    for (const key of textAppKeys) {
+      const app = await client.ai_engine_applications.findUnique({
+        where: { key },
+        select: { config_id: true },
+      });
+
+      if (app && app.config_id == null) {
+        await client.ai_engine_applications.update({
+          where: { key },
+          data: { config_id: textConfig.id },
+        });
+        console.log(
+          `    Linked ${key} → ${textConfig.label} (config #${textConfig.id})`,
+        );
+      }
+    }
+  } catch (err) {
+    console.log('    Could not auto-link text AI apps');
+  }
 }
 
 function isImageGenerationConfig(config: {
@@ -370,12 +541,27 @@ function isImageGenerationConfig(config: {
   const modelId = config.model_id.toLowerCase();
 
   return (
+    settings.model_type === 'image' ||
     settings.image_generation_mode === 'chat_completions' ||
     !!settings.image_model ||
-    config.base_url?.includes('openrouter.ai') === true ||
     modelId.includes('image') ||
     modelId.includes('imagine') ||
     modelId.includes('seedream') ||
     modelId.includes('dall-e')
   );
+}
+
+function isTextGenerationConfig(config: {
+  base_url: string | null;
+  model_id: string;
+  settings: unknown;
+}) {
+  const settings = (config.settings as Record<string, any> | null) || {};
+  const modelType = settings.model_type || settings.modelType;
+
+  if (typeof modelType === 'string' && modelType !== 'text') {
+    return false;
+  }
+
+  return !isImageGenerationConfig(config);
 }

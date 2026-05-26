@@ -8,6 +8,7 @@ import {
   AIEngineApp,
   AIAppQueryDto,
   AIAppStats,
+  AIModelType,
 } from './interfaces';
 import { AIEngineService } from './services/ai-engine.service';
 import {
@@ -124,7 +125,16 @@ export class AIEngineComponent implements OnInit {
       badgeConfig: { type: 'status', size: 'sm' },
       transform: (value: string) => this.formatSdkType(value),
     },
-    { key: 'model_id', label: 'Modelo', sortable: true, priority: 2 },
+    {
+      key: 'settings',
+      label: 'Tipo',
+      sortable: true,
+      priority: 2,
+      badge: true,
+      badgeConfig: { type: 'status', size: 'sm' },
+      transform: (_value: unknown, item?: AIEngineConfig) =>
+        this.formatModelType(item ? this.inferConfigModelType(item) : 'text'),
+    },
     {
       key: 'is_active',
       label: 'Estado',
@@ -158,7 +168,12 @@ export class AIEngineComponent implements OnInit {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'model_id', label: 'Modelo' },
+      {
+        key: 'settings',
+        label: 'Tipo',
+        transform: (_value: unknown, item?: AIEngineConfig) =>
+          this.formatModelType(item ? this.inferConfigModelType(item) : 'text'),
+      },
       { key: 'sdk_type', label: 'SDK' },
     ],
   };
@@ -232,7 +247,7 @@ export class AIEngineComponent implements OnInit {
       priority: 3,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: string) => value.toUpperCase(),
+      transform: (value: string) => this.formatOutputFormat(value),
     },
     {
       key: 'is_active',
@@ -252,7 +267,11 @@ export class AIEngineComponent implements OnInit {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'output_format', label: 'Formato' },
+      {
+        key: 'output_format',
+        label: 'Formato',
+        transform: (value: string) => this.formatOutputFormat(value),
+      },
       { key: 'description', label: 'Descripcion' },
     ],
   };
@@ -285,6 +304,12 @@ export class AIEngineComponent implements OnInit {
     { value: 'markdown', label: 'Markdown' },
     { value: 'html', label: 'HTML' },
     { value: 'image', label: 'Imagen' },
+    { value: 'embedding', label: 'Embeddings' },
+    { value: 'audio', label: 'Audio' },
+    { value: 'video', label: 'Video' },
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'speech', label: 'Speech' },
+    { value: 'transcription', label: 'Transcripcion' },
   ];
 
   appFilterConfigs: FilterConfig[] = [
@@ -717,5 +742,77 @@ export class AIEngineComponent implements OnInit {
       anthropic_compatible: 'Anthropic',
     };
     return map[sdkType] || sdkType;
+  }
+
+  formatModelType(modelType: AIModelType | string): string {
+    const map: Record<string, string> = {
+      text: 'Texto',
+      image: 'Imagen',
+      embedding: 'Embeddings',
+      audio: 'Audio',
+      video: 'Video',
+      rerank: 'Rerank',
+      speech: 'Speech',
+      transcription: 'Transcripcion',
+    };
+    return map[modelType] || modelType;
+  }
+
+  private inferConfigModelType(config: AIEngineConfig): AIModelType {
+    const settings = config.settings || {};
+    const explicitType = settings.model_type || settings['modelType'];
+
+    if (this.isAIModelType(explicitType)) {
+      return explicitType;
+    }
+
+    const modelId = config.model_id.toLowerCase();
+    if (
+      settings.image_generation_mode ||
+      settings.image_endpoint ||
+      settings.image_model ||
+      settings.modalities?.includes?.('image') ||
+      modelId.includes('image') ||
+      modelId.includes('imagine') ||
+      modelId.includes('seedream') ||
+      modelId.includes('dall-e')
+    ) {
+      return 'image';
+    }
+
+    return 'text';
+  }
+
+  private isAIModelType(value: unknown): value is AIModelType {
+    return (
+      typeof value === 'string' &&
+      [
+        'text',
+        'image',
+        'embedding',
+        'audio',
+        'video',
+        'rerank',
+        'speech',
+        'transcription',
+      ].includes(value)
+    );
+  }
+
+  formatOutputFormat(format: string): string {
+    const map: Record<string, string> = {
+      text: 'Texto',
+      json: 'JSON',
+      markdown: 'Markdown',
+      html: 'HTML',
+      image: 'Imagen',
+      embedding: 'Embeddings',
+      audio: 'Audio',
+      video: 'Video',
+      rerank: 'Rerank',
+      speech: 'Speech',
+      transcription: 'Transcripcion',
+    };
+    return map[format] || format;
   }
 }

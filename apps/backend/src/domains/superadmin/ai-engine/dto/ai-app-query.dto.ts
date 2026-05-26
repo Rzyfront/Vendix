@@ -27,7 +27,19 @@ export class AIAppQueryDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['text', 'json', 'markdown', 'html', 'image'])
+  @IsIn([
+    'text',
+    'json',
+    'markdown',
+    'html',
+    'image',
+    'embedding',
+    'audio',
+    'video',
+    'rerank',
+    'speech',
+    'transcription',
+  ])
   output_format?: string;
 
   @IsOptional()

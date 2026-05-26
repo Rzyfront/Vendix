@@ -12,6 +12,16 @@ import {
   AIImageRequestOptions,
   AIImageResponse,
   AIImageStreamChunk,
+  AIEmbeddingResponse,
+  AIVideoRequestOptions,
+  AIVideoResponse,
+  AISpeechRequestOptions,
+  AISpeechResponse,
+  AITranscriptionRequestOptions,
+  AITranscriptionResponse,
+  AIRerankRequestOptions,
+  AIRerankResponse,
+  AIModelType,
 } from './interfaces/ai-provider.interface';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.provider';
 import { AnthropicCompatibleProvider } from './providers/anthropic-compatible.provider';
@@ -798,6 +808,373 @@ export class AIEngineService implements OnModuleInit {
     }
   }
 
+  async getApplicationModelType(appKey: string): Promise<AIModelType> {
+    const app = await this.prisma.ai_engine_applications.findUnique({
+      where: { key: appKey },
+      select: { config_id: true },
+    });
+
+    if (!app) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_001);
+    }
+
+    const configId = app.config_id || this.defaultConfigId;
+    const cachedSettings = configId
+      ? this.configSettings.get(configId)
+      : undefined;
+
+    if (cachedSettings) {
+      return this.getModelTypeFromSettings(cachedSettings);
+    }
+
+    if (!configId) {
+      return 'text';
+    }
+
+    const config = await this.prisma.ai_engine_configs.findUnique({
+      where: { id: configId },
+      select: { settings: true },
+    });
+
+    return this.getModelTypeFromSettings(
+      (config?.settings as Record<string, any>) || {},
+    );
+  }
+
+  async getApplicationExecutionType(appKey: string): Promise<AIModelType> {
+    const app = await this.prisma.ai_engine_applications.findUnique({
+      where: { key: appKey },
+      select: { output_format: true },
+    });
+
+    if (!app) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_001);
+    }
+
+    const modelType = await this.getApplicationModelType(appKey);
+    return this.resolveExecutionType(app.output_format, modelType);
+  }
+
+  async runByApplicationType(
+    appKey: string,
+    variables?: Record<string, string>,
+    extraMessages?: AIMessage[],
+  ): Promise<
+    | AIResponse
+    | AIImageResponse
+    | AIEmbeddingResponse
+    | AIVideoResponse
+    | AISpeechResponse
+    | AITranscriptionResponse
+    | AIRerankResponse
+  > {
+    const executionType = await this.getApplicationExecutionType(appKey);
+
+    switch (executionType) {
+      case 'image':
+        return this.runImage(appKey, variables);
+      case 'embedding':
+        return this.runEmbedding(appKey, variables);
+      case 'audio':
+        return this.run(appKey, variables, extraMessages);
+      case 'video':
+        return this.runVideo(appKey, variables);
+      case 'speech':
+        return this.runSpeech(appKey, variables);
+      case 'transcription':
+        throw new VendixHttpException(
+          ErrorCodes.AI_REQUEST_001,
+          'Transcription applications require audio input; use runTranscription().',
+        );
+      case 'rerank':
+        return this.runRerank(appKey, variables);
+      case 'text':
+      default:
+        return this.run(appKey, variables, extraMessages);
+    }
+  }
+
+  async runEmbedding(
+    appKey: string,
+    variables?: Record<string, string>,
+    input?: string | string[],
+  ): Promise<AIEmbeddingResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AIEmbeddingResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const { app, provider, configId } =
+        await this.resolveApplicationExecution(appKey);
+      resolvedConfigId = configId;
+      featureCategory = app.ai_feature_category;
+
+      if (!provider.generateEmbedding) {
+        logResponse = {
+          success: false,
+          error: 'Embeddings not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const response = await provider.generateEmbedding(
+        input || this.buildApplicationPrompt(app, variables),
+      );
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(
+          app.ai_feature_category,
+          response.usage?.totalTokens ?? 1,
+        );
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      this.logApplicationRequest({
+        appKey,
+        configId: resolvedConfigId,
+        response: logResponse,
+        status: logStatus,
+        startTime,
+        variables,
+        featureCategory,
+      });
+    }
+  }
+
+  async runVideo(
+    appKey: string,
+    variables?: Record<string, string>,
+    videoOptions?: AIVideoRequestOptions,
+  ): Promise<AIVideoResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AIVideoResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const { app, provider, configId } =
+        await this.resolveApplicationExecution(appKey);
+      resolvedConfigId = configId;
+      featureCategory = app.ai_feature_category;
+
+      if (!provider.generateVideo) {
+        logResponse = {
+          success: false,
+          error: 'Video generation not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const response = await provider.generateVideo(
+        this.buildApplicationPrompt(app, variables),
+        this.buildVideoOptions(app, videoOptions),
+      );
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      this.logApplicationRequest({
+        appKey,
+        configId: resolvedConfigId,
+        response: logResponse,
+        status: logStatus,
+        startTime,
+        variables,
+        featureCategory,
+      });
+    }
+  }
+
+  async runSpeech(
+    appKey: string,
+    variables?: Record<string, string>,
+    speechOptions?: AISpeechRequestOptions,
+  ): Promise<AISpeechResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AISpeechResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const { app, provider, configId } =
+        await this.resolveApplicationExecution(appKey);
+      resolvedConfigId = configId;
+      featureCategory = app.ai_feature_category;
+
+      if (!provider.generateSpeech) {
+        logResponse = {
+          success: false,
+          error: 'Speech generation not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const response = await provider.generateSpeech(
+        this.buildApplicationPrompt(app, variables),
+        this.buildSpeechOptions(app, speechOptions),
+      );
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      this.logApplicationRequest({
+        appKey,
+        configId: resolvedConfigId,
+        response: logResponse,
+        status: logStatus,
+        startTime,
+        variables,
+        featureCategory,
+      });
+    }
+  }
+
+  async runTranscription(
+    appKey: string,
+    options: AITranscriptionRequestOptions,
+    variables?: Record<string, string>,
+  ): Promise<AITranscriptionResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AITranscriptionResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const { app, provider, configId } =
+        await this.resolveApplicationExecution(appKey);
+      resolvedConfigId = configId;
+      featureCategory = app.ai_feature_category;
+
+      if (!provider.transcribeAudio) {
+        logResponse = {
+          success: false,
+          error: 'Audio transcription not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const response = await provider.transcribeAudio(options);
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(
+          app.ai_feature_category,
+          response.usage?.totalTokens ?? 1,
+        );
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      this.logApplicationRequest({
+        appKey,
+        configId: resolvedConfigId,
+        response: logResponse,
+        status: logStatus,
+        startTime,
+        variables,
+        featureCategory,
+      });
+    }
+  }
+
+  async runRerank(
+    appKey: string,
+    variables?: Record<string, string>,
+    rerankOptions?: Partial<AIRerankRequestOptions>,
+  ): Promise<AIRerankResponse> {
+    const startTime = Date.now();
+    let logStatus: 'success' | 'error' = 'error';
+    let logResponse: AIRerankResponse = {
+      success: false,
+      error: 'No attempt made',
+    };
+    let resolvedConfigId: number | null = null;
+    let featureCategory: string | null = null;
+
+    try {
+      const { app, provider, configId } =
+        await this.resolveApplicationExecution(appKey);
+      resolvedConfigId = configId;
+      featureCategory = app.ai_feature_category;
+
+      if (!provider.rerank) {
+        logResponse = {
+          success: false,
+          error: 'Rerank not supported by this provider',
+        };
+        return logResponse;
+      }
+
+      const response = await provider.rerank(
+        this.buildRerankOptions(app, variables, rerankOptions),
+      );
+
+      logResponse = response;
+      if (response.success) {
+        logStatus = 'success';
+        await this.consumeSubscriptionQuota(app.ai_feature_category, 1);
+      }
+
+      return response;
+    } catch (error: any) {
+      logResponse = { success: false, error: error.message };
+      throw error;
+    } finally {
+      this.logApplicationRequest({
+        appKey,
+        configId: resolvedConfigId,
+        response: logResponse,
+        status: logStatus,
+        startTime,
+        variables,
+        featureCategory,
+      });
+    }
+  }
+
   async getApplication(appKey: string) {
     const app = await this.prisma.ai_engine_applications.findUnique({
       where: { key: appKey },
@@ -833,6 +1210,13 @@ export class AIEngineService implements OnModuleInit {
     return variables ? JSON.stringify(variables) : '';
   }
 
+  private buildApplicationPrompt(
+    app: any,
+    variables?: Record<string, string>,
+  ): string {
+    return this.buildImagePrompt(app, variables);
+  }
+
   private buildImageOptions(
     app: any,
     overrides?: AIImageRequestOptions,
@@ -865,6 +1249,218 @@ export class AIEngineService implements OnModuleInit {
         (overrides?.referenceImages?.length ? 'auto' : 'generate'),
       referenceImages: overrides?.referenceImages,
     };
+  }
+
+  private buildVideoOptions(
+    app: any,
+    overrides?: AIVideoRequestOptions,
+  ): AIVideoRequestOptions {
+    const metadata = (app.metadata as Record<string, any> | null) || {};
+    const videoConfig = metadata.video_generation || metadata;
+
+    return {
+      model: overrides?.model || videoConfig.video_model || videoConfig.model,
+      aspectRatio:
+        overrides?.aspectRatio ||
+        videoConfig.aspect_ratio ||
+        videoConfig.aspectRatio,
+      duration: overrides?.duration ?? videoConfig.duration,
+      resolution: overrides?.resolution || videoConfig.resolution,
+      callbackUrl:
+        overrides?.callbackUrl ||
+        videoConfig.callback_url ||
+        videoConfig.callbackUrl,
+      pollUntilComplete:
+        overrides?.pollUntilComplete ?? videoConfig.poll_until_complete,
+      pollIntervalMs: overrides?.pollIntervalMs ?? videoConfig.poll_interval_ms,
+      maxPollAttempts:
+        overrides?.maxPollAttempts ?? videoConfig.max_poll_attempts,
+      provider: overrides?.provider || videoConfig.provider,
+    };
+  }
+
+  private buildSpeechOptions(
+    app: any,
+    overrides?: AISpeechRequestOptions,
+  ): AISpeechRequestOptions {
+    const metadata = (app.metadata as Record<string, any> | null) || {};
+    const speechConfig = metadata.speech || metadata;
+
+    return {
+      model:
+        overrides?.model || speechConfig.speech_model || speechConfig.model,
+      voice: overrides?.voice || speechConfig.voice,
+      responseFormat:
+        overrides?.responseFormat ||
+        speechConfig.response_format ||
+        speechConfig.responseFormat,
+      speed: overrides?.speed ?? speechConfig.speed,
+      provider: overrides?.provider || speechConfig.provider,
+    };
+  }
+
+  private buildRerankOptions(
+    app: any,
+    variables?: Record<string, string>,
+    overrides?: Partial<AIRerankRequestOptions>,
+  ): AIRerankRequestOptions {
+    const metadata = (app.metadata as Record<string, any> | null) || {};
+    const rerankConfig = metadata.rerank || metadata;
+    const fallbackQuery = this.buildApplicationPrompt(app, variables);
+
+    return {
+      model:
+        overrides?.model || rerankConfig.rerank_model || rerankConfig.model,
+      query:
+        overrides?.query ||
+        rerankConfig.query ||
+        fallbackQuery ||
+        'Vendix connection test',
+      documents: overrides?.documents ||
+        rerankConfig.documents || ['Vendix connection test', 'Other document'],
+      topN: overrides?.topN ?? rerankConfig.top_n ?? rerankConfig.topN,
+      provider: overrides?.provider || rerankConfig.provider,
+    };
+  }
+
+  private async resolveApplicationExecution(appKey: string): Promise<{
+    app: any;
+    provider: AIProvider;
+    configId: number | null;
+  }> {
+    const app = await this.prisma.ai_engine_applications.findUnique({
+      where: { key: appKey },
+    });
+
+    if (!app) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_001);
+    }
+
+    if (!app.is_active) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_003);
+    }
+
+    await this.runSubscriptionGate(appKey, app.ai_feature_category);
+    await this.checkRateLimit(app);
+
+    const configId = app.config_id || this.defaultConfigId;
+    const provider = app.config_id
+      ? this.providers.get(app.config_id)
+      : this.getDefaultProvider();
+
+    if (!provider) {
+      throw new VendixHttpException(
+        app.config_id ? ErrorCodes.AI_CONFIG_001 : ErrorCodes.AI_PROVIDER_002,
+      );
+    }
+
+    return { app, provider, configId };
+  }
+
+  private logApplicationRequest(params: {
+    appKey: string;
+    configId: number | null;
+    response: {
+      model?: string;
+      usage?: AIResponse['usage'];
+      error?: string;
+    };
+    status: 'success' | 'error';
+    startTime: number;
+    variables?: Record<string, string>;
+    featureCategory?: string | null;
+  }): void {
+    const latencyMs = Date.now() - params.startTime;
+    const context = RequestContextService.getContext();
+    const configSettings = params.configId
+      ? this.configSettings.get(params.configId)
+      : undefined;
+    const usage = params.response.usage;
+
+    const costUsd = this.aiLoggingService.calculateCost(
+      configSettings,
+      usage?.promptTokens ?? 0,
+      usage?.completionTokens ?? 0,
+    );
+
+    this.aiLoggingService.logRequest({
+      app_key: params.appKey,
+      config_id: params.configId ?? undefined,
+      organization_id: context?.organization_id,
+      store_id: context?.store_id,
+      user_id: context?.user_id,
+      model: params.response.model,
+      prompt_tokens: usage?.promptTokens ?? 0,
+      completion_tokens: usage?.completionTokens ?? 0,
+      cost_usd: costUsd,
+      latency_ms: latencyMs,
+      status: params.status,
+      error_message:
+        params.status === 'error' ? params.response.error : undefined,
+      input_preview: params.variables
+        ? JSON.stringify(params.variables)
+        : undefined,
+    });
+
+    this.eventEmitter.emit('ai.request.completed', {
+      app_key: params.appKey,
+      cost_usd: costUsd,
+      latency_ms: latencyMs,
+      status: params.status,
+      organization_id: context?.organization_id,
+      store_id: context?.store_id,
+      feature_category: params.featureCategory,
+    });
+  }
+
+  private getModelTypeFromSettings(settings: Record<string, any>): AIModelType {
+    const modelType = settings?.model_type || settings?.modelType;
+
+    if (this.isAIModelType(modelType)) {
+      return modelType;
+    }
+
+    if (
+      settings?.image_generation_mode !== undefined ||
+      settings?.image_endpoint !== undefined ||
+      settings?.image_model !== undefined ||
+      settings?.modalities?.includes?.('image') === true
+    ) {
+      return 'image';
+    }
+
+    return 'text';
+  }
+
+  private resolveExecutionType(
+    outputFormat: string,
+    modelType: AIModelType,
+  ): AIModelType {
+    if (this.isAIModelType(outputFormat) && outputFormat !== 'text') {
+      return outputFormat;
+    }
+
+    if (modelType !== 'text') {
+      return modelType;
+    }
+
+    return 'text';
+  }
+
+  private isAIModelType(value: unknown): value is AIModelType {
+    return (
+      typeof value === 'string' &&
+      [
+        'text',
+        'image',
+        'embedding',
+        'audio',
+        'video',
+        'rerank',
+        'speech',
+        'transcription',
+      ].includes(value)
+    );
   }
 
   private interpolate(

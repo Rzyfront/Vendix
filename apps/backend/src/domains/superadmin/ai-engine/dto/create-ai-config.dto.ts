@@ -32,9 +32,9 @@ export class CreateAIConfigDto {
 
   @IsOptional()
   @IsString()
-  @IsUrl({}, { message: 'base_url must be a valid URL' })
+  @IsUrl({ require_tld: false }, { message: 'base_url must be a valid URL' })
   @MaxLength(500)
-  base_url?: string;
+  base_url?: string | null;
 
   @IsOptional()
   @IsString()

@@ -112,6 +112,35 @@ export class S3Service {
     }
   }
 
+  /**
+   * Uploads an already-processed image without changing its original format.
+   * Useful when pixel fidelity matters, e.g. QR overlays that must remain
+   * scannable after composition.
+   */
+  async uploadProcessedImage(
+    file: Buffer,
+    key: string,
+    contentType: string,
+    options: { generateThumbnail?: boolean; context?: ImageContext } = {},
+  ): Promise<{ key: string; thumbKey?: string }> {
+    try {
+      await this.uploadToS3(file, key, contentType);
+
+      let thumbKey: string | undefined;
+      const preset = IMAGE_PRESETS[options.context ?? ImageContext.DEFAULT];
+      if (options.generateThumbnail && preset.thumbnail) {
+        thumbKey = await this.generateThumbnail(file, key, preset.thumbnail);
+      }
+
+      return { key, thumbKey };
+    } catch (error) {
+      this.logger.error(
+        `Error uploading processed image to ${key}: ${error.message}`,
+      );
+      throw error;
+    }
+  }
+
   private async uploadToS3(
     file: Buffer,
     key: string,

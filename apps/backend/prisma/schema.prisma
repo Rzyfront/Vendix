@@ -2329,6 +2329,7 @@ model marketing_ad_creatives {
   title               String                            @db.VarChar(255)
   description         String?                           @db.Text
   prompt              String?                           @db.Text
+  post_copy           String?                           @db.Text
   format              marketing_ad_creative_format_enum @default(square)
   status              marketing_ad_creative_status_enum @default(draft)
   image_url           String?                           @db.Text

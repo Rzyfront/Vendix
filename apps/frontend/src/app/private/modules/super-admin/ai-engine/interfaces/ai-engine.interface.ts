@@ -1,4 +1,13 @@
 export type SdkType = 'openai_compatible' | 'anthropic_compatible';
+export type AIModelType =
+  | 'text'
+  | 'image'
+  | 'embedding'
+  | 'audio'
+  | 'video'
+  | 'rerank'
+  | 'speech'
+  | 'transcription';
 
 export interface AIEngineConfig {
   id: number;
@@ -6,7 +15,7 @@ export interface AIEngineConfig {
   sdk_type: SdkType;
   label: string;
   model_id: string;
-  base_url?: string;
+  base_url?: string | null;
   api_key_ref?: string;
   is_default: boolean;
   is_active: boolean;
@@ -14,6 +23,11 @@ export interface AIEngineConfig {
     temperature?: number;
     maxTokens?: number;
     thinking?: boolean;
+    model_type?: AIModelType;
+    image_generation_mode?: string;
+    image_endpoint?: string;
+    image_model?: string;
+    modalities?: string[];
     [key: string]: any;
   };
   last_tested_at?: string;
@@ -27,7 +41,7 @@ export interface CreateAIConfigDto {
   sdk_type: SdkType;
   label: string;
   model_id: string;
-  base_url?: string;
+  base_url?: string | null;
   api_key_ref?: string;
   is_default?: boolean;
   is_active?: boolean;
@@ -39,7 +53,7 @@ export interface UpdateAIConfigDto {
   sdk_type?: SdkType;
   label?: string;
   model_id?: string;
-  base_url?: string;
+  base_url?: string | null;
   api_key_ref?: string;
   is_default?: boolean;
   is_active?: boolean;
@@ -87,7 +101,18 @@ export interface KnownProvider {
 
 // --- AI Applications ---
 
-export type OutputFormat = 'text' | 'json' | 'markdown' | 'html' | 'image';
+export type OutputFormat =
+  | 'text'
+  | 'json'
+  | 'markdown'
+  | 'html'
+  | 'image'
+  | 'embedding'
+  | 'audio'
+  | 'video'
+  | 'rerank'
+  | 'speech'
+  | 'transcription';
 
 export interface AIEngineApp {
   id: number;
@@ -100,6 +125,7 @@ export interface AIEngineApp {
     label: string;
     provider: string;
     model_id: string;
+    settings?: AIEngineConfig['settings'];
   } | null;
   system_prompt?: string;
   prompt_template?: string;
@@ -118,7 +144,7 @@ export interface CreateAIAppDto {
   key: string;
   name: string;
   description?: string;
-  config_id?: number;
+  config_id?: number | null;
   system_prompt?: string;
   prompt_template?: string;
   temperature?: number;
