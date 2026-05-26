@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ai_model_type_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
@@ -21,15 +21,33 @@ export class AIEngineAppsService {
       throw new VendixHttpException(ErrorCodes.AI_APP_002);
     }
 
+    let configModelType: ai_model_type_enum | undefined;
+
     // Validate config_id exists if provided
     if (dto.config_id) {
       const config = await this.prisma.ai_engine_configs.findUnique({
         where: { id: dto.config_id },
+        select: { id: true, model_type: true },
       });
       if (!config) {
         throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
       }
+      configModelType = config.model_type;
     }
+
+    // Cross-validate model_type: if app declares one and config declares one,
+    // they MUST match.
+    if (
+      dto.model_type &&
+      configModelType &&
+      dto.model_type !== configModelType
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
+    }
+
+    // Effective model_type for the new app: dto value, else config value, else 'text'.
+    const effectiveModelType: ai_model_type_enum =
+      dto.model_type ?? configModelType ?? 'text';
 
     return this.prisma.ai_engine_applications.create({
       data: {
@@ -42,6 +60,7 @@ export class AIEngineAppsService {
         temperature: dto.temperature,
         max_tokens: dto.max_tokens,
         output_format: dto.output_format || 'text',
+        model_type: effectiveModelType,
         rate_limit: dto.rate_limit as any,
         retry_config: dto.retry_config as any,
         is_active: dto.is_active ?? true,
@@ -56,6 +75,7 @@ export class AIEngineAppsService {
             label: true,
             provider: true,
             model_id: true,
+            model_type: true,
             settings: true,
           },
         },
@@ -69,6 +89,7 @@ export class AIEngineAppsService {
       limit = 10,
       search,
       output_format,
+      model_type,
       is_active,
       sort_by = 'created_at',
       sort_order = 'desc',
@@ -89,6 +110,10 @@ export class AIEngineAppsService {
       where.output_format = output_format;
     }
 
+    if (model_type) {
+      where.model_type = model_type;
+    }
+
     if (is_active !== undefined) {
       where.is_active = is_active;
     }
@@ -106,6 +131,7 @@ export class AIEngineAppsService {
               label: true,
               provider: true,
               model_id: true,
+              model_type: true,
               settings: true,
             },
           },
@@ -135,6 +161,7 @@ export class AIEngineAppsService {
             label: true,
             provider: true,
             model_id: true,
+            model_type: true,
             settings: true,
           },
         },
@@ -167,14 +194,31 @@ export class AIEngineAppsService {
       }
     }
 
+    let configModelType: ai_model_type_enum | undefined;
+
     // Validate config_id if provided
     if (dto.config_id) {
       const config = await this.prisma.ai_engine_configs.findUnique({
         where: { id: dto.config_id },
+        select: { id: true, model_type: true },
       });
       if (!config) {
         throw new VendixHttpException(ErrorCodes.AI_CONFIG_001);
       }
+      configModelType = config.model_type;
+    }
+
+    // Effective model_type after the update: incoming dto value, else current row value.
+    const effectiveModelType: ai_model_type_enum | undefined =
+      dto.model_type ?? existing.model_type;
+
+    // Cross-validate model_type: when both sides are known, they must match.
+    if (
+      effectiveModelType &&
+      configModelType &&
+      effectiveModelType !== configModelType
+    ) {
+      throw new VendixHttpException(ErrorCodes.AI_APP_005);
     }
 
     return this.prisma.ai_engine_applications.update({
@@ -186,6 +230,7 @@ export class AIEngineAppsService {
         retry_config: dto.retry_config as any,
         metadata: dto.metadata as any,
         ai_feature_category: dto.ai_feature_category,
+        model_type: dto.model_type !== undefined ? dto.model_type : undefined,
         updated_at: new Date(),
       },
       include: {
@@ -195,6 +240,7 @@ export class AIEngineAppsService {
             label: true,
             provider: true,
             model_id: true,
+            model_type: true,
             settings: true,
           },
         },

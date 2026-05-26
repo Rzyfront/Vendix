@@ -3,6 +3,7 @@ import {
   input,
   output,
   OnChanges,
+  SimpleChanges,
   inject,
   signal,
   DestroyRef,
@@ -19,6 +20,8 @@ import {
   AIEngineConfig,
   AIModelType,
   CreateAIConfigDto,
+  MODEL_TYPES,
+  MODEL_TYPE_LABELS,
   UpdateAIConfigDto,
   KNOWN_PROVIDERS,
   KnownProvider,
@@ -126,12 +129,18 @@ import {
           ></app-input>
 
           <!-- Model Type -->
-          <app-selector
-            label="Tipo de modelo"
-            [options]="modelTypeOptions"
-            [formControl]="$any(form.get('model_type'))"
-            [disabled]="isSubmitting()"
-          ></app-selector>
+          <div class="space-y-1">
+            <app-selector
+              label="Tipo de modelo"
+              [options]="modelTypeOptions"
+              [formControl]="$any(form.get('model_type'))"
+              [disabled]="isSubmitting()"
+            ></app-selector>
+            <p class="text-xs text-text-secondary">
+              Define la capacidad principal del modelo (texto, imagen,
+              embeddings, etc.). Se valida contra el tipo de cada aplicacion.
+            </p>
+          </div>
 
           <!-- API Key -->
           <app-input
@@ -244,6 +253,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
   isOpen = input<boolean>(false);
   isSubmitting = input<boolean>(false);
   config = input<AIEngineConfig | null>(null);
+  prefill = input<AIEngineConfig | null>(null);
   isOpenChange = output<boolean>();
   submit = output<CreateAIConfigDto | UpdateAIConfigDto>();
 
@@ -263,16 +273,10 @@ export class AIEngineConfigModalComponent implements OnChanges {
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
   ];
 
-  modelTypeOptions: SelectorOption[] = [
-    { value: 'text', label: 'Texto' },
-    { value: 'image', label: 'Imagen' },
-    { value: 'embedding', label: 'Embeddings' },
-    { value: 'audio', label: 'Audio' },
-    { value: 'video', label: 'Video' },
-    { value: 'rerank', label: 'Rerank' },
-    { value: 'speech', label: 'Speech' },
-    { value: 'transcription', label: 'Transcription' },
-  ];
+  modelTypeOptions: SelectorOption[] = MODEL_TYPES.map((value) => ({
+    value,
+    label: MODEL_TYPE_LABELS[value],
+  }));
 
   form: FormGroup = this.fb.group({
     provider: ['', [Validators.required]],
@@ -280,7 +284,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
     label: ['', [Validators.required, Validators.maxLength(255)]],
     model_id: ['', [Validators.required, Validators.maxLength(100)]],
     base_url: [''],
-    model_type: ['text'],
+    model_type: ['text' as AIModelType, [Validators.required]],
     api_key_ref: [''],
     temperature: [null],
     max_tokens: [null],
@@ -331,7 +335,9 @@ export class AIEngineConfigModalComponent implements OnChanges {
       });
   }
 
-  ngOnChanges(): void {
+  ngOnChanges(changes: SimpleChanges): void {
+    if (!changes['isOpen']) return;
+    if (!this.isOpen()) return;
     if (this.isOpen() && this.config()) {
       const c = this.config()!;
       this.form.patchValue({
@@ -340,13 +346,29 @@ export class AIEngineConfigModalComponent implements OnChanges {
         label: c.label,
         model_id: c.model_id,
         base_url: c.base_url || '',
-        model_type: c.settings?.model_type || this.inferModelType(c),
+        model_type: c.model_type || c.settings?.model_type || this.inferModelType(c),
         api_key_ref: '',
         temperature: c.settings?.temperature ?? null,
         max_tokens: c.settings?.maxTokens ?? null,
         is_default: c.is_default,
         is_active: c.is_active,
         thinking: c.settings?.thinking ?? false,
+      });
+    } else if (this.isOpen() && this.prefill()) {
+      const p = this.prefill()!;
+      this.form.patchValue({
+        provider: p.provider,
+        sdk_type: p.sdk_type,
+        label: p.label,
+        model_id: p.model_id,
+        base_url: p.base_url || '',
+        model_type: p.model_type || p.settings?.model_type || this.inferModelType(p),
+        api_key_ref: '',
+        temperature: p.settings?.temperature ?? null,
+        max_tokens: p.settings?.maxTokens ?? null,
+        is_default: false,
+        is_active: p.is_active,
+        thinking: p.settings?.thinking ?? false,
       });
     } else if (this.isOpen() && !this.config()) {
       this.resetForm();
@@ -371,13 +393,15 @@ export class AIEngineConfigModalComponent implements OnChanges {
       delete settings['maxTokens'];
     }
     settings['thinking'] = !!raw.thinking;
-    settings['model_type'] = (raw.model_type || 'text') as AIModelType;
+    const modelType = (raw.model_type || 'text') as AIModelType;
+    settings['model_type'] = modelType;
 
     const data: any = {
       provider: raw.provider,
       sdk_type: raw.sdk_type,
       label: raw.label,
       model_id: raw.model_id,
+      model_type: modelType,
       is_default: raw.is_default,
       is_active: raw.is_active,
       settings: Object.keys(settings).length > 0 ? settings : undefined,

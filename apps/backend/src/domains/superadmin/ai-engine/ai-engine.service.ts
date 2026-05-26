@@ -47,6 +47,7 @@ export class AIEngineConfigService {
         api_key_ref: dto.api_key_ref || null,
         is_default: dto.is_default || false,
         is_active: dto.is_active ?? true,
+        ...(dto.model_type !== undefined ? { model_type: dto.model_type } : {}),
         settings: dto.settings as any,
         updated_at: new Date(),
       },
@@ -62,6 +63,7 @@ export class AIEngineConfigService {
       limit = 10,
       search,
       sdk_type,
+      model_type,
       is_active,
       sort_by = 'created_at',
       sort_order = 'desc',
@@ -80,6 +82,10 @@ export class AIEngineConfigService {
 
     if (sdk_type) {
       where.sdk_type = sdk_type;
+    }
+
+    if (model_type) {
+      where.model_type = model_type;
     }
 
     if (is_active !== undefined) {
@@ -162,6 +168,7 @@ export class AIEngineConfigService {
           dto.base_url !== undefined
             ? this.cleanBaseUrl(dto.base_url) || null
             : undefined,
+        model_type: dto.model_type !== undefined ? dto.model_type : undefined,
         settings: dto.settings as any,
         updated_at: new Date(),
       },

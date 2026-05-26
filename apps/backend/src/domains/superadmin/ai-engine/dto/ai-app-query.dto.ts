@@ -7,6 +7,8 @@ import {
   Min,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { AIModelType } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import { AI_MODEL_TYPES } from './create-ai-config.dto';
 
 export class AIAppQueryDto {
   @IsOptional()
@@ -41,6 +43,11 @@ export class AIAppQueryDto {
     'transcription',
   ])
   output_format?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(AI_MODEL_TYPES)
+  model_type?: AIModelType;
 
   @IsOptional()
   @Transform(({ value }) => value === 'true')

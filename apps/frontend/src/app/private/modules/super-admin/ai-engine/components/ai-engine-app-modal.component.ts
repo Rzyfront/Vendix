@@ -5,6 +5,7 @@ import {
   OnChanges,
   inject,
   signal,
+  computed,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -20,6 +21,8 @@ import {
   AIEngineConfig,
   AIModelType,
   CreateAIAppDto,
+  MODEL_TYPES,
+  MODEL_TYPE_LABELS,
   UpdateAIAppDto,
   OutputFormat,
 } from '../interfaces';
@@ -99,6 +102,37 @@ import {
             Si no seleccionas una, se usara la configuracion marcada como
             default.
           </p>
+
+          <!-- Model Type -->
+          <div class="space-y-1">
+            <app-selector
+              label="Tipo de modelo"
+              [options]="modelTypeOptions"
+              [formControl]="$any(form.get('model_type'))"
+              [disabled]="isSubmitting()"
+            ></app-selector>
+            <p class="text-xs text-text-secondary">
+              Define el tipo de modelo requerido por esta aplicacion. Debe
+              coincidir con el tipo de la configuracion seleccionada.
+            </p>
+            @if (modelTypeMismatch()) {
+              <p
+                class="text-xs text-red-600 mt-1 flex items-start gap-1"
+                role="alert"
+              >
+                <span class="font-medium">
+                  Tipo incompatible:
+                </span>
+                <span>
+                  La configuracion seleccionada es de tipo
+                  <strong>{{ modelTypeLabel(selectedConfigModelType()!) }}</strong>
+                  pero esta aplicacion requiere
+                  <strong>{{ modelTypeLabel(currentModelType()!) }}</strong
+                  >.
+                </span>
+              </p>
+            }
+          </div>
 
           <!-- System Prompt -->
           <div class="space-y-1">
@@ -235,7 +269,7 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || isSubmitting()"
+            [disabled]="form.invalid || isSubmitting() || modelTypeMismatch()"
             [loading]="isSubmitting()"
           >
             {{ app() ? 'Actualizar' : 'Crear Aplicacion' }}
@@ -265,6 +299,32 @@ export class AIEngineAppModalComponent implements OnChanges {
 
   configOptions = signal<SelectorOption[]>([]);
 
+  // Reactive state for the type-mismatch check between app.model_type and
+  // selected config.model_type. We mirror form values into signals so the
+  // template can use a `computed` without zone-driven change detection.
+  private currentConfigId = signal<string | null>(null);
+  currentModelType = signal<AIModelType | null>('text');
+
+  selectedConfigModelType = computed<AIModelType | null>(() => {
+    const id = this.currentConfigId();
+    if (!id) return null;
+    const found = this.configs().find((c) => c.id.toString() === id);
+    if (!found) return null;
+    return this.resolveConfigModelType(found);
+  });
+
+  modelTypeMismatch = computed<boolean>(() => {
+    const appType = this.currentModelType();
+    const configType = this.selectedConfigModelType();
+    if (!appType || !configType) return false;
+    return appType !== configType;
+  });
+
+  modelTypeOptions: SelectorOption[] = MODEL_TYPES.map((value) => ({
+    value,
+    label: MODEL_TYPE_LABELS[value],
+  }));
+
   outputFormatOptions: SelectorOption[] = [
     { value: 'text', label: 'Texto' },
     { value: 'json', label: 'JSON' },
@@ -284,6 +344,7 @@ export class AIEngineAppModalComponent implements OnChanges {
     name: ['', [Validators.required, Validators.maxLength(255)]],
     description: [''],
     config_id: [null],
+    model_type: ['text' as AIModelType, [Validators.required]],
     system_prompt: [''],
     prompt_template: [''],
     temperature: [null],
@@ -301,28 +362,39 @@ export class AIEngineAppModalComponent implements OnChanges {
       .get('config_id')
       ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((configId: string | null) => {
+        this.currentConfigId.set(configId ? configId.toString() : null);
         this.syncOutputFormatWithConfig(configId);
+      });
+
+    this.form
+      .get('model_type')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((modelType: AIModelType | null) => {
+        this.currentModelType.set(modelType);
       });
   }
 
   ngOnChanges(): void {
-    // Build config options from input
+    // Build config options from input — include model_type in label so
+    // super-admins can pick the matching config at a glance.
     const cfgs = this.configs();
     this.configOptions.set([
       { value: '', label: 'Usar configuracion por defecto' },
       ...cfgs.map((c) => ({
         value: c.id.toString(),
-        label: `${c.label} (${c.provider} - ${this.formatModelType(this.inferConfigModelType(c))})`,
+        label: `${c.label} (${c.provider} - ${MODEL_TYPE_LABELS[this.resolveConfigModelType(c)]})`,
       })),
     ]);
 
     if (this.isOpen() && this.app()) {
       const a = this.app()!;
+      const modelType: AIModelType = a.model_type || 'text';
       this.form.patchValue({
         key: a.key,
         name: a.name,
         description: a.description || '',
         config_id: a.config_id?.toString() || '',
+        model_type: modelType,
         system_prompt: a.system_prompt || '',
         prompt_template: a.prompt_template || '',
         temperature: a.temperature ?? null,
@@ -334,6 +406,8 @@ export class AIEngineAppModalComponent implements OnChanges {
         retry_delay: a.retry_config?.delayMs ?? null,
         is_active: a.is_active,
       });
+      this.currentModelType.set(modelType);
+      this.currentConfigId.set(a.config_id?.toString() || null);
       // Disable key editing on existing apps
       this.form.get('key')?.disable();
     } else if (this.isOpen() && !this.app()) {
@@ -351,6 +425,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       name: raw.name,
       description: raw.description || undefined,
       config_id: raw.config_id ? Number(raw.config_id) : null,
+      model_type: (raw.model_type || 'text') as AIModelType,
       system_prompt: raw.system_prompt || undefined,
       prompt_template: raw.prompt_template || undefined,
       temperature:
@@ -390,6 +465,7 @@ export class AIEngineAppModalComponent implements OnChanges {
       name: '',
       description: '',
       config_id: '',
+      model_type: 'text' as AIModelType,
       system_prompt: '',
       prompt_template: '',
       temperature: null,
@@ -401,6 +477,8 @@ export class AIEngineAppModalComponent implements OnChanges {
       retry_delay: null,
       is_active: true,
     });
+    this.currentModelType.set('text');
+    this.currentConfigId.set(null);
   }
 
   private syncOutputFormatWithConfig(configId: string | null): void {
@@ -410,14 +488,20 @@ export class AIEngineAppModalComponent implements OnChanges {
 
     if (!selected) return;
 
-    const modelType = this.inferConfigModelType(selected);
+    const modelType = this.resolveConfigModelType(selected);
     const current = this.form.get('output_format')?.value as OutputFormat;
 
+    // Auto-align the app's model_type with the config's model_type when the
+    // user picks an explicit non-text config. The user can still override.
     if (modelType !== 'text') {
       this.form.patchValue(
-        { output_format: this.modelTypeToOutputFormat(modelType) },
+        {
+          output_format: this.modelTypeToOutputFormat(modelType),
+          model_type: modelType,
+        },
         { emitEvent: false },
       );
+      this.currentModelType.set(modelType);
       return;
     }
 
@@ -436,12 +520,19 @@ export class AIEngineAppModalComponent implements OnChanges {
     }
   }
 
-  private inferConfigModelType(config: AIEngineConfig): AIModelType {
-    const settings = config.settings || {};
-    const modelId = config.model_id.toLowerCase();
+  /**
+   * Resolves a config's model_type. Prefers the top-level field added in
+   * Phase A; falls back to legacy `settings.model_type` and finally to a
+   * heuristic over model_id. This keeps the UI useful even if the backend
+   * (Phase B1) hasn't shipped the field on the wire yet.
+   */
+  private resolveConfigModelType(config: AIEngineConfig): AIModelType {
+    if (config.model_type) return config.model_type;
 
+    const settings = config.settings || {};
     if (settings.model_type) return settings.model_type;
 
+    const modelId = (config.model_id || '').toLowerCase();
     if (
       settings.image_generation_mode ||
       settings.image_endpoint ||
@@ -462,17 +553,7 @@ export class AIEngineAppModalComponent implements OnChanges {
     return modelType === 'text' ? 'text' : modelType;
   }
 
-  private formatModelType(modelType: AIModelType): string {
-    const map: Record<AIModelType, string> = {
-      text: 'Texto',
-      image: 'Imagen',
-      embedding: 'Embeddings',
-      audio: 'Audio',
-      video: 'Video',
-      rerank: 'Rerank',
-      speech: 'Speech',
-      transcription: 'Transcripcion',
-    };
-    return map[modelType];
+  modelTypeLabel(modelType: AIModelType): string {
+    return MODEL_TYPE_LABELS[modelType] ?? modelType;
   }
 }

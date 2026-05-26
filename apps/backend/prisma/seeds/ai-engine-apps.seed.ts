@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 
 export interface SeedAIEngineAppsResult {
@@ -27,6 +27,9 @@ export async function seedAIEngineApps(
       description:
         'Extrae datos estructurados de imagenes de facturas de compra usando vision AI',
       output_format: 'json',
+      // Vision OCR returns text/JSON from an image input; the underlying model
+      // is a text-output (vision-capable) model.
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.1,
       max_tokens: 4000,
       is_active: true,
@@ -77,6 +80,7 @@ RULES:
       description:
         'Genera un resumen narrativo del cierre de caja basado en los movimientos de la sesion',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.7,
       max_tokens: 800,
       is_active: true,
@@ -113,6 +117,7 @@ Se directo pero natural. No repitas datos en bruto, interpreta y analiza.`,
       description:
         'Genera prediagnóstico previo a consulta basado en formulario de precarga e historial del paciente',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.4,
       max_tokens: 1500,
       is_active: true,
@@ -153,6 +158,7 @@ ESTRUCTURA:
       description:
         'Genera resumen consolidado del historial de consultas de un cliente',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.3,
       max_tokens: 2000,
       is_active: true,
@@ -192,6 +198,7 @@ ESTRUCTURA:
       description:
         'Asistente conversacional general para el widget de chat de IA',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.7,
       max_tokens: 1200,
       is_active: true,
@@ -208,6 +215,7 @@ No inventes datos internos. Si falta información, explica qué dato hace falta 
       description:
         'Genera imagenes promocionales para productos de una tienda usando prompt, catalogo e imagenes de referencia',
       output_format: 'image',
+      model_type: 'image' as ai_model_type_enum,
       temperature: 0.7,
       max_tokens: 1200,
       is_active: true,
@@ -252,6 +260,7 @@ Requisitos de diseno:
       description:
         'Convierte briefs simples de tienda en prompts profesionales para flyers, banners e historias',
       output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.55,
       max_tokens: 1200,
       is_active: true,
@@ -292,6 +301,7 @@ Devuelve SOLO este JSON:
       description:
         'Genera texto publicable para anuncios creados en el modulo de marketing',
       output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.65,
       max_tokens: 900,
       is_active: true,
@@ -367,6 +377,12 @@ Devuelve SOLO este JSON:
         }
       }
 
+      // Always reconcile model_type with the canonical seed declaration; this
+      // is a system-owned column, not user-tunable.
+      if (existing.model_type !== app.model_type) {
+        updates.model_type = app.model_type;
+      }
+
       if (Object.keys(updates).length) {
         await client.ai_engine_applications.update({
           where: { key: app.key },
@@ -383,6 +399,7 @@ Devuelve SOLO este JSON:
           name: app.name,
           description: app.description,
           output_format: app.output_format,
+          model_type: app.model_type,
           temperature: app.temperature,
           max_tokens: app.max_tokens,
           is_active: app.is_active,
@@ -434,13 +451,16 @@ Devuelve SOLO este JSON:
     });
 
     if (marketingAdApp && marketingAdApp.config_id == null) {
-      const activeConfigs = await client.ai_engine_configs.findMany({
-        where: { is_active: true },
-        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-      });
-      const imageConfig = activeConfigs.find((config) =>
-        isImageGenerationConfig(config),
-      );
+      // Prefer default image config, fall back to any active image config.
+      const imageConfig =
+        (await client.ai_engine_configs.findFirst({
+          where: { model_type: 'image', is_active: true, is_default: true },
+          orderBy: { id: 'asc' },
+        })) ||
+        (await client.ai_engine_configs.findFirst({
+          where: { model_type: 'image', is_active: true },
+          orderBy: { id: 'asc' },
+        }));
 
       if (imageConfig) {
         await client.ai_engine_applications.update({
@@ -469,7 +489,11 @@ Devuelve SOLO este JSON:
 
 async function linkTextAppsWhenNoDefault(
   client: PrismaClient,
-  apps: Array<{ key: string; output_format: string }>,
+  apps: Array<{
+    key: string;
+    output_format: string;
+    model_type: ai_model_type_enum;
+  }>,
 ) {
   try {
     const defaultConfig = await client.ai_engine_configs.findFirst({
@@ -481,13 +505,10 @@ async function linkTextAppsWhenNoDefault(
       return;
     }
 
-    const activeConfigs = await client.ai_engine_configs.findMany({
-      where: { is_active: true },
+    const textConfigs = await client.ai_engine_configs.findMany({
+      where: { is_active: true, model_type: 'text' },
       orderBy: { id: 'asc' },
     });
-    const textConfigs = activeConfigs.filter((config) =>
-      isTextGenerationConfig(config),
-    );
 
     if (textConfigs.length !== 1) {
       if (textConfigs.length === 0) {
@@ -504,11 +525,7 @@ async function linkTextAppsWhenNoDefault(
 
     const textConfig = textConfigs[0];
     const textAppKeys = apps
-      .filter(
-        (app) =>
-          ['text', 'json', 'markdown', 'html'].includes(app.output_format) &&
-          app.key !== 'invoice_ocr',
-      )
+      .filter((app) => app.model_type === 'text' && app.key !== 'invoice_ocr')
       .map((app) => app.key);
 
     for (const key of textAppKeys) {
@@ -530,38 +547,4 @@ async function linkTextAppsWhenNoDefault(
   } catch (err) {
     console.log('    Could not auto-link text AI apps');
   }
-}
-
-function isImageGenerationConfig(config: {
-  base_url: string | null;
-  model_id: string;
-  settings: unknown;
-}) {
-  const settings = (config.settings as Record<string, any> | null) || {};
-  const modelId = config.model_id.toLowerCase();
-
-  return (
-    settings.model_type === 'image' ||
-    settings.image_generation_mode === 'chat_completions' ||
-    !!settings.image_model ||
-    modelId.includes('image') ||
-    modelId.includes('imagine') ||
-    modelId.includes('seedream') ||
-    modelId.includes('dall-e')
-  );
-}
-
-function isTextGenerationConfig(config: {
-  base_url: string | null;
-  model_id: string;
-  settings: unknown;
-}) {
-  const settings = (config.settings as Record<string, any> | null) || {};
-  const modelType = settings.model_type || settings.modelType;
-
-  if (typeof modelType === 'string' && modelType !== 'text') {
-    return false;
-  }
-
-  return !isImageGenerationConfig(config);
 }

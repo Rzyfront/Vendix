@@ -11,6 +11,8 @@ import {
   Max,
   Matches,
 } from 'class-validator';
+import { AIModelType } from '../../../../ai-engine/interfaces/ai-provider.interface';
+import { AI_MODEL_TYPES } from './create-ai-config.dto';
 
 export class CreateAIAppDto {
   @IsString()
@@ -70,6 +72,11 @@ export class CreateAIAppDto {
     'transcription',
   ])
   output_format?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(AI_MODEL_TYPES)
+  model_type?: AIModelType;
 
   @IsOptional()
   @IsObject()

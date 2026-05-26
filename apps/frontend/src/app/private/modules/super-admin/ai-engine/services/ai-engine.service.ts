@@ -41,6 +41,7 @@ export class AIEngineService {
     if (query.limit) params = params.set('limit', query.limit.toString());
     if (query.search) params = params.set('search', query.search);
     if (query.sdk_type) params = params.set('sdk_type', query.sdk_type);
+    if (query.model_type) params = params.set('model_type', query.model_type);
     if (query.is_active !== undefined)
       params = params.set('is_active', query.is_active.toString());
 
@@ -113,6 +114,7 @@ export class AIEngineService {
     if (query.search) params = params.set('search', query.search);
     if (query.output_format)
       params = params.set('output_format', query.output_format);
+    if (query.model_type) params = params.set('model_type', query.model_type);
     if (query.is_active !== undefined)
       params = params.set('is_active', query.is_active.toString());
 

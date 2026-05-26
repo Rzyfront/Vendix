@@ -8,6 +8,18 @@ import {
   IsObject,
   MaxLength,
 } from 'class-validator';
+import { AIModelType } from '../../../../ai-engine/interfaces/ai-provider.interface';
+
+export const AI_MODEL_TYPES: readonly AIModelType[] = [
+  'text',
+  'image',
+  'embedding',
+  'audio',
+  'video',
+  'rerank',
+  'speech',
+  'transcription',
+] as const;
 
 export class CreateAIConfigDto {
   @IsString()
@@ -48,6 +60,11 @@ export class CreateAIConfigDto {
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(AI_MODEL_TYPES)
+  model_type?: AIModelType;
 
   @IsOptional()
   @IsObject()

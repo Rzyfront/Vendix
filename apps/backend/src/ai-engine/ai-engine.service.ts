@@ -811,14 +811,40 @@ export class AIEngineService implements OnModuleInit {
   async getApplicationModelType(appKey: string): Promise<AIModelType> {
     const app = await this.prisma.ai_engine_applications.findUnique({
       where: { key: appKey },
-      select: { config_id: true },
+      select: { config_id: true, model_type: true },
     });
 
     if (!app) {
       throw new VendixHttpException(ErrorCodes.AI_APP_001);
     }
 
+    // 1) Prefer the explicit model_type on the application row.
+    if (app.model_type && this.isAIModelType(app.model_type)) {
+      return app.model_type;
+    }
+
+    // 2) Fall back to the assigned/default config's model_type.
     const configId = app.config_id || this.defaultConfigId;
+
+    if (configId) {
+      const config = await this.prisma.ai_engine_configs.findUnique({
+        where: { id: configId },
+        select: { model_type: true, settings: true },
+      });
+
+      if (config?.model_type && this.isAIModelType(config.model_type)) {
+        return config.model_type;
+      }
+
+      // 3) Legacy fallback: heuristic over the config's settings JSON.
+      if (config) {
+        return this.getModelTypeFromSettings(
+          (config.settings as Record<string, any>) || {},
+        );
+      }
+    }
+
+    // 4) Legacy in-memory cache fallback (covers config rows still in cache).
     const cachedSettings = configId
       ? this.configSettings.get(configId)
       : undefined;
@@ -827,32 +853,25 @@ export class AIEngineService implements OnModuleInit {
       return this.getModelTypeFromSettings(cachedSettings);
     }
 
-    if (!configId) {
-      return 'text';
-    }
-
-    const config = await this.prisma.ai_engine_configs.findUnique({
-      where: { id: configId },
-      select: { settings: true },
-    });
-
-    return this.getModelTypeFromSettings(
-      (config?.settings as Record<string, any>) || {},
-    );
+    return 'text';
   }
 
   async getApplicationExecutionType(appKey: string): Promise<AIModelType> {
     const app = await this.prisma.ai_engine_applications.findUnique({
       where: { key: appKey },
-      select: { output_format: true },
+      select: { output_format: true, model_type: true },
     });
 
     if (!app) {
       throw new VendixHttpException(ErrorCodes.AI_APP_001);
     }
 
-    const modelType = await this.getApplicationModelType(appKey);
-    return this.resolveExecutionType(app.output_format, modelType);
+    const appModelType =
+      app.model_type && this.isAIModelType(app.model_type)
+        ? app.model_type
+        : await this.getApplicationModelType(appKey);
+
+    return this.resolveExecutionType(app.output_format, appModelType);
   }
 
   async runByApplicationType(
@@ -1413,6 +1432,13 @@ export class AIEngineService implements OnModuleInit {
     });
   }
 
+  /**
+   * @deprecated Legacy fallback for AI configs that have not yet been
+   * backfilled with the explicit `model_type` column. New code should rely on
+   * `ai_engine_configs.model_type` / `ai_engine_applications.model_type`
+   * directly via `getApplicationModelType`. Kept only to keep unmigrated rows
+   * functional.
+   */
   private getModelTypeFromSettings(settings: Record<string, any>): AIModelType {
     const modelType = settings?.model_type || settings?.modelType;
 

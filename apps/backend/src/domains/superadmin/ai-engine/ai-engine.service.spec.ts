@@ -6,6 +6,10 @@ describe('AIEngineConfigService', () => {
     ai_engine_configs: {
       findUnique: jest.Mock;
       update: jest.Mock;
+      create?: jest.Mock;
+      updateMany?: jest.Mock;
+      findMany?: jest.Mock;
+      count?: jest.Mock;
     };
   };
   let aiEngine: { reloadConfigurations: jest.Mock };
@@ -15,6 +19,10 @@ describe('AIEngineConfigService', () => {
       ai_engine_configs: {
         findUnique: jest.fn(),
         update: jest.fn(),
+        create: jest.fn(),
+        updateMany: jest.fn(),
+        findMany: jest.fn(),
+        count: jest.fn(),
       },
     };
     aiEngine = { reloadConfigurations: jest.fn() };
@@ -91,6 +99,58 @@ describe('AIEngineConfigService', () => {
         expect.objectContaining({
           where: { id: 7 },
           data: expect.objectContaining({ base_url: null }),
+        }),
+      );
+    });
+  });
+
+  describe('model_type', () => {
+    it('create: persists model_type from the DTO when provided', async () => {
+      prisma.ai_engine_configs.findUnique.mockResolvedValueOnce(null);
+      prisma.ai_engine_configs.create!.mockResolvedValueOnce({
+        id: 11,
+        provider: 'OpenAI',
+        sdk_type: 'openai_compatible',
+        label: 'Image gen',
+        model_id: 'gpt-image-1',
+        model_type: 'image',
+        api_key_ref: null,
+      });
+
+      await service.create({
+        provider: 'OpenAI',
+        sdk_type: 'openai_compatible',
+        label: 'Image gen',
+        model_id: 'gpt-image-1',
+        model_type: 'image',
+      } as any);
+
+      expect(prisma.ai_engine_configs.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ model_type: 'image' }),
+        }),
+      );
+      expect(aiEngine.reloadConfigurations).toHaveBeenCalled();
+    });
+
+    it('findAll: passes the model_type filter to the Prisma where clause', async () => {
+      prisma.ai_engine_configs.findMany!.mockResolvedValueOnce([]);
+      prisma.ai_engine_configs.count!.mockResolvedValueOnce(0);
+
+      await service.findAll({
+        page: 1,
+        limit: 10,
+        model_type: 'embedding',
+      } as any);
+
+      expect(prisma.ai_engine_configs.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ model_type: 'embedding' }),
+        }),
+      );
+      expect(prisma.ai_engine_configs.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ model_type: 'embedding' }),
         }),
       );
     });

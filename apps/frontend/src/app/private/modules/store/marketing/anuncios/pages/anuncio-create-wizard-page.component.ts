@@ -105,7 +105,8 @@ interface SelectedResourcePreview {
 
       <div class="p-2 md:p-6">
         <div
-          class="mx-auto grid max-w-7xl gap-4 xl:grid-cols-[minmax(0,1fr)_360px]"
+          class="mx-auto grid max-w-7xl gap-4"
+          [ngClass]="currentStep() < 3 ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''"
         >
           <div class="space-y-4">
             <app-card [responsive]="true" [padding]="false">
@@ -681,44 +682,196 @@ interface SelectedResourcePreview {
                     </div>
                   </section>
                 }
+
+                @if (currentStep() === 3) {
+                  <section class="ai-result-step space-y-4 rounded-2xl p-4 md:p-5">
+                    <header class="flex items-center justify-between gap-3">
+                      <div>
+                        <h2
+                          class="text-base font-semibold text-[var(--color-text-primary)]"
+                        >
+                          {{
+                            generating()
+                              ? 'Creando tu anuncio con IA'
+                              : generationError()
+                              ? 'No pudimos completar la generacion'
+                              : 'Tu anuncio esta listo'
+                          }}
+                        </h2>
+                        <p class="text-sm text-[var(--color-text-secondary)]">
+                          {{
+                            generating()
+                              ? generationMessage()
+                              : generationError()
+                              ? 'Revisa los detalles y vuelve a intentar.'
+                              : 'Copia el post o vuelve a la biblioteca.'
+                          }}
+                        </p>
+                      </div>
+                      @if (generating()) {
+                        <div class="ai-orbit relative h-10 w-10 shrink-0">
+                          <span class="ai-orbit__core"></span>
+                          <span class="ai-orbit__ring"></span>
+                          <span class="ai-orbit__ring ai-orbit__ring--delayed"></span>
+                        </div>
+                      }
+                    </header>
+
+                    @if (generationError()) {
+                      <app-alert-banner variant="danger" icon="triangle-alert">
+                        {{ generationError() }}
+                      </app-alert-banner>
+                    }
+
+                    <div
+                      class="ai-result-stage relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                      [class.is-generating]="generating()"
+                      [ngClass]="formatAspectClass(currentFormat())"
+                    >
+                      @if (activeResultImage()) {
+                        <img
+                          class="relative z-[2] h-full w-full object-contain"
+                          [src]="activeResultImage()!"
+                          alt="Anuncio generado"
+                        />
+                      }
+
+                      @if (generating() && !activeResultImage()) {
+                        <div class="ai-result-stage__placeholder">
+                          <div class="ai-sparkle ai-sparkle--a"></div>
+                          <div class="ai-sparkle ai-sparkle--b"></div>
+                          <div class="ai-sparkle ai-sparkle--c"></div>
+                          <div class="ai-sparkle ai-sparkle--d"></div>
+                          <div class="ai-sparkle ai-sparkle--e"></div>
+                          <div class="ai-result-stage__halo"></div>
+                          <div class="ai-result-stage__icon">
+                            <app-icon name="sparkles" [size]="36"></app-icon>
+                          </div>
+                          <p class="ai-result-stage__caption">
+                            {{ generationMessage() }}
+                          </p>
+                        </div>
+                      }
+
+                      @if (generating()) {
+                        <div class="ai-result-stage__shimmer"></div>
+                        <div class="ai-result-stage__scan"></div>
+                      }
+                    </div>
+
+                    @if (generationResult()?.post_copy) {
+                      <div
+                        class="ai-post-card rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-4"
+                      >
+                        <div class="mb-2 flex items-center justify-between gap-3">
+                          <p
+                            class="text-sm font-semibold text-[var(--color-text-primary)]"
+                          >
+                            Post listo
+                          </p>
+                          <app-button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            (clicked)="copyPostCopy()"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="copy"
+                              [size]="14"
+                            ></app-icon>
+                            Copiar
+                          </app-button>
+                        </div>
+                        <p
+                          class="whitespace-pre-line text-sm leading-6 text-[var(--color-text-secondary)]"
+                        >
+                          {{ generationResult()?.post_copy }}
+                        </p>
+                      </div>
+                    } @else if (generating()) {
+                      <div
+                        class="ai-post-skeleton space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-4"
+                      >
+                        <div class="ai-skeleton-line w-2/3"></div>
+                        <div class="ai-skeleton-line w-full"></div>
+                        <div class="ai-skeleton-line w-11/12"></div>
+                        <div class="ai-skeleton-line w-4/5"></div>
+                      </div>
+                    }
+
+                    <div
+                      class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end"
+                    >
+                      @if (!generating()) {
+                        <app-button
+                          variant="ghost"
+                          size="md"
+                          type="button"
+                          (clicked)="restartWizard()"
+                        >
+                          <app-icon
+                            slot="icon"
+                            name="rotate-ccw"
+                            [size]="16"
+                          ></app-icon>
+                          Crear otro
+                        </app-button>
+                      }
+                      @if (generationResult()?.image_url && !generating()) {
+                        <app-button
+                          variant="primary"
+                          size="md"
+                          type="button"
+                          (clicked)="goBack()"
+                        >
+                          Ver biblioteca
+                        </app-button>
+                      }
+                    </div>
+                  </section>
+                }
               </form>
 
-              <div
-                class="ai-bottom-bar flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6"
-              >
-                <app-button
-                  variant="outline"
-                  size="md"
-                  type="button"
-                  (clicked)="goBack()"
+              @if (currentStep() < 3) {
+                <div
+                  class="ai-bottom-bar flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6"
                 >
-                  Cancelar
-                </app-button>
-                <div class="flex gap-2">
                   <app-button
-                    variant="ghost"
+                    variant="outline"
                     size="md"
                     type="button"
-                    [disabled]="currentStep() === 0"
-                    (clicked)="previousStep()"
+                    (clicked)="goBack()"
                   >
-                    Atras
+                    Cancelar
                   </app-button>
-                  @if (currentStep() < 2) {
+                  <div class="flex gap-2">
                     <app-button
-                      variant="primary"
+                      variant="ghost"
                       size="md"
                       type="button"
-                      (clicked)="nextStep()"
+                      [disabled]="currentStep() === 0"
+                      (clicked)="previousStep()"
                     >
-                      Continuar
+                      Atras
                     </app-button>
-                  }
+                    @if (currentStep() < 2) {
+                      <app-button
+                        variant="primary"
+                        size="md"
+                        type="button"
+                        (clicked)="nextStep()"
+                      >
+                        Continuar
+                      </app-button>
+                    }
+                  </div>
                 </div>
-              </div>
+              }
             </app-card>
           </div>
 
+          @if (currentStep() < 3) {
           <aside class="space-y-4">
             <app-card [responsive]="true" [padding]="false">
               <div class="ai-summary-panel space-y-4 p-4 md:p-5">
@@ -917,6 +1070,7 @@ interface SelectedResourcePreview {
               </app-card>
             }
           </aside>
+          }
         </div>
       </div>
 
@@ -1218,12 +1372,312 @@ interface SelectedResourcePreview {
         }
       }
 
+      .ai-result-step {
+        position: relative;
+        background:
+          radial-gradient(
+              circle at 0% 0%,
+              color-mix(in oklab, var(--color-primary) 7%, transparent),
+              transparent 60%
+            ),
+          radial-gradient(
+              circle at 100% 100%,
+              color-mix(in oklab, var(--color-info) 6%, transparent),
+              transparent 60%
+            );
+      }
+
+      .ai-result-stage {
+        position: relative;
+        isolation: isolate;
+        min-height: 280px;
+      }
+
+      .ai-result-stage.is-generating {
+        background:
+          radial-gradient(
+            circle at 50% 50%,
+            color-mix(in oklab, var(--color-primary) 10%, transparent),
+            transparent 70%
+          ),
+          var(--color-surface-muted);
+      }
+
+      .ai-result-stage__placeholder {
+        position: absolute;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        text-align: center;
+        padding: 1.5rem;
+      }
+
+      .ai-result-stage__icon {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+        border-radius: 9999px;
+        color: var(--color-primary);
+        background: color-mix(in oklab, var(--color-primary) 12%, transparent);
+        box-shadow:
+          0 0 0 1px color-mix(in oklab, var(--color-primary) 25%, transparent),
+          0 0 30px color-mix(in oklab, var(--color-primary) 35%, transparent);
+        animation: ai-icon-breathe 3s ease-in-out infinite;
+      }
+
+      .ai-result-stage__caption {
+        font-size: 0.875rem;
+        color: var(--color-text-secondary);
+        max-width: 280px;
+        animation: ai-soft-pulse 2.4s ease-in-out infinite;
+      }
+
+      .ai-result-stage__halo {
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 320px;
+        height: 320px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: conic-gradient(
+          from 0deg,
+          color-mix(in oklab, var(--color-primary) 35%, transparent),
+          color-mix(in oklab, var(--color-info) 25%, transparent),
+          color-mix(in oklab, var(--color-success) 25%, transparent),
+          color-mix(in oklab, var(--color-primary) 35%, transparent)
+        );
+        filter: blur(40px);
+        opacity: 0.45;
+        z-index: 0;
+        animation: ai-halo-spin 6s linear infinite;
+      }
+
+      .ai-result-stage__shimmer {
+        position: absolute;
+        inset: 0;
+        z-index: 3;
+        background: linear-gradient(
+          110deg,
+          transparent 30%,
+          color-mix(in oklab, white 30%, transparent) 50%,
+          transparent 70%
+        );
+        background-size: 200% 100%;
+        background-position: 200% 0;
+        animation: ai-shimmer-sweep 2.4s ease-in-out infinite;
+        mix-blend-mode: overlay;
+        pointer-events: none;
+      }
+
+      .ai-result-stage__scan {
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 0;
+        height: 2px;
+        z-index: 4;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          color-mix(in oklab, var(--color-primary) 75%, transparent),
+          transparent
+        );
+        box-shadow: 0 0 14px
+          color-mix(in oklab, var(--color-primary) 55%, transparent);
+        animation: ai-scan-vertical 2.6s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      .ai-sparkle {
+        position: absolute;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: color-mix(in oklab, var(--color-primary) 80%, white);
+        box-shadow: 0 0 12px
+          color-mix(in oklab, var(--color-primary) 80%, transparent);
+        opacity: 0;
+        z-index: 2;
+      }
+
+      .ai-sparkle--a {
+        top: 18%;
+        left: 22%;
+        animation: ai-sparkle-twinkle 3s ease-in-out infinite;
+      }
+      .ai-sparkle--b {
+        top: 32%;
+        right: 18%;
+        animation: ai-sparkle-twinkle 3.5s ease-in-out 0.4s infinite;
+      }
+      .ai-sparkle--c {
+        bottom: 24%;
+        left: 30%;
+        animation: ai-sparkle-twinkle 4s ease-in-out 0.8s infinite;
+      }
+      .ai-sparkle--d {
+        bottom: 18%;
+        right: 28%;
+        animation: ai-sparkle-twinkle 3.2s ease-in-out 1.2s infinite;
+      }
+      .ai-sparkle--e {
+        top: 50%;
+        left: 12%;
+        animation: ai-sparkle-twinkle 3.8s ease-in-out 1.6s infinite;
+      }
+
+      .ai-post-skeleton {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .ai-post-skeleton::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          110deg,
+          transparent 30%,
+          color-mix(in oklab, var(--color-primary) 18%, transparent) 50%,
+          transparent 70%
+        );
+        background-size: 200% 100%;
+        background-position: 200% 0;
+        animation: ai-shimmer-sweep 2.2s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      .ai-skeleton-line {
+        height: 10px;
+        border-radius: 999px;
+        background: color-mix(
+          in oklab,
+          var(--color-text-secondary) 14%,
+          transparent
+        );
+      }
+
+      .ai-orbit {
+        display: inline-block;
+      }
+      .ai-orbit__core {
+        position: absolute;
+        inset: 50% auto auto 50%;
+        width: 14px;
+        height: 14px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        background: var(--color-primary);
+        box-shadow: 0 0 18px
+          color-mix(in oklab, var(--color-primary) 70%, transparent);
+        animation: ai-soft-pulse 1.6s ease-in-out infinite;
+      }
+      .ai-orbit__ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 1.5px solid
+          color-mix(in oklab, var(--color-primary) 55%, transparent);
+        border-top-color: transparent;
+        border-left-color: transparent;
+        animation: ai-orbit-spin 1.4s linear infinite;
+      }
+      .ai-orbit__ring--delayed {
+        inset: -6px;
+        border-color: color-mix(in oklab, var(--color-info) 45%, transparent);
+        border-top-color: transparent;
+        border-right-color: transparent;
+        animation: ai-orbit-spin 2.1s linear reverse infinite;
+      }
+
+      @keyframes ai-shimmer-sweep {
+        0% {
+          background-position: 200% 0;
+        }
+        100% {
+          background-position: -200% 0;
+        }
+      }
+
+      @keyframes ai-scan-vertical {
+        0% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(280px);
+        }
+        100% {
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes ai-halo-spin {
+        from {
+          transform: translate(-50%, -50%) rotate(0deg);
+        }
+        to {
+          transform: translate(-50%, -50%) rotate(360deg);
+        }
+      }
+
+      @keyframes ai-icon-breathe {
+        0%,
+        100% {
+          transform: scale(1);
+          box-shadow:
+            0 0 0 1px color-mix(in oklab, var(--color-primary) 25%, transparent),
+            0 0 30px color-mix(in oklab, var(--color-primary) 35%, transparent);
+        }
+        50% {
+          transform: scale(1.08);
+          box-shadow:
+            0 0 0 2px color-mix(in oklab, var(--color-primary) 35%, transparent),
+            0 0 60px color-mix(in oklab, var(--color-primary) 55%, transparent);
+        }
+      }
+
+      @keyframes ai-sparkle-twinkle {
+        0%,
+        100% {
+          opacity: 0;
+          transform: scale(0.6);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1.2);
+        }
+      }
+
+      @keyframes ai-orbit-spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .ai-glow-panel::after,
         .ai-result-panel::after,
         .ai-create-panel::after,
         .ai-generating .ai-preview-stage,
-        .ai-soft-pulse {
+        .ai-soft-pulse,
+        .ai-result-stage__icon,
+        .ai-result-stage__halo,
+        .ai-result-stage__shimmer,
+        .ai-result-stage__scan,
+        .ai-sparkle,
+        .ai-post-skeleton::after,
+        .ai-orbit__core,
+        .ai-orbit__ring {
           animation: none;
         }
       }
@@ -1249,6 +1703,7 @@ export class AnuncioCreateWizardPageComponent {
     { label: 'Idea' },
     { label: 'Recursos' },
     { label: 'Crear' },
+    { label: 'Resultado' },
   ];
   protected readonly currentStep = signal(0);
   protected readonly products = signal<Product[]>([]);
@@ -1511,7 +1966,7 @@ export class AnuncioCreateWizardPageComponent {
       !!this.generationResult()?.post_copy,
   );
 
-  protected readonly stepBadge = computed(() => `${this.currentStep() + 1}/3`);
+  protected readonly stepBadge = computed(() => `${this.currentStep() + 1}/4`);
 
   constructor() {
     this.form.valueChanges
@@ -1559,11 +2014,11 @@ export class AnuncioCreateWizardPageComponent {
   }
 
   protected goToStep(index: number): void {
-    this.currentStep.set(Math.max(0, Math.min(2, index)));
+    this.currentStep.set(Math.max(0, Math.min(3, index)));
   }
 
   protected nextStep(): void {
-    this.currentStep.update((step) => Math.min(2, step + 1));
+    this.currentStep.update((step) => Math.min(3, step + 1));
   }
 
   protected previousStep(): void {
@@ -1692,12 +2147,21 @@ export class AnuncioCreateWizardPageComponent {
         this.anunciosService.createAnuncio(dto),
       );
       this.generationResult.set(response.data);
+      this.currentStep.set(3);
       this.startGeneration(response.data.id);
     } catch (error: any) {
       this.generationError.set(extractApiErrorMessage(error));
     } finally {
       this.creating.set(false);
     }
+  }
+
+  protected restartWizard(): void {
+    this.generationResult.set(null);
+    this.generationPreview.set(null);
+    this.generationError.set(null);
+    this.generating.set(false);
+    this.currentStep.set(0);
   }
 
   protected async copyPostCopy(): Promise<void> {

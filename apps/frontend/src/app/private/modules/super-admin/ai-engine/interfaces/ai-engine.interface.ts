@@ -9,12 +9,35 @@ export type AIModelType =
   | 'speech'
   | 'transcription';
 
+export const MODEL_TYPES: AIModelType[] = [
+  'text',
+  'image',
+  'embedding',
+  'audio',
+  'video',
+  'rerank',
+  'speech',
+  'transcription',
+];
+
+export const MODEL_TYPE_LABELS: Record<AIModelType, string> = {
+  text: 'Texto',
+  image: 'Imagen',
+  embedding: 'Embeddings',
+  audio: 'Audio',
+  video: 'Video',
+  rerank: 'Rerank',
+  speech: 'Speech',
+  transcription: 'Transcripcion',
+};
+
 export interface AIEngineConfig {
   id: number;
   provider: string;
   sdk_type: SdkType;
   label: string;
   model_id: string;
+  model_type: AIModelType;
   base_url?: string | null;
   api_key_ref?: string;
   is_default: boolean;
@@ -41,6 +64,7 @@ export interface CreateAIConfigDto {
   sdk_type: SdkType;
   label: string;
   model_id: string;
+  model_type?: AIModelType;
   base_url?: string | null;
   api_key_ref?: string;
   is_default?: boolean;
@@ -53,6 +77,7 @@ export interface UpdateAIConfigDto {
   sdk_type?: SdkType;
   label?: string;
   model_id?: string;
+  model_type?: AIModelType;
   base_url?: string | null;
   api_key_ref?: string;
   is_default?: boolean;
@@ -65,6 +90,7 @@ export interface AIConfigQueryDto {
   limit?: number;
   search?: string;
   sdk_type?: SdkType;
+  model_type?: AIModelType;
   is_active?: boolean;
 }
 
@@ -125,8 +151,10 @@ export interface AIEngineApp {
     label: string;
     provider: string;
     model_id: string;
+    model_type?: AIModelType;
     settings?: AIEngineConfig['settings'];
   } | null;
+  model_type: AIModelType;
   system_prompt?: string;
   prompt_template?: string;
   temperature?: number;
@@ -145,6 +173,7 @@ export interface CreateAIAppDto {
   name: string;
   description?: string;
   config_id?: number | null;
+  model_type?: AIModelType;
   system_prompt?: string;
   prompt_template?: string;
   temperature?: number;
@@ -163,6 +192,7 @@ export interface AIAppQueryDto {
   limit?: number;
   search?: string;
   output_format?: OutputFormat;
+  model_type?: AIModelType;
   is_active?: boolean;
 }
 

@@ -126,20 +126,23 @@
                 icon="cpu"
                 [title]="
                   filterForm.get('search')?.value ||
-                  filterForm.get('sdk_type')?.value
+                  filterForm.get('sdk_type')?.value ||
+                  filterForm.get('model_type')?.value
                     ? 'Sin resultados'
                     : 'No hay configuraciones'
                 "
                 [description]="
                   filterForm.get('search')?.value ||
-                  filterForm.get('sdk_type')?.value
+                  filterForm.get('sdk_type')?.value ||
+                  filterForm.get('model_type')?.value
                     ? 'Ajusta tus filtros de busqueda'
                     : 'Configura tu primer proveedor de IA para comenzar'
                 "
                 actionButtonText="Nueva Configuracion"
                 [showActionButton]="
                   !filterForm.get('search')?.value &&
-                  !filterForm.get('sdk_type')?.value
+                  !filterForm.get('sdk_type')?.value &&
+                  !filterForm.get('model_type')?.value
                 "
                 (actionClick)="openCreateModal()"
               ></app-empty-state>
@@ -293,6 +296,7 @@
     [isOpen]="showConfigModal()"
     (isOpenChange)="showConfigModal.set($event)"
     [config]="selectedConfig()"
+    [prefill]="duplicateSeed()"
     [isSubmitting]="isSubmitting()"
     (submit)="saveConfig($event)"
   >

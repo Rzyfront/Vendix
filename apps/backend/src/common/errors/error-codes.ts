@@ -946,6 +946,11 @@ export const ErrorCodes = {
     httpStatus: 429,
     devMessage: 'AI application rate limit exceeded',
   },
+  AI_APP_005: {
+    code: 'AI_APP_005',
+    httpStatus: 400,
+    devMessage: 'Config model_type does not match app model_type',
+  },
 
   // AI Queue
   AI_QUEUE_001: {
