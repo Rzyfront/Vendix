@@ -31,7 +31,7 @@ import { StockTransfer, TransferStatus } from '../interfaces';
 ],
   template: `
     <div class="md:space-y-4">
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Search Section -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
@@ -54,16 +54,6 @@ import { StockTransfer, TransferStatus } from '../interfaces';
                 (searchChange)="onSearchChange($event)"
               >
               </app-inputsearch>
-
-              <app-button
-                variant="outline"
-                size="md"
-                customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-                (clicked)="onActionClick('create')"
-                title="Nueva Transferencia"
-              >
-                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-              </app-button>
 
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"

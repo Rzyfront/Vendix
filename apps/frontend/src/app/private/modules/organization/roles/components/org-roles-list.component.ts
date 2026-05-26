@@ -3,13 +3,11 @@ import { FormsModule } from '@angular/forms';
 
 import { Role } from '../interfaces/role.interface';
 import {
-  ButtonComponent,
   CardComponent,
   DropdownAction,
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
-  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -23,10 +21,8 @@ import {
   standalone: true,
   imports: [
     FormsModule,
-    ButtonComponent,
     CardComponent,
     EmptyStateComponent,
-    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -35,6 +31,7 @@ import {
     <app-card
       [responsive]="true"
       [padding]="false"
+      overflow="visible"
       customClasses="md:min-h-[600px]"
     >
       <div
@@ -66,16 +63,6 @@ import {
               (ngModelChange)="searchTerm.set($event)"
               (searchChange)="onSearch($event)"
             ></app-inputsearch>
-
-            <app-button
-              variant="outline"
-              size="md"
-              customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-              (clicked)="create.emit()"
-              title="Nuevo Rol"
-            >
-              <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-            </app-button>
 
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"

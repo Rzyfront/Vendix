@@ -28,9 +28,6 @@ import {
 import {
   ModalComponent,
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
-  SelectorComponent,
   DialogService,
   ToastService,
   PaginationComponent,
@@ -39,6 +36,10 @@ import {
   TableColumn,
   TableAction,
   EmptyStateComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -56,11 +57,9 @@ import './organizations.component.css';
     OrganizationCreateModalComponent,
     OrganizationEditModalComponent,
     InputsearchComponent,
-    IconComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
-    ButtonComponent,
   ],
   providers: [OrganizationsService],
   template: `
@@ -69,7 +68,7 @@ import './organizations.component.css';
       <app-organization-stats [stats]="stats()"></app-organization-stats>
 
       <!-- Organizations List -->
-      <div class="bg-surface rounded-card shadow-card border border-border">
+      <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
@@ -92,36 +91,15 @@ import './organizations.component.css';
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
 
-              <!-- Mode Filter -->
-              <div class="w-full sm:w-44">
-                <app-selector
-                  [options]="modeOptions"
-                  [formControl]="modeControl"
-                  size="sm"
-                  variant="outline"
-                ></app-selector>
-              </div>
-
-              <div class="flex gap-2 items-center">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="refreshOrganizations()"
-                  [disabled]="isLoading()"
-                  title="Refresh"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateOrganizationModal()"
-                  title="New Organization"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">New Organization</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="isLoading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
 
             <!-- Paginación info -->
@@ -221,6 +199,40 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     { value: 'production', label: 'Producción' },
     { value: 'demo', label: 'Demo' },
     { value: 'test', label: 'Test' },
+  ];
+
+  statusOptions = [
+    { value: '', label: 'Todos los estados' },
+    { value: 'active', label: 'Activo' },
+    { value: 'inactive', label: 'Inactivo' },
+    { value: 'suspended', label: 'Suspendido' },
+  ];
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: this.statusOptions,
+    },
+    {
+      key: 'mode',
+      label: 'Modo',
+      type: 'select',
+      options: this.modeOptions,
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Nueva Organización',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table configuration
@@ -556,6 +568,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadOrganizations();
   }
 
+  clearFilters(): void {
+    this.selectedStatus = '';
+    this.selectedMode = '';
+    this.filterValues = {};
+    this.modeControl.setValue('', { emitEvent: false });
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadOrganizations();
+  }
+
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
     this.pagination.update((p) => ({ ...p, page: 1 }));
@@ -566,6 +587,26 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.selectedMode = value;
     this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadOrganizations();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = { ...values };
+    this.selectedStatus = (values['state'] as string) || '';
+    this.selectedMode = (values['mode'] as string) || '';
+    this.modeControl.setValue(this.selectedMode, { emitEvent: false });
+    this.pagination.update((p) => ({ ...p, page: 1 }));
+    this.loadOrganizations();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'refresh':
+        this.refreshOrganizations();
+        break;
+      case 'create':
+        this.openCreateOrganizationModal();
+        break;
+    }
   }
 
   onTableSort(sortEvent: {

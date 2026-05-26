@@ -24,12 +24,14 @@ import {
   DialogService,
   ToastService,
   StatsComponent,
-  ButtonComponent,
-  IconComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-  EmptyStateComponent} from '../../../../shared/components/index';
+  EmptyStateComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction} from '../../../../shared/components/index';
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -58,8 +60,7 @@ interface StatItem {
     ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,
-    IconComponent,
-    ButtonComponent
+    OptionsDropdownComponent
 ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css']})
@@ -203,6 +204,27 @@ export class UsersComponent implements OnInit {
       label: 'Pendiente de Verificación'},
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
+  ];
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: this.userStates,
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Nuevo Usuario',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   constructor() {
@@ -398,6 +420,29 @@ loadUsers(): void {
 
   refreshUsers(): void {
     this.loadUsers();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = { ...values };
+    this.filterForm.patchValue({
+      state: (values['state'] as string) || '',
+    });
+  }
+
+  clearFilters(): void {
+    this.filterValues = {};
+    this.filterForm.patchValue({ state: '' });
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'refresh':
+        this.refreshUsers();
+        break;
+      case 'create':
+        this.createUser();
+        break;
+    }
   }
 
   createUser(): void {

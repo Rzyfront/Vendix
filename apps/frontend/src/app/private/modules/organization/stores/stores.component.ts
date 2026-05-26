@@ -40,15 +40,17 @@ import { DialogService } from '../../../../shared/components/dialog/dialog.servi
 // Import shared components
 import {
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
   ToastService,
   TableColumn,
   TableAction,
   StatsComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-  EmptyStateComponent} from '../../../../shared/components/index';
+  EmptyStateComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction} from '../../../../shared/components/index';
 
 interface StatItem {
   title: string;
@@ -72,9 +74,8 @@ interface StatItem {
     StoreDeleteConfirmationComponent,
     StoreConfigurationModalComponent,
     InputsearchComponent,
-    IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="space-y-4">
@@ -93,7 +94,7 @@ interface StatItem {
       </div>
 
       <!-- Stores List -->
-      <div class="bg-surface rounded-card shadow-card border border-border">
+      <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
@@ -116,51 +117,15 @@ interface StatItem {
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
 
-              <!-- Filtro de tipo de tienda -->
-              <select
-                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-                (change)="onStoreTypeChange($event)"
-                [value]="selectedStoreType()"
-              >
-                <option value="">Todos los Tipos</option>
-                <option value="physical">Tienda Física</option>
-                <option value="online">Tienda Online</option>
-                <option value="hybrid">Tienda Híbrida</option>
-                <option value="popup">Tienda Temporal</option>
-                <option value="kiosko">Kiosko</option>
-              </select>
-
-              <!-- Filtro de estado -->
-              <select
-                class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-                (change)="onStateChange($event)"
-                [value]="selectedState()"
-              >
-                <option value="">Todos los Estados</option>
-                <option value="active">Activa</option>
-                <option value="inactive">Inactiva</option>
-              </select>
-
-              <div class="flex gap-2 items-center">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="refreshStores()"
-                  [disabled]="isLoading()"
-                  title="Actualizar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateStoreModal()"
-                  title="Nueva Tienda"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nueva Tienda</span>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [filters]="filterConfigs"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="isLoading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -266,6 +231,43 @@ export class StoresComponent implements OnInit {
   readonly searchTerm = signal('');
   readonly selectedState = signal('');
   readonly selectedStoreType = signal('');
+  readonly filterValues = signal<FilterValues>({});
+
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'store_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Tipos' },
+        { value: 'physical', label: 'Tienda Física' },
+        { value: 'online', label: 'Tienda Online' },
+        { value: 'hybrid', label: 'Tienda Híbrida' },
+        { value: 'popup', label: 'Tienda Temporal' },
+        { value: 'kiosko', label: 'Kiosko' },
+      ],
+    },
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'active', label: 'Activa' },
+        { value: 'inactive', label: 'Inactiva' },
+      ],
+    },
+  ];
+
+  readonly dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Nueva Tienda',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -607,6 +609,7 @@ openCreateStoreModal(): void {
     this.searchTerm.set('');
     this.selectedState.set('');
     this.selectedStoreType.set('');
+    this.filterValues.set({});
     this.loadStores();
   }
 
@@ -623,6 +626,24 @@ openCreateStoreModal(): void {
   onStateChange(event: any): void {
     this.selectedState.set(event.target.value);
     this.loadStores();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set({ ...values });
+    this.selectedStoreType.set((values['store_type'] as string) || '');
+    this.selectedState.set((values['state'] as string) || '');
+    this.loadStores();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'refresh':
+        this.refreshStores();
+        break;
+      case 'create':
+        this.openCreateStoreModal();
+        break;
+    }
   }
 
   onTableSort(sortEvent: {

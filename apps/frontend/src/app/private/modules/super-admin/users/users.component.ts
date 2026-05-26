@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, signal,
+import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -20,9 +20,10 @@ import {
   TableColumn,
   TableAction,
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
-  SelectorComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
@@ -31,8 +32,6 @@ import {
   EmptyStateComponent,
   CardComponent} from '../../../../shared/components/index';
 import {
-  FormsModule,
-  ReactiveFormsModule,
   FormBuilder,
   FormGroup} from '@angular/forms';
 
@@ -40,17 +39,13 @@ import {
   selector: 'app-users',
   standalone: true,
   imports: [
-    FormsModule,
-    ReactiveFormsModule,
     UserStatsComponent,
     UserCreateModalComponent,
     UserEditModalComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
-    IconComponent,
-    ButtonComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     CardComponent,
   ],
@@ -79,6 +74,7 @@ export class UsersComponent implements OnInit {
     state: [''],
     organization_id: [''],
     include_non_production: ['']});
+  readonly filterValues = signal<FilterValues>({});
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -141,6 +137,44 @@ export class UsersComponent implements OnInit {
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'state',
+      label: 'Estado',
+      type: 'select',
+      options: this.userStates,
+    },
+    {
+      key: 'include_non_production',
+      label: 'Modo',
+      type: 'select',
+      options: this.orgModes,
+      helpText: 'Incluye organizaciones en modo no productivo cuando aplica.',
+    },
+  ];
+
+  readonly dropdownActions = computed<DropdownAction[]>(() => [
+    {
+      label: 'Sync Panel UI',
+      icon: 'shield-check',
+      action: 'sync-panel-ui',
+      disabled: this.isLoading(),
+    },
+    {
+      label: 'Refrescar',
+      icon: 'refresh-cw',
+      action: 'refresh',
+      disabled: this.isLoading(),
+    },
+    {
+      label: 'Nuevo Usuario',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+      disabled: this.isLoading(),
+    },
+  ]);
 
   // Card configuration for mobile
   cardConfig: ItemListCardConfig = {
@@ -235,6 +269,37 @@ loadUsers(): void {
 
   onSearchChange(searchTerm: string): void {
     this.searchSubject.next(searchTerm);
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues.set({ ...values });
+    this.filterForm.patchValue({
+      state: (values['state'] as string) || '',
+      include_non_production:
+        (values['include_non_production'] as string) || '',
+    });
+  }
+
+  onClearFilters(): void {
+    this.filterValues.set({});
+    this.filterForm.patchValue({
+      state: '',
+      include_non_production: '',
+    });
+  }
+
+  onDropdownAction(action: string): void {
+    switch (action) {
+      case 'sync-panel-ui':
+        this.syncPanelUI();
+        break;
+      case 'refresh':
+        this.refreshUsers();
+        break;
+      case 'create':
+        this.createUser();
+        break;
+    }
   }
 
   onPageChange(page: number): void {
@@ -389,7 +454,12 @@ loadUsers(): void {
 
   getEmptyStateTitle(): string {
     const filters = this.filterForm.value;
-    if (filters.search || filters.state || filters.organization_id) {
+    if (
+      filters.search ||
+      filters.state ||
+      filters.organization_id ||
+      filters.include_non_production
+    ) {
       return 'Sin coincidencias';
     }
     return 'No hay usuarios';
@@ -397,7 +467,12 @@ loadUsers(): void {
 
   getEmptyStateDescription(): string {
     const filters = this.filterForm.value;
-    if (filters.search || filters.state || filters.organization_id) {
+    if (
+      filters.search ||
+      filters.state ||
+      filters.organization_id ||
+      filters.include_non_production
+    ) {
       return 'Intenta ajustar los filtros de búsqueda';
     }
     return 'Comienza creando el primer usuario del sistema.';

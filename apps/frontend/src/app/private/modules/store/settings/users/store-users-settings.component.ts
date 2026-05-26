@@ -9,12 +9,11 @@ import {
   TableAction,
 } from '../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../shared/components/item-list/item-list.interfaces';
-import { ButtonComponent } from '../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { OptionsDropdownComponent } from '../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
+  DropdownAction,
   FilterValues,
 } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CardComponent } from '../../../../../shared/components/card/card.component';
@@ -37,8 +36,6 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
     OptionsDropdownComponent,
     CardComponent,
     StoreUserCreateModalComponent,
@@ -85,7 +82,7 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
       </div>
 
       <!-- Data Table -->
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Search Section -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -110,17 +107,10 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
               <app-options-dropdown
                 [filters]="stateFilterConfigs"
                 [filterValues]="filterValues"
+                [actions]="dropdownActions"
                 (filterChange)="onFilterChange($event)"
+                (actionClick)="onActionClick($event)"
               />
-              <app-button
-                variant="outline"
-                size="md"
-                customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-                (clicked)="openCreateModal()"
-                title="Nuevo Usuario"
-              >
-                <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-              </app-button>
             </div>
           </div>
         </div>
@@ -202,6 +192,15 @@ export class StoreUsersSettingsComponent implements OnInit {
         { value: StoreUserState.PENDING_VERIFICATION, label: 'Pendientes' },
         { value: StoreUserState.SUSPENDED, label: 'Suspendidos' },
       ],
+    },
+  ];
+
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo Usuario',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
     },
   ];
 
@@ -312,6 +311,12 @@ export class StoreUsersSettingsComponent implements OnInit {
     this.filterValues = values;
     const state_filter = (values['state'] as string) || '';
     this.store.dispatch(StoreUsersActions.setStateFilter({ state_filter }));
+  }
+
+  onActionClick(action: string) {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 
   openCreateModal() {

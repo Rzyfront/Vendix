@@ -4,11 +4,9 @@ import { FormsModule } from '@angular/forms';
 
 // Shared Components
 import {
-  ButtonComponent,
   TableColumn,
   TableAction,
   InputsearchComponent,
-  IconComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -28,9 +26,7 @@ import { Supplier } from '../../../interfaces';
   standalone: true,
   imports: [
     FormsModule,
-    ButtonComponent,
     InputsearchComponent,
-    IconComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,

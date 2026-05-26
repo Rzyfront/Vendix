@@ -35,6 +35,8 @@ import {
   TableColumn,
   TableAction,
   PaginationComponent,
+  OptionsDropdownComponent,
+  DropdownAction,
 } from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
@@ -52,6 +54,7 @@ import './domains.component.css';
     ResponsiveDataViewComponent,
     ButtonComponent,
     PaginationComponent,
+    OptionsDropdownComponent,
     DomainCreateModalComponent,
     DomainEditModalComponent,
     DomainStatsComponent,
@@ -63,7 +66,7 @@ import './domains.component.css';
       <app-domain-stats [stats]="stats()"></app-domain-stats>
 
       <!-- Domains List -->
-      <div class="bg-surface rounded-card shadow-card border border-border">
+      <div class="bg-surface rounded-card shadow-card border border-border overflow-visible">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
@@ -86,26 +89,11 @@ import './domains.component.css';
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
 
-              <div class="flex gap-2 items-center">
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  (clicked)="openCreateDomainModal()"
-                  title="Nuevo Dominio"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                  <span class="hidden sm:inline">Nuevo Dominio</span>
-                </app-button>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="refreshDomains()"
-                  [disabled]="isLoading()"
-                  title="Actualizar"
-                >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-                </app-button>
-              </div>
+              <app-options-dropdown
+                [actions]="dropdownActions"
+                [isLoading]="isLoading()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
             </div>
           </div>
         </div>
@@ -205,6 +193,16 @@ export class DomainsComponent implements OnInit, OnDestroy {
   readonly domains = signal<DomainListItem[]>([]);
   readonly isLoading = signal(false);
   searchTerm = '';
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Nuevo Dominio',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -549,6 +547,17 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   refreshDomains(): void {
     this.loadDomains();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'refresh':
+        this.refreshDomains();
+        break;
+      case 'create':
+        this.openCreateDomainModal();
+        break;
+    }
   }
 
   onSearchChange(searchTerm: string): void {

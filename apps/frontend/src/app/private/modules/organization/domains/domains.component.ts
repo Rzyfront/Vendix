@@ -102,7 +102,7 @@ const PENDING_PROVISIONING_STATUSES = new Set([
       </div>
 
       <!-- Domains List -->
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >

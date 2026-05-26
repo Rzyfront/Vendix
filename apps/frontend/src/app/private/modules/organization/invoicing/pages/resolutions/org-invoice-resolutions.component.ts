@@ -98,7 +98,7 @@ import {
         </app-alert-banner>
       }
 
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
@@ -120,7 +120,7 @@ import {
                 class="rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none"
                 [filters]="filterConfigs"
                 [filterValues]="filterValues()"
-                [actions]="dropdownActions"
+                [actions]="dropdownActions()"
                 [isLoading]="loading()"
                 triggerLabel="Filtros"
                 triggerIcon="filter"
@@ -129,13 +129,6 @@ import {
                 (actionClick)="onActionClick($event)"
               />
 
-              <app-button
-                size="sm"
-                (clicked)="openCreateModal()"
-                [disabled]="requiresStoreSelector() && !selectedStoreId()"
-              >
-                Crear
-              </app-button>
             </div>
           </div>
         </div>
@@ -311,10 +304,16 @@ export class OrgInvoiceResolutionsComponent {
     },
   ];
 
-  readonly dropdownActions = [
-    { label: 'Crear resolución', icon: 'plus', action: 'create-resolution', variant: 'primary' as const },
+  readonly dropdownActions = computed(() => [
+    {
+      label: 'Crear resolución',
+      icon: 'plus',
+      action: 'create-resolution',
+      variant: 'primary' as const,
+      disabled: this.requiresStoreSelector() && !this.selectedStoreId(),
+    },
     { label: 'Configurar DIAN', icon: 'settings', action: 'dian-config', variant: 'outline' as const },
-  ];
+  ]);
 
   readonly tableActions: TableAction[] = [
     {

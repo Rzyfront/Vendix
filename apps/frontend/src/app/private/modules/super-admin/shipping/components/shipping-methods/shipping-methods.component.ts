@@ -16,6 +16,8 @@ import {
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  DropdownAction,
 } from '../../../../../../shared/components/index';
 
 @Component({
@@ -26,12 +28,13 @@ import {
     IconComponent,
     ButtonComponent,
     ResponsiveDataViewComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="space-y-6">
       <!-- Methods Table -->
       <div
-        class="bg-white rounded-2xl shadow-sm border border-[var(--color-border)] overflow-hidden"
+        class="bg-white rounded-2xl shadow-sm border border-[var(--color-border)] overflow-visible"
       >
         <div
           class="p-6 border-b border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gray-50/50"
@@ -44,10 +47,11 @@ import {
               Opciones de entrega disponibles para todas las tiendas.
             </p>
           </div>
-          <app-button (clicked)="openCreateModal()" variant="primary" size="sm">
-            <app-icon name="plus" size="18" slot="icon" class="mr-2"></app-icon>
-            Nuevo Método
-          </app-button>
+          <app-options-dropdown
+            [actions]="dropdownActions"
+            [isLoading]="loading()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
         </div>
         <div class="p-2 md:p-4">
           @if (loading()) {
@@ -131,6 +135,15 @@ export class ShippingMethodsComponent implements OnInit {
 
   readonly isDeleting = computed(() => this.deletingIds().size > 0);
 
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo Método',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
+
   columns: TableColumn[] = [
     { key: 'name', label: 'Nombre', sortable: true },
     { key: 'code', label: 'Código', sortable: true },
@@ -200,6 +213,12 @@ export class ShippingMethodsComponent implements OnInit {
 
   ngOnInit() {
     this.loadData();
+  }
+
+  onActionClick(action: string) {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 
   async loadData() {

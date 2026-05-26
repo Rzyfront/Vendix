@@ -19,9 +19,7 @@ import {
   TableColumn,
   TableAction,
   InputsearchComponent,
-  ButtonComponent,
   StatsComponent,
-  SelectorComponent,
   SelectorOption,
   DialogService,
   ToastService,
@@ -30,6 +28,10 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components/index';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
@@ -53,9 +55,8 @@ type ActiveTab = 'configs' | 'apps';
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
-    ButtonComponent,
     StatsComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     CardComponent,
   ],
@@ -189,6 +190,26 @@ export class AIEngineComponent implements OnInit {
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
   ];
 
+  configFilterConfigs: FilterConfig[] = [
+    {
+      key: 'sdk_type',
+      label: 'SDK',
+      type: 'select',
+      options: this.sdkTypeOptions,
+    },
+  ];
+
+  configFilterValues: FilterValues = {};
+
+  configDropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Configuración',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
+
   // --- App Table ---
   appTableColumns: TableColumn[] = [
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
@@ -264,6 +285,26 @@ export class AIEngineComponent implements OnInit {
     { value: 'markdown', label: 'Markdown' },
     { value: 'html', label: 'HTML' },
     { value: 'image', label: 'Imagen' },
+  ];
+
+  appFilterConfigs: FilterConfig[] = [
+    {
+      key: 'output_format',
+      label: 'Formato',
+      type: 'select',
+      options: this.outputFormatOptions,
+    },
+  ];
+
+  appFilterValues: FilterValues = {};
+
+  appDropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Aplicación',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   ngOnInit(): void {
@@ -360,6 +401,24 @@ export class AIEngineComponent implements OnInit {
 
   onSearchChange(searchTerm: string): void {
     this.filterForm.patchValue({ search: searchTerm });
+  }
+
+  onConfigFilterChange(values: FilterValues): void {
+    this.configFilterValues = { ...values };
+    this.filterForm.patchValue({
+      sdk_type: (values['sdk_type'] as string) || '',
+    });
+  }
+
+  clearConfigFilters(): void {
+    this.configFilterValues = {};
+    this.filterForm.patchValue({ sdk_type: '' });
+  }
+
+  onConfigActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 
   onConfigPageChange(page: number): void {
@@ -522,6 +581,24 @@ export class AIEngineComponent implements OnInit {
 
   onAppSearchChange(searchTerm: string): void {
     this.appFilterForm.patchValue({ search: searchTerm });
+  }
+
+  onAppFilterChange(values: FilterValues): void {
+    this.appFilterValues = { ...values };
+    this.appFilterForm.patchValue({
+      output_format: (values['output_format'] as string) || '',
+    });
+  }
+
+  clearAppFilters(): void {
+    this.appFilterValues = {};
+    this.appFilterForm.patchValue({ output_format: '' });
+  }
+
+  onAppActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateAppModal();
+    }
   }
 
   onAppPageChange(page: number): void {

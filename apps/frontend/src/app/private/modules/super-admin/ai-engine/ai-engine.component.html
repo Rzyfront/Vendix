@@ -66,7 +66,7 @@
       ></app-stats>
     </div>
     <!-- Main Content Card -->
-    <app-card [padding]="false" overflow="hidden">
+    <app-card [padding]="false" overflow="visible">
       <!-- Table Header -->
       <div
         class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
@@ -91,26 +91,15 @@
               fullWidth="true"
             ></app-inputsearch>
           </div>
-          <div class="w-full sm:w-48">
-            <app-selector
-              placeholder="Filtrar por SDK"
-              [options]="sdkTypeOptions"
-              [formControl]="$any(filterForm.get('sdk_type'))"
-              size="sm"
-              variant="outline"
-            ></app-selector>
-          </div>
-          <div class="flex gap-2 items-center sm:ml-auto">
-            <app-button
-              variant="primary"
-              size="sm"
-              iconName="plus"
-              (clicked)="openCreateModal()"
-            >
-              <span class="hidden sm:inline">Nueva Configuracion</span>
-              <span class="sm:hidden">Nuevo</span>
-            </app-button>
-          </div>
+          <app-options-dropdown
+            [filters]="configFilterConfigs"
+            [filterValues]="configFilterValues"
+            [actions]="configDropdownActions"
+            [isLoading]="isLoading()"
+            (filterChange)="onConfigFilterChange($event)"
+            (clearAllFilters)="clearConfigFilters()"
+            (actionClick)="onConfigActionClick($event)"
+          ></app-options-dropdown>
         </div>
       </div>
       <!-- Table Container -->
@@ -212,7 +201,7 @@
       ></app-stats>
     </div>
     <!-- Main Content Card -->
-    <app-card [padding]="false" overflow="hidden">
+    <app-card [padding]="false" overflow="visible">
       <!-- Table Header -->
       <div
         class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
@@ -237,26 +226,15 @@
               fullWidth="true"
             ></app-inputsearch>
           </div>
-          <div class="w-full sm:w-48">
-            <app-selector
-              placeholder="Filtrar por formato"
-              [options]="outputFormatOptions"
-              [formControl]="$any(appFilterForm.get('output_format'))"
-              size="sm"
-              variant="outline"
-            ></app-selector>
-          </div>
-          <div class="flex gap-2 items-center sm:ml-auto">
-            <app-button
-              variant="primary"
-              size="sm"
-              iconName="plus"
-              (clicked)="openCreateAppModal()"
-            >
-              <span class="hidden sm:inline">Nueva Aplicacion</span>
-              <span class="sm:hidden">Nuevo</span>
-            </app-button>
-          </div>
+          <app-options-dropdown
+            [filters]="appFilterConfigs"
+            [filterValues]="appFilterValues"
+            [actions]="appDropdownActions"
+            [isLoading]="isLoadingApps()"
+            (filterChange)="onAppFilterChange($event)"
+            (clearAllFilters)="clearAppFilters()"
+            (actionClick)="onAppActionClick($event)"
+          ></app-options-dropdown>
         </div>
       </div>
       <!-- Table Container -->

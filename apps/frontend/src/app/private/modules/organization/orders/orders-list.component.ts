@@ -26,6 +26,10 @@ import {
   IconComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components/index';
 
 import { OrderStatsComponent } from './components/order-stats.component';
@@ -45,6 +49,7 @@ import './orders-list.component.css';
     OrderCreateModalComponent,
     IconComponent,
     ResponsiveDataViewComponent,
+    OptionsDropdownComponent,
   ],
   templateUrl: './orders-list.component.html',
 })
@@ -81,6 +86,52 @@ export class OrdersListComponent implements OnInit {
   selectedOrderType = '';
   selectedDateFrom = '';
   selectedDateTo = '';
+  filterValues: FilterValues = {};
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'store_id',
+      label: 'Store',
+      type: 'select',
+      options: [{ value: '', label: 'All Stores' }],
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      type: 'select',
+      options: [
+        { value: '', label: 'All Status' },
+        { value: 'pending', label: 'Pending' },
+        { value: 'confirmed', label: 'Confirmed' },
+        { value: 'processing', label: 'Processing' },
+        { value: 'shipped', label: 'Shipped' },
+        { value: 'delivered', label: 'Delivered' },
+        { value: 'cancelled', label: 'Cancelled' },
+        { value: 'refunded', label: 'Refunded' },
+      ],
+    },
+    {
+      key: 'payment_status',
+      label: 'Payment',
+      type: 'select',
+      options: [
+        { value: '', label: 'All Payment' },
+        { value: 'pending', label: 'Pending' },
+        { value: 'paid', label: 'Paid' },
+        { value: 'failed', label: 'Failed' },
+        { value: 'refunded', label: 'Refunded' },
+        { value: 'partially_refunded', label: 'Partially Refunded' },
+      ],
+    },
+    { key: 'date_from', label: 'From', type: 'date' },
+    { key: 'date_to', label: 'To', type: 'date' },
+  ];
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Create Order', icon: 'plus', action: 'create', variant: 'primary' },
+    { label: 'Refresh', icon: 'refresh-cw', action: 'refresh' },
+    { label: 'Export', icon: 'file-check', action: 'export' },
+  ];
 
   cardConfig!: ItemListCardConfig;
 
@@ -267,6 +318,21 @@ export class OrdersListComponent implements OnInit {
   loadAvailableStores(): void {
     this.availableStores = [];
     this.storeOptionsForModal = [];
+    this.updateStoreFilterOptions();
+  }
+
+  private updateStoreFilterOptions(): void {
+    const storeFilter = this.filterConfigs.find((filter) => filter.key === 'store_id');
+    if (!storeFilter) return;
+
+    storeFilter.options = [
+      { value: '', label: 'All Stores' },
+      ...this.availableStores.map((store) => ({
+        value: store.id,
+        label: store.name,
+      })),
+    ];
+    this.filterConfigs = [...this.filterConfigs];
   }
 
   loadOrders(): void {
@@ -343,6 +409,7 @@ export class OrdersListComponent implements OnInit {
     this.selectedOrderType = '';
     this.selectedDateFrom = '';
     this.selectedDateTo = '';
+    this.filterValues = {};
     this.filterForm.reset();
     this.loadOrders();
   }
@@ -380,6 +447,30 @@ export class OrdersListComponent implements OnInit {
   onDateToChange(event: any): void {
     this.selectedDateTo = event.target.value;
     this.loadOrders();
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = { ...values };
+    this.selectedStore = (values['store_id'] as string) || '';
+    this.selectedStatus = (values['status'] as string) || '';
+    this.selectedPaymentStatus = (values['payment_status'] as string) || '';
+    this.selectedDateFrom = (values['date_from'] as string) || '';
+    this.selectedDateTo = (values['date_to'] as string) || '';
+    this.loadOrders();
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'create':
+        this.createOrder();
+        break;
+      case 'refresh':
+        this.refreshOrders();
+        break;
+      case 'export':
+        this.exportOrders();
+        break;
+    }
   }
 
   viewOrderDetails(order: OrderListItem): void {
