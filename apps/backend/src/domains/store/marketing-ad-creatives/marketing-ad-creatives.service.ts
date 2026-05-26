@@ -207,6 +207,7 @@ export class MarketingAdCreativesService {
             base_price: true,
             sale_price: true,
             description: true,
+            online_purchase_qr_code: true,
           },
         })
       : [];
@@ -997,7 +998,19 @@ export class MarketingAdCreativesService {
         : (creativeImages || [])
             .map((image) => image?.source_type)
             .filter((type): type is string => !!type);
-    const inventory = this.buildResourcesInventory(sourceTypes, products);
+    const storeQrAvailable = Boolean(
+      ecommerce?.general?.qr_code_url ||
+        ecommerce?.general?.qr_code_data_url,
+    );
+    const productQrAvailable = (products || []).some(
+      (product) => !!product?.online_purchase_qr_code,
+    );
+    const inventory = this.buildResourcesInventory(sourceTypes, products, {
+      storeQrAvailable,
+      productQrAvailable,
+    });
+    const qrAvailable = storeQrAvailable || productQrAvailable;
+    const qrSelected = sourceTypes.some((type) => this.isQrSourceType(type));
 
     return {
       store_name: store.name || branding.name || 'Tienda',
@@ -1009,10 +1022,9 @@ export class MarketingAdCreativesService {
         logo_url: branding.logo_url || store.logo_url,
       }),
       ecommerce_context: JSON.stringify({
-        qr_available: Boolean(
-          ecommerce?.general?.qr_code_url ||
-          ecommerce?.general?.qr_code_data_url,
-        ),
+        qr_available: qrAvailable,
+        qr_store_available: storeQrAvailable,
+        qr_product_available: productQrAvailable,
         slider_count: Array.isArray(ecommerce?.slider?.photos)
           ? ecommerce.slider.photos.length
           : 0,
@@ -1033,15 +1045,21 @@ export class MarketingAdCreativesService {
         this.resourcesContext(creativeImages) ||
         'Sin recursos visuales adicionales',
       available_resources_inventory: inventory,
-      qr_context: sourceTypes.some((type) => this.isQrSourceType(type))
-        ? 'Hay un QR seleccionado. El post puede invitar a escanearlo, pero sin asumir descuentos no indicados.'
-        : 'No hay QR seleccionado',
+      qr_context: qrSelected
+        ? 'Hay un QR seleccionado por el usuario. El post puede invitar a escanearlo, pero sin asumir descuentos no indicados.'
+        : qrAvailable
+          ? 'La tienda tiene QR disponible (configurado en ajustes o en productos). El post puede mencionarlo como mecanismo de compra/contacto si encaja con la intencion, sin asumir descuentos no indicados.'
+          : 'No hay QR disponible ni seleccionado',
     };
   }
 
   private buildResourcesInventory(
     sourceTypes: string[],
     products: any[],
+    availability: {
+      storeQrAvailable?: boolean;
+      productQrAvailable?: boolean;
+    } = {},
   ): string {
     const normalized = sourceTypes.map((type) => (type || '').toLowerCase());
     const has = (predicate: (type: string) => boolean) =>
@@ -1050,10 +1068,10 @@ export class MarketingAdCreativesService {
 
     const hasAnyLogo = has((type) => type.includes('logo'));
     const hasSlider = has((type) => type.includes('slider'));
-    const hasStoreQr = has(
+    const hasStoreQrSelected = has(
       (type) => type.includes('qr') && !type.includes('product'),
     );
-    const hasProductQr = has(
+    const hasProductQrSelected = has(
       (type) => type.includes('qr') && type.includes('product'),
     );
     const hasProductImage = has(
@@ -1064,11 +1082,28 @@ export class MarketingAdCreativesService {
     );
     const productCount = (products || []).length;
 
+    // QR es senal de disponibilidad: la tienda puede tener QR configurado
+    // o productos con online_purchase_qr_code aunque el usuario no marque la card.
+    // Otros recursos (logo, slider, uploads) siguen siendo inventario cerrado
+    // por seleccion explicita.
+    const storeQrAvailable = Boolean(availability.storeQrAvailable);
+    const productQrAvailable = Boolean(availability.productQrAvailable);
+    const storeQrFlag = hasStoreQrSelected
+      ? 'SELECCIONADO'
+      : storeQrAvailable
+        ? 'DISPONIBLE'
+        : 'NO';
+    const productQrFlag = hasProductQrSelected
+      ? 'SELECCIONADO'
+      : productQrAvailable
+        ? 'DISPONIBLE'
+        : 'NO';
+
     return [
       `- Logo de la tienda: ${flag(hasAnyLogo)}`,
       `- Slider/banner ecommerce: ${flag(hasSlider)}`,
-      `- QR de la tienda: ${flag(hasStoreQr)}`,
-      `- QR de productos: ${flag(hasProductQr)}`,
+      `- QR de la tienda: ${storeQrFlag}`,
+      `- QR de productos: ${productQrFlag}`,
       `- Imagenes de producto seleccionadas: ${flag(hasProductImage)}`,
       `- Recursos cargados por el usuario: ${flag(hasCustom)}`,
       `- Productos seleccionados (cantidad): ${productCount}`,

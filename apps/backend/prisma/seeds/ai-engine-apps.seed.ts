@@ -301,19 +301,23 @@ REGLA CRITICA — ASPECT RATIO / FORMATO:
 - El prompt sugerido SIEMPRE menciona el aspect ratio y la resolucion ("composicion vertical 1024x1536 para historia", etc.). Esto es obligatorio.
 - Nunca describas composiciones que se verian cortadas o desbalanceadas en el formato indicado.
 
-REGLA CRITICA — INVENTARIO CERRADO DE RECURSOS:
-- El bloque "Recursos disponibles" enumera exactamente que recursos selecciono el usuario.
-- Solo puedes referenciar, mencionar o pedir que aparezcan en el diseño los recursos marcados con SI.
-- Cualquier recurso marcado con NO esta prohibido: no lo menciones, no lo sugieras, no pidas que el diseño lo incluya.
+REGLA CRITICA — INVENTARIO DE RECURSOS:
+- El bloque "Recursos disponibles" usa tres valores por recurso:
+  * SI / SELECCIONADO: el usuario lo eligio explicitamente. Puedes pedir que aparezca en el diseño.
+  * DISPONIBLE: el recurso existe y se puede usar aunque el usuario no lo selecciono. Aplica especialmente a QR (de tienda o de productos). Puedes sugerir su uso de forma natural si encaja con el objetivo.
+  * NO: el recurso no existe ni esta seleccionado. Prohibido mencionarlo o pedir que aparezca.
+- Reglas por recurso:
+  * Logo / Slider / Recursos cargados / Imagenes de producto: inventario cerrado estricto. Solo si estan en SI.
+  * QR de la tienda / QR de productos: si estan en SELECCIONADO o DISPONIBLE puedes incorporarlos. Si estan en NO, no los menciones.
 - Ejemplos prohibidos cuando un recurso es NO:
   * "agrega el logo de la tienda" si "Logo de la tienda: NO".
-  * "incluye el QR para escanear" si "QR de la tienda: NO" y "QR de productos: NO".
+  * "incluye el QR para escanear" si "QR de la tienda: NO" Y "QR de productos: NO".
   * "usa la foto del slider" si "Slider/banner ecommerce: NO".
 - Si el usuario tiene cero recursos visuales, el prompt describe una composicion tipografica/grafica que no asume ningun recurso externo.
 
 OTRAS REGLAS:
 - No inventes descuentos, precios, fechas, claims, marcas externas ni beneficios no proporcionados.
-- Si hay QR (cualquiera marcado SI), indica que el diseño debe dejar una zona limpia para insertarlo despues como overlay exacto; no pidas que la IA lo redibuje.
+- Si hay QR (SELECCIONADO o DISPONIBLE), indica que el diseño debe dejar una zona limpia para insertarlo despues como overlay exacto; no pidas que la IA lo redibuje.
 - Nunca incluyas codigos SKU, identificadores numericos internos ni claves tecnicas en el prompt final.`,
       prompt_template: `Crea una sugerencia de anuncio con este contexto:
 
@@ -326,7 +330,7 @@ Estilo visual: {{visual_style}}
 Formato: {{format_label}} ({{size}})
 Brief humano: {{brief}}
 
-Recursos disponibles (INVENTARIO CERRADO — solo puedes referenciar los marcados SI):
+Recursos disponibles (3 estados: SI/SELECCIONADO = pedido por el usuario, DISPONIBLE = existe y se puede usar para QR, NO = no usar):
 {{available_resources_inventory}}
 
 Productos:
@@ -381,7 +385,7 @@ PERMITIDO:
 REGLAS DE NEGOCIO:
 - No inventes descuentos, precios, fechas, stock, garantías, ubicaciones ni beneficios no proporcionados.
 - Si el objetivo no es promocion, no fuerces tono de oferta.
-- Si hay QR seleccionado, puedes invitar a escanearlo de forma breve y natural.
+- Si hay QR seleccionado o DISPONIBLE en la tienda/productos, puedes invitar a escanearlo de forma breve y natural. Si esta en NO, no lo menciones.
 - Nunca incluyas SKUs, IDs internos, codigos tecnicos ni identificadores de sistema.
 
 EJEMPLOS — EVITA / PREFIERE:
