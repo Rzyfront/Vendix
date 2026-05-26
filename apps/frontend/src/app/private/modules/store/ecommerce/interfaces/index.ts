@@ -34,6 +34,9 @@ export interface EcommerceSettings {
     currency?: string;
     locale?: string;
     timezone?: string;
+    qr_code_url?: string;
+    qr_code_data_url?: string;
+    qr_code_generated_at?: string;
   };
 
   // Slider Principal
@@ -177,6 +180,18 @@ export interface SettingsResponse {
   exists: boolean;
   config?: EcommerceSettings;
   ecommerceUrl?: string; // URL del dominio de Ecommerce activo
+  qrCodeDataUrl?: string | null;
+  qrCodeUrl?: string | null;
+  qrCodeGeneratedAt?: string | null;
+  qrCodeStale?: boolean;
+}
+
+export interface EcommerceQrCodeResponse {
+  ecommerceUrl: string;
+  qrCodeUrl: string;
+  qrCodeDataUrl: string;
+  qrCodeGeneratedAt: string;
+  qrCodeStale: boolean;
 }
 
 /**

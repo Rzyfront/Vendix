@@ -148,10 +148,28 @@ export class StoreDomainsService {
     id: number,
     dto: UpdateStoreDomainDto,
   ): Observable<SingleDomainResponse> {
+    const payload = this.toUpdateDomainPayload(dto);
+
     return this.http.patch<SingleDomainResponse>(
       `${this.api_url}/store/domains/${id}`,
-      dto,
+      payload,
     );
+  }
+
+  private toUpdateDomainPayload(
+    dto: UpdateStoreDomainDto,
+  ): UpdateStoreDomainDto {
+    const payload: UpdateStoreDomainDto = {};
+
+    if (dto.domain_type !== undefined) payload.domain_type = dto.domain_type;
+    if (dto.app_type !== undefined) payload.app_type = dto.app_type;
+    if (dto.status !== undefined) payload.status = dto.status;
+    if (dto.ssl_status !== undefined) payload.ssl_status = dto.ssl_status;
+    if (dto.ownership !== undefined) payload.ownership = dto.ownership;
+    if (dto.is_primary !== undefined) payload.is_primary = dto.is_primary;
+    if (dto.config !== undefined) payload.config = dto.config;
+
+    return payload;
   }
 
   /**

@@ -7,6 +7,11 @@ import { InventoryIntegrationService } from '../inventory/shared/services/invent
 import { LocationsService } from '../inventory/locations/locations.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { S3Service } from '@common/services/s3.service';
+import { QrService } from '@common/services/qr.service';
+import { RemoteImageService } from '@common/services/remote-image.service';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { AIEngineService } from '../../../ai-engine/ai-engine.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -79,6 +84,15 @@ describe('ProductsService', () => {
     tax_categories: {
       findMany: jest.fn(),
     },
+    domain_settings: {
+      findFirst: jest.fn(),
+    },
+    store_settings: {
+      findFirst: jest.fn(),
+    },
+    stores: {
+      findUnique: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 
@@ -105,6 +119,31 @@ describe('ProductsService', () => {
 
   const mockEventEmitter = {
     emit: jest.fn(),
+  };
+
+  const mockS3Service = {
+    signUrl: jest.fn((url) => Promise.resolve(url)),
+    getPresignedUrl: jest.fn((url) => Promise.resolve(url)),
+    uploadBase64: jest.fn(),
+    deleteFile: jest.fn(),
+  };
+
+  const mockQrService = {
+    generateDataUrl: jest.fn((content) =>
+      Promise.resolve(`data:image/png;base64,${Buffer.from(content).toString('base64')}`),
+    ),
+  };
+
+  const mockRemoteImageService = {
+    fetchPreview: jest.fn(),
+  };
+
+  const mockS3PathHelper = {
+    buildProductPath: jest.fn(() => 'organizations/org-1/stores/store-1/products'),
+  };
+
+  const mockAIEngineService = {
+    run: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -146,6 +185,26 @@ describe('ProductsService', () => {
         {
           provide: EventEmitter2,
           useValue: mockEventEmitter,
+        },
+        {
+          provide: S3Service,
+          useValue: mockS3Service,
+        },
+        {
+          provide: QrService,
+          useValue: mockQrService,
+        },
+        {
+          provide: RemoteImageService,
+          useValue: mockRemoteImageService,
+        },
+        {
+          provide: S3PathHelper,
+          useValue: mockS3PathHelper,
+        },
+        {
+          provide: AIEngineService,
+          useValue: mockAIEngineService,
         },
       ],
     }).compile();

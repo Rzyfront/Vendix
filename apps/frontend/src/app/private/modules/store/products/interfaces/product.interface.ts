@@ -71,6 +71,17 @@ export interface Product {
   consultation_template_id?: number;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  online_purchase_url?: string | null;
+  online_purchase_qr_code?: string | null;
+  online_purchase_domain_id?: number | null;
+  online_purchase_generated_at?: string | Date | null;
+  online_purchase_domain_hostname?: string | null;
+  online_purchase_ready?: boolean;
+  online_purchase_status_reason?:
+    | 'ready'
+    | 'ecommerce_not_configured'
+    | 'ecommerce_domain_not_active';
+  online_purchase_status_message?: string;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -424,6 +435,23 @@ export interface ProductStats {
   activeProductsGrowthRate?: number;
   lowStockGrowthRate?: number;
   noImagesGrowthRate?: number;
+}
+
+export interface OnlinePurchaseLinkResult {
+  generated: boolean;
+  product_id: number;
+  online_purchase_url?: string | null;
+  online_purchase_qr_code?: string | null;
+  qr_data_url?: string | null;
+  online_purchase_domain_id?: number | null;
+  domain_hostname?: string | null;
+  online_purchase_generated_at?: string | Date | null;
+  online_purchase_ready?: boolean;
+  online_purchase_status_reason?:
+    | 'ready'
+    | 'ecommerce_not_configured'
+    | 'ecommerce_domain_not_active';
+  online_purchase_status_message?: string;
 }
 
 // Interface para gestión combinada de producto y variantes

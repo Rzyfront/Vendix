@@ -227,6 +227,24 @@ export class ProductsController {
     }
   }
 
+  @Post(':id/online-purchase-link')
+  @Permissions('store:products:update')
+  async generateOnlinePurchaseLink(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.productsService.generateOnlinePurchaseLink(id);
+      return this.responseService.success(
+        result,
+        'Link y QR de compra online generados exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al generar el link y QR de compra online',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id/deactivate')
   @Permissions('store:products:delete')
   async deactivate(@Param('id', ParseIntPipe) id: number) {

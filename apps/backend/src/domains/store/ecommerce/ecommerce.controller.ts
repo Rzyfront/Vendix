@@ -40,6 +40,10 @@ export class EcommerceController {
           exists: true,
           config: settings.config,
           ecommerceUrl: settings.ecommerceUrl,
+          qrCodeDataUrl: settings.qrCodeDataUrl,
+          qrCodeUrl: settings.qrCodeUrl,
+          qrCodeGeneratedAt: settings.qrCodeGeneratedAt,
+          qrCodeStale: settings.qrCodeStale,
         },
         'Configuración de e-commerce obtenida exitosamente',
       );
@@ -117,6 +121,24 @@ export class EcommerceController {
     } catch (error) {
       return this.responseService.error(
         'Error al actualizar la configuración',
+        error.message,
+      );
+    }
+  }
+
+  @Post('qr')
+  @Permissions('store:ecommerce:update')
+  async generateQrCode() {
+    try {
+      const qr = await this.ecommerceService.generateQrCode();
+
+      return this.responseService.created(
+        qr,
+        'QR de e-commerce generado exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al generar el QR de e-commerce',
         error.message,
       );
     }

@@ -3,6 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, catchError, throwError, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
+  EcommerceQrCodeResponse,
   EcommerceSettings,
   SettingsResponse,
   UploadImageResponse,
@@ -20,25 +21,23 @@ export class EcommerceService {
    * Returns response with exists flag to determine mode (setup vs edit)
    */
   getSettings(): Observable<SettingsResponse> {
-    return this.http
-      .get<any>(`${this.apiBaseUrl}/settings`)
-      .pipe(
-        map((response) => this.unwrapResponse<SettingsResponse>(response)),
-        catchError(this.handleError)
-      );
+    return this.http.get<any>(`${this.apiBaseUrl}/settings`).pipe(
+      map((response) => this.unwrapResponse<SettingsResponse>(response)),
+      catchError(this.handleError),
+    );
   }
 
   /**
    * Get default template (basic or advanced)
    * Used in setup mode to load default configuration
    */
-  getTemplate(type: 'basic' | 'advanced' = 'basic'): Observable<EcommerceSettings> {
-    return this.http
-      .get<any>(`${this.apiBaseUrl}/template/${type}`)
-      .pipe(
-        map((response) => this.unwrapResponse<EcommerceSettings>(response)),
-        catchError(this.handleError)
-      );
+  getTemplate(
+    type: 'basic' | 'advanced' = 'basic',
+  ): Observable<EcommerceSettings> {
+    return this.http.get<any>(`${this.apiBaseUrl}/template/${type}`).pipe(
+      map((response) => this.unwrapResponse<EcommerceSettings>(response)),
+      catchError(this.handleError),
+    );
   }
 
   /**
@@ -53,7 +52,7 @@ export class EcommerceService {
       .post<any>(`${this.apiBaseUrl}/upload-slider-image`, formData)
       .pipe(
         map((response) => this.unwrapResponse<UploadImageResponse>(response)),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -63,12 +62,17 @@ export class EcommerceService {
    */
   updateSettings(settings: EcommerceSettings): Observable<EcommerceSettings> {
     const payload: UpdateEcommerceSettingsDto = { ecommerce: settings };
-    return this.http
-      .patch<any>(`${this.apiBaseUrl}/settings`, payload)
-      .pipe(
-        map((response) => this.unwrapResponse<EcommerceSettings>(response)),
-        catchError(this.handleError)
-      );
+    return this.http.patch<any>(`${this.apiBaseUrl}/settings`, payload).pipe(
+      map((response) => this.unwrapResponse<EcommerceSettings>(response)),
+      catchError(this.handleError),
+    );
+  }
+
+  generateQrCode(): Observable<EcommerceQrCodeResponse> {
+    return this.http.post<any>(`${this.apiBaseUrl}/qr`, {}).pipe(
+      map((response) => this.unwrapResponse<EcommerceQrCodeResponse>(response)),
+      catchError(this.handleError),
+    );
   }
 
   private unwrapResponse<T>(response: any): T {

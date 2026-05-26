@@ -71,6 +71,14 @@ export interface EcommerceSliderPhoto {
 
 export interface EcommerceSettings {
   enabled: boolean;
+  general?: {
+    currency?: string;
+    locale?: string;
+    timezone?: string;
+    qr_code_url?: string;
+    qr_code_data_url?: string;
+    qr_code_generated_at?: string;
+  };
   slider?: {
     enable: boolean;
     photos: EcommerceSliderPhoto[];
