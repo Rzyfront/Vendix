@@ -218,7 +218,12 @@ export class MarketingAdCreativesService {
       );
     }
 
-    const variables = await this.buildMarketingTextVariables(dto, products, []);
+    const variables = await this.buildMarketingTextVariables(
+      dto,
+      products,
+      [],
+      dto.selected_resource_types,
+    );
     const response = await this.aiEngine.run(
       'marketing_ad_prompt_specialist',
       variables,
@@ -810,11 +815,10 @@ export class MarketingAdCreativesService {
         const salePrice = product.sale_price
           ? ` | Precio oferta: ${Number(product.sale_price)}`
           : '';
-        const sku = product.sku ? ` | SKU: ${product.sku}` : '';
         const description = product.description
           ? `\n  Descripcion: ${product.description}`
           : '';
-        return `${index + 1}. ${product.name}${sku} | Precio base: ${Number(
+        return `${index + 1}. ${product.name} | Precio base: ${Number(
           product.base_price,
         )}${salePrice}${description}`;
       })
@@ -831,6 +835,13 @@ export class MarketingAdCreativesService {
       .join('\n');
 
     const size = this.formatToSize(creative.format as AdFormat);
+    const sourceTypes = (creative.creative_images || [])
+      .map((image: any) => image?.source_type)
+      .filter((type: any): type is string => !!type);
+    const products = (creative.creative_products || []).map(
+      (item: any) => item.product,
+    );
+    const inventory = this.buildResourcesInventory(sourceTypes, products);
 
     return {
       title: creative.title,
@@ -841,6 +852,7 @@ export class MarketingAdCreativesService {
       products_context: productsContext || 'Sin productos detallados',
       reference_images_context:
         imageContext || 'No se seleccionaron imagenes de referencia',
+      available_resources_inventory: inventory,
       qr_context: this.hasQrReference(creative)
         ? 'El QR seleccionado se insertara despues como overlay exacto. Deja una zona limpia, profesional y discreta en una esquina o area de baja interferencia visual.'
         : 'Sin QR seleccionado',
@@ -894,6 +906,7 @@ export class MarketingAdCreativesService {
     dto: Partial<CreateMarketingAdCreativeDto> | SuggestMarketingAdPromptDto,
     products: any[],
     creativeImages: any[],
+    selectedSourceTypes?: string[],
   ): Promise<Record<string, string>> {
     const data = dto as Partial<CreateMarketingAdCreativeDto>;
     const context = this.getContext();
@@ -902,6 +915,14 @@ export class MarketingAdCreativesService {
     const branding = settings.branding || {};
     const ecommerce = settings.ecommerce || {};
     const format = (dto.format || 'square') as AdFormat;
+
+    const sourceTypes =
+      selectedSourceTypes && selectedSourceTypes.length
+        ? selectedSourceTypes
+        : (creativeImages || [])
+            .map((image) => image?.source_type)
+            .filter((type): type is string => !!type);
+    const inventory = this.buildResourcesInventory(sourceTypes, products);
 
     return {
       store_name: store.name || branding.name || 'Tienda',
@@ -936,12 +957,47 @@ export class MarketingAdCreativesService {
       resources_context:
         this.resourcesContext(creativeImages) ||
         'Sin recursos visuales adicionales',
-      qr_context: creativeImages.some((image) =>
-        this.isQrSourceType(image.source_type),
-      )
+      available_resources_inventory: inventory,
+      qr_context: sourceTypes.some((type) => this.isQrSourceType(type))
         ? 'Hay un QR seleccionado. El post puede invitar a escanearlo, pero sin asumir descuentos no indicados.'
         : 'No hay QR seleccionado',
     };
+  }
+
+  private buildResourcesInventory(
+    sourceTypes: string[],
+    products: any[],
+  ): string {
+    const normalized = sourceTypes.map((type) => (type || '').toLowerCase());
+    const has = (predicate: (type: string) => boolean) =>
+      normalized.some(predicate);
+    const flag = (value: boolean) => (value ? 'SI' : 'NO');
+
+    const hasAnyLogo = has((type) => type.includes('logo'));
+    const hasSlider = has((type) => type.includes('slider'));
+    const hasStoreQr = has(
+      (type) => type.includes('qr') && !type.includes('product'),
+    );
+    const hasProductQr = has(
+      (type) => type.includes('qr') && type.includes('product'),
+    );
+    const hasProductImage = has(
+      (type) => type === 'product' || type === 'product_image',
+    );
+    const hasCustom = has(
+      (type) => type === 'uploaded' || type === 'custom',
+    );
+    const productCount = (products || []).length;
+
+    return [
+      `- Logo de la tienda: ${flag(hasAnyLogo)}`,
+      `- Slider/banner ecommerce: ${flag(hasSlider)}`,
+      `- QR de la tienda: ${flag(hasStoreQr)}`,
+      `- QR de productos: ${flag(hasProductQr)}`,
+      `- Imagenes de producto seleccionadas: ${flag(hasProductImage)}`,
+      `- Recursos cargados por el usuario: ${flag(hasCustom)}`,
+      `- Productos seleccionados (cantidad): ${productCount}`,
+    ].join('\n');
   }
 
   private productsContext(products: any[]): string {
@@ -953,11 +1009,10 @@ export class MarketingAdCreativesService {
         const basePrice = product.base_price
           ? ` | Precio base: ${Number(product.base_price)}`
           : '';
-        const sku = product.sku ? ` | SKU: ${product.sku}` : '';
         const description = product.description
           ? `\n  Descripcion: ${product.description}`
           : '';
-        return `${index + 1}. ${product.name}${sku}${basePrice}${salePrice}${description}`;
+        return `${index + 1}. ${product.name}${basePrice}${salePrice}${description}`;
       })
       .join('\n');
   }

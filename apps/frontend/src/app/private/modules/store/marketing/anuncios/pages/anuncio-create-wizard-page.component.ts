@@ -2101,6 +2101,9 @@ export class AnuncioCreateWizardPageComponent {
           brief: raw.brief.trim(),
           format: raw.format,
           product_ids: this.selectedProductIds(),
+          selected_resource_types: this.selectedReferenceResources()
+            .map((resource) => resource.source_type)
+            .filter((type): type is string => !!type),
         }),
       );
       const suggestion = response.data;

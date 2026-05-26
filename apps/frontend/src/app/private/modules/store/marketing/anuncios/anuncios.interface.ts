@@ -85,6 +85,7 @@ export interface SuggestMarketingAdPromptDto {
   brief?: string;
   format?: AdCreativeFormat;
   product_ids?: number[];
+  selected_resource_types?: string[];
 }
 
 export interface SuggestedMarketingAdPrompt {

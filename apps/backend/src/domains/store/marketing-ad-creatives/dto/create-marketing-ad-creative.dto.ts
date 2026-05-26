@@ -142,6 +142,12 @@ export class SuggestMarketingAdPromptDto {
   @Type(() => Number)
   @IsInt({ each: true })
   product_ids?: number[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(24)
+  @IsString({ each: true })
+  selected_resource_types?: string[];
 }
 
 export class CreateManualMarketingAdCreativeDto extends CreateMarketingAdCreativeDto {
