@@ -50,7 +50,7 @@ export class AIGenerationProcessor extends WorkerHost {
           user_id: job.data.user_id,
           request_id: requestId,
         },
-        () => this.aiEngine.run(app_key, variables, messages),
+        () => this.aiEngine.runByApplicationType(app_key, variables, messages),
       );
 
       this.eventEmitter.emit('ai.generation.completed', {

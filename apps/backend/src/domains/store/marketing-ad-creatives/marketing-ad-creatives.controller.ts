@@ -26,6 +26,7 @@ import {
   CreateMarketingAdCreativeDto,
   CreateManualMarketingAdCreativeDto,
   QueryMarketingAdCreativesDto,
+  SuggestMarketingAdPromptDto,
   UpdateMarketingAdCreativeDetailsDto,
 } from './dto';
 import { MarketingAdCreativesService } from './marketing-ad-creatives.service';
@@ -126,6 +127,19 @@ export class MarketingAdCreativesController {
   async createManual(@Body() dto: CreateManualMarketingAdCreativeDto) {
     const result = await this.adCreativesService.createManual(dto);
     return this.responseService.created(result, 'Anuncio manual creado');
+  }
+
+  @Post('suggest-prompt')
+  @Permissions(
+    'store:marketing_anuncios:create',
+    'store:marketing_anuncios:generate',
+    'store:promotions:create',
+    'store:social_sales:manage',
+  )
+  @HttpCode(HttpStatus.OK)
+  async suggestPrompt(@Body() dto: SuggestMarketingAdPromptDto) {
+    const result = await this.adCreativesService.suggestPrompt(dto);
+    return this.responseService.success(result, 'Sugerencia generada');
   }
 
   @Sse(':id/generate-stream')

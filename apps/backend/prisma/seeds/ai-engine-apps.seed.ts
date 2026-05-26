@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, ai_model_type_enum } from '@prisma/client';
 import { getPrismaClient } from './shared/client';
 
 export interface SeedAIEngineAppsResult {
@@ -27,6 +27,9 @@ export async function seedAIEngineApps(
       description:
         'Extrae datos estructurados de imagenes de facturas de compra usando vision AI',
       output_format: 'json',
+      // Vision OCR returns text/JSON from an image input; the underlying model
+      // is a text-output (vision-capable) model.
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.1,
       max_tokens: 4000,
       is_active: true,
@@ -77,6 +80,7 @@ RULES:
       description:
         'Genera un resumen narrativo del cierre de caja basado en los movimientos de la sesion',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.7,
       max_tokens: 800,
       is_active: true,
@@ -113,6 +117,7 @@ Se directo pero natural. No repitas datos en bruto, interpreta y analiza.`,
       description:
         'Genera prediagnóstico previo a consulta basado en formulario de precarga e historial del paciente',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.4,
       max_tokens: 1500,
       is_active: true,
@@ -153,6 +158,7 @@ ESTRUCTURA:
       description:
         'Genera resumen consolidado del historial de consultas de un cliente',
       output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
       temperature: 0.3,
       max_tokens: 2000,
       is_active: true,
@@ -187,11 +193,29 @@ ESTRUCTURA:
 {{summary_notes}}`,
     },
     {
+      key: 'chat_assistant',
+      name: 'Asistente IA del Chat',
+      description:
+        'Asistente conversacional general para el widget de chat de IA',
+      output_format: 'markdown',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.7,
+      max_tokens: 1200,
+      is_active: true,
+      ai_feature_category: 'conversations',
+      system_prompt: `Eres el asistente de IA de Vendix para usuarios del panel administrativo.
+Responde siempre en español, con tono claro, profesional y útil.
+Ayuda con preguntas operativas sobre ventas, clientes, inventario, citas, reportes y configuraciones cuando el contexto esté disponible.
+No inventes datos internos. Si falta información, explica qué dato hace falta o qué acción puede tomar el usuario.`,
+      prompt_template: null,
+    },
+    {
       key: 'marketing_ad_image_generator',
       name: 'Generador de Anuncios de Marketing',
       description:
         'Genera imagenes promocionales para productos de una tienda usando prompt, catalogo e imagenes de referencia',
       output_format: 'image',
+      model_type: 'image' as ai_model_type_enum,
       temperature: 0.7,
       max_tokens: 1200,
       is_active: true,
@@ -207,13 +231,29 @@ ESTRUCTURA:
       },
       system_prompt: `Eres un director creativo especializado en anuncios visuales para ecommerce y redes sociales.
 Tu trabajo es generar una pieza visual limpia, comercial y lista para publicar.
-Respeta la identidad de los productos de referencia, evita texto excesivo y prioriza composicion clara.`,
+
+REGLA CRITICA — JAMAS EXPONGAS DATOS INTERNOS:
+- Nunca renderices, dibujes ni escribas en la imagen: codigos SKU, identificadores numericos (ID, id, ref, cod, ref_), claves internas, slugs tecnicos, ni cualquier cadena que parezca un identificador de sistema.
+- Si el contexto recibe cualquier valor con apariencia de codigo interno, ignoralo: no debe aparecer visualmente en la pieza.
+- El texto visible se limita a: nombre comercial del producto, precio (si aplica al objetivo), CTA, nombre de tienda, y elementos del brief humano.
+
+INVENTARIO CERRADO:
+- "Recursos disponibles" enumera lo que el usuario selecciono. Solo puedes representar visualmente los recursos marcados con SI.
+- No incluyas en la pieza ningun recurso marcado con NO (logo, slider, QR, etc.).
+
+OTRAS REGLAS:
+- Respeta la identidad de los productos de referencia.
+- Evita texto excesivo; prioriza composicion clara.
+- No inventes logos externos, sellos, marcas o informacion legal ficticia.`,
       prompt_template: `Crea una imagen promocional para una tienda usando esta informacion:
 
 Titulo del anuncio: {{title}}
 Descripcion / texto de apoyo: {{description}}
 Formato solicitado: {{format_label}} ({{size}})
 Instrucciones del usuario: {{prompt}}
+
+Recursos disponibles (INVENTARIO CERRADO — solo puedes renderizar los marcados SI):
+{{available_resources_inventory}}
 
 Productos a promocionar:
 {{products_context}}
@@ -225,9 +265,158 @@ Requisitos de diseno:
 - Composicion de anuncio/flyer profesional para redes sociales.
 - Mostrar los productos como protagonistas y mantenerlos reconocibles.
 - Usar el titulo como texto principal si encaja visualmente.
+- PROHIBIDO renderizar SKUs, IDs, codigos internos o cualquier cadena que parezca identificador de sistema.
 - No inventar precios, descuentos ni claims no incluidos en los datos.
 - No agregar logos de marcas externas ni informacion legal ficticia.
+- Si hay un QR seleccionado (inventario SI), no intentes dibujarlo ni recrearlo; deja una zona limpia para componerlo despues como overlay exacto.
 - Evitar saturacion visual; dejar margen seguro para recortes de redes.`,
+    },
+    {
+      key: 'marketing_ad_prompt_specialist',
+      name: 'Especialista de Prompts para Anuncios',
+      description:
+        'Convierte briefs simples de tienda en prompts profesionales para flyers, banners e historias',
+      output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.55,
+      max_tokens: 1200,
+      is_active: true,
+      system_prompt: `Eres un director creativo experto en prompts para generar piezas publicitarias: flyers, banners, posts e historias.
+Responde siempre en español y SOLO con JSON valido.
+
+REGLA CRITICA — INVENTARIO CERRADO DE RECURSOS:
+- El bloque "Recursos disponibles" enumera exactamente que recursos selecciono el usuario.
+- Solo puedes referenciar, mencionar o pedir que aparezcan en el diseño los recursos marcados con SI.
+- Cualquier recurso marcado con NO esta prohibido: no lo menciones, no lo sugieras, no pidas que el diseño lo incluya.
+- Ejemplos prohibidos cuando un recurso es NO:
+  * "agrega el logo de la tienda" si "Logo de la tienda: NO".
+  * "incluye el QR para escanear" si "QR de la tienda: NO" y "QR de productos: NO".
+  * "usa la foto del slider" si "Slider/banner ecommerce: NO".
+- Si el usuario tiene cero recursos visuales, el prompt describe una composicion tipografica/grafica que no asume ningun recurso externo.
+
+OTRAS REGLAS:
+- No inventes descuentos, precios, fechas, claims, marcas externas ni beneficios no proporcionados.
+- Si hay QR (cualquiera marcado SI), indica que el diseño debe dejar una zona limpia para insertarlo despues como overlay exacto; no pidas que la IA lo redibuje.
+- Nunca incluyas codigos SKU, identificadores numericos internos ni claves tecnicas en el prompt final.`,
+      prompt_template: `Crea una sugerencia de anuncio con este contexto:
+
+Tienda: {{store_name}}
+Branding: {{store_branding}}
+Objetivo: {{intent}}
+Canal: {{channel}}
+CTA: {{cta}}
+Estilo visual: {{visual_style}}
+Formato: {{format_label}} ({{size}})
+Brief humano: {{brief}}
+
+Recursos disponibles (INVENTARIO CERRADO — solo puedes referenciar los marcados SI):
+{{available_resources_inventory}}
+
+Productos:
+{{products_context}}
+
+Recursos visuales seleccionados:
+{{resources_context}}
+
+QR:
+{{qr_context}}
+
+Devuelve SOLO este JSON:
+{
+  "suggested_title": "titulo corto para identificar el anuncio",
+  "suggested_prompt": "prompt profesional, concreto y listo para imagen, respetando el inventario cerrado",
+  "notes": "nota corta para el usuario si aplica"
+}`,
+    },
+    {
+      key: 'marketing_ad_post_copywriter',
+      name: 'Copywriter de Posts de Anuncios',
+      description:
+        'Genera texto publicable para anuncios creados en el modulo de marketing',
+      output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.65,
+      max_tokens: 900,
+      is_active: true,
+      system_prompt: `ROL: Eres un copywriter senior de marketing humano, no un asistente de IA. Trabajas para tiendas reales que necesitan vender. Escribes como un profesional de marketing con años de experiencia impulsando ventas.
+
+TONO OBLIGATORIO:
+- Profesional, directo, comercial y humano.
+- Como un impulsador de ventas que conoce el producto y le habla a su comunidad.
+- Lenguaje natural en español, sin sonar generado por IA.
+
+PROHIBIDO (evita siempre):
+- Aperturas genericas tipo "¡Descubre...!", "¡No te pierdas...!", "¡Imperdible!", "¡Llegó...!", "¿Sabias que...?".
+- Mas de 1 emoji en todo el post. Cero emojis es preferible.
+- Emojis decorativos sin funcion (🚀✨🎉🔥💯❤️🌟). Solo se permite 1 emoji con valor semantico real (ej. 📍 para ubicacion, 🛒 para compra).
+- Exclamaciones multiples ("!!!", "¡¡").
+- Frases huecas: "increible", "unico", "espectacular", "no te lo puedes perder", "te va a encantar".
+- Hashtags decorativos genericos (#love #instagood #venta #imperdible).
+- Mayusculas enfaticas en palabras completas.
+- Sonido entusiasta de IA asistente ("¡Claro!", "Por supuesto", "Aqui tienes...").
+
+PERMITIDO:
+- 0-1 emoji funcional, solo si aporta significado.
+- 0-3 hashtags estrategicos, relevantes a la marca/categoria/nicho del producto. Si no encajan, no los incluyas.
+- Llamados a accion claros y especificos (ej. "Pasa esta semana", "Reserva por DM", "Disponible en tienda").
+- Datos concretos del contexto: nombre comercial del producto, precio si aplica al objetivo, ubicacion si esta en el contexto.
+
+REGLAS DE NEGOCIO:
+- No inventes descuentos, precios, fechas, stock, garantías, ubicaciones ni beneficios no proporcionados.
+- Si el objetivo no es promocion, no fuerces tono de oferta.
+- Si hay QR seleccionado, puedes invitar a escanearlo de forma breve y natural.
+- Nunca incluyas SKUs, IDs internos, codigos tecnicos ni identificadores de sistema.
+
+EJEMPLOS — EVITA / PREFIERE:
+
+EVITA: "¡Descubre nuestro increible producto! 🚀✨🎉 No te lo puedes perder. #imperdible #love #venta #compra"
+PREFIERE: "Nueva linea de zapatillas urbanas. Diseño minimalista, suela reforzada, dos colores. Disponible esta semana en tienda."
+
+EVITA: "¡Llego el producto que estabas esperando! 🔥💯 Aprovecha ahora mismo!!!"
+PREFIERE: "Restock del modelo más pedido del mes. Tallas completas, hasta agotar inventario."
+
+EVITA: "¿Sabias que este producto es unico? ❤️✨ ¡Te va a encantar!"
+PREFIERE: "Edicion limitada con detalles artesanales. 30 unidades en tienda."
+
+FORMATO DE SALIDA:
+Responde SOLO con JSON valido.`,
+      prompt_template: `Crea el texto publicable del anuncio con toda esta informacion:
+
+Tienda: {{store_name}}
+Branding: {{store_branding}}
+Objetivo: {{intent}}
+Canal: {{channel}}
+CTA: {{cta}}
+Estilo visual: {{visual_style}}
+Formato: {{format_label}} ({{size}})
+Brief humano: {{brief}}
+Prompt final de imagen: {{prompt}}
+
+Recursos disponibles (solo referencia los marcados SI):
+{{available_resources_inventory}}
+
+Productos:
+{{products_context}}
+
+Recursos visuales:
+{{resources_context}}
+
+QR:
+{{qr_context}}
+
+Reglas de salida:
+- Maximo 900 caracteres.
+- Listo para copiar y publicar.
+- Maximo 1 emoji funcional (cero es preferible).
+- Maximo 3 hashtags relevantes (cero esta bien si no encajan).
+- Sin aperturas genericas tipo "¡Descubre...!".
+- Sin SKUs, IDs ni codigos internos.
+- Voz humana de copywriter senior, no de IA entusiasta.
+
+Devuelve SOLO este JSON:
+{
+  "post_copy": "texto final publicable"
+}`,
     },
   ];
 
@@ -263,6 +452,30 @@ Requisitos de diseno:
         }
       }
 
+      // Always reconcile model_type with the canonical seed declaration; this
+      // is a system-owned column, not user-tunable.
+      if (existing.model_type !== app.model_type) {
+        updates.model_type = app.model_type;
+      }
+
+      // Marketing AI apps are system-owned (no user UI to edit their prompts).
+      // Reconcile system_prompt and prompt_template canonically so guardrails
+      // (inventario cerrado, prohibicion de SKUs, tono profesional) reach
+      // existing DBs without manual intervention.
+      const MARKETING_SYSTEM_OWNED_KEYS = new Set([
+        'marketing_ad_prompt_specialist',
+        'marketing_ad_image_generator',
+        'marketing_ad_post_copywriter',
+      ]);
+      if (MARKETING_SYSTEM_OWNED_KEYS.has(app.key)) {
+        if (existing.system_prompt !== app.system_prompt) {
+          updates.system_prompt = app.system_prompt;
+        }
+        if (existing.prompt_template !== app.prompt_template) {
+          updates.prompt_template = app.prompt_template;
+        }
+      }
+
       if (Object.keys(updates).length) {
         await client.ai_engine_applications.update({
           where: { key: app.key },
@@ -279,6 +492,7 @@ Requisitos de diseno:
           name: app.name,
           description: app.description,
           output_format: app.output_format,
+          model_type: app.model_type,
           temperature: app.temperature,
           max_tokens: app.max_tokens,
           is_active: app.is_active,
@@ -330,13 +544,16 @@ Requisitos de diseno:
     });
 
     if (marketingAdApp && marketingAdApp.config_id == null) {
-      const activeConfigs = await client.ai_engine_configs.findMany({
-        where: { is_active: true },
-        orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-      });
-      const imageConfig = activeConfigs.find((config) =>
-        isImageGenerationConfig(config),
-      );
+      // Prefer default image config, fall back to any active image config.
+      const imageConfig =
+        (await client.ai_engine_configs.findFirst({
+          where: { model_type: 'image', is_active: true, is_default: true },
+          orderBy: { id: 'asc' },
+        })) ||
+        (await client.ai_engine_configs.findFirst({
+          where: { model_type: 'image', is_active: true },
+          orderBy: { id: 'asc' },
+        }));
 
       if (imageConfig) {
         await client.ai_engine_applications.update({
@@ -358,24 +575,69 @@ Requisitos de diseno:
     );
   }
 
+  await linkTextAppsWhenNoDefault(client, apps);
+
   return { appsCreated, appsSkipped };
 }
 
-function isImageGenerationConfig(config: {
-  base_url: string | null;
-  model_id: string;
-  settings: unknown;
-}) {
-  const settings = (config.settings as Record<string, any> | null) || {};
-  const modelId = config.model_id.toLowerCase();
+async function linkTextAppsWhenNoDefault(
+  client: PrismaClient,
+  apps: Array<{
+    key: string;
+    output_format: string;
+    model_type: ai_model_type_enum;
+  }>,
+) {
+  try {
+    const defaultConfig = await client.ai_engine_configs.findFirst({
+      where: { is_active: true, is_default: true },
+      select: { id: true },
+    });
 
-  return (
-    settings.image_generation_mode === 'chat_completions' ||
-    !!settings.image_model ||
-    config.base_url?.includes('openrouter.ai') === true ||
-    modelId.includes('image') ||
-    modelId.includes('imagine') ||
-    modelId.includes('seedream') ||
-    modelId.includes('dall-e')
-  );
+    if (defaultConfig) {
+      return;
+    }
+
+    const textConfigs = await client.ai_engine_configs.findMany({
+      where: { is_active: true, model_type: 'text' },
+      orderBy: { id: 'asc' },
+    });
+
+    if (textConfigs.length !== 1) {
+      if (textConfigs.length === 0) {
+        console.log(
+          '    Skipped text app auto-link (no active text config and no default)',
+        );
+      } else {
+        console.log(
+          '    Skipped text app auto-link (multiple active text configs and no default)',
+        );
+      }
+      return;
+    }
+
+    const textConfig = textConfigs[0];
+    const textAppKeys = apps
+      .filter((app) => app.model_type === 'text' && app.key !== 'invoice_ocr')
+      .map((app) => app.key);
+
+    for (const key of textAppKeys) {
+      const app = await client.ai_engine_applications.findUnique({
+        where: { key },
+        select: { config_id: true },
+      });
+
+      if (app && app.config_id == null) {
+        await client.ai_engine_applications.update({
+          where: { key },
+          data: { config_id: textConfig.id },
+        });
+        console.log(
+          `    Linked ${key} → ${textConfig.label} (config #${textConfig.id})`,
+        );
+      }
+    }
+  } catch (err) {
+    console.log('    Could not auto-link text AI apps');
+  }
 }

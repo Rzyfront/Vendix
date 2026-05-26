@@ -4,8 +4,8 @@ export const anunciosRoutes: Routes = [
   {
     path: 'create',
     loadComponent: () =>
-      import('./pages/anuncio-create-page.component').then(
-        (c) => c.AnuncioCreatePageComponent,
+      import('./pages/anuncio-create-wizard-page.component').then(
+        (c) => c.AnuncioCreateWizardPageComponent,
       ),
   },
   {

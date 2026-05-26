@@ -102,7 +102,7 @@ const PENDING_PROVISIONING_STATUSES = new Set([
       </div>
 
       <!-- List Component Container — mobile-first: surface styles only on desktop -->
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Search Section — sticky on mobile -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]

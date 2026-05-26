@@ -11,20 +11,32 @@ import {
   AIImageRequestOptions,
   AIImageResponse,
   AIImageStreamChunk,
+  AIEmbeddingRequestOptions,
+  AIEmbeddingResponse,
+  AIVideoRequestOptions,
+  AIVideoResponse,
+  AISpeechRequestOptions,
+  AISpeechResponse,
+  AITranscriptionRequestOptions,
+  AITranscriptionResponse,
+  AIRerankRequestOptions,
+  AIRerankResponse,
+  AIModelType,
 } from '../interfaces/ai-provider.interface';
 
 export class OpenAICompatibleProvider implements AIProvider {
   private client: OpenAI;
 
   constructor(private config: AIProviderConfig) {
-    const baseUrl = this.normalizeBaseUrl(config.baseUrl);
+    const baseUrl = this.cleanBaseUrl(config.baseUrl);
+    const clientBaseUrl = this.toOpenAIClientBaseUrl(baseUrl);
     this.config = {
       ...config,
       baseUrl,
     };
     this.client = new OpenAI({
       apiKey: config.apiKey,
-      ...(baseUrl && { baseURL: baseUrl }),
+      ...(clientBaseUrl && { baseURL: clientBaseUrl }),
     });
   }
 
@@ -107,11 +119,11 @@ export class OpenAICompatibleProvider implements AIProvider {
   ): Promise<AIImageResponse> {
     try {
       if (this.usesChatModalitiesImageGeneration()) {
-        return this.generateImageWithChatModalities(prompt, options);
+        return await this.generateImageWithChatModalities(prompt, options);
       }
 
       if (options?.referenceImages?.length) {
-        return this.generateImageWithResponses(prompt, options);
+        return await this.generateImageWithResponses(prompt, options);
       }
 
       const model =
@@ -150,22 +162,297 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
   }
 
+  async generateEmbedding(
+    input: string | string[],
+    options?: AIEmbeddingRequestOptions,
+  ): Promise<AIEmbeddingResponse> {
+    try {
+      const model =
+        options?.model ||
+        this.config.settings?.embedding_model ||
+        this.config.modelId;
+      const response = await this.client.embeddings.create({
+        model,
+        input,
+        encoding_format:
+          options?.encodingFormat ||
+          this.config.settings?.encoding_format ||
+          'float',
+        ...(options?.dimensions && { dimensions: options.dimensions }),
+      } as any);
+
+      const embeddings = response.data.map(
+        (item: any) => item.embedding as number[],
+      );
+
+      return {
+        success: embeddings.length > 0,
+        embedding: embeddings[0],
+        embeddings,
+        model: (response as any).model || model,
+        usage: this.mapTokenUsage((response as any).usage),
+        error: embeddings.length
+          ? undefined
+          : 'Embedding model returned no data',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'OpenAI-compatible embedding request failed',
+      };
+    }
+  }
+
+  async generateVideo(
+    prompt: string,
+    options?: AIVideoRequestOptions,
+  ): Promise<AIVideoResponse> {
+    const model =
+      options?.model ||
+      this.config.settings?.video_model ||
+      this.config.modelId;
+
+    try {
+      const submitted = await this.postJson<any>('/videos', {
+        model,
+        prompt,
+        ...(options?.aspectRatio || this.config.settings?.aspect_ratio
+          ? {
+              aspect_ratio:
+                options?.aspectRatio || this.config.settings?.aspect_ratio,
+            }
+          : {}),
+        ...(options?.duration || this.config.settings?.duration
+          ? { duration: options?.duration || this.config.settings?.duration }
+          : {}),
+        ...(options?.resolution || this.config.settings?.resolution
+          ? {
+              resolution:
+                options?.resolution || this.config.settings?.resolution,
+            }
+          : {}),
+        ...(options?.callbackUrl || this.config.settings?.callback_url
+          ? {
+              callback_url:
+                options?.callbackUrl || this.config.settings?.callback_url,
+            }
+          : {}),
+        ...(options?.provider || this.config.settings?.provider_preferences
+          ? {
+              provider:
+                options?.provider || this.config.settings?.provider_preferences,
+            }
+          : {}),
+      });
+
+      const response = this.mapVideoResponse(submitted, model);
+
+      if (!options?.pollUntilComplete || !response.pollingUrl) {
+        return response;
+      }
+
+      return this.pollVideoUntilComplete(response.pollingUrl, model, options);
+    } catch (error: any) {
+      return {
+        success: false,
+        model,
+        error: error.message || 'OpenAI-compatible video request failed',
+      };
+    }
+  }
+
+  async generateSpeech(
+    input: string,
+    options?: AISpeechRequestOptions,
+  ): Promise<AISpeechResponse> {
+    const model =
+      options?.model ||
+      this.config.settings?.speech_model ||
+      this.config.modelId;
+
+    try {
+      const body: Record<string, any> = {
+        model,
+        input,
+        voice:
+          options?.voice ||
+          this.config.settings?.speech_voice ||
+          this.config.settings?.voice ||
+          this.getDefaultSpeechVoice(model),
+        ...(options?.responseFormat ||
+        this.config.settings?.response_format ||
+        this.config.settings?.speech_response_format
+          ? {
+              response_format:
+                options?.responseFormat ||
+                this.config.settings?.response_format ||
+                this.config.settings?.speech_response_format,
+            }
+          : {}),
+        ...(options?.speed || this.config.settings?.speed
+          ? { speed: options?.speed || this.config.settings?.speed }
+          : {}),
+        ...(options?.provider || this.config.settings?.provider_preferences
+          ? {
+              provider:
+                options?.provider || this.config.settings?.provider_preferences,
+            }
+          : {}),
+      };
+
+      const response = await fetch(this.buildProviderUrl('/audio/speech'), {
+        method: 'POST',
+        headers: this.buildProviderHeaders(),
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) {
+        throw new Error(await this.readProviderError(response));
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      return {
+        success: buffer.length > 0,
+        audioBase64: buffer.toString('base64'),
+        contentType:
+          response.headers.get('content-type') || 'application/octet-stream',
+        generationId: response.headers.get('x-generation-id') || undefined,
+        model,
+        error: buffer.length ? undefined : 'Speech model returned no audio',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        model,
+        error: error.message || 'OpenAI-compatible speech request failed',
+      };
+    }
+  }
+
+  async transcribeAudio(
+    options: AITranscriptionRequestOptions,
+  ): Promise<AITranscriptionResponse> {
+    const model =
+      options.model ||
+      this.config.settings?.transcription_model ||
+      this.config.modelId;
+
+    try {
+      const response = await this.postJson<any>('/audio/transcriptions', {
+        model,
+        input_audio: options.inputAudio,
+        ...(options.language || this.config.settings?.language
+          ? { language: options.language || this.config.settings?.language }
+          : {}),
+        ...((options.temperature ?? this.config.settings?.temperature)
+          ? {
+              temperature:
+                options.temperature ?? this.config.settings?.temperature,
+            }
+          : {}),
+        ...(options.provider || this.config.settings?.provider_preferences
+          ? {
+              provider:
+                options.provider || this.config.settings?.provider_preferences,
+            }
+          : {}),
+      });
+
+      return {
+        success: typeof response.text === 'string',
+        text: response.text,
+        model,
+        usage: this.mapTokenUsage(response.usage),
+        error:
+          typeof response.text === 'string'
+            ? undefined
+            : 'Transcription model returned no text',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        model,
+        error:
+          error.message || 'OpenAI-compatible transcription request failed',
+      };
+    }
+  }
+
+  async rerank(options: AIRerankRequestOptions): Promise<AIRerankResponse> {
+    const model =
+      options.model ||
+      this.config.settings?.rerank_model ||
+      this.config.modelId;
+
+    try {
+      const response = await this.postJson<any>('/rerank', {
+        model,
+        query: options.query,
+        documents: options.documents,
+        ...(options.topN || this.config.settings?.top_n
+          ? { top_n: options.topN || this.config.settings?.top_n }
+          : {}),
+        ...(options.provider || this.config.settings?.provider_preferences
+          ? {
+              provider:
+                options.provider || this.config.settings?.provider_preferences,
+            }
+          : {}),
+      });
+
+      return {
+        success: Array.isArray(response.results),
+        id: response.id,
+        model: response.model || model,
+        provider: response.provider,
+        results: Array.isArray(response.results)
+          ? response.results.map((item: any) => ({
+              index: item.index,
+              relevanceScore: item.relevance_score ?? item.relevanceScore ?? 0,
+              text: item.document?.text,
+            }))
+          : undefined,
+        usage: this.mapTokenUsage(response.usage),
+        error: Array.isArray(response.results)
+          ? undefined
+          : 'Rerank model returned no results',
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        model,
+        error: error.message || 'OpenAI-compatible rerank request failed',
+      };
+    }
+  }
+
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      if (this.usesChatModalitiesImageGeneration()) {
-        const response = await this.generateImage(
-          'Generate a simple connection test image with a clean OK mark.',
-          { size: '1024x1024' },
-        );
+      const modelType = this.getModelType();
 
-        if (response.success) {
+      switch (modelType) {
+        case 'image':
+          return this.testImageConnection();
+        case 'embedding':
+          return this.testEmbeddingConnection();
+        case 'audio':
+          return this.testAudioConnection();
+        case 'video':
+          return this.testVideoConnection();
+        case 'speech':
+          return this.testSpeechConnection();
+        case 'transcription':
+          return this.testTranscriptionConnection();
+        case 'rerank':
+          return this.testRerankConnection();
+        case 'text':
+          break;
+        default:
           return {
-            success: true,
-            message: `Connection successful. Image model: ${response.model || this.config.modelId}`,
+            success: false,
+            message: `Connection test for model type "${modelType}" is not supported`,
           };
-        }
-
-        return { success: false, message: response.error || 'Unknown error' };
       }
 
       const response = await this.chat([{ role: 'user', content: 'Say OK' }], {
@@ -181,6 +468,169 @@ export class OpenAICompatibleProvider implements AIProvider {
     } catch (error: any) {
       return { success: false, message: error.message || 'Connection failed' };
     }
+  }
+
+  private async testImageConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.generateImage(
+      'Generate a simple connection test image with a clean OK mark.',
+      { size: '1024x1024' },
+    );
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Image model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
+  }
+
+  private async testEmbeddingConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.generateEmbedding('Vendix connection test');
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Embedding model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
+  }
+
+  private async testAudioConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.chat(
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Reply with OK after reading this audio.' },
+            {
+              type: 'input_audio',
+              input_audio: {
+                data: this.buildSilentWavBase64(),
+                format: 'wav',
+              },
+            },
+          ],
+        },
+      ],
+      { maxTokens: 10 },
+    );
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Audio model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
+  }
+
+  private async testVideoConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    if (this.isOpenRouterConfig()) {
+      try {
+        const response = await this.getJson<any>('/videos/models');
+        const models = Array.isArray(response.data) ? response.data : [];
+        const configuredModel = models.find(
+          (model: any) => model.id === this.config.modelId,
+        );
+
+        if (configuredModel) {
+          return {
+            success: true,
+            message: `Connection successful. Video model is available: ${this.config.modelId}`,
+          };
+        }
+
+        return {
+          success: false,
+          message: `Video model was not found in OpenRouter video models: ${this.config.modelId}`,
+        };
+      } catch (error: any) {
+        return {
+          success: false,
+          message: error.message || 'Video model availability check failed',
+        };
+      }
+    }
+
+    return {
+      success: false,
+      message:
+        'Video connection test requires a provider-specific model listing endpoint',
+    };
+  }
+
+  private async testSpeechConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.generateSpeech('OK');
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Speech model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
+  }
+
+  private async testTranscriptionConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.transcribeAudio({
+      inputAudio: {
+        data: this.buildSilentWavBase64(),
+        format: 'wav',
+      },
+    });
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Transcription model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
+  }
+
+  private async testRerankConnection(): Promise<{
+    success: boolean;
+    message: string;
+  }> {
+    const response = await this.rerank({
+      query: 'Which document says OK?',
+      documents: ['OK', 'Something else'],
+      topN: 1,
+    });
+
+    if (response.success) {
+      return {
+        success: true,
+        message: `Connection successful. Rerank model: ${response.model || this.config.modelId}`,
+      };
+    }
+
+    return { success: false, message: response.error || 'Unknown error' };
   }
 
   async *chatStream(
@@ -406,7 +856,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     const response = await this.client.chat.completions.create({
       model,
       messages: this.buildImageChatMessages(prompt, options) as any,
-      modalities: ['image'],
+      modalities: this.config.settings?.modalities || ['image'],
     } as any);
 
     const message = response.choices?.[0]?.message as any;
@@ -606,6 +1056,195 @@ export class OpenAICompatibleProvider implements AIProvider {
     return `data:${contentType};base64,${buffer.toString('base64')}`;
   }
 
+  private async postJson<T>(
+    path: string,
+    body: Record<string, any>,
+  ): Promise<T> {
+    const response = await fetch(this.buildProviderUrl(path), {
+      method: 'POST',
+      headers: this.buildProviderHeaders(),
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      throw new Error(await this.readProviderError(response));
+    }
+
+    return (await response.json()) as T;
+  }
+
+  private async getJson<T>(pathOrUrl: string): Promise<T> {
+    const response = await fetch(this.buildProviderUrl(pathOrUrl), {
+      method: 'GET',
+      headers: this.buildProviderHeaders(false),
+    });
+
+    if (!response.ok) {
+      throw new Error(await this.readProviderError(response));
+    }
+
+    return (await response.json()) as T;
+  }
+
+  private buildProviderHeaders(includeJson = true): Record<string, string> {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.config.apiKey}`,
+    };
+
+    if (includeJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    const referer =
+      this.config.settings?.http_referer ||
+      this.config.settings?.httpReferer ||
+      this.config.settings?.site_url;
+    const title =
+      this.config.settings?.x_openrouter_title ||
+      this.config.settings?.appTitle ||
+      this.config.settings?.site_name;
+
+    if (referer) {
+      headers['HTTP-Referer'] = referer;
+    }
+
+    if (title) {
+      headers['X-OpenRouter-Title'] = title;
+    }
+
+    return headers;
+  }
+
+  private buildProviderUrl(pathOrUrl: string): string {
+    if (pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')) {
+      return pathOrUrl;
+    }
+
+    const apiRoot = this.getApiRootBaseUrl();
+    const rootUrl = new URL(apiRoot);
+
+    if (pathOrUrl.startsWith('/api/')) {
+      return `${rootUrl.origin}${pathOrUrl}`;
+    }
+
+    return `${apiRoot.replace(/\/+$/, '')}/${pathOrUrl.replace(/^\/+/, '')}`;
+  }
+
+  private getApiRootBaseUrl(): string {
+    const configuredRoot = this.toApiRootBaseUrl(this.config.baseUrl);
+
+    if (configuredRoot) {
+      return configuredRoot.replace(/\/+$/, '');
+    }
+
+    if (this.isOpenRouterConfig()) {
+      return 'https://openrouter.ai/api/v1';
+    }
+
+    return 'https://api.openai.com/v1';
+  }
+
+  private async readProviderError(response: Response): Promise<string> {
+    const fallback = `${response.status} ${response.statusText}`.trim();
+    const text = await response.text();
+
+    if (!text) {
+      return fallback;
+    }
+
+    try {
+      const parsed = JSON.parse(text);
+      return (
+        parsed.error?.message ||
+        parsed.error ||
+        parsed.message ||
+        parsed.detail ||
+        fallback
+      );
+    } catch {
+      return text || fallback;
+    }
+  }
+
+  private mapVideoResponse(response: any, model: string): AIVideoResponse {
+    return {
+      success: !!response.id && response.status !== 'failed',
+      id: response.id,
+      generationId: response.generation_id,
+      pollingUrl: response.polling_url,
+      status: response.status,
+      urls: response.unsigned_urls,
+      model,
+      usage: this.mapTokenUsage(response.usage),
+      error:
+        response.status === 'failed'
+          ? response.error || 'Video generation failed'
+          : undefined,
+    };
+  }
+
+  private async pollVideoUntilComplete(
+    pollingUrl: string,
+    model: string,
+    options: AIVideoRequestOptions,
+  ): Promise<AIVideoResponse> {
+    const maxAttempts = options.maxPollAttempts ?? 60;
+    const intervalMs = options.pollIntervalMs ?? 5000;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      }
+
+      const response = await this.getJson<any>(pollingUrl);
+      const mapped = this.mapVideoResponse(response, model);
+
+      if (mapped.status === 'completed' || mapped.status === 'failed') {
+        return mapped;
+      }
+    }
+
+    return {
+      success: false,
+      pollingUrl,
+      model,
+      status: 'in_progress',
+      error: 'Video generation did not complete before polling timeout',
+    };
+  }
+
+  private buildSilentWavBase64(): string {
+    const sampleRate = 8000;
+    const durationSeconds = 0.1;
+    const samples = Math.floor(sampleRate * durationSeconds);
+    const dataSize = samples * 2;
+    const buffer = Buffer.alloc(44 + dataSize);
+
+    buffer.write('RIFF', 0);
+    buffer.writeUInt32LE(36 + dataSize, 4);
+    buffer.write('WAVE', 8);
+    buffer.write('fmt ', 12);
+    buffer.writeUInt32LE(16, 16);
+    buffer.writeUInt16LE(1, 20);
+    buffer.writeUInt16LE(1, 22);
+    buffer.writeUInt32LE(sampleRate, 24);
+    buffer.writeUInt32LE(sampleRate * 2, 28);
+    buffer.writeUInt16LE(2, 32);
+    buffer.writeUInt16LE(16, 34);
+    buffer.write('data', 36);
+    buffer.writeUInt32LE(dataSize, 40);
+
+    return buffer.toString('base64');
+  }
+
+  private getDefaultSpeechVoice(model: string): string {
+    if (model.toLowerCase().includes('grok-voice')) {
+      return 'Eve';
+    }
+
+    return 'alloy';
+  }
+
   private mapImageUsage(usage: any): AIImageResponse['usage'] {
     if (!usage) return undefined;
     return {
@@ -641,30 +1280,117 @@ export class OpenAICompatibleProvider implements AIProvider {
     };
   }
 
+  private mapTokenUsage(usage: any): AIResponse['usage'] | undefined {
+    if (!usage) return undefined;
+    const promptTokens =
+      usage.prompt_tokens || usage.input_tokens || usage.total_tokens || 0;
+    const completionTokens =
+      usage.completion_tokens || usage.output_tokens || 0;
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens:
+        usage.total_tokens ||
+        usage.totalTokens ||
+        promptTokens + completionTokens,
+      ...(usage.seconds !== undefined && { seconds: usage.seconds }),
+      ...(usage.cost !== undefined && { cost: usage.cost }),
+      ...(usage.search_units !== undefined && {
+        searchUnits: usage.search_units,
+      }),
+    } as any;
+  }
+
   private usesChatModalitiesImageGeneration(): boolean {
+    if (this.getModelType() !== 'image') {
+      return false;
+    }
+
     return (
       this.config.settings?.image_generation_mode === 'chat_completions' ||
       this.config.settings?.image_endpoint === 'chat_completions' ||
       this.config.settings?.modalities?.includes?.('image') ||
-      this.config.baseUrl?.includes('openrouter.ai') === true
+      this.isOpenRouterConfig()
     );
   }
 
-  private normalizeBaseUrl(baseUrl?: string): string | undefined {
+  private getModelType(): string {
+    const modelType =
+      this.config.settings?.model_type || this.config.settings?.modelType;
+
+    if (typeof modelType === 'string' && modelType.trim()) {
+      return modelType.trim();
+    }
+
+    return this.hasImageGenerationSettings() ? 'image' : 'text';
+  }
+
+  private hasImageGenerationSettings(): boolean {
+    return (
+      this.config.settings?.image_generation_mode !== undefined ||
+      this.config.settings?.image_endpoint !== undefined ||
+      this.config.settings?.image_model !== undefined ||
+      this.config.settings?.modalities?.includes?.('image') === true
+    );
+  }
+
+  private isOpenRouterConfig(): boolean {
+    return (
+      this.config.baseUrl?.includes('openrouter.ai') === true ||
+      this.config.provider.toLowerCase().includes('openrouter')
+    );
+  }
+
+  private cleanBaseUrl(baseUrl?: string): string | undefined {
     if (!baseUrl) return undefined;
 
-    let normalized = baseUrl.trim().replace(/\/+$/, '');
+    return baseUrl.trim() || undefined;
+  }
+
+  private toOpenAIClientBaseUrl(baseUrl?: string): string | undefined {
+    if (!baseUrl) return undefined;
+
+    const urlWithoutTrailingSlash = baseUrl.replace(/\/+$/, '');
     for (const suffix of [
       '/chat/completions',
       '/images/generations',
       '/responses',
+      '/embeddings',
+      '/videos',
+      '/videos/models',
+      '/audio/speech',
+      '/audio/transcriptions',
+      '/rerank',
     ]) {
-      if (normalized.endsWith(suffix)) {
-        normalized = normalized.slice(0, -suffix.length);
+      if (urlWithoutTrailingSlash.endsWith(suffix)) {
+        return urlWithoutTrailingSlash.slice(0, -suffix.length);
       }
     }
 
-    return normalized;
+    return baseUrl;
+  }
+
+  private toApiRootBaseUrl(baseUrl?: string): string | undefined {
+    if (!baseUrl) return undefined;
+
+    const urlWithoutTrailingSlash = baseUrl.replace(/\/+$/, '');
+    for (const suffix of [
+      '/chat/completions',
+      '/images/generations',
+      '/responses',
+      '/embeddings',
+      '/videos',
+      '/videos/models',
+      '/audio/speech',
+      '/audio/transcriptions',
+      '/rerank',
+    ]) {
+      if (urlWithoutTrailingSlash.endsWith(suffix)) {
+        return urlWithoutTrailingSlash.slice(0, -suffix.length);
+      }
+    }
+
+    return baseUrl;
   }
 
   private buildMessages(

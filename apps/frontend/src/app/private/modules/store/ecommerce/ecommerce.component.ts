@@ -5,9 +5,10 @@ import {
   FormGroup,
   FormsModule,
   Validators,
-  ReactiveFormsModule } from '@angular/forms';
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { map, startWith } from 'rxjs';
-import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -21,7 +22,8 @@ import {
   FooterSettings,
   SettingsResponse,
   SliderImage,
-  SliderPhoto } from './interfaces';
+  SliderPhoto,
+} from './interfaces';
 import { FooterSettingsFormComponent } from './components/footer-settings-form';
 import { StoreShareModalComponent } from './components/store-share-modal';
 import {
@@ -34,7 +36,8 @@ import {
   TextareaComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
-  StickyHeaderActionButton } from '../../../../shared/components';
+  StickyHeaderActionButton,
+} from '../../../../shared/components';
 import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../../shared/components/tour/services/tour.service';
 import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/ecommerce-tour.config';
@@ -57,10 +60,11 @@ import type { Currency } from '../../../../shared/pipes/currency';
     StickyHeaderComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
-    TourModalComponent
-],
+    TourModalComponent,
+  ],
   templateUrl: './ecommerce.component.html',
-  styleUrls: ['./ecommerce.component.scss'] })
+  styleUrls: ['./ecommerce.component.scss'],
+})
 export class EcommerceComponent {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
@@ -73,7 +77,7 @@ export class EcommerceComponent {
   private shippingMethodsService = inject(ShippingMethodsService);
   private tourService = inject(TourService);
   private destroyRef = inject(DestroyRef);
-// Tour
+  // Tour
   readonly showTourModal = signal(false);
   readonly ecommerceTourConfig = ECOMMERCE_TOUR_CONFIG;
 
@@ -91,13 +95,21 @@ export class EcommerceComponent {
   hasShippingMethods = signal<boolean | null>(null);
 
   private readonly formValueSignal = toSignal(
-    this.settingsForm.valueChanges.pipe(startWith(this.settingsForm.getRawValue())),
-    { initialValue: this.settingsForm.getRawValue() }
+    this.settingsForm.valueChanges.pipe(
+      startWith(this.settingsForm.getRawValue()),
+    ),
+    { initialValue: this.settingsForm.getRawValue() },
   );
 
-  readonly primaryColor = computed(() => this.formValueSignal()?.inicio?.colores?.primary_color ?? '#3B82F6');
-  readonly secondaryColor = computed(() => this.formValueSignal()?.inicio?.colores?.secondary_color ?? '#10B981');
-  readonly accentColor = computed(() => this.formValueSignal()?.inicio?.colores?.accent_color ?? '#F59E0B');
+  readonly primaryColor = computed(
+    () => this.formValueSignal()?.inicio?.colores?.primary_color ?? '#3B82F6',
+  );
+  readonly secondaryColor = computed(
+    () => this.formValueSignal()?.inicio?.colores?.secondary_color ?? '#10B981',
+  );
+  readonly accentColor = computed(
+    () => this.formValueSignal()?.inicio?.colores?.accent_color ?? '#F59E0B',
+  );
 
   // Slider images
   readonly sliderImages = signal<SliderImage[]>([]);
@@ -118,6 +130,11 @@ export class EcommerceComponent {
 
   // Ecommerce URL for "Open Store" button
   readonly ecommerceUrl = signal<string | null>(null);
+  readonly ecommerceQrCodeDataUrl = signal<string | null>(null);
+  readonly ecommerceQrTargetUrl = signal<string | null>(null);
+  readonly ecommerceQrGeneratedAt = signal<string | null>(null);
+  readonly ecommerceQrStale = signal(false);
+  readonly isGeneratingQr = signal(false);
 
   // Share modal state
   readonly isShareModalOpen = signal(false);
@@ -137,7 +154,8 @@ export class EcommerceComponent {
         id: 'reset',
         label: 'Restablecer',
         variant: 'outline',
-        disabled: isSaving || isPristine });
+        disabled: isSaving || isPristine,
+      });
     }
 
     const ecommerceUrl = this.ecommerceUrl();
@@ -148,13 +166,15 @@ export class EcommerceComponent {
         label: 'Compartir',
         variant: 'outline',
         icon: 'share-2',
-        disabled: !ecommerceUrl });
+        disabled: !ecommerceUrl,
+      });
       actions.push({
         id: 'open',
         label: 'Abrir Tienda',
         variant: 'outline',
         icon: 'external-link',
-        disabled: !ecommerceUrl });
+        disabled: !ecommerceUrl,
+      });
     }
 
     actions.push({
@@ -167,7 +187,8 @@ export class EcommerceComponent {
       variant: 'primary',
       icon: isSaving ? undefined : 'save',
       loading: isSaving,
-      disabled: isSaving || isPristine || isInvalid });
+      disabled: isSaving || isPristine || isInvalid,
+    });
 
     return actions;
   });
@@ -180,8 +201,7 @@ export class EcommerceComponent {
     this.loadCurrencies();
     this.checkShippingStatus();
 
-    this.destroyRef.onDestroy(() => {
-    });
+    this.destroyRef.onDestroy(() => {});
   }
 
   /**
@@ -200,18 +220,22 @@ export class EcommerceComponent {
         colores: this.fb.group({
           primary_color: ['#3B82F6'],
           secondary_color: ['#10B981'],
-          accent_color: ['#F59E0B'] }) }),
+          accent_color: ['#F59E0B'],
+        }),
+      }),
 
       // Configuración General
       general: this.fb.group({
         currency: [this.currencyService.currencyCode() || 'COP'],
         locale: ['es-CO'],
-        timezone: ['America/Bogota'] }),
+        timezone: ['America/Bogota'],
+      }),
 
       // Slider Principal
       slider: this.fb.group({
         enable: [false],
-        photos: this.fb.array([]) }),
+        photos: this.fb.array([]),
+      }),
 
       // Catálogo
       catalog: this.fb.group({
@@ -220,68 +244,130 @@ export class EcommerceComponent {
         allow_reviews: [true],
         show_variants: [true],
         show_related_products: [false],
-        enable_filters: [false] }),
+        enable_filters: [false],
+      }),
 
       // Carrito
       cart: this.fb.group({
         cart_expiration_hours: [24],
-        max_quantity_per_item: [10] }),
+        max_quantity_per_item: [10],
+      }),
 
       // Checkout
       checkout: this.fb.group({
         whatsapp_checkout: [false],
         whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],
-        confirm_whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],  // frontend-only, never sent to backend
-        require_registration: [false] }) });
+        confirm_whatsapp_number: [
+          '',
+          [Validators.pattern(/^\+57[\d+#*\s()-]*$/)],
+        ], // frontend-only, never sent to backend
+        require_registration: [false],
+      }),
+    });
   }
 
   // --- Typed Getters for Form Controls ---
-  get inicioGroup(): FormGroup { return this.settingsForm.get('inicio') as FormGroup; }
-  get catalogGroup(): FormGroup { return this.settingsForm.get('catalog') as FormGroup; }
-  get cartGroup(): FormGroup { return this.settingsForm.get('cart') as FormGroup; }
-  get checkoutGroup(): FormGroup { return this.settingsForm.get('checkout') as FormGroup; }
-  get generalGroup(): FormGroup { return this.settingsForm.get('general') as FormGroup; }
+  get inicioGroup(): FormGroup {
+    return this.settingsForm.get('inicio') as FormGroup;
+  }
+  get catalogGroup(): FormGroup {
+    return this.settingsForm.get('catalog') as FormGroup;
+  }
+  get cartGroup(): FormGroup {
+    return this.settingsForm.get('cart') as FormGroup;
+  }
+  get checkoutGroup(): FormGroup {
+    return this.settingsForm.get('checkout') as FormGroup;
+  }
+  get generalGroup(): FormGroup {
+    return this.settingsForm.get('general') as FormGroup;
+  }
 
   // Inicio
-  get tituloControl() { return this.inicioGroup.get('titulo') as any; }
-  get parrafoControl() { return this.inicioGroup.get('parrafo') as any; }
-  get primaryColorControl() { return this.inicioGroup.get('colores.primary_color') as any; }
-  get secondaryColorControl() { return this.inicioGroup.get('colores.secondary_color') as any; }
-  get accentColorControl() { return this.inicioGroup.get('colores.accent_color') as any; }
+  get tituloControl() {
+    return this.inicioGroup.get('titulo') as any;
+  }
+  get parrafoControl() {
+    return this.inicioGroup.get('parrafo') as any;
+  }
+  get primaryColorControl() {
+    return this.inicioGroup.get('colores.primary_color') as any;
+  }
+  get secondaryColorControl() {
+    return this.inicioGroup.get('colores.secondary_color') as any;
+  }
+  get accentColorControl() {
+    return this.inicioGroup.get('colores.accent_color') as any;
+  }
 
   // General
-  get currencyControl() { return this.generalGroup.get('currency') as any; }
-  get localeControl() { return this.generalGroup.get('locale') as any; }
-  get timezoneControl() { return this.generalGroup.get('timezone') as any; }
+  get currencyControl() {
+    return this.generalGroup.get('currency') as any;
+  }
+  get localeControl() {
+    return this.generalGroup.get('locale') as any;
+  }
+  get timezoneControl() {
+    return this.generalGroup.get('timezone') as any;
+  }
 
   // Slider
-  get sliderEnableControl() { return this.settingsForm.get('slider.enable') as any; }
+  get sliderEnableControl() {
+    return this.settingsForm.get('slider.enable') as any;
+  }
 
   // Catalog
-  get productsPerPageControl() { return this.catalogGroup.get('products_per_page') as any; }
-  get showOutOfStockControl() { return this.catalogGroup.get('show_out_of_stock') as any; }
-  get allowReviewsControl() { return this.catalogGroup.get('allow_reviews') as any; }
-  get showVariantsControl() { return this.catalogGroup.get('show_variants') as any; }
-  get showRelatedProductsControl() { return this.catalogGroup.get('show_related_products') as any; }
-  get enableFiltersControl() { return this.catalogGroup.get('enable_filters') as any; }
+  get productsPerPageControl() {
+    return this.catalogGroup.get('products_per_page') as any;
+  }
+  get showOutOfStockControl() {
+    return this.catalogGroup.get('show_out_of_stock') as any;
+  }
+  get allowReviewsControl() {
+    return this.catalogGroup.get('allow_reviews') as any;
+  }
+  get showVariantsControl() {
+    return this.catalogGroup.get('show_variants') as any;
+  }
+  get showRelatedProductsControl() {
+    return this.catalogGroup.get('show_related_products') as any;
+  }
+  get enableFiltersControl() {
+    return this.catalogGroup.get('enable_filters') as any;
+  }
 
   // Cart
-  get cartExpirationHoursControl() { return this.cartGroup.get('cart_expiration_hours') as any; }
-  get maxQuantityPerItemControl() { return this.cartGroup.get('max_quantity_per_item') as any; }
+  get cartExpirationHoursControl() {
+    return this.cartGroup.get('cart_expiration_hours') as any;
+  }
+  get maxQuantityPerItemControl() {
+    return this.cartGroup.get('max_quantity_per_item') as any;
+  }
 
   // Checkout
-  get whatsappCheckoutControl() { return this.checkoutGroup.get('whatsapp_checkout') as any; }
-  get whatsappNumberControl() { return this.checkoutGroup.get('whatsapp_number') as any; }
-  get confirmWhatsappNumberControl() { return this.checkoutGroup.get('confirm_whatsapp_number') as any; }
-  get requireRegistrationControl() { return this.checkoutGroup.get('require_registration') as any; }
+  get whatsappCheckoutControl() {
+    return this.checkoutGroup.get('whatsapp_checkout') as any;
+  }
+  get whatsappNumberControl() {
+    return this.checkoutGroup.get('whatsapp_number') as any;
+  }
+  get confirmWhatsappNumberControl() {
+    return this.checkoutGroup.get('confirm_whatsapp_number') as any;
+  }
+  get requireRegistrationControl() {
+    return this.checkoutGroup.get('require_registration') as any;
+  }
 
   /**
    * Enforces that WhatsApp number inputs always start with +57
    */
   private setupWhatsappPrefixEnforcement(): void {
-    const controls = [this.whatsappNumberControl, this.confirmWhatsappNumberControl];
+    const controls = [
+      this.whatsappNumberControl,
+      this.confirmWhatsappNumberControl,
+    ];
 
-    controls.forEach(control => {
+    controls.forEach((control) => {
       control.valueChanges
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((value: string) => {
@@ -307,7 +393,9 @@ export class EcommerceComponent {
             this.whatsappNumberControl.setValue('+57', { emitEvent: false });
           }
           if (!this.confirmWhatsappNumberControl.value) {
-            this.confirmWhatsappNumberControl.setValue('+57', { emitEvent: false });
+            this.confirmWhatsappNumberControl.setValue('+57', {
+              emitEvent: false,
+            });
           }
         }
       });
@@ -332,9 +420,12 @@ export class EcommerceComponent {
             // Pre-fill confirm_whatsapp_number from saved number
             if (response.config.checkout?.whatsapp_number) {
               let num = response.config.checkout.whatsapp_number;
-              if (!num.startsWith('+57')) num = '+57' + num.replace(/^\+?5?7?/, '');
+              if (!num.startsWith('+57'))
+                num = '+57' + num.replace(/^\+?5?7?/, '');
               this.whatsappNumberControl.setValue(num, { emitEvent: false });
-              this.confirmWhatsappNumberControl.setValue(num, { emitEvent: false });
+              this.confirmWhatsappNumberControl.setValue(num, {
+                emitEvent: false,
+              });
             }
 
             // Cargar logo si existe
@@ -355,7 +446,8 @@ export class EcommerceComponent {
                     url: photo.url || undefined,
                     key: photo.key || undefined,
                     title: photo.title,
-                    caption: photo.caption }))
+                    caption: photo.caption,
+                  })),
               );
             } else {
               this.sliderImages.set([]);
@@ -366,11 +458,21 @@ export class EcommerceComponent {
 
             // Obtener la URL de la Ecommerce desde la respuesta del endpoint
             this.ecommerceUrl.set(response.ecommerceUrl || null);
+            this.ecommerceQrCodeDataUrl.set(response.qrCodeDataUrl || null);
+            this.ecommerceQrTargetUrl.set(
+              response.qrCodeUrl || response.ecommerceUrl || null,
+            );
+            this.ecommerceQrGeneratedAt.set(response.qrCodeGeneratedAt || null);
+            this.ecommerceQrStale.set(!!response.qrCodeStale);
           } else {
             // MODO SETUP: no existe configuración
             this.isSetupMode.set(true);
             this.isEditMode.set(false);
             this.ecommerceUrl.set(null);
+            this.ecommerceQrCodeDataUrl.set(null);
+            this.ecommerceQrTargetUrl.set(null);
+            this.ecommerceQrGeneratedAt.set(null);
+            this.ecommerceQrStale.set(false);
             this.loadTemplate();
           }
           this.isLoading.set(false);
@@ -380,7 +482,8 @@ export class EcommerceComponent {
             'Error al cargar configuración: ' + error.message,
           );
           this.isLoading.set(false);
-        } });
+        },
+      });
   }
 
   /**
@@ -403,7 +506,8 @@ export class EcommerceComponent {
         error: (error) => {
           this.toastService.error('Error al cargar template: ' + error.message);
           this.isLoading.set(false);
-        } });
+        },
+      });
   }
 
   /**
@@ -413,14 +517,15 @@ export class EcommerceComponent {
     try {
       const response = await firstValueFrom(
         this.http.get<{ success: boolean; data: Currency[]; message?: string }>(
-          `${environment.apiUrl}/public/currencies/active`
-        )
+          `${environment.apiUrl}/public/currencies/active`,
+        ),
       );
 
       if (response.success && response.data) {
         this.currencies = response.data.map((c) => ({
           value: c.code,
-          label: `${c.name} (${c.code})` }));
+          label: `${c.name} (${c.code})`,
+        }));
       } else {
         // Fallback to common currencies if service fails
         this.currencies = [
@@ -444,11 +549,13 @@ export class EcommerceComponent {
    * Check if the store has active shipping methods configured
    */
   private checkShippingStatus(): void {
-    this.shippingMethodsService.getShippingMethodStats()
+    this.shippingMethodsService
+      .getShippingMethodStats()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => this.hasShippingMethods.set(stats.enabled_methods > 0),
-        error: () => this.hasShippingMethods.set(false) });
+        error: () => this.hasShippingMethods.set(false),
+      });
   }
 
   navigateToShipping(): void {
@@ -458,9 +565,11 @@ export class EcommerceComponent {
   private async showShippingRedirectModal(): Promise<void> {
     const confirmed = await this.dialogService.confirm({
       title: 'Configurar Métodos de Envío',
-      message: 'Tu tienda necesita al menos un método de envío activo para que los clientes puedan completar sus compras. Te redirigiremos a la configuración de envíos.',
+      message:
+        'Tu tienda necesita al menos un método de envío activo para que los clientes puedan completar sus compras. Te redirigiremos a la configuración de envíos.',
       confirmText: 'Ir a Configuración de Envíos',
-      cancelText: 'Configurar después' });
+      cancelText: 'Configurar después',
+    });
     if (confirmed) {
       this.router.navigate(['/admin/settings/shipping']);
     }
@@ -507,7 +616,11 @@ export class EcommerceComponent {
 
     // Filter valid image files and cap to available slots
     const valid_files: File[] = [];
-    for (let i = 0; i < files.length && valid_files.length < available_slots; i++) {
+    for (
+      let i = 0;
+      i < files.length && valid_files.length < available_slots;
+      i++
+    ) {
       const file = files[i];
       if (!file.type.startsWith('image/')) continue;
       if (file.size > 5 * 1024 * 1024) continue;
@@ -515,13 +628,17 @@ export class EcommerceComponent {
     }
 
     if (valid_files.length === 0) {
-      this.toastService.warning('No se encontraron imágenes válidas (PNG, JPG, WebP - máx 5MB)');
+      this.toastService.warning(
+        'No se encontraron imágenes válidas (PNG, JPG, WebP - máx 5MB)',
+      );
       input.value = '';
       return;
     }
 
     if (files.length > available_slots) {
-      this.toastService.info(`Se subirán ${valid_files.length} de ${files.length} imágenes (máximo 5 en total)`);
+      this.toastService.info(
+        `Se subirán ${valid_files.length} de ${files.length} imágenes (máximo 5 en total)`,
+      );
     }
 
     this.isUploadingImage.set(true);
@@ -539,14 +656,17 @@ export class EcommerceComponent {
         .subscribe({
           next: (result) => {
             this.sliderImages.update((arr) =>
-              arr.map((v, idx) => idx === placeholder_index
-                ? {
-                    url: result.url || result.key,
-                    key: result.key,
-                    thumbnail: result.thumbKey,
-                    title: '',
-                    caption: '' }
-                : v)
+              arr.map((v, idx) =>
+                idx === placeholder_index
+                  ? {
+                      url: result.url || result.key,
+                      key: result.key,
+                      thumbnail: result.thumbKey,
+                      title: '',
+                      caption: '',
+                    }
+                  : v,
+              ),
             );
             pending_uploads--;
             if (pending_uploads === 0) {
@@ -555,13 +675,17 @@ export class EcommerceComponent {
               this.toastService.success(
                 valid_files.length === 1
                   ? 'Imagen subida exitosamente'
-                  : `${valid_files.length} imágenes subidas exitosamente`
+                  : `${valid_files.length} imágenes subidas exitosamente`,
               );
             }
           },
           error: (error) => {
             this.sliderImages.update((arr) =>
-              arr.map((v, idx) => idx === placeholder_index ? (undefined as unknown as SliderImage) : v)
+              arr.map((v, idx) =>
+                idx === placeholder_index
+                  ? (undefined as unknown as SliderImage)
+                  : v,
+              ),
             );
             pending_uploads--;
             if (pending_uploads === 0) {
@@ -570,7 +694,8 @@ export class EcommerceComponent {
               this.updateSliderPhotosForm();
             }
             this.toastService.error('Error al subir imagen: ' + error.message);
-          } });
+          },
+        });
     }
 
     input.value = '';
@@ -599,7 +724,7 @@ export class EcommerceComponent {
     const current = this.sliderImages();
     if (current[index]) {
       this.sliderImages.update((arr) =>
-        arr.map((v, idx) => idx === index ? { ...v, [field]: value } : v)
+        arr.map((v, idx) => (idx === index ? { ...v, [field]: value } : v)),
       );
       this.updateSliderPhotosForm();
     }
@@ -609,7 +734,10 @@ export class EcommerceComponent {
    * Handle input event for image title
    */
   onTitleInputChange(event: Event | string): void {
-    const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
+    const value =
+      typeof event === 'string'
+        ? event
+        : (event.target as HTMLInputElement).value;
     this.updateImageMetadata(this.activeImageIndex(), 'title', value);
   }
 
@@ -617,7 +745,10 @@ export class EcommerceComponent {
    * Handle input event for image caption
    */
   onCaptionInputChange(event: Event | string): void {
-    const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
+    const value =
+      typeof event === 'string'
+        ? event
+        : (event.target as HTMLInputElement).value;
     this.updateImageMetadata(this.activeImageIndex(), 'caption', value);
   }
 
@@ -685,7 +816,8 @@ export class EcommerceComponent {
         error: (error) => {
           this.isUploadingLogo.set(false);
           this.toastService.error('Error al subir el logo: ' + error.message);
-        } });
+        },
+      });
 
     input.value = '';
   }
@@ -711,7 +843,8 @@ export class EcommerceComponent {
       url: img.url || null,
       key: img.key || null,
       title: img.title || '',
-      caption: img.caption || '' }));
+      caption: img.caption || '',
+    }));
 
     // Asegurarnos de que el formulario tenga los datos actualizados
     const sliderGroup = this.settingsForm.get('slider') as FormGroup;
@@ -736,11 +869,13 @@ export class EcommerceComponent {
     if (!number || !confirm || number !== confirm) {
       await this.dialogService.confirm({
         title: 'WhatsApp Checkout',
-        message: !number || !confirm
-          ? 'Debes ingresar y confirmar tu numero de WhatsApp para activar esta opcion.'
-          : 'Los numeros de WhatsApp no coinciden. Verifica e intenta de nuevo.',
+        message:
+          !number || !confirm
+            ? 'Debes ingresar y confirmar tu numero de WhatsApp para activar esta opcion.'
+            : 'Los numeros de WhatsApp no coinciden. Verifica e intenta de nuevo.',
         confirmText: 'Entendido',
-        cancelText: 'Cerrar' });
+        cancelText: 'Cerrar',
+      });
       this.whatsappCheckoutControl.setValue(false);
       this.whatsappNumberControl.setValue('');
       this.confirmWhatsappNumberControl.setValue('');
@@ -769,21 +904,26 @@ export class EcommerceComponent {
     this.isSaving.set(true);
 
     // Preparar el objeto de configuración (strip confirm_whatsapp_number — frontend-only)
-    const { confirm_whatsapp_number, ...checkoutPayload } = this.settingsForm.value.checkout;
+    const { confirm_whatsapp_number, ...checkoutPayload } =
+      this.settingsForm.value.checkout;
     const settings: EcommerceSettings = {
       ...this.settingsForm.value,
       checkout: checkoutPayload,
       inicio: {
         ...this.settingsForm.value.inicio,
-        logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url },
+        logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url,
+      },
       slider: {
         ...this.settingsForm.value.slider,
         photos: this.sliderImages().map((img) => ({
           url: img.key || img.url || null, // Preferir la KEY para persistencia
           key: img.key || null,
           title: img.title || '',
-          caption: img.caption || '' })) },
-      footer: this.footerSettings() };
+          caption: img.caption || '',
+        })),
+      },
+      footer: this.footerSettings(),
+    };
 
     this.ecommerceService
       .updateSettings(settings)
@@ -816,7 +956,8 @@ export class EcommerceComponent {
         error: (error) => {
           this.toastService.error('Error al guardar: ' + error.message);
           this.isSaving.set(false);
-        } });
+        },
+      });
   }
 
   /**
@@ -841,6 +982,103 @@ export class EcommerceComponent {
     } else {
       this.toastService.warning('No se pudo obtener la URL de la tienda');
     }
+  }
+
+  generateEcommerceQr(): void {
+    if (!this.ecommerceUrl() && !this.isEditMode()) {
+      this.toastService.warning(
+        'Guarda la configuración antes de generar el QR',
+      );
+      return;
+    }
+
+    this.isGeneratingQr.set(true);
+    this.ecommerceService
+      .generateQrCode()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (qr) => {
+          this.ecommerceUrl.set(qr.ecommerceUrl);
+          this.ecommerceQrTargetUrl.set(qr.qrCodeUrl);
+          this.ecommerceQrCodeDataUrl.set(qr.qrCodeDataUrl);
+          this.ecommerceQrGeneratedAt.set(qr.qrCodeGeneratedAt);
+          this.ecommerceQrStale.set(false);
+          this.isGeneratingQr.set(false);
+          this.toastService.success('QR generado exitosamente');
+        },
+        error: (error) => {
+          this.isGeneratingQr.set(false);
+          this.toastService.error('Error al generar QR: ' + error.message);
+        },
+      });
+  }
+
+  downloadEcommerceQr(): void {
+    const qr = this.ecommerceQrCodeDataUrl();
+    if (!qr || typeof document === 'undefined') return;
+
+    const link = document.createElement('a');
+    link.href = qr;
+    link.download = 'qr-tienda-online.png';
+    link.click();
+  }
+
+  copyEcommerceQrLink(): void {
+    const url = this.ecommerceQrTargetUrl() || this.ecommerceUrl();
+    if (!url) return;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(url)
+        .then(() => this.toastService.success('Link copiado'))
+        .catch(() => this.copyEcommerceQrLinkFallback(url));
+      return;
+    }
+
+    this.copyEcommerceQrLinkFallback(url);
+  }
+
+  openEcommerceQrLink(): void {
+    const url = this.ecommerceQrTargetUrl() || this.ecommerceUrl();
+    if (!url || typeof window === 'undefined') return;
+
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  private copyEcommerceQrLinkFallback(url: string): void {
+    if (typeof document === 'undefined') {
+      this.toastService.error('No se pudo copiar el link');
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = url;
+    textarea.setAttribute('readonly', 'true');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+      const copied = document.execCommand('copy');
+      if (copied) {
+        this.toastService.success('Link copiado');
+      } else {
+        this.toastService.error('No se pudo copiar el link');
+      }
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
+  formatQrGeneratedAt(): string {
+    const generatedAt = this.ecommerceQrGeneratedAt();
+    if (!generatedAt) return '';
+
+    return new Date(generatedAt).toLocaleString('es-CO', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
   }
 
   onHeaderAction(actionId: string): void {
@@ -871,14 +1109,16 @@ export class EcommerceComponent {
     // Auto-fill título if empty
     if (!titulo || titulo.trim() === '') {
       inicio.patchValue({
-        titulo: `Bienvenido a ${this.storeName}` });
+        titulo: `Bienvenido a ${this.storeName}`,
+      });
     }
 
     // Auto-fill párrafo if empty
     if (!parrafo || parrafo.trim() === '') {
       inicio.patchValue({
         parrafo:
-          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...' });
+          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
+      });
     }
   }
   /**
@@ -908,9 +1148,12 @@ export class EcommerceComponent {
       coloresGroup.patchValue({
         primary_color: branding.primary_color || '#3B82F6',
         secondary_color: branding.secondary_color || '#10B981',
-        accent_color: branding.accent_color || '#F59E0B' });
+        accent_color: branding.accent_color || '#F59E0B',
+      });
       this.settingsForm.markAsDirty();
-      this.toastService.success('Colores sincronizados desde el branding de la tienda');
+      this.toastService.success(
+        'Colores sincronizados desde el branding de la tienda',
+      );
     }
   }
 

@@ -14,6 +14,7 @@ import {
   ProductQueryDto,
   PaginatedResponse,
   ProductStats,
+  OnlinePurchaseLinkResult,
 } from '../interfaces';
 import { BulkImageAnalysisResult, BulkImageUploadResult } from '../interfaces/bulk-image-analysis.interface';
 import { BulkProductAnalysisResult, BulkProductUploadResult } from '../interfaces/bulk-product-analysis.interface';
@@ -23,6 +24,7 @@ interface ApiResponse<T> {
   data: T;
   meta?: any;
   message: string;
+  error?: string;
 }
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -123,6 +125,24 @@ export class ProductsService {
       >(`${this.apiUrl}/store/products/${id}`, product)
       .pipe(
         map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  generateOnlinePurchaseLink(
+    id: number,
+  ): Observable<OnlinePurchaseLinkResult> {
+    return this.http
+      .post<
+        ApiResponse<OnlinePurchaseLinkResult>
+      >(`${this.apiUrl}/store/products/${id}/online-purchase-link`, {})
+      .pipe(
+        map((response) => {
+          if (!response.success) {
+            throw response.message || response.error || 'No se pudo generar';
+          }
+          return response.data;
+        }),
         catchError(this.handleError),
       );
   }
@@ -553,8 +573,12 @@ export class ProductsService {
     // Mensajes de error más descriptivos
     let errorMessage = 'Ocurrió un error';
 
-    if (error.error?.message) {
+    if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error.error?.message) {
       errorMessage = error.error.message;
+    } else if (error.message) {
+      errorMessage = error.message;
     } else if (error.status === 400) {
       errorMessage = 'Datos inválidos proporcionados';
     } else if (error.status === 401) {

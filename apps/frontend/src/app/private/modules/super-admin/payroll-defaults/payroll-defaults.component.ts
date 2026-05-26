@@ -12,28 +12,29 @@ import { PayrollDefaultsFormComponent } from './components';
 import {
   TableColumn,
   TableAction,
-  ButtonComponent,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   EmptyStateComponent,
-  CardComponent} from '../../../../shared/components/index';
+  CardComponent,
+  OptionsDropdownComponent,
+  DropdownAction} from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-payroll-defaults',
   standalone: true,
   imports: [
     PayrollDefaultsFormComponent,
-    ButtonComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
-    CardComponent
+    CardComponent,
+    OptionsDropdownComponent
 ],
   template: `
     <div class="flex flex-col gap-6">
       <!-- Main Content Card -->
-      <app-card [padding]="false" overflow="hidden">
+      <app-card [padding]="false" overflow="visible">
         <!-- Header -->
         <div class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div class="flex-1 min-w-0">
@@ -42,17 +43,11 @@ import {
               Gestiona los parámetros legales de nómina para cada año fiscal
             </p>
           </div>
-          <div class="flex items-center gap-2">
-            <app-button
-              variant="primary"
-              size="sm"
-              iconName="plus"
-              (clicked)="openCreateModal()"
-            >
-              <span class="hidden sm:inline">Nuevo año fiscal</span>
-              <span class="sm:hidden">Nuevo</span>
-            </app-button>
-          </div>
+          <app-options-dropdown
+            [actions]="dropdownActions"
+            [isLoading]="isLoading()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
         </div>
 
         <!-- Table Container -->
@@ -111,6 +106,14 @@ export class PayrollDefaultsComponent implements OnInit {
   isSubmitting = signal(false);
   showFormModal = signal(false);
   selectedRecord = signal<PayrollSystemDefault | null>(null);
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo año fiscal',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 tableColumns: TableColumn[] = [
     { key: 'year', label: 'Año', sortable: true, priority: 1 },
     { key: 'decree_ref', label: 'Decreto', sortable: false, priority: 2 },
@@ -177,6 +180,12 @@ tableColumns: TableColumn[] = [
 
   ngOnInit(): void {
     this.loadRecords();
+  }
+
+  onActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 loadRecords(): void {
     this.isLoading.set(true);

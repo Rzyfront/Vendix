@@ -17,10 +17,30 @@ export class AIStreamController {
     return new Observable<MessageEvent>((subscriber) => {
       (async () => {
         try {
-          for await (const chunk of this.aiEngine.runStream(
-            appKey,
-            Object.keys(variables).length > 0 ? variables : undefined,
-          )) {
+          const executionType =
+            await this.aiEngine.getApplicationExecutionType(appKey);
+          const appVariables =
+            Object.keys(variables).length > 0 ? variables : undefined;
+          const stream =
+            executionType === 'image'
+              ? this.aiEngine.runImageStream(appKey, appVariables)
+              : executionType === 'text' || executionType === 'audio'
+                ? this.aiEngine.runStream(appKey, appVariables)
+                : null;
+
+          if (!stream) {
+            subscriber.next({
+              data: JSON.stringify({
+                type: 'error',
+                error: `Streaming is not supported for ${executionType} applications`,
+              }),
+              type: 'ai-chunk',
+            } as MessageEvent);
+            subscriber.complete();
+            return;
+          }
+
+          for await (const chunk of stream) {
             subscriber.next({
               data: JSON.stringify(chunk),
               type: 'ai-chunk',

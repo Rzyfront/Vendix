@@ -6,5 +6,6 @@ export enum UploadEntityType {
   LOGOS = 'logos',
   STORE_LOGOS = 'store_logos',
   STORE_FAVICONS = 'store_favicons',
+  MARKETING_ADS = 'marketing_ads',
   RECEIPTS = 'receipts',
 }

@@ -28,10 +28,7 @@
       </div>
 
       <!-- Controles compactos -->
-      <div
-        class="flex flex-wrap items-center gap-3 w-full md:w-auto"
-        [formGroup]="filterForm"
-      >
+      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
         <!-- Búsqueda -->
         <app-inputsearch
           class="min-w-[200px] flex-1 md:flex-none"
@@ -41,40 +38,15 @@
           (searchChange)="onSearchChange($event)"
         ></app-inputsearch>
 
-        <!-- Filtro por estado -->
-        <select
-          formControlName="state"
-          class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
-          [disabled]="isLoading()"
-        >
-          @for (state of userStates; track state) {
-            <option [value]="state.value">
-              {{ state.label }}
-            </option>
-          }
-        </select>
-
-        <!-- Botones de acción -->
-        <div class="flex gap-2 items-center">
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="refreshUsers()"
-            [disabled]="isLoading()"
-            title="Actualizar"
-          >
-            <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-          </app-button>
-          <app-button
-            variant="primary"
-            size="sm"
-            (clicked)="createUser()"
-            title="Nuevo Usuario"
-          >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            <span class="hidden md:inline ml-2">Nuevo</span>
-          </app-button>
-        </div>
+        <app-options-dropdown
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          [actions]="dropdownActions"
+          [isLoading]="isLoading()"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="clearFilters()"
+          (actionClick)="onActionClick($event)"
+        ></app-options-dropdown>
       </div>
     </div>
     <!-- Loading State -->

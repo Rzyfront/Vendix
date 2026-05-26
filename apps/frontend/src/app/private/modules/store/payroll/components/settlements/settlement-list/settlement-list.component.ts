@@ -21,8 +21,6 @@ import {
   TableColumn,
   TableAction,
   ItemListCardConfig,
-  ButtonComponent,
-  IconComponent,
   CardComponent,
   EmptyStateComponent,
 } from '../../../../../../../shared/components/index';
@@ -36,8 +34,6 @@ import {
     OptionsDropdownComponent,
     EmptyStateComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
     CardComponent
 ],
   templateUrl: './settlement-list.component.html',

@@ -44,6 +44,7 @@ export class UploadController {
     logos: ImageContext.LOGO,
     store_logos: ImageContext.LOGO,
     store_favicons: ImageContext.LOGO,
+    marketing_ads: ImageContext.MARKETING_AD,
     receipts: ImageContext.RECEIPT,
   };
 
@@ -145,6 +146,13 @@ export class UploadController {
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
         const store = await this.getStoreWithSlug(storeId);
         path = this.s3PathHelper.buildFaviconPath(org, store);
+        break;
+      }
+      case UploadEntityType.MARKETING_ADS: {
+        if (!storeId)
+          throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
+        const store = await this.getStoreWithSlug(storeId);
+        path = this.s3PathHelper.buildMarketingAnunciosPath(org, store);
         break;
       }
       case UploadEntityType.AVATARS: {

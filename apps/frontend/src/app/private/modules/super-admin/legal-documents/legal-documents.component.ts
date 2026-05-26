@@ -12,12 +12,8 @@ import {
   UpdateSystemDocumentDto,
 } from './interfaces/legal-document.interface';
 import { LegalDocumentModalComponent } from './components/legal-document-modal/legal-document-modal.component';
-import { ButtonComponent } from '../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
-import {
-  SelectorComponent,
-  SelectorOption,
-} from '../../../../shared/components/selector/selector.component';
+import { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../shared/components/inputsearch/inputsearch.component';
 import {
@@ -27,6 +23,10 @@ import {
 import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import { CardComponent } from '../../../../shared/components';
@@ -39,13 +39,12 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
     RouterModule,
     ReactiveFormsModule,
     LegalDocumentModalComponent,
-    ButtonComponent,
-    SelectorComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ConfirmationModalComponent,
     CardComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <!-- Standard Module Layout -->
@@ -86,7 +85,7 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
       </div>
 
       <!-- Main Content Card -->
-      <app-card [padding]="false" overflow="hidden">
+      <app-card [padding]="false" overflow="visible">
         <!-- Header (Compact & Symmetric) -->
         <div
           class="p-4 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
@@ -116,29 +115,15 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
               ></app-inputsearch>
             </div>
 
-            <!-- Selector -->
-            <div class="w-full sm:w-48">
-              <app-selector
-                placeholder="Filtrar por tipo"
-                [options]="typeFilterOptions"
-                [formControl]="typeFilterControl"
-                size="sm"
-                variant="outline"
-              ></app-selector>
-            </div>
-
-            <!-- Actions -->
-            <div class="flex gap-2 items-center sm:ml-auto">
-              <app-button
-                variant="primary"
-                size="sm"
-                iconName="plus"
-                (clicked)="openCreateModal()"
-              >
-                <span class="hidden sm:inline">Nuevo</span>
-                <span class="sm:hidden">Plus</span>
-              </app-button>
-            </div>
+            <app-options-dropdown
+              [filters]="filterConfigs"
+              [filterValues]="filterValues"
+              [actions]="dropdownActions"
+              [isLoading]="loading()"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="clearFilters()"
+              (actionClick)="onActionClick($event)"
+            ></app-options-dropdown>
           </div>
         </div>
 
@@ -259,6 +244,16 @@ export class LegalDocumentsComponent implements OnInit {
 
   // Options
   typeFilterOptions: SelectorOption[] = [];
+  filterConfigs: FilterConfig[] = [];
+  filterValues: FilterValues = {};
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nuevo Documento',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // Table Config
   columns: TableColumn[] = [
@@ -369,6 +364,18 @@ export class LegalDocumentsComponent implements OnInit {
         value: type,
       }),
     );
+    this.filterConfigs = [
+      {
+        key: 'document_type',
+        label: 'Tipo',
+        type: 'select',
+        placeholder: 'Todos los tipos',
+        options: [
+          { label: 'Todos los tipos', value: '' },
+          ...this.typeFilterOptions,
+        ],
+      },
+    ];
   }
 
   async loadDocuments() {
@@ -387,6 +394,25 @@ export class LegalDocumentsComponent implements OnInit {
 
   onSearch(query: string) {
     this.searchQuery.set(query);
+  }
+
+  onFilterChange(values: FilterValues) {
+    this.filterValues = { ...values };
+    this.typeFilterControl.setValue(
+      (values['document_type'] as LegalDocumentTypeEnum) || null,
+      { emitEvent: false },
+    );
+  }
+
+  clearFilters() {
+    this.filterValues = {};
+    this.typeFilterControl.setValue(null, { emitEvent: false });
+  }
+
+  onActionClick(action: string) {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
   }
 
   openCreateModal() {

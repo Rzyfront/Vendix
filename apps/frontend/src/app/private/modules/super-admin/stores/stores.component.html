@@ -4,7 +4,7 @@
   <app-store-stats [stats]="stats()"></app-store-stats>
 
   <!-- Main Content Card -->
-  <app-card [padding]="false" overflow="hidden">
+  <app-card [padding]="false" overflow="visible">
     <!-- Table Header (Title, Description, Controls) -->
     <div
       class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
@@ -32,57 +32,15 @@
           ></app-inputsearch>
         </div>
 
-        <!-- Filter Tipo -->
-        <div class="w-full sm:w-48">
-          <app-selector
-            [options]="storeTypes"
-            [formControl]="$any(filterForm.get('store_type'))"
-            size="sm"
-            variant="outline"
-          ></app-selector>
-        </div>
-
-        <!-- Filter Estado -->
-        <div class="w-full sm:w-48">
-          <app-selector
-            [options]="activeStates"
-            [formControl]="$any(filterForm.get('is_active'))"
-            size="sm"
-            variant="outline"
-          ></app-selector>
-        </div>
-
-        <!-- Filter Modo Org -->
-        <div class="w-full sm:w-48">
-          <app-selector
-            [options]="orgModes"
-            [formControl]="$any(filterForm.get('include_non_production'))"
-            size="sm"
-            variant="outline"
-          ></app-selector>
-        </div>
-
-        <div class="flex gap-2 items-center sm:ml-auto">
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="refreshStores()"
-            [disabled]="isLoading()"
-            title="Actualizar lista"
-          >
-            <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
-          </app-button>
-          <app-button
-            variant="primary"
-            size="sm"
-            (clicked)="openCreateStoreModal()"
-            title="Crear Nueva Tienda"
-          >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-            <span class="hidden sm:inline">Nueva Tienda</span>
-            <span class="sm:hidden">Nueva</span>
-          </app-button>
-        </div>
+        <app-options-dropdown
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          [actions]="dropdownActions"
+          [isLoading]="isLoading()"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="clearFilters()"
+          (actionClick)="onActionClick($event)"
+        ></app-options-dropdown>
       </div>
     </div>
 

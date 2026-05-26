@@ -8,6 +8,9 @@ import {
   AIEngineApp,
   AIAppQueryDto,
   AIAppStats,
+  AIModelType,
+  MODEL_TYPES,
+  MODEL_TYPE_LABELS,
 } from './interfaces';
 import { AIEngineService } from './services/ai-engine.service';
 import {
@@ -19,9 +22,7 @@ import {
   TableColumn,
   TableAction,
   InputsearchComponent,
-  ButtonComponent,
   StatsComponent,
-  SelectorComponent,
   SelectorOption,
   DialogService,
   ToastService,
@@ -30,6 +31,10 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components/index';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
@@ -53,9 +58,8 @@ type ActiveTab = 'configs' | 'apps';
     EmptyStateComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
-    ButtonComponent,
     StatsComponent,
-    SelectorComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     CardComponent,
   ],
@@ -77,6 +81,7 @@ export class AIEngineComponent implements OnInit {
   stats = signal<AIEngineStats | null>(null);
   isLoading = signal<boolean>(false);
   selectedConfig = signal<AIEngineConfig | null>(null);
+  duplicateSeed = signal<AIEngineConfig | null>(null);
   isTesting = signal<number | null>(null);
   showConfigModal = signal<boolean>(false);
   isSubmitting = signal<boolean>(false);
@@ -95,12 +100,14 @@ export class AIEngineComponent implements OnInit {
   filterForm: FormGroup = this.fb.group({
     search: [''],
     sdk_type: [''],
+    model_type: [''],
   });
 
   // App filters
   appFilterForm: FormGroup = this.fb.group({
     search: [''],
     output_format: [''],
+    model_type: [''],
   });
 
   // --- Config Table ---
@@ -123,7 +130,16 @@ export class AIEngineComponent implements OnInit {
       badgeConfig: { type: 'status', size: 'sm' },
       transform: (value: string) => this.formatSdkType(value),
     },
-    { key: 'model_id', label: 'Modelo', sortable: true, priority: 2 },
+    {
+      key: 'model_type',
+      label: 'Tipo',
+      sortable: true,
+      priority: 2,
+      badge: true,
+      badgeConfig: { type: 'status', size: 'sm' },
+      transform: (_value: unknown, item?: AIEngineConfig) =>
+        this.formatModelType(item ? this.resolveConfigModelType(item) : 'text'),
+    },
     {
       key: 'is_active',
       label: 'Estado',
@@ -157,7 +173,12 @@ export class AIEngineComponent implements OnInit {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'model_id', label: 'Modelo' },
+      {
+        key: 'model_type',
+        label: 'Tipo',
+        transform: (_value: unknown, item?: AIEngineConfig) =>
+          this.formatModelType(item ? this.resolveConfigModelType(item) : 'text'),
+      },
       { key: 'sdk_type', label: 'SDK' },
     ],
   };
@@ -176,6 +197,12 @@ export class AIEngineComponent implements OnInit {
       variant: 'info',
     },
     {
+      label: 'Duplicar',
+      icon: 'copy',
+      action: (config: AIEngineConfig) => this.duplicateConfig(config),
+      variant: 'secondary',
+    },
+    {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (config: AIEngineConfig) => this.confirmDelete(config),
@@ -187,6 +214,40 @@ export class AIEngineComponent implements OnInit {
     { value: '', label: 'Todos los SDK' },
     { value: 'openai_compatible', label: 'OpenAI Compatible' },
     { value: 'anthropic_compatible', label: 'Anthropic Compatible' },
+  ];
+
+  modelTypeFilterOptions: SelectorOption[] = [
+    { value: '', label: 'Todos los tipos' },
+    ...MODEL_TYPES.map((value) => ({
+      value,
+      label: MODEL_TYPE_LABELS[value],
+    })),
+  ];
+
+  configFilterConfigs: FilterConfig[] = [
+    {
+      key: 'sdk_type',
+      label: 'SDK',
+      type: 'select',
+      options: this.sdkTypeOptions,
+    },
+    {
+      key: 'model_type',
+      label: 'Tipo de modelo',
+      type: 'select',
+      options: this.modelTypeFilterOptions,
+    },
+  ];
+
+  configFilterValues: FilterValues = {};
+
+  configDropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Configuración',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // --- App Table ---
@@ -206,12 +267,22 @@ export class AIEngineComponent implements OnInit {
       transform: (value: any) => (value ? `${value.label}` : 'Default'),
     },
     {
+      key: 'model_type',
+      label: 'Tipo',
+      sortable: true,
+      priority: 2,
+      badge: true,
+      badgeConfig: { type: 'status', size: 'sm' },
+      transform: (value: AIModelType | undefined) =>
+        this.formatModelType(value || 'text'),
+    },
+    {
       key: 'output_format',
       label: 'Formato',
       priority: 3,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: string) => value.toUpperCase(),
+      transform: (value: string) => this.formatOutputFormat(value),
     },
     {
       key: 'is_active',
@@ -231,7 +302,17 @@ export class AIEngineComponent implements OnInit {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'output_format', label: 'Formato' },
+      {
+        key: 'model_type',
+        label: 'Tipo',
+        transform: (value: AIModelType | undefined) =>
+          this.formatModelType(value || 'text'),
+      },
+      {
+        key: 'output_format',
+        label: 'Formato',
+        transform: (value: string) => this.formatOutputFormat(value),
+      },
       { key: 'description', label: 'Descripcion' },
     ],
   };
@@ -264,6 +345,38 @@ export class AIEngineComponent implements OnInit {
     { value: 'markdown', label: 'Markdown' },
     { value: 'html', label: 'HTML' },
     { value: 'image', label: 'Imagen' },
+    { value: 'embedding', label: 'Embeddings' },
+    { value: 'audio', label: 'Audio' },
+    { value: 'video', label: 'Video' },
+    { value: 'rerank', label: 'Rerank' },
+    { value: 'speech', label: 'Speech' },
+    { value: 'transcription', label: 'Transcripcion' },
+  ];
+
+  appFilterConfigs: FilterConfig[] = [
+    {
+      key: 'output_format',
+      label: 'Formato',
+      type: 'select',
+      options: this.outputFormatOptions,
+    },
+    {
+      key: 'model_type',
+      label: 'Tipo de modelo',
+      type: 'select',
+      options: this.modelTypeFilterOptions,
+    },
+  ];
+
+  appFilterValues: FilterValues = {};
+
+  appDropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Aplicación',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   ngOnInit(): void {
@@ -303,6 +416,7 @@ export class AIEngineComponent implements OnInit {
       limit: this.configPagination.limit,
       search: filters.search || undefined,
       sdk_type: filters.sdk_type || undefined,
+      model_type: filters.model_type || undefined,
     };
 
     this.aiEngineService
@@ -362,6 +476,25 @@ export class AIEngineComponent implements OnInit {
     this.filterForm.patchValue({ search: searchTerm });
   }
 
+  onConfigFilterChange(values: FilterValues): void {
+    this.configFilterValues = { ...values };
+    this.filterForm.patchValue({
+      sdk_type: (values['sdk_type'] as string) || '',
+      model_type: (values['model_type'] as string) || '',
+    });
+  }
+
+  clearConfigFilters(): void {
+    this.configFilterValues = {};
+    this.filterForm.patchValue({ sdk_type: '', model_type: '' });
+  }
+
+  onConfigActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateModal();
+    }
+  }
+
   onConfigPageChange(page: number): void {
     this.configPagination.page = page;
     this.loadConfigs();
@@ -369,11 +502,23 @@ export class AIEngineComponent implements OnInit {
 
   openCreateModal(): void {
     this.selectedConfig.set(null);
+    this.duplicateSeed.set(null);
     this.showConfigModal.set(true);
   }
 
   editConfig(config: AIEngineConfig): void {
+    this.duplicateSeed.set(null);
     this.selectedConfig.set(config);
+    this.showConfigModal.set(true);
+  }
+
+  duplicateConfig(config: AIEngineConfig): void {
+    this.selectedConfig.set(null);
+    this.duplicateSeed.set({
+      ...config,
+      label: `${config.label} (copia)`,
+      is_default: false,
+    });
     this.showConfigModal.set(true);
   }
 
@@ -391,6 +536,7 @@ export class AIEngineComponent implements OnInit {
         next: () => {
           this.showConfigModal.set(false);
           this.selectedConfig.set(null);
+          this.duplicateSeed.set(null);
           this.refreshData();
           this.toastService.success(
             current
@@ -477,6 +623,7 @@ export class AIEngineComponent implements OnInit {
       limit: this.appPagination.limit,
       search: filters.search || undefined,
       output_format: filters.output_format || undefined,
+      model_type: filters.model_type || undefined,
     };
 
     this.aiEngineService
@@ -522,6 +669,25 @@ export class AIEngineComponent implements OnInit {
 
   onAppSearchChange(searchTerm: string): void {
     this.appFilterForm.patchValue({ search: searchTerm });
+  }
+
+  onAppFilterChange(values: FilterValues): void {
+    this.appFilterValues = { ...values };
+    this.appFilterForm.patchValue({
+      output_format: (values['output_format'] as string) || '',
+      model_type: (values['model_type'] as string) || '',
+    });
+  }
+
+  clearAppFilters(): void {
+    this.appFilterValues = {};
+    this.appFilterForm.patchValue({ output_format: '', model_type: '' });
+  }
+
+  onAppActionClick(action: string): void {
+    if (action === 'create') {
+      this.openCreateAppModal();
+    }
   }
 
   onAppPageChange(page: number): void {
@@ -640,5 +806,70 @@ export class AIEngineComponent implements OnInit {
       anthropic_compatible: 'Anthropic',
     };
     return map[sdkType] || sdkType;
+  }
+
+  formatModelType(modelType: AIModelType | string): string {
+    if (this.isAIModelType(modelType)) {
+      return MODEL_TYPE_LABELS[modelType];
+    }
+    return modelType;
+  }
+
+  /**
+   * Resolves a config's model_type. Prefers the top-level field from
+   * Phase A; falls back to legacy `settings.model_type` and finally to a
+   * heuristic over model_id so the table still shows useful info if a
+   * backend response predates Phase B1.
+   */
+  private resolveConfigModelType(config: AIEngineConfig): AIModelType {
+    if (this.isAIModelType(config.model_type)) {
+      return config.model_type;
+    }
+
+    const settings = config.settings || {};
+    const explicitType = settings.model_type || settings['modelType'];
+    if (this.isAIModelType(explicitType)) {
+      return explicitType;
+    }
+
+    const modelId = config.model_id.toLowerCase();
+    if (
+      settings.image_generation_mode ||
+      settings.image_endpoint ||
+      settings.image_model ||
+      settings.modalities?.includes?.('image') ||
+      modelId.includes('image') ||
+      modelId.includes('imagine') ||
+      modelId.includes('seedream') ||
+      modelId.includes('dall-e')
+    ) {
+      return 'image';
+    }
+
+    return 'text';
+  }
+
+  private isAIModelType(value: unknown): value is AIModelType {
+    return (
+      typeof value === 'string' &&
+      (MODEL_TYPES as readonly string[]).includes(value)
+    );
+  }
+
+  formatOutputFormat(format: string): string {
+    const map: Record<string, string> = {
+      text: 'Texto',
+      json: 'JSON',
+      markdown: 'Markdown',
+      html: 'HTML',
+      image: 'Imagen',
+      embedding: 'Embeddings',
+      audio: 'Audio',
+      video: 'Video',
+      rerank: 'Rerank',
+      speech: 'Speech',
+      transcription: 'Transcripcion',
+    };
+    return map[format] || format;
   }
 }

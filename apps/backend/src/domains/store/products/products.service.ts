@@ -26,6 +26,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ProductVariantService } from './services/product-variant.service';
 import { S3Service } from '@common/services/s3.service';
+import { QrService } from '@common/services/qr.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
 import {
   S3PathHelper,
@@ -44,6 +45,26 @@ import {
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 
+type OnlinePurchaseStatusReason =
+  | 'ready'
+  | 'ecommerce_not_configured'
+  | 'ecommerce_domain_not_active';
+
+interface OnlinePurchaseStatus {
+  ready: boolean;
+  reason: OnlinePurchaseStatusReason;
+  message: string;
+  domain_id: number | null;
+  domain_hostname: string | null;
+}
+
+interface OnlinePurchaseData {
+  online_purchase_url: string;
+  online_purchase_qr_code: string;
+  online_purchase_domain_id: number;
+  online_purchase_generated_at: Date;
+}
+
 @Injectable()
 export class ProductsService {
   constructor(
@@ -54,6 +75,7 @@ export class ProductsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly productVariantService: ProductVariantService,
     private readonly s3Service: S3Service,
+    private readonly qrService: QrService,
     private readonly remoteImageService: RemoteImageService,
     private readonly s3PathHelper: S3PathHelper,
     private readonly ai_engine: AIEngineService,
@@ -260,6 +282,10 @@ export class ProductsService {
         variants,
         ...productData
       } = createProductDto;
+      const onlinePurchaseData = await this.buildOnlinePurchaseData(
+        store_id,
+        slug,
+      );
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -270,6 +296,7 @@ export class ProductsService {
               store_id: store_id, // Agregar el store_id del contexto
               slug: slug,
               stock_quantity: 0, // Se inicializará via stock_levels
+              ...(onlinePurchaseData ?? {}),
               updated_at: new Date(),
             } as any,
           });
@@ -1018,6 +1045,12 @@ export class ProductsService {
           },
         },
         brands: true,
+        online_purchase_domain: {
+          select: {
+            id: true,
+            hostname: true,
+          },
+        },
         product_categories: {
           include: {
             categories: true,
@@ -1109,6 +1142,9 @@ export class ProductsService {
 
     // Sign all images
     await this.signProductImages(product);
+    const onlinePurchaseStatus = await this.resolveOnlinePurchaseStatus(
+      product.store_id,
+    );
 
     // Retornar producto con información de stock enriquecida
     return {
@@ -1138,6 +1174,19 @@ export class ProductsService {
       service_instructions: product.service_instructions,
       booking_mode: product.booking_mode,
       buffer_minutes: product.buffer_minutes,
+      online_purchase_url: product.online_purchase_url,
+      online_purchase_qr_code: product.online_purchase_qr_code,
+      online_purchase_domain_id: product.online_purchase_domain_id,
+      online_purchase_generated_at: product.online_purchase_generated_at,
+      online_purchase_domain_hostname:
+        product.online_purchase_domain?.hostname ??
+        onlinePurchaseStatus.domain_hostname,
+      online_purchase_ready: onlinePurchaseStatus.ready,
+      online_purchase_status_reason: onlinePurchaseStatus.reason,
+      online_purchase_status_message: this.getOnlinePurchaseStatusMessage(
+        product,
+        onlinePurchaseStatus,
+      ),
       // Consultation fields
       is_consultation: product.is_consultation,
       send_preconsultation: product.send_preconsultation,
@@ -1357,6 +1406,13 @@ export class ProductsService {
         price, // Exclude as it's not in DB
         ...productData
       } = updateProductDto as UpdateProductDto & { price?: number };
+      const onlinePurchaseData = await this.buildOnlinePurchaseData(
+        existingProduct.store_id,
+        updateProductDto.slug || existingProduct.slug,
+      );
+      const shouldRefreshOnlinePurchase =
+        !!onlinePurchaseData &&
+        this.shouldRefreshOnlinePurchase(existingProduct, onlinePurchaseData);
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -1365,6 +1421,7 @@ export class ProductsService {
             where: { id },
             data: {
               ...productData,
+              ...(shouldRefreshOnlinePurchase ? onlinePurchaseData : {}),
               updated_at: new Date(),
             } as any,
           });
@@ -2195,6 +2252,214 @@ export class ProductsService {
 
   async removeVariant(variantId: number) {
     return this.productVariantService.removeVariant(variantId);
+  }
+
+  async generateOnlinePurchaseLink(id: number) {
+    const product = await this.prisma.products.findFirst({
+      where: {
+        id,
+        state: { not: ProductState.ARCHIVED },
+      },
+      select: {
+        id: true,
+        store_id: true,
+        slug: true,
+        state: true,
+        available_for_ecommerce: true,
+        online_purchase_url: true,
+        online_purchase_qr_code: true,
+        online_purchase_domain_id: true,
+        online_purchase_generated_at: true,
+      },
+    });
+
+    if (!product) {
+      throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
+    }
+
+    const status = await this.resolveOnlinePurchaseStatus(product.store_id);
+    if (!status.ready) {
+      throw new BadRequestException(status.message);
+    }
+
+    const onlinePurchaseData = await this.buildOnlinePurchaseData(
+      product.store_id,
+      product.slug,
+    );
+
+    if (!onlinePurchaseData) {
+      throw new BadRequestException(
+        'No se pudo generar el QR de compra online.',
+      );
+    }
+
+    const updatedProduct = await this.prisma.products.update({
+      where: { id },
+      data: {
+        ...onlinePurchaseData,
+        updated_at: new Date(),
+      },
+      select: {
+        id: true,
+        slug: true,
+        state: true,
+        available_for_ecommerce: true,
+        online_purchase_url: true,
+        online_purchase_qr_code: true,
+        online_purchase_domain_id: true,
+        online_purchase_generated_at: true,
+        online_purchase_domain: {
+          select: {
+            id: true,
+            hostname: true,
+          },
+        },
+      },
+    });
+
+    return {
+      generated: true,
+      product_id: updatedProduct.id,
+      online_purchase_url: updatedProduct.online_purchase_url,
+      online_purchase_qr_code: updatedProduct.online_purchase_qr_code,
+      qr_data_url: updatedProduct.online_purchase_qr_code,
+      online_purchase_domain_id: updatedProduct.online_purchase_domain_id,
+      domain_hostname: updatedProduct.online_purchase_domain?.hostname ?? null,
+      online_purchase_generated_at:
+        updatedProduct.online_purchase_generated_at,
+      online_purchase_ready: status.ready,
+      online_purchase_status_reason: status.reason,
+      online_purchase_status_message: this.getOnlinePurchaseStatusMessage(
+        updatedProduct,
+        status,
+      ),
+    };
+  }
+
+  private async buildOnlinePurchaseData(
+    storeId: number,
+    slug: string,
+  ): Promise<OnlinePurchaseData | null> {
+    const status = await this.resolveOnlinePurchaseStatus(storeId);
+
+    if (!status.ready || !status.domain_id || !status.domain_hostname) {
+      return null;
+    }
+
+    const onlinePurchaseUrl = this.buildOnlinePurchaseUrl(
+      status.domain_hostname,
+      slug,
+    );
+    const qrDataUrl = await this.qrService.generateDataUrl(
+      onlinePurchaseUrl,
+      320,
+    );
+
+    return {
+      online_purchase_url: onlinePurchaseUrl,
+      online_purchase_qr_code: qrDataUrl,
+      online_purchase_domain_id: status.domain_id,
+      online_purchase_generated_at: new Date(),
+    };
+  }
+
+  private async resolveOnlinePurchaseStatus(
+    storeId: number,
+  ): Promise<OnlinePurchaseStatus> {
+    const settingsRow = await this.prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const settings = mergeStoreSettingsWithDefaults(settingsRow?.settings);
+
+    if (!settings.ecommerce || settings.ecommerce.enabled === false) {
+      return {
+        ready: false,
+        reason: 'ecommerce_not_configured',
+        message:
+          'Configura y activa la tienda online antes de generar el QR de compra.',
+        domain_id: null,
+        domain_hostname: null,
+      };
+    }
+
+    const ecommerceDomain = await this.prisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        app_type: 'STORE_ECOMMERCE',
+        domain_type: 'ecommerce',
+        status: 'active',
+        is_primary: true,
+      },
+      orderBy: [{ updated_at: 'desc' }],
+      select: {
+        id: true,
+        hostname: true,
+      },
+    });
+
+    if (!ecommerceDomain?.hostname) {
+      return {
+        ready: false,
+        reason: 'ecommerce_domain_not_active',
+        message:
+          'No hay un dominio principal de ecommerce activo para generar el QR de compra.',
+        domain_id: null,
+        domain_hostname: null,
+      };
+    }
+
+    return {
+      ready: true,
+      reason: 'ready',
+      message: 'La tienda online está lista para generar QR de compra.',
+      domain_id: ecommerceDomain.id,
+      domain_hostname: ecommerceDomain.hostname,
+    };
+  }
+
+  private shouldRefreshOnlinePurchase(
+    product: any,
+    onlinePurchaseData: OnlinePurchaseData,
+  ): boolean {
+    return (
+      !product.online_purchase_url ||
+      !product.online_purchase_qr_code ||
+      product.online_purchase_url !== onlinePurchaseData.online_purchase_url ||
+      product.online_purchase_domain_id !==
+        onlinePurchaseData.online_purchase_domain_id
+    );
+  }
+
+  private buildOnlinePurchaseUrl(hostname: string, slug: string): string {
+    const cleanHostname = hostname
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '');
+
+    return `https://${cleanHostname}/products/${encodeURIComponent(slug)}`;
+  }
+
+  private getOnlinePurchaseStatusMessage(
+    product: any,
+    status: OnlinePurchaseStatus,
+  ): string {
+    if (!status.ready) {
+      return status.message;
+    }
+
+    if (!product.online_purchase_url || !product.online_purchase_qr_code) {
+      return 'Genera el link y QR de compra online para este producto.';
+    }
+
+    if (
+      product.state !== ProductState.ACTIVE ||
+      product.available_for_ecommerce === false
+    ) {
+      return 'El link y QR existen, pero el producto debe estar activo y disponible en ecommerce para que el cliente pueda comprar.';
+    }
+
+    return 'Link y QR de compra online listos.';
   }
 
   private async handleImageUploads(

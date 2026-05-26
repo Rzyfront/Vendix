@@ -774,6 +774,7 @@ model domain_settings {
   organization organizations? @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store        stores?        @relation(fields: [store_id], references: [id], onDelete: Cascade)
   domain_root  domain_roots?  @relation(fields: [domain_root_id], references: [id], onDelete: SetNull)
+  product_online_purchase_links products[] @relation("product_online_purchase_domain")
 
   @@index([hostname])
   @@index([organization_id])
@@ -1250,6 +1251,10 @@ model products {
   preconsultation_template_id   Int?
   preconsultation_template      data_collection_templates?      @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
   available_for_ecommerce       Boolean                         @default(false)
+  online_purchase_url           String?                         @db.Text
+  online_purchase_qr_code       String?                         @db.Text
+  online_purchase_domain_id     Int?
+  online_purchase_generated_at  DateTime?                       @db.Timestamp(6)
   allow_pos_price_override      Boolean                         @default(false)
   is_on_sale                    Boolean                         @default(false)
   sale_price                    Decimal?                        @db.Decimal(12, 2)
@@ -1275,6 +1280,7 @@ model products {
   product_tax_assignments       product_tax_assignments[]
   product_variants              product_variants[]
   brands                        brands?                         @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  online_purchase_domain        domain_settings?                 @relation("product_online_purchase_domain", fields: [online_purchase_domain_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   stores                        stores                          @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   purchase_order_items          purchase_order_items[]
   return_order_items            return_order_items[]
@@ -1310,6 +1316,7 @@ model products {
   @@index([store_id, sku])
   @@index([store_id, product_type])
   @@index([store_id, is_consultation])
+  @@index([online_purchase_domain_id])
 }
 
 model refund_items {
@@ -2322,6 +2329,7 @@ model marketing_ad_creatives {
   title               String                            @db.VarChar(255)
   description         String?                           @db.Text
   prompt              String?                           @db.Text
+  post_copy           String?                           @db.Text
   format              marketing_ad_creative_format_enum @default(square)
   status              marketing_ad_creative_status_enum @default(draft)
   image_url           String?                           @db.Text
@@ -3466,50 +3474,54 @@ model support_notifications {
 }
 
 model ai_engine_configs {
-  id             Int       @id @default(autoincrement())
-  provider       String    @db.VarChar(100)
-  sdk_type       String    @db.VarChar(50)
-  label          String    @db.VarChar(255)
-  model_id       String    @db.VarChar(100)
-  base_url       String?   @db.VarChar(500)
-  api_key_ref    String?   @db.VarChar(500)
-  is_default     Boolean   @default(false)
-  is_active      Boolean   @default(true)
+  id             Int                @id @default(autoincrement())
+  provider       String             @db.VarChar(100)
+  sdk_type       String             @db.VarChar(50)
+  label          String             @db.VarChar(255)
+  model_id       String             @db.VarChar(100)
+  base_url       String?            @db.VarChar(500)
+  api_key_ref    String?            @db.VarChar(500)
+  is_default     Boolean            @default(false)
+  is_active      Boolean            @default(true)
+  model_type     ai_model_type_enum @default(text)
   settings       Json?
-  last_tested_at DateTime? @db.Timestamp(6)
+  last_tested_at DateTime?          @db.Timestamp(6)
   last_test_ok   Boolean?
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
-  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  created_at     DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?          @default(now()) @db.Timestamp(6)
 
   applications ai_engine_applications[]
   logs         ai_engine_logs[]
 
   @@unique([provider, model_id])
+  @@index([model_type])
 }
 
 model ai_engine_applications {
-  id                  Int       @id @default(autoincrement())
-  key                 String    @unique @db.VarChar(100)
-  name                String    @db.VarChar(255)
-  description         String?   @db.Text
+  id                  Int                @id @default(autoincrement())
+  key                 String             @unique @db.VarChar(100)
+  name                String             @db.VarChar(255)
+  description         String?            @db.Text
   config_id           Int?
-  system_prompt       String?   @db.Text
-  prompt_template     String?   @db.Text
-  temperature         Decimal?  @db.Decimal(3, 2)
+  system_prompt       String?            @db.Text
+  prompt_template     String?            @db.Text
+  temperature         Decimal?           @db.Decimal(3, 2)
   max_tokens          Int?
-  output_format       String    @default("text") @db.VarChar(50)
+  output_format       String             @default("text") @db.VarChar(50)
+  model_type          ai_model_type_enum @default(text)
   rate_limit          Json?
   retry_config        Json?
-  is_active           Boolean   @default(true)
+  is_active           Boolean            @default(true)
   metadata            Json?
-  ai_feature_category String?   @db.VarChar(32)
-  created_at          DateTime? @default(now()) @db.Timestamp(6)
-  updated_at          DateTime? @default(now()) @db.Timestamp(6)
+  ai_feature_category String?            @db.VarChar(32)
+  created_at          DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?          @default(now()) @db.Timestamp(6)
 
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
   @@index([ai_feature_category])
+  @@index([model_type])
 }
 
 model ai_engine_logs {
@@ -3550,6 +3562,17 @@ enum ai_message_role_enum {
   user
   assistant
   tool
+}
+
+enum ai_model_type_enum {
+  text
+  image
+  embedding
+  audio
+  video
+  rerank
+  speech
+  transcription
 }
 
 model ai_conversations {

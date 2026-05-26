@@ -32,15 +32,16 @@ import { StoreSettingsModalComponent } from './components/store-settings-modal.c
 // Import shared components
 import {
   InputsearchComponent,
-  IconComponent,
-  ButtonComponent,
-  SelectorComponent,
   DialogService,
   ToastService,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   TableColumn,
   TableAction,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
   PaginationComponent,
   EmptyStateComponent,
   CardComponent} from '../../../../shared/components/index';
@@ -61,10 +62,8 @@ import './stores.component.css';
     StoreEditModalComponent,
     StoreSettingsModalComponent,
     InputsearchComponent,
-    SelectorComponent,
-    IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
+    OptionsDropdownComponent,
     PaginationComponent,
     CardComponent,
   ],
@@ -104,6 +103,39 @@ export class StoresComponent implements OnInit, OnChanges {
   orgModes = [
     { value: '', label: 'Solo Producción' },
     { value: 'all', label: 'Todos los modos' },
+  ];
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'store_type',
+      label: 'Tipo',
+      type: 'select',
+      options: this.storeTypes,
+    },
+    {
+      key: 'is_active',
+      label: 'Estado',
+      type: 'select',
+      options: this.activeStates,
+    },
+    {
+      key: 'include_non_production',
+      label: 'Modo',
+      type: 'select',
+      options: this.orgModes,
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Nueva Tienda',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
   ];
 
   // Table configuration
@@ -504,6 +536,7 @@ private initializeCreateForm(): void {
   }
 
   clearFilters(): void {
+    this.filterValues = {};
     this.filterForm.reset({
       search: '',
       store_type: '',
@@ -563,6 +596,27 @@ private initializeCreateForm(): void {
 
   onSearchChange(searchTerm: string): void {
     this.filterForm.patchValue({ search: searchTerm });
+  }
+
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = { ...values };
+    this.filterForm.patchValue({
+      store_type: (values['store_type'] as string) || '',
+      is_active: (values['is_active'] as string) || '',
+      include_non_production:
+        (values['include_non_production'] as string) || '',
+    });
+  }
+
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'refresh':
+        this.refreshStores();
+        break;
+      case 'create':
+        this.openCreateStoreModal();
+        break;
+    }
   }
 
   onPageChange(page: number): void {

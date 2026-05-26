@@ -28,6 +28,7 @@ export interface MarketingAdCreative {
   title: string;
   description?: string | null;
   prompt?: string | null;
+  post_copy?: string | null;
   format: AdCreativeFormat;
   status: AdCreativeStatus;
   image_url?: string | null;
@@ -45,13 +46,26 @@ export interface MarketingAdCreative {
   creative_images?: MarketingAdCreativeImage[];
 }
 
+export interface MarketingAdReferenceImageDto {
+  image_url?: string;
+  image_base64?: string;
+  source_type?: string;
+  label?: string;
+}
+
 export interface CreateMarketingAdCreativeDto {
   title: string;
   description?: string;
   prompt?: string;
+  intent?: string;
+  channel?: string;
+  cta?: string;
+  visual_style?: string;
+  brief?: string;
   format: AdCreativeFormat;
-  product_ids: number[];
+  product_ids?: number[];
   product_image_ids?: number[];
+  reference_images?: MarketingAdReferenceImageDto[];
 }
 
 export interface CreateManualMarketingAdCreativeDto extends CreateMarketingAdCreativeDto {
@@ -61,6 +75,23 @@ export interface CreateManualMarketingAdCreativeDto extends CreateMarketingAdCre
 export interface UpdateMarketingAdCreativeDetailsDto {
   title?: string;
   description?: string;
+}
+
+export interface SuggestMarketingAdPromptDto {
+  intent?: string;
+  channel?: string;
+  cta?: string;
+  visual_style?: string;
+  brief?: string;
+  format?: AdCreativeFormat;
+  product_ids?: number[];
+  selected_resource_types?: string[];
+}
+
+export interface SuggestedMarketingAdPrompt {
+  suggested_prompt: string;
+  suggested_title?: string;
+  notes?: string;
 }
 
 export interface MarketingAdCreativeSummary {

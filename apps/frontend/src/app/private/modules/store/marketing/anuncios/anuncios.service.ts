@@ -11,6 +11,8 @@ import {
   MarketingAdEcommerceDomain,
   MarketingAdCreative,
   MarketingAdCreativeSummary,
+  SuggestedMarketingAdPrompt,
+  SuggestMarketingAdPromptDto,
   UpdateMarketingAdCreativeDetailsDto,
 } from './anuncios.interface';
 
@@ -51,6 +53,13 @@ export class AnunciosService {
   createManualAnuncio(dto: CreateManualMarketingAdCreativeDto) {
     return this.http.post<ApiResponse<MarketingAdCreative>>(
       `${this.apiUrl}/manual`,
+      dto,
+    );
+  }
+
+  suggestPrompt(dto: SuggestMarketingAdPromptDto) {
+    return this.http.post<ApiResponse<SuggestedMarketingAdPrompt>>(
+      `${this.apiUrl}/suggest-prompt`,
       dto,
     );
   }

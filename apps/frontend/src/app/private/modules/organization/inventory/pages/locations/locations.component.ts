@@ -17,7 +17,6 @@ import {
   DropdownAction,
   FilterConfig,
   FilterValues,
-  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
@@ -68,7 +67,6 @@ const LOCATION_TYPE_LABELS: Record<string, string> = {
     AlertBannerComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     PaginationComponent,
@@ -175,7 +173,7 @@ const LOCATION_TYPE_LABELS: Record<string, string> = {
       }
 
       <!-- List card -->
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <!-- Sticky search/header below stats on mobile -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
@@ -197,18 +195,6 @@ const LOCATION_TYPE_LABELS: Record<string, string> = {
                 [debounceTime]="300"
                 (search)="onSearch($event)"
               ></app-inputsearch>
-
-              @if (canCreate()) {
-                <app-button
-                  variant="outline"
-                  size="md"
-                  customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-                  (clicked)="openCreateModal()"
-                  title="Nueva ubicación"
-                >
-                  <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-                </app-button>
-              }
 
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"

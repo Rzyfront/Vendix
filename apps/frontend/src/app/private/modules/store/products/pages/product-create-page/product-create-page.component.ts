@@ -449,6 +449,28 @@ export class ProductCreatePageComponent {
   isEditMode = signal(false);
   productId: number | null = null;
   product: Product | null = null;
+  readonly onlinePurchaseProduct = signal<Product | null>(null);
+  readonly isGeneratingOnlinePurchaseLink = signal(false);
+  readonly hasOnlinePurchaseLink = computed(() => {
+    const product = this.onlinePurchaseProduct();
+    return !!(
+      product?.online_purchase_url && product?.online_purchase_qr_code
+    );
+  });
+  readonly onlinePurchaseUrl = computed(
+    () => this.onlinePurchaseProduct()?.online_purchase_url || '',
+  );
+  readonly onlinePurchaseQrCode = computed(
+    () => this.onlinePurchaseProduct()?.online_purchase_qr_code || '',
+  );
+  readonly onlinePurchaseReady = computed(
+    () => this.onlinePurchaseProduct()?.online_purchase_ready !== false,
+  );
+  readonly onlinePurchaseMessage = computed(
+    () =>
+      this.onlinePurchaseProduct()?.online_purchase_status_message ||
+      'Genera el link y QR de compra online para este producto.',
+  );
 
   imageUrls: string[] = [];
   imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
@@ -712,6 +734,99 @@ export class ProductCreatePageComponent {
       });
   }
 
+  generateOnlinePurchaseLink(): void {
+    if (!this.productId || this.isGeneratingOnlinePurchaseLink()) return;
+
+    this.isGeneratingOnlinePurchaseLink.set(true);
+    this.productsService.generateOnlinePurchaseLink(this.productId).subscribe({
+      next: (result) => {
+        const currentProduct = this.onlinePurchaseProduct();
+        const updatedProduct = {
+          ...(currentProduct || this.product || ({} as Product)),
+          online_purchase_url: result.online_purchase_url || null,
+          online_purchase_qr_code:
+            result.online_purchase_qr_code || result.qr_data_url || null,
+          online_purchase_domain_id: result.online_purchase_domain_id || null,
+          online_purchase_domain_hostname: result.domain_hostname || null,
+          online_purchase_generated_at:
+            result.online_purchase_generated_at || null,
+          online_purchase_ready: result.online_purchase_ready,
+          online_purchase_status_reason: result.online_purchase_status_reason,
+          online_purchase_status_message: result.online_purchase_status_message,
+        } as Product;
+
+        this.product = updatedProduct;
+        this.onlinePurchaseProduct.set(updatedProduct);
+        this.toastService.success('Link y QR de compra online generados');
+        this.isGeneratingOnlinePurchaseLink.set(false);
+      },
+      error: (err: any) => {
+        const message =
+          typeof err === 'string' ? err : extractApiErrorMessage(err);
+        this.toastService.error(
+          message || 'No se pudo generar el QR de compra online',
+        );
+        this.isGeneratingOnlinePurchaseLink.set(false);
+      },
+    });
+  }
+
+  copyOnlinePurchaseLink(): void {
+    const url = this.onlinePurchaseUrl();
+    if (!url) return;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(url)
+        .then(() => this.toastService.success('Link copiado'))
+        .catch(() => this.copyOnlinePurchaseLinkFallback(url));
+      return;
+    }
+
+    this.copyOnlinePurchaseLinkFallback(url);
+  }
+
+  openOnlinePurchaseLink(): void {
+    const url = this.onlinePurchaseUrl();
+    if (!url || typeof window === 'undefined') return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  downloadOnlinePurchaseQr(): void {
+    const qrCode = this.onlinePurchaseQrCode();
+    if (!qrCode || typeof document === 'undefined') return;
+
+    const link = document.createElement('a');
+    const slug = this.onlinePurchaseProduct()?.slug || 'producto';
+    link.href = qrCode;
+    link.download = `${slug}-qr-compra-online.png`;
+    link.click();
+  }
+
+  private copyOnlinePurchaseLinkFallback(url: string): void {
+    if (typeof document === 'undefined') {
+      this.toastService.error('No se pudo copiar el link');
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = url;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+      document.execCommand('copy');
+      this.toastService.success('Link copiado');
+    } catch {
+      this.toastService.error('No se pudo copiar el link');
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+
   private loadDataCollectionTemplates(): void {
     this.http
       .get<any>(`${environment.apiUrl}/store/data-collection/templates`)
@@ -869,6 +984,7 @@ export class ProductCreatePageComponent {
     this.productsService.getProductById(id).subscribe({
       next: (product: Product) => {
         this.product = product;
+        this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
       },
       error: (error: any) => {

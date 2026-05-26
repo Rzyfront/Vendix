@@ -275,7 +275,9 @@ type FileSaveWindow = Window & {
         (closed)="closePreviewModal()"
       >
         @if (selectedAnuncio()) {
-          <div class="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
+          <div
+            class="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]"
+          >
             <section
               class="flex min-h-[320px] items-center justify-center overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
             >
@@ -302,9 +304,7 @@ type FileSaveWindow = Window & {
                 >
                   {{ selectedAnuncio()?.title }}
                 </h3>
-                <p
-                  class="text-sm leading-6 text-[var(--color-text-secondary)]"
-                >
+                <p class="text-sm leading-6 text-[var(--color-text-secondary)]">
                   {{ selectedAnuncioDescription() }}
                 </p>
               </div>
@@ -320,6 +320,40 @@ type FileSaveWindow = Window & {
                   </p>
                   <p class="text-sm text-[var(--color-text-primary)]">
                     {{ selectedAnuncioProducts() }}
+                  </p>
+                </div>
+              }
+
+              @if (selectedAnuncioPostCopy()) {
+                <div
+                  class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-4"
+                >
+                  <div class="mb-3 flex items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                      <app-icon
+                        name="message-square"
+                        [size]="18"
+                        class="text-[var(--color-primary)]"
+                      ></app-icon>
+                      <p
+                        class="text-sm font-semibold text-[var(--color-text-primary)]"
+                      >
+                        Post sugerido
+                      </p>
+                    </div>
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="copyPostCopy()"
+                    >
+                      <app-icon slot="icon" name="copy" [size]="14"></app-icon>
+                      Copiar
+                    </app-button>
+                  </div>
+                  <p
+                    class="whitespace-pre-line text-sm leading-6 text-[var(--color-text-primary)]"
+                  >
+                    {{ selectedAnuncioPostCopy() }}
                   </p>
                 </div>
               }
@@ -344,7 +378,11 @@ type FileSaveWindow = Window & {
                   <div
                     class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"
                   >
-                    <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
+                    <app-icon
+                      name="loader-2"
+                      [size]="16"
+                      [spin]="true"
+                    ></app-icon>
                     Buscando dominio ecommerce...
                   </div>
                 } @else if (ecommerceUrl()) {
@@ -360,7 +398,9 @@ type FileSaveWindow = Window & {
                     </a>
                   </p>
                 } @else {
-                  <p class="text-sm leading-6 text-[var(--color-text-secondary)]">
+                  <p
+                    class="text-sm leading-6 text-[var(--color-text-secondary)]"
+                  >
                     Consigue esto y más en la tienda online.
                   </p>
                 }
@@ -625,14 +665,16 @@ export class AnunciosComponent {
     const creative = this.selectedAnuncio();
     return creative ? this.productNames(creative) : '';
   });
+  protected readonly selectedAnuncioPostCopy = computed(() => {
+    const creative = this.selectedAnuncio();
+    return creative?.post_copy?.trim() || '';
+  });
   protected readonly selectedAnuncioStatusLabel = computed(() => {
     const creative = this.selectedAnuncio();
     return creative ? this.statusLabel(creative.status) : '';
   });
   protected readonly ecommerceUrlLabel = computed(() =>
-    (this.ecommerceUrl() || '')
-      .replace(/^https?:\/\//, '')
-      .replace(/\/$/, ''),
+    (this.ecommerceUrl() || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
   );
 
   constructor() {
@@ -865,9 +907,14 @@ export class AnunciosComponent {
     }
   }
 
-  protected async downloadImage(
-    creative: MarketingAdCreative,
-  ): Promise<void> {
+  protected async copyPostCopy(): Promise<void> {
+    const postCopy = this.selectedAnuncioPostCopy();
+    if (!postCopy) return;
+    await navigator.clipboard.writeText(postCopy);
+    this.toastService.success('Post copiado.');
+  }
+
+  protected async downloadImage(creative: MarketingAdCreative): Promise<void> {
     if (!creative.image_url) return;
 
     const fileName = this.imageFileName(creative);

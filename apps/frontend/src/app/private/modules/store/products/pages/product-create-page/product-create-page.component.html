@@ -563,6 +563,142 @@
           </div>
         </section>
 
+        @if (isEditMode()) {
+          <section
+            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+          >
+            <div
+              class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div class="flex items-start gap-2">
+                <app-icon
+                  name="shopping-cart"
+                  size="18"
+                  class="text-primary-600 mt-0.5"
+                ></app-icon>
+                <div>
+                  <h2 class="text-base font-bold text-gray-900">
+                    Compra online
+                  </h2>
+                  <p class="text-xs text-gray-500 mt-0.5">
+                    {{ onlinePurchaseMessage() }}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                (click)="generateOnlinePurchaseLink()"
+                [disabled]="isGeneratingOnlinePurchaseLink()"
+                class="inline-flex min-h-[40px] items-center justify-center gap-2 rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-sm font-semibold text-primary-700 transition hover:bg-primary-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                @if (isGeneratingOnlinePurchaseLink()) {
+                  <app-icon name="loader-2" [size]="16" [spin]="true" />
+                  Generando
+                } @else if (hasOnlinePurchaseLink()) {
+                  <app-icon name="refresh-cw" [size]="16" />
+                  Regenerar
+                } @else {
+                  <app-icon name="link" [size]="16" />
+                  Generar link y QR
+                }
+              </button>
+            </div>
+
+            @if (hasOnlinePurchaseLink()) {
+              <div class="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-4">
+                <div
+                  class="rounded-xl border border-gray-200 bg-gray-50 p-3 flex items-center justify-center"
+                >
+                  <img
+                    [src]="onlinePurchaseQrCode()"
+                    alt="QR de compra online"
+                    class="h-32 w-32 rounded-lg bg-white object-contain"
+                  />
+                </div>
+
+                <div class="min-w-0 space-y-3">
+                  <div
+                    class="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2"
+                  >
+                    <span
+                      class="block text-[10px] font-bold uppercase tracking-wide text-gray-400"
+                      >Link de compra</span
+                    >
+                    <p class="break-all text-sm font-medium text-gray-800">
+                      {{ onlinePurchaseUrl() }}
+                    </p>
+                    @if (onlinePurchaseProduct()?.online_purchase_domain_hostname) {
+                      <p class="mt-1 text-xs text-gray-500">
+                        Dominio:
+                        {{ onlinePurchaseProduct()?.online_purchase_domain_hostname }}
+                      </p>
+                    }
+                    @if (onlinePurchaseProduct()?.online_purchase_generated_at) {
+                      <p class="mt-1 text-xs text-gray-400">
+                        Generado:
+                        {{
+                          onlinePurchaseProduct()?.online_purchase_generated_at
+                            | date: "medium"
+                        }}
+                      </p>
+                    }
+                  </div>
+
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      (click)="copyOnlinePurchaseLink()"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      aria-label="Copiar link de compra"
+                    >
+                      <app-icon name="copy" [size]="15" />
+                      Copiar
+                    </button>
+                    <button
+                      type="button"
+                      (click)="openOnlinePurchaseLink()"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      aria-label="Abrir link de compra"
+                    >
+                      <app-icon name="external-link" [size]="15" />
+                      Abrir
+                    </button>
+                    <button
+                      type="button"
+                      (click)="downloadOnlinePurchaseQr()"
+                      class="inline-flex min-h-[38px] items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+                      aria-label="Descargar QR de compra"
+                    >
+                      <app-icon name="download" [size]="15" />
+                      Descargar QR
+                    </button>
+                  </div>
+                </div>
+              </div>
+            } @else {
+              <div
+                class="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-4 flex items-start gap-3"
+              >
+                <app-icon
+                  name="link"
+                  size="18"
+                  class="text-gray-400 mt-0.5"
+                ></app-icon>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-gray-800">
+                    Este producto aún no tiene link ni QR de compra.
+                  </p>
+                  <p class="text-xs text-gray-500 mt-1">
+                    Se usará el dominio ecommerce principal activo de la
+                    tienda.
+                  </p>
+                </div>
+              </div>
+            }
+          </section>
+        }
+
         <!-- Clasificación y Medidas (unificada: marca/categorías + dimensiones/peso) -->
         <section
           class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"

@@ -10,6 +10,7 @@ import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { ImageContext } from '@common/config/image-presets';
+import { QrService } from '../../../common/services/qr.service';
 import {
   StoreSettings,
   EcommerceSettings,
@@ -25,6 +26,7 @@ export class EcommerceService {
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
+    private readonly qrService: QrService,
   ) {}
 
   /**
@@ -99,11 +101,19 @@ export class EcommerceService {
     }
 
     // 6. Build ecommerce URL from domain hostname
-    const ecommerceUrl = domain ? this.buildEcommerceUrl(domain.hostname) : null;
+    const ecommerceUrl = domain
+      ? this.buildEcommerceUrl(domain.hostname)
+      : null;
+    const primaryQrDomain = await this.findPrimaryEcommerceDomain(store_id);
+    const qrTargetUrl = primaryQrDomain
+      ? this.buildEcommerceUrl(primaryQrDomain.hostname)
+      : null;
+    const qrCode = this.resolveQrCode(config, qrTargetUrl);
 
     return {
       config,
       ecommerceUrl,
+      ...qrCode,
     };
   }
 
@@ -129,6 +139,18 @@ export class EcommerceService {
       where: {
         store_id,
         domain_type: 'ecommerce',
+      },
+      orderBy: { updated_at: 'desc' },
+    });
+  }
+
+  private async findPrimaryEcommerceDomain(store_id: number) {
+    return this.prisma.domain_settings.findFirst({
+      where: {
+        store_id,
+        domain_type: 'ecommerce',
+        status: 'active',
+        is_primary: true,
       },
       orderBy: { updated_at: 'desc' },
     });
@@ -236,6 +258,100 @@ export class EcommerceService {
     return `https://${hostname}`;
   }
 
+  private resolveQrCode(
+    config: EcommerceSettings,
+    ecommerceUrl: string | null,
+  ) {
+    const general = config.general;
+    const qrCodeDataUrl = general?.qr_code_data_url || null;
+    const qrCodeUrl = general?.qr_code_url || ecommerceUrl;
+    const qrCodeGeneratedAt = general?.qr_code_generated_at || null;
+    const qrCodeMatchesCurrentDomain =
+      !!qrCodeDataUrl && !!ecommerceUrl && qrCodeUrl === ecommerceUrl;
+
+    return {
+      qrCodeDataUrl: qrCodeMatchesCurrentDomain ? qrCodeDataUrl : null,
+      qrCodeUrl,
+      qrCodeGeneratedAt: qrCodeMatchesCurrentDomain ? qrCodeGeneratedAt : null,
+      qrCodeStale:
+        !!qrCodeDataUrl && !!ecommerceUrl && qrCodeUrl !== ecommerceUrl,
+    };
+  }
+
+  async generateQrCode() {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new Error('Store ID not found in context');
+
+    const appType = 'STORE_ECOMMERCE';
+    const storeSettings = await this.findStoreSettings(store_id);
+    const currentSettings = mergeStoreSettingsWithDefaults(
+      storeSettings?.settings,
+    );
+
+    const domain = await this.findPrimaryEcommerceDomain(store_id);
+    if (!domain) {
+      throw new Error(
+        'No hay un dominio ecommerce principal activo para generar el QR',
+      );
+    }
+
+    if (domain.app_type !== appType) {
+      await this.prisma.domain_settings.updateMany({
+        where: { id: domain.id, store_id, domain_type: 'ecommerce' },
+        data: { app_type: appType, updated_at: new Date() },
+      });
+    }
+
+    const ecommerceUrl = this.buildEcommerceUrl(domain.hostname);
+    const qrCodeDataUrl = await this.qrService.generateDataUrl(
+      ecommerceUrl,
+      320,
+    );
+    const qrCodeGeneratedAt = new Date().toISOString();
+    const currentEcommerce =
+      currentSettings.ecommerce || ({} as Partial<EcommerceSettings>);
+    const updatedEcommerce: EcommerceSettings = {
+      ...currentEcommerce,
+      enabled: currentEcommerce.enabled ?? true,
+      general: {
+        ...currentEcommerce.general,
+        qr_code_url: ecommerceUrl,
+        qr_code_data_url: qrCodeDataUrl,
+        qr_code_generated_at: qrCodeGeneratedAt,
+      },
+    } as EcommerceSettings;
+
+    const settingsPayload = {
+      ...currentSettings,
+      ecommerce: updatedEcommerce,
+    };
+
+    if (storeSettings) {
+      await this.prisma.store_settings.updateMany({
+        where: { store_id },
+        data: {
+          settings: settingsPayload as any,
+          updated_at: new Date(),
+        },
+      });
+    } else {
+      await this.prisma.store_settings.create({
+        data: {
+          store_id,
+          settings: settingsPayload as any,
+        },
+      });
+    }
+
+    return {
+      ecommerceUrl,
+      qrCodeUrl: ecommerceUrl,
+      qrCodeDataUrl,
+      qrCodeGeneratedAt,
+      qrCodeStale: false,
+    };
+  }
+
   /**
    * Get default template for e-commerce configuration
    */
@@ -307,13 +423,16 @@ export class EcommerceService {
         ...existingEcommerce.inicio,
         ...processedDto.inicio,
       },
+      general: {
+        ...existingEcommerce.general,
+        ...processedDto.general,
+      },
       // Preserve footer from DTO or existing, ensuring it's properly merged
       footer: processedDto.footer ?? existingEcommerce.footer,
     } as EcommerceSettings;
 
     // 3. Sanitize URLs to S3 keys before storage
-    const preparedEcommerce =
-      this.prepareEcommerceForStorage(mergedEcommerce);
+    const preparedEcommerce = this.prepareEcommerceForStorage(mergedEcommerce);
 
     // 4. Check if logo changed for favicon generation
     const logoChanged =
@@ -356,10 +475,9 @@ export class EcommerceService {
 
     // 7. Generate favicon if logo changed
     if (logoChanged && preparedEcommerce.inicio?.logo_url) {
-      this.generateFaviconForEcommerce(
-        preparedEcommerce.inicio.logo_url,
-      ).catch((error) =>
-        this.logger.warn(`Favicon generation failed: ${error.message}`),
+      this.generateFaviconForEcommerce(preparedEcommerce.inicio.logo_url).catch(
+        (error) =>
+          this.logger.warn(`Favicon generation failed: ${error.message}`),
       );
     }
 
