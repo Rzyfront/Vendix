@@ -39,9 +39,7 @@ export class SessionsService {
     return this.prisma.cash_register_sessions.findFirst({
       where,
       include: {
-        register: {
-          include: { location: { select: { id: true, name: true } } },
-        },
+        register: true,
         opened_by_user: {
           select: { id: true, first_name: true, last_name: true },
         },

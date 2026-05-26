@@ -2553,7 +2553,9 @@ export class AnuncioCreateWizardPageComponent {
   }
 
   private startGeneration(id: number): void {
-    if (this.generating()) return;
+    // `generating` is set to true in createAiAnuncio() before we get here, so
+    // we cannot guard on it. The wizard flow guarantees a single invocation
+    // per ad creation, gated by submitDisabled().
     this.generating.set(true);
     this.generationMessage.set('Preparando recursos...');
 
