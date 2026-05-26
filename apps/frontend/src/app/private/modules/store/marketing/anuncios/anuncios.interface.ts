@@ -123,11 +123,18 @@ export interface ApiResponse<T> {
 }
 
 export interface AdCreativeStreamEvent {
-  type: 'progress' | 'partial_image' | 'completed' | 'done' | 'error';
+  type:
+    | 'progress'
+    | 'partial_image'
+    | 'completed'
+    | 'post_copy'
+    | 'done'
+    | 'error';
   message?: string;
   imageBase64?: string;
   partialImageIndex?: number;
   creative?: MarketingAdCreative;
+  post_copy?: string;
   error?: string;
   error_code?: string;
   details?: Record<string, unknown>;

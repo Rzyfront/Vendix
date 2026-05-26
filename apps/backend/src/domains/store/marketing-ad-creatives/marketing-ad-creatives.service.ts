@@ -303,10 +303,9 @@ export class MarketingAdCreativesService {
       context,
     );
     const creativeImages = [...selectedImages, ...selectedReferenceImages];
-    const postCopy = await this.generatePostCopy(dto, products, creativeImages);
 
     if (!creativeDelegate) {
-      return this.createRaw(dto, productIds, creativeImages, context, postCopy);
+      return this.createRaw(dto, productIds, creativeImages, context, null);
     }
 
     const creative = await this.runWithAdStorageGuard(() =>
@@ -315,7 +314,7 @@ export class MarketingAdCreativesService {
           title: dto.title.trim(),
           description: dto.description?.trim() || null,
           prompt: dto.prompt?.trim() || null,
-          post_copy: postCopy,
+          post_copy: null,
           format: dto.format || 'square',
           ai_app_key: dto.ai_app_key || 'marketing_ad_image_generator',
           created_by_user_id: context.user_id ?? null,
@@ -466,6 +465,32 @@ export class MarketingAdCreativesService {
                   revisedPrompt: chunk.revisedPrompt,
                 }),
               } as MessageEvent);
+
+              // Post copy runs only after image succeeds — saves tokens on failure.
+              try {
+                const postCopy = await this.generatePostCopyForCreative(
+                  id,
+                  creative,
+                );
+                if (postCopy) {
+                  savedCreative = {
+                    ...savedCreative,
+                    post_copy: postCopy,
+                  };
+                  subscriber.next({
+                    type: 'ai-chunk',
+                    data: JSON.stringify({
+                      type: 'post_copy',
+                      post_copy: postCopy,
+                      creative: savedCreative,
+                    }),
+                  } as MessageEvent);
+                }
+              } catch (postCopyError: any) {
+                this.logger.warn(
+                  `Post copy generation failed for creative ${id}: ${postCopyError?.message || postCopyError}`,
+                );
+              }
               continue;
             }
 
@@ -867,6 +892,56 @@ export class MarketingAdCreativesService {
 
   private isQrSourceType(sourceType?: string | null): boolean {
     return (sourceType || '').toLowerCase().includes('qr');
+  }
+
+  private async generatePostCopyForCreative(
+    creativeId: number,
+    creative: any,
+  ): Promise<string | null> {
+    const products = (creative.creative_products || []).map(
+      (item: any) => item.product,
+    );
+    const creativeImages = creative.creative_images || [];
+    const dtoLike: Partial<CreateMarketingAdCreativeDto> = {
+      title: creative.title,
+      description: creative.description || undefined,
+      prompt: creative.prompt || undefined,
+      format: creative.format,
+    };
+
+    const postCopy = await this.generatePostCopy(
+      dtoLike as CreateMarketingAdCreativeDto,
+      products,
+      creativeImages,
+    );
+
+    if (!postCopy) return null;
+
+    const creativeDelegate = this.getCreativeDelegate();
+    if (creativeDelegate) {
+      await this.runWithAdStorageGuard(() =>
+        creativeDelegate.update({
+          where: { id: creativeId },
+          data: { post_copy: postCopy, updated_at: new Date() },
+        }),
+      );
+    } else {
+      await this.updatePostCopyRaw(creativeId, postCopy);
+    }
+
+    return postCopy;
+  }
+
+  private async updatePostCopyRaw(id: number, postCopy: string): Promise<void> {
+    await this.prisma.$executeRawUnsafe(
+      `
+      UPDATE "marketing_ad_creatives"
+      SET "post_copy" = $1, "updated_at" = NOW()
+      WHERE "id" = $2
+      `,
+      postCopy,
+      id,
+    );
   }
 
   private async generatePostCopy(
