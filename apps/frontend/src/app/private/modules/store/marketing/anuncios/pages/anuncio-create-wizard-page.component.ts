@@ -684,124 +684,161 @@ interface SelectedResourcePreview {
                 }
 
                 @if (currentStep() === 3) {
-                  <section class="ai-result-step space-y-4 rounded-2xl p-4 md:p-5">
-                    <header class="flex items-center justify-between gap-3">
-                      <div>
-                        <h2
-                          class="text-base font-semibold text-[var(--color-text-primary)]"
-                        >
-                          {{
-                            generating()
-                              ? 'Creando tu anuncio con IA'
-                              : generationError()
-                              ? 'No pudimos completar la generacion'
-                              : 'Tu anuncio esta listo'
-                          }}
-                        </h2>
-                        <p class="text-sm text-[var(--color-text-secondary)]">
-                          {{
-                            generating()
-                              ? generationMessage()
-                              : generationError()
-                              ? 'Revisa los detalles y vuelve a intentar.'
-                              : 'Copia el post o vuelve a la biblioteca.'
-                          }}
-                        </p>
-                      </div>
-                      @if (generating()) {
-                        <div class="ai-orbit relative h-10 w-10 shrink-0">
-                          <span class="ai-orbit__core"></span>
-                          <span class="ai-orbit__ring"></span>
-                          <span class="ai-orbit__ring ai-orbit__ring--delayed"></span>
+                  <section class="ai-result-step space-y-3 rounded-2xl p-3 md:p-4">
+                    <header
+                      class="ai-result-header flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
+                    >
+                      <div class="flex min-w-0 items-center gap-3">
+                        @if (generating()) {
+                          <div class="ai-orbit relative h-9 w-9 shrink-0">
+                            <span class="ai-orbit__core"></span>
+                            <span class="ai-orbit__ring"></span>
+                            <span class="ai-orbit__ring ai-orbit__ring--delayed"></span>
+                          </div>
+                        } @else {
+                          <div
+                            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft,#dcfce7)] text-[var(--color-success,#16a34a)]"
+                          >
+                            <app-icon name="check" [size]="18"></app-icon>
+                          </div>
+                        }
+                        <div class="min-w-0">
+                          <h2
+                            class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                          >
+                            {{
+                              generating()
+                                ? 'Generando tu anuncio'
+                                : 'Tu anuncio esta listo'
+                            }}
+                          </h2>
+                          <p
+                            class="truncate text-xs text-[var(--color-text-secondary)]"
+                          >
+                            {{
+                              generating()
+                                ? generationMessage()
+                                : 'Copia el post o vuelve a la biblioteca.'
+                            }}
+                          </p>
                         </div>
-                      }
+                      </div>
                     </header>
 
-                    @if (generationError()) {
-                      <app-alert-banner variant="danger" icon="triangle-alert">
-                        {{ generationError() }}
-                      </app-alert-banner>
-                    }
+                    <div class="ai-result-grid">
+                      <div class="ai-result-grid__image">
+                        <div
+                          class="ai-result-stage relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                          [class.is-generating]="generating()"
+                          [ngClass]="formatAspectClass(currentFormat())"
+                        >
+                          @if (activeResultImage()) {
+                            <img
+                              class="relative z-[2] h-full w-full object-contain"
+                              [src]="activeResultImage()!"
+                              alt="Anuncio generado"
+                            />
+                          }
 
-                    <div
-                      class="ai-result-stage relative overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
-                      [class.is-generating]="generating()"
-                      [ngClass]="formatAspectClass(currentFormat())"
-                    >
-                      @if (activeResultImage()) {
-                        <img
-                          class="relative z-[2] h-full w-full object-contain"
-                          [src]="activeResultImage()!"
-                          alt="Anuncio generado"
-                        />
-                      }
+                          @if (generating() && !activeResultImage()) {
+                            <div class="ai-result-stage__placeholder">
+                              <div class="ai-holo-grid"></div>
+                              <div class="ai-holo-aurora"></div>
+                              <div class="ai-sparkle ai-sparkle--a"></div>
+                              <div class="ai-sparkle ai-sparkle--b"></div>
+                              <div class="ai-sparkle ai-sparkle--c"></div>
+                              <div class="ai-sparkle ai-sparkle--d"></div>
+                              <div class="ai-sparkle ai-sparkle--e"></div>
+                              <div class="ai-result-stage__halo"></div>
+                              <div class="ai-result-stage__icon">
+                                <app-icon name="sparkles" [size]="40"></app-icon>
+                              </div>
+                              <p class="ai-result-stage__caption">
+                                {{ generationMessage() }}
+                              </p>
+                            </div>
+                          }
 
-                      @if (generating() && !activeResultImage()) {
-                        <div class="ai-result-stage__placeholder">
-                          <div class="ai-sparkle ai-sparkle--a"></div>
-                          <div class="ai-sparkle ai-sparkle--b"></div>
-                          <div class="ai-sparkle ai-sparkle--c"></div>
-                          <div class="ai-sparkle ai-sparkle--d"></div>
-                          <div class="ai-sparkle ai-sparkle--e"></div>
-                          <div class="ai-result-stage__halo"></div>
-                          <div class="ai-result-stage__icon">
-                            <app-icon name="sparkles" [size]="36"></app-icon>
-                          </div>
-                          <p class="ai-result-stage__caption">
-                            {{ generationMessage() }}
-                          </p>
+                          @if (generating()) {
+                            <div class="ai-result-stage__shimmer"></div>
+                            <div class="ai-result-stage__scan"></div>
+                            <div class="ai-result-stage__prism"></div>
+                          }
                         </div>
-                      }
+                      </div>
 
-                      @if (generating()) {
-                        <div class="ai-result-stage__shimmer"></div>
-                        <div class="ai-result-stage__scan"></div>
-                      }
+                      <aside class="ai-result-grid__side">
+                        <div
+                          class="ai-post-card relative flex h-full flex-col rounded-2xl border border-[var(--color-border)] bg-[var(--color-background)] p-4"
+                        >
+                          <div class="mb-3 flex items-center justify-between gap-2">
+                            <div class="flex items-center gap-2">
+                              <app-icon
+                                name="message-square"
+                                [size]="16"
+                              ></app-icon>
+                              <p
+                                class="text-sm font-semibold text-[var(--color-text-primary)]"
+                              >
+                                Post para publicar
+                              </p>
+                            </div>
+                            @if (generationResult()?.post_copy) {
+                              <app-button
+                                variant="ghost"
+                                size="sm"
+                                type="button"
+                                (clicked)="copyPostCopy()"
+                              >
+                                <app-icon
+                                  slot="icon"
+                                  name="copy"
+                                  [size]="14"
+                                ></app-icon>
+                                Copiar
+                              </app-button>
+                            }
+                          </div>
+
+                          @if (generationResult()?.post_copy) {
+                            <p
+                              class="ai-post-card__text whitespace-pre-line text-sm leading-6 text-[var(--color-text-secondary)]"
+                            >
+                              {{ generationResult()?.post_copy }}
+                            </p>
+                          } @else if (
+                            generatingPostCopy() ||
+                            (generating() && activeResultImage())
+                          ) {
+                            <div class="ai-post-card__pending space-y-2">
+                              <div class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)]">
+                                <span class="ai-dot-pulse"></span>
+                                Redactando post...
+                              </div>
+                              <div class="ai-skeleton-line w-2/3"></div>
+                              <div class="ai-skeleton-line w-full"></div>
+                              <div class="ai-skeleton-line w-11/12"></div>
+                              <div class="ai-skeleton-line w-4/5"></div>
+                            </div>
+                          } @else if (generating()) {
+                            <div
+                              class="ai-post-card__hint text-xs text-[var(--color-text-tertiary,var(--color-text-secondary))]"
+                            >
+                              El texto del post se genera cuando la imagen este lista.
+                            </div>
+                          } @else if (generationError()) {
+                            <div
+                              class="ai-post-card__hint text-xs text-[var(--color-text-tertiary,var(--color-text-secondary))]"
+                            >
+                              Sin post aun: se genera tras una imagen exitosa.
+                            </div>
+                          }
+                        </div>
+                      </aside>
                     </div>
 
-                    @if (generationResult()?.post_copy) {
-                      <div
-                        class="ai-post-card rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-4"
-                      >
-                        <div class="mb-2 flex items-center justify-between gap-3">
-                          <p
-                            class="text-sm font-semibold text-[var(--color-text-primary)]"
-                          >
-                            Post listo
-                          </p>
-                          <app-button
-                            variant="ghost"
-                            size="sm"
-                            type="button"
-                            (clicked)="copyPostCopy()"
-                          >
-                            <app-icon
-                              slot="icon"
-                              name="copy"
-                              [size]="14"
-                            ></app-icon>
-                            Copiar
-                          </app-button>
-                        </div>
-                        <p
-                          class="whitespace-pre-line text-sm leading-6 text-[var(--color-text-secondary)]"
-                        >
-                          {{ generationResult()?.post_copy }}
-                        </p>
-                      </div>
-                    } @else if (generating()) {
-                      <div
-                        class="ai-post-skeleton space-y-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] p-4"
-                      >
-                        <div class="ai-skeleton-line w-2/3"></div>
-                        <div class="ai-skeleton-line w-full"></div>
-                        <div class="ai-skeleton-line w-11/12"></div>
-                        <div class="ai-skeleton-line w-4/5"></div>
-                      </div>
-                    }
-
                     <div
-                      class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end"
+                      class="ai-result-actions flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end"
                     >
                       @if (!generating()) {
                         <app-button
@@ -817,16 +854,16 @@ interface SelectedResourcePreview {
                           ></app-icon>
                           Crear otro
                         </app-button>
-                      }
-                      @if (generationResult()?.image_url && !generating()) {
-                        <app-button
-                          variant="primary"
-                          size="md"
-                          type="button"
-                          (clicked)="goBack()"
-                        >
-                          Ver biblioteca
-                        </app-button>
+                        @if (generationResult()?.image_url) {
+                          <app-button
+                            variant="primary"
+                            size="md"
+                            type="button"
+                            (clicked)="goBack()"
+                          >
+                            Ver biblioteca
+                          </app-button>
+                        }
                       }
                     </div>
                   </section>
@@ -1664,6 +1701,210 @@ interface SelectedResourcePreview {
         }
       }
 
+      .ai-result-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+
+      @media (min-width: 900px) {
+        .ai-result-grid {
+          grid-template-columns: 70% 1fr;
+          align-items: stretch;
+        }
+      }
+
+      .ai-result-grid__image,
+      .ai-result-grid__side {
+        min-width: 0;
+      }
+
+      .ai-result-grid__side {
+        display: flex;
+      }
+
+      .ai-result-grid__side > .ai-post-card {
+        width: 100%;
+      }
+
+      .ai-post-card {
+        position: relative;
+        overflow: hidden;
+        background:
+          linear-gradient(
+            135deg,
+            color-mix(in oklab, var(--color-primary) 4%, transparent),
+            transparent 60%
+          ),
+          var(--color-background);
+      }
+
+      .ai-post-card__text {
+        flex: 1;
+        overflow-y: auto;
+        max-height: 360px;
+      }
+
+      .ai-post-card__pending {
+        flex: 1;
+      }
+
+      .ai-post-card__hint {
+        flex: 1;
+        align-self: center;
+        padding: 0.5rem 0;
+        opacity: 0.75;
+      }
+
+      .ai-dot-pulse {
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-primary);
+        box-shadow: 0 0 8px
+          color-mix(in oklab, var(--color-primary) 60%, transparent);
+        animation: ai-soft-pulse 1.2s ease-in-out infinite;
+      }
+
+      .ai-result-stage.is-error {
+        background:
+          radial-gradient(
+            circle at 50% 50%,
+            color-mix(in oklab, var(--color-danger, #dc2626) 8%, transparent),
+            transparent 70%
+          ),
+          var(--color-surface-muted);
+      }
+
+      .ai-result-stage__error-state {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.75rem;
+        text-align: center;
+        padding: 1.5rem;
+      }
+
+      .ai-result-stage__error-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 64px;
+        height: 64px;
+        border-radius: 9999px;
+        color: var(--color-danger, #dc2626);
+        background: color-mix(
+          in oklab,
+          var(--color-danger, #dc2626) 12%,
+          transparent
+        );
+        box-shadow:
+          0 0 0 1px
+            color-mix(in oklab, var(--color-danger, #dc2626) 25%, transparent),
+          0 0 24px
+            color-mix(in oklab, var(--color-danger, #dc2626) 30%, transparent);
+      }
+
+      .ai-result-stage__error-text {
+        font-size: 0.85rem;
+        color: var(--color-text-secondary);
+        max-width: 360px;
+        line-height: 1.4;
+      }
+
+      .ai-holo-grid {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        background-image:
+          linear-gradient(
+            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
+            transparent 1px
+          ),
+          linear-gradient(
+            90deg,
+            color-mix(in oklab, var(--color-primary) 18%, transparent) 1px,
+            transparent 1px
+          );
+        background-size: 36px 36px;
+        background-position: 0 0;
+        mask-image: radial-gradient(
+          circle at 50% 50%,
+          rgba(0, 0, 0, 0.9),
+          rgba(0, 0, 0, 0) 70%
+        );
+        opacity: 0.55;
+        animation: ai-holo-grid-drift 8s linear infinite;
+      }
+
+      .ai-holo-aurora {
+        position: absolute;
+        inset: -20%;
+        z-index: 0;
+        background:
+          radial-gradient(
+            circle at 30% 30%,
+            color-mix(in oklab, var(--color-info, #6366f1) 45%, transparent),
+            transparent 55%
+          ),
+          radial-gradient(
+            circle at 70% 60%,
+            color-mix(in oklab, var(--color-primary) 40%, transparent),
+            transparent 55%
+          ),
+          radial-gradient(
+            circle at 50% 80%,
+            color-mix(in oklab, var(--color-success, #10b981) 30%, transparent),
+            transparent 55%
+          );
+        filter: blur(48px);
+        opacity: 0.5;
+        animation: ai-holo-aurora-shift 9s ease-in-out infinite;
+      }
+
+      .ai-result-stage__prism {
+        position: absolute;
+        inset: 0;
+        z-index: 5;
+        background: linear-gradient(
+          120deg,
+          transparent 30%,
+          color-mix(in oklab, var(--color-primary) 14%, transparent) 45%,
+          color-mix(in oklab, var(--color-info, #6366f1) 14%, transparent) 55%,
+          transparent 70%
+        );
+        mix-blend-mode: screen;
+        opacity: 0.55;
+        background-size: 200% 100%;
+        background-position: 200% 0;
+        animation: ai-shimmer-sweep 3.4s ease-in-out infinite;
+        pointer-events: none;
+      }
+
+      @keyframes ai-holo-grid-drift {
+        0% {
+          background-position: 0 0;
+        }
+        100% {
+          background-position: 36px 36px;
+        }
+      }
+
+      @keyframes ai-holo-aurora-shift {
+        0%,
+        100% {
+          transform: translate(0, 0) scale(1);
+        }
+        50% {
+          transform: translate(2%, -2%) scale(1.05);
+        }
+      }
+
       @media (prefers-reduced-motion: reduce) {
         .ai-glow-panel::after,
         .ai-result-panel::after,
@@ -1674,6 +1915,10 @@ interface SelectedResourcePreview {
         .ai-result-stage__halo,
         .ai-result-stage__shimmer,
         .ai-result-stage__scan,
+        .ai-result-stage__prism,
+        .ai-holo-grid,
+        .ai-holo-aurora,
+        .ai-dot-pulse,
         .ai-sparkle,
         .ai-post-skeleton::after,
         .ai-orbit__core,
@@ -1725,6 +1970,7 @@ export class AnuncioCreateWizardPageComponent {
   protected readonly resourceModalOpen = signal(false);
   protected readonly creating = signal(false);
   protected readonly generating = signal(false);
+  protected readonly generatingPostCopy = signal(false);
   protected readonly suggestingPrompt = signal(false);
   protected readonly suggestionNotes = signal('');
   protected readonly suggestedTitle = signal('');
@@ -2124,6 +2370,9 @@ export class AnuncioCreateWizardPageComponent {
     this.generationError.set(null);
     this.generationPreview.set(null);
     this.generationResult.set(null);
+    this.generationMessage.set('Preparando recursos...');
+    this.generating.set(true);
+    this.currentStep.set(3);
 
     try {
       const raw = this.form.getRawValue();
@@ -2150,10 +2399,11 @@ export class AnuncioCreateWizardPageComponent {
         this.anunciosService.createAnuncio(dto),
       );
       this.generationResult.set(response.data);
-      this.currentStep.set(3);
       this.startGeneration(response.data.id);
     } catch (error: any) {
+      this.generating.set(false);
       this.generationError.set(extractApiErrorMessage(error));
+      this.currentStep.set(2);
     } finally {
       this.creating.set(false);
     }
@@ -2324,21 +2574,42 @@ export class AnuncioCreateWizardPageComponent {
           if (event.type === 'completed' && event.creative) {
             this.generationResult.set(event.creative);
             this.generationPreview.set(event.creative.image_url || null);
+            this.generationMessage.set('Imagen lista. Redactando post...');
+            this.generatingPostCopy.set(true);
+          }
+          if (event.type === 'post_copy') {
+            this.generatingPostCopy.set(false);
+            if (event.creative) {
+              this.generationResult.set(event.creative);
+            } else if (event.post_copy) {
+              const current = this.generationResult();
+              if (current) {
+                this.generationResult.set({
+                  ...current,
+                  post_copy: event.post_copy,
+                });
+              }
+            }
             this.generationMessage.set('Anuncio listo.');
           }
           if (event.type === 'done') {
             this.generating.set(false);
+            this.generatingPostCopy.set(false);
           }
           if (event.type === 'error') {
             this.generating.set(false);
+            this.generatingPostCopy.set(false);
             this.generationError.set(
               event.error || 'No se pudo generar la imagen.',
             );
+            this.currentStep.set(2);
           }
         },
         error: () => {
           this.generating.set(false);
+          this.generatingPostCopy.set(false);
           this.generationError.set('No se pudo conectar con la generacion.');
+          this.currentStep.set(2);
         },
       });
   }
