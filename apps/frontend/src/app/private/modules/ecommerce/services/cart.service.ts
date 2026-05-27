@@ -54,6 +54,11 @@ interface LocalCartItem {
   variant_price?: number;
 }
 
+interface StoredLocalCart {
+  items: LocalCartItem[];
+  updated_at: string;
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -113,10 +118,9 @@ export class CartService {
 
   // Local storage methods for guest cart
   private loadLocalCart(): void {
-    const stored = localStorage.getItem(this.local_storage_key);
-    if (stored) {
+    const items = this.getLocalCart();
+    if (items.length > 0) {
       try {
-        const items: LocalCartItem[] = JSON.parse(stored);
         if (items.length === 0) {
           this.emitEmptyCart();
           return;
@@ -203,7 +207,15 @@ export class CartService {
     const stored = localStorage.getItem(this.local_storage_key);
     if (stored) {
       try {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored) as LocalCartItem[] | StoredLocalCart;
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+        if (this.isStoredCartExpired(parsed)) {
+          localStorage.removeItem(this.local_storage_key);
+          return [];
+        }
+        return parsed.items || [];
       } catch {
         return [];
       }
@@ -212,8 +224,37 @@ export class CartService {
   }
 
   private saveLocalCart(items: LocalCartItem[]): void {
-    localStorage.setItem(this.local_storage_key, JSON.stringify(items));
+    const payload: StoredLocalCart = {
+      items,
+      updated_at: new Date().toISOString(),
+    };
+    localStorage.setItem(this.local_storage_key, JSON.stringify(payload));
     this.loadLocalCart();
+  }
+
+  private isStoredCartExpired(cart: StoredLocalCart): boolean {
+    const expirationHours = this.getCartExpirationHours();
+    if (!expirationHours || !cart.updated_at) return false;
+
+    const expiresAt =
+      new Date(cart.updated_at).getTime() + expirationHours * 60 * 60 * 1000;
+    return Date.now() > expiresAt;
+  }
+
+  getCartExpirationHours(): number | null {
+    const value =
+      this.domain_service.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.cart?.cart_expiration_hours;
+    const hours = Number(value || 0);
+    return hours > 0 ? hours : null;
+  }
+
+  getMaxQuantityPerItem(): number | null {
+    const value =
+      this.domain_service.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.cart?.max_quantity_per_item;
+    const max = Number(value || 0);
+    return max > 0 ? max : null;
   }
 
   /**
@@ -233,12 +274,18 @@ export class CartService {
     );
 
     if (existing) {
-      existing.quantity += quantity;
+      const nextQuantity = existing.quantity + quantity;
+      const maxQuantity = this.getMaxQuantityPerItem();
+      existing.quantity = maxQuantity
+        ? Math.min(nextQuantity, maxQuantity)
+        : nextQuantity;
     } else {
       items.push({
         product_id,
         product_variant_id,
-        quantity,
+        quantity: this.getMaxQuantityPerItem()
+          ? Math.min(quantity, this.getMaxQuantityPerItem()!)
+          : quantity,
         variant_name: variantInfo?.name,
         variant_sku: variantInfo?.sku,
         variant_price: variantInfo?.price,
@@ -265,7 +312,8 @@ export class CartService {
     );
 
     if (item) {
-      item.quantity = quantity;
+      const maxQuantity = this.getMaxQuantityPerItem();
+      item.quantity = maxQuantity ? Math.min(quantity, maxQuantity) : quantity;
       this.saveLocalCart(items);
     }
   }

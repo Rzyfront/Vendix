@@ -352,6 +352,48 @@ export class MenuFilterService {
   }
 
   /**
+   * Resuelve la(s) key(s) panel_ui asociadas a un label del menú.
+   * Útil para correlacionar items renderizados con `new_keys` del backend.
+   */
+  getModuleKey(label: string): string | string[] | undefined {
+    return this.moduleKeyMap[label];
+  }
+
+  /**
+   * Determina si un item del menú es "nuevo" para el usuario actual.
+   * Consume `newModuleKeys` del AuthFacade (calculado por el backend).
+   *
+   * Retorna `true` si alguna de las keys mapeadas para `label` está dentro
+   * de la lista `new_keys` del app_type activo. Una vez que el usuario
+   * marca la key como vista, el backend la remueve y este método retorna `false`.
+   */
+  isNewModule(label: string): boolean {
+    const moduleKey = this.moduleKeyMap[label];
+    if (!moduleKey) return false;
+    const newKeys = this.authFacade.newModuleKeys() || [];
+    if (!newKeys.length) return false;
+    if (Array.isArray(moduleKey)) {
+      return moduleKey.some((k) => newKeys.includes(k));
+    }
+    return newKeys.includes(moduleKey);
+  }
+
+  /**
+   * Devuelve la primera key "nueva" mapeada al label dado. Útil para
+   * pasar la key correcta a `markPanelUiSeen` al hacer click en el item.
+   */
+  getNewKeyForLabel(label: string): string | null {
+    const moduleKey = this.moduleKeyMap[label];
+    if (!moduleKey) return null;
+    const newKeys = this.authFacade.newModuleKeys() || [];
+    if (!newKeys.length) return null;
+    if (Array.isArray(moduleKey)) {
+      return moduleKey.find((k) => newKeys.includes(k)) ?? null;
+    }
+    return newKeys.includes(moduleKey) ? moduleKey : null;
+  }
+
+  /**
    * Check if a specific menu item should be visible.
    * Synchronous version for immediate checks.
    *

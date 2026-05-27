@@ -11,10 +11,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 
 import { Brand, CatalogService } from '../../services/catalog.service';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-brands-showcase',
   standalone: true,
+  imports: [IconComponent],
   templateUrl: './brands-showcase.component.html',
   styleUrls: ['./brands-showcase.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

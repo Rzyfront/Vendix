@@ -12,11 +12,12 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';
 import { CatalogService } from '../../services/catalog.service';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-categories-showcase',
   standalone: true,
-  imports: [RouterModule],
+  imports: [RouterModule, IconComponent],
   templateUrl: './categories-showcase.component.html',
   styleUrls: ['./categories-showcase.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

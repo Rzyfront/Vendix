@@ -491,6 +491,102 @@ export class AuthService {
     });
   }
 
+  /**
+   * Marca una key de panel_ui como "vista" para el usuario actual.
+   * Usado por el badge "Nuevo" del sidebar — al primer click el badge
+   * desaparece persistentemente.
+   *
+   * Idempotente: no falla si la key ya estaba marcada.
+   */
+  async markPanelUiSeen(
+    userId: number,
+    key: string,
+    appType: string,
+  ): Promise<Record<string, any>> {
+    const ALLOWED_APP_TYPES = [
+      'STORE_ADMIN',
+      'ORG_ADMIN',
+      'STORE_ECOMMERCE',
+      'VENDIX_LANDING',
+      'VENDIX_ADMIN',
+    ];
+
+    if (!key || typeof key !== 'string' || key.length > 100) {
+      throw new BadRequestException('key inválida');
+    }
+    if (!appType || !ALLOWED_APP_TYPES.includes(appType)) {
+      throw new BadRequestException('app_type inválido');
+    }
+
+    const existing = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+
+    const currentConfig: Record<string, any> =
+      existing?.config && typeof existing.config === 'object'
+        ? (existing.config as Record<string, any>)
+        : {};
+
+    const currentSeen: Record<string, string[]> =
+      currentConfig.panel_ui_seen_keys &&
+      typeof currentConfig.panel_ui_seen_keys === 'object'
+        ? (currentConfig.panel_ui_seen_keys as Record<string, string[]>)
+        : {};
+
+    const seenForApp = Array.isArray(currentSeen[appType])
+      ? currentSeen[appType]
+      : [];
+
+    // Idempotente — Set semántica
+    const updatedSeenForApp = seenForApp.includes(key)
+      ? seenForApp
+      : [...seenForApp, key];
+
+    const updatedSeen: Record<string, string[]> = {
+      ...currentSeen,
+      [appType]: updatedSeenForApp,
+    };
+
+    const updatedConfig: Record<string, any> = {
+      ...currentConfig,
+      panel_ui_seen_keys: updatedSeen,
+    };
+
+    const upserted = await this.prismaService.user_settings.upsert({
+      where: { user_id: userId },
+      update: {
+        config: updatedConfig as any,
+        updated_at: new Date(),
+      },
+      create: {
+        user_id: userId,
+        config: updatedConfig as any,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
+
+    // Recalcular new_keys con merge para retornar al cliente
+    const [defaults, userRoles] = await Promise.all([
+      this.defaultPanelUIService.generatePanelUI(''),
+      this.prismaService.user_roles.findMany({
+        where: { user_id: userId },
+        include: { roles: { select: { name: true } } },
+      }),
+    ]);
+
+    const roleNames = userRoles
+      .map((ur) => ur.roles?.name)
+      .filter((n): n is string => !!n);
+    const mergedConfig = mergeUserConfigPanelUi(
+      upserted.config as any,
+      defaults.panel_ui,
+      roleNames,
+    );
+
+    return mergedConfig;
+  }
+
   async registerOwner(
     registerOwnerDto: RegisterOwnerDto,
     client_info?: { ip_address?: string; user_agent?: string },

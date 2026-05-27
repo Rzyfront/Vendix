@@ -33,32 +33,50 @@ interface HomeSectionConfig {
   title?: string;
   subtitle?: string;
   limit?: number;
+  sort_order?: number;
 }
 
 interface HomeSectionsConfig {
+  slider: HomeSectionConfig;
   categories: HomeSectionConfig;
   brands: HomeSectionConfig;
   featured_products: HomeSectionConfig;
 }
 
+type HomeSectionKey = keyof HomeSectionsConfig;
+
+interface OrderedHomeSection {
+  key: HomeSectionKey;
+  config: HomeSectionConfig;
+}
+
 const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
+  slider: {
+    enabled: true,
+    title: 'Slider principal',
+    subtitle: 'La primera historia visual de tu tienda',
+    sort_order: 10,
+  },
   categories: {
     enabled: true,
     title: 'Categorías',
     subtitle: 'Explora por tipo de producto',
     limit: 8,
+    sort_order: 20,
   },
   brands: {
     enabled: true,
     title: 'Marcas',
     subtitle: 'Compra por tus marcas favoritas',
     limit: 8,
+    sort_order: 30,
   },
   featured_products: {
     enabled: true,
     title: 'Productos destacados',
     subtitle: 'Selección especial de la tienda',
     limit: 16,
+    sort_order: 40,
   },
 };
 
@@ -93,6 +111,17 @@ export class HomeComponent implements OnInit {
   readonly featured_section = computed(
     () => this.home_sections().featured_products,
   );
+  readonly ordered_home_sections = computed<OrderedHomeSection[]>(() => {
+    const sections = this.home_sections();
+    return (Object.keys(sections) as HomeSectionKey[])
+      .map((key) => ({ key, config: sections[key] }))
+      .filter((section) => section.config.enabled !== false)
+      .sort(
+        (a, b) =>
+          (a.config.sort_order ?? DEFAULT_HOME_SECTIONS[a.key].sort_order ?? 0) -
+          (b.config.sort_order ?? DEFAULT_HOME_SECTIONS[b.key].sort_order ?? 0),
+      );
+  });
   readonly banner_content = signal<{ title: string; paragraph: string }>({
     title: 'Bienvenido',
     paragraph: 'Encuentra aquí todo lo que buscas...',
@@ -182,6 +211,10 @@ export class HomeComponent implements OnInit {
           this.slider_config.set(ecommerceConfig.slider || null);
           const configuredSections = ecommerceConfig.home_sections || {};
           this.home_sections.set({
+            slider: {
+              ...DEFAULT_HOME_SECTIONS.slider,
+              ...(configuredSections.slider || {}),
+            },
             categories: {
               ...DEFAULT_HOME_SECTIONS.categories,
               ...(configuredSections.categories || {}),
@@ -201,10 +234,13 @@ export class HomeComponent implements OnInit {
           const hasPhotos =
             Array.isArray(this.slider_config()?.photos) &&
             this.slider_config()?.photos.length > 0;
+          const sliderEnabled =
+            (configuredSections.slider?.enabled ?? true) !== false &&
+            (this.slider_config()?.enable ?? true) !== false;
 
           // El slider se muestra si hay fotos
           // El campo 'enable' es opcional - si no existe, se asume true cuando hay fotos
-          this.show_slider.set(hasPhotos);
+          this.show_slider.set(sliderEnabled && hasPhotos);
 
           // Mapeo de contenido para el banner estático desde ecommerce.inicio
           const inicio = ecommerceConfig.inicio || {};

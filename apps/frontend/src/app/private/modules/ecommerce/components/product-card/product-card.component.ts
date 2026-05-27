@@ -45,7 +45,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         }
 
         <!-- Variant Badge -->
-        @if (product().variant_count && product().variant_count! > 0) {
+        @if (show_variants() && product().variant_count && product().variant_count! > 0) {
           <div class="variant-badge">
             {{ product().variant_count }} variantes
           </div>
@@ -127,22 +127,30 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       min-width: 0;
     }
 
-    /* iOS-style Product Card */
     .product-card {
-      background: transparent;
+      position: relative;
+      height: 100%;
+      background-color: transparent;
       border-radius: 8px;
       border: 1px solid transparent;
-      overflow: hidden;
+      overflow: visible;
       cursor: pointer;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      transition:
+        border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex;
       flex-direction: column;
+      gap: 0.72rem;
       -webkit-tap-highlight-color: transparent;
 
-      &:hover {
-        box-shadow: 0 10px 24px -20px rgba(0, 0, 0, 0.35);
+      &:hover,
+      &:focus-within {
+        background-color: var(--color-background);
+        box-shadow: 0 22px 44px -36px rgba(15, 23, 42, 0.55);
         transform: translateY(-2px);
-        border-color: rgba(148, 163, 184, 0.45);
+        border-color: rgba(148, 163, 184, 0.28);
       }
 
       &:active {
@@ -162,14 +170,19 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     .product-image {
       position: relative;
       aspect-ratio: 1;
-      background: var(--color-background);
+      background: var(--color-surface);
       overflow: hidden;
       border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
 
       img {
         width: 100%;
         height: 100%;
-        object-fit: cover;
+        object-fit: contain;
+        object-position: center;
+        padding: 0.72rem;
+        transition: transform 0.35s ease;
       }
 
       .no-image {
@@ -179,94 +192,111 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         align-items: center;
         justify-content: center;
         color: var(--color-text-muted);
+        background: var(--color-surface);
         font-size: 3rem;
       }
     }
 
     .quick-cart-btn {
       position: absolute;
-      right: 0.65rem;
-      bottom: 0.65rem;
+      right: 0.55rem;
+      bottom: 0.55rem;
       z-index: 2;
-      width: 34px;
-      height: 34px;
+      width: 38px;
+      height: 38px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      color: var(--color-text-secondary);
-      background: rgba(255, 255, 255, 0.86);
-      border: 1px solid rgba(148, 163, 184, 0.28);
+      color: var(--color-text-primary);
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.24);
       border-radius: 999px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       box-shadow: 0 8px 20px -18px rgba(15, 23, 42, 0.4);
       cursor: pointer;
-      opacity: 0;
-      transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+      opacity: 1;
+      transition:
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        transform 0.15s ease;
 
       &:hover {
-        border-color: rgba(148, 163, 184, 0.65);
-        transform: translateY(-1px);
+        color: var(--color-primary);
+        background: #ffffff;
+        border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+        transform: translateY(-1px) scale(1.02);
+      }
+
+      &:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.42);
+        outline-offset: 2px;
       }
     }
 
-    .product-card:hover .quick-cart-btn,
-    .quick-cart-btn:focus-visible {
-      opacity: 1;
+    .product-card:hover .product-image img {
+      transform: scale(1.025);
     }
 
-    @media (hover: none) {
-      .quick-cart-btn {
-        opacity: 1;
-      }
-    }
-
-    /* Stock Badge positioning */
     .stock-badge-pos {
       position: absolute;
-      top: 0.5rem;
-      left: 0.5rem;
+      top: 0.55rem;
+      left: 0.55rem;
       z-index: 1;
     }
 
-    /* Variant Badge */
     .variant-badge {
       position: absolute;
-      bottom: 0.5rem;
-      left: 0.5rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: var(--radius-md);
-      font-size: var(--fs-xs);
+      bottom: 0.58rem;
+      left: 0.58rem;
+      padding: 0.24rem 0.48rem;
+      border-radius: 999px;
+      font-size: 10px;
       font-weight: var(--fw-semibold);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.8);
-      color: white;
-      border: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.6);
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--color-text-primary);
+      border: 1px solid rgba(148, 163, 184, 0.24);
       z-index: 1;
     }
 
-    /* Card action buttons column */
     .card-actions {
       position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
+      top: 0.55rem;
+      right: 0.55rem;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.38rem;
       z-index: 1;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity var(--transition-fast), transform var(--transition-fast);
     }
 
-    /* Circular action buttons */
+    .product-card:hover .card-actions,
+    .card-actions:focus-within {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     :host ::ng-deep .action-btn {
-      width: 36px !important;
-      height: 36px !important;
-      min-width: 36px !important;
+      width: 34px !important;
+      height: 34px !important;
+      min-width: 34px !important;
       padding: 0 !important;
       border-radius: 50% !important;
-      background: var(--color-surface) !important;
-      box-shadow: var(--shadow-sm);
+      color: var(--color-text-secondary) !important;
+      background: rgba(255, 255, 255, 0.88) !important;
+      border: 1px solid rgba(148, 163, 184, 0.22) !important;
+      box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
 
       &:hover {
-        background: var(--color-background) !important;
+        background: #ffffff !important;
+        color: var(--color-primary) !important;
       }
 
       &.active {
@@ -276,25 +306,28 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     }
 
     .product-info {
-      padding: 1rem;
+      padding: 0 0.16rem 0.16rem;
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.28rem;
     }
 
     .product-brand {
       font-size: var(--fs-xs);
       color: var(--color-text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
+      font-weight: var(--fw-semibold);
     }
 
     .product-name {
       font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
+      font-weight: 700;
       color: var(--color-text-primary);
       margin: 0;
+      line-height: 1.3;
+      min-height: 2.6em;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
@@ -302,13 +335,14 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     }
 
     .product-price {
-      margin-top: 0.5rem;
+      margin-top: 0.35rem;
       display: flex;
+      flex-wrap: wrap;
       align-items: baseline;
-      gap: 0.5rem;
+      gap: 0.35rem;
 
       .price {
-        font-size: var(--fs-lg);
+        font-size: var(--fs-base);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
       }
@@ -360,6 +394,11 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     @media (max-width: 480px) {
       .product-card {
         border-radius: 8px;
+        gap: 0.5rem;
+      }
+
+      .product-image img {
+        padding: 0.55rem;
       }
 
       .variant-badge {
@@ -368,15 +407,17 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .card-actions {
-        top: 0.4rem;
-        right: 0.4rem;
+        top: 0.45rem;
+        right: 0.45rem;
         gap: 0.3rem;
+        opacity: 1;
+        transform: none;
       }
 
       :host ::ng-deep .action-btn {
-        width: 28px !important;
-        height: 28px !important;
-        min-width: 28px !important;
+        width: 34px !important;
+        height: 34px !important;
+        min-width: 34px !important;
 
         app-icon {
           font-size: 14px;
@@ -384,7 +425,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-info {
-        padding: 0.5rem 0.15rem;
+        padding: 0 0.1rem 0.05rem;
         gap: 0.15rem;
       }
 
@@ -393,8 +434,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-name {
-        font-size: 12px;
-        -webkit-line-clamp: 1;
+        font-size: 13px;
+        -webkit-line-clamp: 2;
       }
 
       .product-price .price {
@@ -402,14 +443,24 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .quick-cart-btn {
-        width: 28px !important;
-        height: 28px !important;
+        width: 36px !important;
+        height: 36px !important;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .product-card,
+      .product-image img,
+      .quick-cart-btn,
+      .card-actions {
+        transition: none;
       }
     }
   `],
 })
 export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
+  readonly show_variants = input<boolean>(true);
   readonly in_wishlist = input<boolean>(false);
   readonly add_to_cart = output<EcommerceProduct>();
   readonly toggle_wishlist = output<EcommerceProduct>();

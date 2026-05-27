@@ -507,6 +507,14 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.setDefaultPanelUi({ default_panel_ui }));
   }
 
+  /**
+   * Marca una key del panel_ui como vista — remueve el badge "Nuevo" del
+   * sidebar de forma persistente. Idempotente (puede llamarse múltiples veces).
+   */
+  markPanelUiSeen(key: string, app_type: string): void {
+    this.store.dispatch(AuthActions.markPanelUiSeen({ key, app_type }));
+  }
+
   getUserId(): number | null {
     return this.userId() ?? null;
   }

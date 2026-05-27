@@ -14,6 +14,8 @@ import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { BadgeComponent } from '../badge/badge.component';
 import { ToastService } from '../toast/toast.service';
+import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
 
 const DEFAULT_LOCKED_BADGE = 'ORG';
 const DEFAULT_LOCKED_TOOLTIP = 'Disponible en modo ORGANIZATION';
@@ -164,7 +166,7 @@ export interface MenuItem {
                   #rla="routerLinkActive"
                   [class.active]="rla.isActive"
                   class="menu-item"
-                  (click)="onMenuItemClick()"
+                  (click)="onMenuItemClick(item)"
                 >
                   <app-icon
                     [name]="item.icon"
@@ -172,6 +174,9 @@ export interface MenuItem {
                     class="flex-shrink-0"
                   ></app-icon>
                   <span class="menu-text">{{ item.label }}</span>
+                  @if (isNewItem(item.label)) {
+                    <span class="badge-new" aria-label="Nuevo módulo">Nuevo</span>
+                  }
                   @if (item.badge) {
                     <span class="badge">{{ item.badge }}</span>
                   }
@@ -184,6 +189,9 @@ export interface MenuItem {
                     class="flex-shrink-0"
                   ></app-icon>
                   <span class="menu-text">{{ item.label }}</span>
+                  @if (hasNewChildren(item)) {
+                    <span class="badge-new" aria-label="Nuevos módulos">Nuevo</span>
+                  }
                   @if (item.badge) {
                     <span class="badge">{{ item.badge }}</span>
                   }
@@ -211,10 +219,13 @@ export interface MenuItem {
                         </button>
                       } @else if (child.action) {
                         <button
-                          (click)="child.action(child); onMenuItemClick()"
+                          (click)="child.action(child); onMenuItemClick(child)"
                           class="submenu-item-button"
                         >
                           <span>{{ child.label }}</span>
+                          @if (isNewItem(child.label)) {
+                            <span class="badge-new" aria-label="Nuevo módulo">Nuevo</span>
+                          }
                           @if (child.badge) {
                             <span class="badge">{{ child.badge }}</span>
                           }
@@ -226,9 +237,12 @@ export interface MenuItem {
                           routerLinkActive="active"
                           #rlaChild="routerLinkActive"
                           [class.active]="rlaChild.isActive"
-                          (click)="onMenuItemClick()"
+                          (click)="onMenuItemClick(child)"
                         >
                           <span>{{ child.label }}</span>
+                          @if (isNewItem(child.label)) {
+                            <span class="badge-new" aria-label="Nuevo módulo">Nuevo</span>
+                          }
                           @if (child.badge) {
                             <span class="badge">{{ child.badge }}</span>
                           }
@@ -274,6 +288,8 @@ export class SidebarComponent implements AfterViewInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toastService = inject(ToastService);
+  private readonly menuFilterService = inject(MenuFilterService);
+  private readonly authFacade = inject(AuthFacade);
 
   // --- State signals ---
   readonly isMobile = signal(false);
@@ -510,7 +526,12 @@ export class SidebarComponent implements AfterViewInit {
     this.renderer.removeClass(document.body, 'sidebar-mobile-open');
   }
 
-  onMenuItemClick(): void {
+  onMenuItemClick(item?: MenuItem): void {
+    // Si el item tiene badge "Nuevo", marcarlo como visto (idempotente).
+    if (item?.label) {
+      this.markItemAsSeenIfNew(item.label);
+    }
+
     // Close mobile sidebar when menu item is clicked
     if (this.isMobile()) {
       setTimeout(() => {
@@ -524,6 +545,36 @@ export class SidebarComponent implements AfterViewInit {
     this.toastService.info(message);
     this.router.navigateByUrl(LOCKED_REDIRECT_ROUTE);
     this.onMenuItemClick();
+  }
+
+  /**
+   * Determina si un menu item debe mostrar el badge "Nuevo".
+   * Consume `MenuFilterService.isNewModule` que lee `new_keys` del backend.
+   */
+  isNewItem(label: string): boolean {
+    return this.menuFilterService.isNewModule(label);
+  }
+
+  /**
+   * Determina si un menu item padre tiene al menos un hijo marcado como nuevo.
+   * Útil para mostrar el badge en el item colapsado.
+   */
+  hasNewChildren(item: MenuItem): boolean {
+    if (this.isNewItem(item.label)) return true;
+    if (!item.children?.length) return false;
+    return item.children.some((child) => this.isNewItem(child.label));
+  }
+
+  /**
+   * Marca la key del label dado como vista en el backend, si tiene badge.
+   * Idempotente — el backend acepta llamadas repetidas sin error.
+   */
+  private markItemAsSeenIfNew(label: string): void {
+    const key = this.menuFilterService.getNewKeyForLabel(label);
+    if (!key) return;
+    const appType = this.authFacade.selectedAppType();
+    if (!appType) return;
+    this.authFacade.markPanelUiSeen(key, appType);
   }
 
   toggleSubmenu(menuLabel: string): void {

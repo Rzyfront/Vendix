@@ -17,6 +17,9 @@ import { Store } from '@ngrx/store';
 import { selectStoreSettings } from '../../../../core/store/auth/auth.selectors';
 import { ShippingMethodsService } from '../settings/shipping/services/shipping-methods.service';
 import { EcommerceService } from './services/ecommerce.service';
+import { ProductService } from '../products/services/product.service';
+import { CategoriesService } from '../products/services/categories.service';
+import { BrandsService } from '../products/services/brands.service';
 import {
   EcommerceSettings,
   FooterSettings,
@@ -33,6 +36,7 @@ import {
   IconComponent,
   ButtonComponent,
   InputComponent,
+  MultiSelectorComponent,
   SelectorComponent,
   TextareaComponent,
   SettingToggleComponent,
@@ -45,6 +49,7 @@ import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/config
 import { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import type { Currency } from '../../../../shared/pipes/currency';
+import { ProductState } from '../products/interfaces';
 
 type HomeSectionKey = 'slider' | 'categories' | 'brands' | 'featured_products';
 
@@ -57,6 +62,8 @@ interface HomeSectionAdminItem {
   hasLimit: boolean;
   limitMax: number;
 }
+
+type SliderTargetField = 'product_id' | 'category_id' | 'brand_id';
 
 const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
   {
@@ -106,6 +113,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     IconComponent,
     ButtonComponent,
     InputComponent,
+    MultiSelectorComponent,
     SelectorComponent,
     TextareaComponent,
     SettingToggleComponent,
@@ -120,6 +128,9 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
 export class EcommerceComponent {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
+  private productService = inject(ProductService);
+  private categoriesService = inject(CategoriesService);
+  private brandsService = inject(BrandsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
@@ -177,6 +188,9 @@ export class EcommerceComponent {
   readonly sliderImages = signal<SliderImage[]>([]);
   readonly activeImageIndex = signal(0);
   readonly isUploadingImage = signal(false);
+  readonly sliderProductOptions = signal<SelectorOption[]>([]);
+  readonly sliderCategoryOptions = signal<SelectorOption[]>([]);
+  readonly sliderBrandOptions = signal<SelectorOption[]>([]);
   readonly sliderActionOptions: Array<{
     value: SliderActionType;
     label: string;
@@ -188,6 +202,40 @@ export class EcommerceComponent {
     { value: 'category', label: 'Categoría' },
     { value: 'brand', label: 'Marca' },
   ];
+  readonly activeSliderTargetField = computed<SliderTargetField | null>(() => {
+    const active = this.sliderImages()[this.activeImageIndex()];
+    if (!active) return null;
+    if (active.action_type === 'product') return 'product_id';
+    if (active.action_type === 'category') return 'category_id';
+    if (active.action_type === 'brand') return 'brand_id';
+    return null;
+  });
+  readonly activeSliderTargetOptions = computed<SelectorOption[]>(() => {
+    const field = this.activeSliderTargetField();
+    if (field === 'product_id') {
+      return this.sliderProductOptions();
+    }
+    if (field === 'category_id') {
+      return this.sliderCategoryOptions();
+    }
+    if (field === 'brand_id') {
+      return this.sliderBrandOptions();
+    }
+    return [];
+  });
+  readonly activeSliderTargetValues = computed<(string | number)[]>(() => {
+    const active = this.sliderImages()[this.activeImageIndex()];
+    const field = this.activeSliderTargetField();
+    if (!active || !field || !active[field]) return [];
+    return [active[field] as number];
+  });
+  readonly activeSliderTargetLabel = computed(() => {
+    const field = this.activeSliderTargetField();
+    if (field === 'product_id') return 'Producto destino';
+    if (field === 'category_id') return 'Categoría destino';
+    if (field === 'brand_id') return 'Marca destino';
+    return 'Destino';
+  });
 
   // Logo state
   readonly isUploadingLogo = signal(false);
@@ -270,6 +318,7 @@ export class EcommerceComponent {
     this.checkAndStartEcommerceTour();
     this.setupWhatsappPrefixEnforcement();
     this.loadSettings();
+    this.loadSliderTargetOptions();
     this.currencyService.loadCurrency();
     this.loadCurrencies();
     this.checkShippingStatus();
@@ -621,6 +670,54 @@ export class EcommerceComponent {
       });
   }
 
+  private loadSliderTargetOptions(): void {
+    this.productService
+      .getProducts({ page: 1, limit: 100, state: ProductState.ACTIVE })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.sliderProductOptions.set(
+            (response.data || []).map((product) => ({
+              value: product.id,
+              label: product.name,
+              description: product.sku || undefined,
+            })),
+          );
+        },
+        error: () => this.sliderProductOptions.set([]),
+      });
+
+    this.categoriesService
+      .getAllCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (categories) => {
+          this.sliderCategoryOptions.set(
+            categories.map((category) => ({
+              value: category.id,
+              label: category.name,
+            })),
+          );
+        },
+        error: () => this.sliderCategoryOptions.set([]),
+      });
+
+    this.brandsService
+      .getAllBrands()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (brands) => {
+          this.sliderBrandOptions.set(
+            brands.map((brand) => ({
+              value: brand.id,
+              label: brand.name,
+            })),
+          );
+        },
+        error: () => this.sliderBrandOptions.set([]),
+      });
+  }
+
   /**
    * Load active currencies for the selector
    */
@@ -895,6 +992,26 @@ export class EcommerceComponent {
     this.updateSliderPhotosForm();
   }
 
+  onSliderActionTypeChange(value: string | number | null): void {
+    this.updateImageAction(
+      this.activeImageIndex(),
+      'action_type',
+      (value || 'none') as SliderActionType,
+    );
+  }
+
+  onSliderTargetChange(values: (string | number)[]): void {
+    const field = this.activeSliderTargetField();
+    if (!field) return;
+    const selectedValue = values.length > 0 ? values[values.length - 1] : null;
+
+    this.updateImageTargetId(
+      this.activeImageIndex(),
+      field,
+      selectedValue === null ? '' : selectedValue.toString(),
+    );
+  }
+
   updateImageTargetId(
     index: number,
     field: 'product_id' | 'category_id' | 'brand_id',
@@ -917,6 +1034,31 @@ export class EcommerceComponent {
    */
   setActiveImage(index: number): void {
     this.activeImageIndex.set(index);
+  }
+
+  moveHomeSection(key: HomeSectionKey, direction: -1 | 1): void {
+    const sections = this.orderedHomeSections();
+    const currentIndex = sections.findIndex((section) => section.key === key);
+    const target = sections[currentIndex + direction];
+
+    if (currentIndex < 0 || !target) return;
+
+    const currentGroup = this.getHomeSectionGroup(key);
+    const targetGroup = this.getHomeSectionGroup(target.key);
+    const currentOrder = Number(
+      currentGroup.get('sort_order')?.value ?? sections[currentIndex].defaultOrder,
+    );
+    const targetOrder = Number(
+      targetGroup.get('sort_order')?.value ?? target.defaultOrder,
+    );
+
+    currentGroup.patchValue({ sort_order: targetOrder });
+    targetGroup.patchValue({ sort_order: currentOrder });
+    this.settingsForm.markAsDirty();
+  }
+
+  private getHomeSectionGroup(key: HomeSectionKey): FormGroup {
+    return this.settingsForm.get(['home_sections', key]) as FormGroup;
   }
 
   /**

@@ -414,6 +414,22 @@ export const authReducer = createReducer(
     default_panel_ui,
   })),
 
+  // Mark Panel UI Seen — actualiza config (incluye new_keys recalculado)
+  on(AuthActions.markPanelUiSeenSuccess, (state, { config }) => {
+    const currentSettings = state.user_settings || {};
+    const newState = {
+      ...state,
+      user_settings: {
+        ...currentSettings,
+        config,
+      },
+    };
+    saveAuthState(newState);
+    return newState;
+  }),
+
+  on(AuthActions.markPanelUiSeenFailure, (state) => state),
+
   // Update Store Settings
   on(AuthActions.updateStoreSettings, (state, { store_settings }) => {
     const newState = {

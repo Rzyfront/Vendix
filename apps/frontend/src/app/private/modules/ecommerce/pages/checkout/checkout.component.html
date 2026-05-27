@@ -517,7 +517,11 @@
     </div>
   }
 
-  @if (recommendedProducts().length > 0 && !is_submitting()) {
+  @if (
+    relatedProductsEnabled() &&
+    recommendedProducts().length > 0 &&
+    !is_submitting()
+  ) {
     <div class="checkout-offers">
       <app-product-carousel
         title="Agrega ofertas imperdibles a tu compra"

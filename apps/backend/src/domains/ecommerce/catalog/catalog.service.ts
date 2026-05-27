@@ -31,12 +31,14 @@ export class CatalogService {
 
     const skip = (page - 1) * limit;
     const store_id = RequestContextService.getStoreId();
+    const catalogSettings = await this.getCatalogSettings(store_id);
 
     const where: any = {
       state: 'active',
       available_for_ecommerce: true,
       // store_id se aplica automáticamente por EcommercePrismaService
     };
+    const andFilters: any[] = [];
 
     if (search) {
       where.OR = [
@@ -80,6 +82,30 @@ export class CatalogService {
 
     if (String(query.is_featured) === 'true') {
       where.is_featured = true;
+    }
+
+    if (catalogSettings.show_out_of_stock !== true) {
+      andFilters.push({
+        OR: [
+          { product_type: 'service' },
+          { track_inventory: false },
+          { stock_quantity: { gt: 0 } },
+          {
+            product_variants: {
+              some: {
+                OR: [
+                  { track_inventory_override: false },
+                  { stock_quantity: { gt: 0 } },
+                ],
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...andFilters];
     }
 
     let orderBy: any;
@@ -413,6 +439,21 @@ export class CatalogService {
       },
     });
     return store?.store_settings?.settings || {};
+  }
+
+  private async getCatalogSettings(storeId?: number | null): Promise<{
+    show_out_of_stock?: boolean;
+  }> {
+    if (!storeId) return {};
+
+    const settings = await this.prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+
+    return ((settings?.settings as any)?.ecommerce?.catalog ?? {}) as {
+      show_out_of_stock?: boolean;
+    };
   }
 
   private async areReviewsEnabled(): Promise<boolean> {

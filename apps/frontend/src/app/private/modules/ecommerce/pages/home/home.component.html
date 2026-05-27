@@ -1,90 +1,98 @@
 <div class="home-page">
-  <!-- Hero Section -->
-  @if (show_slider()) {
-    <app-hero-banner
-      [slides]="slider_config()?.photos || []"
-      [banner]="{
-        title: banner_content().title,
-        subtitle: banner_content().paragraph,
-      }"
-    />
-  } @else {
-    <div class="static-banner-wrapper">
-      <div class="static-banner">
-        <div class="banner-content">
-          <h1>{{ banner_content().title }}</h1>
-          <p>{{ banner_content().paragraph }}</p>
-        </div>
-      </div>
-    </div>
-  }
-
-  @if (home_sections().categories.enabled !== false) {
-    <app-categories-showcase
-      [title]="home_sections().categories.title || 'Categorías'"
-      [subtitle]="home_sections().categories.subtitle || ''"
-      [limit]="home_sections().categories.limit || 8"
-    />
-  }
-
-  @if (home_sections().brands.enabled !== false) {
-    <app-brands-showcase
-      [title]="home_sections().brands.title || 'Marcas'"
-      [subtitle]="home_sections().brands.subtitle || ''"
-      [limit]="home_sections().brands.limit || 8"
-    />
-  }
-
-  <!-- Featured Products -->
-  @if (featured_section().enabled !== false) {
-  <section class="products-section">
-    <div class="section-header">
-      <h2>{{ featured_section().title || 'Productos destacados' }}</h2>
-      <p class="subtitle">
-        {{ featured_section().subtitle || 'Selección especial de la tienda' }}
-      </p>
-    </div>
-
-    @if (is_loading_featured()) {
-      <div class="loading-grid">
-        @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
-          <div class="skeleton-card">
-            <div class="skeleton-image"></div>
-            <div class="skeleton-text"></div>
-            <div class="skeleton-text short"></div>
+  @for (section of ordered_home_sections(); track section.key) {
+    @switch (section.key) {
+      @case ("slider") {
+        @if (show_slider()) {
+          <app-hero-banner
+            [slides]="slider_config()?.photos || []"
+            [banner]="{
+              title: banner_content().title,
+              subtitle: banner_content().paragraph,
+            }"
+          />
+        } @else {
+          <div class="static-banner-wrapper">
+            <div class="static-banner">
+              <div class="banner-content">
+                <span class="banner-kicker">Tienda online</span>
+                <h1>{{ banner_content().title }}</h1>
+                <p>{{ banner_content().paragraph }}</p>
+              </div>
+            </div>
           </div>
         }
-      </div>
-    } @else {
-      @if (featured_products().length > 0) {
-        <div class="products-grid">
-          @for (product of featured_products(); track product.id) {
-            <app-product-card
-              [product]="product"
-              [in_wishlist]="isInWishlist(product.id)"
-              (add_to_cart)="onAddToCart($event)"
-              (toggle_wishlist)="onToggleWishlist($event)"
-              (quick_view)="onQuickView($event)"
-              (share)="onShare($event)"
-            />
-          }
-        </div>
-        <div class="view-more-container">
-          <app-button variant="outline" (clicked)="onViewMore()">
-            Descubre más productos
-          </app-button>
-        </div>
-      } @else {
-        <div class="empty-state">
-          <div class="empty-icon">
-            <i class="pi pi-box"></i>
+      }
+
+      @case ("categories") {
+        <app-categories-showcase
+          [title]="section.config.title || 'Categorías'"
+          [subtitle]="section.config.subtitle || ''"
+          [limit]="section.config.limit || 8"
+        />
+      }
+
+      @case ("brands") {
+        <app-brands-showcase
+          [title]="section.config.title || 'Marcas'"
+          [subtitle]="section.config.subtitle || ''"
+          [limit]="section.config.limit || 8"
+        />
+      }
+
+      @case ("featured_products") {
+        <section class="products-section">
+          <div class="section-header">
+            <span class="section-kicker">Selección curada</span>
+            <h2>{{ section.config.title || 'Productos destacados' }}</h2>
+            <p class="subtitle">
+              {{
+                section.config.subtitle || 'Selección especial de la tienda'
+              }}
+            </p>
           </div>
-          <h3>¡Ups! Aún no hay productos destacados</h3>
-          <p>Estamos preparando las mejores ofertas para ti.</p>
-        </div>
+
+          @if (is_loading_featured()) {
+            <div class="loading-grid">
+              @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+                <div class="skeleton-card">
+                  <div class="skeleton-image"></div>
+                  <div class="skeleton-text"></div>
+                  <div class="skeleton-text short"></div>
+                </div>
+              }
+            </div>
+          } @else {
+            @if (featured_products().length > 0) {
+              <div class="products-grid">
+                @for (product of featured_products(); track product.id) {
+                  <app-product-card
+                    [product]="product"
+                    [in_wishlist]="isInWishlist(product.id)"
+                    (add_to_cart)="onAddToCart($event)"
+                    (toggle_wishlist)="onToggleWishlist($event)"
+                    (quick_view)="onQuickView($event)"
+                    (share)="onShare($event)"
+                  />
+                }
+              </div>
+              <div class="view-more-container">
+                <app-button variant="outline" (clicked)="onViewMore()">
+                  Descubre más productos
+                </app-button>
+              </div>
+            } @else {
+              <div class="empty-state">
+                <div class="empty-icon">
+                  <i class="pi pi-box"></i>
+                </div>
+                <h3>¡Ups! Aún no hay productos destacados</h3>
+                <p>Activa el flag de destacado en tus productos favoritos.</p>
+              </div>
+            }
+          }
+        </section>
       }
     }
-  </section>
   }
 </div>
 

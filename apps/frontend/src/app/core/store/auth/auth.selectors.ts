@@ -411,15 +411,28 @@ export const selectDefaultPanelUi = createSelector(
   (state: AuthState) => state.default_panel_ui,
 );
 
+/**
+ * Selector unificado que lee `config.new_keys` calculado por el backend.
+ * Estructura: { ORG_ADMIN: string[], STORE_ADMIN: string[], ... }
+ *
+ * El backend ya filtra por rol privilegiado y considera `panel_ui_seen_keys`,
+ * por lo que el frontend solo necesita consumir el resultado.
+ */
+export const selectNewKeysByAppType = createSelector(
+  selectUserSettings,
+  (userSettings: any): Record<string, string[]> => {
+    const newKeys = userSettings?.config?.new_keys;
+    if (!newKeys || typeof newKeys !== 'object') return {};
+    return newKeys as Record<string, string[]>;
+  },
+);
+
 export const selectNewModuleKeys = createSelector(
-  selectPanelUiConfig,
-  selectDefaultPanelUi,
+  selectNewKeysByAppType,
   selectSelectedAppType,
-  (panelUi: any, defaults: Record<string, Record<string, boolean>> | null, appType: string) => {
-    if (!defaults) return [];
-    const userKeys = panelUi?.[appType] || {};
-    const defaultKeys = defaults[appType] || {};
-    return Object.keys(defaultKeys).filter((key) => !userKeys.hasOwnProperty(key));
+  (newKeysByApp: Record<string, string[]>, appType: string): string[] => {
+    const keys = newKeysByApp?.[appType];
+    return Array.isArray(keys) ? keys : [];
   },
 );
 
@@ -428,16 +441,12 @@ export const selectNewModuleKeys = createSelector(
 const EDITABLE_APP_TYPES = ['ORG_ADMIN', 'STORE_ADMIN'];
 
 export const selectAllNewModuleCount = createSelector(
-  selectPanelUiConfig,
-  selectDefaultPanelUi,
-  (panelUi: any, defaults: Record<string, Record<string, boolean>> | null) => {
-    if (!defaults) return 0;
+  selectNewKeysByAppType,
+  (newKeysByApp: Record<string, string[]>): number => {
     let count = 0;
     for (const appType of EDITABLE_APP_TYPES) {
-      if (!defaults[appType]) continue;
-      const userKeys = panelUi?.[appType] || {};
-      const defaultKeys = defaults[appType];
-      count += Object.keys(defaultKeys).filter((key) => !userKeys.hasOwnProperty(key)).length;
+      const keys = newKeysByApp?.[appType];
+      if (Array.isArray(keys)) count += keys.length;
     }
     return count;
   },

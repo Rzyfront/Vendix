@@ -1,4 +1,12 @@
-import { Component, ChangeDetectionStrategy, OnInit, DestroyRef, inject, signal } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  OnInit,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -16,6 +24,7 @@ import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
@@ -23,7 +32,29 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+
+interface CatalogSettings {
+  products_per_page: number;
+  show_out_of_stock: boolean;
+  show_variants: boolean;
+  show_related_products: boolean;
+  enable_filters: boolean;
+}
+
+type CatalogSortBy = 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
+
+const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
+  products_per_page: 12,
+  show_out_of_stock: false,
+  show_variants: true,
+  show_related_products: false,
+  enable_filters: false,
+};
 
 @Component({
   selector: 'app-catalog-page',
@@ -38,6 +69,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     InputComponent,
     IconComponent,
     PaginationComponent,
+    SelectorComponent,
   ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
@@ -54,13 +86,27 @@ export class CatalogComponent implements OnInit {
   readonly selected_brand_id = signal<number | null>(null);
   readonly min_price = signal<number | null>(null);
   readonly max_price = signal<number | null>(null);
-  readonly sort_by = signal<'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest'>('newest');
+  readonly sort_by = signal<CatalogSortBy>('newest');
 
   // Pagination
   readonly current_page = signal(1);
   readonly total_pages = signal(1);
   readonly total_products = signal(0);
   readonly limit = signal(12);
+  readonly catalog_settings = signal<CatalogSettings>(DEFAULT_CATALOG_SETTINGS);
+  readonly filters_enabled = computed(
+    () => this.catalog_settings().enable_filters === true,
+  );
+  readonly show_variants = computed(
+    () => this.catalog_settings().show_variants !== false,
+  );
+  readonly sortOptions: SelectorOption[] = [
+    { value: 'newest', label: 'Más recientes' },
+    { value: 'oldest', label: 'Menos recientes' },
+    { value: 'name', label: 'Nombre A-Z' },
+    { value: 'price_asc', label: 'Precio: menor a mayor' },
+    { value: 'price_desc', label: 'Precio: mayor a menor' },
+  ];
 
   readonly is_loading = signal(false);
   readonly show_filters = signal(false);
@@ -86,12 +132,18 @@ export class CatalogComponent implements OnInit {
     private wishlist_service: WishlistService,
     private store_ui_service: StoreUiService,
     private auth_facade: AuthFacade,
+    private tenant_facade: TenantFacade,
     private toast_service: ToastService,
     private route: ActivatedRoute,
     private router: Router,
   ) {}
 
   ngOnInit(): void {
+    this.applyCatalogSettings(
+      this.tenant_facade.getCurrentDomainConfig()?.customConfig?.ecommerce,
+    );
+    this.loadPublicCatalogSettings();
+
     // Load categories and brands
     this.loadCategories();
     this.loadBrands();
@@ -175,38 +227,80 @@ export class CatalogComponent implements OnInit {
     if (defaults.has_discount) query.has_discount = true;
     if (defaults.created_after) query.created_after = defaults.created_after;
 
-    this.catalog_service.getProducts(query).subscribe({
-      next: (response) => {
-        this.products.set(response.data);
-        this.total_products.set(response.meta.total);
-        this.total_pages.set(response.meta.total_pages);
-        this.current_page.set(response.meta.page);
-        this.is_loading.set(false);
-      },
-      error: () => {
-        this.is_loading.set(false);
-      },
+    this.catalog_service
+      .getProducts(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.products.set(response.data);
+          this.total_products.set(response.meta.total);
+          this.total_pages.set(response.meta.total_pages);
+          this.current_page.set(response.meta.page);
+          this.is_loading.set(false);
+        },
+        error: () => {
+          this.is_loading.set(false);
+        },
+      });
+  }
+
+  private loadPublicCatalogSettings(): void {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.applyCatalogSettings(response.data?.ecommerce);
+          this.loadProducts();
+        },
+      });
+  }
+
+  private applyCatalogSettings(ecommerce: any): void {
+    const catalog = {
+      ...DEFAULT_CATALOG_SETTINGS,
+      ...(ecommerce?.catalog || {}),
+    };
+    const productsPerPage = Number(catalog.products_per_page || 12);
+
+    this.catalog_settings.set({
+      products_per_page: productsPerPage,
+      show_out_of_stock: catalog.show_out_of_stock === true,
+      show_variants: catalog.show_variants !== false,
+      show_related_products: catalog.show_related_products === true,
+      enable_filters: catalog.enable_filters === true,
     });
+    this.limit.set(productsPerPage);
+
+    if (catalog.enable_filters !== true) {
+      this.show_filters.set(false);
+    }
   }
 
   loadCategories(): void {
-    this.catalog_service.getCategories().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.categories.set(response.data);
-        }
-      },
-    });
+    this.catalog_service
+      .getCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.categories.set(response.data);
+          }
+        },
+      });
   }
 
   loadBrands(): void {
-    this.catalog_service.getBrands().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.brands.set(response.data);
-        }
-      },
-    });
+    this.catalog_service
+      .getBrands()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.brands.set(response.data);
+          }
+        },
+      });
   }
 
   onSearchChange(): void {
@@ -227,7 +321,10 @@ export class CatalogComponent implements OnInit {
     this.loadProducts();
   }
 
-  onSortChange(): void {
+  onSortChange(value?: string | number | null): void {
+    if (typeof value === 'string') {
+      this.sort_by.set(value as CatalogSortBy);
+    }
     this.current_page.set(1);
     this.loadProducts();
   }

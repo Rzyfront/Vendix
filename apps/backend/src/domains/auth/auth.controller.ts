@@ -29,6 +29,7 @@ import {
 } from './dto/password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { SwitchEnvironmentDto } from './dto/switch-environment.dto';
+import { MarkPanelUiSeenDto } from './dto/mark-panel-ui-seen.dto';
 import { Public } from './decorators/public.decorator';
 import { Roles } from './decorators/roles.decorator';
 import { RolesGuard } from './guards/roles.guard';
@@ -619,6 +620,43 @@ export class AuthController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al cambiar de entorno',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  // ===== PANEL UI — BADGE "NUEVO" =====
+
+  @Post('panel-ui/mark-seen')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Marcar un módulo del sidebar como visto',
+    description:
+      'Remueve un módulo del badge "Nuevo" del sidebar para el usuario actual. Idempotente — no falla si la key ya estaba marcada.',
+  })
+  @ApiBearerAuth()
+  @ApiResponse({
+    status: 200,
+    description: 'Key marcada como vista exitosamente',
+  })
+  async markPanelUiSeen(
+    @Req() req: AuthenticatedRequest,
+    @Body() body: MarkPanelUiSeenDto,
+  ) {
+    try {
+      const config = await this.authService.markPanelUiSeen(
+        req.user.id,
+        body.key,
+        body.app_type,
+      );
+      return this.responseService.success(
+        { config },
+        'Módulo marcado como visto',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al marcar el módulo como visto',
         error.response?.message || error.message,
         error.status || 400,
       );
