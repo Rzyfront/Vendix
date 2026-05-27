@@ -461,6 +461,17 @@ export class StockLevelManager {
   /**
    * Reserva stock para una orden.
    *
+   * @param stock_units_consumed (multi-tarifa) Cuando es un número > 0, este
+   *   valor se usa como la cantidad real a reservar en `stock_levels` en
+   *   lugar de `quantity`. Lo usa OrdersService cuando una tarifa
+   *   `is_package_unit` se aplica sobre un producto con
+   *   `package_consumes_multiple_stock = true`: el caller calcula
+   *   `quantity * units_per_package` y lo pasa explícito.
+   *
+   *   El método no decide la equivalencia caja/unidad — solo respeta el
+   *   override numérico. Si es undefined u <= 0, comportamiento legacy
+   *   (reservar `quantity`).
+   *
    * @param skip_reservation Cuando es `true`, el método se vuelve no-op:
    *   - NO crea fila en `stock_reservations`.
    *   - NO muta `stock_levels` (qty_reserved / qty_available no cambian).
@@ -488,12 +499,21 @@ export class StockLevelManager {
     tx?: any,
     expires_at?: Date | null,
     skip_reservation = false,
+    stock_units_consumed?: number,
   ): Promise<void> {
     // P3.4: cuando una reserva upstream ya cubre el stock, evitar doble
     // decremento manteniendo este método como no-op.
     if (skip_reservation) {
       return;
     }
+
+    // Multi-tarifa: cuando el caller pasa una cantidad explícita de stock
+    // a consumir (caja con package_consumes_multiple_stock), usamos ese
+    // valor; en caso contrario, la cantidad lógica de la línea de venta.
+    const effectiveQuantity =
+      typeof stock_units_consumed === 'number' && stock_units_consumed > 0
+        ? stock_units_consumed
+        : quantity;
 
     const execute = async (prisma: any) => {
       // Validar contexto
@@ -510,7 +530,10 @@ export class StockLevelManager {
       );
 
       // 2. Validar disponibilidad (skip for POS/non-restrictive channels)
-      if (validate_availability && stock_level.quantity_available < quantity) {
+      if (
+        validate_availability &&
+        stock_level.quantity_available < effectiveQuantity
+      ) {
         throw new ConflictException(
           'Insufficient stock available for reservation',
         );
@@ -523,7 +546,7 @@ export class StockLevelManager {
           product_id: product_id,
           product_variant_id: variant_id,
           location_id: location_id,
-          quantity: quantity,
+          quantity: effectiveQuantity,
           reserved_for_type: reserved_for_type,
           reserved_for_id: reserved_for_id,
           status: 'active',
@@ -540,8 +563,9 @@ export class StockLevelManager {
       await prisma.stock_levels.update({
         where: { id: stock_level.id },
         data: {
-          quantity_reserved: stock_level.quantity_reserved + quantity,
-          quantity_available: stock_level.quantity_available - quantity,
+          quantity_reserved: stock_level.quantity_reserved + effectiveQuantity,
+          quantity_available:
+            stock_level.quantity_available - effectiveQuantity,
           last_updated: new Date(),
           updated_at: new Date(),
         },

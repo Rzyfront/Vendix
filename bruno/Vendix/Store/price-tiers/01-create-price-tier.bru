@@ -1,0 +1,46 @@
+meta {
+  name: 01 Create Price Tier
+  type: http
+  seq: 1
+}
+
+post {
+  url: http://{{url}}/store/price-tiers
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Mayorista Bruno Test",
+    "code": "BRUNO_WHOLESALE",
+    "description": "Tarifa creada por smoke test Bruno (multi-tarifa)",
+    "discount_percentage": 15.00,
+    "is_active": true,
+    "is_default": false,
+    "is_package_unit": false,
+    "sort_order": 10
+  }
+}
+
+tests {
+  test("Status is 201", function () {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response has data with id and code", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data.id).to.be.a('number');
+    expect(res.body.data).to.have.property('name', 'Mayorista Bruno Test');
+    expect(res.body.data).to.have.property('code', 'BRUNO_WHOLESALE');
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("priceTierId", res.body.data.id);
+    bru.setVar("priceTierCode", res.body.data.code);
+  }
+}

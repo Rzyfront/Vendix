@@ -1,6 +1,11 @@
 <section class="categories-showcase" [class]="class()">
   <div class="categories-header">
-    <h2 class="categories-title">Categorías</h2>
+    <div>
+      <h2 class="categories-title">{{ title() }}</h2>
+      @if (subtitle()) {
+        <p class="categories-subtitle">{{ subtitle() }}</p>
+      }
+    </div>
     @if (show_all_link() && categories().length > 0) {
       <button class="see-all-btn" (click)="viewAllCategories()">
         Ver todas

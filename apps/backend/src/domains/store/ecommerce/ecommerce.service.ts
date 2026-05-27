@@ -198,9 +198,15 @@ export class EcommerceService {
   private isLegacyEcommerceConfig(value: unknown): boolean {
     if (!this.isRecord(value)) return false;
 
-    return ['inicio', 'slider', 'catalog', 'cart', 'checkout', 'footer'].some(
-      (key) => key in value,
-    );
+    return [
+      'inicio',
+      'slider',
+      'home_sections',
+      'catalog',
+      'cart',
+      'checkout',
+      'footer',
+    ].some((key) => key in value);
   }
 
   private isRecord(value: unknown): value is Record<string, any> {
@@ -426,6 +432,10 @@ export class EcommerceService {
       general: {
         ...existingEcommerce.general,
         ...processedDto.general,
+      },
+      home_sections: {
+        ...existingEcommerce.home_sections,
+        ...processedDto.home_sections,
       },
       // Preserve footer from DTO or existing, ensuring it's properly merged
       footer: processedDto.footer ?? existingEcommerce.footer,

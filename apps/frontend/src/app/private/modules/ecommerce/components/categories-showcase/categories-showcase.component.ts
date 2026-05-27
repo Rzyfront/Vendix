@@ -1,4 +1,12 @@
-import {Component, ChangeDetectionStrategy, inject, input, signal, DestroyRef} from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  DestroyRef,
+  OnInit,
+  inject,
+  input,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router } from '@angular/router';
@@ -11,10 +19,13 @@ import { CatalogService } from '../../services/catalog.service';
   imports: [RouterModule],
   templateUrl: './categories-showcase.component.html',
   styleUrls: ['./categories-showcase.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CategoriesShowcaseComponent {
+export class CategoriesShowcaseComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   readonly limit = input<number>(6);
+  readonly title = input<string>('Categorías');
+  readonly subtitle = input<string>('');
   readonly show_all_link = input<boolean>(true);
   readonly class = input<string>('');
 
@@ -24,7 +35,7 @@ export class CategoriesShowcaseComponent {
   private catalog_service = inject(CatalogService);
   private router = inject(Router);
 
-  constructor() {
+  ngOnInit(): void {
     this.loadCategories();
   }
 
@@ -44,7 +55,7 @@ export class CategoriesShowcaseComponent {
   }
 
   onCategoryClick(category: Category): void {
-    this.router.navigate(['/catalog'], { queryParams: { category_id: category.id } });
+    this.router.navigate(['/catalog'], { queryParams: { category: category.id } });
   }
 
   viewAllCategories(): void {

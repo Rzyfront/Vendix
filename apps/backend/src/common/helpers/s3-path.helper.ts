@@ -61,6 +61,14 @@ export class S3PathHelper {
   }
 
   /**
+   * Builds the path for brand assets
+   * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/brands
+   */
+  buildBrandPath(org: S3OrgContext, store: S3StoreContext): string {
+    return `${this.buildStorePath(org, store)}/brands`;
+  }
+
+  /**
    * Builds the path for store logos
    * @returns organizations/{org_slug}-{org_id}/stores/{store_slug}-{store_id}/logos
    */
@@ -130,5 +138,13 @@ export class S3PathHelper {
    */
   buildHelpCenterPath(): string {
     return 'global/help-center/articles';
+  }
+
+  /**
+   * Builds the path for global notification sound assets (no org/store scope).
+   * @returns global/notification-sounds
+   */
+  buildNotificationSoundsPath(): string {
+    return 'global/notification-sounds';
   }
 }

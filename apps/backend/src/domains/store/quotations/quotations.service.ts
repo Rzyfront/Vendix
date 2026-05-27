@@ -79,6 +79,13 @@ export class QuotationsService {
 
     // Calculate totals from items
     const items = createQuotationDto.items || [];
+
+    // Multi-tarifa: validar permission + resolver snapshots por línea.
+    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      items,
+      context,
+    );
+
     const subtotal = items.reduce(
       (sum, item) => sum + Number(item.total_price),
       0,
@@ -113,20 +120,27 @@ export class QuotationsService {
         created_by_user_id: context?.user_id,
         updated_at: new Date(),
         quotation_items: {
-          create: items.map((item) => ({
-            product_id: item.product_id,
-            product_variant_id: item.product_variant_id,
-            product_name: item.product_name,
-            variant_sku: item.variant_sku,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            discount_amount: item.discount_amount || 0,
-            tax_rate: item.tax_rate,
-            tax_amount_item: item.tax_amount_item,
-            total_price: item.total_price,
-            notes: item.notes,
-            updated_at: new Date(),
-          })),
+          create: items.map((item, index) => {
+            const tierSnap = tierSnapshots[index];
+            return {
+              product_id: item.product_id,
+              product_variant_id: item.product_variant_id,
+              product_name: item.product_name,
+              variant_sku: item.variant_sku,
+              quantity: item.quantity,
+              unit_price: item.unit_price,
+              discount_amount: item.discount_amount || 0,
+              tax_rate: item.tax_rate,
+              tax_amount_item: item.tax_amount_item,
+              total_price: item.total_price,
+              notes: item.notes,
+              // Multi-tarifa snapshot
+              applied_price_tier_id: tierSnap?.tier_id ?? null,
+              applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
+              stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+              updated_at: new Date(),
+            };
+          }),
         },
       },
       include: this.QUOTATION_INCLUDE,
@@ -218,6 +232,12 @@ export class QuotationsService {
 
     // If items are provided, delete and recreate
     if (updateQuotationDto.items) {
+      const ctx = RequestContextService.getContext();
+      const tierSnapshots = await this.resolveTierSnapshotsForItems(
+        updateQuotationDto.items,
+        ctx,
+      );
+
       return this.prisma.$transaction(async (tx) => {
         await tx.quotation_items.deleteMany({ where: { quotation_id: id } });
 
@@ -257,20 +277,27 @@ export class QuotationsService {
             grand_total,
             updated_at: new Date(),
             quotation_items: {
-              create: items.map((item) => ({
-                product_id: item.product_id,
-                product_variant_id: item.product_variant_id,
-                product_name: item.product_name,
-                variant_sku: item.variant_sku,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                discount_amount: item.discount_amount || 0,
-                tax_rate: item.tax_rate,
-                tax_amount_item: item.tax_amount_item,
-                total_price: item.total_price,
-                notes: item.notes,
-                updated_at: new Date(),
-              })),
+              create: items.map((item, index) => {
+                const tierSnap = tierSnapshots[index];
+                return {
+                  product_id: item.product_id,
+                  product_variant_id: item.product_variant_id,
+                  product_name: item.product_name,
+                  variant_sku: item.variant_sku,
+                  quantity: item.quantity,
+                  unit_price: item.unit_price,
+                  discount_amount: item.discount_amount || 0,
+                  tax_rate: item.tax_rate,
+                  tax_amount_item: item.tax_amount_item,
+                  total_price: item.total_price,
+                  notes: item.notes,
+                  applied_price_tier_id: tierSnap?.tier_id ?? null,
+                  applied_price_tier_name_snapshot:
+                    tierSnap?.tier_name ?? null,
+                  stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+                  updated_at: new Date(),
+                };
+              }),
             },
           },
           include: this.QUOTATION_INCLUDE,
@@ -382,6 +409,8 @@ export class QuotationsService {
       tax_amount_item: item.tax_amount_item
         ? Number(item.tax_amount_item)
         : undefined,
+      // Multi-tarifa: propagar el tier elegido al convertir cotización a orden.
+      applied_price_tier_id: item.applied_price_tier_id ?? undefined,
     }));
 
     // Create order using OrdersService
@@ -567,6 +596,102 @@ export class QuotationsService {
         updated_at: new Date(),
       },
       include: this.QUOTATION_INCLUDE,
+    });
+  }
+
+  /**
+   * Multi-tarifa: idéntica a OrdersService.resolveTierSnapshotsForItems.
+   * Centralizar el helper aquí evita un import cruzado entre dominios y
+   * mantiene la quotation independiente del flujo de stock.
+   */
+  private async resolveTierSnapshotsForItems(
+    items: Array<{
+      product_id?: number | null;
+      quantity: number;
+      applied_price_tier_id?: number | null;
+    }>,
+    context: ReturnType<typeof RequestContextService.getContext>,
+  ): Promise<
+    Array<{
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null>
+  > {
+    const tierIds = new Set<number>();
+    for (const item of items) {
+      if (
+        item.applied_price_tier_id !== undefined &&
+        item.applied_price_tier_id !== null
+      ) {
+        tierIds.add(Number(item.applied_price_tier_id));
+      }
+    }
+    if (tierIds.size === 0) {
+      return items.map(() => null);
+    }
+
+    const permissions = context?.permissions ?? [];
+    const isSuperAdmin = !!context?.is_super_admin;
+    const isOwner = !!context?.is_owner;
+    if (
+      !isSuperAdmin &&
+      !isOwner &&
+      !permissions.includes('store:products:apply_pricing_tier')
+    ) {
+      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
+    }
+
+    const tiers = await this.prisma.price_tiers.findMany({
+      where: { id: { in: Array.from(tierIds) } },
+      select: { id: true, name: true, is_package_unit: true },
+    });
+    type TierRow = (typeof tiers)[number];
+    const tierById = new Map<number, TierRow>(
+      tiers.map((t): [number, TierRow] => [t.id, t]),
+    );
+
+    const productIds = Array.from(
+      new Set(
+        items
+          .map((i) => i.product_id)
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    );
+    const productsList = productIds.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            units_per_package: true,
+            package_consumes_multiple_stock: true,
+          },
+        })
+      : [];
+    type ProductRow = (typeof productsList)[number];
+    const productById = new Map<number, ProductRow>(
+      productsList.map((p): [number, ProductRow] => [p.id, p]),
+    );
+
+    return items.map((item) => {
+      const tid = item.applied_price_tier_id;
+      if (tid === undefined || tid === null) return null;
+      const tier = tierById.get(Number(tid));
+      if (!tier) return null;
+      const product = item.product_id ? productById.get(item.product_id) : null;
+      const isPackage =
+        tier.is_package_unit &&
+        product?.package_consumes_multiple_stock === true &&
+        typeof product.units_per_package === 'number' &&
+        (product.units_per_package ?? 0) > 0;
+      const stock_units_consumed = isPackage
+        ? Number(item.quantity) * Number(product!.units_per_package)
+        : null;
+      return {
+        tier_id: tier.id,
+        tier_name: tier.name,
+        stock_units_consumed,
+      };
     });
   }
 

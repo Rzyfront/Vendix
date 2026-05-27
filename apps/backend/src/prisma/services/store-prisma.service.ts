@@ -71,6 +71,7 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_invoices',
     'subscription_payments',
     'subscription_events',
+    'price_tiers',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -252,6 +253,7 @@ export class StorePrismaService extends BasePrismaService {
       'subscription_invoices', // Store scoped
       'subscription_payments', // Relational
       'subscription_events', // Relational
+      'product_price_tier_overrides', // Relational (via product.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -457,6 +459,9 @@ export class StorePrismaService extends BasePrismaService {
       subscription_payments: { invoice: { store_id: context.store_id } },
       subscription_events: {
         store_subscription: { store_id: context.store_id },
+      },
+      product_price_tier_overrides: {
+        product: { store_id: context.store_id },
       },
     };
 
@@ -1421,6 +1426,15 @@ export class StorePrismaService extends BasePrismaService {
 
   get subscription_events() {
     return this.scoped_client.subscription_events;
+  }
+
+  // Price Tiers (multi-tarifa)
+  get price_tiers() {
+    return this.scoped_client.price_tiers;
+  }
+
+  get product_price_tier_overrides() {
+    return this.scoped_client.product_price_tier_overrides;
   }
 
   // Global tables (no store scoping)

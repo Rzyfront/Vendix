@@ -63,4 +63,8 @@ export class CatalogQueryDto {
   @IsOptional()
   @IsString()
   has_discount?: string;
+
+  @IsOptional()
+  @IsString()
+  is_featured?: string;
 }

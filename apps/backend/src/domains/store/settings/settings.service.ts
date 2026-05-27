@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
@@ -62,6 +63,7 @@ export class SettingsService {
   constructor(
     private prisma: StorePrismaService,
     private organizationPrisma: OrganizationPrismaService,
+    private globalPrisma: GlobalPrismaService,
     private s3Service: S3Service,
     private s3PathHelper: S3PathHelper,
     private auditService: AuditService,
@@ -274,6 +276,22 @@ export class SettingsService {
       raw as Record<string, unknown>,
       store_id,
     );
+
+    // Validar que el sonido de notificación referenciado exista en el
+    // catálogo global y esté activo. Permitimos null (sin sonido).
+    const incomingSoundId = dto.notifications?.sound_id;
+    if (incomingSoundId !== undefined && incomingSoundId !== null) {
+      const sound = await this.globalPrisma.notification_sounds.findUnique({
+        where: { id: incomingSoundId },
+        select: { id: true, is_active: true },
+      });
+      if (!sound || !sound.is_active) {
+        throw new VendixHttpException(
+          ErrorCodes.NOTIFICATION_SOUND_INVALID,
+          'El sonido seleccionado no existe o está desactivado.',
+        );
+      }
+    }
 
     // Read raw DB settings (without signed URLs) to avoid leaking temporary URLs into stored JSON
     const storeSettings = await this.prisma.store_settings.findUnique({

@@ -168,6 +168,13 @@ export const superAdminRoutes: Routes = [
           ).then((c) => c.SuperAdminSettingsSyncComponent),
       },
       {
+        path: 'system/notification-sounds',
+        loadComponent: () =>
+          import(
+            '../../private/modules/super-admin/notification-sounds/notification-sounds-page.component'
+          ).then((c) => c.NotificationSoundsPageComponent),
+      },
+      {
         path: 'subscriptions',
         loadChildren: () =>
           import(

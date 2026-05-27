@@ -12,6 +12,7 @@ export interface EcommerceProduct {
   base_price: number;
   sale_price?: number;
   is_on_sale?: boolean;
+  is_featured?: boolean;
   sku: string | null;
   stock_quantity: number | null;
   track_inventory?: boolean;
@@ -82,11 +83,18 @@ export interface CatalogQuery {
   brand_id?: number;
   min_price?: number;
   max_price?: number;
-  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
+  sort_by?:
+    | 'name'
+    | 'price_asc'
+    | 'price_desc'
+    | 'newest'
+    | 'oldest'
+    | 'best_selling';
   page?: number;
   limit?: number;
   created_after?: string;
   has_discount?: boolean;
+  is_featured?: boolean;
   product_type?: 'physical' | 'service';
 }
 
@@ -142,6 +150,8 @@ export class CatalogService {
       params = params.set('created_after', query.created_after);
     if (query.has_discount !== undefined)
       params = params.set('has_discount', query.has_discount.toString());
+    if (query.is_featured !== undefined)
+      params = params.set('is_featured', query.is_featured.toString());
     if (query.product_type)
       params = params.set('product_type', query.product_type);
 

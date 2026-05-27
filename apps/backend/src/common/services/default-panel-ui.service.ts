@@ -121,6 +121,7 @@ export class DefaultPanelUIService {
         settings: true,
         settings_general: true,
         settings_payments: true,
+        settings_price_tiers: true,
         settings_appearance: true,
         settings_security: true,
         settings_domains: true,

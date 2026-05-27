@@ -244,7 +244,28 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(2, { message: 'Las unidades por empaque deben ser mayores o iguales a 2' })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -484,7 +505,28 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(2, { message: 'Las unidades por empaque deben ser mayores o iguales a 2' })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -885,6 +927,11 @@ export class UpdateProductVariantDto {
   available_for_ecommerce?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
@@ -949,6 +996,11 @@ export class UpdateProductWithVariantsDto {
   @IsBoolean()
   @Type(() => Boolean)
   available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -1165,6 +1217,11 @@ export class UpdateVariantWithStockDto {
   available_for_ecommerce?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -1247,6 +1304,10 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_featured?: boolean;
 
   @IsOptional()
   @IsArray()

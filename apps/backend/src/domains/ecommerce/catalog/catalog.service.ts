@@ -78,6 +78,10 @@ export class CatalogService {
       where.is_on_sale = true;
     }
 
+    if (String(query.is_featured) === 'true') {
+      where.is_featured = true;
+    }
+
     let orderBy: any;
     let explicitIds: number[] | null = null;
 
@@ -484,6 +488,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
@@ -539,6 +544,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,

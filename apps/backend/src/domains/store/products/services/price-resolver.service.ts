@@ -6,6 +6,9 @@ export interface PriceResolverParams {
     is_on_sale: boolean;
     sale_price: number | null;
     track_inventory: boolean;
+    has_multiple_price_tiers?: boolean;
+    units_per_package?: number | null;
+    package_consumes_multiple_stock?: boolean;
   };
   variant?: {
     price_override: number | null;
@@ -15,6 +18,22 @@ export interface PriceResolverParams {
   };
 }
 
+/**
+ * Source of the resolved price.
+ *
+ * Legacy values (`variant` | `product` | `base`) are preserved for
+ * backward compatibility with checkout.service.ts and any existing
+ * consumer. The new `tier_override` / `tier_rule` values are returned
+ * exclusively by `resolveWithTier` when a multi-tarifa is applied.
+ */
+export type PriceResolutionSource =
+  | 'variant'
+  | 'product'
+  | 'base'
+  | 'tier_override'
+  | 'tier_rule'
+  | 'legacy_cascade';
+
 export interface PriceResolutionResult {
   unitBasePrice: number;
   unitPrice: number;
@@ -23,8 +42,37 @@ export interface PriceResolutionResult {
   isOnSale: boolean;
   totalTaxRate: number;
   currency: string;
-  source: 'variant' | 'product' | 'base';
+  source: PriceResolutionSource;
   reason: string;
+  // Multi-tarifa (only populated by resolveWithTier when a tier is applied)
+  appliedPriceTierId?: number | null;
+  appliedPriceTierName?: string | null;
+  isPackageUnit?: boolean;
+  unitsPerPackage?: number | null;
+}
+
+/**
+ * Input for the multi-tarifa aware resolver. The `priceTier` is optional;
+ * when undefined OR the product has `has_multiple_price_tiers = false`
+ * the resolver falls back to the legacy cascade.
+ */
+export interface PriceResolverWithTierParams {
+  product: PriceResolverParams['product'];
+  variant?: PriceResolverParams['variant'];
+  priceTier?: {
+    id: number;
+    name: string;
+    discount_percentage: number;
+    is_package_unit: boolean;
+  } | null;
+  /** Override prices for this product+tier (variant-specific or base). */
+  tierOverrides?: Array<{
+    variant_id: number | null;
+    override_price: number;
+  }>;
+  taxRate?: number;
+  /** Optional quantity hint (does not affect unit price, only callers). */
+  quantity?: number;
 }
 
 /**
@@ -63,7 +111,7 @@ export class PriceResolverService {
     let unitPrice = product.base_price;
     let compareAtPrice: number | null = null;
     let isOnSale = false;
-    let source: 'variant' | 'product' | 'base' = 'base';
+    let source: PriceResolutionSource = 'base';
     let reason = 'Base product price';
 
     // Rule 1: Variant on sale with valid sale_price takes priority
@@ -175,7 +223,7 @@ export class PriceResolverService {
     currency: string,
     compareAtPrice: number | null,
     isOnSale: boolean,
-    source: 'variant' | 'product' | 'base',
+    source: PriceResolutionSource,
     reason: string,
   ): PriceResolutionResult {
     // Calculate price with tax: unitPrice * (1 + taxRate)
@@ -206,5 +254,114 @@ export class PriceResolverService {
    */
   calculatePriceWithTax(unitPrice: number, taxRate: number): number {
     return unitPrice * (1 + taxRate);
+  }
+
+  /**
+   * Multi-tarifa aware resolver. Does NOT replace `resolvePrice`; checkout
+   * and any consumer that does not pass a tier keeps using the legacy
+   * cascade by calling `resolvePrice` directly.
+   *
+   * Resolution order:
+   *
+   *   a. If `product.has_multiple_price_tiers === false` OR `priceTier == null`
+   *      → delegate to legacy cascade (`resolvePrice`) and report
+   *      `source = 'legacy_cascade'` for traceability.
+   *
+   *   b. Look for an explicit override row in `tierOverrides`:
+   *      - first try the variant-specific row (when a variant is provided);
+   *      - if absent fall back to the base product override (variant_id = null).
+   *      When found → `unitPrice = override_price`, `source = 'tier_override'`.
+   *
+   *   c. Otherwise apply the tier rule:
+   *      base = variant.price_override (if > 0) or product.base_price.
+   *      unitPrice = base * (1 - discount_percentage / 100).
+   *      `source = 'tier_rule'`.
+   *
+   *   d. Taxes are applied identically to the legacy cascade
+   *      (`unitPrice * (1 + taxRate)`).
+   *
+   * The returned `appliedPriceTierId` / `appliedPriceTierName` are used by
+   * orders/quotations for the immutable snapshot in line items.
+   */
+  resolveWithTier(args: PriceResolverWithTierParams): PriceResolutionResult {
+    const {
+      product,
+      variant,
+      priceTier,
+      tierOverrides,
+      taxRate,
+    } = args;
+    const totalTaxRate = taxRate ?? this.DEFAULT_TAX_RATE;
+    const currency = this.DEFAULT_CURRENCY;
+
+    // (a) Tier not applicable → legacy cascade.
+    if (!priceTier || !product.has_multiple_price_tiers) {
+      const legacy = this.resolvePrice({ product, variant }, totalTaxRate);
+      return {
+        ...legacy,
+        source: priceTier ? 'legacy_cascade' : legacy.source,
+        appliedPriceTierId: null,
+        appliedPriceTierName: null,
+        isPackageUnit: false,
+        unitsPerPackage: product.units_per_package ?? null,
+      };
+    }
+
+    // Resolve the price-base used by tier rule (variant override wins over
+    // product base price, identical to the legacy cascade's notion of base).
+    const variantHasOverride =
+      variant?.price_override != null && variant.price_override > 0;
+    const ruleBasePrice = variantHasOverride
+      ? Number(variant!.price_override)
+      : Number(product.base_price);
+
+    // (b) Override lookup — variant-specific first, then product base.
+    const overrides = tierOverrides ?? [];
+    let overrideRow: { variant_id: number | null; override_price: number } | undefined;
+    if (variant) {
+      overrideRow = overrides.find(
+        (o) => o.variant_id !== null && o.variant_id !== undefined,
+      );
+    }
+    if (!overrideRow) {
+      overrideRow = overrides.find(
+        (o) => o.variant_id === null || o.variant_id === undefined,
+      );
+    }
+
+    let unitPrice: number;
+    let source: PriceResolutionSource;
+    let reason: string;
+    if (overrideRow) {
+      unitPrice = Number(overrideRow.override_price);
+      source = 'tier_override';
+      reason = `Explicit override for tier "${priceTier.name}"`;
+    } else {
+      // (c) Apply discount rule on ruleBasePrice.
+      const discount = Number(priceTier.discount_percentage ?? 0);
+      const clampedDiscount = Math.max(0, Math.min(100, discount));
+      unitPrice = ruleBasePrice * (1 - clampedDiscount / 100);
+      source = 'tier_rule';
+      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off)`;
+    }
+
+    const compareAtPrice =
+      ruleBasePrice > unitPrice ? ruleBasePrice : null;
+
+    return {
+      unitBasePrice: ruleBasePrice,
+      unitPrice,
+      unitPriceWithTax: unitPrice * (1 + totalTaxRate),
+      compareAtPrice,
+      isOnSale: false,
+      totalTaxRate,
+      currency,
+      source,
+      reason,
+      appliedPriceTierId: priceTier.id,
+      appliedPriceTierName: priceTier.name,
+      isPackageUnit: !!priceTier.is_package_unit,
+      unitsPerPackage: product.units_per_package ?? null,
+    };
   }
 }

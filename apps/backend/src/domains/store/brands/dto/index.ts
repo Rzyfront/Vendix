@@ -6,7 +6,6 @@ import {
   MinLength,
   MaxLength,
   Min,
-  IsUrl,
   IsEnum,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -50,7 +49,6 @@ export class CreateBrandDto {
   })
   @IsString()
   @IsOptional()
-  @IsUrl()
   logo_url?: string;
 
   @ApiPropertyOptional({

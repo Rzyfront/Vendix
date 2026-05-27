@@ -1,0 +1,68 @@
+meta {
+  name: 10 Create Order WITH Price Tier (snapshot smoke)
+  type: http
+  seq: 10
+}
+
+# Smoke test: send applied_price_tier_id in an order line item and verify the
+# backend persists the snapshot fields (applied_price_tier_id +
+# applied_price_tier_name_snapshot) on the saved order_item.
+#
+# Requires the authenticated user to have:
+#   - store:orders:create
+#   - store:products:apply_pricing_tier
+#
+# Pre-flight: requests 01 + 07 must have run so {{priceTierId}} is set and the
+# product override exists for {{ecommerce_product_id}}.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "customer_id": 1,
+    "subtotal": 49999.00,
+    "total_amount": 49999.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "product_name": "Bruno smoke item with tier",
+        "quantity": 1,
+        "unit_price": 49999.00,
+        "total_price": 49999.00,
+        "applied_price_tier_id": {{priceTierId}}
+      }
+    ]
+  }
+}
+
+tests {
+  test("Status is 201", function () {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Order has id and items", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('items');
+    expect(res.body.data.items).to.be.an('array').that.is.not.empty;
+  });
+
+  test("First order item carries snapshot of applied price tier", function () {
+    var item = res.body.data.items[0];
+    expect(item).to.have.property('applied_price_tier_id');
+    expect(String(item.applied_price_tier_id)).to.equal(String(bru.getVar('priceTierId')));
+    expect(item).to.have.property('applied_price_tier_name_snapshot');
+    expect(item.applied_price_tier_name_snapshot).to.be.a('string').and.not.empty;
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("priceTierOrderId", res.body.data.id);
+  }
+}

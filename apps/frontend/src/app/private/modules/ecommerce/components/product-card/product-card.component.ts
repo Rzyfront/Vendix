@@ -11,7 +11,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
   standalone: true,
   imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
   template: `
-    <article class="product-card" (click)="onQuickView($event)">
+    <article class="product-card" (click)="onCardClick($event)">
       <div class="product-image">
         @if (product().image_url) {
           <img [src]="product().image_url" [alt]="product().name" loading="lazy">
@@ -69,6 +69,18 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             <app-icon slot="icon" name="share" [size]="18"></app-icon>
           </app-button>
         </div>
+
+        @if (!isUnavailable()) {
+          <button
+            class="quick-cart-btn"
+            type="button"
+            [attr.aria-label]="quickActionLabel()"
+            [title]="quickActionLabel()"
+            (click)="onAddToCart($event)"
+          >
+            <app-icon [name]="quickActionIcon()" [size]="17"></app-icon>
+          </button>
+        }
       </div>
       <div class="product-info">
         @if (product().brand) {
@@ -107,25 +119,6 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           </div>
         }
       </div>
-      <div class="actions-container">
-        <app-button
-          variant="primary"
-          size="sm"
-          customClasses="buy-btn"
-          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
-          (clicked)="onBuyNow($event)">
-          {{ product().product_type === 'service' ? 'Agendar' : 'Comprar' }}
-        </app-button>
-        <app-button
-          variant="secondary"
-          size="sm"
-          customClasses="add-to-cart-btn"
-          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
-          [title]="product().requires_booking && product().product_type === 'service' ? 'Agendar' : 'Agregar al carrito'"
-          (clicked)="onAddToCart($event)">
-          <app-icon slot="icon" [name]="product().requires_booking && product().product_type === 'service' ? 'calendar-check' : 'shopping-cart'" [size]="16"></app-icon>
-        </app-button>
-      </div>
     </article>
   `,
   styles: [`
@@ -136,9 +129,9 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 
     /* iOS-style Product Card */
     .product-card {
-      background: var(--color-surface);
-      border-radius: 1rem;
-      border: 1px solid var(--color-border);
+      background: transparent;
+      border-radius: 8px;
+      border: 1px solid transparent;
       overflow: hidden;
       cursor: pointer;
       transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
@@ -147,9 +140,9 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       -webkit-tap-highlight-color: transparent;
 
       &:hover {
-        box-shadow: 0 8px 25px -8px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 10px 24px -20px rgba(0, 0, 0, 0.35);
         transform: translateY(-2px);
-        border-color: var(--color-primary);
+        border-color: rgba(148, 163, 184, 0.45);
       }
 
       &:active {
@@ -171,6 +164,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       aspect-ratio: 1;
       background: var(--color-background);
       overflow: hidden;
+      border-radius: 8px;
 
       img {
         width: 100%;
@@ -186,6 +180,42 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         justify-content: center;
         color: var(--color-text-muted);
         font-size: 3rem;
+      }
+    }
+
+    .quick-cart-btn {
+      position: absolute;
+      right: 0.65rem;
+      bottom: 0.65rem;
+      z-index: 2;
+      width: 34px;
+      height: 34px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-secondary);
+      background: rgba(255, 255, 255, 0.86);
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 999px;
+      box-shadow: 0 8px 20px -18px rgba(15, 23, 42, 0.4);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+
+      &:hover {
+        border-color: rgba(148, 163, 184, 0.65);
+        transform: translateY(-1px);
+      }
+    }
+
+    .product-card:hover .quick-cart-btn,
+    .quick-cart-btn:focus-visible {
+      opacity: 1;
+    }
+
+    @media (hover: none) {
+      .quick-cart-btn {
+        opacity: 1;
       }
     }
 
@@ -326,51 +356,10 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       font-weight: 500;
     }
 
-    .actions-container {
-      margin: 0 1rem 1rem;
-      display: flex;
-      gap: 0.5rem;
-
-      /* Botón Comprar (primer app-button) - ocupa todo el espacio */
-      app-button:first-child {
-        flex: 1;
-        min-width: 0;
-      }
-
-      /* Botón Carrito (segundo app-button) - cuadrado fijo */
-      app-button:last-child {
-        flex-shrink: 0;
-      }
-    }
-
-    /* Botón Comprar - misma altura que carrito */
-    :host ::ng-deep .buy-btn {
-      width: 100% !important;
-      height: 32px !important;
-
-      @media (min-width: 640px) {
-        height: 36px !important;
-      }
-    }
-
-    /* Botón Carrito - cuadrado simétrico */
-    :host ::ng-deep .add-to-cart-btn {
-      width: 32px !important;
-      min-width: 32px !important;
-      height: 32px !important;
-      padding: 0 !important;
-
-      @media (min-width: 640px) {
-        width: 36px !important;
-        min-width: 36px !important;
-        height: 36px !important;
-      }
-    }
-
     /* Mobile compact styles */
     @media (max-width: 480px) {
       .product-card {
-        border-radius: 0.75rem;
+        border-radius: 8px;
       }
 
       .variant-badge {
@@ -395,7 +384,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-info {
-        padding: 0.5rem 0.6rem;
+        padding: 0.5rem 0.15rem;
         gap: 0.15rem;
       }
 
@@ -412,18 +401,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         font-size: var(--fs-sm);
       }
 
-      .actions-container {
-        margin: 0 0.5rem 0.5rem;
-        gap: 0.35rem;
-      }
-
-      :host ::ng-deep .buy-btn {
-        height: 28px !important;
-      }
-
-      :host ::ng-deep .add-to-cart-btn {
+      .quick-cart-btn {
         width: 28px !important;
-        min-width: 28px !important;
         height: 28px !important;
       }
     }
@@ -449,14 +428,14 @@ export class ProductCardComponent {
     return !!this.product().variant_count && this.product().variant_count! > 0;
   }
 
-  onQuickView(event: Event): void {
+  onCardClick(event: Event): void {
     // Let clicks on buttons/links propagate normally to their handlers
     const target = event.target as HTMLElement;
     if (target.closest('button') || target.closest('a')) {
       return;
     }
     event.preventDefault();
-    this.quick_view.emit(this.product());
+    this.router.navigate(['/products', this.product().slug]);
   }
 
   onBuyNow(event: Event): void {
@@ -467,7 +446,7 @@ export class ProductCardComponent {
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product().slug]);
+      this.router.navigate(['/products', this.product().slug]);
       return;
     }
     this.add_to_cart.emit(this.product());
@@ -482,10 +461,34 @@ export class ProductCardComponent {
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product().slug]);
+      this.router.navigate(['/products', this.product().slug]);
       return;
     }
     this.add_to_cart.emit(this.product());
+  }
+
+  isUnavailable(): boolean {
+    return (
+      this.product().product_type !== 'service' &&
+      this.product().track_inventory !== false &&
+      this.product().stock_quantity === 0
+    );
+  }
+
+  quickActionIcon(): string {
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      return 'calendar-check';
+    }
+    if (this.hasVariants) return 'eye';
+    return 'shopping-cart';
+  }
+
+  quickActionLabel(): string {
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      return 'Agendar';
+    }
+    if (this.hasVariants) return 'Ver opciones';
+    return 'Agregar al carrito';
   }
 
   onWishlistClick(event: Event): void {

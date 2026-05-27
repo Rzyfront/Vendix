@@ -163,6 +163,9 @@ export interface NotificationsSettings {
   new_order_alerts_email: string | null;
   low_stock_alerts_phone: string | null;
   new_order_alerts_phone: string | null;
+  sound_id: string | null;
+  sound_volume: number;
+  sound_muted: boolean;
 }
 
 export interface CashRegisterSettings {

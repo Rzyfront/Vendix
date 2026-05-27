@@ -155,6 +155,7 @@ export class SuperAdminLayoutComponent {
     '/super-admin/system/backups': 'Copias de Seguridad',
     '/super-admin/system/payroll-defaults': 'Parámetros de Nómina',
     '/super-admin/system/settings-sync': 'Sincronización de Settings',
+    '/super-admin/system/notification-sounds': 'Sonidos de notificación',
   };
 
   user = {
@@ -310,6 +311,11 @@ export class SuperAdminLayoutComponent {
             label: 'Sincronización de Settings',
             icon: 'circle',
             route: '/super-admin/system/settings-sync',
+          },
+          {
+            label: 'Sonidos de notificación',
+            icon: 'circle',
+            route: '/super-admin/system/notification-sounds',
           },
         ],
       },

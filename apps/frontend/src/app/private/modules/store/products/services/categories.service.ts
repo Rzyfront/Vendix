@@ -23,6 +23,13 @@ interface PaginatedApiResponse<T> {
     };
   };
 }
+
+export interface CategoryImageUploadResponse {
+  key: string;
+  url: string;
+  thumbKey?: string;
+}
+
 import {
   ProductCategory,
   CreateCategoryDto,
@@ -118,6 +125,20 @@ export class CategoriesService {
       .patch<
         ApiResponse<ProductCategory>
       >(`${this.apiUrl}/store/categories/${id}`, category)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  uploadCategoryImage(file: File): Observable<CategoryImageUploadResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.http
+      .post<
+        ApiResponse<CategoryImageUploadResponse>
+      >(`${this.apiUrl}/store/categories/upload-image`, formData)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

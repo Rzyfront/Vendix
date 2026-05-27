@@ -440,6 +440,9 @@ export class StoreConfigurationModalComponent
       new_order_alerts_email: null,
       low_stock_alerts_phone: null,
       new_order_alerts_phone: null,
+      sound_id: null,
+      sound_volume: 70,
+      sound_muted: false,
     },
     pos: {
       allow_anonymous_sales: false,

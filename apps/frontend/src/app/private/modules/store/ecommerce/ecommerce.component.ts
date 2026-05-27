@@ -24,6 +24,7 @@ import {
   SliderImage,
   SliderPhoto,
 } from './interfaces';
+import type { SliderActionType } from './interfaces';
 import { FooterSettingsFormComponent } from './components/footer-settings-form';
 import { StoreShareModalComponent } from './components/store-share-modal';
 import {
@@ -44,6 +45,57 @@ import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/config
 import { SelectorOption } from '../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import type { Currency } from '../../../../shared/pipes/currency';
+
+type HomeSectionKey = 'slider' | 'categories' | 'brands' | 'featured_products';
+
+interface HomeSectionAdminItem {
+  key: HomeSectionKey;
+  label: string;
+  description: string;
+  icon: string;
+  defaultOrder: number;
+  hasLimit: boolean;
+  limitMax: number;
+}
+
+const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
+  {
+    key: 'slider',
+    label: 'Slider principal',
+    description: 'Hero visual, promociones y llamadas a la acción.',
+    icon: 'image',
+    defaultOrder: 10,
+    hasLimit: false,
+    limitMax: 1,
+  },
+  {
+    key: 'categories',
+    label: 'Categorías',
+    description: 'Accesos visuales a las familias de productos.',
+    icon: 'layout-grid',
+    defaultOrder: 20,
+    hasLimit: true,
+    limitMax: 24,
+  },
+  {
+    key: 'brands',
+    label: 'Marcas',
+    description: 'Logos y accesos a marcas disponibles.',
+    icon: 'tags',
+    defaultOrder: 30,
+    hasLimit: true,
+    limitMax: 24,
+  },
+  {
+    key: 'featured_products',
+    label: 'Productos destacados',
+    description: 'Colección curada con productos marcados como destacados.',
+    icon: 'sparkles',
+    defaultOrder: 40,
+    hasLimit: true,
+    limitMax: 48,
+  },
+];
 
 @Component({
   selector: 'app-ecommerce',
@@ -101,6 +153,16 @@ export class EcommerceComponent {
     { initialValue: this.settingsForm.getRawValue() },
   );
 
+  readonly orderedHomeSections = computed<HomeSectionAdminItem[]>(() => {
+    const sections = this.formValueSignal()?.home_sections ?? {};
+    return HOME_SECTION_ITEMS.map((section) => ({
+      ...section,
+      defaultOrder: Number(
+        sections?.[section.key]?.sort_order ?? section.defaultOrder,
+      ),
+    })).sort((a, b) => a.defaultOrder - b.defaultOrder);
+  });
+
   readonly primaryColor = computed(
     () => this.formValueSignal()?.inicio?.colores?.primary_color ?? '#3B82F6',
   );
@@ -115,6 +177,17 @@ export class EcommerceComponent {
   readonly sliderImages = signal<SliderImage[]>([]);
   readonly activeImageIndex = signal(0);
   readonly isUploadingImage = signal(false);
+  readonly sliderActionOptions: Array<{
+    value: SliderActionType;
+    label: string;
+  }> = [
+    { value: 'none', label: 'Sin acción' },
+    { value: 'internal_url', label: 'URL interna' },
+    { value: 'external_url', label: 'URL externa' },
+    { value: 'product', label: 'Producto' },
+    { value: 'category', label: 'Categoría' },
+    { value: 'brand', label: 'Marca' },
+  ];
 
   // Logo state
   readonly isUploadingLogo = signal(false);
@@ -235,6 +308,37 @@ export class EcommerceComponent {
       slider: this.fb.group({
         enable: [false],
         photos: this.fb.array([]),
+      }),
+
+      // Secciones del inicio
+      home_sections: this.fb.group({
+        slider: this.fb.group({
+          enabled: [true],
+          title: ['Slider principal'],
+          subtitle: ['La primera historia visual de tu tienda'],
+          sort_order: [10, [Validators.min(1)]],
+        }),
+        categories: this.fb.group({
+          enabled: [true],
+          title: ['Categorías'],
+          subtitle: ['Explora por tipo de producto'],
+          limit: [8, [Validators.min(1), Validators.max(24)]],
+          sort_order: [20, [Validators.min(1)]],
+        }),
+        brands: this.fb.group({
+          enabled: [true],
+          title: ['Marcas'],
+          subtitle: ['Compra por tus marcas favoritas'],
+          limit: [8, [Validators.min(1), Validators.max(24)]],
+          sort_order: [30, [Validators.min(1)]],
+        }),
+        featured_products: this.fb.group({
+          enabled: [true],
+          title: ['Productos destacados'],
+          subtitle: ['Selección especial de la tienda'],
+          limit: [16, [Validators.min(1), Validators.max(48)]],
+          sort_order: [40, [Validators.min(1)]],
+        }),
       }),
 
       // Catálogo
@@ -447,6 +551,13 @@ export class EcommerceComponent {
                     key: photo.key || undefined,
                     title: photo.title,
                     caption: photo.caption,
+                    action_type: photo.action_type || 'none',
+                    action_label: photo.action_label,
+                    action_url: photo.action_url,
+                    product_id: photo.product_id ?? null,
+                    category_id: photo.category_id ?? null,
+                    brand_id: photo.brand_id ?? null,
+                    open_in_new_tab: photo.open_in_new_tab ?? true,
                   })),
               );
             } else {
@@ -664,6 +775,8 @@ export class EcommerceComponent {
                       thumbnail: result.thumbKey,
                       title: '',
                       caption: '',
+                      action_type: 'none',
+                      open_in_new_tab: true,
                     }
                   : v,
               ),
@@ -718,7 +831,7 @@ export class EcommerceComponent {
    */
   updateImageMetadata(
     index: number,
-    field: 'title' | 'caption',
+    field: 'title' | 'caption' | 'action_label' | 'action_url',
     value: string,
   ): void {
     const current = this.sliderImages();
@@ -750,6 +863,53 @@ export class EcommerceComponent {
         ? event
         : (event.target as HTMLInputElement).value;
     this.updateImageMetadata(this.activeImageIndex(), 'caption', value);
+  }
+
+  updateImageAction(
+    index: number,
+    field: 'action_type' | 'open_in_new_tab',
+    value: SliderActionType | boolean,
+  ): void {
+    const current = this.sliderImages();
+    if (!current[index]) return;
+
+    this.sliderImages.update((arr) =>
+      arr.map((v, idx) =>
+        idx === index
+          ? {
+              ...v,
+              [field]: value,
+              ...(field === 'action_type' && value === 'none'
+                ? {
+                    action_label: '',
+                    action_url: '',
+                    product_id: null,
+                    category_id: null,
+                    brand_id: null,
+                  }
+                : {}),
+            }
+          : v,
+      ),
+    );
+    this.updateSliderPhotosForm();
+  }
+
+  updateImageTargetId(
+    index: number,
+    field: 'product_id' | 'category_id' | 'brand_id',
+    value: string,
+  ): void {
+    const current = this.sliderImages();
+    if (!current[index]) return;
+
+    const numericValue = value.trim() ? Number(value) : null;
+    this.sliderImages.update((arr) =>
+      arr.map((v, idx) =>
+        idx === index ? { ...v, [field]: numericValue || null } : v,
+      ),
+    );
+    this.updateSliderPhotosForm();
   }
 
   /**
@@ -844,6 +1004,13 @@ export class EcommerceComponent {
       key: img.key || null,
       title: img.title || '',
       caption: img.caption || '',
+      action_type: img.action_type || 'none',
+      action_label: img.action_label || '',
+      action_url: img.action_url || '',
+      product_id: img.product_id ?? null,
+      category_id: img.category_id ?? null,
+      brand_id: img.brand_id ?? null,
+      open_in_new_tab: img.open_in_new_tab ?? true,
     }));
 
     // Asegurarnos de que el formulario tenga los datos actualizados
@@ -920,6 +1087,13 @@ export class EcommerceComponent {
           key: img.key || null,
           title: img.title || '',
           caption: img.caption || '',
+          action_type: img.action_type || 'none',
+          action_label: img.action_label || '',
+          action_url: img.action_url || '',
+          product_id: img.product_id ?? null,
+          category_id: img.category_id ?? null,
+          brand_id: img.brand_id ?? null,
+          open_in_new_tab: img.open_in_new_tab ?? true,
         })),
       },
       footer: this.footerSettings(),

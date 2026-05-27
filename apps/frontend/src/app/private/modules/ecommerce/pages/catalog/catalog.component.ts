@@ -121,12 +121,10 @@ export class CatalogComponent implements OnInit {
         // Siempre actualizar search_term (vacío si no existe)
         this.search_term.set(params['search'] || '');
 
-        if (params['category']) {
-          this.selected_category_id.set(+params['category']);
-        }
-        if (params['brand']) {
-          this.selected_brand_id.set(+params['brand']);
-        }
+        const categoryParam = params['category'] || params['category_id'];
+        const brandParam = params['brand'] || params['brand_id'];
+        this.selected_category_id.set(categoryParam ? +categoryParam : null);
+        this.selected_brand_id.set(brandParam ? +brandParam : null);
         this.loadProducts();
       });
 
@@ -271,7 +269,7 @@ export class CatalogComponent implements OnInit {
     }
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
-      this.router.navigate(['/catalog', product.slug]);
+      this.router.navigate(['/products', product.slug]);
       return;
     }
     const result = this.cart_service.addToCart(product.id, 1);

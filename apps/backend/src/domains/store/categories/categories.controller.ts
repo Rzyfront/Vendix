@@ -12,7 +12,10 @@ import {
   ParseIntPipe,
   HttpCode,
   HttpStatus,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto, CategoryQueryDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -97,6 +100,39 @@ export class CategoriesController {
         error.message || 'Error en la búsqueda de categorías',
         error.response?.message || error.message,
         error.status || 400,
+      );
+    }
+  }
+
+  @Post('upload-image')
+  @Permissions('store:categories:update')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImage(@UploadedFile() file: Express.Multer.File) {
+    try {
+      if (!file) {
+        return this.responseService.error(
+          'No se proporcionó archivo',
+          'File is required',
+        );
+      }
+
+      if (!file.mimetype.startsWith('image/')) {
+        return this.responseService.error(
+          'Tipo de archivo inválido',
+          'Only image files are allowed',
+        );
+      }
+
+      const result = await this.categoriesService.uploadCategoryImage(
+        file.buffer,
+        `category-${Date.now()}.webp`,
+      );
+
+      return this.responseService.created(result, 'Imagen subida exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al subir la imagen',
+        error.message,
       );
     }
   }

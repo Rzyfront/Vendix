@@ -35,19 +35,19 @@ export class CatalogController {
   }
 
   @Public()
+  @Get('config/public')
+  @Header('Cache-Control', 'no-store')
+  async getPublicConfig() {
+    const data = await this.catalog_service.getPublicConfig();
+    return { success: true, data };
+  }
+
+  @Public()
   @Get(':slug')
   @Header('Cache-Control', 'no-store')
   async getProductBySlug(@Param('slug') slug: string) {
     // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware
     const data = await this.catalog_service.getProductBySlug(slug);
-    return { success: true, data };
-  }
-
-  @Public()
-  @Get('config/public')
-  @Header('Cache-Control', 'no-store')
-  async getPublicConfig() {
-    const data = await this.catalog_service.getPublicConfig();
     return { success: true, data };
   }
 }

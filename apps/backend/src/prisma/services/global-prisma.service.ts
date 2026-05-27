@@ -313,6 +313,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.push_subscriptions;
   }
 
+  get notification_sounds() {
+    return this.baseClient.notification_sounds;
+  }
+
   // Booking models
   get bookings() {
     return this.baseClient.bookings;

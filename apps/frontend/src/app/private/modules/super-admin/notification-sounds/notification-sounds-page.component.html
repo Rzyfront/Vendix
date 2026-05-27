@@ -1,0 +1,131 @@
+<!-- Standard Module Layout: Stats + Sticky search/header + ResponsiveDataView -->
+<div class="flex flex-col gap-6">
+  <!-- Stats Cards -->
+  <div class="stats-container">
+    <app-stats
+      title="Total"
+      [value]="stats().total"
+      iconName="bell"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+
+    <app-stats
+      title="Activos"
+      [value]="stats().active"
+      iconName="check-circle"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    ></app-stats>
+
+    <app-stats
+      title="Inactivos"
+      [value]="stats().inactive"
+      iconName="slash"
+      iconBgColor="bg-yellow-100"
+      iconColor="text-yellow-600"
+    ></app-stats>
+  </div>
+
+  <!-- Main Card -->
+  <app-card [padding]="false" overflow="hidden">
+    <!-- Header (sticky-friendly) -->
+    <div
+      class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+    >
+      <div class="flex-1 min-w-0">
+        <h3 class="text-lg font-semibold text-text-primary">
+          Sonidos de notificación
+        </h3>
+        <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+          Catálogo global disponible para todas las tiendas Vendix
+        </p>
+      </div>
+
+      <div
+        class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+      >
+        <div class="w-full sm:w-60">
+          <app-inputsearch
+            placeholder="Buscar sonidos..."
+            [debounceTime]="300"
+            (searchChange)="onSearchChange($event)"
+            size="sm"
+            fullWidth="true"
+          ></app-inputsearch>
+        </div>
+
+        <div class="flex gap-2 items-center sm:ml-auto">
+          <app-button
+            variant="primary"
+            size="sm"
+            iconName="plus"
+            (clicked)="openCreateModal()"
+          >
+            <span class="hidden sm:inline">Nuevo sonido</span>
+            <span class="sm:hidden">Nuevo</span>
+          </app-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data View -->
+    <div class="relative min-h-[400px] p-2 md:p-4">
+      @if (isLoading()) {
+        <div
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
+
+      <app-responsive-data-view
+        [columns]="tableColumns"
+        [data]="filteredSounds()"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading()"
+      >
+        @if (!isLoading() && filteredSounds().length === 0) {
+          <div class="p-8 flex justify-center w-full">
+            <app-empty-state
+              icon="bell"
+              [title]="
+                searchTerm() ? 'Sin resultados' : 'No hay sonidos de notificación'
+              "
+              [description]="
+                searchTerm()
+                  ? 'Ajusta tu búsqueda'
+                  : 'Sube el primer sonido del catálogo global'
+              "
+              actionButtonText="Nuevo sonido"
+              [showActionButton]="!searchTerm()"
+              (actionClick)="openCreateModal()"
+            ></app-empty-state>
+          </div>
+        }
+      </app-responsive-data-view>
+    </div>
+  </app-card>
+</div>
+
+@defer (when showCreateModal()) {
+  <app-create-notification-sound-modal
+    [isOpen]="showCreateModal()"
+    (isOpenChange)="showCreateModal.set($event)"
+    [isSubmitting]="isCreating()"
+    (submit)="createSound($event)"
+  ></app-create-notification-sound-modal>
+}
+
+@defer (when showEditModal()) {
+  <app-edit-notification-sound-modal
+    [isOpen]="showEditModal()"
+    (isOpenChange)="showEditModal.set($event)"
+    [sound]="selectedSound()"
+    [isSubmitting]="isUpdating()"
+    (submit)="updateSound($event)"
+  ></app-edit-notification-sound-modal>
+}

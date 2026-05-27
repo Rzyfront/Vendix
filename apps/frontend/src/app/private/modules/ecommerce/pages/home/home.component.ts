@@ -4,6 +4,7 @@ import {
   OnInit,
   inject,
   DestroyRef,
+  computed,
   signal,
 } from '@angular/core';
 
@@ -11,7 +12,6 @@ import { RouterModule, Router } from '@angular/router';
 import {
   CatalogService,
   EcommerceProduct,
-  Category,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
@@ -20,11 +20,47 @@ import { TenantFacade } from '../../../../../../app/core/store/tenant/tenant.fac
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { HeroBannerComponent } from '../../components/hero-banner';
+import { CategoriesShowcaseComponent } from '../../components/categories-showcase/categories-showcase.component';
+import { BrandsShowcaseComponent } from '../../components/brands-showcase/brands-showcase.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+interface HomeSectionConfig {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+}
+
+interface HomeSectionsConfig {
+  categories: HomeSectionConfig;
+  brands: HomeSectionConfig;
+  featured_products: HomeSectionConfig;
+}
+
+const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
+  categories: {
+    enabled: true,
+    title: 'Categorías',
+    subtitle: 'Explora por tipo de producto',
+    limit: 8,
+  },
+  brands: {
+    enabled: true,
+    title: 'Marcas',
+    subtitle: 'Compra por tus marcas favoritas',
+    limit: 8,
+  },
+  featured_products: {
+    enabled: true,
+    title: 'Productos destacados',
+    subtitle: 'Selección especial de la tienda',
+    limit: 16,
+  },
+};
 
 @Component({
   selector: 'app-home',
@@ -33,6 +69,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     RouterModule,
     ProductCardComponent,
     HeroBannerComponent,
+    CategoriesShowcaseComponent,
+    BrandsShowcaseComponent,
     ProductQuickViewModalComponent,
     ShareModalComponent,
     ButtonComponent,
@@ -51,6 +89,10 @@ export class HomeComponent implements OnInit {
   readonly selectedProductSlug = signal<string | null>(null);
   readonly slider_config = signal<any>(null);
   readonly show_slider = signal(false);
+  readonly home_sections = signal<HomeSectionsConfig>(DEFAULT_HOME_SECTIONS);
+  readonly featured_section = computed(
+    () => this.home_sections().featured_products,
+  );
   readonly banner_content = signal<{ title: string; paragraph: string }>({
     title: 'Bienvenido',
     paragraph: 'Encuentra aquí todo lo que buscas...',
@@ -102,9 +144,16 @@ export class HomeComponent implements OnInit {
       });
   }
 
-  loadFeaturedProducts(): void {
+  loadFeaturedProducts(limit = this.featured_section().limit || 16): void {
+    if (this.featured_section().enabled === false) {
+      this.featured_products.set([]);
+      this.is_loading_featured.set(false);
+      return;
+    }
+
+    this.is_loading_featured.set(true);
     this.catalog_service
-      .getProducts({ limit: 16, sort_by: 'best_selling' as any })
+      .getProducts({ limit, sort_by: 'newest', is_featured: true })
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {
@@ -131,6 +180,22 @@ export class HomeComponent implements OnInit {
           const ecommerceConfig = customConfig.ecommerce || {};
 
           this.slider_config.set(ecommerceConfig.slider || null);
+          const configuredSections = ecommerceConfig.home_sections || {};
+          this.home_sections.set({
+            categories: {
+              ...DEFAULT_HOME_SECTIONS.categories,
+              ...(configuredSections.categories || {}),
+            },
+            brands: {
+              ...DEFAULT_HOME_SECTIONS.brands,
+              ...(configuredSections.brands || {}),
+            },
+            featured_products: {
+              ...DEFAULT_HOME_SECTIONS.featured_products,
+              ...(configuredSections.featured_products || {}),
+            },
+          });
+          this.loadFeaturedProducts();
 
           // Verificar si hay fotos configuradas
           const hasPhotos =
@@ -160,7 +225,7 @@ export class HomeComponent implements OnInit {
     }
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
-      this.router.navigate(['/catalog', product.slug]);
+      this.router.navigate(['/products', product.slug]);
       return;
     }
     const result = this.cart_service.addToCart(product.id, 1);

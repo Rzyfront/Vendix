@@ -17,6 +17,8 @@ import {
 } from './dto';
 import slugify from 'slugify';
 import { S3Service } from '@common/services/s3.service';
+import { ImageContext } from '@common/config/image-presets';
+import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -26,6 +28,7 @@ export class CategoriesService {
     private prisma: StorePrismaService,
     private accessValidation: AccessValidationService,
     private s3Service: S3Service,
+    private s3PathHelper: S3PathHelper,
   ) {}
 
   async create(createCategoryDto: CreateCategoryDto, user: any) {
@@ -206,6 +209,45 @@ export class CategoriesService {
         state: 'archived',
       },
     });
+  }
+
+  async uploadCategoryImage(file: Buffer, filename: string) {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: {
+        id: true,
+        slug: true,
+        organizations: {
+          select: { id: true, slug: true },
+        },
+      },
+    });
+
+    if (!store || !store.organizations) {
+      throw new BadRequestException('Store or organization not found');
+    }
+
+    const timestamp = Date.now();
+    const cleanFilename = filename.replace(/[^a-z0-9.]/gi, '_').toLowerCase();
+    const basePath = this.s3PathHelper.buildCategoryPath(
+      store.organizations,
+      store,
+    );
+    const key = `${basePath}/${timestamp}-${cleanFilename}`;
+    const result = await this.s3Service.uploadImage(file, key, {
+      generateThumbnail: true,
+      context: ImageContext.CATEGORY,
+    });
+    const signedUrl = await this.s3Service.getPresignedUrl(result.key);
+
+    return {
+      key: result.key,
+      url: signedUrl,
+      thumbKey: result.thumbKey,
+    };
   }
 
   private async validateUniqueSlug(

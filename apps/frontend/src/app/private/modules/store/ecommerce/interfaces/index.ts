@@ -45,6 +45,13 @@ export interface EcommerceSettings {
     photos?: SliderPhoto[];
   };
 
+  home_sections?: {
+    slider?: HomeSectionSettings;
+    categories?: HomeSectionSettings;
+    brands?: HomeSectionSettings;
+    featured_products?: HomeSectionSettings;
+  };
+
   // Catálogo
   catalog?: {
     products_per_page?: number;
@@ -159,6 +166,29 @@ export interface SliderPhoto {
   key?: string | null; // S3 key
   title?: string;
   caption?: string;
+  action_type?: SliderActionType;
+  action_label?: string;
+  action_url?: string;
+  product_id?: number | null;
+  category_id?: number | null;
+  brand_id?: number | null;
+  open_in_new_tab?: boolean;
+}
+
+export type SliderActionType =
+  | 'none'
+  | 'internal_url'
+  | 'external_url'
+  | 'product'
+  | 'category'
+  | 'brand';
+
+export interface HomeSectionSettings {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  sort_order?: number;
 }
 
 /**
@@ -171,6 +201,13 @@ export interface SliderImage {
   uploading?: boolean;
   title?: string;
   caption?: string;
+  action_type?: SliderActionType;
+  action_label?: string;
+  action_url?: string;
+  product_id?: number | null;
+  category_id?: number | null;
+  brand_id?: number | null;
+  open_in_new_tab?: boolean;
 }
 
 /**

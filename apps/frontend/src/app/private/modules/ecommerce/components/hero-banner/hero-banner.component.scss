@@ -5,6 +5,10 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+
+  &.is-clickable {
+    cursor: pointer;
+  }
 }
 
 .hero-background {

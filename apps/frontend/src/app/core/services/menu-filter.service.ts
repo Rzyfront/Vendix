@@ -147,6 +147,7 @@ export class MenuFilterService {
       'settings_payments',
       'settings',
     ],
+    'Precios y Tarifas': 'settings_price_tiers',
     Apariencia: 'settings_appearance',
     Seguridad: 'settings_security',
     // 'Dominios' supports both ORG_ADMIN (domains) and STORE_ADMIN (settings_domains)

@@ -26,6 +26,12 @@ import { PosApiService } from '../services/pos-api.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TaxesService } from '../../products/services/taxes.service';
 import { TaxCategory } from '../../products/interfaces';
+import {
+  PriceTier,
+  ProductPriceTierOverride,
+  PriceTierCacheService,
+  PriceTierSelectorComponent,
+} from '../../price-tiers';
 
 @Component({
   selector: 'app-pos-cart',
@@ -39,6 +45,7 @@ import { TaxCategory } from '../../products/interfaces';
     SelectorComponent,
     TextareaComponent,
     QuantityControlComponent,
+    PriceTierSelectorComponent,
   ],
   template: `
     <div
@@ -390,7 +397,32 @@ import { TaxCategory } from '../../products/interfaces';
                         precio editado
                       </span>
                     }
+                    @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800"
+                        [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                      >
+                        {{ item.applied_price_tier_name }}
+                      </span>
+                    }
+                    @if (item.is_package_unit && item.units_per_package) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-700"
+                      >
+                        × {{ item.units_per_package }} unid/empaque
+                      </span>
+                    }
                   </div>
+                  @if (canShowTierSelector(item)) {
+                    <div class="mt-1.5">
+                      <app-price-tier-selector
+                        [tiers]="availableTiers()"
+                        [selectedTierId]="item.applied_price_tier_id ?? null"
+                        [unitsPerPackage]="item.units_per_package ?? null"
+                        (selectedTierIdChange)="onTierChange(item, $event)"
+                      ></app-price-tier-selector>
+                    </div>
+                  }
                 </div>
                 <!-- Item actions -->
                 <div class="flex items-start gap-1 self-start">
@@ -675,8 +707,12 @@ private cartService = inject(PosCartService);
   private posApiService = inject(PosApiService);
   private authFacade = inject(AuthFacade);
   private taxesService = inject(TaxesService);
+  private priceTierCache = inject(PriceTierCacheService);
 
   readonly cartState = this.cartService.cartState;
+  readonly availableTiers = signal<PriceTier[]>([]);
+  /** Per-product (number key) override cache so the selector resolves instantly. */
+  readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
   readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
   readonly taxCategories = signal<TaxCategory[]>([]);
@@ -709,6 +745,9 @@ private cartService = inject(PosCartService);
   readonly canOverridePrices = computed(() =>
     this.hasPermission('store:pos:price_override'),
   );
+  readonly canApplyPricingTier = computed(() =>
+    this.hasPermission('store:products:apply_pricing_tier'),
+  );
 
   activePromotions: any[] = [];
   couponCode = '';
@@ -730,6 +769,59 @@ private cartService = inject(PosCartService);
       .subscribe({
         next: (taxCategories) => this.taxCategories.set(taxCategories || []),
         error: () => this.taxCategories.set([]),
+      });
+
+    // Load active tiers once. Cache is shareReplay'd so other modules reuse.
+    if (this.canApplyPricingTier()) {
+      this.priceTierCache
+        .getActiveTiers()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (tiers) => this.availableTiers.set(tiers || []),
+          error: () => this.availableTiers.set([]),
+        });
+    }
+
+    // Pre-fetch overrides whenever a new tier-enabled product appears in the
+    // cart. Uses item count + product ids in the dependency string to avoid
+    // re-running on quantity changes.
+    toObservable(this.cartService.cartState)
+      .pipe(
+        map((state) =>
+          state.items
+            .filter(
+              (i) =>
+                i.itemType !== 'custom' &&
+                i.product.has_multiple_price_tiers === true,
+            )
+            .map((i) => Number(i.product.id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+        map((ids) => Array.from(new Set(ids)).sort()),
+        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((productIds) => {
+        for (const productId of productIds) {
+          if (this.productOverrides()[productId]) continue;
+          this.priceTierCache
+            .getProductOverrides(productId)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (overrides) => {
+                this.productOverrides.update((current) => ({
+                  ...current,
+                  [productId]: overrides || [],
+                }));
+              },
+              error: () => {
+                this.productOverrides.update((current) => ({
+                  ...current,
+                  [productId]: [],
+                }));
+              },
+            });
+        }
       });
 
 // Load active promotions
@@ -904,6 +996,58 @@ private cartService = inject(PosCartService);
         next: () => this.toastService.success('Precio actualizado'),
         error: (error) =>
           this.toastService.error(error.message || 'Error al actualizar precio'),
+      });
+  }
+
+  /**
+   * Returns the override rows for the item's product, filtered to the
+   * currently-selected tier. Empty array if the cache hasn't loaded yet.
+   */
+  getOverridesForItem(item: CartItem, tierId: number | null): ProductPriceTierOverride[] {
+    if (item.itemType === 'custom') return [];
+    const productId = Number(item.product.id);
+    if (!Number.isFinite(productId) || productId <= 0) return [];
+    const all = this.productOverrides()[productId] ?? [];
+    if (tierId == null) return all;
+    return all.filter((o) => o.price_tier_id === tierId);
+  }
+
+  /** True when the line should expose the multi-tarifa selector. */
+  canShowTierSelector(item: CartItem): boolean {
+    return (
+      item.itemType !== 'custom' &&
+      item.product.has_multiple_price_tiers === true &&
+      this.canApplyPricingTier() &&
+      this.availableTiers().length > 0
+    );
+  }
+
+  onTierChange(item: CartItem, tierId: number | null): void {
+    if (!this.canApplyPricingTier()) {
+      // UI gate already prevents this — defensive guard against keyboard injection.
+      this.toastService.warning(
+        'No tienes permiso para aplicar tarifas de precio',
+      );
+      return;
+    }
+    const tier = tierId == null
+      ? null
+      : this.availableTiers().find((t) => t.id === tierId) || null;
+    const overrides = this.getOverridesForItem(item, tier?.id ?? null);
+
+    this.cartService
+      .applyTierToCartItem(item.id, tier, overrides)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          if (tier) {
+            this.toastService.success(`Tarifa "${tier.name}" aplicada`);
+          } else {
+            this.toastService.info('Tarifa default restaurada');
+          }
+        },
+        error: (error) =>
+          this.toastService.error(error.message || 'Error al aplicar la tarifa'),
       });
   }
 

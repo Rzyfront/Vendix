@@ -123,12 +123,41 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
         slider: {
           enable: false,
           photos: [
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
-            { url: null, title: '', caption: '' },
+            { url: null, title: '', caption: '', action_type: 'none' },
+            { url: null, title: '', caption: '', action_type: 'none' },
+            { url: null, title: '', caption: '', action_type: 'none' },
+            { url: null, title: '', caption: '', action_type: 'none' },
+            { url: null, title: '', caption: '', action_type: 'none' },
           ],
+        },
+        home_sections: {
+          slider: {
+            enabled: true,
+            title: 'Slider principal',
+            subtitle: 'La primera historia visual de tu tienda',
+            sort_order: 10,
+          },
+          categories: {
+            enabled: true,
+            title: 'Categorías',
+            subtitle: 'Explora por tipo de producto',
+            limit: 8,
+            sort_order: 20,
+          },
+          brands: {
+            enabled: true,
+            title: 'Marcas',
+            subtitle: 'Compra por tus marcas favoritas',
+            limit: 8,
+            sort_order: 30,
+          },
+          featured_products: {
+            enabled: true,
+            title: 'Productos destacados',
+            subtitle: 'Selección especial de la tienda',
+            limit: 16,
+            sort_order: 40,
+          },
         },
         catalog: {
           products_per_page: 16,

@@ -41,6 +41,7 @@ export interface Product {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  is_featured?: boolean;
   allow_pos_price_override?: boolean;
   sku?: string;
   stock_quantity?: number;
@@ -83,6 +84,10 @@ export interface Product {
     | 'ecommerce_domain_not_active';
   online_purchase_status_message?: string;
   final_price: number;
+  // Multi-tarifa (Phase 4): per-product tier overrides + unit-of-measure
+  has_multiple_price_tiers?: boolean;
+  units_per_package?: number | null;
+  package_consumes_multiple_stock?: boolean;
   created_at: Date;
   updated_at: Date;
 
@@ -270,6 +275,7 @@ export interface CreateProductDto {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  is_featured?: boolean;
   allow_pos_price_override?: boolean;
   sku?: string;
   stock_quantity?: number;
@@ -308,6 +314,10 @@ export interface CreateProductDto {
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+  // Multi-tarifa + empaque (Phase 4)
+  has_multiple_price_tiers?: boolean;
+  units_per_package?: number | null;
+  package_consumes_multiple_stock?: boolean;
 }
 
 export interface UpdateProductDto {
@@ -323,6 +333,7 @@ export interface UpdateProductDto {
   stock_quantity?: number;
   track_inventory?: boolean;
   available_for_ecommerce?: boolean;
+  is_featured?: boolean;
   allow_pos_price_override?: boolean;
   weight?: number;
   dimensions?: {
@@ -357,6 +368,10 @@ export interface UpdateProductDto {
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+  // Multi-tarifa + empaque (Phase 4)
+  has_multiple_price_tiers?: boolean;
+  units_per_package?: number | null;
+  package_consumes_multiple_stock?: boolean;
 }
 
 export interface CreateProductVariantDto {
@@ -487,6 +502,7 @@ export interface ProductManagement {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  is_featured?: boolean;
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
@@ -534,6 +550,7 @@ export interface ProductVariantManagementDto {
   is_on_sale?: boolean;
   sale_price?: number;
   available_for_ecommerce?: boolean;
+  is_featured?: boolean;
   sku?: string;
   stock_quantity?: number;
   state?: ProductState;

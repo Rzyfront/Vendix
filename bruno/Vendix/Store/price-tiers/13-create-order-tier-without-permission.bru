@@ -1,0 +1,72 @@
+meta {
+  name: 13 Create Order With Tier WITHOUT Permission (403)
+  type: http
+  seq: 13
+}
+
+# Negative test: send applied_price_tier_id with a user that lacks the
+# `store:products:apply_pricing_tier` permission. Expected response:
+#
+#   HTTP 403
+#   {
+#     "success": false,
+#     "error_code": "PRICING_TIER_PERMISSION_DENIED",
+#     ...
+#   }
+#
+# IMPORTANT
+# ---------
+# This request uses {{storeAdminToken}} on purpose so it does NOT inherit the
+# collection root bearer. Configure that variable in your environment as a
+# user that does NOT have `store:products:apply_pricing_tier`.
+#
+# If `storeAdminToken` is empty or maps to a user that DOES carry the
+# permission (e.g. owner/super_admin bypass), this test will fail — that is a
+# wiring issue, not a backend bug. See TODO below.
+#
+# TODO: Replace {{storeAdminToken}} with a dedicated `noTierPermissionToken`
+#       once the seeds expose a baseline non-super_admin role without the
+#       apply_pricing_tier permission.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{storeAdminToken}}
+}
+
+body:json {
+  {
+    "customer_id": 1,
+    "subtotal": 49999.00,
+    "total_amount": 49999.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "product_name": "Bruno smoke item with tier (no permission)",
+        "quantity": 1,
+        "unit_price": 49999.00,
+        "total_price": 49999.00,
+        "applied_price_tier_id": {{priceTierId}}
+      }
+    ]
+  }
+}
+
+tests {
+  test("Status is 403", function () {
+    expect(res.status).to.equal(403);
+  });
+
+  test("Error code is PRICING_TIER_PERMISSION_DENIED", function () {
+    expect(res.body).to.have.property('success', false);
+    // VendixHttpException structure: error_code may live at top level or
+    // inside data depending on AllExceptionsFilter shape. Check both.
+    var code = res.body.error_code || (res.body.data && res.body.data.error_code) || (res.body.error && res.body.error.error_code);
+    expect(code, 'expected error_code = PRICING_TIER_PERMISSION_DENIED').to.equal('PRICING_TIER_PERMISSION_DENIED');
+  });
+}

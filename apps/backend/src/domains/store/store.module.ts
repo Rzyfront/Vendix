@@ -53,6 +53,7 @@ import { ConsultationsModule } from './consultations/consultations.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SocialSalesModule } from './social-sales/social-sales.module';
 import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-ad-creatives.module';
+import { PriceTiersModule } from './price-tiers/price-tiers.module';
 
 @Module({
   imports: [
@@ -108,6 +109,7 @@ import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-a
     SubscriptionsModule,
     SocialSalesModule,
     MarketingAdCreativesModule,
+    PriceTiersModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

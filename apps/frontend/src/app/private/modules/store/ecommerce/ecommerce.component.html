@@ -445,10 +445,253 @@
                         customWrapperClass="!mt-0"
                       ></app-input>
                     </div>
+                    <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label class="block">
+                        <span class="block text-xs font-semibold text-gray-700 mb-1">
+                          Acción al hacer clic
+                        </span>
+                        <select
+                          class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-100"
+                          [value]="
+                            sliderImages()[activeImageIndex()].action_type ||
+                            'none'
+                          "
+                          (change)="
+                            updateImageAction(
+                              activeImageIndex(),
+                              'action_type',
+                              $any($event.target).value
+                            )
+                          "
+                        >
+                          @for (option of sliderActionOptions; track option.value) {
+                            <option [value]="option.value">
+                              {{ option.label }}
+                            </option>
+                          }
+                        </select>
+                      </label>
+                      <app-input
+                        label="Texto del botón"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].action_label || ''
+                        "
+                        [ngModelOptions]="{ standalone: true }"
+                        (inputChange)="
+                          updateImageMetadata(
+                            activeImageIndex(),
+                            'action_label',
+                            $event
+                          )
+                        "
+                        placeholder="Ej: Ver colección"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+                    @if (
+                      sliderImages()[activeImageIndex()].action_type ===
+                        'internal_url' ||
+                      sliderImages()[activeImageIndex()].action_type ===
+                        'external_url'
+                    ) {
+                      <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <app-input
+                          label="URL destino"
+                          [ngModel]="
+                            sliderImages()[activeImageIndex()].action_url || ''
+                          "
+                          [ngModelOptions]="{ standalone: true }"
+                          (inputChange)="
+                            updateImageMetadata(
+                              activeImageIndex(),
+                              'action_url',
+                              $event
+                            )
+                          "
+                          placeholder="/products o https://..."
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                        @if (
+                          sliderImages()[activeImageIndex()].action_type ===
+                          'external_url'
+                        ) {
+                          <label
+                            class="flex items-center gap-2 pt-6 text-sm text-gray-700"
+                          >
+                            <input
+                              type="checkbox"
+                              class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                              [checked]="
+                                sliderImages()[activeImageIndex()]
+                                  .open_in_new_tab !== false
+                              "
+                              (change)="
+                                updateImageAction(
+                                  activeImageIndex(),
+                                  'open_in_new_tab',
+                                  $any($event.target).checked
+                                )
+                              "
+                            />
+                            Abrir en una pestaña nueva
+                          </label>
+                        }
+                      </div>
+                    }
+                    @if (
+                      sliderImages()[activeImageIndex()].action_type ===
+                      'product'
+                    ) {
+                      <app-input
+                        label="ID del producto"
+                        type="number"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].product_id || ''
+                        "
+                        [ngModelOptions]="{ standalone: true }"
+                        (inputChange)="
+                          updateImageTargetId(
+                            activeImageIndex(),
+                            'product_id',
+                            $event
+                          )
+                        "
+                        placeholder="Ej: 123"
+                        customWrapperClass="!mt-4"
+                      ></app-input>
+                    }
+                    @if (
+                      sliderImages()[activeImageIndex()].action_type ===
+                      'category'
+                    ) {
+                      <app-input
+                        label="ID de la categoría"
+                        type="number"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].category_id || ''
+                        "
+                        [ngModelOptions]="{ standalone: true }"
+                        (inputChange)="
+                          updateImageTargetId(
+                            activeImageIndex(),
+                            'category_id',
+                            $event
+                          )
+                        "
+                        placeholder="Ej: 12"
+                        customWrapperClass="!mt-4"
+                      ></app-input>
+                    }
+                    @if (
+                      sliderImages()[activeImageIndex()].action_type ===
+                      'brand'
+                    ) {
+                      <app-input
+                        label="ID de la marca"
+                        type="number"
+                        [ngModel]="
+                          sliderImages()[activeImageIndex()].brand_id || ''
+                        "
+                        [ngModelOptions]="{ standalone: true }"
+                        (inputChange)="
+                          updateImageTargetId(
+                            activeImageIndex(),
+                            'brand_id',
+                            $event
+                          )
+                        "
+                        placeholder="Ej: 8"
+                        customWrapperClass="!mt-4"
+                      ></app-input>
+                    }
                   </div>
                 }
               </div>
             }
+          </div>
+
+          <div
+            formGroupName="home_sections"
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="layout-grid"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
+              </div>
+              Secciones del Inicio
+            </h2>
+            <div class="space-y-4">
+              <div formGroupName="categories" class="rounded-lg bg-gray-50 p-3">
+                <app-setting-toggle
+                  formControlName="enabled"
+                  label="Mostrar categorías"
+                  description="Lista categorías con imagen debajo del slider"
+                ></app-setting-toggle>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                  <app-input label="Título" formControlName="title"></app-input>
+                  <app-input
+                    label="Subtítulo"
+                    formControlName="subtitle"
+                  ></app-input>
+                  <app-input
+                    label="Límite"
+                    type="number"
+                    formControlName="limit"
+                  ></app-input>
+                </div>
+              </div>
+
+              <div formGroupName="brands" class="rounded-lg bg-gray-50 p-3">
+                <app-setting-toggle
+                  formControlName="enabled"
+                  label="Mostrar marcas"
+                  description="Lista marcas con logo debajo de categorías"
+                ></app-setting-toggle>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                  <app-input label="Título" formControlName="title"></app-input>
+                  <app-input
+                    label="Subtítulo"
+                    formControlName="subtitle"
+                  ></app-input>
+                  <app-input
+                    label="Límite"
+                    type="number"
+                    formControlName="limit"
+                  ></app-input>
+                </div>
+              </div>
+
+              <div
+                formGroupName="featured_products"
+                class="rounded-lg bg-gray-50 p-3"
+              >
+                <app-setting-toggle
+                  formControlName="enabled"
+                  label="Mostrar destacados"
+                  description="Lista productos marcados como destacados"
+                ></app-setting-toggle>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                  <app-input label="Título" formControlName="title"></app-input>
+                  <app-input
+                    label="Subtítulo"
+                    formControlName="subtitle"
+                  ></app-input>
+                  <app-input
+                    label="Límite"
+                    type="number"
+                    formControlName="limit"
+                  ></app-input>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <!-- Columna Derecha -->

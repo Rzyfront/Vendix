@@ -1,4 +1,13 @@
-import { Component, effect, input, output } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -22,6 +31,7 @@ import {
   CreateBrandDto,
   UpdateBrandDto,
 } from '../../../interfaces';
+import { BrandsService } from '../../../services/brands.service';
 
 @Component({
   selector: 'app-brand-form-modal',
@@ -66,6 +76,63 @@ import {
               placeholder="https://..."
               [error]="getError('logo_url')"
             ></app-input>
+          </div>
+
+          <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+            <div class="flex items-center gap-3">
+              <div
+                class="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white"
+              >
+                @if (logoPreviewUrl()) {
+                  <img
+                    [src]="logoPreviewUrl()"
+                    alt="Logo de marca"
+                    class="h-full w-full object-contain p-2"
+                  />
+                } @else {
+                  <div
+                    class="flex h-full w-full items-center justify-center text-xs text-gray-400"
+                  >
+                    Logo
+                  </div>
+                }
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-gray-900">
+                  Logo para la tienda online
+                </p>
+                <p class="text-xs text-gray-500">
+                  Se usará en el inicio y en filtros visuales de marcas.
+                </p>
+              </div>
+              <input
+                #brandLogoInput
+                type="file"
+                accept="image/*"
+                class="hidden"
+                (change)="onLogoSelected($event)"
+              />
+              <app-button
+                variant="outline"
+                type="button"
+                size="sm"
+                [loading]="isUploadingLogo()"
+                [disabled]="isUploadingLogo()"
+                (clicked)="brandLogoInput.click()"
+              >
+                Subir
+              </app-button>
+              @if (logoPreviewUrl()) {
+                <app-button
+                  variant="ghost"
+                  type="button"
+                  size="sm"
+                  (clicked)="removeLogo()"
+                >
+                  Quitar
+                </app-button>
+              }
+            </div>
           </div>
 
           <!-- Description -->
@@ -117,7 +184,12 @@ export class BrandFormModalComponent {
   readonly cancel = output<void>();
   readonly save = output<CreateBrandDto | UpdateBrandDto>();
 
+  readonly logoPreviewUrl = signal<string | null>(null);
+  readonly isUploadingLogo = signal(false);
+
   form: FormGroup;
+  private readonly brandsService = inject(BrandsService);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor(private fb: FormBuilder) {
     this.form = this.createForm();
@@ -128,6 +200,7 @@ export class BrandFormModalComponent {
         this.patchForm(current);
       } else if (open && !current) {
         this.form.reset({ state: true });
+        this.logoPreviewUrl.set(null);
       }
     });
   }
@@ -157,6 +230,7 @@ export class BrandFormModalComponent {
       logo_url: brand.logo_url || '',
       state: brand.state !== 'inactive',
     });
+    this.logoPreviewUrl.set(brand.logo_url || null);
   }
 
   getError(field: string): string {
@@ -197,10 +271,46 @@ export class BrandFormModalComponent {
       name: value.name,
       slug: value.slug ? value.slug : undefined,
       description: value.description ? value.description : undefined,
-      logo_url: value.logo_url ? value.logo_url : undefined,
+      logo_url: value.logo_url ? value.logo_url : this.brand() ? '' : undefined,
       state: value.state ? 'active' : 'inactive',
     };
 
     this.save.emit(payload);
+  }
+
+  onLogoSelected(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    const file = inputElement.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      inputElement.value = '';
+      return;
+    }
+
+    this.isUploadingLogo.set(true);
+    this.brandsService
+      .uploadBrandLogo(file)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.form.patchValue({ logo_url: result.key });
+          this.logoPreviewUrl.set(result.url);
+          this.form.markAsDirty();
+        },
+        error: () => {
+          this.isUploadingLogo.set(false);
+        },
+        complete: () => {
+          this.isUploadingLogo.set(false);
+          inputElement.value = '';
+        },
+      });
+  }
+
+  removeLogo(): void {
+    this.form.patchValue({ logo_url: '' });
+    this.logoPreviewUrl.set(null);
+    this.form.markAsDirty();
   }
 }

@@ -143,6 +143,50 @@ export class SliderPhotoDto {
   @IsString()
   @MaxLength(500)
   caption?: string;
+
+  @ApiPropertyOptional({
+    description: 'Action executed when the slide is clicked',
+    enum: ['none', 'internal_url', 'external_url', 'product', 'category', 'brand'],
+  })
+  @IsOptional()
+  @IsIn(['none', 'internal_url', 'external_url', 'product', 'category', 'brand'])
+  action_type?: 'none' | 'internal_url' | 'external_url' | 'product' | 'category' | 'brand';
+
+  @ApiPropertyOptional({ description: 'Optional CTA label for the slide' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  action_label?: string;
+
+  @ApiPropertyOptional({ description: 'URL used by internal_url or external_url actions' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  action_url?: string;
+
+  @ApiPropertyOptional({ description: 'Product target ID for product actions' })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_id?: number;
+
+  @ApiPropertyOptional({ description: 'Category target ID for category actions' })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  category_id?: number;
+
+  @ApiPropertyOptional({ description: 'Brand target ID for brand actions' })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  brand_id?: number;
+
+  @ApiPropertyOptional({ description: 'Open URL action in a new browser tab' })
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  open_in_new_tab?: boolean;
 }
 
 /**
@@ -160,6 +204,68 @@ export class EcommerceSliderDto {
   @ValidateNested({ each: true })
   @Type(() => SliderPhotoDto)
   photos?: SliderPhotoDto[];
+}
+
+export class EcommerceHomeSectionDto {
+  @ApiPropertyOptional({ example: true, description: 'Show the section on home' })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'Section title' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  title?: string;
+
+  @ApiPropertyOptional({ description: 'Section subtitle' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  subtitle?: string;
+
+  @ApiPropertyOptional({ example: 8, description: 'Maximum items to show' })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  limit?: number;
+
+  @ApiPropertyOptional({
+    example: 10,
+    description: 'Relative section order on the storefront home',
+  })
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  sort_order?: number;
+}
+
+export class EcommerceHomeSectionsDto {
+  @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  slider?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  categories?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  brands?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  featured_products?: EcommerceHomeSectionDto;
 }
 
 /**
@@ -595,6 +701,16 @@ export class EcommerceSettingsDto {
   @ValidateNested()
   @Type(() => EcommerceSliderDto)
   slider?: EcommerceSliderDto;
+
+  // Secciones del inicio
+  @ApiPropertyOptional({
+    description: 'Home merchandising sections',
+    type: EcommerceHomeSectionsDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionsDto)
+  home_sections?: EcommerceHomeSectionsDto;
 
   // Catálogo
   @ApiPropertyOptional({

@@ -747,6 +747,15 @@ export class PaymentsService {
               continue;
             }
 
+            // Multi-tarifa (Fase 5.5): si el item persistió stock_units_consumed
+            // (>0), pasarlo como override al reservador para descontar la
+            // cantidad real de unidades de stock (caja con
+            // package_consumes_multiple_stock).
+            const stockUnitsConsumed =
+              typeof item.stock_units_consumed === 'number' &&
+              item.stock_units_consumed > 0
+                ? item.stock_units_consumed
+                : undefined;
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -757,6 +766,9 @@ export class PaymentsService {
               user?.id,
               false, // POS: don't validate availability (non-restrictive UX)
               tx,
+              undefined, // expires_at
+              false, // skip_reservation
+              stockUnitsConsumed,
             );
 
             await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
@@ -1354,11 +1366,125 @@ export class PaymentsService {
     };
   }
 
+  /**
+   * Multi-tarifa (Fase 5.5): resuelve snapshots por línea POS.
+   *
+   * Patrón espejo de `OrdersService.resolveTierSnapshotsForItems`:
+   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna `[]` (no overhead).
+   * - Si AL MENOS UNA línea lo trae, valida server-side el permission
+   *   `store:products:apply_pricing_tier`. Bypass para super_admin / owner.
+   *   Si denegado, lanza `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)`.
+   * - Pre-carga tarifas (price_tiers) y productos (units_per_package,
+   *   package_consumes_multiple_stock) para computar `stock_units_consumed`
+   *   cuando aplica empaque real.
+   * - Lenient: si la tarifa no existe en esta tienda, snapshot = null (no
+   *   crashea la venta).
+   *
+   * Devuelve un array alineado por índice con `items`.
+   */
+  private async resolveTierSnapshotsForItems(
+    tx: any,
+    items: Array<{
+      product_id?: number;
+      quantity: number;
+      applied_price_tier_id?: number;
+    }>,
+    context: ReturnType<typeof RequestContextService.getContext>,
+  ): Promise<
+    Array<{
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null>
+  > {
+    const tierIdsInUse = new Set<number>();
+    for (const item of items) {
+      if (
+        item.applied_price_tier_id !== undefined &&
+        item.applied_price_tier_id !== null
+      ) {
+        tierIdsInUse.add(Number(item.applied_price_tier_id));
+      }
+    }
+
+    if (tierIdsInUse.size === 0) {
+      return items.map(() => null);
+    }
+
+    // Permission gate (server-side; UI cannot bypass).
+    const permissions = context?.permissions ?? [];
+    const isSuperAdmin = !!context?.is_super_admin;
+    const isOwner = !!context?.is_owner;
+    if (
+      !isSuperAdmin &&
+      !isOwner &&
+      !permissions.includes('store:products:apply_pricing_tier')
+    ) {
+      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
+    }
+
+    const tiers = await tx.price_tiers.findMany({
+      where: { id: { in: Array.from(tierIdsInUse) } },
+      select: { id: true, name: true, is_package_unit: true },
+    });
+    type TierRow = (typeof tiers)[number];
+    const tierById = new Map<number, TierRow>(
+      tiers.map((t: TierRow): [number, TierRow] => [t.id, t]),
+    );
+
+    const productIds = Array.from(
+      new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
+    );
+    const productsList = productIds.length
+      ? await tx.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            units_per_package: true,
+            package_consumes_multiple_stock: true,
+          },
+        })
+      : [];
+    type ProductRow = (typeof productsList)[number];
+    const productById = new Map<number, ProductRow>(
+      productsList.map((p: ProductRow): [number, ProductRow] => [p.id, p]),
+    );
+
+    return items.map((item) => {
+      const tierId = item.applied_price_tier_id;
+      if (tierId === undefined || tierId === null) return null;
+      const tier = tierById.get(Number(tierId));
+      if (!tier) {
+        // Lenient: tier desconocida en esta tienda → no snapshot, no crash.
+        return null;
+      }
+      const product = item.product_id ? productById.get(item.product_id) : null;
+      const isPackage =
+        tier.is_package_unit &&
+        product?.package_consumes_multiple_stock === true &&
+        typeof product.units_per_package === 'number' &&
+        (product.units_per_package ?? 0) > 0;
+      const stock_units_consumed = isPackage
+        ? Number(item.quantity) * Number(product!.units_per_package)
+        : null;
+      return {
+        tier_id: tier.id,
+        tier_name: tier.name,
+        stock_units_consumed,
+      };
+    });
+  }
+
   private async buildPosOrderItem(
     tx: any,
     item: any,
     dtoStoreId: number,
     user: any,
+    tierSnap?: {
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null,
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -1418,6 +1544,7 @@ export class PaymentsService {
         priceOverriddenByUserId: undefined,
         productId: undefined,
         productVariantId: undefined,
+        tierSnap: tierSnap ?? null,
       });
     }
 
@@ -1524,6 +1651,7 @@ export class PaymentsService {
       priceOverriddenByUserId: isPriceOverridden ? user?.id : undefined,
       productId: product.id,
       productVariantId: item.product_variant_id,
+      tierSnap: tierSnap ?? null,
     });
   }
 
@@ -1555,6 +1683,13 @@ export class PaymentsService {
     priceOverriddenByUserId?: number;
     productId?: number;
     productVariantId?: number;
+    // Multi-tarifa snapshot (Fase 5.5). Resuelto previamente por
+    // `resolveTierSnapshotsForItems` y alineado por índice con `dto.items`.
+    tierSnap?: {
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null;
   }): any {
     const lineBaseTotal = this.roundMoney(
       params.unitBasePrice * params.lineUnits,
@@ -1595,6 +1730,12 @@ export class PaymentsService {
       weight: params.item.weight || undefined,
       weight_unit: params.item.weight_unit || undefined,
       item_type: params.itemType,
+      // Multi-tarifa (Fase 5.5): snapshot persistente. `null` cuando la línea
+      // no tenía applied_price_tier_id o cuando la tarifa no existe en esta
+      // tienda (fallback lenient, mismo patrón que OrdersService).
+      applied_price_tier_id: params.tierSnap?.tier_id ?? null,
+      applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
+      stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
     };
 
     if (params.productId) {
@@ -1641,6 +1782,16 @@ export class PaymentsService {
     }
     const dtoStoreId: number = dto.store_id;
 
+    // Multi-tarifa (Fase 5.5): si alguna línea trae applied_price_tier_id,
+    // validar permiso server-side ANTES de armar items. Patrón espejo de
+    // OrdersService.resolveTierSnapshotsForItems.
+    const context = RequestContextService.getContext();
+    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      tx,
+      dto.items,
+      context,
+    );
+
     while (retries > 0) {
       try {
         // Generate order number for this store
@@ -1648,8 +1799,14 @@ export class PaymentsService {
 
         // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
-          dto.items.map((item) =>
-            this.buildPosOrderItem(tx, item, dtoStoreId, user),
+          dto.items.map((item, index) =>
+            this.buildPosOrderItem(
+              tx,
+              item,
+              dtoStoreId,
+              user,
+              tierSnapshots[index],
+            ),
           ),
         );
 

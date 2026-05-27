@@ -60,6 +60,13 @@ export class OrdersService {
     }
     createOrderDto.store_id = store_id;
 
+    // Multi-tarifa: si alguna línea trae applied_price_tier_id, validar
+    // permiso server-side ANTES de crear la orden. UI no es fuente de verdad.
+    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      createOrderDto.items,
+      context,
+    );
+
     // Validar horario de atención antes de crear la orden
     if (!createOrderDto.skip_schedule_validation) {
       await this.scheduleValidationService.validateOrThrow(store_id, true);
@@ -113,7 +120,7 @@ export class OrdersService {
             updated_at: new Date(),
             order_items: {
               create: await Promise.all(
-                createOrderDto.items.map(async (item) => {
+                createOrderDto.items.map(async (item, index) => {
                   // Resolve product type for snapshot
                   const product = item.product_id
                     ? await this.prisma.products.findUnique({
@@ -125,6 +132,7 @@ export class OrdersService {
                     item.item_type === 'product'
                       ? product?.product_type || 'physical'
                       : item.item_type || product?.product_type || 'custom';
+                  const tierSnap = tierSnapshots[index];
                   return {
                     product_id: item.product_id || null,
                     product_variant_id: item.product_id
@@ -156,6 +164,12 @@ export class OrdersService {
                           item.product_variant_id,
                         )
                       : null,
+                    // Multi-tarifa snapshot (Phase 2)
+                    applied_price_tier_id: tierSnap?.tier_id ?? null,
+                    applied_price_tier_name_snapshot:
+                      tierSnap?.tier_name ?? null,
+                    stock_units_consumed:
+                      tierSnap?.stock_units_consumed ?? null,
                     updated_at: new Date(),
                   };
                 }),
@@ -179,6 +193,13 @@ export class OrdersService {
                 item.product_id,
                 item.product_variant_id || undefined,
               );
+            // Multi-tarifa: si el item persistió stock_units_consumed (>0),
+            // pasarlo como override al reservador.
+            const stockUnitsConsumed =
+              typeof item.stock_units_consumed === 'number' &&
+              item.stock_units_consumed > 0
+                ? item.stock_units_consumed
+                : undefined;
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -188,6 +209,10 @@ export class OrdersService {
               order.id,
               creatingUser?.id,
               false, // POS: don't validate availability (non-restrictive UX)
+              undefined,
+              undefined,
+              false,
+              stockUnitsConsumed,
             );
           } catch (error) {
             this.logger.warn(
@@ -481,6 +506,14 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
     }
 
+    // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
+    // líneas traen applied_price_tier_id.
+    const ctx = RequestContextService.getContext();
+    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      dto.items,
+      ctx,
+    );
+
     // Calculate totals from items
     const subtotal =
       dto.subtotal ??
@@ -534,33 +567,43 @@ export class OrdersService {
 
       // Create new items
       await tx.order_items.createMany({
-        data: dto.items.map((item) => ({
-          order_id: id,
-          product_id: item.product_id || null,
-          product_variant_id: item.product_id ? item.product_variant_id : null,
-          product_name: item.product_name,
-          description: item.description,
-          variant_sku: item.variant_sku,
-          variant_attributes: item.variant_attributes,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          total_price: item.total_price,
-          tax_rate: item.tax_rate,
-          tax_amount_item: item.tax_amount_item,
-          catalog_unit_price: item.catalog_unit_price,
-          catalog_final_price: item.catalog_final_price,
-          final_unit_price: item.final_unit_price ?? item.unit_price,
-          is_price_overridden:
-            item.is_price_overridden ?? Boolean(item.price_override_reason),
-          price_override_reason: item.price_override_reason,
-          weight: item.weight,
-          weight_unit: item.weight_unit,
-          item_type:
-            item.item_type === 'product'
-              ? 'physical'
-              : item.item_type || (item.product_id ? 'physical' : 'custom'),
-          updated_at: new Date(),
-        })),
+        data: dto.items.map((item, index) => {
+          const tierSnap = tierSnapshots[index];
+          return {
+            order_id: id,
+            product_id: item.product_id || null,
+            product_variant_id: item.product_id
+              ? item.product_variant_id
+              : null,
+            product_name: item.product_name,
+            description: item.description,
+            variant_sku: item.variant_sku,
+            variant_attributes: item.variant_attributes,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: item.total_price,
+            tax_rate: item.tax_rate,
+            tax_amount_item: item.tax_amount_item,
+            catalog_unit_price: item.catalog_unit_price,
+            catalog_final_price: item.catalog_final_price,
+            final_unit_price: item.final_unit_price ?? item.unit_price,
+            is_price_overridden:
+              item.is_price_overridden ??
+              Boolean(item.price_override_reason),
+            price_override_reason: item.price_override_reason,
+            weight: item.weight,
+            weight_unit: item.weight_unit,
+            item_type:
+              item.item_type === 'product'
+                ? 'physical'
+                : item.item_type || (item.product_id ? 'physical' : 'custom'),
+            // Multi-tarifa snapshot
+            applied_price_tier_id: tierSnap?.tier_id ?? null,
+            applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
+            stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
+            updated_at: new Date(),
+          };
+        }),
       });
 
       // Update order totals
@@ -595,6 +638,11 @@ export class OrdersService {
               item.product_id,
               item.product_variant_id || undefined,
             );
+          const stockUnitsConsumed =
+            typeof item.stock_units_consumed === 'number' &&
+            item.stock_units_consumed > 0
+              ? item.stock_units_consumed
+              : undefined;
           await this.stockLevelManager.reserveStock(
             item.product_id,
             item.product_variant_id || undefined,
@@ -604,6 +652,10 @@ export class OrdersService {
             id,
             undefined,
             false, // Don't validate availability (non-restrictive UX)
+            undefined,
+            undefined,
+            false,
+            stockUnitsConsumed,
           );
         } catch (error) {
           this.logger.warn(
@@ -844,6 +896,112 @@ export class OrdersService {
     await this.findOne(id);
     // Use scoped client (implicit via this.prisma)
     return this.prisma.orders.delete({ where: { id } });
+  }
+
+  /**
+   * Multi-tarifa: resuelve snapshots por línea (id, nombre, stock_units_consumed).
+   *
+   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna `[]` (sin overhead).
+   * - Si AL MENOS UNA línea lo trae, valida que el usuario tenga el permission
+   *   `store:products:apply_pricing_tier`. Si no, lanza
+   *   `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)` (403).
+   * - Carga tarifas (auto-scoped por store) y productos (para resolver
+   *   `quantity × units_per_package` cuando aplica empaque real).
+   *
+   * Devuelve un array alineado por índice con `items` para que el caller
+   * mapee la línea ↔ snapshot sin re-buscar.
+   */
+  private async resolveTierSnapshotsForItems(
+    items: Array<{
+      product_id?: number;
+      quantity: number;
+      applied_price_tier_id?: number;
+    }>,
+    context: ReturnType<typeof RequestContextService.getContext>,
+  ): Promise<
+    Array<{
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null>
+  > {
+    const tierIdsInUse = new Set<number>();
+    for (const item of items) {
+      if (
+        item.applied_price_tier_id !== undefined &&
+        item.applied_price_tier_id !== null
+      ) {
+        tierIdsInUse.add(Number(item.applied_price_tier_id));
+      }
+    }
+
+    if (tierIdsInUse.size === 0) {
+      return items.map(() => null);
+    }
+
+    // Permission gate (server-side; UI cannot bypass).
+    const permissions = context?.permissions ?? [];
+    const isSuperAdmin = !!context?.is_super_admin;
+    const isOwner = !!context?.is_owner;
+    if (
+      !isSuperAdmin &&
+      !isOwner &&
+      !permissions.includes('store:products:apply_pricing_tier')
+    ) {
+      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
+    }
+
+    const tiers = await this.prisma.price_tiers.findMany({
+      where: { id: { in: Array.from(tierIdsInUse) } },
+      select: { id: true, name: true, is_package_unit: true },
+    });
+    type TierRow = (typeof tiers)[number];
+    const tierById = new Map<number, TierRow>(
+      tiers.map((t): [number, TierRow] => [t.id, t]),
+    );
+
+    const productIds = Array.from(
+      new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
+    );
+    const productsList = productIds.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            units_per_package: true,
+            package_consumes_multiple_stock: true,
+          },
+        })
+      : [];
+    type ProductRow = (typeof productsList)[number];
+    const productById = new Map<number, ProductRow>(
+      productsList.map((p): [number, ProductRow] => [p.id, p]),
+    );
+
+    return items.map((item) => {
+      const tierId = item.applied_price_tier_id;
+      if (tierId === undefined || tierId === null) return null;
+      const tier = tierById.get(Number(tierId));
+      if (!tier) {
+        // Soft fall-through: invalid tier id → don't crash the order, just
+        // skip the snapshot. Could also throw; leaving lenient for now.
+        return null;
+      }
+      const product = item.product_id ? productById.get(item.product_id) : null;
+      const isPackage =
+        tier.is_package_unit &&
+        product?.package_consumes_multiple_stock === true &&
+        typeof product.units_per_package === 'number' &&
+        (product.units_per_package ?? 0) > 0;
+      const stock_units_consumed = isPackage
+        ? Number(item.quantity) * Number(product!.units_per_package)
+        : null;
+      return {
+        tier_id: tier.id,
+        tier_name: tier.name,
+        stock_units_consumed,
+      };
+    });
   }
 
   private async generateOrderNumber(storeId: number): Promise<string> {

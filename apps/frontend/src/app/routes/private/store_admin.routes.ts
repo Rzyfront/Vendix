@@ -620,6 +620,14 @@ export const storeAdminRoutes: Routes = [
             (m) => m.icaRoutes,
           ),
       },
+      // Price Tiers (Precios y Tarifas)
+      {
+        path: 'price-tiers',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/price-tiers/routes/price-tiers.routes'
+          ).then((m) => m.priceTiersRoutes),
+      },
       // Subscription Routes
       {
         path: 'subscription',

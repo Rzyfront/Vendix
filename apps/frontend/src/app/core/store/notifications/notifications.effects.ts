@@ -14,14 +14,17 @@ import {
   tap,
   filter,
 } from 'rxjs/operators';
-import { of, Observable, EMPTY } from 'rxjs';
+import { of, Observable, EMPTY, firstValueFrom } from 'rxjs';
 import { Action } from '@ngrx/store';
 import { NotificationsApiService } from '../../services/notifications.service';
 import { PushSubscriptionService } from '../../services/push-subscription.service';
+import { NotificationSoundPlayerService } from '../../services/notification-sound-player.service';
+import { NotificationSoundsCatalogService } from '../../services/notification-sounds-catalog.service';
 import * as NotificationsActions from './notifications.actions';
 import * as AuthActions from '../auth/auth.actions';
 import { AppNotification } from './notifications.actions';
 import { AuthFacade } from '../auth/auth.facade';
+import { StoreSettingsFacade } from '../store-settings/store-settings.facade';
 
 @Injectable()
 export class NotificationsEffects {
@@ -30,6 +33,9 @@ export class NotificationsEffects {
   private store = inject(Store);
   private pushService = inject(PushSubscriptionService);
   private authFacade = inject(AuthFacade);
+  private soundPlayer = inject(NotificationSoundPlayerService);
+  private soundsCatalog = inject(NotificationSoundsCatalogService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
   private eventSource: EventSource | null = null;
 
   /**
@@ -187,6 +193,28 @@ export class NotificationsEffects {
       filter(({ notification }) => notification.type === 'fiscal_scope_changed'),
       map(() => AuthActions.refreshUser()),
     ),
+  );
+
+  playSound$ = createEffect(
+    () =>
+      this.actions$.pipe(
+        ofType(NotificationsActions.receivedNotification),
+        tap(async () => {
+          const settings = this.storeSettingsFacade.notifications();
+          if (!settings || settings.sound_muted || !settings.sound_id) return;
+
+          try {
+            const catalog = await firstValueFrom(this.soundsCatalog.getCatalog());
+            const sound = catalog.find((s) => s.id === settings.sound_id);
+            if (!sound) return;
+
+            await this.soundPlayer.play(sound.id, sound.url, settings.sound_volume ?? 70);
+          } catch {
+            // Silent fail — never break notification flow because of audio
+          }
+        }),
+      ),
+    { dispatch: false },
   );
 
   markRead$ = createEffect(() =>

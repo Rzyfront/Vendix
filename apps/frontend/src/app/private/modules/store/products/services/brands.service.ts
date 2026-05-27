@@ -23,6 +23,13 @@ interface PaginatedApiResponse<T> {
     };
   };
 }
+
+export interface BrandLogoUploadResponse {
+  key: string;
+  url: string;
+  thumbKey?: string;
+}
+
 import {
   Brand,
   CreateBrandDto,
@@ -105,6 +112,20 @@ export class BrandsService {
   updateBrand(id: number, brand: UpdateBrandDto): Observable<Brand> {
     return this.http
       .patch<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`, brand)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
+  uploadBrandLogo(file: File): Observable<BrandLogoUploadResponse> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.http
+      .post<
+        ApiResponse<BrandLogoUploadResponse>
+      >(`${this.apiUrl}/store/brands/upload-logo`, formData)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

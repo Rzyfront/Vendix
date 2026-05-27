@@ -3,6 +3,7 @@ import {
   IsString,
   IsNumber,
   IsEnum,
+  IsInt,
   IsOptional,
   IsDateString,
   ValidateNested,
@@ -58,6 +59,16 @@ export class SalesOrderItemDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiProperty({
+    description:
+      'Multi-tarifa: id de la tarifa de precios aplicada a esta línea. Requiere permission store:products:apply_pricing_tier.',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  applied_price_tier_id?: number;
 }
 
 export class CreateSalesOrderDto {

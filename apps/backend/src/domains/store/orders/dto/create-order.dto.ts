@@ -104,6 +104,16 @@ export class CreateOrderItemDto {
   @IsString()
   @MaxLength(10)
   weight_unit?: string;
+
+  /**
+   * Multi-tarifa: id de la tarifa de precios aplicada a esta línea (opcional).
+   * Si está presente y la tarifa no es la default, el caller debe tener
+   * el permission `store:products:apply_pricing_tier`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  applied_price_tier_id?: number;
 }
 
 export class CreateOrderDto {

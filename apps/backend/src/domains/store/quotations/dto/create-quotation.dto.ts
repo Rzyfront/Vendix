@@ -53,6 +53,15 @@ export class CreateQuotationItemDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * Multi-tarifa: id de la tarifa aplicada a la línea (opcional).
+   * Permission `store:products:apply_pricing_tier` requerido cuando se envía.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  applied_price_tier_id?: number;
 }
 
 export class CreateQuotationDto {

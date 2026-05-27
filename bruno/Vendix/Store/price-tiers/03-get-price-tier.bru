@@ -1,0 +1,24 @@
+meta {
+  name: 03 Get Price Tier by ID
+  type: http
+  seq: 3
+}
+
+get {
+  url: http://{{url}}/store/price-tiers/{{priceTierId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Returns the requested tier", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(String(res.body.data.id)).to.equal(String(bru.getVar('priceTierId')));
+    expect(res.body.data).to.have.property('discount_percentage');
+  });
+}

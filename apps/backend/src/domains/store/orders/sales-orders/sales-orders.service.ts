@@ -15,6 +15,8 @@ import { InventoryIntegrationService } from '../../inventory/shared/services/inv
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { S3Service } from '@common/services/s3.service';
 import { resolveCostPrice } from '../utils/resolve-cost-price';
+import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class SalesOrdersService {
@@ -28,6 +30,15 @@ export class SalesOrdersService {
   ) {}
 
   async create(createSalesOrderDto: CreateSalesOrderDto) {
+    // Multi-tarifa: si alguna línea trae applied_price_tier_id, validar
+    // permission y resolver snapshot ANTES de abrir la transacción. UI no es
+    // fuente de verdad — el gate vive en el backend.
+    const context = RequestContextService.getContext();
+    const tierSnapshots = await this.resolveTierSnapshotsForItems(
+      createSalesOrderDto.items,
+      context,
+    );
+
     return this.prisma.$transaction(async (tx) => {
       // Calculate totals
       const subtotal = createSalesOrderDto.items.reduce(
@@ -76,14 +87,16 @@ export class SalesOrdersService {
       });
 
       // Create order items and reserve stock immediately
-      for (const item of createSalesOrderDto.items) {
+      for (let index = 0; index < createSalesOrderDto.items.length; index++) {
+        const item = createSalesOrderDto.items[index];
+        const tierSnap = tierSnapshots[index];
         const cost_price = await resolveCostPrice(
           tx,
           item.product_id,
           item.product_variant_id,
         );
 
-        const orderItem = await tx.sales_order_items.create({
+        await tx.sales_order_items.create({
           data: {
             sales_order_id: salesOrder.id,
             product_id: item.product_id,
@@ -93,9 +106,21 @@ export class SalesOrdersService {
             unit_price: item.unit_price,
             total_price: item.quantity * item.unit_price,
             cost_price,
+            // Multi-tarifa snapshot (Phase 1.5)
+            applied_price_tier_id: tierSnap?.tier_id ?? null,
+            applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
+            stock_units_consumed: tierSnap?.stock_units_consumed ?? null,
             created_at: new Date(),
           },
         });
+
+        // Multi-tarifa: si el tier persistió stock_units_consumed (>0),
+        // pasarlo como override al reservador.
+        const stockUnitsConsumed =
+          typeof tierSnap?.stock_units_consumed === 'number' &&
+          tierSnap.stock_units_consumed > 0
+            ? tierSnap.stock_units_consumed
+            : undefined;
 
         // Reserve stock immediately
         await this.stockLevelManager.reserveStock(
@@ -106,6 +131,11 @@ export class SalesOrdersService {
           'order',
           salesOrder.id,
           1, // Use default user ID as fallback
+          true,
+          undefined,
+          undefined,
+          false,
+          stockUnitsConsumed,
         );
       }
 
@@ -245,6 +275,15 @@ export class SalesOrdersService {
   }
 
   async update(id: number, updateSalesOrderDto: UpdateSalesOrderDto) {
+    // Multi-tarifa: si las líneas a actualizar traen applied_price_tier_id,
+    // revalida el permission server-side. Esto es defensivo: aunque el shape
+    // actual de update no recree las líneas, el gate evita que un caller
+    // confíe en la UI y la rompa después.
+    if (updateSalesOrderDto.items?.length) {
+      const ctx = RequestContextService.getContext();
+      await this.resolveTierSnapshotsForItems(updateSalesOrderDto.items, ctx);
+    }
+
     return this.prisma.$transaction(async (tx) => {
       // If items are being updated, recalculate totals
       if (updateSalesOrderDto.items) {
@@ -512,6 +551,115 @@ export class SalesOrdersService {
   remove(id: number) {
     return this.prisma.sales_orders.delete({
       where: { id },
+    });
+  }
+
+  /**
+   * Multi-tarifa: resuelve snapshots por línea (id, nombre, stock_units_consumed).
+   *
+   * Replica el patrón de `OrdersService.resolveTierSnapshotsForItems`:
+   * - Si NINGUNA línea trae `applied_price_tier_id`, retorna un array de `null`
+   *   alineado por índice (sin overhead).
+   * - Si AL MENOS UNA línea lo trae, valida que el usuario tenga el permission
+   *   `store:products:apply_pricing_tier`. Si no, lanza
+   *   `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)` (403).
+   * - Carga tarifas (auto-scoped por store) y productos (para resolver
+   *   `quantity × units_per_package` cuando aplica empaque real).
+   */
+  private async resolveTierSnapshotsForItems(
+    items: Array<{
+      product_id?: number;
+      quantity: number;
+      applied_price_tier_id?: number;
+    }>,
+    context: ReturnType<typeof RequestContextService.getContext>,
+  ): Promise<
+    Array<{
+      tier_id: number;
+      tier_name: string;
+      stock_units_consumed: number | null;
+    } | null>
+  > {
+    const tierIdsInUse = new Set<number>();
+    for (const item of items) {
+      if (
+        item.applied_price_tier_id !== undefined &&
+        item.applied_price_tier_id !== null
+      ) {
+        tierIdsInUse.add(Number(item.applied_price_tier_id));
+      }
+    }
+
+    if (tierIdsInUse.size === 0) {
+      return items.map(() => null);
+    }
+
+    // Permission gate (server-side; UI cannot bypass).
+    const permissions = context?.permissions ?? [];
+    const isSuperAdmin = !!context?.is_super_admin;
+    const isOwner = !!context?.is_owner;
+    if (
+      !isSuperAdmin &&
+      !isOwner &&
+      !permissions.includes('store:products:apply_pricing_tier')
+    ) {
+      throw new VendixHttpException(ErrorCodes.PRICING_TIER_PERMISSION_DENIED);
+    }
+
+    const tiers = await this.prisma.price_tiers.findMany({
+      where: { id: { in: Array.from(tierIdsInUse) } },
+      select: { id: true, name: true, is_package_unit: true },
+    });
+    type TierRow = (typeof tiers)[number];
+    const tierById = new Map<number, TierRow>(
+      tiers.map((t): [number, TierRow] => [t.id, t]),
+    );
+
+    const productIds = Array.from(
+      new Set(
+        items.map((i) => i.product_id).filter((id): id is number => !!id),
+      ),
+    );
+    const productsList = productIds.length
+      ? await this.prisma.products.findMany({
+          where: { id: { in: productIds } },
+          select: {
+            id: true,
+            units_per_package: true,
+            package_consumes_multiple_stock: true,
+          },
+        })
+      : [];
+    type ProductRow = (typeof productsList)[number];
+    const productById = new Map<number, ProductRow>(
+      productsList.map((p): [number, ProductRow] => [p.id, p]),
+    );
+
+    return items.map((item) => {
+      const tierId = item.applied_price_tier_id;
+      if (tierId === undefined || tierId === null) return null;
+      const tier = tierById.get(Number(tierId));
+      if (!tier) {
+        // Soft fall-through: invalid tier id → don't crash the order, just
+        // skip the snapshot. Mirrors OrdersService behavior.
+        return null;
+      }
+      const product = item.product_id
+        ? productById.get(item.product_id)
+        : null;
+      const isPackage =
+        tier.is_package_unit &&
+        product?.package_consumes_multiple_stock === true &&
+        typeof product.units_per_package === 'number' &&
+        (product.units_per_package ?? 0) > 0;
+      const stock_units_consumed = isPackage
+        ? Number(item.quantity) * Number(product!.units_per_package)
+        : null;
+      return {
+        tier_id: tier.id,
+        tier_name: tier.name,
+        stock_units_consumed,
+      };
     });
   }
 

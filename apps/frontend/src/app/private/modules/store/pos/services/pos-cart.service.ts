@@ -28,6 +28,10 @@ export type {
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
+import {
+  PriceTier,
+  ProductPriceTierOverride,
+} from '../../price-tiers/interfaces';
 
 @Injectable({
   providedIn: 'root',
@@ -101,6 +105,27 @@ export class PosCartService {
   updateCartItem(request: UpdateCartItemRequest): Observable<CartState> {
     return of(request).pipe(
       map((req) => this.processUpdateCartItem(req)),
+      tap((newState) => this.cartState.set(newState)),
+    );
+  }
+
+  /**
+   * Apply (or clear, with `tier === null`) a price tier on a specific cart
+   * item. Recomputes `unitPrice`, `finalPrice`, `totalPrice` and tax via
+   * `PriceResolverService.resolveWithTier`.
+   *
+   * @param itemId         Cart item id.
+   * @param tier           Selected tier, or null to revert to default cascade.
+   * @param tierOverrides  Override rows for the product that match `tier.id`
+   *                       (caller pre-filters; pass [] if none).
+   */
+  applyTierToCartItem(
+    itemId: string,
+    tier: PriceTier | null,
+    tierOverrides: ProductPriceTierOverride[] = [],
+  ): Observable<CartState> {
+    return of({ itemId, tier, tierOverrides }).pipe(
+      map((args) => this.processApplyTierToCartItem(args)),
       tap((newState) => this.cartState.set(newState)),
     );
   }
@@ -598,6 +623,104 @@ export class PosCartService {
         updatedItems,
         currentState.appliedDiscounts,
       ),
+      updatedAt: new Date(),
+    };
+  }
+
+  private processApplyTierToCartItem(args: {
+    itemId: string;
+    tier: PriceTier | null;
+    tierOverrides: ProductPriceTierOverride[];
+  }): CartState {
+    const { itemId, tier, tierOverrides } = args;
+    const currentState = this.cartState();
+    const itemIndex = currentState.items.findIndex(
+      (item) => item.id === itemId,
+    );
+    if (itemIndex === -1) {
+      throw new Error('Item not found in cart');
+    }
+
+    const item = currentState.items[itemIndex];
+    if (item.itemType === 'custom') {
+      // Custom items never resolve via tier — they carry a free-form price.
+      return currentState;
+    }
+
+    const product = item.product;
+    const variant = product.product_variants?.find(
+      (v) => v.id === item.variant_id,
+    );
+
+    const taxRate = this.calculateRateSum(product);
+    const resolution = this.priceResolver.resolveWithTier(
+      {
+        id: product.id,
+        base_price: product.price,
+        is_on_sale: product.is_on_sale ?? false,
+        sale_price: product.sale_price ?? null,
+        track_inventory: product.track_inventory ?? true,
+        has_multiple_price_tiers: product.has_multiple_price_tiers === true,
+        units_per_package: product.units_per_package ?? null,
+        package_consumes_multiple_stock:
+          product.package_consumes_multiple_stock === true,
+      },
+      variant
+        ? {
+            id: variant.id.toString(),
+            price_override: variant.price_override ?? null,
+            is_on_sale: variant.is_on_sale ?? false,
+            sale_price: variant.sale_price ?? null,
+            track_inventory_override: variant.track_inventory_override ?? null,
+          }
+        : undefined,
+      tier
+        ? {
+            id: tier.id,
+            name: tier.name,
+            discount_percentage: tier.discount_percentage ?? 0,
+            is_package_unit: !!tier.is_package_unit,
+          }
+        : null,
+      tierOverrides
+        .filter((o) => !tier || o.price_tier_id === tier.id)
+        .map((o) => ({
+          variant_id: o.variant_id ?? null,
+          override_price: Number(o.override_price),
+        })),
+      taxRate,
+    );
+
+    const unitPrice = this.roundMoney(resolution.unitPrice);
+    const finalUnitPrice = this.roundMoney(resolution.unitPriceWithTax);
+    const multiplier =
+      item.is_weight_product && item.weight ? item.weight : item.quantity;
+    const taxAmount = this.roundMoney(
+      (finalUnitPrice - unitPrice) * multiplier,
+    );
+
+    const updatedItems = [...currentState.items];
+    updatedItems[itemIndex] = {
+      ...item,
+      unitPrice,
+      finalPrice: finalUnitPrice,
+      originalFinalPrice: finalUnitPrice,
+      totalPrice: this.roundMoney(finalUnitPrice * multiplier),
+      taxAmount,
+      taxRate,
+      applied_price_tier_id: resolution.appliedPriceTierId ?? null,
+      applied_price_tier_name: resolution.appliedPriceTierName ?? null,
+      is_package_unit: !!resolution.isPackageUnit,
+      units_per_package: resolution.unitsPerPackage ?? null,
+      // Clear manual price-override flags — a tier change is system-driven.
+      isPriceOverridden: false,
+      priceOverrideReason: undefined,
+    };
+
+    return {
+      ...currentState,
+      items: updatedItems,
+      summary: this.calculateSummary(updatedItems, currentState.appliedDiscounts),
       updatedAt: new Date(),
     };
   }
