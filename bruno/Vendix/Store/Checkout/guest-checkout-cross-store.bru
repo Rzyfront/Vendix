@@ -1,0 +1,102 @@
+meta {
+  name: Guest Checkout - Cross-Store (Mismo Email, Otra Store)
+  type: http
+  seq: 24
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: none
+  headers: {
+    x-store-id: {{cross_store_id}}
+  }
+}
+
+docs {
+  Escenario 4 - El scope de match es ESTRICTO por store via
+  `store_users.some({ store_id })`. Si llega el MISMO email del test 1
+  pero apuntando a una store DIFERENTE (header `x-store-id`), el resolver
+  debe crear una NUEVA fila en `users` (porque el cliente no esta
+  vinculado en `store_users` a la store-B) en lugar de reusar el cliente
+  de la store-A.
+
+  Pre-condicion:
+    - Variable `new_guest_email` seteada por `guest-checkout-new-email.bru`.
+    - Variable `cross_store_id` apuntando a una store ecommerce DIFERENTE a
+      la default (la resuelta por hostname `localhost`). Editar esta
+      variable en el environment local antes de correr este test.
+    - Tanto la store default como `cross_store_id` deben tener el mismo
+      `payment_method_id` y `product_id` habilitados, o ajustar las vars
+      `bank_transfer_payment_method_id` / `ecommerce_product_id` segun
+      corresponda a la store-B.
+
+  Verificacion SQL manual:
+    SELECT COUNT(*) AS user_count
+      FROM users WHERE email = '<valor de new_guest_email>';
+    -- Debe ser 2 (uno por cada store - scope estricto).
+
+    SELECT u.id, u.email, su.store_id
+      FROM users u
+      JOIN store_users su ON su.user_id = u.id
+      WHERE u.email = '<valor de new_guest_email>'
+      ORDER BY su.store_id;
+    -- Debe devolver 2 filas con store_ids distintos.
+}
+
+body:json {
+  {
+    "payment_method_id": {{bank_transfer_payment_method_id}},
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "quantity": 1
+      }
+    ],
+    "guest_customer": {
+      "email": "{{new_guest_email}}",
+      "first_name": "Cross Store",
+      "last_name": "Invitado",
+      "phone": "3005556677"
+    }
+  }
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.data) {
+    bru.setVar("cross_store_order_id", res.body.data.order_id);
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+  res.body.data.order_id: isDefined
+}
+
+tests {
+  test("Pre-requisito: new_guest_email definido", function() {
+    expect(bru.getVar("new_guest_email")).to.be.a("string");
+    expect(bru.getVar("new_guest_email").length).to.be.greaterThan(0);
+  });
+
+  test("Pre-requisito: cross_store_id definido", function() {
+    const id = bru.getVar("cross_store_id");
+    expect(id, "Definir cross_store_id en el environment").to.not.be.undefined;
+    expect(id, "Definir cross_store_id en el environment").to.not.equal("");
+  });
+
+  test("Status 201 - orden creada en store-B", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response incluye order_id distinto a las ordenes previas", function() {
+    expect(res.body.data.order_id).to.not.be.null;
+    const prevOrders = [
+      bru.getVar("new_order_id"),
+      bru.getVar("repeat_order_id"),
+      bru.getVar("registered_order_id"),
+    ];
+    expect(prevOrders).to.not.include(res.body.data.order_id);
+  });
+}

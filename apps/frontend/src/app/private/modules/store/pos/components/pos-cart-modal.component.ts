@@ -1,23 +1,40 @@
 import {
   Component,
+  computed,
+  DestroyRef,
+  effect,
+  inject,
   input,
   output,
-  inject,
-  effect,
+  signal,
 } from '@angular/core';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+import { distinctUntilChanged, map } from 'rxjs';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { TooltipComponent } from '../../../../../shared/components/tooltip/tooltip.component';
 import { CartState, CartItem } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { PosCartService } from '../services/pos-cart.service';
+import {
+  PriceTier,
+  ProductPriceTierOverride,
+  PriceTierCacheService,
+  PriceTierSelectorComponent,
+} from '../../price-tiers';
 
 @Component({
   selector: 'app-pos-cart-modal',
   standalone: true,
   imports: [
     IconComponent,
-    QuantityControlComponent
-],
+    QuantityControlComponent,
+    TooltipComponent,
+    PriceTierSelectorComponent,
+  ],
   template: `
     <!-- Overlay -->
     <div
@@ -129,7 +146,26 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                       @if (item.isPriceOverridden) {
                         <span class="item-price-badge">precio editado</span>
                       }
+                      @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                        <span
+                          class="item-tier-badge"
+                          [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                        >{{ item.applied_price_tier_name }}</span>
+                      }
+                      @if (item.is_package_unit && item.units_per_package) {
+                        <span class="item-package-badge">× {{ item.units_per_package }} unid/empaque</span>
+                      }
                     </div>
+                    @if (canShowTierSelector(item)) {
+                      <div class="item-tier-selector">
+                        <app-price-tier-selector
+                          [tiers]="availableTiers()"
+                          [selectedTierId]="item.applied_price_tier_id ?? null"
+                          [unitsPerPackage]="item.units_per_package ?? null"
+                          (selectedTierIdChange)="onTierChange(item, $event)"
+                        ></app-price-tier-selector>
+                      </div>
+                    }
                   </div>
                   <!-- Remove Button -->
                   <button
@@ -155,17 +191,27 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
                         (valueChange)="onQuantityChange(item.id, $event)"
                       ></app-quantity-control>
                     }
-                    @if (canEditItemPrice(item)) {
-                      <button
-                        type="button"
-                        class="edit-price-btn"
-                        (click)="itemPriceEditRequested.emit(item)"
-                        title="Editar precio de venta"
-                      >
-                        <app-icon name="pencil" [size]="15"></app-icon>
-                      </button>
-                    }
-                    <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
+                    <div class="item-price-action">
+                      <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
+                      @if (canEditItemPrice(item)) {
+                        <app-tooltip
+                          content="Edita el precio de venta de este producto."
+                          position="top"
+                          size="sm"
+                          color="default"
+                        >
+                          <button
+                            type="button"
+                            class="edit-price-btn"
+                            (click)="itemPriceEditRequested.emit(item)"
+                            aria-label="Editar precio de venta"
+                            title="Edita el precio de venta de este producto."
+                          >
+                            <app-icon name="pencil" [size]="15"></app-icon>
+                          </button>
+                        </app-tooltip>
+                      }
+                    </div>
                   </div>
                 </div>
               }
@@ -493,7 +539,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       }
 
       .item-tax-badge,
-      .item-price-badge {
+      .item-price-badge,
+      .item-tier-badge,
+      .item-package-badge {
         display: inline-flex;
         align-items: center;
         padding: 1px 6px;
@@ -511,6 +559,21 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       .item-price-badge {
         background: rgba(147, 51, 234, 0.12);
         color: rgb(126, 34, 206);
+      }
+
+      .item-tier-badge {
+        background: rgba(245, 158, 11, 0.14);
+        color: rgb(180, 83, 9);
+      }
+
+      .item-package-badge {
+        background: rgba(59, 130, 246, 0.1);
+        color: rgb(29, 78, 216);
+        font-weight: 600;
+      }
+
+      .item-tier-selector {
+        margin-top: 6px;
       }
 
       .item-weight-badge {
@@ -576,19 +639,38 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         font-size: 15px;
         font-weight: 700;
         color: var(--color-primary);
+        line-height: 1;
+      }
+
+      .item-price-action {
         margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        min-width: 0;
       }
 
       .edit-price-btn {
         width: 34px;
         height: 34px;
-        border: 1px solid var(--color-border);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.24);
         border-radius: 10px;
-        background: var(--color-surface);
-        color: var(--color-text-secondary);
+        background: rgba(var(--color-primary-rgb), 0.08);
+        color: var(--color-primary);
         display: inline-flex;
         align-items: center;
         justify-content: center;
+        cursor: pointer;
+        transition:
+          background 0.2s ease,
+          border-color 0.2s ease,
+          transform 0.2s ease;
+      }
+
+      .edit-price-btn:hover {
+        background: rgba(var(--color-primary-rgb), 0.14);
+        border-color: rgba(var(--color-primary-rgb), 0.36);
       }
 
       .edit-price-btn:active {
@@ -736,6 +818,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 })
 export class PosCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly priceTierCache = inject(PriceTierCacheService);
+  private readonly cartService = inject(PosCartService);
+  private readonly toastService = inject(ToastService);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
@@ -752,6 +839,12 @@ export class PosCartModalComponent {
   readonly shipping = output<void>();
   readonly checkout = output<void>();
 
+  readonly availableTiers = signal<PriceTier[]>([]);
+  readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
+  readonly canApplyPricingTier = computed(() =>
+    this.authFacade.userPermissions().includes('store:products:apply_pricing_tier'),
+  );
+
   constructor() {
     void this.currencyService.loadCurrency();
 
@@ -762,6 +855,101 @@ export class PosCartModalComponent {
         document.body.style.overflow = '';
       }
     });
+
+    // Load active tiers once (cache shareReplay'd with desktop cart).
+    if (this.canApplyPricingTier()) {
+      this.priceTierCache
+        .getActiveTiers()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (tiers) => this.availableTiers.set(tiers || []),
+          error: () => this.availableTiers.set([]),
+        });
+    }
+
+    // Pre-fetch overrides per multi-tier product in cart.
+    toObservable(this.cartState)
+      .pipe(
+        map((state) =>
+          (state?.items ?? [])
+            .filter(
+              (i) =>
+                i.itemType !== 'custom' &&
+                i.product.has_multiple_price_tiers === true,
+            )
+            .map((i) => Number(i.product.id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+        map((ids) => Array.from(new Set(ids)).sort()),
+        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((productIds) => {
+        for (const productId of productIds) {
+          if (this.productOverrides()[productId]) continue;
+          this.priceTierCache
+            .getProductOverrides(productId)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (overrides) =>
+                this.productOverrides.update((curr) => ({
+                  ...curr,
+                  [productId]: overrides ?? [],
+                })),
+              error: () => {},
+            });
+        }
+      });
+  }
+
+  canShowTierSelector(item: CartItem): boolean {
+    return (
+      item.itemType !== 'custom' &&
+      item.product.has_multiple_price_tiers === true &&
+      this.canApplyPricingTier() &&
+      this.availableTiers().length > 0
+    );
+  }
+
+  private getOverridesForItem(
+    item: CartItem,
+    tierId: number | null,
+  ): ProductPriceTierOverride[] {
+    if (item.itemType === 'custom') return [];
+    const productId = Number(item.product.id);
+    if (!Number.isFinite(productId) || productId <= 0) return [];
+    const all = this.productOverrides()[productId] ?? [];
+    if (tierId == null) return all;
+    return all.filter((o) => o.price_tier_id === tierId);
+  }
+
+  onTierChange(item: CartItem, tierId: number | null): void {
+    if (!this.canApplyPricingTier()) {
+      this.toastService.warning('No tienes permiso para aplicar tarifas de precio');
+      return;
+    }
+    const tier =
+      tierId == null
+        ? null
+        : this.availableTiers().find((t) => t.id === tierId) || null;
+    const overrides = this.getOverridesForItem(item, tier?.id ?? null);
+
+    this.cartService
+      .applyTierToCartItem(item.id, tier, overrides)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          if (tier) {
+            this.toastService.success(`Tarifa "${tier.name}" aplicada`);
+          } else {
+            this.toastService.info('Tarifa default restaurada');
+          }
+        },
+        error: (error) =>
+          this.toastService.error(
+            typeof error === 'string' ? error : 'Error al aplicar tarifa',
+          ),
+      });
   }
 
   onOverlayClick(event: MouseEvent): void {

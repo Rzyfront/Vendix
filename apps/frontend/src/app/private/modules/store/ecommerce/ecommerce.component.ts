@@ -38,7 +38,6 @@ import {
   InputComponent,
   MultiSelectorComponent,
   SelectorComponent,
-  TextareaComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -51,7 +50,12 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import type { Currency } from '../../../../shared/pipes/currency';
 import { ProductState } from '../products/interfaces';
 
-type HomeSectionKey = 'slider' | 'categories' | 'brands' | 'featured_products';
+type HomeSectionKey =
+  | 'slider'
+  | 'welcome'
+  | 'categories'
+  | 'brands'
+  | 'featured_products';
 
 interface HomeSectionAdminItem {
   key: HomeSectionKey;
@@ -76,11 +80,20 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     limitMax: 1,
   },
   {
+    key: 'welcome',
+    label: 'Bienvenida',
+    description: 'Título y párrafo independientes del slider.',
+    icon: 'message-square',
+    defaultOrder: 20,
+    hasLimit: false,
+    limitMax: 1,
+  },
+  {
     key: 'categories',
     label: 'Categorías',
     description: 'Accesos visuales a las familias de productos.',
     icon: 'layout-grid',
-    defaultOrder: 20,
+    defaultOrder: 30,
     hasLimit: true,
     limitMax: 24,
   },
@@ -89,7 +102,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     label: 'Marcas',
     description: 'Logos y accesos a marcas disponibles.',
     icon: 'tags',
-    defaultOrder: 30,
+    defaultOrder: 40,
     hasLimit: true,
     limitMax: 24,
   },
@@ -98,7 +111,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     label: 'Productos destacados',
     description: 'Colección curada con productos marcados como destacados.',
     icon: 'sparkles',
-    defaultOrder: 40,
+    defaultOrder: 50,
     hasLimit: true,
     limitMax: 48,
   },
@@ -115,7 +128,6 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     InputComponent,
     MultiSelectorComponent,
     SelectorComponent,
-    TextareaComponent,
     SettingToggleComponent,
     StickyHeaderComponent,
     FooterSettingsFormComponent,
@@ -241,10 +253,14 @@ export class EcommerceComponent {
   readonly isUploadingLogo = signal(false);
   readonly logoPreview = signal<string | null>(null);
   logoKey: string | null = null;
+  readonly isUploadingFavicon = signal(false);
+  readonly faviconPreview = signal<string | null>(null);
+  faviconKey: string | null = null;
 
   // File input reference
   fileInputRef: HTMLInputElement | null = null;
   logoInputRef: HTMLInputElement | null = null;
+  faviconInputRef: HTMLInputElement | null = null;
 
   // Store info for auto-fill
   storeName = 'Mi Tienda';
@@ -339,6 +355,7 @@ export class EcommerceComponent {
         titulo: [''],
         parrafo: [''],
         logo_url: [''],
+        favicon_url: [''],
         colores: this.fb.group({
           primary_color: ['#3B82F6'],
           secondary_color: ['#10B981'],
@@ -367,26 +384,32 @@ export class EcommerceComponent {
           subtitle: ['La primera historia visual de tu tienda'],
           sort_order: [10, [Validators.min(1)]],
         }),
+        welcome: this.fb.group({
+          enabled: [false],
+          title: [''],
+          subtitle: [''],
+          sort_order: [20, [Validators.min(1)]],
+        }),
         categories: this.fb.group({
           enabled: [true],
           title: ['Categorías'],
           subtitle: ['Explora por tipo de producto'],
           limit: [8, [Validators.min(1), Validators.max(24)]],
-          sort_order: [20, [Validators.min(1)]],
+          sort_order: [30, [Validators.min(1)]],
         }),
         brands: this.fb.group({
           enabled: [true],
           title: ['Marcas'],
           subtitle: ['Compra por tus marcas favoritas'],
           limit: [8, [Validators.min(1), Validators.max(24)]],
-          sort_order: [30, [Validators.min(1)]],
+          sort_order: [40, [Validators.min(1)]],
         }),
         featured_products: this.fb.group({
           enabled: [true],
           title: ['Productos destacados'],
           subtitle: ['Selección especial de la tienda'],
           limit: [16, [Validators.min(1), Validators.max(48)]],
-          sort_order: [40, [Validators.min(1)]],
+          sort_order: [50, [Validators.min(1)]],
         }),
       }),
 
@@ -437,12 +460,6 @@ export class EcommerceComponent {
   }
 
   // Inicio
-  get tituloControl() {
-    return this.inicioGroup.get('titulo') as any;
-  }
-  get parrafoControl() {
-    return this.inicioGroup.get('parrafo') as any;
-  }
   get primaryColorControl() {
     return this.inicioGroup.get('colores.primary_color') as any;
   }
@@ -569,6 +586,7 @@ export class EcommerceComponent {
             this.isEditMode.set(true);
             this.isSetupMode.set(false);
             this.settingsForm.patchValue(response.config);
+            this.hydrateWelcomeSection(response.config);
 
             // Pre-fill confirm_whatsapp_number from saved number
             if (response.config.checkout?.whatsapp_number) {
@@ -588,6 +606,17 @@ export class EcommerceComponent {
             } else {
               this.logoPreview.set(null);
               this.logoKey = null;
+            }
+            const faviconUrl =
+              response.config.inicio?.favicon_url ||
+              response.branding?.favicon_url ||
+              this.getStoreBrandingFaviconUrl();
+            if (faviconUrl) {
+              this.faviconPreview.set(faviconUrl);
+              this.faviconKey = faviconUrl;
+            } else {
+              this.faviconPreview.set(null);
+              this.faviconKey = null;
             }
 
             // Cargar imágenes del slider
@@ -657,6 +686,13 @@ export class EcommerceComponent {
       .subscribe({
         next: (template: EcommerceSettings) => {
           this.settingsForm.patchValue(template);
+          this.hydrateWelcomeSection(template);
+          this.logoPreview.set(template.inicio?.logo_url || null);
+          this.logoKey = template.inicio?.logo_url || null;
+          const faviconUrl =
+            template.inicio?.favicon_url || this.getStoreBrandingFaviconUrl();
+          this.faviconPreview.set(faviconUrl);
+          this.faviconKey = faviconUrl;
           this.sliderImages.set([]);
           this.activeImageIndex.set(0);
           // Cargar defaults del footer
@@ -1061,6 +1097,15 @@ export class EcommerceComponent {
     return this.settingsForm.get(['home_sections', key]) as FormGroup;
   }
 
+  private getStoreBrandingFaviconUrl(): string | null {
+    const storeSettings: any = this.store.selectSignal(selectStoreSettings)();
+    return (
+      storeSettings?.branding?.favicon_url ||
+      storeSettings?.app?.favicon_url ||
+      null
+    );
+  }
+
   /**
    * Trigger file input for logo upload
    */
@@ -1137,6 +1182,77 @@ export class EcommerceComponent {
     }
   }
 
+  triggerFaviconInput(): void {
+    if (this.isUploadingFavicon()) return;
+
+    if (!this.faviconInputRef) {
+      this.faviconInputRef = document.createElement('input');
+      this.faviconInputRef.type = 'file';
+      this.faviconInputRef.accept = 'image/*';
+      this.faviconInputRef.addEventListener('change', (e) =>
+        this.onFaviconUpload(e),
+      );
+    }
+    this.faviconInputRef.click();
+  }
+
+  onFaviconUpload(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+
+    if (!files || files.length === 0) return;
+    const file = files[0];
+
+    if (!file.type.startsWith('image/')) {
+      this.toastService.warning('Solo se permiten archivos de imagen');
+      return;
+    }
+
+    if (file.size > 1 * 1024 * 1024) {
+      this.toastService.warning('El favicon excede el tamaño máximo de 1MB');
+      return;
+    }
+
+    this.isUploadingFavicon.set(true);
+
+    this.ecommerceService
+      .uploadSliderImage(file)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.faviconPreview.set(result.url || result.key);
+          this.faviconKey = result.key;
+
+          const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
+          if (inicioGroup) {
+            inicioGroup.patchValue({ favicon_url: result.key });
+            this.settingsForm.markAsDirty();
+          }
+
+          this.isUploadingFavicon.set(false);
+          this.toastService.success('Favicon subido exitosamente');
+        },
+        error: (error) => {
+          this.isUploadingFavicon.set(false);
+          this.toastService.error(
+            'Error al subir el favicon: ' + error.message,
+          );
+        },
+      });
+
+    input.value = '';
+  }
+
+  removeFavicon(): void {
+    this.faviconPreview.set(null);
+    this.faviconKey = null;
+    const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
+    if (inicioGroup) {
+      inicioGroup.patchValue({ favicon_url: '' });
+      this.settingsForm.markAsDirty();
+    }
+  }
+
   /**
    * Update the form's slider photos array from sliderImages
    */
@@ -1207,8 +1323,7 @@ export class EcommerceComponent {
     const whatsappValid = await this.validateWhatsappCheckout();
     if (!whatsappValid) return;
 
-    // Apply auto-fill before submitting
-    this.applyAutoFill();
+    this.syncInicioFromWelcomeSection();
 
     this.isSaving.set(true);
 
@@ -1221,6 +1336,8 @@ export class EcommerceComponent {
       inicio: {
         ...this.settingsForm.value.inicio,
         logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url,
+        favicon_url:
+          this.faviconKey || this.settingsForm.value.inicio.favicon_url,
       },
       slider: {
         ...this.settingsForm.value.slider,
@@ -1412,31 +1529,38 @@ export class EcommerceComponent {
     this.settingsForm.markAsDirty();
   }
 
-  /**
-   * Apply auto-fill defaults to inicio section
-   */
-  private applyAutoFill(): void {
-    const inicio = this.settingsForm.get('inicio');
-    if (!inicio) return;
+  private hydrateWelcomeSection(config?: EcommerceSettings): void {
+    const welcome = config?.home_sections?.welcome;
+    if (welcome) return;
 
-    const titulo = inicio.get('titulo')?.value;
-    const parrafo = inicio.get('parrafo')?.value;
+    const title = config?.inicio?.titulo?.trim() || '';
+    const subtitle = config?.inicio?.parrafo?.trim() || '';
+    if (!title && !subtitle) return;
 
-    // Auto-fill título if empty
-    if (!titulo || titulo.trim() === '') {
-      inicio.patchValue({
-        titulo: `Bienvenido a ${this.storeName}`,
-      });
-    }
-
-    // Auto-fill párrafo if empty
-    if (!parrafo || parrafo.trim() === '') {
-      inicio.patchValue({
-        parrafo:
-          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
-      });
-    }
+    this.getHomeSectionGroup('welcome').patchValue(
+      {
+        enabled: true,
+        title,
+        subtitle,
+      },
+      { emitEvent: false },
+    );
   }
+
+  private syncInicioFromWelcomeSection(): void {
+    const inicio = this.settingsForm.get('inicio');
+    const welcome = this.getHomeSectionGroup('welcome');
+    if (!inicio || !welcome) return;
+
+    inicio.patchValue(
+      {
+        titulo: welcome.get('title')?.value || '',
+        parrafo: welcome.get('subtitle')?.value || '',
+      },
+      { emitEvent: false },
+    );
+  }
+
   /**
    * Sync color picker native input with FormControl
    */

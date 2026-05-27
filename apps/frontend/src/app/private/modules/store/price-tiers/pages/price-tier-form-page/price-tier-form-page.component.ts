@@ -14,7 +14,8 @@ import {
   Validators,
 } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs';
 
 import {
   InputComponent,
@@ -98,6 +99,17 @@ export class PriceTierFormPageComponent implements OnInit {
       }),
     });
 
+  /**
+   * Signal mirror of `form.status` so `computed()` can react to validity changes.
+   * Without this, `headerActions` computes once with the initial invalid state
+   * (name vacío = required) and the "Crear Tarifa" button stays permanently
+   * disabled even after the user fills the form.
+   */
+  private readonly formStatus = toSignal(
+    this.form.statusChanges.pipe(startWith(this.form.status)),
+    { initialValue: this.form.status },
+  );
+
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
       id: 'cancel',
@@ -111,7 +123,7 @@ export class PriceTierFormPageComponent implements OnInit {
       variant: 'primary',
       icon: 'save',
       loading: this.isSubmitting(),
-      disabled: this.isSubmitting() || this.form.invalid,
+      disabled: this.isSubmitting() || this.formStatus() === 'INVALID',
     },
   ]);
 

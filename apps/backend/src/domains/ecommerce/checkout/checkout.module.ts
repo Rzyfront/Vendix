@@ -16,6 +16,7 @@ import { ReservationsModule } from '../../store/reservations/reservations.module
 import { InvoicingModule } from '../../store/invoicing/invoicing.module';
 import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
 import { S3Module } from '../../../common/services/s3.module';
+import { CustomersModule } from '../../store/customers/customers.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { S3Module } from '../../../common/services/s3.module';
     InvoicingModule,
     InvoiceDataRequestsModule,
     S3Module,
+    CustomersModule,
     // 5 MB max upload — matches what the checkout controller's
     // FileInterceptor advertises so multer rejects oversized uploads early
     // (before the buffer is even allocated).

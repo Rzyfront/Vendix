@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  BadRequestException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
@@ -24,6 +20,8 @@ import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
 import { Prisma } from '@prisma/client';
 import * as XLSX from 'xlsx';
+
+type BulkExcelTemplateRequest = 'products' | 'services';
 
 @Injectable()
 export class ProductsBulkService {
@@ -70,6 +68,11 @@ export class ProductsBulkService {
     Marca: 'brand_id',
     Estado: 'state',
     'Disponible Ecommerce': 'available_for_ecommerce',
+    Destacado: 'is_featured',
+    'Permite Cambiar Precio POS': 'allow_pos_price_override',
+    'Usa Listas de Precio': 'has_multiple_price_tiers',
+    'Unidades por Empaque': 'units_per_package',
+    'Empaque Descuenta Múltiples Unidades': 'package_consumes_multiple_stock',
     'En Oferta': 'is_on_sale',
     'Precio Oferta': 'sale_price',
     Peso: 'weight',
@@ -82,8 +85,13 @@ export class ProductsBulkService {
     'Buffer (min)': 'buffer_minutes',
     'Es Recurrente': 'is_recurring',
     'Instrucciones Servicio': 'service_instructions',
+    'Es Consulta': 'is_consultation',
+    'Enviar Preconsulta': 'send_preconsultation',
+    'Plantilla Consulta ID': 'consultation_template_id',
+    'Plantilla Preconsulta ID': 'preconsultation_template_id',
     'Tiempo Preparación (min)': 'preparation_time_minutes',
     'Tipo Precio': 'pricing_type',
+    'Impuestos IDs': 'tax_category_ids',
   };
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
@@ -107,6 +115,26 @@ export class ProductsBulkService {
     'precio oferta': 'sale_price',
     peso: 'weight',
     'disponible ecommerce': 'available_for_ecommerce',
+    'disponible e-commerce': 'available_for_ecommerce',
+    'available for ecommerce': 'available_for_ecommerce',
+    ecommerce: 'available_for_ecommerce',
+    destacado: 'is_featured',
+    featured: 'is_featured',
+    'is featured': 'is_featured',
+    'permite cambiar precio pos': 'allow_pos_price_override',
+    'permite cambio precio pos': 'allow_pos_price_override',
+    'precio flexible pos': 'allow_pos_price_override',
+    'allow pos price override': 'allow_pos_price_override',
+    'usa listas de precio': 'has_multiple_price_tiers',
+    'usa tarifas': 'has_multiple_price_tiers',
+    'multiples listas de precio': 'has_multiple_price_tiers',
+    'múltiples listas de precio': 'has_multiple_price_tiers',
+    'has multiple price tiers': 'has_multiple_price_tiers',
+    'unidades por empaque': 'units_per_package',
+    'units per package': 'units_per_package',
+    'empaque descuenta multiples unidades': 'package_consumes_multiple_stock',
+    'empaque descuenta múltiples unidades': 'package_consumes_multiple_stock',
+    'package consumes multiple stock': 'package_consumes_multiple_stock',
     estado: 'state',
     'codigo bodega': 'warehouse_code',
     'código bodega': 'warehouse_code',
@@ -129,6 +157,18 @@ export class ProductsBulkService {
     recurrente: 'is_recurring',
     'instrucciones servicio': 'service_instructions',
     instrucciones: 'service_instructions',
+    'es consulta': 'is_consultation',
+    consulta: 'is_consultation',
+    'is consultation': 'is_consultation',
+    'enviar preconsulta': 'send_preconsultation',
+    preconsulta: 'send_preconsultation',
+    'send preconsultation': 'send_preconsultation',
+    'plantilla consulta id': 'consultation_template_id',
+    'consulta template id': 'consultation_template_id',
+    'consultation template id': 'consultation_template_id',
+    'plantilla preconsulta id': 'preconsultation_template_id',
+    'preconsulta template id': 'preconsultation_template_id',
+    'preconsultation template id': 'preconsultation_template_id',
     'tiempo preparacion': 'preparation_time_minutes',
     'tiempo preparacion (min)': 'preparation_time_minutes',
     preparacion: 'preparation_time_minutes',
@@ -146,6 +186,9 @@ export class ProductsBulkService {
     'maneja lotes': 'requires_batch_tracking',
     lotes: 'requires_batch_tracking',
     'tipo precio': 'pricing_type',
+    'impuestos ids': 'tax_category_ids',
+    impuestos: 'tax_category_ids',
+    'tax category ids': 'tax_category_ids',
   };
 
   constructor(
@@ -154,6 +197,46 @@ export class ProductsBulkService {
     private readonly accessValidationService: AccessValidationService,
     private readonly s3Service: S3Service,
   ) {}
+
+  private normalizeBooleanValue(value: any): boolean {
+    if (typeof value === 'boolean') return value;
+
+    const normalized = String(value ?? '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    if (
+      ['si', 'yes', 'true', 'verdadero', '1', 'activo', 'active', 'x'].includes(
+        normalized,
+      )
+    ) {
+      return true;
+    }
+
+    if (
+      [
+        'no',
+        'false',
+        'falso',
+        '0',
+        'inactivo',
+        'inactive',
+        'deshabilitado',
+        'disabled',
+      ].includes(normalized)
+    ) {
+      return false;
+    }
+
+    return Boolean(value);
+  }
+
+  private normalizeNullableBooleanValue(value: any): boolean | string {
+    if (value === this.NULL_MARKER) return this.NULL_MARKER;
+    return this.normalizeBooleanValue(value);
+  }
 
   /**
    * Parsea archivo (Excel o CSV) a array de productos usando mapeo de español
@@ -179,7 +262,12 @@ export class ProductsBulkService {
 
       rawHeaders.forEach((h, index) => {
         if (!h) return;
-        const normalized = h.toString().trim().toLowerCase();
+        const normalized = h
+          .toString()
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
         // Buscar traducción
         const dtoKey = this.HEADER_TRANSLATIONS[normalized];
         if (dtoKey) {
@@ -234,6 +322,9 @@ export class ProductsBulkService {
                 'max_stock_level',
                 'reorder_point',
                 'reorder_quantity',
+                'units_per_package',
+                'consultation_template_id',
+                'preconsultation_template_id',
               ].includes(key)
             ) {
               const num = parseFloat(strVal);
@@ -276,7 +367,9 @@ export class ProductsBulkService {
     }
   }
 
-  private stripCatalogOnlyIgnoredFields(product: Record<string, any>): string[] {
+  private stripCatalogOnlyIgnoredFields(
+    product: Record<string, any>,
+  ): string[] {
     const ignored = new Set<string>();
 
     for (const field of this.CATALOG_ONLY_IGNORED_FIELDS) {
@@ -385,8 +478,7 @@ export class ProductsBulkService {
 
     for (let i = 0; i < products.length; i++) {
       const product = { ...products[i] };
-      const ignoredCatalogFields =
-        this.stripCatalogOnlyIgnoredFields(product);
+      const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(product);
       const item: BulkProductAnalysisItemDto = {
         row_number: i + 2, // +2 because row 1 is header, data starts at row 2
         name: product.name || '',
@@ -423,18 +515,9 @@ export class ProductsBulkService {
         product.track_inventory !== null &&
         product.track_inventory !== ''
       ) {
-        if (typeof product.track_inventory === 'boolean') {
-          item.track_inventory = product.track_inventory;
-        } else {
-          const raw = product.track_inventory.toString().toLowerCase().trim();
-          item.track_inventory =
-            raw === 'si' ||
-            raw === 'sí' ||
-            raw === 'yes' ||
-            raw === 'true' ||
-            raw === 'verdadero' ||
-            raw === '1';
-        }
+        item.track_inventory = this.normalizeBooleanValue(
+          product.track_inventory,
+        );
       } else {
         // Default: services=false, physical=true
         item.track_inventory = item.product_type === 'service' ? false : true;
@@ -636,11 +719,17 @@ export class ProductsBulkService {
         'product_type',
         'track_inventory',
         'available_for_ecommerce',
+        'is_featured',
+        'allow_pos_price_override',
+        'has_multiple_price_tiers',
+        'units_per_package',
+        'package_consumes_multiple_stock',
         'is_on_sale',
         'sale_price',
         'weight',
         'brand_id',
         'category_ids',
+        'tax_category_ids',
         'pricing_type',
         'service_duration_minutes',
         'service_modality',
@@ -650,6 +739,10 @@ export class ProductsBulkService {
         'buffer_minutes',
         'is_recurring',
         'service_instructions',
+        'is_consultation',
+        'send_preconsultation',
+        'consultation_template_id',
+        'preconsultation_template_id',
         'preparation_time_minutes',
       ];
 
@@ -748,410 +841,227 @@ export class ProductsBulkService {
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
    */
-  async generateExcelTemplate(type: 'quick' | 'complete'): Promise<Buffer> {
-    let headers: string[] = [];
-    let exampleData: any[] = [];
+  async generateExcelTemplate(
+    type: BulkExcelTemplateRequest = 'products',
+  ): Promise<Buffer> {
+    const templateType = type;
+    const productHeaders = [
+      'Nombre',
+      'SKU',
+      'Tipo',
+      'Estado',
+      'Controla Inventario',
+      'Precio Venta',
+      'Descripción',
+      'Marca',
+      'Categorías',
+      'Impuestos IDs',
+      'Tipo Precio',
+      'Disponible Ecommerce',
+      'Destacado',
+      'Permite Cambiar Precio POS',
+      'Usa Listas de Precio',
+      'Unidades por Empaque',
+      'Empaque Descuenta Múltiples Unidades',
+      'Peso',
+      'En Oferta',
+      'Precio Oferta',
+    ];
+    const serviceHeaders = [
+      'Nombre',
+      'SKU',
+      'Tipo',
+      'Estado',
+      'Precio Venta',
+      'Descripción',
+      'Marca',
+      'Categorías',
+      'Impuestos IDs',
+      'Disponible Ecommerce',
+      'Destacado',
+      'Permite Cambiar Precio POS',
+      'En Oferta',
+      'Precio Oferta',
+      'Duración Servicio (min)',
+      'Modalidad Servicio',
+      'Tipo Precio Servicio',
+      'Requiere Reserva',
+      'Modo Reserva',
+      'Buffer (min)',
+      'Es Recurrente',
+      'Instrucciones Servicio',
+      'Es Consulta',
+      'Enviar Preconsulta',
+      'Plantilla Consulta ID',
+      'Plantilla Preconsulta ID',
+      'Tiempo Preparación (min)',
+    ];
 
-    if (type === 'quick') {
-      headers = [
-        'Nombre',
-        'SKU',
-        'Tipo',
-        'Estado',
-        'Controla Inventario',
-        'Precio Venta',
-      ];
-      exampleData = [
-        {
-          Nombre: 'Producto Ejemplo 1',
-          SKU: 'SKU-001',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 15000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 2',
-          SKU: 'SKU-002',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 25000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 3',
-          SKU: 'SKU-003',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 42000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 4',
-          SKU: 'SKU-004',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 85000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 5',
-          SKU: 'SKU-005',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 32000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 6',
-          SKU: 'SKU-006',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 55000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 7',
-          SKU: 'SKU-007',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 18000,
-        },
-        {
-          Nombre: 'Servicio Ejemplo 1',
-          SKU: 'SVC-001',
-          Tipo: 'servicio',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 50000,
-        },
-        {
-          Nombre: 'Servicio Ejemplo 2',
-          SKU: 'SVC-002',
-          Tipo: 'servicio',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 35000,
-        },
-        {
-          Nombre: 'Producto Ejemplo 8',
-          SKU: 'SKU-008',
-          Tipo: 'físico',
-          Estado: 'inactivo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 18000,
-        },
-      ];
-    } else {
-      headers = [
-        'Nombre',
-        'SKU',
-        'Tipo',
-        'Estado',
-        'Controla Inventario',
-        'Precio Venta',
-        'Descripción',
-        'Marca',
-        'Categorías',
-        'Tipo Precio',
-        'Disponible Ecommerce',
-        'Peso',
-        'En Oferta',
-        'Precio Oferta',
-        'Duración Servicio (min)',
-        'Modalidad Servicio',
-        'Tipo Precio Servicio',
-        'Requiere Reserva',
-        'Modo Reserva',
-        'Buffer (min)',
-        'Es Recurrente',
-        'Instrucciones Servicio',
-        'Tiempo Preparación (min)',
-      ];
-      exampleData = [
-        {
-          Nombre: 'Zapatillas Running Pro',
-          SKU: 'ZAP-RUN-PRO-42',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 85000,
-          Descripción: 'Zapatillas ideales para correr largas distancias.',
-          Marca: 'Nike',
-          Categorías: 'Deportes, Calzado',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0.8,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Asesoría Tributaria',
-          SKU: 'SVC-ASE-TRI-001',
-          Tipo: 'servicio',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 150000,
-          Descripción: 'Asesoría tributaria profesional por sesión.',
-          Marca: '',
-          Categorías: 'Servicios, Contabilidad',
-          'Tipo Precio': '',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': 60,
-          'Modalidad Servicio': 'presencial',
-          'Tipo Precio Servicio': 'por hora',
-          'Requiere Reserva': 'sí',
-          'Modo Reserva': 'proveedor',
-          'Buffer (min)': 15,
-          'Es Recurrente': 'no',
-          'Instrucciones Servicio': 'Traer cédula y comprobante de pago.',
-          'Tiempo Preparación (min)': 15,
-        },
-        {
-          Nombre: 'Leche Entera 1L',
-          SKU: 'LEC-ENT-1L-COL',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 5200,
-          Descripción: 'Leche entera pasteurizada de origen colombiano.',
-          Marca: 'Colanta',
-          Categorías: 'Alimentos, Lácteos',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'no',
-          Peso: 1.05,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Camiseta Dry-Fit Running',
-          SKU: 'CAM-DRY-RUN-M01',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 65000,
-          Descripción: 'Camiseta deportiva transpirable para hombre.',
-          Marca: 'Adidas',
-          Categorías: 'Deportes, Ropa Deportiva',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0.15,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Consultoría Estratégica Virtual',
-          SKU: 'SVC-CON-EST-001',
-          Tipo: 'servicio',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 250000,
-          Descripción:
-            'Consultoría estratégica virtual por sesión de 90 minutos.',
-          Marca: '',
-          Categorías: 'Servicios, Consultoría',
-          'Tipo Precio': '',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': 90,
-          'Modalidad Servicio': 'virtual',
-          'Tipo Precio Servicio': 'por sesión',
-          'Requiere Reserva': 'sí',
-          'Modo Reserva': 'libre',
-          'Buffer (min)': 10,
-          'Es Recurrente': 'no',
-          'Instrucciones Servicio':
-            'Conexión por Zoom 5 minutos antes de la sesión.',
-          'Tiempo Preparación (min)': 10,
-        },
-        {
-          Nombre: 'Escritorio Plegable Madera',
-          SKU: 'ESC-PLE-MAD-120',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 180000,
-          Descripción:
-            'Escritorio plegable de madera 120x60cm para home office.',
-          Marca: 'Muebles Express',
-          Categorías: 'Hogar, Muebles, Oficina',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'sí',
-          Peso: 15,
-          'En Oferta': 'sí',
-          'Precio Oferta': 155000,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Aceite de Oliva Extra Virgen 500ml',
-          SKU: 'ACE-OLI-EXV-500',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 38000,
-          Descripción: 'Aceite de oliva importado, primera prensada en frío.',
-          Marca: 'Olivetto',
-          Categorías: 'Alimentos, Aceites',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0.55,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Teclado Mecánico RGB',
-          SKU: 'TEC-MEC-RGB-K70',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 320000,
-          Descripción:
-            'Teclado mecánico con switches Cherry MX e iluminación RGB.',
-          Marca: 'Corsair',
-          Categorías: 'Tecnología, Periféricos',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'sí',
-          Peso: 1.2,
-          'En Oferta': 'sí',
-          'Precio Oferta': 280000,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Mantenimiento Preventivo Anual',
-          SKU: 'SVC-MNT-PRE-001',
-          Tipo: 'servicio',
-          Estado: 'activo',
-          'Controla Inventario': 'no',
-          'Precio Venta': 480000,
-          Descripción: 'Plan de mantenimiento preventivo anual para equipos.',
-          Marca: '',
-          Categorías: 'Servicios, Mantenimiento',
-          'Tipo Precio': '',
-          'Disponible Ecommerce': 'sí',
-          Peso: 0,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': 120,
-          'Modalidad Servicio': 'híbrido',
-          'Tipo Precio Servicio': 'suscripción',
-          'Requiere Reserva': 'no',
-          'Modo Reserva': '',
-          'Buffer (min)': 0,
-          'Es Recurrente': 'sí',
-          'Instrucciones Servicio':
-            'Coordinar visita técnica con anticipación de 24 horas.',
-          'Tiempo Preparación (min)': 30,
-        },
-        {
-          Nombre: 'Bloqueador Solar Facial SPF 60',
-          SKU: 'BLO-SOL-FAC-060',
-          Tipo: 'físico',
-          Estado: 'inactivo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 48000,
-          Descripción: 'Protector solar facial oil-free con SPF 60.',
-          Marca: 'La Roche-Posay',
-          Categorías: 'Belleza, Cuidado Personal',
-          'Tipo Precio': 'unidad',
-          'Disponible Ecommerce': 'no',
-          Peso: 0.1,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-        {
-          Nombre: 'Frutas Orgánicas Mix 1kg',
-          SKU: 'FRU-ORG-MIX-1KG',
-          Tipo: 'físico',
-          Estado: 'activo',
-          'Controla Inventario': 'sí',
-          'Precio Venta': 22000,
-          Descripción: 'Mix de frutas orgánicas de temporada por kilo.',
-          Marca: '',
-          Categorías: 'Alimentos, Orgánicos',
-          'Tipo Precio': 'peso',
-          'Disponible Ecommerce': 'sí',
-          Peso: 1.0,
-          'En Oferta': 'no',
-          'Precio Oferta': 0,
-          'Duración Servicio (min)': '',
-          'Modalidad Servicio': '',
-          'Tipo Precio Servicio': '',
-          'Requiere Reserva': '',
-          'Modo Reserva': '',
-          'Buffer (min)': '',
-          'Es Recurrente': '',
-          'Instrucciones Servicio': '',
-          'Tiempo Preparación (min)': '',
-        },
-      ];
-    }
+    const headers =
+      templateType === 'services' ? serviceHeaders : productHeaders;
+    const exampleData =
+      templateType === 'services'
+        ? [
+            {
+              Nombre: 'Asesoría Tributaria',
+              SKU: 'SVC-ASE-TRI-001',
+              Tipo: 'servicio',
+              Estado: 'activo',
+              'Precio Venta': 150000,
+              Descripción: 'Asesoría tributaria profesional por sesión.',
+              Marca: '',
+              Categorías: 'Servicios, Contabilidad',
+              'Impuestos IDs': '',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'no',
+              'Permite Cambiar Precio POS': 'no',
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+              'Duración Servicio (min)': 60,
+              'Modalidad Servicio': 'presencial',
+              'Tipo Precio Servicio': 'por hora',
+              'Requiere Reserva': 'sí',
+              'Modo Reserva': 'proveedor',
+              'Buffer (min)': 15,
+              'Es Recurrente': 'no',
+              'Instrucciones Servicio': 'Traer cédula y comprobante de pago.',
+              'Es Consulta': 'no',
+              'Enviar Preconsulta': 'no',
+              'Plantilla Consulta ID': '',
+              'Plantilla Preconsulta ID': '',
+              'Tiempo Preparación (min)': 15,
+            },
+            {
+              Nombre: 'Consultoría Estratégica Virtual',
+              SKU: 'SVC-CON-EST-001',
+              Tipo: 'servicio',
+              Estado: 'activo',
+              'Precio Venta': 250000,
+              Descripción:
+                'Consultoría estratégica virtual por sesión de 90 minutos.',
+              Marca: '',
+              Categorías: 'Servicios, Consultoría',
+              'Impuestos IDs': '',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'sí',
+              'Permite Cambiar Precio POS': 'no',
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+              'Duración Servicio (min)': 90,
+              'Modalidad Servicio': 'virtual',
+              'Tipo Precio Servicio': 'por sesión',
+              'Requiere Reserva': 'sí',
+              'Modo Reserva': 'libre',
+              'Buffer (min)': 10,
+              'Es Recurrente': 'no',
+              'Instrucciones Servicio':
+                'Conexión por videollamada 5 minutos antes de la sesión.',
+              'Es Consulta': 'no',
+              'Enviar Preconsulta': 'no',
+              'Plantilla Consulta ID': '',
+              'Plantilla Preconsulta ID': '',
+              'Tiempo Preparación (min)': 10,
+            },
+            {
+              Nombre: 'Mantenimiento Preventivo Anual',
+              SKU: 'SVC-MNT-PRE-001',
+              Tipo: 'servicio',
+              Estado: 'activo',
+              'Precio Venta': 480000,
+              Descripción:
+                'Plan de mantenimiento preventivo anual para equipos.',
+              Marca: '',
+              Categorías: 'Servicios, Mantenimiento',
+              'Impuestos IDs': '',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'no',
+              'Permite Cambiar Precio POS': 'sí',
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+              'Duración Servicio (min)': 120,
+              'Modalidad Servicio': 'híbrido',
+              'Tipo Precio Servicio': 'suscripción',
+              'Requiere Reserva': 'no',
+              'Modo Reserva': '',
+              'Buffer (min)': 0,
+              'Es Recurrente': 'sí',
+              'Instrucciones Servicio':
+                'Coordinar visita técnica con anticipación de 24 horas.',
+              'Es Consulta': 'no',
+              'Enviar Preconsulta': 'no',
+              'Plantilla Consulta ID': '',
+              'Plantilla Preconsulta ID': '',
+              'Tiempo Preparación (min)': 30,
+            },
+          ]
+        : [
+            {
+              Nombre: 'Zapatillas Running Pro',
+              SKU: 'ZAP-RUN-PRO-42',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'sí',
+              'Precio Venta': 85000,
+              Descripción: 'Zapatillas ideales para correr largas distancias.',
+              Marca: 'Nike',
+              Categorías: 'Deportes, Calzado',
+              'Impuestos IDs': '',
+              'Tipo Precio': 'unidad',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'sí',
+              'Permite Cambiar Precio POS': 'no',
+              'Usa Listas de Precio': 'no',
+              'Unidades por Empaque': '',
+              'Empaque Descuenta Múltiples Unidades': 'no',
+              Peso: 0.8,
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+            },
+            {
+              Nombre: 'Leche Entera 1L',
+              SKU: 'LEC-ENT-1L-COL',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'sí',
+              'Precio Venta': 5200,
+              Descripción: 'Leche entera pasteurizada de origen colombiano.',
+              Marca: 'Colanta',
+              Categorías: 'Alimentos, Lácteos',
+              'Impuestos IDs': '',
+              'Tipo Precio': 'unidad',
+              'Disponible Ecommerce': 'no',
+              Destacado: 'no',
+              'Permite Cambiar Precio POS': 'no',
+              'Usa Listas de Precio': 'no',
+              'Unidades por Empaque': 6,
+              'Empaque Descuenta Múltiples Unidades': 'sí',
+              Peso: 1.05,
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+            },
+            {
+              Nombre: 'Frutas Orgánicas Mix 1kg',
+              SKU: 'FRU-ORG-MIX-1KG',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'no',
+              'Precio Venta': 22000,
+              Descripción: 'Mix de frutas orgánicas de temporada por kilo.',
+              Marca: '',
+              Categorías: 'Alimentos, Orgánicos',
+              'Impuestos IDs': '',
+              'Tipo Precio': 'peso',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'no',
+              'Permite Cambiar Precio POS': 'sí',
+              'Usa Listas de Precio': 'sí',
+              'Unidades por Empaque': '',
+              'Empaque Descuenta Múltiples Unidades': 'no',
+              Peso: 1,
+              'En Oferta': 'sí',
+              'Precio Oferta': 19000,
+            },
+          ];
 
     const ws = XLSX.utils.json_to_sheet(exampleData, { header: headers });
 
@@ -1160,7 +1070,13 @@ export class ProductsBulkService {
     ws['!cols'] = colWidths;
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Productos');
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      templateType === 'services'
+        ? 'Plantilla Servicios'
+        : 'Plantilla Productos',
+    );
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }
@@ -1196,8 +1112,9 @@ export class ProductsBulkService {
       const productData = products[rowIndex];
       const rowNumber = rowIndex + 2; // header = fila 1
       try {
-        const ignoredCatalogFields =
-          this.stripCatalogOnlyIgnoredFields(productData as any);
+        const ignoredCatalogFields = this.stripCatalogOnlyIgnoredFields(
+          productData as any,
+        );
 
         if (ignoredCatalogFields.length > 0) {
           this.logger.warn('PRODUCT_BULK_IGNORED_INVENTORY_FIELDS', {
@@ -1370,7 +1287,9 @@ export class ProductsBulkService {
   private async preprocessProductData(product: any, storeId: number) {
     // Procesar Marca (Brand) — tolerante: si falla resolver/crear, el producto sube sin marca
     if (product.brand_id !== undefined && product.brand_id !== null) {
-      if (typeof product.brand_id === 'string') {
+      if (product.brand_id === this.NULL_MARKER) {
+        // Se resuelve en el mapper como null para limpiar la marca.
+      } else if (typeof product.brand_id === 'string') {
         const brandName = product.brand_id.trim();
         if (!brandName) {
           delete product.brand_id;
@@ -1392,70 +1311,125 @@ export class ProductsBulkService {
 
     // Procesar Categorías
     if (product.category_ids) {
-      let rawCategories: any[] = [];
-      if (typeof product.category_ids === 'string') {
-        rawCategories = (product.category_ids as string).split(',');
-      } else if (Array.isArray(product.category_ids)) {
-        rawCategories = product.category_ids;
-      }
-
-      if (rawCategories.length > 0) {
-        const categoryIds: number[] = [];
-        for (const cat of rawCategories) {
-          const catStr = cat.toString().trim();
-          if (!catStr) continue;
-
-          if (/^\d+$/.test(catStr)) {
-            categoryIds.push(parseInt(catStr, 10));
-          } else {
-            const catId = await this.findOrCreateCategory(catStr, storeId);
-            categoryIds.push(catId);
-          }
+      if (product.category_ids === this.NULL_MARKER) {
+        // Se resuelve en el mapper como arreglo vacío para limpiar categorías.
+      } else {
+        let rawCategories: any[] = [];
+        if (typeof product.category_ids === 'string') {
+          rawCategories = (product.category_ids as string).split(',');
+        } else if (Array.isArray(product.category_ids)) {
+          rawCategories = product.category_ids;
         }
-        product.category_ids = categoryIds;
+
+        if (rawCategories.length > 0) {
+          const categoryIds: number[] = [];
+          for (const cat of rawCategories) {
+            const catStr = cat.toString().trim();
+            if (!catStr) continue;
+
+            if (/^\d+$/.test(catStr)) {
+              categoryIds.push(parseInt(catStr, 10));
+            } else {
+              const catId = await this.findOrCreateCategory(catStr, storeId);
+              categoryIds.push(catId);
+            }
+          }
+          product.category_ids = categoryIds;
+        }
       }
     }
 
-    // Normalizar Booleanos (Si/No -> true/false)
-    const normalizeBool = (val: any) => {
-      if (typeof val === 'boolean') return val;
-      if (typeof val === 'string') {
-        return (
-          val.toLowerCase() === 'si' ||
-          val.toLowerCase() === 'yes' ||
-          val.toLowerCase() === 'verdadero' ||
-          val.toLowerCase() === 'true'
-        );
+    // Procesar impuestos por ID (no crea impuestos desde carga masiva)
+    if (product.tax_category_ids !== undefined) {
+      if (product.tax_category_ids === this.NULL_MARKER) {
+        // Se resuelve en el mapper como arreglo vacío para limpiar asignaciones.
+      } else {
+        const rawTaxIds =
+          typeof product.tax_category_ids === 'string'
+            ? product.tax_category_ids.split(',')
+            : Array.isArray(product.tax_category_ids)
+              ? product.tax_category_ids
+              : [];
+        const taxCategoryIds = rawTaxIds
+          .map((id: any) => parseInt(id.toString().trim(), 10))
+          .filter((id: number) => !isNaN(id) && id > 0);
+        if (rawTaxIds.length > 0 && taxCategoryIds.length === 0) {
+          delete product.tax_category_ids;
+        } else {
+          product.tax_category_ids = taxCategoryIds;
+        }
       }
-      return !!val;
-    };
+    }
 
     if (product.is_on_sale !== undefined) {
-      product.is_on_sale = normalizeBool(product.is_on_sale);
+      product.is_on_sale = this.normalizeNullableBooleanValue(
+        product.is_on_sale,
+      );
     }
 
     if (product.available_for_ecommerce !== undefined) {
-      product.available_for_ecommerce = normalizeBool(
+      product.available_for_ecommerce = this.normalizeNullableBooleanValue(
         product.available_for_ecommerce,
       );
     }
 
+    if (product.is_featured !== undefined) {
+      product.is_featured = this.normalizeNullableBooleanValue(
+        product.is_featured,
+      );
+    }
+
+    if (product.allow_pos_price_override !== undefined) {
+      product.allow_pos_price_override = this.normalizeNullableBooleanValue(
+        product.allow_pos_price_override,
+      );
+    }
+
+    if (product.has_multiple_price_tiers !== undefined) {
+      product.has_multiple_price_tiers = this.normalizeNullableBooleanValue(
+        product.has_multiple_price_tiers,
+      );
+    }
+
+    if (product.package_consumes_multiple_stock !== undefined) {
+      product.package_consumes_multiple_stock =
+        this.normalizeNullableBooleanValue(
+          product.package_consumes_multiple_stock,
+        );
+    }
+
     if (product.requires_booking !== undefined) {
-      product.requires_booking = normalizeBool(product.requires_booking);
+      product.requires_booking = this.normalizeNullableBooleanValue(
+        product.requires_booking,
+      );
     }
 
     if (product.is_recurring !== undefined) {
-      product.is_recurring = normalizeBool(product.is_recurring);
+      product.is_recurring = this.normalizeNullableBooleanValue(
+        product.is_recurring,
+      );
+    }
+
+    if (product.is_consultation !== undefined) {
+      product.is_consultation = this.normalizeNullableBooleanValue(
+        product.is_consultation,
+      );
+    }
+
+    if (product.send_preconsultation !== undefined) {
+      product.send_preconsultation = this.normalizeNullableBooleanValue(
+        product.send_preconsultation,
+      );
     }
 
     if (product.requires_serial_numbers !== undefined) {
-      product.requires_serial_numbers = normalizeBool(
+      product.requires_serial_numbers = this.normalizeNullableBooleanValue(
         product.requires_serial_numbers,
       );
     }
 
     if (product.requires_batch_tracking !== undefined) {
-      product.requires_batch_tracking = normalizeBool(
+      product.requires_batch_tracking = this.normalizeNullableBooleanValue(
         product.requires_batch_tracking,
       );
     }
@@ -1547,7 +1521,9 @@ export class ProductsBulkService {
       product.track_inventory !== ''
     ) {
       if (typeof product.track_inventory === 'string') {
-        product.track_inventory = normalizeBool(product.track_inventory);
+        product.track_inventory = this.normalizeBooleanValue(
+          product.track_inventory,
+        );
       } else {
         product.track_inventory = !!product.track_inventory;
       }
@@ -1755,6 +1731,8 @@ export class ProductsBulkService {
       sale_price: product['sale_price'],
       state: product.state,
       available_for_ecommerce: product.available_for_ecommerce,
+      is_featured: product.is_featured,
+      allow_pos_price_override: product.allow_pos_price_override,
       product_type: product.product_type || 'physical',
       track_inventory:
         product.product_type === 'service'
@@ -1773,12 +1751,26 @@ export class ProductsBulkService {
       'service_instructions',
       'preparation_time_minutes',
       'pricing_type',
+      'is_consultation',
+      'send_preconsultation',
+      'consultation_template_id',
+      'preconsultation_template_id',
+      'has_multiple_price_tiers',
+      'units_per_package',
+      'package_consumes_multiple_stock',
     ];
 
     for (const field of newCatalogFields) {
       if (product[field] !== undefined) {
         dto[field] = resolveValue(product[field]);
       }
+    }
+
+    if (product.tax_category_ids !== undefined) {
+      dto.tax_category_ids =
+        product.tax_category_ids === this.NULL_MARKER
+          ? []
+          : product.tax_category_ids;
     }
 
     return dto;
@@ -1789,12 +1781,7 @@ export class ProductsBulkService {
 
     const dto: any = {};
 
-    const simpleFields = [
-      'name',
-      'base_price',
-      'sku',
-      'state',
-    ];
+    const simpleFields = ['name', 'base_price', 'sku', 'state'];
 
     for (const field of simpleFields) {
       if (product[field] !== undefined) {
@@ -1843,6 +1830,16 @@ export class ProductsBulkService {
       );
     }
 
+    if (product.is_featured !== undefined) {
+      dto.is_featured = resolveValue(product.is_featured);
+    }
+
+    if (product.allow_pos_price_override !== undefined) {
+      dto.allow_pos_price_override = resolveValue(
+        product.allow_pos_price_override,
+      );
+    }
+
     if (product.product_type !== undefined) {
       dto.product_type = resolveValue(product.product_type);
     }
@@ -1862,12 +1859,26 @@ export class ProductsBulkService {
       'service_instructions',
       'preparation_time_minutes',
       'pricing_type',
+      'is_consultation',
+      'send_preconsultation',
+      'consultation_template_id',
+      'preconsultation_template_id',
+      'has_multiple_price_tiers',
+      'units_per_package',
+      'package_consumes_multiple_stock',
     ];
 
     for (const field of newCatalogFields) {
       if (product[field] !== undefined) {
         dto[field] = resolveValue(product[field]);
       }
+    }
+
+    if (product.tax_category_ids !== undefined) {
+      dto.tax_category_ids =
+        product.tax_category_ids === this.NULL_MARKER
+          ? []
+          : product.tax_category_ids;
     }
 
     return dto;
@@ -1881,5 +1892,4 @@ export class ProductsBulkService {
       await this.productsService.createVariant(productId, variantData);
     }
   }
-
 }

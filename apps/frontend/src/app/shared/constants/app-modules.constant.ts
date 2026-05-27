@@ -467,6 +467,12 @@ export const APP_MODULES: {
           description: 'M\u00e9todos de pago aceptados',
         },
         {
+          key: 'settings_price_tiers',
+          label: 'Precios y Tarifas',
+          description:
+            'Tarifas por tienda (mayorista, detal, por caja) para productos multi-tarifa',
+        },
+        {
           key: 'settings_appearance',
           label: 'Apariencia',
           description: 'Personalizaci\u00f3n visual',

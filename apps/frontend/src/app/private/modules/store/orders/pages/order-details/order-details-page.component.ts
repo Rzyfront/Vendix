@@ -3,7 +3,7 @@ import { NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { forkJoin } from 'rxjs';
+import { forkJoin, firstValueFrom } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
@@ -1284,6 +1284,21 @@ export class OrderDetailsPageComponent {
       this.printOrder();
     } else if (actionId === 'credit-payment') {
       this.openPayModal();
+    }
+  }
+
+  async viewPaymentReceipt(payment: { id: number }): Promise<void> {
+    if (!this.orderId) return;
+    try {
+      const res = await firstValueFrom(
+        this.ordersService.getPaymentReceiptUrl(this.orderId, payment.id),
+      );
+      window.open(res.url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      this.toastService.error(
+        err?.message || 'No se pudo abrir el comprobante',
+        'Error',
+      );
     }
   }
 

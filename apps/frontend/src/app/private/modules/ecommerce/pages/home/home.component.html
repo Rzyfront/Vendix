@@ -4,22 +4,23 @@
       @case ("slider") {
         @if (show_slider()) {
           <app-hero-banner
-            [slides]="slider_config()?.photos || []"
-            [banner]="{
-              title: banner_content().title,
-              subtitle: banner_content().paragraph,
-            }"
+            [slides]="slider_slides()"
           />
-        } @else {
-          <div class="static-banner-wrapper">
-            <div class="static-banner">
-              <div class="banner-content">
-                <span class="banner-kicker">Tienda online</span>
-                <h1>{{ banner_content().title }}</h1>
-                <p>{{ banner_content().paragraph }}</p>
-              </div>
+        }
+      }
+
+      @case ("welcome") {
+        @if (hasWelcomeContent(section.config)) {
+          <section class="welcome-section">
+            <div class="welcome-content">
+              @if (section.config.title) {
+                <h1>{{ section.config.title }}</h1>
+              }
+              @if (section.config.subtitle) {
+                <p>{{ section.config.subtitle }}</p>
+              }
             </div>
-          </div>
+          </section>
         }
       }
 
@@ -67,6 +68,7 @@
                 @for (product of featured_products(); track product.id) {
                   <app-product-card
                     [product]="product"
+                    [show_shipping_badge]="shipping_badge_enabled()"
                     [in_wishlist]="isInWishlist(product.id)"
                     (add_to_cart)="onAddToCart($event)"
                     (toggle_wishlist)="onToggleWishlist($event)"

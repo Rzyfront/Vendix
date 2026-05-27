@@ -62,7 +62,6 @@
 .sidebar.collapsed .logo-text-container,
 .sidebar.collapsed .submenu,
 .sidebar.collapsed .badge,
-.sidebar.collapsed .badge-new,
 .sidebar.collapsed .chevron,
 .sidebar.collapsed .vlink-container {
   opacity: 0;
@@ -402,31 +401,6 @@
   background-color: var(--color-secondary);
   color: var(--color-text-on-primary);
   font-weight: 500;
-}
-
-/**
- * "Nuevo" badge — shown next to menu items added recently to PANEL_UI_FALLBACK
- * but not yet seen by the user. Compact pill on accent color so it draws
- * attention without breaking the row layout.
- */
-.badge-new {
-  margin-left: auto;
-  font-size: 0.6rem;
-  line-height: 1;
-  padding: 0.15rem 0.4rem;
-  border-radius: var(--radius-pill);
-  background-color: var(--color-primary);
-  color: var(--color-text-on-primary, #fff);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  flex-shrink: 0;
-  text-transform: none;
-}
-
-/* Cuando hay ambos badges, el "Nuevo" queda primero y el .badge sigue a la derecha. */
-.badge-new + .badge {
-  margin-left: 0.35rem;
 }
 
 /* Footer Section */

@@ -111,6 +111,7 @@ export interface EcommerceConfig {
   };
   home_sections?: {
     slider?: EcommerceHomeSectionConfig;
+    welcome?: EcommerceHomeSectionConfig;
     categories?: EcommerceHomeSectionConfig;
     brands?: EcommerceHomeSectionConfig;
     featured_products?: EcommerceHomeSectionConfig;

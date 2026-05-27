@@ -21,6 +21,7 @@ export interface TenantConfig {
   };
   home_sections?: {
     slider?: TenantHomeSectionConfig;
+    welcome?: TenantHomeSectionConfig;
     categories?: TenantHomeSectionConfig;
     brands?: TenantHomeSectionConfig;
     featured_products?: TenantHomeSectionConfig;

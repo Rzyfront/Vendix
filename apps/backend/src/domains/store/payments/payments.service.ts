@@ -1733,10 +1733,20 @@ export class PaymentsService {
       // Multi-tarifa (Fase 5.5): snapshot persistente. `null` cuando la línea
       // no tenía applied_price_tier_id o cuando la tarifa no existe en esta
       // tienda (fallback lenient, mismo patrón que OrdersService).
-      applied_price_tier_id: params.tierSnap?.tier_id ?? null,
+      //
+      // NOTA: `applied_price_tier_id` es FK scalar. En nested-create dentro de
+      // `orders.create({ data: { order_items: { create: [...] } } })`, Prisma
+      // usa el variant *Checked* y rechaza el scalar FK directo — exige la
+      // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
       stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
     };
+
+    if (params.tierSnap?.tier_id != null) {
+      orderItem.applied_price_tier = {
+        connect: { id: params.tierSnap.tier_id },
+      };
+    }
 
     if (params.productId) {
       orderItem.products = { connect: { id: params.productId } };

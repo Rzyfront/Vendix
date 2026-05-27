@@ -877,6 +877,12 @@ export class ProductsService {
             stock_levels: product.stock_levels,
             has_variants: product_variants.length > 0,
             product_variants,
+            // Multi-tarifa / empaque (fase 5) — POS necesita el flag para
+            // decidir si renderiza el selector de tarifa por línea.
+            has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+            units_per_package: (product as any).units_per_package,
+            package_consumes_multiple_stock: (product as any)
+              .package_consumes_multiple_stock,
           };
         }),
       );
@@ -1009,6 +1015,13 @@ export class ProductsService {
             has_variants: (mapped_variants?.length ?? 0) > 0,
             product_variants: mapped_variants,
           }),
+          // Multi-tarifa / empaque (fase 5) — exponer en el listado para que
+          // la grid del admin y POS conozcan el flag sin tener que hacer
+          // findOne adicional.
+          has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+          units_per_package: (product as any).units_per_package,
+          package_consumes_multiple_stock: (product as any)
+            .package_consumes_multiple_stock,
         };
       }),
     );
@@ -1195,6 +1208,11 @@ export class ProductsService {
       send_preconsultation: product.send_preconsultation,
       consultation_template_id: product.consultation_template_id,
       preconsultation_template_id: product.preconsultation_template_id,
+      // Multi-tarifa / empaque (fase 5)
+      has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+      units_per_package: (product as any).units_per_package,
+      package_consumes_multiple_stock: (product as any)
+        .package_consumes_multiple_stock,
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:

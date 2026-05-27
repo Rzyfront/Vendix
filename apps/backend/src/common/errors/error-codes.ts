@@ -151,6 +151,11 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Access denied to payment resource',
   },
+  PAY_RECEIPT_NOT_FOUND_001: {
+    code: 'PAY_RECEIPT_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Payment receipt not uploaded',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {

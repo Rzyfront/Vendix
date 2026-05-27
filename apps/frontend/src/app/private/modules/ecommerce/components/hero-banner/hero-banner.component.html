@@ -21,14 +21,22 @@
     <div class="hero-overlay"></div>
   }
 
-  <div class="hero-content" [style.color]="banner_config.text_color">
-    <h1 class="hero-title">{{ banner_config.title }}</h1>
-    <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
-    <button class="hero-cta" type="button" (click)="onCtaClick($event)">
-      {{ banner_config.cta_text }}
-      <i class="pi pi-arrow-right"></i>
-    </button>
-  </div>
+  @if (hasHeroContent()) {
+    <div class="hero-content" [style.color]="banner_config.text_color">
+      @if (banner_config.title) {
+        <h1 class="hero-title">{{ banner_config.title }}</h1>
+      }
+      @if (banner_config.subtitle) {
+        <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
+      }
+      @if (hasCta()) {
+        <button class="hero-cta" type="button" (click)="onCtaClick($event)">
+          {{ banner_config.cta_text }}
+          <i class="pi pi-arrow-right"></i>
+        </button>
+      }
+    </div>
+  }
 
   @if (slides().length > 1) {
     <div class="slider-indicators">

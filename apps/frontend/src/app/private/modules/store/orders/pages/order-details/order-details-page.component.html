@@ -113,130 +113,214 @@
         <div class="flex flex-col gap-3">
           <!-- 1. INFORMACION DEL CLIENTE -->
           <app-card
-            title="Informacion del Cliente"
             shadow="sm"
             [responsivePadding]="true"
+            [showHeader]="true"
           >
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
-              <!-- Profile Info -->
-              <div class="md:col-span-2 flex items-start gap-3 sm:gap-4">
-                <div
-                  class="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-lg font-bold border border-primary/5 flex-shrink-0 aspect-square"
-                >
-                  {{ orderData.users?.first_name?.charAt(0) || "C" }}
-                </div>
-                <div class="space-y-0.5 sm:space-y-1 min-w-0">
-                  <p
-                    class="text-base sm:text-lg font-bold text-gray-900 truncate"
-                  >
-                    @if (
-                      orderData.users?.first_name || orderData.users?.last_name
-                    ) {
-                      {{ orderData.users?.first_name }}
-                      {{ orderData.users?.last_name }}
-                    } @else {
-                      Consumidor Final
-                    }
-                  </p>
-                  <div
-                    class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600"
-                  >
-                    <app-icon
-                      name="mail"
-                      size="14"
-                      class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"
-                    ></app-icon>
-                    <span class="truncate">{{
-                      orderData.users?.email || "Sin correo registrado"
-                    }}</span>
-                  </div>
-                  <div
-                    class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600"
-                  >
-                    <app-icon
-                      name="phone"
-                      size="14"
-                      class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"
-                    ></app-icon>
-                    <span class="truncate">{{
-                      orderData.users?.phone || "Sin telefono registrado"
-                    }}</span>
-                  </div>
+            <div slot="header" class="customer-card-header">
+              <div class="customer-card-title">
+                <span class="customer-card-title-icon">
+                  <app-icon name="user-check" size="18"></app-icon>
+                </span>
+                <div class="min-w-0">
+                  <h3>Informacion del Cliente</h3>
+                  <p>Contacto, entrega y facturacion de esta orden</p>
                 </div>
               </div>
+            </div>
 
-              <!-- Direccion de Entrega -->
-              <div
-                class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4"
-              >
-                <h3
-                  class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2"
-                >
-                  <app-icon
-                    name="truck"
-                    size="14"
-                    class="text-primary-600"
-                  ></app-icon>
-                  Direccion de Entrega
-                </h3>
-                @if (
-                  orderData.addresses_orders_shipping_address_idToaddresses;
-                  as addr
-                ) {
-                  <div class="text-gray-700 space-y-1">
-                    <p class="font-semibold">{{ addr.address_line1 }}</p>
-                    @if (addr.address_line2) {
-                      <p class="text-sm">{{ addr.address_line2 }}</p>
-                    }
-                    <p class="text-sm text-gray-500">
-                      {{ addr.city }}, {{ addr.state_province }}
-                      {{ addr.postal_code }}
-                    </p>
-                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">
-                      {{ addr.country_code }}
-                    </p>
+            <div class="customer-card-content">
+              <section class="customer-hero-panel">
+                <div class="customer-identity">
+                  <div class="customer-avatar" aria-hidden="true">
+                    {{
+                      (
+                        orderData.users?.first_name?.charAt(0) ||
+                        orderData.users?.last_name?.charAt(0) ||
+                        "C"
+                      ).toUpperCase()
+                    }}
                   </div>
-                } @else {
-                  <p class="text-sm text-gray-400 italic">No especificada</p>
-                }
-              </div>
+                  <div class="customer-name-block">
+                    <span class="customer-eyebrow">Cliente</span>
+                    <h2>
+                      @if (
+                        orderData.users?.first_name ||
+                        orderData.users?.last_name
+                      ) {
+                        {{ orderData.users?.first_name }}
+                        {{ orderData.users?.last_name }}
+                      } @else {
+                        Consumidor Final
+                      }
+                    </h2>
+                    <div class="customer-data-pills">
+                      <span
+                        class="customer-data-pill"
+                        [class.customer-data-pill-muted]="!orderData.users?.email"
+                      >
+                        <app-icon name="mail-check" size="13"></app-icon>
+                        {{
+                          orderData.users?.email
+                            ? "Correo registrado"
+                            : "Sin correo"
+                        }}
+                      </span>
+                      <span
+                        class="customer-data-pill"
+                        [class.customer-data-pill-muted]="!orderData.users?.phone"
+                      >
+                        <app-icon name="phone" size="13"></app-icon>
+                        {{
+                          orderData.users?.phone
+                            ? "Telefono registrado"
+                            : "Sin telefono"
+                        }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-              <!-- Direccion de Facturacion -->
-              <div
-                class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4"
-              >
-                <h3
-                  class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2"
-                >
-                  <app-icon
-                    name="file-text"
-                    size="14"
-                    class="text-primary-600"
-                  ></app-icon>
-                  Direccion de Facturacion
-                </h3>
-                @if (
-                  orderData.addresses_orders_billing_address_idToaddresses;
-                  as addr
-                ) {
-                  <div class="text-gray-700 space-y-1">
-                    <p class="font-semibold">{{ addr.address_line1 }}</p>
-                    @if (addr.address_line2) {
-                      <p class="text-sm">{{ addr.address_line2 }}</p>
-                    }
-                    <p class="text-sm text-gray-500">
-                      {{ addr.city }}, {{ addr.state_province }}
-                      {{ addr.postal_code }}
-                    </p>
-                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">
-                      {{ addr.country_code }}
-                    </p>
+                <div class="customer-contact-panel">
+                  @if (orderData.users?.email) {
+                    <a
+                      class="customer-contact-line"
+                      [href]="'mailto:' + orderData.users?.email"
+                    >
+                      <span class="customer-contact-icon">
+                        <app-icon name="mail" size="15"></app-icon>
+                      </span>
+                      <span class="customer-contact-copy">
+                        <span>Correo</span>
+                        <strong>{{ orderData.users?.email }}</strong>
+                      </span>
+                    </a>
+                  } @else {
+                    <div class="customer-contact-line is-muted">
+                      <span class="customer-contact-icon">
+                        <app-icon name="mail" size="15"></app-icon>
+                      </span>
+                      <span class="customer-contact-copy">
+                        <span>Correo</span>
+                        <strong>Sin correo registrado</strong>
+                      </span>
+                    </div>
+                  }
+
+                  @if (orderData.users?.phone) {
+                    <a
+                      class="customer-contact-line"
+                      [href]="'tel:' + orderData.users?.phone"
+                    >
+                      <span class="customer-contact-icon">
+                        <app-icon name="phone" size="15"></app-icon>
+                      </span>
+                      <span class="customer-contact-copy">
+                        <span>Telefono</span>
+                        <strong>{{ orderData.users?.phone }}</strong>
+                      </span>
+                    </a>
+                  } @else {
+                    <div class="customer-contact-line is-muted">
+                      <span class="customer-contact-icon">
+                        <app-icon name="phone" size="15"></app-icon>
+                      </span>
+                      <span class="customer-contact-copy">
+                        <span>Telefono</span>
+                        <strong>Sin telefono registrado</strong>
+                      </span>
+                    </div>
+                  }
+                </div>
+              </section>
+
+              <div class="customer-address-grid">
+                <!-- Direccion de Entrega -->
+                <section class="customer-address-panel">
+                  <div class="customer-address-heading">
+                    <span class="customer-address-icon">
+                      <app-icon name="truck" size="16"></app-icon>
+                    </span>
+                    <div>
+                      <span>Entrega</span>
+                      <h3>Direccion de Entrega</h3>
+                    </div>
                   </div>
-                } @else {
-                  <p class="text-sm text-gray-400 italic">
-                    Igual a la direccion de envio
-                  </p>
-                }
+                  @if (
+                    orderData.addresses_orders_shipping_address_idToaddresses ||
+                      $any(orderData).shipping_address_snapshot;
+                    as addr
+                  ) {
+                    <div class="customer-address-body">
+                      <p class="customer-address-main">
+                        {{ addr.address_line1 }}
+                      </p>
+                      @if (addr.address_line2) {
+                        <p>{{ addr.address_line2 }}</p>
+                      }
+                      <p>
+                        {{ addr.city }}, {{ addr.state_province }}
+                        {{ addr.postal_code }}
+                      </p>
+                      @if (addr.phone_number) {
+                        <p class="customer-address-phone">
+                          <app-icon name="phone" size="13"></app-icon>
+                          {{ addr.phone_number }}
+                        </p>
+                      }
+                      @if (addr.country_code) {
+                        <span class="customer-country-chip">
+                          {{ addr.country_code }}
+                        </span>
+                      }
+                    </div>
+                  } @else {
+                    <div class="customer-address-empty">
+                      <app-icon name="map-pin" size="18"></app-icon>
+                      <span>No especificada</span>
+                    </div>
+                  }
+                </section>
+
+                <!-- Direccion de Facturacion -->
+                <section class="customer-address-panel">
+                  <div class="customer-address-heading">
+                    <span class="customer-address-icon">
+                      <app-icon name="file-text" size="16"></app-icon>
+                    </span>
+                    <div>
+                      <span>Factura</span>
+                      <h3>Direccion de Facturacion</h3>
+                    </div>
+                  </div>
+                  @if (
+                    orderData.addresses_orders_billing_address_idToaddresses;
+                    as addr
+                  ) {
+                    <div class="customer-address-body">
+                      <p class="customer-address-main">
+                        {{ addr.address_line1 }}
+                      </p>
+                      @if (addr.address_line2) {
+                        <p>{{ addr.address_line2 }}</p>
+                      }
+                      <p>
+                        {{ addr.city }}, {{ addr.state_province }}
+                        {{ addr.postal_code }}
+                      </p>
+                      @if (addr.country_code) {
+                        <span class="customer-country-chip">
+                          {{ addr.country_code }}
+                        </span>
+                      }
+                    </div>
+                  } @else {
+                    <div class="customer-address-empty">
+                      <app-icon name="file-check" size="18"></app-icon>
+                      <span>Igual a la direccion de envio</span>
+                    </div>
+                  }
+                </section>
               </div>
             </div>
           </app-card>
@@ -323,6 +407,128 @@
               }
             </div>
           </app-card>
+
+          <!-- 3. SEGUIMIENTO DE ENVIO (con Informacion de Envio) -->
+          @if (showShipmentTracking() || shippingMethodInfo()) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <h2
+                class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2"
+              >
+                <app-icon
+                  name="map-pin"
+                  size="16"
+                  class="text-primary-600"
+                ></app-icon>
+                Seguimiento de Envio
+              </h2>
+
+              <!-- Subseccion: Informacion de Envio -->
+              @if (shippingMethodInfo(); as info) {
+                <div class="mb-4 pb-4 border-b border-border">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3
+                      class="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2"
+                    >
+                      <app-icon
+                        name="truck"
+                        size="14"
+                        class="text-primary-600"
+                      ></app-icon>
+                      Informacion de Envio
+                    </h3>
+                    @if (canEditShipping() && !showShippingAssignment()) {
+                      <button
+                        class="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+                        (click)="openShippingAssignCard()"
+                      >
+                        <app-icon name="edit" size="12"></app-icon>
+                        Cambiar
+                      </button>
+                    }
+                  </div>
+                  <div class="space-y-2 text-sm">
+                    <div class="flex items-center gap-2">
+                      <span class="text-text-secondary font-medium">Metodo:</span>
+                      <span class="font-semibold text-gray-900">{{ info.name }}</span>
+                      <span
+                        class="text-xs px-1.5 py-0.5 rounded font-medium"
+                        [ngClass]="getShippingTypeBadgeClass(info.type)"
+                      >{{ shippingMethodsService.getShippingMethodTypeLabel(info.type) }}</span>
+                    </div>
+                    @if (info.provider) {
+                      <div class="flex items-center gap-2">
+                        <span class="text-text-secondary font-medium">Transportista:</span>
+                        <span class="text-gray-900">{{ info.provider }}</span>
+                      </div>
+                    }
+                    @if (info.rate) {
+                      <div class="flex items-center gap-2">
+                        <span class="text-text-secondary font-medium">Tarifa:</span>
+                        <span class="text-gray-900">{{ info.rate }}</span>
+                      </div>
+                    }
+                    <div class="flex items-center gap-2">
+                      <span class="text-text-secondary font-medium">Costo:</span>
+                      <span class="font-bold text-gray-900">{{ info.cost | currency }}</span>
+                    </div>
+                    @if (info.minDays && info.maxDays) {
+                      <div class="flex items-center gap-2">
+                        <span class="text-text-secondary font-medium">Entrega estimada:</span>
+                        <span class="text-gray-900">{{ info.minDays }}-{{ info.maxDays }} dias habiles</span>
+                      </div>
+                    }
+                  </div>
+                </div>
+              }
+
+              <!-- Subseccion: Tracking -->
+              @if (showShipmentTracking()) {
+                <h3
+                  class="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2"
+                >
+                  <app-icon
+                    name="navigation"
+                    size="14"
+                    class="text-primary-600"
+                  ></app-icon>
+                  Seguimiento
+                </h3>
+
+                <!-- Tracking Timeline -->
+                <app-timeline
+                  [steps]="tracking_steps_timeline()"
+                  [collapsible]="true"
+                  expand_label="Ver seguimiento completo"
+                  collapse_label="Ocultar seguimiento"
+                  size="sm"
+                />
+
+                <!-- Tracking number -->
+                @if (flowMetadata().tracking_number) {
+                  <div
+                    class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between gap-2"
+                  >
+                    <div class="min-w-0">
+                      <span
+                        class="text-[10px] font-bold text-text-secondary uppercase block"
+                        >Numero de rastreo</span
+                      >
+                      <code
+                        class="text-sm font-mono text-gray-900 truncate block"
+                        >{{ flowMetadata().tracking_number }}</code
+                      >
+                    </div>
+                    <button
+                      (click)="copyTrackingNumber()"
+                      class="flex-shrink-0 p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
+                    >
+                      <app-icon name="copy" size="16"></app-icon>
+                    </button>
+                  </div>
+                }
+              }
+            </app-card>
+          }
 
           <!-- PLAN DE CUOTAS (Credit Installments) -->
           @if (isInstallmentCredit() && order()?.order_installments?.length) {
@@ -533,7 +739,7 @@
             </app-card>
           }
 
-          <!-- 3. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
+          <!-- 4. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
           <app-card
             title="Historial de la Orden"
             shadow="sm"
@@ -737,61 +943,6 @@
                 </div>
               }
             </div>
-          }
-
-          <!-- SHIPPING INFO BLOCK (always visible when method assigned) -->
-          @if (shippingMethodInfo(); as info) {
-            <app-card shadow="sm" [responsivePadding]="true">
-              <div class="flex items-center justify-between mb-3">
-                <h2
-                  class="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2"
-                >
-                  <app-icon name="truck" size="14" class="text-primary-600"></app-icon>
-                  Informacion de Envio
-                </h2>
-                @if (canEditShipping() && !showShippingAssignment()) {
-                  <button
-                    class="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
-                    (click)="openShippingAssignCard()"
-                  >
-                    <app-icon name="edit" size="12"></app-icon>
-                    Cambiar
-                  </button>
-                }
-              </div>
-              <div class="space-y-2 text-sm">
-                <div class="flex items-center gap-2">
-                  <span class="text-text-secondary font-medium">Metodo:</span>
-                  <span class="font-semibold text-gray-900">{{ info.name }}</span>
-                  <span
-                    class="text-xs px-1.5 py-0.5 rounded font-medium"
-                    [ngClass]="getShippingTypeBadgeClass(info.type)"
-                  >{{ shippingMethodsService.getShippingMethodTypeLabel(info.type) }}</span>
-                </div>
-                @if (info.provider) {
-                  <div class="flex items-center gap-2">
-                    <span class="text-text-secondary font-medium">Transportista:</span>
-                    <span class="text-gray-900">{{ info.provider }}</span>
-                  </div>
-                }
-                @if (info.rate) {
-                  <div class="flex items-center gap-2">
-                    <span class="text-text-secondary font-medium">Tarifa:</span>
-                    <span class="text-gray-900">{{ info.rate }}</span>
-                  </div>
-                }
-                <div class="flex items-center gap-2">
-                  <span class="text-text-secondary font-medium">Costo:</span>
-                  <span class="font-bold text-gray-900">{{ info.cost | currency }}</span>
-                </div>
-                @if (info.minDays && info.maxDays) {
-                  <div class="flex items-center gap-2">
-                    <span class="text-text-secondary font-medium">Entrega estimada:</span>
-                    <span class="text-gray-900">{{ info.minDays }}-{{ info.maxDays }} dias habiles</span>
-                  </div>
-                }
-              </div>
-            </app-card>
           }
 
           <!-- 4. PROGRESO DE LA ORDEN -->
@@ -1014,56 +1165,7 @@
             </app-card>
           }
 
-          <!-- 6. SEGUIMIENTO DE ENVIO -->
-          @if (showShipmentTracking()) {
-            <app-card shadow="sm" [responsivePadding]="true">
-              <h2
-                class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2"
-              >
-                <app-icon
-                  name="map-pin"
-                  size="16"
-                  class="text-primary-600"
-                ></app-icon>
-                Seguimiento de Envio
-              </h2>
-
-              <!-- Tracking Timeline -->
-              <app-timeline
-                [steps]="tracking_steps_timeline()"
-                [collapsible]="true"
-                expand_label="Ver seguimiento completo"
-                collapse_label="Ocultar seguimiento"
-                size="sm"
-              />
-
-              <!-- Tracking number -->
-              @if (flowMetadata().tracking_number) {
-                <div
-                  class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between gap-2"
-                >
-                  <div class="min-w-0">
-                    <span
-                      class="text-[10px] font-bold text-text-secondary uppercase block"
-                      >Numero de rastreo</span
-                    >
-                    <code
-                      class="text-sm font-mono text-gray-900 truncate block"
-                      >{{ flowMetadata().tracking_number }}</code
-                    >
-                  </div>
-                  <button
-                    (click)="copyTrackingNumber()"
-                    class="flex-shrink-0 p-2 rounded-lg hover:bg-gray-100 transition-colors text-gray-500 hover:text-gray-700"
-                  >
-                    <app-icon name="copy" size="16"></app-icon>
-                  </button>
-                </div>
-              }
-            </app-card>
-          }
-
-          <!-- 7. ACCIONES DE FLUJO -->
+          <!-- 6. ACCIONES DE FLUJO -->
           <app-card shadow="sm" [responsivePadding]="true">
             <h2
               class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
@@ -1303,6 +1405,22 @@
                     <p class="text-[10px] text-gray-400 mt-1">
                       {{ formatDate(payment.created_at) }}
                     </p>
+                    @if ($any(payment).receipt_s3_key) {
+                      <div class="mt-2">
+                        <app-button
+                          variant="outline"
+                          size="xsm"
+                          (clicked)="viewPaymentReceipt(payment)"
+                        >
+                          <app-icon
+                            slot="icon"
+                            name="receipt"
+                            size="14"
+                          ></app-icon>
+                          Ver comprobante
+                        </app-button>
+                      </div>
+                    }
                   </div>
                 }
               </div>

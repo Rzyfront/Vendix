@@ -80,6 +80,14 @@ export class InicioDto {
   logo_url?: string | null;
 
   @ApiPropertyOptional({
+    example: 'https://ejemplo.com/favicon.png',
+    description: 'URL del favicon del ecommerce',
+  })
+  @IsOptional()
+  @IsString()
+  favicon_url?: string | null;
+
+  @ApiPropertyOptional({
     description: 'Colores de la marca',
     type: InicioColoresDto,
   })
@@ -248,6 +256,12 @@ export class EcommerceHomeSectionsDto {
   @ValidateNested()
   @Type(() => EcommerceHomeSectionDto)
   slider?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  welcome?: EcommerceHomeSectionDto;
 
   @ApiPropertyOptional({ type: EcommerceHomeSectionDto })
   @IsOptional()

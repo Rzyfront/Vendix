@@ -22,7 +22,6 @@
         @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
           <div class="brand-card brand-card--skeleton">
             <div class="skeleton-logo"></div>
-            <div class="skeleton-name"></div>
           </div>
         }
       </div>
@@ -33,6 +32,7 @@
             class="brand-card"
             type="button"
             [attr.aria-label]="'Ver productos de ' + brand.name"
+            [attr.title]="brand.name"
             (click)="onBrandClick(brand)"
           >
             <span class="brand-logo">

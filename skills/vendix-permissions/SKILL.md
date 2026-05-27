@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Adding backend permissions"
@@ -77,6 +77,28 @@ Prefer `domain:resource:action` or `domain:resource:subresource:action` for new 
 4. Ensure `method` matches the HTTP method or uses `ALL` only when intentional.
 5. Assign the permission to the correct role(s) in the seed.
 6. Treat seed cleanup as data-impacting: removed seed permissions may be removed/deprecated from DB by seed logic.
+7. **Run the seed.** Editing the seed file alone does NOT grant the permission — the row only exists in code until the seed runs against the DB. After committing the seed change you MUST re-run it:
+
+   ```bash
+   # Standalone module run (preferred — avoids touching users/orgs/etc.)
+   docker exec -e NODE_OPTIONS="--max-old-space-size=4096" vendix_backend \
+     npx ts-node -e "import('./prisma/seeds/permissions-roles.seed').then(m => m.seedPermissionsAndRoles())"
+
+   # Full seed (idempotent but heavier)
+   docker exec vendix_backend npm run seed
+   ```
+
+   The seed is additive: it never deletes role assignments (uses `syncRolePermissions` with additive-only mode), so it is safe to re-run in dev. In production, run it via the deploy pipeline alongside the migration.
+
+8. **No re-login required for users.** `JwtStrategy.validate()` re-reads `user.permissions` from the DB on every request — once the row exists, the next API call sees it.
+
+### Pitfall — 403 right after adding a permission
+
+Symptom: `403 AUTH_PERM_001` on the new endpoint, even for `owner` / `super_admin`.
+
+Cause: the seed defines the row in code but the DB does not have it yet. `PermissionsGuard` evaluates `user.permissions` (loaded from DB by `JwtStrategy`) — empty match → deny.
+
+Fix: run the seed (step 7 above). Then retry the API call (no re-login).
 
 ## panel_ui Is Not Authorization
 

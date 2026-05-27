@@ -136,6 +136,8 @@ export interface Payment {
   amount: number;
   currency: string;
   state: PaymentStatus;
+  receipt_s3_key?: string | null;
+  receipt_uploaded_at?: string | null;
   transaction_id?: string;
   gateway_response?: {
     change?: number;

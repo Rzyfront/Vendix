@@ -221,6 +221,30 @@ export class OrdersController {
     }
   }
 
+  @Get(':id/payments/:paymentId/receipt-url')
+  @Permissions('store:orders:read')
+  async getPaymentReceiptUrl(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+  ) {
+    try {
+      const result = await this.ordersService.getPaymentReceiptUrl(
+        id,
+        paymentId,
+      );
+      return this.responseService.success(
+        result,
+        'URL del comprobante generada exitosamente',
+      );
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al obtener la URL del comprobante',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
   @Patch(':id')
   @Permissions('store:orders:update')
   async update(

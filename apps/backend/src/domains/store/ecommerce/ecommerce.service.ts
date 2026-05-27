@@ -99,6 +99,24 @@ export class EcommerceService {
         config.inicio.logo_url,
       );
     }
+    if (
+      config.inicio?.favicon_url &&
+      !config.inicio.favicon_url.startsWith('http')
+    ) {
+      config.inicio.favicon_url = await this.s3Service.signUrl(
+        config.inicio.favicon_url,
+      );
+    }
+
+    const branding = currentSettings.branding
+      ? JSON.parse(JSON.stringify(currentSettings.branding))
+      : null;
+    if (branding?.logo_url && !branding.logo_url.startsWith('http')) {
+      branding.logo_url = await this.s3Service.signUrl(branding.logo_url);
+    }
+    if (branding?.favicon_url && !branding.favicon_url.startsWith('http')) {
+      branding.favicon_url = await this.s3Service.signUrl(branding.favicon_url);
+    }
 
     // 6. Build ecommerce URL from domain hostname
     const ecommerceUrl = domain
@@ -112,6 +130,7 @@ export class EcommerceService {
 
     return {
       config,
+      branding,
       ecommerceUrl,
       ...qrCode,
     };
@@ -246,6 +265,10 @@ export class EcommerceService {
     if (preparedSettings.inicio?.logo_url) {
       preparedSettings.inicio.logo_url =
         extractS3KeyFromUrl(preparedSettings.inicio.logo_url) ?? undefined;
+    }
+    if (preparedSettings.inicio?.favicon_url) {
+      preparedSettings.inicio.favicon_url =
+        extractS3KeyFromUrl(preparedSettings.inicio.favicon_url) ?? undefined;
     }
 
     return preparedSettings;
@@ -548,29 +571,14 @@ export class EcommerceService {
 
   /**
    * Aplica valores por defecto a la configuración de e-commerce
-   * Auto-rellena título y párrafo si están vacíos
-   * Sincroniza colores de inicio.colores con branding
+   * Normaliza URLs de imágenes antes de persistir.
    */
   private applyDefaultValues(
     ecommerceDto: EcommerceSettingsDto,
   ): EcommerceSettingsDto {
     const settings = { ...ecommerceDto };
 
-    // Auto-relleno de la sección inicio
     if (settings.inicio) {
-      // Auto-relleno del título
-      if (!settings.inicio.titulo || settings.inicio.titulo.trim() === '') {
-        // Intentar obtener el nombre de la tienda del contexto
-        const store_id = RequestContextService.getStoreId();
-        settings.inicio.titulo = `Bienvenido a nuestra tienda`;
-      }
-
-      // Auto-relleno del párrafo
-      if (!settings.inicio.parrafo || settings.inicio.parrafo.trim() === '') {
-        settings.inicio.parrafo =
-          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...';
-      }
-
       // Legacy: inicio.colores is deprecated, we now use ecommerce.branding
       // Migration happens in updateSettings() when saving
 
@@ -578,6 +586,11 @@ export class EcommerceService {
       if (settings.inicio.logo_url) {
         settings.inicio.logo_url = extractS3KeyFromUrl(
           settings.inicio.logo_url,
+        );
+      }
+      if (settings.inicio.favicon_url) {
+        settings.inicio.favicon_url = extractS3KeyFromUrl(
+          settings.inicio.favicon_url,
         );
       }
     }

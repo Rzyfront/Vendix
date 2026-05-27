@@ -19,6 +19,7 @@ export interface InicioSettings {
   titulo?: string;
   parrafo?: string;
   logo_url?: string | null;
+  favicon_url?: string | null;
   colores?: InicioColores;
 }
 
@@ -47,6 +48,7 @@ export interface EcommerceSettings {
 
   home_sections?: {
     slider?: HomeSectionSettings;
+    welcome?: HomeSectionSettings;
     categories?: HomeSectionSettings;
     brands?: HomeSectionSettings;
     featured_products?: HomeSectionSettings;
@@ -216,6 +218,10 @@ export interface SliderImage {
 export interface SettingsResponse {
   exists: boolean;
   config?: EcommerceSettings;
+  branding?: {
+    logo_url?: string | null;
+    favicon_url?: string | null;
+  } | null;
   ecommerceUrl?: string; // URL del dominio de Ecommerce activo
   qrCodeDataUrl?: string | null;
   qrCodeUrl?: string | null;

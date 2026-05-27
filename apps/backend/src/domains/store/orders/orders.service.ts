@@ -418,6 +418,40 @@ export class OrdersService {
     );
   }
 
+  async getPaymentReceiptUrl(
+    orderId: number,
+    paymentId: number,
+  ): Promise<{ url: string; expires_at: string; content_type?: string }> {
+    const payment = await this.prisma.payments.findFirst({
+      where: { id: paymentId, order_id: orderId },
+      select: {
+        id: true,
+        order_id: true,
+        receipt_s3_key: true,
+        receipt_uploaded_at: true,
+      },
+    });
+
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    if (!payment.receipt_s3_key) {
+      throw new VendixHttpException(ErrorCodes.PAY_RECEIPT_NOT_FOUND_001);
+    }
+
+    const TTL_SECONDS = 300;
+    const url = await this.s3Service.getPresignedUrl(
+      payment.receipt_s3_key,
+      TTL_SECONDS,
+    );
+    const expires_at = new Date(
+      Date.now() + TTL_SECONDS * 1000,
+    ).toISOString();
+
+    return { url, expires_at };
+  }
+
   async update(id: number, updateOrderDto: UpdateOrderDto) {
     const order = await this.findOne(id);
 

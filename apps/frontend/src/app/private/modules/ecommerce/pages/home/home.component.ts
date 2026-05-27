@@ -38,6 +38,7 @@ interface HomeSectionConfig {
 
 interface HomeSectionsConfig {
   slider: HomeSectionConfig;
+  welcome: HomeSectionConfig;
   categories: HomeSectionConfig;
   brands: HomeSectionConfig;
   featured_products: HomeSectionConfig;
@@ -57,26 +58,32 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     subtitle: 'La primera historia visual de tu tienda',
     sort_order: 10,
   },
+  welcome: {
+    enabled: false,
+    title: '',
+    subtitle: '',
+    sort_order: 20,
+  },
   categories: {
     enabled: true,
     title: 'Categorías',
     subtitle: 'Explora por tipo de producto',
     limit: 8,
-    sort_order: 20,
+    sort_order: 30,
   },
   brands: {
     enabled: true,
     title: 'Marcas',
     subtitle: 'Compra por tus marcas favoritas',
     limit: 8,
-    sort_order: 30,
+    sort_order: 40,
   },
   featured_products: {
     enabled: true,
     title: 'Productos destacados',
     subtitle: 'Selección especial de la tienda',
     limit: 16,
-    sort_order: 40,
+    sort_order: 50,
   },
 };
 
@@ -107,7 +114,14 @@ export class HomeComponent implements OnInit {
   readonly selectedProductSlug = signal<string | null>(null);
   readonly slider_config = signal<any>(null);
   readonly show_slider = signal(false);
+  readonly slider_slides = computed<any[]>(() => {
+    const photos = this.slider_config()?.photos;
+    return Array.isArray(photos)
+      ? photos.filter((photo: any) => !!photo?.url)
+      : [];
+  });
   readonly home_sections = signal<HomeSectionsConfig>(DEFAULT_HOME_SECTIONS);
+  readonly shipping_badge_enabled = signal(false);
   readonly featured_section = computed(
     () => this.home_sections().featured_products,
   );
@@ -116,15 +130,15 @@ export class HomeComponent implements OnInit {
     return (Object.keys(sections) as HomeSectionKey[])
       .map((key) => ({ key, config: sections[key] }))
       .filter((section) => section.config.enabled !== false)
+      .filter(
+        (section) =>
+          section.key !== 'welcome' || this.hasWelcomeContent(section.config),
+      )
       .sort(
         (a, b) =>
           (a.config.sort_order ?? DEFAULT_HOME_SECTIONS[a.key].sort_order ?? 0) -
           (b.config.sort_order ?? DEFAULT_HOME_SECTIONS[b.key].sort_order ?? 0),
       );
-  });
-  readonly banner_content = signal<{ title: string; paragraph: string }>({
-    title: 'Bienvenido',
-    paragraph: 'Encuentra aquí todo lo que buscas...',
   });
   shareProduct: EcommerceProduct | null = null;
 
@@ -148,6 +162,7 @@ export class HomeComponent implements OnInit {
   ngOnInit(): void {
     this.loadFeaturedProducts();
     this.loadPublicConfig();
+    this.loadShippingAvailability();
 
     // Subscribe to authentication state
     this.auth_facade.isAuthenticated$
@@ -207,13 +222,33 @@ export class HomeComponent implements OnInit {
           // La configuración de ecommerce está en customConfig.ecommerce
           const customConfig = domainConfig.customConfig || {};
           const ecommerceConfig = customConfig.ecommerce || {};
+          if (this.hasConfiguredShipping(ecommerceConfig)) {
+            this.shipping_badge_enabled.set(true);
+          }
 
           this.slider_config.set(ecommerceConfig.slider || null);
+          const inicio = ecommerceConfig.inicio || {};
           const configuredSections = ecommerceConfig.home_sections || {};
+          const configuredWelcome = configuredSections.welcome || {};
+          const welcomeTitle = this.normalizeText(
+            configuredWelcome.title ?? inicio.titulo,
+          );
+          const welcomeSubtitle = this.normalizeText(
+            configuredWelcome.subtitle ?? inicio.parrafo,
+          );
           this.home_sections.set({
             slider: {
               ...DEFAULT_HOME_SECTIONS.slider,
               ...(configuredSections.slider || {}),
+            },
+            welcome: {
+              ...DEFAULT_HOME_SECTIONS.welcome,
+              ...configuredWelcome,
+              enabled:
+                configuredWelcome.enabled ??
+                Boolean(welcomeTitle.trim() || welcomeSubtitle.trim()),
+              title: welcomeTitle,
+              subtitle: welcomeSubtitle,
             },
             categories: {
               ...DEFAULT_HOME_SECTIONS.categories,
@@ -231,26 +266,47 @@ export class HomeComponent implements OnInit {
           this.loadFeaturedProducts();
 
           // Verificar si hay fotos configuradas
-          const hasPhotos =
-            Array.isArray(this.slider_config()?.photos) &&
-            this.slider_config()?.photos.length > 0;
           const sliderEnabled =
             (configuredSections.slider?.enabled ?? true) !== false &&
             (this.slider_config()?.enable ?? true) !== false;
 
           // El slider se muestra si hay fotos
           // El campo 'enable' es opcional - si no existe, se asume true cuando hay fotos
-          this.show_slider.set(sliderEnabled && hasPhotos);
-
-          // Mapeo de contenido para el banner estático desde ecommerce.inicio
-          const inicio = ecommerceConfig.inicio || {};
-
-          this.banner_content.set({
-            title: inicio.titulo || 'Bienvenido',
-            paragraph: inicio.parrafo || 'Encuentra aquí todo lo que buscas...',
-          });
+          this.show_slider.set(
+            sliderEnabled && this.slider_slides().length > 0,
+          );
         },
       });
+  }
+
+  private loadShippingAvailability(): void {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response) => {
+          this.shipping_badge_enabled.set(
+            this.hasConfiguredShipping(response.data?.ecommerce),
+          );
+        },
+      });
+  }
+
+  hasWelcomeContent(config: HomeSectionConfig): boolean {
+    return Boolean(config.title?.trim() || config.subtitle?.trim());
+  }
+
+  private hasConfiguredShipping(ecommerce: any): boolean {
+    const shipping = ecommerce?.shipping || {};
+    return (
+      shipping.has_configured_shipping === true ||
+      shipping.enabled === true ||
+      shipping.shipping_enabled === true
+    );
+  }
+
+  private normalizeText(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
   }
 
   onAddToCart(product: EcommerceProduct): void {

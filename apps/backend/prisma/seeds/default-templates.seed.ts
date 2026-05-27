@@ -109,6 +109,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           titulo: '',
           parrafo: '',
           logo_url: null,
+          favicon_url: null,
           colores: {
             primary_color: '#3B82F6',
             secondary_color: '#10B981',
@@ -137,26 +138,32 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             subtitle: 'La primera historia visual de tu tienda',
             sort_order: 10,
           },
+          welcome: {
+            enabled: false,
+            title: '',
+            subtitle: '',
+            sort_order: 20,
+          },
           categories: {
             enabled: true,
             title: 'Categorías',
             subtitle: 'Explora por tipo de producto',
             limit: 8,
-            sort_order: 20,
+            sort_order: 30,
           },
           brands: {
             enabled: true,
             title: 'Marcas',
             subtitle: 'Compra por tus marcas favoritas',
             limit: 8,
-            sort_order: 30,
+            sort_order: 40,
           },
           featured_products: {
             enabled: true,
             title: 'Productos destacados',
             subtitle: 'Selección especial de la tienda',
             limit: 16,
-            sort_order: 40,
+            sort_order: 50,
           },
         },
         catalog: {

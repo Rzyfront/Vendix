@@ -4,7 +4,10 @@ import { Injectable } from '@angular/core';
 export class NotificationSoundPlayerService {
   private cache = new Map<string, HTMLAudioElement>();
   private lastPlayedAt = 0;
-  private readonly THROTTLE_MS = 300;
+  // Anti-spam: si suena, espera 30s antes de volver a sonar.
+  // Notificaciones recibidas en esa ventana NO se encolan — se dan por
+  // notificadas por el sonido anterior.
+  private readonly THROTTLE_MS = 30_000;
 
   /**
    * Preload an audio element for a given sound, keyed by id.
@@ -25,7 +28,8 @@ export class NotificationSoundPlayerService {
    * autoplay errors (NotAllowedError) — first user interaction unlocks audio.
    */
   async play(soundId: string, url: string, volume: number): Promise<void> {
-    // Throttle to prevent overlapping plays when many notifications arrive at once
+    // Anti-spam: si suena, espera 30s. Notificaciones en esa ventana NO se
+    // encolan — se dan por notificadas por el primer play.
     const now = Date.now();
     if (now - this.lastPlayedAt < this.THROTTLE_MS) return;
     this.lastPlayedAt = now;

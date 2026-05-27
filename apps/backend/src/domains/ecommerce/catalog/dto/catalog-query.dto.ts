@@ -22,10 +22,18 @@ export class CatalogQueryDto {
   category_id?: number;
 
   @IsOptional()
+  @IsString()
+  category_ids?: string;
+
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
   @Min(1)
   brand_id?: number;
+
+  @IsOptional()
+  @IsString()
+  brand_ids?: string;
 
   @IsOptional()
   @IsInt()

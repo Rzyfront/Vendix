@@ -259,7 +259,9 @@ export class CreateProductDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  @Min(2, { message: 'Las unidades por empaque deben ser mayores o iguales a 2' })
+  @Min(2, {
+    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
+  })
   units_per_package?: number;
 
   @IsOptional()
@@ -520,7 +522,9 @@ export class UpdateProductDto {
   @IsOptional()
   @IsInt()
   @Type(() => Number)
-  @Min(2, { message: 'Las unidades por empaque deben ser mayores o iguales a 2' })
+  @Min(2, {
+    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
+  })
   units_per_package?: number;
 
   @IsOptional()
@@ -1278,6 +1282,9 @@ export class BulkProductItemDto {
   category_ids?: (number | string)[] | string;
 
   @IsOptional()
+  tax_category_ids?: (number | string)[] | string;
+
+  @IsOptional()
   @IsNumber({}, { message: 'Stock quantity must be a number' })
   @Min(0, { message: 'Stock quantity must be positive' })
   stock_quantity?: number;
@@ -1308,6 +1315,23 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(2, { message: 'Units per package must be at least 2' })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsArray()
@@ -1368,6 +1392,22 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_consultation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_preconsultation?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  consultation_template_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  preconsultation_template_id?: number;
 
   @IsOptional()
   @IsNumber()

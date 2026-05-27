@@ -80,7 +80,9 @@ export interface CatalogQuery {
   search?: string;
   ids?: string;
   category_id?: number;
+  category_ids?: string;
   brand_id?: number;
+  brand_ids?: string;
   min_price?: number;
   max_price?: number;
   sort_by?:
@@ -137,8 +139,11 @@ export class CatalogService {
     if (query.ids) params = params.set('ids', query.ids);
     if (query.category_id)
       params = params.set('category_id', query.category_id.toString());
+    if (query.category_ids)
+      params = params.set('category_ids', query.category_ids);
     if (query.brand_id)
       params = params.set('brand_id', query.brand_id.toString());
+    if (query.brand_ids) params = params.set('brand_ids', query.brand_ids);
     if (query.min_price)
       params = params.set('min_price', query.min_price.toString());
     if (query.max_price)

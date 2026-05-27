@@ -28,7 +28,7 @@ export const ECOMMERCE_TOUR_CONFIG: TourConfig = {
     {
       id: 'inicio-section',
       title: 'Apariencia',
-      description: 'Define título, logo y colores de tu marca.',
+      description: 'Define logo y colores de tu marca.',
       action: 'Revisa Inicio',
       target: '[data-tour="inicio-section"]',
       beforeNext: async () => {

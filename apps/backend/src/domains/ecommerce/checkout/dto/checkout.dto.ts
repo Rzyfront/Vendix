@@ -9,7 +9,7 @@ import {
   Matches,
   IsEmail,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 class CheckoutCartItemDto {
   @IsInt()
@@ -35,6 +35,9 @@ export class GuestCheckoutCustomerDto {
   @IsString()
   last_name?: string;
 
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toLowerCase().trim() : value,
+  )
   @IsOptional()
   @IsEmail()
   email?: string;

@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
@@ -11,6 +12,7 @@ import { PriceResolverService } from '../../store/products/services/price-resolv
 export class CatalogService {
   constructor(
     private readonly prisma: EcommercePrismaService,
+    private readonly storePrisma: StorePrismaService,
     private readonly s3Service: S3Service,
     private readonly priceResolverService: PriceResolverService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -20,7 +22,9 @@ export class CatalogService {
     const {
       search,
       category_id,
+      category_ids,
       brand_id,
+      brand_ids,
       ids,
       min_price,
       max_price,
@@ -39,6 +43,8 @@ export class CatalogService {
       // store_id se aplica automáticamente por EcommercePrismaService
     };
     const andFilters: any[] = [];
+    const categoryIds = this.mergeIdFilters(category_id, category_ids);
+    const brandIds = this.mergeIdFilters(brand_id, brand_ids);
 
     if (search) {
       where.OR = [
@@ -48,14 +54,17 @@ export class CatalogService {
       ];
     }
 
-    if (category_id) {
+    if (categoryIds.length > 0) {
       where.product_categories = {
-        some: { category_id },
+        some: {
+          category_id:
+            categoryIds.length === 1 ? categoryIds[0] : { in: categoryIds },
+        },
       };
     }
 
-    if (brand_id) {
-      where.brand_id = brand_id;
+    if (brandIds.length > 0) {
+      where.brand_id = brandIds.length === 1 ? brandIds[0] : { in: brandIds };
     }
 
     if (ids) {
@@ -105,7 +114,10 @@ export class CatalogService {
     }
 
     if (andFilters.length > 0) {
-      where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...andFilters];
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        ...andFilters,
+      ];
     }
 
     let orderBy: any;
@@ -438,7 +450,53 @@ export class CatalogService {
         store_settings: true,
       },
     });
-    return store?.store_settings?.settings || {};
+    const settings = (store?.store_settings?.settings || {}) as any;
+    const has_configured_shipping = await this.hasConfiguredShipping();
+
+    return {
+      ...settings,
+      ecommerce: {
+        ...(settings.ecommerce || {}),
+        shipping: {
+          ...(settings.ecommerce?.shipping || {}),
+          has_configured_shipping,
+        },
+      },
+    };
+  }
+
+  private mergeIdFilters(singleId?: number, csvIds?: string): number[] {
+    const ids = [...(singleId ? [singleId] : []), ...this.parseIdList(csvIds)];
+
+    return [...new Set(ids)];
+  }
+
+  private parseIdList(value?: string): number[] {
+    if (!value) return [];
+
+    return value
+      .split(',')
+      .map((id) => Number(id.trim()))
+      .filter((id) => Number.isInteger(id) && id > 0);
+  }
+
+  private async hasConfiguredShipping(): Promise<boolean> {
+    const active_rates = await this.storePrisma.shipping_rates.count({
+      where: {
+        is_active: true,
+        shipping_zone: {
+          is_active: true,
+          is_system: false,
+        },
+        shipping_method: {
+          is_active: true,
+          is_system: false,
+          type: { not: 'pickup' },
+        },
+      },
+    });
+
+    return active_rates > 0;
   }
 
   private async getCatalogSettings(storeId?: number | null): Promise<{

@@ -87,15 +87,6 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           <span class="product-brand">{{ product().brand?.name }}</span>
         }
         <h3 class="product-name">{{ product().name }}</h3>
-        <div class="product-price">
-          <span class="price">{{ product().final_price | currency }}</span>
-          @if (product().pricing_type === 'weight') {
-            <span class="weight-unit">/kg</span>
-          }
-          @if (product().is_on_sale) {
-            <span class="original-price">{{ product().base_price | currency }}</span>
-          }
-        </div>
         @if (product().pricing_type === 'weight') {
           <div class="weight-indicator">
             <app-icon name="scale" [size]="12"></app-icon>
@@ -118,22 +109,43 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             }
           </div>
         }
+        <div class="product-bottom">
+          @if (show_shipping_badge()) {
+            <div class="shipping-badge">
+              <app-icon name="truck" [size]="12"></app-icon>
+              <span>Envío disponible</span>
+            </div>
+          }
+          <div class="product-price">
+            <span class="price" [class.sale-price]="hasActiveDiscount()">
+              {{ product().final_price | currency }}
+            </span>
+            @if (product().pricing_type === 'weight') {
+              <span class="weight-unit">/kg</span>
+            }
+            @if (hasActiveDiscount()) {
+              <span class="original-price">{{ product().base_price | currency }}</span>
+              <span class="discount-badge">-{{ discountPercentage() }}% OFF</span>
+            }
+          </div>
+        </div>
       </div>
     </article>
   `,
   styles: [`
     :host {
       display: block;
+      height: 100%;
       min-width: 0;
     }
 
     .product-card {
       position: relative;
       height: 100%;
-      background-color: transparent;
+      background-color: var(--color-surface);
       border-radius: 8px;
-      border: 1px solid transparent;
-      overflow: visible;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      overflow: hidden;
       cursor: pointer;
       transition:
         border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
@@ -142,15 +154,16 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex;
       flex-direction: column;
-      gap: 0.72rem;
+      gap: 0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
       -webkit-tap-highlight-color: transparent;
 
       &:hover,
       &:focus-within {
         background-color: var(--color-background);
-        box-shadow: 0 22px 44px -36px rgba(15, 23, 42, 0.55);
+        box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.5);
         transform: translateY(-2px);
-        border-color: rgba(148, 163, 184, 0.28);
+        border-color: rgba(148, 163, 184, 0.34);
       }
 
       &:active {
@@ -170,18 +183,17 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     .product-image {
       position: relative;
       aspect-ratio: 1;
-      background: var(--color-surface);
+      background: var(--color-background);
       overflow: hidden;
-      border-radius: 8px;
-      border: 1px solid rgba(148, 163, 184, 0.16);
-      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.42);
+      border-radius: 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 
       img {
+        display: block;
         width: 100%;
         height: 100%;
-        object-fit: contain;
+        object-fit: cover;
         object-position: center;
-        padding: 0.72rem;
         transition: transform 0.35s ease;
       }
 
@@ -192,18 +204,18 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         align-items: center;
         justify-content: center;
         color: var(--color-text-muted);
-        background: var(--color-surface);
+        background: var(--color-background);
         font-size: 3rem;
       }
     }
 
     .quick-cart-btn {
       position: absolute;
-      right: 0.55rem;
-      bottom: 0.55rem;
+      right: 0.6rem;
+      bottom: 0.6rem;
       z-index: 2;
-      width: 38px;
-      height: 38px;
+      width: 36px;
+      height: 36px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -213,10 +225,12 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       border-radius: 999px;
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
-      box-shadow: 0 8px 20px -18px rgba(15, 23, 42, 0.4);
+      box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.42);
       cursor: pointer;
-      opacity: 1;
+      opacity: 0;
+      transform: translateY(4px);
       transition:
+        opacity 0.15s ease,
         background-color 0.15s ease,
         border-color 0.15s ease,
         color 0.15s ease,
@@ -237,6 +251,12 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 
     .product-card:hover .product-image img {
       transform: scale(1.025);
+    }
+
+    .product-card:hover .quick-cart-btn,
+    .quick-cart-btn:focus-visible {
+      opacity: 1;
+      transform: translateY(0);
     }
 
     .stock-badge-pos {
@@ -306,11 +326,12 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     }
 
     .product-info {
-      padding: 0 0.16rem 0.16rem;
+      padding: 0.82rem 0.85rem 0.9rem;
       flex: 1;
+      min-height: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.28rem;
+      gap: 0.24rem;
     }
 
     .product-brand {
@@ -326,31 +347,56 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       font-weight: 700;
       color: var(--color-text-primary);
       margin: 0;
-      line-height: 1.3;
-      min-height: 2.6em;
+      line-height: 1.28;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
 
+    .product-bottom {
+      margin-top: auto;
+      padding-top: 0.28rem;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.14rem;
+    }
+
     .product-price {
-      margin-top: 0.35rem;
       display: flex;
       flex-wrap: wrap;
       align-items: baseline;
       gap: 0.35rem;
 
       .price {
-        font-size: var(--fs-base);
+        font-size: var(--fs-md);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
+
+        &.sale-price {
+          color: var(--color-success);
+        }
       }
 
       .original-price {
         font-size: var(--fs-xs);
         color: var(--color-text-muted);
         text-decoration: line-through;
+      }
+
+      .discount-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0.12rem 0.36rem;
+        border-radius: 999px;
+        background: var(--color-success-light);
+        color: var(--color-success);
+        font-size: 10px;
+        font-weight: var(--fw-bold);
+        line-height: 1;
+        white-space: nowrap;
       }
 
       .weight-unit {
@@ -370,6 +416,27 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       color: rgb(37, 99, 235);
       font-size: 11px;
       font-weight: 500;
+    }
+
+    .shipping-badge {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      gap: 0.25rem;
+      max-width: 100%;
+      padding: 0.18rem 0.46rem;
+      border-radius: 999px;
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+      color: var(--color-primary);
+      font-size: 10.5px;
+      font-weight: var(--fw-semibold);
+      line-height: 1.1;
+
+      span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     }
 
     .service-indicators {
@@ -394,11 +461,6 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     @media (max-width: 480px) {
       .product-card {
         border-radius: 8px;
-        gap: 0.5rem;
-      }
-
-      .product-image img {
-        padding: 0.55rem;
       }
 
       .variant-badge {
@@ -425,8 +487,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-info {
-        padding: 0 0.1rem 0.05rem;
-        gap: 0.15rem;
+        padding: 0.65rem 0.65rem 0.7rem;
+        gap: 0.16rem;
       }
 
       .product-brand {
@@ -443,8 +505,10 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .quick-cart-btn {
-        width: 36px !important;
-        height: 36px !important;
+        width: 34px !important;
+        height: 34px !important;
+        opacity: 1;
+        transform: none;
       }
     }
 
@@ -461,6 +525,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
   readonly show_variants = input<boolean>(true);
+  readonly show_shipping_badge = input<boolean>(false);
   readonly in_wishlist = input<boolean>(false);
   readonly add_to_cart = output<EcommerceProduct>();
   readonly toggle_wishlist = output<EcommerceProduct>();
@@ -477,6 +542,34 @@ export class ProductCardComponent {
 
   private get hasVariants(): boolean {
     return !!this.product().variant_count && this.product().variant_count! > 0;
+  }
+
+  hasActiveDiscount(): boolean {
+    const product = this.product();
+    if (!product.is_on_sale) return false;
+
+    const basePrice = Number(product.base_price) || 0;
+    const promoPrice = this.promoPrice();
+
+    return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
+  }
+
+  discountPercentage(): number {
+    const basePrice = Number(this.product().base_price) || 0;
+    const promoPrice = this.promoPrice();
+
+    if (basePrice <= 0 || promoPrice <= 0 || promoPrice >= basePrice) return 0;
+
+    return Math.round(((basePrice - promoPrice) / basePrice) * 100);
+  }
+
+  private promoPrice(): number {
+    const product = this.product();
+    const salePrice = Number(product.sale_price) || 0;
+    const finalPrice = Number(product.final_price) || 0;
+
+    if (salePrice > 0) return salePrice;
+    return finalPrice;
   }
 
   onCardClick(event: Event): void {

@@ -17,6 +17,7 @@ import {
   InputComponent,
   SelectorComponent,
   TextareaComponent,
+  TooltipComponent,
 } from '../../../../../shared/components';
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -44,6 +45,7 @@ import {
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    TooltipComponent,
     QuantityControlComponent,
     PriceTierSelectorComponent,
   ],
@@ -485,20 +487,30 @@ import {
                         (valueChange)="updateQuantity(item.id, $event)"
                       ></app-quantity-control>
                     }
+                  </div>
+                  <div class="flex shrink-0 items-center justify-end gap-2">
+                    <span class="text-sm font-extrabold leading-none text-primary">
+                      {{ formatCurrency(item.totalPrice) }}
+                    </span>
                     @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
-                      <button
-                        type="button"
-                        (click)="editItemPrice(item)"
-                        class="p-1.5 rounded-md text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Editar precio de venta"
+                      <app-tooltip
+                        content="Edita el precio de venta de este producto."
+                        position="top"
+                        size="sm"
+                        color="default"
                       >
-                        <app-icon name="pencil" [size]="14"></app-icon>
-                      </button>
+                        <button
+                          type="button"
+                          (click)="editItemPrice(item)"
+                          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary transition-colors hover:border-primary/40 hover:bg-primary/15"
+                          aria-label="Editar precio de venta"
+                          title="Edita el precio de venta de este producto."
+                        >
+                          <app-icon name="pencil" [size]="14"></app-icon>
+                        </button>
+                      </app-tooltip>
                     }
                   </div>
-                  <span class="text-sm font-extrabold text-primary">
-                    {{ formatCurrency(item.totalPrice) }}
-                  </span>
                 </div>
               </div>
             }

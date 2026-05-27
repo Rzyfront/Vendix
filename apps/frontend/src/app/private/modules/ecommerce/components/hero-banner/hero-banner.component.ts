@@ -12,13 +12,13 @@ import { RouterModule, Router } from '@angular/router';
 import { TenantFacade } from '../../../../../../app/core/store';
 
 export interface HeroBannerConfig {
-  title: string;
-  subtitle: string;
+  title?: string;
+  subtitle?: string;
   image_url?: string;
   background_color?: string;
   text_color?: string;
-  cta_text: string;
-  cta_link: string;
+  cta_text?: string;
+  cta_link?: string;
   show_overlay?: boolean;
 }
 
@@ -105,24 +105,31 @@ export class HeroBannerComponent implements OnInit {
     const bannerVal = this.banner();
 
     return {
-      title:
-        current_slide?.title ||
-        bannerVal.title ||
-        'Bienvenido a nuestra tienda',
-      subtitle:
-        current_slide?.caption ||
-        bannerVal.subtitle ||
-        'Encuentra los mejores productos al mejor precio',
+      title: current_slide?.title || bannerVal.title || '',
+      subtitle: current_slide?.caption || bannerVal.subtitle || '',
       image_url: current_slide?.url || bannerVal.image_url || undefined,
       background_color:
         bannerVal.background_color ||
         tenantConfig?.branding?.colors?.primary ||
         'var(--color-primary)',
       text_color: bannerVal.text_color || '#ffffff',
-      cta_text: current_slide?.action_label || bannerVal.cta_text || 'Ver productos',
+      cta_text: current_slide?.action_label || bannerVal.cta_text || '',
       cta_link: bannerVal.cta_link || '/catalog',
       show_overlay: bannerVal.show_overlay ?? true,
     };
+  }
+
+  hasHeroContent(): boolean {
+    const config = this.banner_config;
+    return Boolean(
+      config.title?.trim() ||
+        config.subtitle?.trim() ||
+        config.cta_text?.trim(),
+    );
+  }
+
+  hasCta(): boolean {
+    return Boolean(this.banner_config.cta_text?.trim());
   }
 
   hasSlideAction(): boolean {
@@ -140,7 +147,7 @@ export class HeroBannerComponent implements OnInit {
     event.stopPropagation();
     if (this.runSlideAction(this.currentSlide())) return;
 
-    this.router.navigateByUrl(this.banner_config.cta_link);
+    this.router.navigateByUrl(this.banner_config.cta_link || '/catalog');
   }
 
   onBannerKeydown(event: Event): void {

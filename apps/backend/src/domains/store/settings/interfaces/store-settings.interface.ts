@@ -86,6 +86,7 @@ export interface EcommerceHomeSectionSettings {
 
 export interface EcommerceHomeSectionsSettings {
   slider?: EcommerceHomeSectionSettings;
+  welcome?: EcommerceHomeSectionSettings;
   categories?: EcommerceHomeSectionSettings;
   brands?: EcommerceHomeSectionSettings;
   featured_products?: EcommerceHomeSectionSettings;
@@ -110,6 +111,7 @@ export interface EcommerceSettings {
     titulo?: string;
     parrafo?: string;
     logo_url?: string;
+    favicon_url?: string;
     // Legacy: colores para compatibilidad (migrar a branding)
     colores?: {
       primary_color: string;

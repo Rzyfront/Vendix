@@ -29,6 +29,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
+import { CustomersService } from '../../store/customers/customers.service';
 
 @Injectable()
 export class CheckoutService {
@@ -55,6 +56,7 @@ export class CheckoutService {
     private readonly fiscalStatusService: FiscalStatusService,
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
+    private readonly customersService: CustomersService,
   ) {}
 
   /**
@@ -364,6 +366,17 @@ export class CheckoutService {
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
     const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
+
+    const store_id_ctx = RequestContextService.getStoreId();
+    let resolved_customer_id: number | null = user_id ?? null;
+    if (is_guest && guest_customer && store_id_ctx) {
+      const resolved =
+        await this.customersService.resolveGuestCustomerForCheckout(
+          store_id_ctx,
+          guest_customer,
+        );
+      resolved_customer_id = resolved?.customer_id ?? null;
+    }
 
     if (is_guest && dto.bookings?.length) {
       throw new BadRequestException(
@@ -698,6 +711,7 @@ export class CheckoutService {
     const order = await this.prisma.orders.create({
       data: {
         order_number,
+        customer_id: resolved_customer_id,
         channel: 'ecommerce', // Ecommerce orders are assigned 'ecommerce' channel
         currency: cart_currency,
         subtotal_amount: subtotal,
@@ -871,6 +885,17 @@ export class CheckoutService {
     const user_id = RequestContextService.getUserId();
     const is_guest = !user_id;
     const guest_customer = this.normalizeGuestCustomer(dto.guest_customer);
+
+    const wa_store_id_ctx = RequestContextService.getStoreId();
+    let resolved_customer_id: number | null = user_id ?? null;
+    if (is_guest && guest_customer && wa_store_id_ctx) {
+      const resolved =
+        await this.customersService.resolveGuestCustomerForCheckout(
+          wa_store_id_ctx,
+          guest_customer,
+        );
+      resolved_customer_id = resolved?.customer_id ?? null;
+    }
 
     // Fetch customer profile and primary address for authenticated users
     let customer_data: {
@@ -1184,6 +1209,7 @@ export class CheckoutService {
     const order = await this.prisma.orders.create({
       data: {
         order_number,
+        customer_id: resolved_customer_id,
         channel: 'whatsapp',
         currency: cart_currency,
         subtotal_amount: subtotal,
