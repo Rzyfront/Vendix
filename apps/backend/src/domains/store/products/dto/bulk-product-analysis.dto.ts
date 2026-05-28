@@ -19,6 +19,12 @@ export class BulkProductAnalysisItemDto {
   categories_will_create: string[];
   warehouse_code?: string;
   warehouse_name?: string;
+  available_for_ecommerce?: boolean;
+  is_featured?: boolean;
+  allow_pos_price_override?: boolean;
+  has_multiple_price_tiers?: boolean;
+  units_per_package?: number;
+  package_consumes_multiple_stock?: boolean;
   action: 'create' | 'update';
   existing_product_id?: number;
   status: 'ready' | 'warning' | 'error';
@@ -31,6 +37,10 @@ export class BulkProductAnalysisItemDto {
   booking_mode?: string;
   buffer_minutes?: number;
   is_recurring?: boolean;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number;
+  preconsultation_template_id?: number;
   min_stock_level?: number;
   max_stock_level?: number;
   reorder_point?: number;

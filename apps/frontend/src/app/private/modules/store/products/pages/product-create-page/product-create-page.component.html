@@ -337,6 +337,363 @@
           </div>
         </section>
 
+        <!-- ─── Multi-Tarifa (Phase 4) ───────────────────────────────── -->
+        <section
+          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="tags" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">
+              Precios Multi-Tarifa
+            </h2>
+          </div>
+
+          <app-setting-toggle
+            formControlName="has_multiple_price_tiers"
+            label="Activar precios multi-tarifa"
+            description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
+            (changed)="onMultiTierToggle($event)"
+          ></app-setting-toggle>
+
+          @if (isMultiTierEnabled) {
+            <!-- Create-mode warning: product must be saved first -->
+            @if (!productId) {
+              <div
+                class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 flex items-start gap-2"
+              >
+                <app-icon
+                  name="info"
+                  size="16"
+                  class="text-amber-600 shrink-0 mt-0.5"
+                ></app-icon>
+                <span>
+                  Las tarifas activas quedan habilitadas por defecto. Destilda
+                  las que no apliquen para este producto antes de guardarlo.
+                </span>
+              </div>
+            }
+
+            @if (isLoadingPriceTiers()) {
+              <div
+                class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-4 text-sm text-gray-500 text-center"
+              >
+                Cargando tarifas...
+              </div>
+            } @else if (hasLoadedPriceTiers() && priceTierRows().length === 0) {
+              <div
+                class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-600 flex items-start gap-2"
+              >
+                <app-icon
+                  name="info"
+                  size="16"
+                  class="text-gray-500 shrink-0 mt-0.5"
+                ></app-icon>
+                <span>
+                  No hay tarifas activas configuradas. Crea tarifas desde
+                  <a
+                    routerLink="/admin/price-tiers"
+                    class="text-primary-600 hover:underline font-medium"
+                    >Precios y Tarifas</a
+                  >
+                  para poder definir precios por tarifa en este producto.
+                </span>
+              </div>
+            } @else if (priceTierRows().length > 0) {
+              <!-- Tier assignments + overrides table -->
+              <!-- MOBILE: card list -->
+              <div class="md:hidden space-y-3">
+                @for (row of priceTierRows(); track row.tier.id) {
+                  <div
+                    class="rounded-lg border border-gray-200 p-3 space-y-2"
+                    [class.opacity-60]="!row.enabled"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex flex-col">
+                        <span class="text-sm font-semibold text-gray-900">{{
+                          row.tier.name
+                        }}</span>
+                        @if (row.tier.discount_percentage) {
+                          <span class="text-xs text-gray-500"
+                            >Descuento por defecto:
+                            {{ row.tier.discount_percentage }}%</span
+                          >
+                          }
+                        </div>
+                      <div class="flex items-center gap-2">
+                        @if (row.tier.is_default) {
+                          <app-badge variant="primary" size="sm"
+                            >Por defecto</app-badge
+                          >
+                        }
+                        <label
+                          class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700"
+                        >
+                          <input
+                            type="checkbox"
+                            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            [checked]="row.enabled"
+                            (change)="
+                              toggleTierAssignment(
+                                row.tier.id,
+                                $any($event.target).checked
+                              )
+                            "
+                          />
+                          Activa
+                        </label>
+                      </div>
+                    </div>
+
+                    <div class="flex flex-col gap-1">
+                      <span class="text-xs font-medium text-gray-600"
+                        >Precio override</span
+                      >
+                      <app-input
+                        [currency]="true"
+                        prefix="$"
+                        placeholder="Usar % de la tarifa"
+                        [ngModel]="row.override_price"
+                        [ngModelOptions]="{ standalone: true }"
+                        [disabled]="!row.enabled"
+                        (ngModelChange)="
+                          updateTierOverridePrice(row.tier.id, $event)
+                        "
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+
+                    <div class="flex items-center justify-between text-xs">
+                      <span class="text-gray-500">
+                        @if (!row.enabled) {
+                          <span class="font-semibold text-gray-500"
+                            >No habilitada</span
+                          >
+                        } @else if (
+                          row.override_price === null ||
+                          row.override_price === undefined
+                        ) {
+                          Resultante:
+                          <span class="font-semibold text-gray-700">{{
+                            getTierFallbackPrice(row.tier) | currency
+                          }}</span>
+                        } @else {
+                          <span class="text-primary-600 font-semibold"
+                            >Override activo</span
+                          >
+                        }
+                      </span>
+                      @if (
+                        row.override_price !== null &&
+                        row.override_price !== undefined &&
+                        row.enabled
+                      ) {
+                        <button
+                          type="button"
+                          (click)="clearTierOverride(row.tier.id)"
+                          class="text-rose-600 hover:text-rose-700 font-medium"
+                        >
+                          Limpiar
+                        </button>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+
+              <!-- DESKTOP: table -->
+              <div class="hidden md:block overflow-x-auto">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left border-b border-gray-200">
+                      <th
+                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-24"
+                      >
+                        Activa
+                      </th>
+                      <th
+                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider"
+                      >
+                        Tarifa
+                      </th>
+                      <th
+                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-48"
+                      >
+                        Precio Override
+                      </th>
+                      <th
+                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider"
+                      >
+                        Resultante
+                      </th>
+                      <th
+                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-28 text-right"
+                      >
+                        Acciones
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of priceTierRows(); track row.tier.id) {
+                      <tr
+                        class="border-b border-gray-100 last:border-b-0 align-middle"
+                        [class.opacity-60]="!row.enabled"
+                      >
+                        <td class="py-2 px-3">
+                          <input
+                            type="checkbox"
+                            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                            [checked]="row.enabled"
+                            (change)="
+                              toggleTierAssignment(
+                                row.tier.id,
+                                $any($event.target).checked
+                              )
+                            "
+                          />
+                        </td>
+                        <td class="py-2 px-3">
+                          <div class="flex items-center gap-2">
+                            <span class="font-medium text-gray-900">{{
+                              row.tier.name
+                            }}</span>
+                            @if (row.tier.is_default) {
+                              <app-badge variant="primary" size="sm"
+                                >Por defecto</app-badge
+                              >
+                            }
+                            @if (row.tier.is_package_unit) {
+                              <app-badge variant="info" size="sm"
+                                >Empaque</app-badge
+                              >
+                            }
+                          </div>
+                          @if (row.tier.discount_percentage) {
+                            <div class="text-xs text-gray-500 mt-0.5">
+                              {{ row.tier.discount_percentage }}% sobre base
+                            </div>
+                          }
+                        </td>
+                        <td class="py-2 px-3">
+                          <app-input
+                            [currency]="true"
+                            prefix="$"
+                            placeholder="Usar % tarifa"
+                            [ngModel]="row.override_price"
+                            [ngModelOptions]="{ standalone: true }"
+                            [disabled]="!row.enabled"
+                            (ngModelChange)="
+                              updateTierOverridePrice(row.tier.id, $event)
+                            "
+                            customWrapperClass="!mt-0"
+                          ></app-input>
+                        </td>
+                        <td class="py-2 px-3 text-gray-700">
+                          @if (!row.enabled) {
+                            <span class="font-medium text-gray-500"
+                              >No habilitada</span
+                            >
+                          } @else if (
+                            row.override_price === null ||
+                            row.override_price === undefined
+                          ) {
+                            <span class="font-medium">{{
+                              getTierFallbackPrice(row.tier) | currency
+                            }}</span>
+                            <div class="text-xs text-gray-400">(calculado)</div>
+                          } @else {
+                            <span class="font-medium text-primary-600"
+                              >Override</span
+                            >
+                          }
+                        </td>
+                        <td class="py-2 px-3 text-right">
+                          @if (
+                            row.override_price !== null &&
+                            row.override_price !== undefined &&
+                            row.enabled
+                          ) {
+                            <button
+                              type="button"
+                              (click)="clearTierOverride(row.tier.id)"
+                              class="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-medium"
+                            >
+                              <app-icon name="x-circle" size="14"></app-icon>
+                              Limpiar
+                            </button>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- MVP note: per-variant overrides deferred -->
+              @if (hasVariants) {
+                <div
+                  class="rounded-lg border border-blue-100 bg-blue-50/60 px-3 py-2 text-xs text-blue-700 flex items-start gap-2"
+                >
+                  <app-icon
+                    name="info"
+                    size="14"
+                    class="text-blue-500 shrink-0 mt-0.5"
+                  ></app-icon>
+                  <span>
+                    Las variantes heredan los precios por tarifa del producto.
+                    Configuración por variante disponible próximamente.
+                  </span>
+                </div>
+              }
+            }
+          }
+        </section>
+
+        <!-- ─── Empaque / Unit of Measure (Phase 4) ────────────────── -->
+        <section
+          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="package"
+              size="18"
+              class="text-primary-600"
+            ></app-icon>
+            <h2 class="text-base font-bold text-gray-900">
+              Empaque (opcional)
+            </h2>
+          </div>
+
+          <p class="text-xs text-gray-500">
+            Define unidades por empaque para vender por caja, paquete o bulto.
+            Ej: si la caja contiene 12 unidades, vender 1 caja descuenta 12 del
+            stock.
+          </p>
+
+          <div
+            class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 md:gap-x-4 gap-y-4"
+          >
+            <app-input
+              label="Unidades por empaque"
+              type="number"
+              formControlName="units_per_package"
+              placeholder="Ej: 12"
+              tooltipText="Cuántas unidades individuales contiene un empaque (caja, paquete, bulto). Debe ser 2 o más."
+              [error]="getErrorMessage('units_per_package')"
+              customWrapperClass="!mt-0"
+            ></app-input>
+
+            <div class="flex items-end">
+              <app-setting-toggle
+                class="flex-1"
+                formControlName="package_consumes_multiple_stock"
+                label="Vender por empaque descuenta múltiples unidades del stock"
+                description="Si está activo, vender 1 empaque resta 'unidades por empaque' del inventario."
+                (changed)="onPackageConsumesMultipleStockToggle($event)"
+              ></app-setting-toggle>
+            </div>
+          </div>
+        </section>
+
         <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->
         <section
           class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
@@ -397,9 +754,28 @@
                 <button
                   type="button"
                   (click)="removeImage(activeImageIndex)"
+                  aria-label="Eliminar imagen"
                   class="absolute top-2 right-2 p-1.5 bg-red-500/90 text-white rounded-full shadow-sm hover:bg-red-600"
                 >
                   <app-icon name="trash-2" size="14"></app-icon>
+                </button>
+                <button
+                  type="button"
+                  (click)="openImageEditor(activeImageIndex)"
+                  aria-label="Ajustar y recortar imagen"
+                  class="absolute bottom-2 right-2 px-2 py-1.5 bg-white/95 text-gray-700 rounded-full shadow-sm hover:bg-white hover:text-primary-600 flex items-center gap-1"
+                >
+                  <app-icon name="crop" size="14"></app-icon>
+                  <span class="text-[10px] font-semibold">Ajustar</span>
+                </button>
+                <button
+                  type="button"
+                  (click)="openImageAiEnhancer(activeImageIndex)"
+                  aria-label="Mejorar imagen con IA"
+                  class="ai-image-action-btn absolute bottom-2 left-2"
+                >
+                  <app-icon name="sparkles" size="14"></app-icon>
+                  <span>IA</span>
                 </button>
                 <!-- Pagination -->
                 <div
@@ -480,7 +856,6 @@
                 </div>
               }
             </div>
-
           </div>
         </section>
 
@@ -520,6 +895,13 @@
             </app-setting-toggle>
 
             <app-setting-toggle
+              formControlName="is_featured"
+              label="Producto destacado"
+              description="Aparece en la sección de destacados de la tienda online"
+            >
+            </app-setting-toggle>
+
+            <app-setting-toggle
               formControlName="allow_pos_price_override"
               label="Precio editable en POS"
               description="Permite que usuarios autorizados vendan este producto con precio negociado"
@@ -533,7 +915,11 @@
                 (ngModelChange)="toggleVariants($event)"
                 [ngModelOptions]="{ standalone: true }"
                 label="Este producto tiene variantes"
-                [description]="isService ? 'Agrega opciones como duración o precio' : 'Agrega opciones como tamaño, color o material'"
+                [description]="
+                  isService
+                    ? 'Agrega opciones como duración o precio'
+                    : 'Agrega opciones como tamaño, color o material'
+                "
               >
               </app-setting-toggle>
               @if (
@@ -550,16 +936,16 @@
               }
             </div>
 
-              <app-setting-toggle
-                formControlName="track_inventory"
-                label="Controlar inventario"
-                [description]="
-                  productForm.get('track_inventory')?.value
-                    ? 'Se controla el stock de este producto'
-                    : 'Producto bajo pedido — siempre disponible para venta'
-                "
-              >
-              </app-setting-toggle>
+            <app-setting-toggle
+              formControlName="track_inventory"
+              label="Controlar inventario"
+              [description]="
+                productForm.get('track_inventory')?.value
+                  ? 'Se controla el stock de este producto'
+                  : 'Producto bajo pedido — siempre disponible para venta'
+              "
+            >
+            </app-setting-toggle>
           </div>
         </section>
 
@@ -628,13 +1014,20 @@
                     <p class="break-all text-sm font-medium text-gray-800">
                       {{ onlinePurchaseUrl() }}
                     </p>
-                    @if (onlinePurchaseProduct()?.online_purchase_domain_hostname) {
+                    @if (
+                      onlinePurchaseProduct()?.online_purchase_domain_hostname
+                    ) {
                       <p class="mt-1 text-xs text-gray-500">
                         Dominio:
-                        {{ onlinePurchaseProduct()?.online_purchase_domain_hostname }}
+                        {{
+                          onlinePurchaseProduct()
+                            ?.online_purchase_domain_hostname
+                        }}
                       </p>
                     }
-                    @if (onlinePurchaseProduct()?.online_purchase_generated_at) {
+                    @if (
+                      onlinePurchaseProduct()?.online_purchase_generated_at
+                    ) {
                       <p class="mt-1 text-xs text-gray-400">
                         Generado:
                         {{
@@ -690,8 +1083,7 @@
                     Este producto aún no tiene link ni QR de compra.
                   </p>
                   <p class="text-xs text-gray-500 mt-1">
-                    Se usará el dominio ecommerce principal activo de la
-                    tienda.
+                    Se usará el dominio ecommerce principal activo de la tienda.
                   </p>
                 </div>
               </div>
@@ -788,7 +1180,9 @@
                     label="Ancho (cm)"
                     type="number"
                     formControlName="width"
-                    [control]="$any(productForm.get('dimensions'))?.get('width')"
+                    [control]="
+                      $any(productForm.get('dimensions'))?.get('width')
+                    "
                     placeholder="0.00"
                     tooltipText="Ancho del producto empacado en centímetros."
                     customWrapperClass="!mt-0"
@@ -994,7 +1388,6 @@
             </app-textarea>
           </section>
         }
-
       </div>
 
       <!-- Right Column: Images & Stock (Desktop only) -->
@@ -1056,7 +1449,28 @@
                 <div class="absolute top-3 right-3 flex gap-2">
                   <button
                     type="button"
+                    (click)="openImageAiEnhancer(activeImageIndex)"
+                    aria-label="Mejorar imagen con IA"
+                    title="Mejorar con IA"
+                    class="ai-image-action-btn opacity-0 group-hover:opacity-100"
+                  >
+                    <app-icon name="sparkles" size="16"></app-icon>
+                    <span>IA</span>
+                  </button>
+                  <button
+                    type="button"
+                    (click)="openImageEditor(activeImageIndex)"
+                    aria-label="Ajustar y recortar imagen"
+                    title="Ajustar y recortar"
+                    class="p-2 bg-white/95 text-gray-700 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-sm hover:bg-white hover:text-primary-600 transform hover:scale-110"
+                  >
+                    <app-icon name="crop" size="16"></app-icon>
+                  </button>
+                  <button
+                    type="button"
                     (click)="removeImage(activeImageIndex)"
+                    aria-label="Eliminar imagen"
+                    title="Eliminar imagen"
                     class="p-2 bg-red-500/90 text-white rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-sm hover:bg-red-600 transform hover:scale-110"
                   >
                     <app-icon name="trash-2" size="16"></app-icon>
@@ -1547,12 +1961,16 @@
             </div>
 
             @if (!isEditMode() || !productId) {
-              <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+              <p
+                class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3"
+              >
                 Guarda el producto para asignar proveedores.
               </p>
             } @else {
               @if (loadingProviders()) {
-                <p class="text-sm text-gray-400 italic">Cargando proveedores...</p>
+                <p class="text-sm text-gray-400 italic">
+                  Cargando proveedores...
+                </p>
               }
 
               <app-multi-selector
@@ -1595,7 +2013,6 @@
             </button>
           </section>
         }
-
       </div>
     </div>
 
@@ -1699,7 +2116,9 @@
         </div>
 
         @if (!isEditMode() || !productId) {
-          <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+          <p
+            class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3"
+          >
             Guarda el producto para asignar proveedores.
           </p>
         } @else {
@@ -1816,11 +2235,7 @@
         class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
       >
         <div class="flex items-center gap-2 min-w-0">
-          <app-icon
-            name="layers"
-            size="18"
-            class="text-primary-600"
-          ></app-icon>
+          <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
           <h2 class="text-base font-bold text-gray-900 flex items-center gap-2">
             Variantes
             @if (generatedVariants.length > 0) {
@@ -2822,5 +3237,20 @@
   [isOpen]="isImageSourceModalOpen()"
   (isOpenChange)="isImageSourceModalOpen.set($event)"
   [remainingSlots]="remainingImageSlots()"
+  [mode]="imageModalMode()"
+  [sourceImageUrl]="imageEditSourceUrl()"
   (imagesAdded)="onImagesFromModal($event)"
+  (imageEdited)="onImageEdited($event)"
 ></app-product-image-source-modal>
+
+<app-product-image-ai-enhance-modal
+  [isOpen]="isImageAiEnhanceModalOpen()"
+  (isOpenChange)="isImageAiEnhanceModalOpen.set($event)"
+  [sourceImageUrl]="aiEnhanceImageUrl()"
+  [productName]="productForm.get('name')?.value || ''"
+  [productType]="isService ? 'service' : 'physical'"
+  [description]="productForm.get('description')?.value || ''"
+  [remainingSlots]="remainingImageSlots()"
+  (replace)="onAiImageReplace($event)"
+  (keep)="onAiImageKeepBoth($event)"
+></app-product-image-ai-enhance-modal>

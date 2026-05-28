@@ -5,6 +5,7 @@ export interface QuotationEmailData {
   items: {
     product_name: string;
     variant_sku?: string;
+    applied_price_tier_name_snapshot?: string | null;
     quantity: number;
     unit_price: number;
     total_price: number;
@@ -36,6 +37,7 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151;">
         ${item.product_name}
         ${item.variant_sku ? `<br><span style="font-size: 12px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
+        ${item.applied_price_tier_name_snapshot ? `<br><span style="font-size: 12px; color: #92400e;">Tarifa: ${item.applied_price_tier_name_snapshot}</span>` : ''}
       </td>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: center;">${item.quantity}</td>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(item.unit_price)}</td>

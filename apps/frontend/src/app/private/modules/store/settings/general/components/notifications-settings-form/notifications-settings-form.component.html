@@ -42,6 +42,63 @@
       </div>
     </div>
 
+    <!-- Sonido de notificaciones -->
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Sonido de notificaciones</h4>
+      <p class="text-xs text-gray-500 mb-3">Reproduce un sonido cuando llega una nueva notificación.</p>
+
+      <div class="space-y-4">
+        <app-setting-toggle
+          [formControl]="soundMutedControl"
+          label="Silenciar sonidos"
+          description="Desactiva la reproducción de cualquier sonido"
+          (changed)="onFieldChange()"
+        ></app-setting-toggle>
+
+        <div class="space-y-2" [class.opacity-50]="isSoundMuted">
+          <div class="flex gap-2 items-end">
+            <div class="flex-1">
+              <app-selector
+                label="Sonido seleccionado"
+                placeholder="— Sin sonido —"
+                size="md"
+                [options]="soundOptions()"
+                [formControl]="soundIdControl"
+                [disabled]="isSoundMuted"
+                (valueChange)="onFieldChange()"
+              ></app-selector>
+            </div>
+            <app-button
+              variant="primary"
+              size="md"
+              [disabled]="isSoundMuted || !soundIdControl.value"
+              (clicked)="playPreview()"
+              title="Escuchar previsualización"
+            >
+              <app-icon name="play" [size]="16" slot="icon"></app-icon>
+              Probar
+            </app-button>
+          </div>
+        </div>
+
+        <div class="space-y-2" [class.opacity-50]="isSoundMuted">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            Volumen: {{ soundVolumeControl.value }}%
+          </label>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            [formControl]="soundVolumeControl"
+            (input)="onFieldChange()"
+            [attr.disabled]="isSoundMuted ? '' : null"
+            class="w-full"
+          />
+        </div>
+      </div>
+    </div>
+
     <!-- Alert Subscriptions -->
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Alertas de Eventos</h4>

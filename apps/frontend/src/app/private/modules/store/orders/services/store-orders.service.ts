@@ -569,4 +569,18 @@ export class StoreOrdersService {
   invalidateCache(): void {
     storeOrdersStatsCache = null;
   }
+
+  getPaymentReceiptUrl(
+    orderId: string | number,
+    paymentId: number,
+  ): Observable<{ url: string; expires_at: string; content_type?: string }> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/payments/${paymentId}/receipt-url`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fetching payment receipt URL:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
 }

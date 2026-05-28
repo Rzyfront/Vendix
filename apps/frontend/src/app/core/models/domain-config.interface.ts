@@ -96,7 +96,25 @@ export interface EcommerceConfig {
   enabled: boolean;
   slider?: {
     enable: boolean;
-    photos: Array<{ url?: string; title?: string; caption?: string }>;
+    photos: Array<{
+      url?: string;
+      title?: string;
+      caption?: string;
+      action_type?: 'none' | 'internal_url' | 'external_url' | 'product' | 'category' | 'brand';
+      action_label?: string;
+      action_url?: string;
+      product_id?: number;
+      category_id?: number;
+      brand_id?: number;
+      open_in_new_tab?: boolean;
+    }>;
+  };
+  home_sections?: {
+    slider?: EcommerceHomeSectionConfig;
+    welcome?: EcommerceHomeSectionConfig;
+    categories?: EcommerceHomeSectionConfig;
+    brands?: EcommerceHomeSectionConfig;
+    featured_products?: EcommerceHomeSectionConfig;
   };
   inicio?: {
     titulo?: string;
@@ -136,6 +154,14 @@ export interface EcommerceConfig {
     calculate_tax_before_shipping: boolean;
     multiple_shipping_addresses: boolean;
   };
+}
+
+export interface EcommerceHomeSectionConfig {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  sort_order?: number;
 }
 
 // ============================================================================

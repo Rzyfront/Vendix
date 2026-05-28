@@ -132,6 +132,16 @@ export class PosOrderItemDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  // Multi-tarifa (Fase 5.5): id de la tarifa aplicada a esta línea. Si está
+  // presente, el backend valida server-side el permission
+  // `store:products:apply_pricing_tier` (super_admin / owner bypass) y
+  // persiste el snapshot (id + name + stock_units_consumed) en order_items.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  applied_price_tier_id?: number;
 }
 
 export class PosInstallmentTermsDto {

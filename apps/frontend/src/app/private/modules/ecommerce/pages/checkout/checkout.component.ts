@@ -58,6 +58,7 @@ import {
 } from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { AuthFacade } from '../../../../../core/store';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import {
   GuestCheckoutData,
   GuestCheckoutDataModalComponent,
@@ -216,6 +217,7 @@ export class CheckoutComponent implements OnInit {
   private toast = inject(ToastService);
   private wompiService = inject(WompiService);
   private auth_facade = inject(AuthFacade);
+  private tenant_facade = inject(TenantFacade);
   readonly guestDataModal = viewChild(GuestCheckoutDataModalComponent);
   private guest_data_decision_made = false;
   private guest_checkout_data: GuestCheckoutData | null = null;
@@ -242,7 +244,9 @@ export class CheckoutComponent implements OnInit {
 
     this.setupLocationData();
     this.loadData();
-    this.loadRecommendations();
+    if (this.relatedProductsEnabled()) {
+      this.loadRecommendations();
+    }
 
     this.checkout_service
       .getInvoicingEligibility()
@@ -441,6 +445,13 @@ export class CheckoutComponent implements OnInit {
           }
         },
       });
+  }
+
+  relatedProductsEnabled(): boolean {
+    return (
+      this.tenant_facade.getCurrentDomainConfig()?.customConfig?.ecommerce
+        ?.catalog?.show_related_products === true
+    );
   }
 
   selectAddress(address_id: number): void {

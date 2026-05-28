@@ -1,0 +1,144 @@
+<div class="w-full max-w-[1400px] mx-auto">
+  <!-- Sticky Header with Save/Cancel actions -->
+  <app-sticky-header
+    [title]="isEditMode() ? 'Editar Tarifa' : 'Nueva Tarifa'"
+    [subtitle]="
+      isEditMode()
+        ? 'Actualiza los detalles de esta tarifa'
+        : 'Crea una nueva tarifa de precios para tu tienda'
+    "
+    icon="tags"
+    variant="glass"
+    [showBackButton]="true"
+    [backRoute]="['/admin/price-tiers']"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <!-- Loading state while fetching tier in edit mode -->
+  @if (isLoading()) {
+    <div class="p-6 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-text-secondary">Cargando tarifa...</p>
+    </div>
+  }
+
+  @if (!isLoading()) {
+    <form
+      [formGroup]="form"
+      (ngSubmit)="save()"
+      class="px-2 md:px-4 pb-6"
+    >
+      <!--
+        Layout: 12-col grid on lg+ — "Información básica" (col-span-7) y
+        "Configuración de precio" (col-span-5) lado a lado; "Estado y
+        opciones" abajo full-width. En mobile/tablet apilado.
+      -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        <!-- Información básica -->
+        <app-card [padding]="true" class="lg:col-span-7">
+          <div class="space-y-1 mb-4">
+            <h3 class="text-base md:text-lg font-semibold text-text-primary">
+              Información básica
+            </h3>
+            <p class="text-sm text-text-secondary">
+              Nombre y código identificadores de la tarifa.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <app-input
+              label="Nombre *"
+              formControlName="name"
+              placeholder="Ej: Mayorista"
+              [required]="true"
+              [error]="getError('name')"
+            />
+            <app-input
+              label="Código"
+              formControlName="code"
+              placeholder="Ej: WHOLESALE"
+              [error]="getError('code')"
+            />
+          </div>
+
+          <div class="mt-3">
+            <app-textarea
+              label="Descripción"
+              formControlName="description"
+              [rows]="3"
+              placeholder="Describe brevemente cuándo aplicar esta tarifa..."
+              [control]="form.get('description')"
+            />
+          </div>
+        </app-card>
+
+        <!-- Configuración de precio -->
+        <app-card [padding]="true" class="lg:col-span-5">
+          <div class="space-y-1 mb-4">
+            <h3 class="text-base md:text-lg font-semibold text-text-primary">
+              Configuración de precio
+            </h3>
+            <p class="text-sm text-text-secondary">
+              Define cómo se calculará el precio para esta tarifa.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <app-input
+              label="Descuento (%)"
+              formControlName="discount_percentage"
+              type="number"
+              placeholder="0"
+              [error]="getError('discount_percentage')"
+            />
+            <app-input
+              label="Orden de visualización"
+              formControlName="sort_order"
+              type="number"
+              placeholder="0"
+              [error]="getError('sort_order')"
+            />
+          </div>
+
+          <p class="mt-3 text-xs text-text-secondary">
+            El descuento (0 a 100) se aplica sobre el precio base del producto
+            cuando no hay un precio específico definido para esta tarifa.
+          </p>
+        </app-card>
+
+        <!-- Estado y opciones (full-width) -->
+        <app-card [padding]="true" class="lg:col-span-12">
+          <div class="space-y-1 mb-4">
+            <h3 class="text-base md:text-lg font-semibold text-text-primary">
+              Estado y opciones
+            </h3>
+            <p class="text-sm text-text-secondary">
+              Controla la visibilidad y comportamiento de la tarifa.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <app-setting-toggle
+              formControlName="is_active"
+              label="Tarifa activa"
+              description="Desactiva para ocultar esta tarifa del POS y del carrito."
+            />
+            <app-setting-toggle
+              formControlName="is_default"
+              label="Tarifa por defecto"
+              description="Se selecciona automáticamente al crear ventas, órdenes y cotizaciones."
+            />
+            <app-setting-toggle
+              formControlName="is_package_unit"
+              label="Unidad de paquete"
+              description="Aplica para tarifas que venden por paquete o caja (consume múltiples unidades de stock)."
+            />
+          </div>
+        </app-card>
+      </div>
+    </form>
+  }
+</div>

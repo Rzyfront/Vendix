@@ -1,0 +1,50 @@
+meta {
+  name: Guest Checkout - Setup Cliente Registrado
+  type: http
+  seq: 22
+}
+
+post {
+  url: {{url}}/auth/register-customer
+  body: json
+  auth: none
+}
+
+docs {
+  Pre-step para `guest-checkout-registered-email.bru`.
+
+  Crea un cliente registrado con email fijo `registered@vendix-test.local`
+  vinculado a `store_id = 1`. Si el cliente ya existe (segunda ejecucion),
+  el endpoint suele devolver 409 / 400 — esto es aceptable, basta con que
+  exista la fila en `users` con state activo o pending_verification.
+
+  El test 3 lee el email pre-creado y verifica que el checkout guest con
+  ese email REUTILIZA al cliente registrado y SOBRESCRIBE los campos
+  no-vacios del modal.
+
+  NOTA: ajustar `store_id` si la store ecommerce por defecto en el entorno
+  local no es 1.
+}
+
+body:json {
+  {
+    "email": "registered@vendix-test.local",
+    "password": "Registered@123!",
+    "first_name": "Cliente",
+    "last_name": "Registrado",
+    "phone": "3009998877",
+    "store_id": 1
+  }
+}
+
+script:post-response {
+  // Persistimos el email para que el siguiente test pueda referenciarlo
+  // independientemente del status (idempotente: si ya existe seguimos).
+  bru.setVar("registered_customer_email", "registered@vendix-test.local");
+}
+
+tests {
+  test("Cliente registrado existe (201 nuevo o 409 ya existia)", function() {
+    expect([201, 200, 409, 400]).to.include(res.status);
+  });
+}

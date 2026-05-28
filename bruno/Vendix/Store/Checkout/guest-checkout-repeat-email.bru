@@ -1,0 +1,83 @@
+meta {
+  name: Guest Checkout - Email Repetido (Reusa Cliente)
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: none
+}
+
+docs {
+  Escenario 2 - Mismo email del test 1 (guest-checkout-new-email) en la
+  misma store debe REUSAR el `users.id` existente. NO debe crearse una
+  segunda fila en `users` ni duplicar `store_users`. La nueva orden debe
+  apuntar al MISMO `customer_id` que la anterior. Ademas, los campos
+  no-vacios del modal (en este caso `first_name = "Nombre Actualizado"`)
+  deben SOBRESCRIBIR los del `users` existente.
+
+  Pre-condicion: ejecutar primero `guest-checkout-new-email.bru` para que
+  la variable `new_guest_email` quede seteada en el runner.
+
+  Verificacion SQL manual (CRITICA - el endpoint
+  `GET /store/customers?search=...` requiere admin token y store context,
+  por lo que se documenta como manual aqui para evitar acoplar tokens):
+
+    -- Conteo de usuarios con ese email en la misma store: debe ser 1.
+    SELECT COUNT(*) AS user_count
+      FROM users u
+      JOIN store_users su ON su.user_id = u.id
+      WHERE u.email = '<valor de new_guest_email>'
+        AND su.store_id = <store_id resuelto por hostname>;
+
+    -- El first_name debe haberse actualizado a "Nombre Actualizado":
+    SELECT first_name FROM users WHERE email = '<valor de new_guest_email>';
+}
+
+body:json {
+  {
+    "payment_method_id": {{bank_transfer_payment_method_id}},
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "quantity": 1
+      }
+    ],
+    "guest_customer": {
+      "email": "{{new_guest_email}}",
+      "first_name": "Nombre Actualizado",
+      "last_name": "Apellido Actualizado",
+      "phone": "3007654321"
+    }
+  }
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.data) {
+    bru.setVar("repeat_order_id", res.body.data.order_id);
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+  res.body.data.order_id: isDefined
+}
+
+tests {
+  test("Status 201 - segunda orden guest creada", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Nueva orden tiene order_id distinto al test anterior", function() {
+    const previousOrderId = bru.getVar("new_order_id");
+    expect(res.body.data.order_id).to.not.equal(previousOrderId);
+  });
+
+  test("Pre-requisito: new_guest_email definido", function() {
+    expect(bru.getVar("new_guest_email")).to.be.a("string");
+    expect(bru.getVar("new_guest_email").length).to.be.greaterThan(0);
+  });
+}

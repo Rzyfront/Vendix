@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   priority: critical
   auto_invoke:
@@ -73,6 +73,7 @@ Some checks are warnings, not hard failures. Follow the script’s logic rather 
 - plain UI booleans/strings used in templates in zoneless components
 - `toSignal()` in facades without `initialValue` when synchronous consumers exist
 - outputs emitted only from imperative methods while the real source of truth is a `model()` signal
+- **ReactiveForms `form.invalid` / `form.value` / `form.status` read inside `computed()` or `effect()`** — these are plain properties, not signals. The computed evaluates once with the initial state and never recomputes when validity changes. Symptom: a "Guardar" button bound to `disabled: this.form.invalid` inside `computed()` stays permanently disabled (initial state = invalid because of `Validators.required`) even after the user fills the form. **Fix**: bridge form state with `toSignal(form.statusChanges.pipe(startWith(form.status)), { initialValue: form.status })`, then read the signal inside the computed. Same pattern for `form.valueChanges` if you need value reactivity.
 
 ## Template Rules
 

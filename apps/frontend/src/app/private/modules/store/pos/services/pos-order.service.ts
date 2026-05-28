@@ -1031,6 +1031,11 @@ export class PosOrderService {
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,
+      // Multi-tarifa (Phase 5) — backend uses this to snapshot tier on the
+      // resulting order_items row. Null/undefined means "default cascade".
+      applied_price_tier_id: isCustomItem
+        ? undefined
+        : item.applied_price_tier_id ?? undefined,
     };
   }
 

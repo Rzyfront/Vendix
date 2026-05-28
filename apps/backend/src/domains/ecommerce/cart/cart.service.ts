@@ -48,6 +48,10 @@ export class CartService {
       include: this.cartInclude,
     });
 
+    if (cart) {
+      cart = await this.clearCartIfExpired(cart);
+    }
+
     if (!cart) {
       const currency = await this.settingsService.getStoreCurrency();
       cart = await this.prisma.carts.create({
@@ -63,6 +67,8 @@ export class CartService {
   }
 
   async addItem(dto: AddToCartDto) {
+    await this.validateMaxQuantity(dto.quantity);
+
     // Verificar que el producto existe y está disponible
     // store_id se aplica automáticamente
     const product = await this.prisma.products.findFirst({
@@ -125,6 +131,8 @@ export class CartService {
       cart = await this.prisma.carts.create({
         data: { currency },
       });
+    } else {
+      cart = await this.clearCartIfExpired(cart);
     }
 
     const existing_item = dto.product_variant_id
@@ -147,6 +155,7 @@ export class CartService {
 
     if (existing_item) {
       const new_quantity = existing_item.quantity + dto.quantity;
+      await this.validateMaxQuantity(new_quantity);
       await this.validateStock(product, variant, new_quantity);
 
       await this.prisma.cart_items.update({
@@ -173,6 +182,8 @@ export class CartService {
     if (dto.quantity === 0) {
       return this.removeItem(item_id);
     }
+
+    await this.validateMaxQuantity(dto.quantity);
 
     const cart = await this.prisma.carts.findFirst({});
 
@@ -273,6 +284,51 @@ export class CartService {
       where: { id: cart_id },
       data: { subtotal, updated_at: new Date() },
     });
+  }
+
+  private async clearCartIfExpired(cart: any) {
+    const settings = await this.getEcommerceCartSettings();
+    const expirationHours = Number(settings.cart_expiration_hours || 0);
+
+    if (expirationHours <= 0 || !cart.updated_at) return cart;
+
+    const expiresAt =
+      new Date(cart.updated_at).getTime() + expirationHours * 60 * 60 * 1000;
+
+    if (Date.now() <= expiresAt) return cart;
+
+    await this.prisma.cart_items.deleteMany({
+      where: { cart_id: cart.id },
+    });
+
+    return this.prisma.carts.update({
+      where: { id: cart.id },
+      data: { subtotal: 0, updated_at: new Date() },
+      include: this.cartInclude,
+    });
+  }
+
+  private async validateMaxQuantity(quantity: number): Promise<void> {
+    const settings = await this.getEcommerceCartSettings();
+    const maxQuantity = Number(settings.max_quantity_per_item || 0);
+
+    if (maxQuantity > 0 && quantity > maxQuantity) {
+      throw new BadRequestException(
+        `La cantidad máxima por producto es ${maxQuantity}`,
+      );
+    }
+  }
+
+  private async getEcommerceCartSettings(): Promise<{
+    cart_expiration_hours?: number;
+    max_quantity_per_item?: number;
+  }> {
+    try {
+      const settings = await this.settingsService.getSettings();
+      return settings.ecommerce?.cart ?? {};
+    } catch {
+      return {};
+    }
   }
 
   private async mapCartToResponse(cart: any) {

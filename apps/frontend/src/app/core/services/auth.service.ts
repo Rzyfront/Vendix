@@ -442,6 +442,21 @@ export class AuthService {
     return this.http.put(`${this.API_URL}/settings`, data);
   }
 
+  /**
+   * Marca una key de panel_ui como "vista" para remover el badge "Nuevo"
+   * del sidebar. Idempotente — el backend acepta el mismo key múltiples veces.
+   *
+   * @param key Module key (ej: 'settings_price_tiers')
+   * @param app_type Tipo de app (ej: 'STORE_ADMIN', 'ORG_ADMIN')
+   * @returns Response con `data.config` actualizado (incluye new_keys recalculado)
+   */
+  markPanelUiSeen(key: string, app_type: string): Observable<any> {
+    return this.http.post(`${this.API_URL}/panel-ui/mark-seen`, {
+      key,
+      app_type,
+    });
+  }
+
   changePassword(
     current_password: string,
     new_password: string,

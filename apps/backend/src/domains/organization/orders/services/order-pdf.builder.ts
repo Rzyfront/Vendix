@@ -22,6 +22,8 @@ export interface OrderPdfItem {
   quantity: number;
   unit_price: number;
   total_price: number;
+  applied_price_tier_name?: string | null;
+  stock_units_consumed?: number | null;
 }
 
 const MARGIN = 50;
@@ -136,7 +138,40 @@ export class OrderPdfBuilder {
             width: 70,
             align: 'right',
           });
-          y += 18;
+          y += 14;
+
+          // Tier + package metadata lines (snapshot, audit trail).
+          const hasTier = !!item.applied_price_tier_name;
+          const hasPackage =
+            typeof item.stock_units_consumed === 'number' &&
+            item.stock_units_consumed > 0 &&
+            item.stock_units_consumed !== item.quantity;
+
+          if (hasTier || hasPackage) {
+            doc.fontSize(8).fillColor('#666666');
+            if (hasTier) {
+              doc.text(`Tarifa: ${item.applied_price_tier_name}`, col1X + 8, y, {
+                width: 280,
+              });
+              y += 11;
+            }
+            if (hasPackage) {
+              const perUnit =
+                Math.round(
+                  ((item.stock_units_consumed as number) / item.quantity) * 100,
+                ) / 100;
+              doc.text(
+                `× ${perUnit} unid/empaque (descontó ${item.stock_units_consumed} unid. de stock)`,
+                col1X + 8,
+                y,
+                { width: 280 },
+              );
+              y += 11;
+            }
+            doc.fontSize(9).fillColor('black');
+          }
+
+          y += 4;
         }
 
         y += 10;

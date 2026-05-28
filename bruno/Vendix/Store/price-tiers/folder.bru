@@ -1,0 +1,30 @@
+meta {
+  name: Price Tiers
+  seq: 99
+}
+
+docs {
+  # Multi-Tarifa (Price Tiers)
+
+  Smoke tests for the multi-tarifa feature:
+
+  - CRUD on `store/price-tiers`
+  - Product overrides (`store/price-tiers/products/:productId/overrides/:tierId`)
+  - Snapshot persistence on `store/orders`, `store/quotations` when
+    `applied_price_tier_id` is sent per line item.
+  - Permission denial test (`store:products:apply_pricing_tier`).
+
+  Run as a folder collection in order — later requests depend on IDs
+  captured by earlier `post_response` scripts (`priceTierId`,
+  `priceTierOrderId`, etc.).
+
+  ## Prerequisites
+
+  - Authenticated as a user with `store:price-tiers:*` permissions
+    (owner/store admin). The collection-level `{{token}}` is used.
+  - Variables expected (override per-environment if needed):
+    - `{{url}}` — e.g. `localhost:3000/api`
+    - `{{ecommerce_product_id}}` — an existing product id
+    - `{{testCustomerId}}` (optional) — defaults to 1 in payloads
+    - `{{storeAdminToken}}` — used by request 13 for permission-denial test
+}

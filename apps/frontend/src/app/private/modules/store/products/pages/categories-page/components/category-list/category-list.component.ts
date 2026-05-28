@@ -97,6 +97,14 @@ export class CategoryListComponent {
   });
 
   tableColumns: TableColumn[] = [
+    {
+      key: 'image_url',
+      label: 'Foto',
+      type: 'image',
+      width: '80px',
+      priority: 3,
+      defaultValue: '',
+    },
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
     { key: 'slug', label: 'Slug', sortable: true, priority: 3 },
     {
@@ -155,6 +163,7 @@ export class CategoryListComponent {
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'slug',
+    avatarKey: 'image_url',
     avatarFallbackIcon: 'layers',
     avatarShape: 'square',
     badgeKey: 'state',

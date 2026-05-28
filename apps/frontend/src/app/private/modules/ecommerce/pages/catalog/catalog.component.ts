@@ -1,4 +1,12 @@
-import { Component, ChangeDetectionStrategy, OnInit, DestroyRef, inject, signal } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  OnInit,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -16,14 +24,41 @@ import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
 import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
+import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import {
+  MultiSelectorComponent,
+  MultiSelectorOption,
+} from '../../../../../shared/components/multi-selector/multi-selector.component';
 import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+
+interface CatalogSettings {
+  products_per_page: number;
+  show_out_of_stock: boolean;
+  show_variants: boolean;
+  show_related_products: boolean;
+  enable_filters: boolean;
+}
+
+type CatalogSortBy = 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
+
+const DEFAULT_CATALOG_SETTINGS: CatalogSettings = {
+  products_per_page: 12,
+  show_out_of_stock: false,
+  show_variants: true,
+  show_related_products: false,
+  enable_filters: false,
+};
 
 @Component({
   selector: 'app-catalog-page',
@@ -37,7 +72,9 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     ButtonComponent,
     InputComponent,
     IconComponent,
+    MultiSelectorComponent,
     PaginationComponent,
+    SelectorComponent,
   ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
@@ -50,17 +87,77 @@ export class CatalogComponent implements OnInit {
 
   // Filters
   readonly search_term = signal('');
-  readonly selected_category_id = signal<number | null>(null);
-  readonly selected_brand_id = signal<number | null>(null);
+  readonly selected_category_ids = signal<number[]>([]);
+  readonly selected_brand_ids = signal<number[]>([]);
   readonly min_price = signal<number | null>(null);
   readonly max_price = signal<number | null>(null);
-  readonly sort_by = signal<'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest'>('newest');
+  readonly sort_by = signal<CatalogSortBy>('newest');
 
   // Pagination
   readonly current_page = signal(1);
   readonly total_pages = signal(1);
   readonly total_products = signal(0);
   readonly limit = signal(12);
+  readonly catalog_settings = signal<CatalogSettings>(DEFAULT_CATALOG_SETTINGS);
+  readonly shipping_badge_enabled = signal(false);
+  readonly filters_enabled = computed(
+    () => this.catalog_settings().enable_filters === true,
+  );
+  readonly show_variants = computed(
+    () => this.catalog_settings().show_variants !== false,
+  );
+  readonly sortOptions: SelectorOption[] = [
+    { value: 'newest', label: 'Más recientes' },
+    { value: 'oldest', label: 'Menos recientes' },
+    { value: 'name', label: 'Nombre A-Z' },
+    { value: 'price_asc', label: 'Precio: menor a mayor' },
+    { value: 'price_desc', label: 'Precio: mayor a menor' },
+  ];
+  readonly category_options = computed<MultiSelectorOption[]>(() =>
+    this.categories().map((category) => ({
+      value: category.id,
+      label: category.name,
+    })),
+  );
+  readonly brand_options = computed<MultiSelectorOption[]>(() =>
+    this.brands().map((brand) => ({
+      value: brand.id,
+      label: brand.name,
+    })),
+  );
+  readonly selected_category_labels = computed(() =>
+    this.getSelectedLabels(
+      this.category_options(),
+      this.selected_category_ids(),
+    ),
+  );
+  readonly selected_brand_labels = computed(() =>
+    this.getSelectedLabels(this.brand_options(), this.selected_brand_ids()),
+  );
+  readonly price_filter_label = computed(() => {
+    const minPrice = this.min_price();
+    const maxPrice = this.max_price();
+
+    if (minPrice !== null && maxPrice !== null) {
+      return `$${minPrice} - $${maxPrice}`;
+    }
+    if (minPrice !== null) {
+      return `Desde $${minPrice}`;
+    }
+    if (maxPrice !== null) {
+      return `Hasta $${maxPrice}`;
+    }
+    return '';
+  });
+  readonly active_filters_count = computed(() => {
+    let count =
+      this.selected_category_ids().length + this.selected_brand_ids().length;
+    if (this.min_price() !== null || this.max_price() !== null) {
+      count += 1;
+    }
+    return count;
+  });
+  readonly has_active_filters = computed(() => this.active_filters_count() > 0);
 
   readonly is_loading = signal(false);
   readonly show_filters = signal(false);
@@ -86,19 +183,29 @@ export class CatalogComponent implements OnInit {
     private wishlist_service: WishlistService,
     private store_ui_service: StoreUiService,
     private auth_facade: AuthFacade,
+    private tenant_facade: TenantFacade,
     private toast_service: ToastService,
     private route: ActivatedRoute,
     private router: Router,
   ) {}
 
   ngOnInit(): void {
+    this.applyCatalogSettings(
+      this.tenant_facade.getCurrentDomainConfig()?.customConfig?.ecommerce,
+    );
+    this.loadPublicCatalogSettings();
+
     // Load categories and brands
     this.loadCategories();
     this.loadBrands();
 
     // Handle search debounce
     this.search_subject
-      .pipe(debounceTime(400), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        debounceTime(400),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => {
         this.current_page.set(1);
         this.loadProducts();
@@ -121,12 +228,20 @@ export class CatalogComponent implements OnInit {
         // Siempre actualizar search_term (vacío si no existe)
         this.search_term.set(params['search'] || '');
 
-        if (params['category']) {
-          this.selected_category_id.set(+params['category']);
-        }
-        if (params['brand']) {
-          this.selected_brand_id.set(+params['brand']);
-        }
+        const categoryParam =
+          params['category_ids'] ||
+          params['categories'] ||
+          params['category'] ||
+          params['category_id'];
+        const brandParam =
+          params['brand_ids'] ||
+          params['brands'] ||
+          params['brand'] ||
+          params['brand_id'];
+        this.selected_category_ids.set(this.parseIdsParam(categoryParam));
+        this.selected_brand_ids.set(this.parseIdsParam(brandParam));
+        this.min_price.set(this.parsePriceParam(params['min_price']));
+        this.max_price.set(this.parsePriceParam(params['max_price']));
         this.loadProducts();
       });
 
@@ -167,82 +282,147 @@ export class CatalogComponent implements OnInit {
     };
 
     if (this.search_term()) query.search = this.search_term();
-    if (this.selected_category_id())
-      query.category_id = this.selected_category_id()!;
-    if (this.selected_brand_id()) query.brand_id = this.selected_brand_id()!;
-    if (this.min_price()) query.min_price = this.min_price()!;
-    if (this.max_price()) query.max_price = this.max_price()!;
+    if (this.selected_category_ids().length > 0)
+      query.category_ids = this.selected_category_ids().join(',');
+    if (this.selected_brand_ids().length > 0)
+      query.brand_ids = this.selected_brand_ids().join(',');
+    if (this.min_price() !== null) query.min_price = this.min_price()!;
+    if (this.max_price() !== null) query.max_price = this.max_price()!;
 
     // Merge with default filters from route data
     if (defaults.has_discount) query.has_discount = true;
     if (defaults.created_after) query.created_after = defaults.created_after;
 
-    this.catalog_service.getProducts(query).subscribe({
-      next: (response) => {
-        this.products.set(response.data);
-        this.total_products.set(response.meta.total);
-        this.total_pages.set(response.meta.total_pages);
-        this.current_page.set(response.meta.page);
-        this.is_loading.set(false);
-      },
-      error: () => {
-        this.is_loading.set(false);
-      },
+    this.catalog_service
+      .getProducts(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.products.set(response.data);
+          this.total_products.set(response.meta.total);
+          this.total_pages.set(response.meta.total_pages);
+          this.current_page.set(response.meta.page);
+          this.is_loading.set(false);
+        },
+        error: () => {
+          this.is_loading.set(false);
+        },
+      });
+  }
+
+  private loadPublicCatalogSettings(): void {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.applyCatalogSettings(response.data?.ecommerce);
+          this.loadProducts();
+        },
+      });
+  }
+
+  private applyCatalogSettings(ecommerce: any): void {
+    const catalog = {
+      ...DEFAULT_CATALOG_SETTINGS,
+      ...(ecommerce?.catalog || {}),
+    };
+    const productsPerPage = Number(catalog.products_per_page || 12);
+
+    this.catalog_settings.set({
+      products_per_page: productsPerPage,
+      show_out_of_stock: catalog.show_out_of_stock === true,
+      show_variants: catalog.show_variants !== false,
+      show_related_products: catalog.show_related_products === true,
+      enable_filters: catalog.enable_filters === true,
     });
+    this.shipping_badge_enabled.set(this.hasConfiguredShipping(ecommerce));
+    this.limit.set(productsPerPage);
+
+    if (catalog.enable_filters !== true) {
+      this.show_filters.set(false);
+    }
+  }
+
+  private hasConfiguredShipping(ecommerce: any): boolean {
+    const shipping = ecommerce?.shipping || {};
+    return (
+      shipping.has_configured_shipping === true ||
+      shipping.enabled === true ||
+      shipping.shipping_enabled === true
+    );
   }
 
   loadCategories(): void {
-    this.catalog_service.getCategories().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.categories.set(response.data);
-        }
-      },
-    });
+    this.catalog_service
+      .getCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.categories.set(response.data);
+          }
+        },
+      });
   }
 
   loadBrands(): void {
-    this.catalog_service.getBrands().subscribe({
-      next: (response) => {
-        if (response.success) {
-          this.brands.set(response.data);
-        }
-      },
-    });
+    this.catalog_service
+      .getBrands()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success) {
+            this.brands.set(response.data);
+          }
+        },
+      });
   }
 
   onSearchChange(): void {
     this.search_subject.next(this.search_term());
   }
 
-  onCategorySelect(category_id: number | null): void {
-    this.selected_category_id.set(category_id);
+  onCategoriesChange(category_ids: (string | number)[]): void {
+    this.selected_category_ids.set(this.toNumberArray(category_ids));
     this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
 
-  onBrandSelect(brand_id: number | null): void {
-    this.selected_brand_id.set(brand_id);
+  onBrandsChange(brand_ids: (string | number)[]): void {
+    this.selected_brand_ids.set(this.toNumberArray(brand_ids));
     this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
 
-  onSortChange(): void {
+  onSortChange(value?: string | number | null): void {
+    if (typeof value === 'string') {
+      this.sort_by.set(value as CatalogSortBy);
+    }
     this.current_page.set(1);
     this.loadProducts();
+  }
+
+  onMinPriceChange(value: string | number | null): void {
+    this.min_price.set(this.normalizePriceValue(value));
+  }
+
+  onMaxPriceChange(value: string | number | null): void {
+    this.max_price.set(this.normalizePriceValue(value));
   }
 
   applyPriceFilter(): void {
     this.current_page.set(1);
+    this.updateUrl();
     this.loadProducts();
   }
 
   clearFilters(): void {
     this.search_term.set('');
-    this.selected_category_id.set(null);
-    this.selected_brand_id.set(null);
+    this.selected_category_ids.set([]);
+    this.selected_brand_ids.set([]);
     this.min_price.set(null);
     this.max_price.set(null);
     this.sort_by.set('newest');
@@ -271,7 +451,7 @@ export class CatalogComponent implements OnInit {
     }
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
-      this.router.navigate(['/catalog', product.slug]);
+      this.router.navigate(['/products', product.slug]);
       return;
     }
     const result = this.cart_service.addToCart(product.id, 1);
@@ -326,16 +506,72 @@ export class CatalogComponent implements OnInit {
   }
 
   private updateUrl(): void {
-    const queryParams: any = {};
-    if (this.selected_category_id())
-      queryParams.category = this.selected_category_id();
-    if (this.selected_brand_id()) queryParams.brand = this.selected_brand_id();
-    if (this.search_term()) queryParams.search = this.search_term();
+    const queryParams: Record<string, string | number | null> = {
+      category: null,
+      category_id: null,
+      category_ids: null,
+      categories: null,
+      brand: null,
+      brand_id: null,
+      brand_ids: null,
+      brands: null,
+      min_price: null,
+      max_price: null,
+      search: null,
+    };
+    if (this.selected_category_ids().length > 0)
+      queryParams['category_ids'] = this.selected_category_ids().join(',');
+    if (this.selected_brand_ids().length > 0)
+      queryParams['brand_ids'] = this.selected_brand_ids().join(',');
+    if (this.min_price() !== null) queryParams['min_price'] = this.min_price();
+    if (this.max_price() !== null) queryParams['max_price'] = this.max_price();
+    if (this.search_term()) queryParams['search'] = this.search_term();
 
     this.router.navigate([], {
       relativeTo: this.route,
       queryParams,
       queryParamsHandling: 'merge',
+    });
+  }
+
+  private parseIdsParam(value: unknown): number[] {
+    if (!value) return [];
+
+    const rawValue = Array.isArray(value) ? value.join(',') : String(value);
+    return this.toNumberArray(rawValue.split(','));
+  }
+
+  private parsePriceParam(value: unknown): number | null {
+    if (value === null || value === undefined || value === '') return null;
+    return this.normalizePriceValue(String(value));
+  }
+
+  private normalizePriceValue(value: string | number | null): number | null {
+    if (value === null || value === undefined || value === '') return null;
+
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue < 0) return null;
+
+    return numericValue;
+  }
+
+  private toNumberArray(values: (string | number)[]): number[] {
+    return [
+      ...new Set(
+        values
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0),
+      ),
+    ];
+  }
+
+  private getSelectedLabels(
+    options: MultiSelectorOption[],
+    selectedIds: number[],
+  ): string[] {
+    return selectedIds.map((id) => {
+      const option = options.find((item) => Number(item.value) === id);
+      return option?.label || String(id);
     });
   }
 }

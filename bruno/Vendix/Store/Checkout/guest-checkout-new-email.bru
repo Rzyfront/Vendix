@@ -1,0 +1,99 @@
+meta {
+  name: Guest Checkout - Nuevo Email (Crea Cliente)
+  type: http
+  seq: 20
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: none
+}
+
+docs {
+  Escenario 1 - Email nunca visto antes en la store debe crear un nuevo
+  registro en `users` (rol customer, state=pending_verification, password
+  inalcanzable) y devolver una orden con `customer_id` no null.
+
+  Pre-condicion: env local con `ecommerce_product_id` y
+  `bank_transfer_payment_method_id` apuntando a entidades validas y
+  habilitadas para la store ecommerce por defecto (la resuelta por
+  hostname `localhost` o el host configurado del request).
+
+  Variables que setea para el siguiente test:
+    - new_guest_email
+    - new_order_id
+    - new_order_token
+
+  Verificacion SQL manual:
+    SELECT id, email, state, email_verified
+      FROM users
+      WHERE email = '<valor de new_guest_email>';
+    -- Debe devolver exactamente 1 fila, state=pending_verification.
+}
+
+body:json {
+  {
+    "payment_method_id": {{bank_transfer_payment_method_id}},
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "quantity": 1
+      }
+    ],
+    "guest_customer": {
+      "email": "guest-test-{{$timestamp}}@vendix-test.local",
+      "first_name": "Invitado",
+      "last_name": "Nuevo",
+      "phone": "3001234567"
+    }
+  }
+}
+
+script:pre-request {
+  // Generamos el email aqui para poder reusarlo (Bruno evalua {{$timestamp}}
+  // en cada interpolacion; capturarlo en una var evita drift entre body y
+  // assertions/follow-up).
+  const ts = Date.now();
+  const generatedEmail = `guest-test-${ts}@vendix-test.local`;
+  bru.setVar("new_guest_email", generatedEmail);
+  // Reinyectamos el email generado en el body para mantener consistencia
+  // con la variable capturada.
+  const body = req.getBody();
+  if (body && body.guest_customer) {
+    body.guest_customer.email = generatedEmail;
+    req.setBody(body);
+  }
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.data) {
+    bru.setVar("new_order_id", res.body.data.order_id);
+    bru.setVar("new_order_token", res.body.data.public_order_token || "");
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+  res.body.data.order_id: isDefined
+}
+
+tests {
+  test("Status 201 - orden guest creada", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response incluye order_id no nulo", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("order_id");
+    expect(res.body.data.order_id).to.not.be.null;
+    expect(res.body.data.order_id).to.not.be.undefined;
+  });
+
+  test("Response incluye public_order_token", function() {
+    expect(res.body.data).to.have.property("public_order_token");
+    expect(res.body.data.public_order_token).to.not.be.null;
+    expect(res.body.data.public_order_token).to.not.be.undefined;
+  });
+}

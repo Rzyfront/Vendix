@@ -15,6 +15,14 @@ import {
   TextareaComponent,
   IconComponent,
 } from '../../../../../../shared/components';
+import {
+  PriceTier,
+  ProductPriceTierOverride,
+  PriceTierCacheService,
+  PriceTierSelectorComponent,
+} from '../../../price-tiers';
+import { PriceResolverService } from '../../../../../../shared/services/pricing';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 @Component({
   selector: 'app-quotation-form-modal',
@@ -28,6 +36,7 @@ import {
     TextareaComponent,
     IconComponent,
     CurrencyPipe,
+    PriceTierSelectorComponent,
   ],
   template: `
     <app-modal
@@ -201,7 +210,7 @@ import {
                     class="flex items-center gap-2 rounded-md border p-2"
                     style="border-color: var(--color-border);"
                   >
-                    <div class="flex min-w-0 flex-1 flex-col">
+                    <div class="flex min-w-0 flex-1 flex-col gap-1">
                       <span class="truncate text-sm font-medium" style="color: var(--color-text-primary);">
                         {{ itemGroup.get('product_name')?.value }}
                       </span>
@@ -213,6 +222,22 @@ import {
                       @if (itemGroup.get('tax_rate')?.value > 0) {
                         <span class="text-xs" style="color: var(--color-text-secondary);">
                           IVA: {{ (itemGroup.get('tax_rate')?.value * 100) | number:'1.0-0' }}%
+                        </span>
+                      }
+                      @if (canShowTierSelector(asFormGroup(itemGroup))) {
+                        <div class="mt-0.5">
+                          <app-price-tier-selector
+                            [tiers]="visibleTiersForItem(asFormGroup(itemGroup))"
+                            [selectedTierId]="getItemTierId(asFormGroup(itemGroup))"
+                            [unitsPerPackage]="getItemUnitsPerPackage(asFormGroup(itemGroup))"
+                            (selectedTierIdChange)="onTierChange(i, $event)"
+                          ></app-price-tier-selector>
+                        </div>
+                      } @else if (itemGroup.get('applied_price_tier_name')?.value) {
+                        <span
+                          class="inline-flex items-center px-1 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800 w-fit"
+                        >
+                          {{ itemGroup.get('applied_price_tier_name')?.value }}
                         </span>
                       }
                     </div>
@@ -329,7 +354,23 @@ export class QuotationFormModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly http = inject(HttpClient);
   private readonly posProductService = inject(PosProductService);
+  private readonly priceTierCache = inject(PriceTierCacheService);
+  private readonly priceResolver = inject(PriceResolverService);
+  private readonly authFacade = inject(AuthFacade);
   private readonly apiUrl = environment.apiUrl;
+
+  /** Active tiers loaded once when the modal opens (if user has permission). */
+  readonly availableTiers = signal<PriceTier[]>([]);
+  /** Per-product overrides cache (product_id → rows). */
+  readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
+  /** Snapshot of the product per item, used by the resolver when recomputing. */
+  private readonly itemProductCache = new Map<number, Product>();
+
+  readonly canApplyPricingTier = computed(() =>
+    this.authFacade.userPermissions().includes('store:products:apply_pricing_tier') ||
+    this.authFacade.userRoles().includes('super_admin') ||
+    this.authFacade.userRoles().includes('SUPER_ADMIN'),
+  );
 
   /** Reactive form */
   readonly form: FormGroup = this.fb.group({
@@ -372,6 +413,18 @@ export class QuotationFormModalComponent {
   }
 
   constructor() {
+    // Load active tiers once. Permission gate keeps the request out for users
+    // who would never see the selector anyway.
+    if (this.canApplyPricingTier()) {
+      this.priceTierCache
+        .getActiveTiers()
+        .pipe(takeUntilDestroyed())
+        .subscribe({
+          next: (tiers) => this.availableTiers.set(tiers || []),
+          error: () => this.availableTiers.set([]),
+        });
+    }
+
     // Customer search with debounce
     this.customerSearch$
       .pipe(
@@ -422,6 +475,7 @@ export class QuotationFormModalComponent {
       });
 
       q.quotation_items.forEach((item) => {
+        const anyItem = item as any;
         this.itemsArray.push(this.createItemGroup({
           product_id: item.product_id || undefined,
           product_variant_id: item.product_variant_id || undefined,
@@ -433,6 +487,12 @@ export class QuotationFormModalComponent {
           tax_rate: item.tax_rate ? Number(item.tax_rate) : 0,
           tax_amount_item: item.tax_amount_item ? Number(item.tax_amount_item) : 0,
           total_price: Number(item.total_price),
+          applied_price_tier_id: anyItem.applied_price_tier_id ?? null,
+          applied_price_tier_name: anyItem.applied_price_tier_name_snapshot ?? null,
+          has_multiple_price_tiers: anyItem.product?.has_multiple_price_tiers === true,
+          enabled_price_tier_ids: anyItem.product?.enabled_price_tier_ids ?? [],
+          units_per_package: anyItem.product?.units_per_package ?? null,
+          base_price: Number(anyItem.product?.base_price ?? item.unit_price),
         }));
       });
       this.recalculateGrandTotal();
@@ -482,8 +542,17 @@ export class QuotationFormModalComponent {
     const taxAmountItem = basePrice * taxRate;
     const totalPrice = basePrice;
 
+    const productId = Number(product.id);
+    if (Number.isFinite(productId)) {
+      this.itemProductCache.set(productId, product);
+      // Pre-fetch overrides only if the product actually supports multi-tarifa.
+      if (product.has_multiple_price_tiers === true && this.canApplyPricingTier()) {
+        this.ensureProductOverridesLoaded(productId);
+      }
+    }
+
     this.itemsArray.push(this.createItemGroup({
-      product_id: Number(product.id),
+      product_id: productId,
       product_variant_id: variant?.id,
       product_name: product.name,
       variant_sku: variant?.sku || product.sku,
@@ -492,6 +561,10 @@ export class QuotationFormModalComponent {
       tax_rate: taxRate,
       tax_amount_item: taxAmountItem,
       total_price: totalPrice,
+      has_multiple_price_tiers: product.has_multiple_price_tiers === true,
+      enabled_price_tier_ids: product.enabled_price_tier_ids ?? [],
+      units_per_package: product.units_per_package ?? null,
+      base_price: Number(product.price ?? basePrice),
     }));
 
     this.pendingVariantProduct.set(null);
@@ -588,6 +661,11 @@ export class QuotationFormModalComponent {
         tax_rate: item.tax_rate || 0,
         tax_amount_item: item.tax_amount_item || 0,
         total_price: item.total_price,
+        // Multi-tarifa: send tier id only when set (backend validates permission).
+        applied_price_tier_id:
+          item.applied_price_tier_id != null
+            ? Number(item.applied_price_tier_id)
+            : undefined,
       })),
     };
 
@@ -614,6 +692,12 @@ export class QuotationFormModalComponent {
     tax_rate?: number;
     tax_amount_item?: number;
     total_price: number;
+    applied_price_tier_id?: number | null;
+    applied_price_tier_name?: string | null;
+    has_multiple_price_tiers?: boolean;
+    enabled_price_tier_ids?: number[];
+    units_per_package?: number | null;
+    base_price?: number;
   }): FormGroup {
     return this.fb.group({
       product_id: [item.product_id],
@@ -626,6 +710,132 @@ export class QuotationFormModalComponent {
       tax_rate: [item.tax_rate || 0],
       tax_amount_item: [item.tax_amount_item || 0],
       total_price: [item.total_price],
+      // Multi-tarifa (Phase 5)
+      applied_price_tier_id: [item.applied_price_tier_id ?? null],
+      applied_price_tier_name: [item.applied_price_tier_name ?? null],
+      has_multiple_price_tiers: [item.has_multiple_price_tiers ?? false],
+      enabled_price_tier_ids: [item.enabled_price_tier_ids ?? []],
+      units_per_package: [item.units_per_package ?? null],
+      base_price: [item.base_price ?? item.unit_price],
     });
+  }
+
+  // ── Multi-tarifa (Phase 5) ──
+
+  /** Template helper: narrow `AbstractControl` to `FormGroup`. */
+  asFormGroup(control: any): FormGroup {
+    return control as FormGroup;
+  }
+
+  /** Whether the row should expose a tier selector. */
+  canShowTierSelector(itemGroup: FormGroup): boolean {
+    return (
+      !!itemGroup.get('has_multiple_price_tiers')?.value &&
+      this.canApplyPricingTier() &&
+      this.visibleTiersForItem(itemGroup).length > 0
+    );
+  }
+
+  visibleTiersForItem(itemGroup: FormGroup): PriceTier[] {
+    const enabledIds = itemGroup.get('enabled_price_tier_ids')?.value ?? [];
+    if (!Array.isArray(enabledIds) || enabledIds.length === 0) return [];
+    const enabled = new Set(enabledIds.map(Number));
+    return this.availableTiers().filter((tier) => enabled.has(tier.id));
+  }
+
+  getItemTierId(itemGroup: FormGroup): number | null {
+    const v = itemGroup.get('applied_price_tier_id')?.value;
+    return v == null ? null : Number(v);
+  }
+
+  getItemUnitsPerPackage(itemGroup: FormGroup): number | null {
+    const v = itemGroup.get('units_per_package')?.value;
+    return v == null ? null : Number(v);
+  }
+
+  /**
+   * Apply (or clear) a tier on a quotation item: re-resolves unit_price via
+   * PriceResolverService and persists the choice in the form group so it is
+   * sent to the backend on save.
+   */
+  onTierChange(index: number, tierId: number | null): void {
+    if (!this.canApplyPricingTier()) return;
+    const group = this.itemsArray.at(index) as FormGroup;
+    if (!group) return;
+
+    const tier = tierId == null
+      ? null
+      : this.visibleTiersForItem(group).find((t) => t.id === tierId) || null;
+    if (tierId != null && !tier) return;
+
+    const productId = Number(group.get('product_id')?.value);
+    const product = Number.isFinite(productId)
+      ? this.itemProductCache.get(productId)
+      : undefined;
+    const basePrice = Number(group.get('base_price')?.value || 0);
+    const taxRate = Number(group.get('tax_rate')?.value || 0);
+
+    const overridesAll = Number.isFinite(productId)
+      ? this.productOverrides()[productId] ?? []
+      : [];
+    const overrides = (tier
+      ? overridesAll.filter((o) => o.price_tier_id === tier.id)
+      : []
+    ).map((o) => ({
+      variant_id: o.variant_id ?? null,
+      override_price: Number(o.override_price),
+    }));
+
+    const resolution = this.priceResolver.resolveWithTier(
+      {
+        id: String(productId),
+        base_price: basePrice,
+        is_on_sale: product?.is_on_sale ?? false,
+        sale_price: product?.sale_price ?? null,
+        track_inventory: product?.track_inventory ?? true,
+        has_multiple_price_tiers: !!group.get('has_multiple_price_tiers')?.value,
+        units_per_package: group.get('units_per_package')?.value ?? null,
+      },
+      undefined,
+      tier
+        ? {
+            id: tier.id,
+            name: tier.name,
+            discount_percentage: tier.discount_percentage ?? 0,
+            is_package_unit: !!tier.is_package_unit,
+          }
+        : null,
+      overrides,
+      taxRate,
+    );
+
+    const unitPrice = Number(resolution.unitPrice.toFixed(2));
+    group.patchValue({
+      unit_price: unitPrice,
+      applied_price_tier_id: resolution.appliedPriceTierId ?? null,
+      applied_price_tier_name: resolution.appliedPriceTierName ?? null,
+    });
+    this.recalculateItem(index);
+  }
+
+  /** Pre-fetch overrides for the product so the selector resolves instantly. */
+  private ensureProductOverridesLoaded(productId: number): void {
+    if (!Number.isFinite(productId) || productId <= 0) return;
+    if (this.productOverrides()[productId]) return;
+    this.priceTierCache
+      .getProductOverrides(productId)
+      .pipe(takeUntilDestroyed())
+      .subscribe({
+        next: (overrides) =>
+          this.productOverrides.update((current) => ({
+            ...current,
+            [productId]: overrides || [],
+          })),
+        error: () =>
+          this.productOverrides.update((current) => ({
+            ...current,
+            [productId]: [],
+          })),
+      });
   }
 }

@@ -19,6 +19,7 @@ export interface InicioSettings {
   titulo?: string;
   parrafo?: string;
   logo_url?: string | null;
+  favicon_url?: string | null;
   colores?: InicioColores;
 }
 
@@ -43,6 +44,14 @@ export interface EcommerceSettings {
   slider?: {
     enable?: boolean;
     photos?: SliderPhoto[];
+  };
+
+  home_sections?: {
+    slider?: HomeSectionSettings;
+    welcome?: HomeSectionSettings;
+    categories?: HomeSectionSettings;
+    brands?: HomeSectionSettings;
+    featured_products?: HomeSectionSettings;
   };
 
   // Catálogo
@@ -159,6 +168,29 @@ export interface SliderPhoto {
   key?: string | null; // S3 key
   title?: string;
   caption?: string;
+  action_type?: SliderActionType;
+  action_label?: string;
+  action_url?: string;
+  product_id?: number | null;
+  category_id?: number | null;
+  brand_id?: number | null;
+  open_in_new_tab?: boolean;
+}
+
+export type SliderActionType =
+  | 'none'
+  | 'internal_url'
+  | 'external_url'
+  | 'product'
+  | 'category'
+  | 'brand';
+
+export interface HomeSectionSettings {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  sort_order?: number;
 }
 
 /**
@@ -171,6 +203,13 @@ export interface SliderImage {
   uploading?: boolean;
   title?: string;
   caption?: string;
+  action_type?: SliderActionType;
+  action_label?: string;
+  action_url?: string;
+  product_id?: number | null;
+  category_id?: number | null;
+  brand_id?: number | null;
+  open_in_new_tab?: boolean;
 }
 
 /**
@@ -179,6 +218,10 @@ export interface SliderImage {
 export interface SettingsResponse {
   exists: boolean;
   config?: EcommerceSettings;
+  branding?: {
+    logo_url?: string | null;
+    favicon_url?: string | null;
+  } | null;
   ecommerceUrl?: string; // URL del dominio de Ecommerce activo
   qrCodeDataUrl?: string | null;
   qrCodeUrl?: string | null;

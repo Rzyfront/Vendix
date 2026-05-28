@@ -1,43 +1,58 @@
 <section class="categories-showcase" [class]="class()">
-  <div class="categories-header">
-    <h2 class="categories-title">Categorías</h2>
-    @if (show_all_link() && categories().length > 0) {
-      <button class="see-all-btn" (click)="viewAllCategories()">
-        Ver todas
-        <i class="pi pi-arrow-right"></i>
-      </button>
+  <div class="showcase-inner">
+    <div class="categories-header">
+      <div>
+        <span class="section-kicker">Explorar</span>
+        <h2 class="categories-title">{{ title() }}</h2>
+        @if (subtitle()) {
+          <p class="categories-subtitle">{{ subtitle() }}</p>
+        }
+      </div>
+      @if (show_all_link() && categories().length > 0) {
+        <button class="see-all-btn" type="button" (click)="viewAllCategories()">
+          Ver todas
+          <app-icon name="arrow-right" size="16"></app-icon>
+        </button>
+      }
+    </div>
+
+    @if (is_loading()) {
+      <div class="categories-grid skeleton-grid">
+        @for (i of [1, 2, 3, 4, 5, 6]; track i) {
+          <div class="category-skeleton">
+            <div class="skeleton-image"></div>
+            <div class="skeleton-text"></div>
+          </div>
+        }
+      </div>
+    } @else if (categories().length > 0) {
+      <div class="categories-grid">
+        @for (category of categories(); track category.id) {
+          <button
+            class="category-card"
+            type="button"
+            (click)="onCategoryClick(category)"
+          >
+            @if (category.image_url) {
+              <img
+                [src]="category.image_url"
+                [alt]="category.name"
+                class="category-image"
+                loading="lazy"
+              />
+            } @else {
+              <div class="category-placeholder">
+                <app-icon name="layout-grid" size="28"></app-icon>
+              </div>
+            }
+            <span class="category-overlay"></span>
+            <span class="category-content">
+              <span class="category-name">{{ category.name }}</span>
+              <span class="category-cta">Explorar</span>
+            </span>
+          </button>
+        }
+      </div>
     }
   </div>
-
-  @if (is_loading()) {
-    <div class="categories-grid skeleton-grid">
-      @for (i of [1, 2, 3, 4, 5, 6]; track i) {
-        <div class="category-skeleton">
-          <div class="skeleton-image"></div>
-          <div class="skeleton-text"></div>
-        </div>
-      }
-    </div>
-  } @else if (categories().length > 0) {
-    <div class="categories-grid">
-      @for (category of categories(); track category.id) {
-        <div class="category-card" (click)="onCategoryClick(category)">
-          @if (category.image_url) {
-            <img
-              [src]="category.image_url"
-              [alt]="category.name"
-              class="category-image"
-            />
-          } @else {
-            <div class="category-placeholder">
-              <i class="pi pi-th-large"></i>
-            </div>
-          }
-          <div class="category-overlay">
-            <span class="category-name">{{ category.name }}</span>
-          </div>
-        </div>
-      }
-    </div>
-  }
 </section>

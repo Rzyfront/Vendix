@@ -116,7 +116,9 @@ export class PublicDomainsService {
             name: storeBranding?.name,
             logo_url:
               ecommerceSettings.inicio.logo_url || storeBranding?.logo_url,
-            favicon_url: storeBranding?.favicon_url,
+            favicon_url:
+              ecommerceSettings.inicio.favicon_url ||
+              storeBranding?.favicon_url,
           };
         } else {
           // For non-ecommerce domains (STORE_ADMIN, etc.), use store branding
@@ -166,28 +168,6 @@ export class PublicDomainsService {
 
     // Legacy: Procesar config existente para compatibilidad
     const config = (domain.config as any) || {};
-
-    // NUEVO: Inyectar nombre de la tienda en inicio si es necesario
-    if (domain.store?.name && ecommerceSettings?.inicio) {
-      if (
-        !ecommerceSettings.inicio.titulo ||
-        ecommerceSettings.inicio.titulo === 'Bienvenido a nuestra tienda' ||
-        ecommerceSettings.inicio.titulo === 'Bienvenido a Vendix Shop'
-      ) {
-        ecommerceSettings.inicio.titulo = `Bienvenido a ${domain.store.name}`;
-      }
-    }
-
-    // Legacy: También procesar config.inicio para compatibilidad
-    if (domain.store?.name && config.inicio) {
-      if (
-        !config.inicio.titulo ||
-        config.inicio.titulo === 'Bienvenido a nuestra tienda' ||
-        config.inicio.titulo === 'Bienvenido a Vendix Shop'
-      ) {
-        config.inicio.titulo = `Bienvenido a ${domain.store.name}`;
-      }
-    }
 
     // Legacy: Firmar imágenes en config si existen (para compatibilidad)
     if (
@@ -278,6 +258,14 @@ export class PublicDomainsService {
     if (config.inicio?.logo_url && !config.inicio.logo_url.startsWith('http')) {
       config.inicio.logo_url = await this.s3Service.signUrl(
         config.inicio.logo_url,
+      );
+    }
+    if (
+      config.inicio?.favicon_url &&
+      !config.inicio.favicon_url.startsWith('http')
+    ) {
+      config.inicio.favicon_url = await this.s3Service.signUrl(
+        config.inicio.favicon_url,
       );
     }
   }

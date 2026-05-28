@@ -2,6 +2,7 @@ import {
   IsString,
   IsBoolean,
   IsNumber,
+  IsInt,
   Min,
   Max,
   IsEnum,
@@ -9,6 +10,7 @@ import {
   IsOptional,
   ValidateNested,
   IsUrl,
+  IsUUID,
   Matches,
   IsIn,
   IsNotEmpty,
@@ -186,6 +188,28 @@ export class NotificationsSettingsDto {
       'El teléfono solo puede contener números y los símbolos + # * ( ) -',
   })
   new_order_alerts_phone?: string;
+
+  @ApiProperty({
+    example: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    required: false,
+    nullable: true,
+  })
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  sound_id?: string | null;
+
+  @ApiProperty({ example: 70, required: false, minimum: 0, maximum: 100 })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  sound_volume?: number;
+
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  sound_muted?: boolean;
 }
 
 export class ScaleDeviceConfigDto {

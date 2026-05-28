@@ -27,6 +27,11 @@ export interface CartItem {
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
   is_weight_product?: boolean;
+  // Multi-tarifa (Phase 5)
+  applied_price_tier_id?: number | null;
+  applied_price_tier_name?: string | null;
+  is_package_unit?: boolean;
+  units_per_package?: number | null;
 }
 
 export interface CartDiscount {

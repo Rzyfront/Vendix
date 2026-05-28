@@ -1,0 +1,21 @@
+meta {
+  name: 05 Delete Price Tier (soft)
+  type: http
+  seq: 5
+}
+
+delete {
+  url: http://{{url}}/store/price-tiers/{{priceTierId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Response indicates success", function () {
+    expect(res.body).to.have.property('success', true);
+  });
+}

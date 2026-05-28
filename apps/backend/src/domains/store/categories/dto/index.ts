@@ -6,7 +6,6 @@ import {
   MinLength,
   MaxLength,
   Min,
-  IsUrl,
   IsEnum,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
@@ -51,7 +50,6 @@ export class CreateCategoryDto {
   })
   @IsString()
   @IsOptional()
-  @IsUrl()
   image_url?: string;
 
   // store_id se infiere automáticamente del contexto del token

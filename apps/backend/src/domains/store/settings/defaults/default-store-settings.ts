@@ -82,6 +82,9 @@ export function getDefaultStoreSettings(): StoreSettings {
       new_order_alerts_email: null,
       low_stock_alerts_phone: null,
       new_order_alerts_phone: null,
+      sound_id: null,
+      sound_volume: 70,
+      sound_muted: false,
     },
     pos: {
       allow_anonymous_sales: true,
@@ -222,6 +225,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings: true,
         settings_general: true,
         settings_payments: true,
+        settings_price_tiers: true,
         settings_appearance: true,
         settings_security: true,
         settings_domains: true,

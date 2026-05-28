@@ -7,6 +7,9 @@ export interface TicketItem {
   totalPrice: number;
   discount?: number;
   tax?: number;
+  appliedPriceTierName?: string | null;
+  isPackageUnit?: boolean;
+  unitsPerPackage?: number | null;
 }
 
 export interface TicketData {

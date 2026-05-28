@@ -4,6 +4,7 @@ import {
   OnInit,
   inject,
   DestroyRef,
+  computed,
   signal,
 } from '@angular/core';
 
@@ -11,7 +12,6 @@ import { RouterModule, Router } from '@angular/router';
 import {
   CatalogService,
   EcommerceProduct,
-  Category,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { WishlistService } from '../../services/wishlist.service';
@@ -20,11 +20,72 @@ import { TenantFacade } from '../../../../../../app/core/store/tenant/tenant.fac
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { ProductCardComponent } from '../../components/product-card/product-card.component';
 import { HeroBannerComponent } from '../../components/hero-banner';
+import { CategoriesShowcaseComponent } from '../../components/categories-showcase/categories-showcase.component';
+import { BrandsShowcaseComponent } from '../../components/brands-showcase/brands-showcase.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+interface HomeSectionConfig {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  sort_order?: number;
+}
+
+interface HomeSectionsConfig {
+  slider: HomeSectionConfig;
+  welcome: HomeSectionConfig;
+  categories: HomeSectionConfig;
+  brands: HomeSectionConfig;
+  featured_products: HomeSectionConfig;
+}
+
+type HomeSectionKey = keyof HomeSectionsConfig;
+
+interface OrderedHomeSection {
+  key: HomeSectionKey;
+  config: HomeSectionConfig;
+}
+
+const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
+  slider: {
+    enabled: true,
+    title: 'Slider principal',
+    subtitle: 'La primera historia visual de tu tienda',
+    sort_order: 10,
+  },
+  welcome: {
+    enabled: false,
+    title: '',
+    subtitle: '',
+    sort_order: 20,
+  },
+  categories: {
+    enabled: true,
+    title: 'Categorías',
+    subtitle: 'Explora por tipo de producto',
+    limit: 8,
+    sort_order: 30,
+  },
+  brands: {
+    enabled: true,
+    title: 'Marcas',
+    subtitle: 'Compra por tus marcas favoritas',
+    limit: 8,
+    sort_order: 40,
+  },
+  featured_products: {
+    enabled: true,
+    title: 'Productos destacados',
+    subtitle: 'Selección especial de la tienda',
+    limit: 16,
+    sort_order: 50,
+  },
+};
 
 @Component({
   selector: 'app-home',
@@ -33,6 +94,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     RouterModule,
     ProductCardComponent,
     HeroBannerComponent,
+    CategoriesShowcaseComponent,
+    BrandsShowcaseComponent,
     ProductQuickViewModalComponent,
     ShareModalComponent,
     ButtonComponent,
@@ -51,9 +114,31 @@ export class HomeComponent implements OnInit {
   readonly selectedProductSlug = signal<string | null>(null);
   readonly slider_config = signal<any>(null);
   readonly show_slider = signal(false);
-  readonly banner_content = signal<{ title: string; paragraph: string }>({
-    title: 'Bienvenido',
-    paragraph: 'Encuentra aquí todo lo que buscas...',
+  readonly slider_slides = computed<any[]>(() => {
+    const photos = this.slider_config()?.photos;
+    return Array.isArray(photos)
+      ? photos.filter((photo: any) => !!photo?.url)
+      : [];
+  });
+  readonly home_sections = signal<HomeSectionsConfig>(DEFAULT_HOME_SECTIONS);
+  readonly shipping_badge_enabled = signal(false);
+  readonly featured_section = computed(
+    () => this.home_sections().featured_products,
+  );
+  readonly ordered_home_sections = computed<OrderedHomeSection[]>(() => {
+    const sections = this.home_sections();
+    return (Object.keys(sections) as HomeSectionKey[])
+      .map((key) => ({ key, config: sections[key] }))
+      .filter((section) => section.config.enabled !== false)
+      .filter(
+        (section) =>
+          section.key !== 'welcome' || this.hasWelcomeContent(section.config),
+      )
+      .sort(
+        (a, b) =>
+          (a.config.sort_order ?? DEFAULT_HOME_SECTIONS[a.key].sort_order ?? 0) -
+          (b.config.sort_order ?? DEFAULT_HOME_SECTIONS[b.key].sort_order ?? 0),
+      );
   });
   shareProduct: EcommerceProduct | null = null;
 
@@ -77,6 +162,7 @@ export class HomeComponent implements OnInit {
   ngOnInit(): void {
     this.loadFeaturedProducts();
     this.loadPublicConfig();
+    this.loadShippingAvailability();
 
     // Subscribe to authentication state
     this.auth_facade.isAuthenticated$
@@ -102,9 +188,16 @@ export class HomeComponent implements OnInit {
       });
   }
 
-  loadFeaturedProducts(): void {
+  loadFeaturedProducts(limit = this.featured_section().limit || 16): void {
+    if (this.featured_section().enabled === false) {
+      this.featured_products.set([]);
+      this.is_loading_featured.set(false);
+      return;
+    }
+
+    this.is_loading_featured.set(true);
     this.catalog_service
-      .getProducts({ limit: 16, sort_by: 'best_selling' as any })
+      .getProducts({ limit, sort_by: 'newest', is_featured: true })
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {
@@ -129,27 +222,91 @@ export class HomeComponent implements OnInit {
           // La configuración de ecommerce está en customConfig.ecommerce
           const customConfig = domainConfig.customConfig || {};
           const ecommerceConfig = customConfig.ecommerce || {};
+          if (this.hasConfiguredShipping(ecommerceConfig)) {
+            this.shipping_badge_enabled.set(true);
+          }
 
           this.slider_config.set(ecommerceConfig.slider || null);
+          const inicio = ecommerceConfig.inicio || {};
+          const configuredSections = ecommerceConfig.home_sections || {};
+          const configuredWelcome = configuredSections.welcome || {};
+          const welcomeTitle = this.normalizeText(
+            configuredWelcome.title ?? inicio.titulo,
+          );
+          const welcomeSubtitle = this.normalizeText(
+            configuredWelcome.subtitle ?? inicio.parrafo,
+          );
+          this.home_sections.set({
+            slider: {
+              ...DEFAULT_HOME_SECTIONS.slider,
+              ...(configuredSections.slider || {}),
+            },
+            welcome: {
+              ...DEFAULT_HOME_SECTIONS.welcome,
+              ...configuredWelcome,
+              enabled:
+                configuredWelcome.enabled ??
+                Boolean(welcomeTitle.trim() || welcomeSubtitle.trim()),
+              title: welcomeTitle,
+              subtitle: welcomeSubtitle,
+            },
+            categories: {
+              ...DEFAULT_HOME_SECTIONS.categories,
+              ...(configuredSections.categories || {}),
+            },
+            brands: {
+              ...DEFAULT_HOME_SECTIONS.brands,
+              ...(configuredSections.brands || {}),
+            },
+            featured_products: {
+              ...DEFAULT_HOME_SECTIONS.featured_products,
+              ...(configuredSections.featured_products || {}),
+            },
+          });
+          this.loadFeaturedProducts();
 
           // Verificar si hay fotos configuradas
-          const hasPhotos =
-            Array.isArray(this.slider_config()?.photos) &&
-            this.slider_config()?.photos.length > 0;
+          const sliderEnabled =
+            (configuredSections.slider?.enabled ?? true) !== false &&
+            (this.slider_config()?.enable ?? true) !== false;
 
           // El slider se muestra si hay fotos
           // El campo 'enable' es opcional - si no existe, se asume true cuando hay fotos
-          this.show_slider.set(hasPhotos);
-
-          // Mapeo de contenido para el banner estático desde ecommerce.inicio
-          const inicio = ecommerceConfig.inicio || {};
-
-          this.banner_content.set({
-            title: inicio.titulo || 'Bienvenido',
-            paragraph: inicio.parrafo || 'Encuentra aquí todo lo que buscas...',
-          });
+          this.show_slider.set(
+            sliderEnabled && this.slider_slides().length > 0,
+          );
         },
       });
+  }
+
+  private loadShippingAvailability(): void {
+    this.catalog_service
+      .getPublicConfig()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response) => {
+          this.shipping_badge_enabled.set(
+            this.hasConfiguredShipping(response.data?.ecommerce),
+          );
+        },
+      });
+  }
+
+  hasWelcomeContent(config: HomeSectionConfig): boolean {
+    return Boolean(config.title?.trim() || config.subtitle?.trim());
+  }
+
+  private hasConfiguredShipping(ecommerce: any): boolean {
+    const shipping = ecommerce?.shipping || {};
+    return (
+      shipping.has_configured_shipping === true ||
+      shipping.enabled === true ||
+      shipping.shipping_enabled === true
+    );
+  }
+
+  private normalizeText(value: unknown): string {
+    return typeof value === 'string' ? value.trim() : '';
   }
 
   onAddToCart(product: EcommerceProduct): void {
@@ -160,7 +317,7 @@ export class HomeComponent implements OnInit {
     }
     // Guard: variant products must go through detail page for variant selection
     if (product.variant_count && product.variant_count > 0) {
-      this.router.navigate(['/catalog', product.slug]);
+      this.router.navigate(['/products', product.slug]);
       return;
     }
     const result = this.cart_service.addToCart(product.id, 1);

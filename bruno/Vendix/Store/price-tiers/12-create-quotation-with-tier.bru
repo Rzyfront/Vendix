@@ -1,0 +1,57 @@
+meta {
+  name: 12 Create Quotation WITH Price Tier
+  type: http
+  seq: 12
+}
+
+# Smoke test: quotations must also accept applied_price_tier_id on line items
+# and persist the snapshot.
+
+post {
+  url: http://{{url}}/store/quotations
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "customer_id": 1,
+    "channel": "manual",
+    "notes": "Bruno smoke quotation with price tier",
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "product_name": "Bruno smoke item with tier",
+        "quantity": 2,
+        "unit_price": 49999.00,
+        "total_price": 99998.00,
+        "applied_price_tier_id": {{priceTierId}}
+      }
+    ]
+  }
+}
+
+tests {
+  test("Status is 201", function () {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Quotation created with items[]", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('items');
+    expect(res.body.data.items).to.be.an('array').that.is.not.empty;
+  });
+
+  test("Item carries applied_price_tier_id snapshot", function () {
+    var item = res.body.data.items[0];
+    expect(item).to.have.property('applied_price_tier_id');
+    expect(String(item.applied_price_tier_id)).to.equal(String(bru.getVar('priceTierId')));
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("priceTierQuotationId", res.body.data.id);
+  }
+}

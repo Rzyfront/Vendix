@@ -151,6 +151,11 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Access denied to payment resource',
   },
+  PAY_RECEIPT_NOT_FOUND_001: {
+    code: 'PAY_RECEIPT_NOT_FOUND_001',
+    httpStatus: 404,
+    devMessage: 'Payment receipt not uploaded',
+  },
 
   // Payment Sources (Card-On-File / Wompi recurrent)
   PAYMENT_SOURCE_NOT_FOUND: {
@@ -663,6 +668,11 @@ export const ErrorCodes = {
     code: 'INV_STOCK_001',
     httpStatus: 400,
     devMessage: 'Insufficient stock',
+  },
+  POS_STOCK_INSUFFICIENT_001: {
+    code: 'POS_STOCK_INSUFFICIENT_001',
+    httpStatus: 409,
+    devMessage: 'Stock insuficiente para una o más líneas del POS',
   },
   INV_LOC_001: {
     code: 'INV_LOC_001',
@@ -2315,6 +2325,53 @@ export const ErrorCodes = {
     code: 'FISCAL_STATUS_PERMISSION_DENIED',
     httpStatus: 403,
     devMessage: 'Fiscal status permission denied',
+  },
+
+  // Multi-tarifa (Price Tiers)
+  PRICE_TIER_FIND_001: {
+    code: 'PRICE_TIER_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Tarifa de precios no encontrada',
+  },
+  PRICE_TIER_DUP_001: {
+    code: 'PRICE_TIER_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Ya existe una tarifa con ese nombre en la tienda',
+  },
+  PRICE_TIER_VALIDATE_001: {
+    code: 'PRICE_TIER_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Datos inválidos para la tarifa de precios',
+  },
+  PRICE_TIER_NOT_ALLOWED: {
+    code: 'PRICE_TIER_NOT_ALLOWED',
+    httpStatus: 422,
+    devMessage: 'La tarifa seleccionada no está habilitada para este producto',
+  },
+  PRICING_TIER_PERMISSION_DENIED: {
+    code: 'PRICING_TIER_PERMISSION_DENIED',
+    httpStatus: 403,
+    devMessage:
+      'No tiene permiso para aplicar tarifas de precios (multi-tarifa)',
+  },
+  PRICE_TIER_OVERRIDE_PRODUCT_001: {
+    code: 'PRICE_TIER_OVERRIDE_PRODUCT_001',
+    httpStatus: 404,
+    devMessage: 'Producto no encontrado para asignar override de tarifa',
+  },
+
+  // notification sounds
+  NOTIFICATION_SOUND_INVALID: {
+    code: 'NOTIFICATION_SOUND_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'Archivo de sonido inválido (debe ser audio/mpeg y pesar como máximo 300 KB).',
+  },
+  NOTIFICATION_SOUND_IN_USE: {
+    code: 'NOTIFICATION_SOUND_IN_USE',
+    httpStatus: 409,
+    devMessage:
+      'El sonido está siendo usado por una o más tiendas y no puede eliminarse.',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

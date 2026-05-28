@@ -1,0 +1,51 @@
+<section [class]="class() ? 'brands-showcase ' + class() : 'brands-showcase'">
+  <div class="showcase-inner">
+    <div class="brands-header">
+      <div class="header-copy">
+        <span class="section-kicker">Marcas aliadas</span>
+        <h2 class="brands-title">{{ title() }}</h2>
+        @if (subtitle()) {
+          <p class="brands-subtitle">{{ subtitle() }}</p>
+        }
+      </div>
+
+      @if (show_all_link() && brands().length > 0) {
+        <button class="see-all-btn" type="button" (click)="viewAllBrands()">
+          <span>Ver todas</span>
+          <app-icon name="arrow-right" size="16"></app-icon>
+        </button>
+      }
+    </div>
+
+    @if (is_loading()) {
+      <div class="brand-grid brand-grid--loading" aria-hidden="true">
+        @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+          <div class="brand-card brand-card--skeleton">
+            <div class="skeleton-logo"></div>
+          </div>
+        }
+      </div>
+    } @else if (brands().length > 0) {
+      <div class="brand-grid">
+        @for (brand of brands(); track brand.id) {
+          <button
+            class="brand-card"
+            type="button"
+            [attr.aria-label]="'Ver productos de ' + brand.name"
+            [attr.title]="brand.name"
+            (click)="onBrandClick(brand)"
+          >
+            <span class="brand-logo">
+              @if (brand.logo_url) {
+                <img [src]="brand.logo_url" [alt]="brand.name" loading="lazy" />
+              } @else {
+                <span>{{ brand.name.slice(0, 1) }}</span>
+              }
+            </span>
+            <span class="brand-name">{{ brand.name }}</span>
+          </button>
+        }
+      </div>
+    }
+  </div>
+</section>

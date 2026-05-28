@@ -1,0 +1,84 @@
+meta {
+  name: Guest Checkout - Email Registrado (Overwrite)
+  type: http
+  seq: 23
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: none
+}
+
+docs {
+  Escenario 3 - Email de un cliente PREVIAMENTE REGISTRADO via
+  `/auth/register-customer` (state activo, password real). El checkout
+  guest con ese mismo email debe:
+    - Reutilizar el `users.id` existente (no crear uno nuevo).
+    - Crear la orden con `customer_id` != null apuntando a ese user.
+    - SOBRESCRIBIR los campos no-vacios del modal en el `users` existente.
+
+  Pre-condicion obligatoria: ejecutar primero
+  `guest-checkout-register-customer.bru` para asegurar que el email
+  `registered@vendix-test.local` existe como cliente activo en store_id=1.
+
+  Verificacion SQL manual:
+    SELECT first_name, last_name, phone
+      FROM users
+      WHERE email = 'registered@vendix-test.local';
+    -- Debe devolver:
+    --   first_name = 'Nuevo Nombre'   (toTitleCase aplicado por el resolver)
+    --   last_name  = 'Nuevo Apellido'
+    --   phone      = '3001112233'
+
+    SELECT COUNT(*) AS row_count
+      FROM users WHERE email = 'registered@vendix-test.local';
+    -- Debe seguir siendo 1 (no se duplico).
+}
+
+body:json {
+  {
+    "payment_method_id": {{bank_transfer_payment_method_id}},
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "quantity": 1
+      }
+    ],
+    "guest_customer": {
+      "email": "registered@vendix-test.local",
+      "first_name": "Nuevo Nombre",
+      "last_name": "Nuevo Apellido",
+      "phone": "3001112233"
+    }
+  }
+}
+
+script:post-response {
+  if (res.status === 201 && res.body && res.body.data) {
+    bru.setVar("registered_order_id", res.body.data.order_id);
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.success: eq true
+  res.body.data.order_id: isDefined
+}
+
+tests {
+  test("Status 201 - orden vinculada a cliente registrado", function() {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Response incluye order_id no nulo", function() {
+    expect(res.body).to.have.property("data");
+    expect(res.body.data).to.have.property("order_id");
+    expect(res.body.data.order_id).to.not.be.null;
+  });
+
+  test("Response incluye public_order_token", function() {
+    expect(res.body.data).to.have.property("public_order_token");
+    expect(res.body.data.public_order_token).to.not.be.null;
+  });
+}

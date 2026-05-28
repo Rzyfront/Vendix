@@ -16,8 +16,14 @@ import {
   ProductStats,
   OnlinePurchaseLinkResult,
 } from '../interfaces';
-import { BulkImageAnalysisResult, BulkImageUploadResult } from '../interfaces/bulk-image-analysis.interface';
-import { BulkProductAnalysisResult, BulkProductUploadResult } from '../interfaces/bulk-product-analysis.interface';
+import {
+  BulkImageAnalysisResult,
+  BulkImageUploadResult,
+} from '../interfaces/bulk-image-analysis.interface';
+import {
+  BulkProductAnalysisResult,
+  BulkProductUploadResult,
+} from '../interfaces/bulk-product-analysis.interface';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -25,6 +31,21 @@ interface ApiResponse<T> {
   meta?: any;
   message: string;
   error?: string;
+}
+
+export interface ProductImageEnhancementRequest {
+  image_url: string;
+  prompt: string;
+  product_name?: string;
+  product_type?: 'physical' | 'service';
+  description?: string;
+  extra_context?: Record<string, any>;
+}
+
+export interface ProductImageEnhancementResult {
+  image_url: string;
+  revised_prompt?: string;
+  model?: string;
 }
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -129,9 +150,7 @@ export class ProductsService {
       );
   }
 
-  generateOnlinePurchaseLink(
-    id: number,
-  ): Observable<OnlinePurchaseLinkResult> {
+  generateOnlinePurchaseLink(id: number): Observable<OnlinePurchaseLinkResult> {
     return this.http
       .post<
         ApiResponse<OnlinePurchaseLinkResult>
@@ -283,6 +302,24 @@ export class ProductsService {
       );
   }
 
+  enhanceProductImage(
+    data: ProductImageEnhancementRequest,
+  ): Observable<ProductImageEnhancementResult> {
+    return this.http
+      .post<
+        ApiResponse<ProductImageEnhancementResult>
+      >(`${this.apiUrl}/store/products/enhance-image`, data)
+      .pipe(
+        map((response) => {
+          if (!response?.success || !response.data?.image_url) {
+            throw response;
+          }
+
+          return response.data;
+        }),
+      );
+  }
+
   // Estadísticas
   getProductStats(storeId: number): Observable<ProductStats> {
     const now = Date.now();
@@ -400,7 +437,7 @@ export class ProductsService {
 
   // Carga Masiva
   getBulkUploadTemplate(
-    type: 'quick' | 'complete' = 'quick',
+    type: 'products' | 'services' | 'quick' | 'complete' = 'products',
   ): Observable<Blob> {
     return this.http
       .get(`${this.apiUrl}/store/products/bulk/template/download`, {
@@ -465,10 +502,9 @@ export class ProductsService {
     const formData = new FormData();
     formData.append('file', file);
     return this.http
-      .post<ApiResponse<BulkImageAnalysisResult>>(
-        `${this.apiUrl}/store/products/bulk-images/analyze`,
-        formData,
-      )
+      .post<
+        ApiResponse<BulkImageAnalysisResult>
+      >(`${this.apiUrl}/store/products/bulk-images/analyze`, formData)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -479,10 +515,9 @@ export class ProductsService {
     sessionId: string,
   ): Observable<BulkImageUploadResult> {
     return this.http
-      .post<ApiResponse<BulkImageUploadResult>>(
-        `${this.apiUrl}/store/products/bulk-images/upload-session`,
-        { session_id: sessionId },
-      )
+      .post<
+        ApiResponse<BulkImageUploadResult>
+      >(`${this.apiUrl}/store/products/bulk-images/upload-session`, { session_id: sessionId })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -494,10 +529,9 @@ export class ProductsService {
     const formData = new FormData();
     formData.append('file', file);
     return this.http
-      .post<ApiResponse<BulkProductAnalysisResult>>(
-        `${this.apiUrl}/store/products/bulk/analyze`,
-        formData,
-      )
+      .post<
+        ApiResponse<BulkProductAnalysisResult>
+      >(`${this.apiUrl}/store/products/bulk/analyze`, formData)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -508,10 +542,9 @@ export class ProductsService {
     sessionId: string,
   ): Observable<BulkProductUploadResult> {
     return this.http
-      .post<ApiResponse<BulkProductUploadResult>>(
-        `${this.apiUrl}/store/products/bulk/upload-session`,
-        { session_id: sessionId },
-      )
+      .post<
+        ApiResponse<BulkProductUploadResult>
+      >(`${this.apiUrl}/store/products/bulk/upload-session`, { session_id: sessionId })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -520,18 +553,16 @@ export class ProductsService {
 
   cancelBulkProductSession(sessionId: string): Observable<void> {
     return this.http
-      .delete<void>(
-        `${this.apiUrl}/store/products/bulk/session/${sessionId}`,
-      )
+      .delete<void>(`${this.apiUrl}/store/products/bulk/session/${sessionId}`)
       .pipe(catchError(this.handleError));
   }
 
   // Promociones del producto
   getProductPromotions(productId: number): Observable<any[]> {
     return this.http
-      .get<ApiResponse<any[]>>(
-        `${this.apiUrl}/store/products/${productId}/promotions`,
-      )
+      .get<
+        ApiResponse<any[]>
+      >(`${this.apiUrl}/store/products/${productId}/promotions`)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
@@ -543,10 +574,9 @@ export class ProductsService {
     promotionIds: number[],
   ): Observable<any[]> {
     return this.http
-      .patch<ApiResponse<any[]>>(
-        `${this.apiUrl}/store/products/${productId}/promotions`,
-        { promotion_ids: promotionIds },
-      )
+      .patch<
+        ApiResponse<any[]>
+      >(`${this.apiUrl}/store/products/${productId}/promotions`, { promotion_ids: promotionIds })
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),

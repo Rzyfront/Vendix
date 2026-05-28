@@ -676,6 +676,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/settings/payments',
         },
         {
+          label: 'Precios y Tarifas',
+          icon: 'circle',
+          route: '/admin/price-tiers',
+        },
+        {
           label: 'Métodos de Envío',
           icon: 'circle',
           route: '/admin/settings/shipping',

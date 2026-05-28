@@ -121,6 +121,7 @@ export class DefaultPanelUIService {
         settings: true,
         settings_general: true,
         settings_payments: true,
+        settings_price_tiers: true,
         settings_appearance: true,
         settings_security: true,
         settings_domains: true,
@@ -152,7 +153,49 @@ export class DefaultPanelUIService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   /**
-   * Obtiene el template unificado desde la base de datos (con cache)
+   * Deep-merges PANEL_UI_FALLBACK into a DB-loaded panel_ui object.
+   *
+   * For each app_type in PANEL_UI_FALLBACK:
+   *   - Ensures the app_type exists in the result (defaults to {} if missing).
+   *   - For each fallback key: if the DB value is `undefined`, takes the
+   *     fallback value; otherwise respects the DB value (including `false`).
+   *
+   * This auto-fills missing keys without re-seeding the DB so that new modules
+   * added to PANEL_UI_FALLBACK appear immediately for all users/tenants.
+   */
+  private mergePanelUIWithFallback(
+    dbPanelUI: Record<string, Record<string, boolean>>,
+  ): Record<string, Record<string, boolean>> {
+    const merged: Record<string, Record<string, boolean>> = {
+      ...(dbPanelUI || {}),
+    };
+
+    for (const appType of Object.keys(this.PANEL_UI_FALLBACK)) {
+      const fallbackForApp = this.PANEL_UI_FALLBACK[appType] || {};
+      const dbForApp = (dbPanelUI && dbPanelUI[appType]) || {};
+      const mergedForApp: Record<string, boolean> = { ...dbForApp };
+
+      for (const key of Object.keys(fallbackForApp)) {
+        if (mergedForApp[key] === undefined) {
+          mergedForApp[key] = fallbackForApp[key];
+        }
+      }
+
+      merged[appType] = mergedForApp;
+    }
+
+    return merged;
+  }
+
+  /**
+   * Obtiene el template unificado desde la base de datos (con cache).
+   *
+   * Auto-fills missing keys from PANEL_UI_FALLBACK so new modules appear
+   * without re-seeding the BD. The DB value always wins when it is defined
+   * (including explicit `false`); the fallback only provides values for
+   * keys that are missing entirely.
+   *
+   * The merged result is what gets cached for {@link CACHE_TTL}.
    */
   private async getUnifiedTemplate(): Promise<{
     panel_ui: Record<string, Record<string, boolean>>;
@@ -175,15 +218,21 @@ export class DefaultPanelUIService {
 
       const templateData = template?.template_data as any;
       if (templateData?.panel_ui) {
+        // Merge BD template with fallback so newly-added keys in
+        // PANEL_UI_FALLBACK appear automatically without re-seeding.
+        const mergedPanelUI = this.mergePanelUIWithFallback(
+          templateData.panel_ui,
+        );
+
         const result = {
-          panel_ui: templateData.panel_ui,
+          panel_ui: mergedPanelUI,
           preferences: templateData.preferences || {
             language: 'es',
             theme: 'default',
           },
         };
 
-        // Cache the result
+        // Cache the merged result
         this.templateCache = {
           data: result,
           expiry: Date.now() + this.CACHE_TTL,
@@ -195,7 +244,7 @@ export class DefaultPanelUIService {
       // Silent fallback to hardcoded config
     }
 
-    // Fallback to hardcoded configs
+    // Fallback to hardcoded configs (no DB template available)
     return {
       panel_ui: this.PANEL_UI_FALLBACK,
       preferences: {

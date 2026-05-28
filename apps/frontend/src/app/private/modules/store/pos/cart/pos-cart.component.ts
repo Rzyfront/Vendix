@@ -17,6 +17,7 @@ import {
   InputComponent,
   SelectorComponent,
   TextareaComponent,
+  TooltipComponent,
 } from '../../../../../shared/components';
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -26,6 +27,12 @@ import { PosApiService } from '../services/pos-api.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { TaxesService } from '../../products/services/taxes.service';
 import { TaxCategory } from '../../products/interfaces';
+import {
+  PriceTier,
+  ProductPriceTierOverride,
+  PriceTierCacheService,
+  PriceTierSelectorComponent,
+} from '../../price-tiers';
 
 @Component({
   selector: 'app-pos-cart',
@@ -38,7 +45,9 @@ import { TaxCategory } from '../../products/interfaces';
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    TooltipComponent,
     QuantityControlComponent,
+    PriceTierSelectorComponent,
   ],
   template: `
     <div
@@ -390,7 +399,32 @@ import { TaxCategory } from '../../products/interfaces';
                         precio editado
                       </span>
                     }
+                    @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-amber-100 text-amber-800"
+                        [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                      >
+                        {{ item.applied_price_tier_name }}
+                      </span>
+                    }
+                    @if (item.is_package_unit && item.units_per_package) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-700"
+                      >
+                        × {{ item.units_per_package }} unid/empaque
+                      </span>
+                    }
                   </div>
+                  @if (canShowTierSelector(item)) {
+                    <div class="mt-1.5">
+                      <app-price-tier-selector
+                        [tiers]="visibleTiersForItem(item)"
+                        [selectedTierId]="item.applied_price_tier_id ?? null"
+                        [unitsPerPackage]="item.units_per_package ?? null"
+                        (selectedTierIdChange)="onTierChange(item, $event)"
+                      ></app-price-tier-selector>
+                    </div>
+                  }
                 </div>
                 <!-- Item actions -->
                 <div class="flex items-start gap-1 self-start">
@@ -444,29 +478,38 @@ import { TaxCategory } from '../../products/interfaces';
                         [value]="item.quantity"
                         [min]="1"
                         [max]="
-                          item.product.track_inventory !== false
-                            ? item.product.stock
-                            : 999
+                          getQuantityMax(item)
                         "
+                        [unitsPerPackage]="getRequiredStockPerUnit(item)"
                         [editable]="true"
                         [size]="'sm'"
                         (valueChange)="updateQuantity(item.id, $event)"
                       ></app-quantity-control>
                     }
+                  </div>
+                  <div class="flex shrink-0 items-center justify-end gap-2">
+                    <span class="text-sm font-extrabold leading-none text-primary">
+                      {{ formatCurrency(item.totalPrice) }}
+                    </span>
                     @if (item.itemType !== 'custom' && canEditItemPrice(item)) {
-                      <button
-                        type="button"
-                        (click)="editItemPrice(item)"
-                        class="p-1.5 rounded-md text-text-secondary hover:text-primary hover:bg-primary/10 transition-colors"
-                        title="Editar precio de venta"
+                      <app-tooltip
+                        content="Edita el precio de venta de este producto."
+                        position="top"
+                        size="sm"
+                        color="default"
                       >
-                        <app-icon name="pencil" [size]="14"></app-icon>
-                      </button>
+                        <button
+                          type="button"
+                          (click)="editItemPrice(item)"
+                          class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary transition-colors hover:border-primary/40 hover:bg-primary/15"
+                          aria-label="Editar precio de venta"
+                          title="Edita el precio de venta de este producto."
+                        >
+                          <app-icon name="pencil" [size]="14"></app-icon>
+                        </button>
+                      </app-tooltip>
                     }
                   </div>
-                  <span class="text-sm font-extrabold text-primary">
-                    {{ formatCurrency(item.totalPrice) }}
-                  </span>
                 </div>
               </div>
             }
@@ -675,8 +718,12 @@ private cartService = inject(PosCartService);
   private posApiService = inject(PosApiService);
   private authFacade = inject(AuthFacade);
   private taxesService = inject(TaxesService);
+  private priceTierCache = inject(PriceTierCacheService);
 
   readonly cartState = this.cartService.cartState;
+  readonly availableTiers = signal<PriceTier[]>([]);
+  /** Per-product (number key) override cache so the selector resolves instantly. */
+  readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
   readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
   readonly taxCategories = signal<TaxCategory[]>([]);
@@ -709,6 +756,9 @@ private cartService = inject(PosCartService);
   readonly canOverridePrices = computed(() =>
     this.hasPermission('store:pos:price_override'),
   );
+  readonly canApplyPricingTier = computed(() =>
+    this.hasPermission('store:products:apply_pricing_tier'),
+  );
 
   activePromotions: any[] = [];
   couponCode = '';
@@ -730,6 +780,59 @@ private cartService = inject(PosCartService);
       .subscribe({
         next: (taxCategories) => this.taxCategories.set(taxCategories || []),
         error: () => this.taxCategories.set([]),
+      });
+
+    // Load active tiers once. Cache is shareReplay'd so other modules reuse.
+    if (this.canApplyPricingTier()) {
+      this.priceTierCache
+        .getActiveTiers()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (tiers) => this.availableTiers.set(tiers || []),
+          error: () => this.availableTiers.set([]),
+        });
+    }
+
+    // Pre-fetch overrides whenever a new tier-enabled product appears in the
+    // cart. Uses item count + product ids in the dependency string to avoid
+    // re-running on quantity changes.
+    toObservable(this.cartService.cartState)
+      .pipe(
+        map((state) =>
+          state.items
+            .filter(
+              (i) =>
+                i.itemType !== 'custom' &&
+                i.product.has_multiple_price_tiers === true,
+            )
+            .map((i) => Number(i.product.id))
+            .filter((id) => Number.isFinite(id) && id > 0),
+        ),
+        map((ids) => Array.from(new Set(ids)).sort()),
+        distinctUntilChanged((a, b) => JSON.stringify(a) === JSON.stringify(b)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((productIds) => {
+        for (const productId of productIds) {
+          if (this.productOverrides()[productId]) continue;
+          this.priceTierCache
+            .getProductOverrides(productId)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (overrides) => {
+                this.productOverrides.update((current) => ({
+                  ...current,
+                  [productId]: overrides || [],
+                }));
+              },
+              error: () => {
+                this.productOverrides.update((current) => ({
+                  ...current,
+                  [productId]: [],
+                }));
+              },
+            });
+        }
       });
 
 // Load active promotions
@@ -907,6 +1010,71 @@ private cartService = inject(PosCartService);
       });
   }
 
+  /**
+   * Returns the override rows for the item's product, filtered to the
+   * currently-selected tier. Empty array if the cache hasn't loaded yet.
+   */
+  getOverridesForItem(item: CartItem, tierId: number | null): ProductPriceTierOverride[] {
+    if (item.itemType === 'custom') return [];
+    const productId = Number(item.product.id);
+    if (!Number.isFinite(productId) || productId <= 0) return [];
+    const all = this.productOverrides()[productId] ?? [];
+    if (tierId == null) return all;
+    return all.filter((o) => o.price_tier_id === tierId);
+  }
+
+  /** True when the line should expose the multi-tarifa selector. */
+  visibleTiersForItem(item: CartItem): PriceTier[] {
+    if (item.itemType === 'custom') return [];
+    const enabledIds = item.product.enabled_price_tier_ids ?? [];
+    if (!Array.isArray(enabledIds) || enabledIds.length === 0) return [];
+    const enabled = new Set(enabledIds.map(Number));
+    return this.availableTiers().filter((tier) => enabled.has(tier.id));
+  }
+
+  canShowTierSelector(item: CartItem): boolean {
+    return (
+      item.itemType !== 'custom' &&
+      item.product.has_multiple_price_tiers === true &&
+      this.canApplyPricingTier() &&
+      this.visibleTiersForItem(item).length > 0
+    );
+  }
+
+  onTierChange(item: CartItem, tierId: number | null): void {
+    if (!this.canApplyPricingTier()) {
+      // UI gate already prevents this — defensive guard against keyboard injection.
+      this.toastService.warning(
+        'No tienes permiso para aplicar tarifas de precio',
+      );
+      return;
+    }
+    const tier =
+      tierId == null
+        ? null
+        : this.visibleTiersForItem(item).find((t) => t.id === tierId) || null;
+    if (tierId != null && !tier) {
+      this.toastService.warning('Esta tarifa no está habilitada para el producto');
+      return;
+    }
+    const overrides = this.getOverridesForItem(item, tier?.id ?? null);
+
+    this.cartService
+      .applyTierToCartItem(item.id, tier, overrides)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          if (tier) {
+            this.toastService.success(`Tarifa "${tier.name}" aplicada`);
+          } else {
+            this.toastService.info('Tarifa default restaurada');
+          }
+        },
+        error: (error) =>
+          this.toastService.error(error.message || 'Error al aplicar la tarifa'),
+      });
+  }
+
   updateQuantity(itemId: string, quantity: number): void {
     if (quantity <= 0) {
       this.removeFromCart(itemId);
@@ -923,6 +1091,38 @@ private cartService = inject(PosCartService);
             error.message || 'Error al actualizar cantidad',
           );
         } });
+  }
+
+  getRequiredStockPerUnit(item: CartItem): number {
+    if (
+      item.is_package_unit &&
+      item.product.package_consumes_multiple_stock === true &&
+      item.units_per_package
+    ) {
+      const units = Number(item.units_per_package);
+      return Number.isFinite(units) && units > 1 ? units : 1;
+    }
+    return 1;
+  }
+
+  getQuantityMax(item: CartItem): number {
+    if (item.itemType === 'custom' || item.product.track_inventory === false) {
+      return 999;
+    }
+    const availableStock = this.getAvailableStockForItem(item);
+    const requiredPerUnit = this.getRequiredStockPerUnit(item);
+    return Math.max(0, Math.floor(availableStock / requiredPerUnit));
+  }
+
+  private getAvailableStockForItem(item: CartItem): number {
+    if (item.variant_id) {
+      const variant = item.product.product_variants?.find(
+        (candidate) => Number(candidate.id) === Number(item.variant_id),
+      );
+      if (variant?.track_inventory_override === false) return 999;
+      return Number(variant?.stock ?? 0);
+    }
+    return Number(item.product.stock ?? 0);
   }
 
   removeFromCart(itemId: string): void {

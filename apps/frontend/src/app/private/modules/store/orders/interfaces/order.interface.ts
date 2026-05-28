@@ -94,6 +94,9 @@ export interface OrderItem {
   total_price: number;
   tax_rate?: number;
   tax_amount_item?: number;
+  applied_price_tier_id?: number | null;
+  applied_price_tier_name_snapshot?: string | null;
+  stock_units_consumed?: number | null;
   item_type?: string;
   created_at: string;
   updated_at: string;
@@ -136,6 +139,8 @@ export interface Payment {
   amount: number;
   currency: string;
   state: PaymentStatus;
+  receipt_s3_key?: string | null;
+  receipt_uploaded_at?: string | null;
   transaction_id?: string;
   gateway_response?: {
     change?: number;
@@ -661,4 +666,3 @@ export interface RefundItemRecord {
     code: string;
   };
 }
-

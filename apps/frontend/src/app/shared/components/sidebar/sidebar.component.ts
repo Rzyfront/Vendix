@@ -14,6 +14,7 @@ import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { BadgeComponent } from '../badge/badge.component';
 import { ToastService } from '../toast/toast.service';
+import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 const DEFAULT_LOCKED_BADGE = 'ORG';
 const DEFAULT_LOCKED_TOOLTIP = 'Disponible en modo ORGANIZATION';
@@ -164,7 +165,7 @@ export interface MenuItem {
                   #rla="routerLinkActive"
                   [class.active]="rla.isActive"
                   class="menu-item"
-                  (click)="onMenuItemClick()"
+                  (click)="onMenuItemClick(item)"
                 >
                   <app-icon
                     [name]="item.icon"
@@ -211,7 +212,7 @@ export interface MenuItem {
                         </button>
                       } @else if (child.action) {
                         <button
-                          (click)="child.action(child); onMenuItemClick()"
+                          (click)="child.action(child); onMenuItemClick(child)"
                           class="submenu-item-button"
                         >
                           <span>{{ child.label }}</span>
@@ -226,7 +227,7 @@ export interface MenuItem {
                           routerLinkActive="active"
                           #rlaChild="routerLinkActive"
                           [class.active]="rlaChild.isActive"
-                          (click)="onMenuItemClick()"
+                          (click)="onMenuItemClick(child)"
                         >
                           <span>{{ child.label }}</span>
                           @if (child.badge) {
@@ -274,6 +275,7 @@ export class SidebarComponent implements AfterViewInit {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toastService = inject(ToastService);
+  private readonly menuFilterService = inject(MenuFilterService);
 
   // --- State signals ---
   readonly isMobile = signal(false);
@@ -510,7 +512,13 @@ export class SidebarComponent implements AfterViewInit {
     this.renderer.removeClass(document.body, 'sidebar-mobile-open');
   }
 
-  onMenuItemClick(): void {
+  onMenuItemClick(item?: MenuItem): void {
+    // Nota: el badge "Nuevo" se removió del sidebar (UX demasiado intrusiva).
+    // El consumo de `new_keys` ahora se hace desde el user-dropdown banner y
+    // desde la sección "Módulos del Panel" en Settings → General; un click
+    // de sidebar ya no debe mermar silenciosamente ese contador.
+    void item;
+
     // Close mobile sidebar when menu item is clicked
     if (this.isMobile()) {
       setTimeout(() => {
@@ -525,6 +533,14 @@ export class SidebarComponent implements AfterViewInit {
     this.router.navigateByUrl(LOCKED_REDIRECT_ROUTE);
     this.onMenuItemClick();
   }
+
+  // Nota: los helpers `isNewItem` / `hasNewChildren` / `markItemAsSeenIfNew`
+  // fueron removidos junto con los badges "Nuevo" del sidebar (UX intrusiva).
+  // El descubrimiento de módulos nuevos vive ahora en:
+  //   - User dropdown → banner "Tienes N módulos nuevos disponibles"
+  //   - Settings → General → sección "Módulos del Panel"
+  // `MenuFilterService.isNewModule` / `getNewKeyForLabel` siguen disponibles
+  // para esos consumidores.
 
   toggleSubmenu(menuLabel: string): void {
     // Auto-expand if collapsed and has children (PC only)

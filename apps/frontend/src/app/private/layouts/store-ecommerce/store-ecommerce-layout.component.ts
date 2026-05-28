@@ -4,11 +4,16 @@ import {
   HostListener,
   DestroyRef,
   signal,
+  PLATFORM_ID,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { CurrencyPipe } from '@angular/common';
-import { RouterModule, Router } from '@angular/router';
-import { map } from 'rxjs/operators';
+import {
+  CurrencyPipe,
+  isPlatformBrowser,
+  ViewportScroller,
+} from '@angular/common';
+import { RouterModule, Router, NavigationEnd } from '@angular/router';
+import { filter, map } from 'rxjs/operators';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
@@ -114,8 +119,11 @@ export class StoreEcommerceLayoutComponent {
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
   private router = inject(Router);
+  private viewport_scroller = inject(ViewportScroller);
   private destroy_ref = inject(DestroyRef);
   private title_service = inject(Title); // Inject Title service
+  private platform_id = inject(PLATFORM_ID);
+  private readonly is_browser = isPlatformBrowser(this.platform_id);
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
@@ -216,6 +224,19 @@ export class StoreEcommerceLayoutComponent {
       .subscribe(() => {
         this.triggerWishlistAnimation();
       });
+
+    this.router.events
+      .pipe(
+        filter(
+          (event): event is NavigationEnd => event instanceof NavigationEnd,
+        ),
+        takeUntilDestroyed(this.destroy_ref),
+      )
+      .subscribe((event) => {
+        if (this.shouldScrollToTopOnNavigation(event.urlAfterRedirects)) {
+          this.scrollToTop();
+        }
+      });
   }
 
   private triggerCartAnimation(): void {
@@ -287,6 +308,19 @@ export class StoreEcommerceLayoutComponent {
 
   goToCart(): void {
     this.router.navigate(['/cart']);
+  }
+
+  private shouldScrollToTopOnNavigation(url: string): boolean {
+    const path = url.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
+    return path === '/cart' || path === '/checkout';
+  }
+
+  private scrollToTop(): void {
+    if (!this.is_browser) return;
+
+    requestAnimationFrame(() => {
+      this.viewport_scroller.scrollToPosition([0, 0]);
+    });
   }
 
   goToWishlist(): void {

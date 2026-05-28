@@ -1,0 +1,33 @@
+meta {
+  name: 04 Update Price Tier
+  type: http
+  seq: 4
+}
+
+patch {
+  url: http://{{url}}/store/price-tiers/{{priceTierId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "discount_percentage": 20.50,
+    "description": "Discount actualizado por Bruno (20.5%)",
+    "sort_order": 5
+  }
+}
+
+tests {
+  test("Status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("discount_percentage was updated", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    // Backend may return Decimal as string or number; compare loosely.
+    var dp = res.body.data.discount_percentage;
+    expect(Number(dp)).to.equal(20.5);
+  });
+}

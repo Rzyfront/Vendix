@@ -18,6 +18,7 @@ export class ProductsScrollComponent implements AfterViewInit {
   readonly initial_products = input<EcommerceProduct[]>([]);
   readonly show_header = input<boolean>(true);
   readonly show_see_all = input<boolean>(true);
+  readonly show_shipping_badge = input<boolean>(false);
   readonly class = input<string>('');
 
   readonly add_to_cart = output<EcommerceProduct>();

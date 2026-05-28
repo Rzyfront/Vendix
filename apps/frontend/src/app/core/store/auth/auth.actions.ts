@@ -286,6 +286,22 @@ export const setDefaultPanelUi = createAction(
   props<{ default_panel_ui: Record<string, Record<string, boolean>> }>(),
 );
 
+// Mark Panel UI key as seen (remove "Nuevo" badge)
+export const markPanelUiSeen = createAction(
+  '[Auth] Mark Panel UI Seen',
+  props<{ key: string; app_type: string }>(),
+);
+
+export const markPanelUiSeenSuccess = createAction(
+  '[Auth] Mark Panel UI Seen Success',
+  props<{ config: any }>(),
+);
+
+export const markPanelUiSeenFailure = createAction(
+  '[Auth] Mark Panel UI Seen Failure',
+  props<{ error: NormalizedApiPayload | string }>(),
+);
+
 // Update Store Settings Actions
 export const updateStoreSettings = createAction(
   '[Auth] Update Store Settings',

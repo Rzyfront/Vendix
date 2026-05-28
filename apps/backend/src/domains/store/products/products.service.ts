@@ -37,7 +37,10 @@ import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { ImageContext } from '@common/config/image-presets';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
-import { GenerateProductDescriptionDto } from './dto';
+import {
+  GenerateProductDescriptionDto,
+  GenerateProductImageEnhancementDto,
+} from './dto';
 import {
   resolvePosStockScope,
   ResolvedInventoryScope,
@@ -109,6 +112,65 @@ export class ProductsService {
     }
 
     return { description: response.content };
+  }
+
+  async enhanceImage(dto: GenerateProductImageEnhancementDto) {
+    const referenceImage = await this.resolveImageReference(dto.image_url);
+    const productTypeLabel =
+      dto.product_type === 'service' ? 'servicio' : 'producto';
+    const variables: Record<string, string> = {
+      requested_improvement: dto.prompt.trim(),
+      product_name: dto.product_name || '',
+      product_type: productTypeLabel,
+      description: dto.description || '',
+      context: JSON.stringify(dto.extra_context || {}),
+    };
+
+    const response = await this.ai_engine.runImage(
+      'product_image_enhancer',
+      variables,
+      {
+        action: 'edit',
+        inputFidelity: 'high',
+        quality: 'high',
+        outputFormat: 'png',
+        size: 'auto',
+        referenceImages: [{ url: referenceImage, detail: 'high' }],
+      },
+    );
+
+    if (!response.success || !response.imageBase64) {
+      throw new VendixHttpException(ErrorCodes.AI_REQUEST_001);
+    }
+
+    const imageUrl = response.imageBase64.startsWith('data:image/')
+      ? response.imageBase64
+      : `data:image/png;base64,${response.imageBase64}`;
+
+    return {
+      image_url: imageUrl,
+      revised_prompt: response.revisedPrompt,
+      model: response.model,
+    };
+  }
+
+  private async resolveImageReference(imageUrl: string): Promise<string> {
+    const trimmed = imageUrl.trim();
+    if (trimmed.startsWith('data:image/')) {
+      return trimmed;
+    }
+
+    const fetchableUrl =
+      trimmed.startsWith('http://') || trimmed.startsWith('https://')
+        ? trimmed
+        : await this.s3Service.signUrl(trimmed);
+
+    if (!fetchableUrl) {
+      throw new VendixHttpException(ErrorCodes.UPLOAD_REMOTE_URL_001);
+    }
+
+    const preview = await this.remoteImageService.fetchPreview(fetchableUrl);
+    return preview.dataUrl;
   }
 
   async getProductPromotions(productId: number) {
@@ -280,6 +342,7 @@ export class ProductsService {
         stock_quantity,
         stock_by_location,
         variants,
+        enabled_price_tier_ids,
         ...productData
       } = createProductDto;
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
@@ -307,6 +370,19 @@ export class ProductsService {
                 product_id: product.id,
                 category_id: categoryId,
               })),
+            });
+          }
+
+          if (
+            enabled_price_tier_ids !== undefined &&
+            enabled_price_tier_ids.length > 0
+          ) {
+            await prisma.product_price_tier_assignments.createMany({
+              data: enabled_price_tier_ids.map((priceTierId) => ({
+                product_id: product.id,
+                price_tier_id: priceTierId,
+              })),
+              skipDuplicates: true,
             });
           }
 
@@ -519,6 +595,9 @@ export class ProductsService {
                   tax_categories: true,
                 },
               },
+              product_price_tier_assignments: {
+                select: { price_tier_id: true },
+              },
               product_images: {
                 orderBy: { is_main: 'desc' },
               },
@@ -590,6 +669,10 @@ export class ProductsService {
             // Nuevos campos agregados para mayor claridad
             total_stock_available: totalStockAvailable,
             total_stock_reserved: totalStockReserved,
+            enabled_price_tier_ids:
+              completeProduct.product_price_tier_assignments?.map(
+                (assignment) => assignment.price_tier_id,
+              ) ?? [],
             stock_by_location: completeProduct.stock_levels.map((stock) => ({
               location_id: stock.inventory_locations.id,
               location_name: stock.inventory_locations.name,
@@ -723,6 +806,9 @@ export class ProductsService {
               },
             },
           },
+          product_price_tier_assignments: {
+            select: { price_tier_id: true },
+          },
           product_images: {
             where: { is_main: true },
             take: 1,
@@ -824,7 +910,9 @@ export class ProductsService {
                   ? Number(variant.profit_margin)
                   : null,
                 is_on_sale: variant.is_on_sale,
-                sale_price: variant.sale_price ? Number(variant.sale_price) : null,
+                sale_price: variant.sale_price
+                  ? Number(variant.sale_price)
+                  : null,
                 stock: variantStock,
                 stock_quantity: variantStock,
                 track_inventory_override: variant.track_inventory_override,
@@ -858,6 +946,7 @@ export class ProductsService {
             product_type: product.product_type,
             track_inventory: product.track_inventory,
             available_for_ecommerce: product.available_for_ecommerce,
+            is_featured: product.is_featured,
             allow_pos_price_override: product.allow_pos_price_override,
             requires_batch_tracking: product.requires_batch_tracking,
             requires_booking: product.requires_booking,
@@ -876,6 +965,16 @@ export class ProductsService {
             stock_levels: product.stock_levels,
             has_variants: product_variants.length > 0,
             product_variants,
+            // Multi-tarifa / empaque (fase 5) — POS necesita el flag para
+            // decidir si renderiza el selector de tarifa por línea.
+            has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+            units_per_package: (product as any).units_per_package,
+            package_consumes_multiple_stock: (product as any)
+              .package_consumes_multiple_stock,
+            enabled_price_tier_ids:
+              (product as any).product_price_tier_assignments?.map(
+                (assignment: any) => assignment.price_tier_id,
+              ) ?? [],
           };
         }),
       );
@@ -945,7 +1044,9 @@ export class ProductsService {
                 ? Number(variant.profit_margin)
                 : null,
               is_on_sale: variant.is_on_sale,
-              sale_price: variant.sale_price ? Number(variant.sale_price) : null,
+              sale_price: variant.sale_price
+                ? Number(variant.sale_price)
+                : null,
               stock_quantity: this.sumVariantStock(variant),
               track_inventory_override: variant.track_inventory_override,
               service_duration_minutes: variant.service_duration_minutes,
@@ -973,6 +1074,7 @@ export class ProductsService {
           product_type: product.product_type,
           track_inventory: product.track_inventory,
           available_for_ecommerce: product.available_for_ecommerce,
+          is_featured: product.is_featured,
           allow_pos_price_override: product.allow_pos_price_override,
           requires_batch_tracking: product.requires_batch_tracking,
           requires_booking: product.requires_booking,
@@ -1007,6 +1109,17 @@ export class ProductsService {
             has_variants: (mapped_variants?.length ?? 0) > 0,
             product_variants: mapped_variants,
           }),
+          // Multi-tarifa / empaque (fase 5) — exponer en el listado para que
+          // la grid del admin y POS conozcan el flag sin tener que hacer
+          // findOne adicional.
+          has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+          units_per_package: (product as any).units_per_package,
+          package_consumes_multiple_stock: (product as any)
+            .package_consumes_multiple_stock,
+          enabled_price_tier_ids:
+            (product as any).product_price_tier_assignments?.map(
+              (assignment: any) => assignment.price_tier_id,
+            ) ?? [],
         };
       }),
     );
@@ -1064,6 +1177,9 @@ export class ProductsService {
               },
             },
           },
+        },
+        product_price_tier_assignments: {
+          select: { price_tier_id: true },
         },
         product_images: {
           orderBy: { is_main: 'desc' },
@@ -1164,6 +1280,7 @@ export class ProductsService {
       product_type: product.product_type,
       track_inventory: product.track_inventory,
       available_for_ecommerce: product.available_for_ecommerce,
+      is_featured: product.is_featured,
       allow_pos_price_override: product.allow_pos_price_override,
       // Service-specific fields
       service_duration_minutes: product.service_duration_minutes,
@@ -1192,6 +1309,15 @@ export class ProductsService {
       send_preconsultation: product.send_preconsultation,
       consultation_template_id: product.consultation_template_id,
       preconsultation_template_id: product.preconsultation_template_id,
+      // Multi-tarifa / empaque (fase 5)
+      has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
+      units_per_package: (product as any).units_per_package,
+      package_consumes_multiple_stock: (product as any)
+        .package_consumes_multiple_stock,
+      enabled_price_tier_ids:
+        (product as any).product_price_tier_assignments?.map(
+          (assignment: any) => assignment.price_tier_id,
+        ) ?? [],
       image_url: await this.signProductImage(product),
       brand: product.brands,
       categories:
@@ -1403,6 +1529,7 @@ export class ProductsService {
         variants,
         stock_transfer_mode,
         variant_removal_stock_mode,
+        enabled_price_tier_ids,
         price, // Exclude as it's not in DB
         ...productData
       } = updateProductDto as UpdateProductDto & { price?: number };
@@ -1438,6 +1565,22 @@ export class ProductsService {
                   product_id: id,
                   category_id: categoryId,
                 })),
+              });
+            }
+          }
+
+          if (enabled_price_tier_ids !== undefined) {
+            await prisma.product_price_tier_assignments.deleteMany({
+              where: { product_id: id },
+            });
+
+            if (enabled_price_tier_ids.length > 0) {
+              await prisma.product_price_tier_assignments.createMany({
+                data: enabled_price_tier_ids.map((priceTierId) => ({
+                  product_id: id,
+                  price_tier_id: priceTierId,
+                })),
+                skipDuplicates: true,
               });
             }
           }
@@ -2155,15 +2298,15 @@ export class ProductsService {
       });
 
       // Calculate stats
-      const total_products = products.length;
       const active_products = products.filter(
-        (p) => p.state === 'active',
+        (p) => p.state === ProductState.ACTIVE,
       ).length;
       const inactive_products = products.filter(
-        (p) => p.state === 'inactive',
+        (p) => p.state === ProductState.INACTIVE,
       ).length;
+      const total_products = active_products + inactive_products;
       const archived_products = products.filter(
-        (p) => p.state === 'archived',
+        (p) => p.state === ProductState.ARCHIVED,
       ).length;
 
       // Stock calculations (simplified - using stock_quantity field)
@@ -2325,8 +2468,7 @@ export class ProductsService {
       qr_data_url: updatedProduct.online_purchase_qr_code,
       online_purchase_domain_id: updatedProduct.online_purchase_domain_id,
       domain_hostname: updatedProduct.online_purchase_domain?.hostname ?? null,
-      online_purchase_generated_at:
-        updatedProduct.online_purchase_generated_at,
+      online_purchase_generated_at: updatedProduct.online_purchase_generated_at,
       online_purchase_ready: status.ready,
       online_purchase_status_reason: status.reason,
       online_purchase_status_message: this.getOnlinePurchaseStatusMessage(
@@ -2482,15 +2624,17 @@ export class ProductsService {
           { generateThumbnail: true, context: ImageContext.PRODUCT },
         );
         imageUrl = result.key;
-      } else if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+      } else if (
+        imageUrl.startsWith('http://') ||
+        imageUrl.startsWith('https://')
+      ) {
         const sanitizedKey = extractS3KeyFromUrl(imageUrl);
 
         if (sanitizedKey && sanitizedKey !== imageUrl) {
           imageUrl = sanitizedKey;
         } else {
-          const remoteImage = await this.remoteImageService.fetchPreview(
-            imageUrl,
-          );
+          const remoteImage =
+            await this.remoteImageService.fetchPreview(imageUrl);
           const result = await this.s3Service.uploadBase64(
             remoteImage.dataUrl,
             `${basePath}/${productSlug}-remote-${Date.now()}-${index}`,

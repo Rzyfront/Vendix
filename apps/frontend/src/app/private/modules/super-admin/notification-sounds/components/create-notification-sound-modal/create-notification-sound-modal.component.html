@@ -1,0 +1,74 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  size="md"
+  title="Nuevo sonido de notificación"
+  subtitle="Sube un archivo .mp3 para el catálogo global"
+>
+  <form [formGroup]="form" class="space-y-4">
+    <!-- Nombre -->
+    <app-input
+      formControlName="name"
+      label="Nombre"
+      placeholder="Ej: Campana"
+      [required]="true"
+      [control]="form.get('name')"
+    ></app-input>
+
+    <!-- Orden -->
+    <div class="space-y-1">
+      <label class="block text-sm font-medium text-text-primary">
+        Orden
+      </label>
+      <input
+        type="number"
+        formControlName="sort_order"
+        min="0"
+        class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+        placeholder="0"
+      />
+      <p class="text-xs text-text-secondary">
+        Determina el orden en el listado (menor primero).
+      </p>
+    </div>
+
+    <!-- Archivo de audio -->
+    <div class="space-y-2">
+      <label class="block text-sm font-medium text-text-primary">
+        Archivo de audio <span class="text-red-500">*</span>
+      </label>
+      <app-file-upload-dropzone
+        label="Subir audio"
+        helperText="Solo .mp3 (audio/mpeg). Máximo 300 KB."
+        accept="audio/mpeg"
+        icon="upload-cloud"
+        [disabled]="isSubmitting()"
+        (fileSelected)="onFileSelected($event)"
+        (fileRemoved)="onFileRemoved()"
+      ></app-file-upload-dropzone>
+      @if (fileError()) {
+        <p class="text-sm text-red-500">{{ fileError() }}</p>
+      }
+    </div>
+  </form>
+
+  <div slot="footer" class="flex justify-between items-center">
+    <div class="text-sm text-text-secondary">
+      <span class="text-red-500">*</span> Campos obligatorios
+    </div>
+    <div class="flex gap-3">
+      <app-button variant="outline" (clicked)="onCancel()">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        (clicked)="onSubmit()"
+        [disabled]="form.invalid || !selectedFile() || !!fileError() || isSubmitting()"
+        [loading]="isSubmitting()"
+      >
+        Crear sonido
+      </app-button>
+    </div>
+  </div>
+</app-modal>

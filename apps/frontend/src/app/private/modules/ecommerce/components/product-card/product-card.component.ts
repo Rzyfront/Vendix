@@ -11,7 +11,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
   standalone: true,
   imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
   template: `
-    <article class="product-card" (click)="onQuickView($event)">
+    <article class="product-card" (click)="onCardClick($event)">
       <div class="product-image">
         @if (product().image_url) {
           <img [src]="product().image_url" [alt]="product().name" loading="lazy">
@@ -45,7 +45,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         }
 
         <!-- Variant Badge -->
-        @if (product().variant_count && product().variant_count! > 0) {
+        @if (show_variants() && product().variant_count && product().variant_count! > 0) {
           <div class="variant-badge">
             {{ product().variant_count }} variantes
           </div>
@@ -69,21 +69,24 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             <app-icon slot="icon" name="share" [size]="18"></app-icon>
           </app-button>
         </div>
+
+        @if (!isUnavailable()) {
+          <button
+            class="quick-cart-btn"
+            type="button"
+            [attr.aria-label]="quickActionLabel()"
+            [title]="quickActionLabel()"
+            (click)="onAddToCart($event)"
+          >
+            <app-icon [name]="quickActionIcon()" [size]="17"></app-icon>
+          </button>
+        }
       </div>
       <div class="product-info">
         @if (product().brand) {
           <span class="product-brand">{{ product().brand?.name }}</span>
         }
         <h3 class="product-name">{{ product().name }}</h3>
-        <div class="product-price">
-          <span class="price">{{ product().final_price | currency }}</span>
-          @if (product().pricing_type === 'weight') {
-            <span class="weight-unit">/kg</span>
-          }
-          @if (product().is_on_sale) {
-            <span class="original-price">{{ product().base_price | currency }}</span>
-          }
-        </div>
         @if (product().pricing_type === 'weight') {
           <div class="weight-indicator">
             <app-icon name="scale" [size]="12"></app-icon>
@@ -106,50 +109,61 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             }
           </div>
         }
-      </div>
-      <div class="actions-container">
-        <app-button
-          variant="primary"
-          size="sm"
-          customClasses="buy-btn"
-          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
-          (clicked)="onBuyNow($event)">
-          {{ product().product_type === 'service' ? 'Agendar' : 'Comprar' }}
-        </app-button>
-        <app-button
-          variant="secondary"
-          size="sm"
-          customClasses="add-to-cart-btn"
-          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
-          [title]="product().requires_booking && product().product_type === 'service' ? 'Agendar' : 'Agregar al carrito'"
-          (clicked)="onAddToCart($event)">
-          <app-icon slot="icon" [name]="product().requires_booking && product().product_type === 'service' ? 'calendar-check' : 'shopping-cart'" [size]="16"></app-icon>
-        </app-button>
+        <div class="product-bottom">
+          @if (show_shipping_badge()) {
+            <div class="shipping-badge">
+              <app-icon name="truck" [size]="12"></app-icon>
+              <span>Envío disponible</span>
+            </div>
+          }
+          <div class="product-price">
+            <span class="price" [class.sale-price]="hasActiveDiscount()">
+              {{ product().final_price | currency }}
+            </span>
+            @if (product().pricing_type === 'weight') {
+              <span class="weight-unit">/kg</span>
+            }
+            @if (hasActiveDiscount()) {
+              <span class="original-price">{{ product().base_price | currency }}</span>
+              <span class="discount-badge">-{{ discountPercentage() }}% OFF</span>
+            }
+          </div>
+        </div>
       </div>
     </article>
   `,
   styles: [`
     :host {
       display: block;
+      height: 100%;
       min-width: 0;
     }
 
-    /* iOS-style Product Card */
     .product-card {
-      background: var(--color-surface);
-      border-radius: 1rem;
-      border: 1px solid var(--color-border);
+      position: relative;
+      height: 100%;
+      background-color: var(--color-surface);
+      border-radius: 8px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
       overflow: hidden;
       cursor: pointer;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+      transition:
+        border-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+        transform 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       display: flex;
       flex-direction: column;
+      gap: 0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
       -webkit-tap-highlight-color: transparent;
 
-      &:hover {
-        box-shadow: 0 8px 25px -8px rgba(0, 0, 0, 0.15);
+      &:hover,
+      &:focus-within {
+        background-color: var(--color-background);
+        box-shadow: 0 18px 38px -28px rgba(15, 23, 42, 0.5);
         transform: translateY(-2px);
-        border-color: var(--color-primary);
+        border-color: rgba(148, 163, 184, 0.34);
       }
 
       &:active {
@@ -171,11 +185,16 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       aspect-ratio: 1;
       background: var(--color-background);
       overflow: hidden;
+      border-radius: 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 
       img {
+        display: block;
         width: 100%;
         height: 100%;
         object-fit: cover;
+        object-position: center;
+        transition: transform 0.35s ease;
       }
 
       .no-image {
@@ -185,58 +204,119 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         align-items: center;
         justify-content: center;
         color: var(--color-text-muted);
+        background: var(--color-background);
         font-size: 3rem;
       }
     }
 
-    /* Stock Badge positioning */
+    .quick-cart-btn {
+      position: absolute;
+      right: 0.6rem;
+      bottom: 0.6rem;
+      z-index: 2;
+      width: 36px;
+      height: 36px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--color-text-primary);
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(148, 163, 184, 0.24);
+      border-radius: 999px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.42);
+      cursor: pointer;
+      opacity: 0;
+      transform: translateY(4px);
+      transition:
+        opacity 0.15s ease,
+        background-color 0.15s ease,
+        border-color 0.15s ease,
+        color 0.15s ease,
+        transform 0.15s ease;
+
+      &:hover {
+        color: var(--color-primary);
+        background: #ffffff;
+        border-color: rgba(var(--color-primary-rgb, 59, 130, 246), 0.32);
+        transform: translateY(-1px) scale(1.02);
+      }
+
+      &:focus-visible {
+        outline: 2px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.42);
+        outline-offset: 2px;
+      }
+    }
+
+    .product-card:hover .product-image img {
+      transform: scale(1.025);
+    }
+
+    .product-card:hover .quick-cart-btn,
+    .quick-cart-btn:focus-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     .stock-badge-pos {
       position: absolute;
-      top: 0.5rem;
-      left: 0.5rem;
+      top: 0.55rem;
+      left: 0.55rem;
       z-index: 1;
     }
 
-    /* Variant Badge */
     .variant-badge {
       position: absolute;
-      bottom: 0.5rem;
-      left: 0.5rem;
-      padding: 0.25rem 0.5rem;
-      border-radius: var(--radius-md);
-      font-size: var(--fs-xs);
+      bottom: 0.58rem;
+      left: 0.58rem;
+      padding: 0.24rem 0.48rem;
+      border-radius: 999px;
+      font-size: 10px;
       font-weight: var(--fw-semibold);
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
-      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.8);
-      color: white;
-      border: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.6);
+      background: rgba(255, 255, 255, 0.88);
+      color: var(--color-text-primary);
+      border: 1px solid rgba(148, 163, 184, 0.24);
       z-index: 1;
     }
 
-    /* Card action buttons column */
     .card-actions {
       position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
+      top: 0.55rem;
+      right: 0.55rem;
       display: flex;
       flex-direction: column;
-      gap: 0.5rem;
+      gap: 0.38rem;
       z-index: 1;
+      opacity: 0;
+      transform: translateY(-4px);
+      transition: opacity var(--transition-fast), transform var(--transition-fast);
     }
 
-    /* Circular action buttons */
+    .product-card:hover .card-actions,
+    .card-actions:focus-within {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
     :host ::ng-deep .action-btn {
-      width: 36px !important;
-      height: 36px !important;
-      min-width: 36px !important;
+      width: 34px !important;
+      height: 34px !important;
+      min-width: 34px !important;
       padding: 0 !important;
       border-radius: 50% !important;
-      background: var(--color-surface) !important;
-      box-shadow: var(--shadow-sm);
+      color: var(--color-text-secondary) !important;
+      background: rgba(255, 255, 255, 0.88) !important;
+      border: 1px solid rgba(148, 163, 184, 0.22) !important;
+      box-shadow: 0 10px 22px -20px rgba(15, 23, 42, 0.45);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
 
       &:hover {
-        background: var(--color-background) !important;
+        background: #ffffff !important;
+        color: var(--color-primary) !important;
       }
 
       &.active {
@@ -246,47 +326,77 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     }
 
     .product-info {
-      padding: 1rem;
+      padding: 0.82rem 0.85rem 0.9rem;
       flex: 1;
+      min-height: 0;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.24rem;
     }
 
     .product-brand {
       font-size: var(--fs-xs);
       color: var(--color-text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0;
+      font-weight: var(--fw-semibold);
     }
 
     .product-name {
       font-size: var(--fs-sm);
-      font-weight: var(--fw-medium);
+      font-weight: 700;
       color: var(--color-text-primary);
       margin: 0;
+      line-height: 1.28;
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
 
-    .product-price {
-      margin-top: 0.5rem;
+    .product-bottom {
+      margin-top: auto;
+      padding-top: 0.28rem;
       display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.14rem;
+    }
+
+    .product-price {
+      display: flex;
+      flex-wrap: wrap;
       align-items: baseline;
-      gap: 0.5rem;
+      gap: 0.35rem;
 
       .price {
-        font-size: var(--fs-lg);
+        font-size: var(--fs-md);
         font-weight: var(--fw-bold);
         color: var(--color-text-primary);
+
+        &.sale-price {
+          color: var(--color-success);
+        }
       }
 
       .original-price {
         font-size: var(--fs-xs);
         color: var(--color-text-muted);
         text-decoration: line-through;
+      }
+
+      .discount-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0.12rem 0.36rem;
+        border-radius: 999px;
+        background: var(--color-success-light);
+        color: var(--color-success);
+        font-size: 10px;
+        font-weight: var(--fw-bold);
+        line-height: 1;
+        white-space: nowrap;
       }
 
       .weight-unit {
@@ -308,6 +418,27 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       font-weight: 500;
     }
 
+    .shipping-badge {
+      display: inline-flex;
+      align-items: center;
+      align-self: flex-start;
+      gap: 0.25rem;
+      max-width: 100%;
+      padding: 0.18rem 0.46rem;
+      border-radius: 999px;
+      background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+      color: var(--color-primary);
+      font-size: 10.5px;
+      font-weight: var(--fw-semibold);
+      line-height: 1.1;
+
+      span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    }
+
     .service-indicators {
       display: flex;
       flex-wrap: wrap;
@@ -326,51 +457,10 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       font-weight: 500;
     }
 
-    .actions-container {
-      margin: 0 1rem 1rem;
-      display: flex;
-      gap: 0.5rem;
-
-      /* Botón Comprar (primer app-button) - ocupa todo el espacio */
-      app-button:first-child {
-        flex: 1;
-        min-width: 0;
-      }
-
-      /* Botón Carrito (segundo app-button) - cuadrado fijo */
-      app-button:last-child {
-        flex-shrink: 0;
-      }
-    }
-
-    /* Botón Comprar - misma altura que carrito */
-    :host ::ng-deep .buy-btn {
-      width: 100% !important;
-      height: 32px !important;
-
-      @media (min-width: 640px) {
-        height: 36px !important;
-      }
-    }
-
-    /* Botón Carrito - cuadrado simétrico */
-    :host ::ng-deep .add-to-cart-btn {
-      width: 32px !important;
-      min-width: 32px !important;
-      height: 32px !important;
-      padding: 0 !important;
-
-      @media (min-width: 640px) {
-        width: 36px !important;
-        min-width: 36px !important;
-        height: 36px !important;
-      }
-    }
-
     /* Mobile compact styles */
     @media (max-width: 480px) {
       .product-card {
-        border-radius: 0.75rem;
+        border-radius: 8px;
       }
 
       .variant-badge {
@@ -379,15 +469,17 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .card-actions {
-        top: 0.4rem;
-        right: 0.4rem;
+        top: 0.45rem;
+        right: 0.45rem;
         gap: 0.3rem;
+        opacity: 1;
+        transform: none;
       }
 
       :host ::ng-deep .action-btn {
-        width: 28px !important;
-        height: 28px !important;
-        min-width: 28px !important;
+        width: 34px !important;
+        height: 34px !important;
+        min-width: 34px !important;
 
         app-icon {
           font-size: 14px;
@@ -395,8 +487,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-info {
-        padding: 0.5rem 0.6rem;
-        gap: 0.15rem;
+        padding: 0.65rem 0.65rem 0.7rem;
+        gap: 0.16rem;
       }
 
       .product-brand {
@@ -404,33 +496,36 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
       }
 
       .product-name {
-        font-size: 12px;
-        -webkit-line-clamp: 1;
+        font-size: 13px;
+        -webkit-line-clamp: 2;
       }
 
       .product-price .price {
         font-size: var(--fs-sm);
       }
 
-      .actions-container {
-        margin: 0 0.5rem 0.5rem;
-        gap: 0.35rem;
+      .quick-cart-btn {
+        width: 34px !important;
+        height: 34px !important;
+        opacity: 1;
+        transform: none;
       }
+    }
 
-      :host ::ng-deep .buy-btn {
-        height: 28px !important;
-      }
-
-      :host ::ng-deep .add-to-cart-btn {
-        width: 28px !important;
-        min-width: 28px !important;
-        height: 28px !important;
+    @media (prefers-reduced-motion: reduce) {
+      .product-card,
+      .product-image img,
+      .quick-cart-btn,
+      .card-actions {
+        transition: none;
       }
     }
   `],
 })
 export class ProductCardComponent {
   readonly product = input.required<EcommerceProduct>();
+  readonly show_variants = input<boolean>(true);
+  readonly show_shipping_badge = input<boolean>(false);
   readonly in_wishlist = input<boolean>(false);
   readonly add_to_cart = output<EcommerceProduct>();
   readonly toggle_wishlist = output<EcommerceProduct>();
@@ -449,14 +544,42 @@ export class ProductCardComponent {
     return !!this.product().variant_count && this.product().variant_count! > 0;
   }
 
-  onQuickView(event: Event): void {
+  hasActiveDiscount(): boolean {
+    const product = this.product();
+    if (!product.is_on_sale) return false;
+
+    const basePrice = Number(product.base_price) || 0;
+    const promoPrice = this.promoPrice();
+
+    return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
+  }
+
+  discountPercentage(): number {
+    const basePrice = Number(this.product().base_price) || 0;
+    const promoPrice = this.promoPrice();
+
+    if (basePrice <= 0 || promoPrice <= 0 || promoPrice >= basePrice) return 0;
+
+    return Math.round(((basePrice - promoPrice) / basePrice) * 100);
+  }
+
+  private promoPrice(): number {
+    const product = this.product();
+    const salePrice = Number(product.sale_price) || 0;
+    const finalPrice = Number(product.final_price) || 0;
+
+    if (salePrice > 0) return salePrice;
+    return finalPrice;
+  }
+
+  onCardClick(event: Event): void {
     // Let clicks on buttons/links propagate normally to their handlers
     const target = event.target as HTMLElement;
     if (target.closest('button') || target.closest('a')) {
       return;
     }
     event.preventDefault();
-    this.quick_view.emit(this.product());
+    this.router.navigate(['/products', this.product().slug]);
   }
 
   onBuyNow(event: Event): void {
@@ -467,7 +590,7 @@ export class ProductCardComponent {
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product().slug]);
+      this.router.navigate(['/products', this.product().slug]);
       return;
     }
     this.add_to_cart.emit(this.product());
@@ -482,10 +605,34 @@ export class ProductCardComponent {
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product().slug]);
+      this.router.navigate(['/products', this.product().slug]);
       return;
     }
     this.add_to_cart.emit(this.product());
+  }
+
+  isUnavailable(): boolean {
+    return (
+      this.product().product_type !== 'service' &&
+      this.product().track_inventory !== false &&
+      this.product().stock_quantity === 0
+    );
+  }
+
+  quickActionIcon(): string {
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      return 'calendar-check';
+    }
+    if (this.hasVariants) return 'eye';
+    return 'shopping-cart';
+  }
+
+  quickActionLabel(): string {
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      return 'Agendar';
+    }
+    if (this.hasVariants) return 'Ver opciones';
+    return 'Agregar al carrito';
   }
 
   onWishlistClick(event: Event): void {

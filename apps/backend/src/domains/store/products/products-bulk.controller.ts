@@ -83,13 +83,14 @@ export class ProductsBulkController {
   @Get('template/download')
   @Permissions('store:products:bulk:template') // Asumiendo que existe este permiso, o store:products:create
   async downloadTemplate(
-    @Query('type') type: 'quick' | 'complete' = 'quick',
+    @Query('type') type: 'products' | 'services' = 'products',
     @Res() res: Response,
   ) {
     try {
       const buffer = await this.productsBulkService.generateExcelTemplate(type);
+      const filenameType = type === 'services' ? 'servicios' : 'productos';
 
-      const filename = `plantilla_productos_${type}_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const filename = `plantilla_${filenameType}_${new Date().toISOString().split('T')[0]}.xlsx`;
 
       res.set({
         'Content-Type':

@@ -11,7 +11,10 @@ import {
   ParseIntPipe,
   HttpStatus,
   HttpCode,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { BrandsService } from './brands.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -96,6 +99,39 @@ export class BrandsController {
     } catch (error) {
       return this.responseService.error(
         'Error al obtener marcas de la tienda',
+        error.message,
+      );
+    }
+  }
+
+  @Post('upload-logo')
+  @Permissions('store:brands:update')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadLogo(@UploadedFile() file: Express.Multer.File) {
+    try {
+      if (!file) {
+        return this.responseService.error(
+          'No se proporcionó archivo',
+          'File is required',
+        );
+      }
+
+      if (!file.mimetype.startsWith('image/')) {
+        return this.responseService.error(
+          'Tipo de archivo inválido',
+          'Only image files are allowed',
+        );
+      }
+
+      const result = await this.brandsService.uploadBrandLogo(
+        file.buffer,
+        `brand-${Date.now()}.webp`,
+      );
+
+      return this.responseService.created(result, 'Logo subido exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        'Error al subir el logo',
         error.message,
       );
     }

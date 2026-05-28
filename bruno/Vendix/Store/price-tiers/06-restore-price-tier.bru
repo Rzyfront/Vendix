@@ -1,0 +1,22 @@
+meta {
+  name: 06 Restore Price Tier
+  type: http
+  seq: 6
+}
+
+post {
+  url: http://{{url}}/store/price-tiers/{{priceTierId}}/restore
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Status is 200 or 201", function () {
+    expect([200, 201]).to.include(res.status);
+  });
+
+  test("Tier is_active is true again", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('is_active', true);
+  });
+}

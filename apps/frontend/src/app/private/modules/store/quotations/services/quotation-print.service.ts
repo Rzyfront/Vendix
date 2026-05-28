@@ -70,9 +70,10 @@ export class QuotationPrintService {
       <tr>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${i + 1}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
-          ${item.product_name}
-          ${item.variant_sku ? `<br><span style="font-size: 11px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
-        </td>
+	          ${item.product_name}
+	          ${item.variant_sku ? `<br><span style="font-size: 11px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
+	          ${item.applied_price_tier_name_snapshot ? `<br><span style="font-size: 11px; color: #92400e;">Tarifa: ${item.applied_price_tier_name_snapshot}</span>` : ''}
+	        </td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${item.quantity}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${this.currencyService.format(Number(item.unit_price))}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${this.currencyService.format(Number(item.total_price))}</td>

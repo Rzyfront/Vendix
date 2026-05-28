@@ -100,14 +100,24 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
                 <div class="flex justify-between text-sm">
                   <div class="flex flex-col">
                     <span class="font-medium text-text-primary">{{ item.name }}</span>
-                    <span class="text-xs text-text-secondary">
-                      @if (item.is_weight_product) {
-                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
-                      } @else {
-                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
-                      }
-                    </span>
-                  </div>
+	                    <span class="text-xs text-text-secondary">
+	                      @if (item.is_weight_product) {
+	                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
+	                      } @else {
+	                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
+	                      }
+	                    </span>
+	                    @if (item.appliedPriceTierName) {
+	                      <span class="mt-1 inline-flex w-fit rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+	                        Tarifa: {{ item.appliedPriceTierName }}
+	                      </span>
+	                    }
+	                    @if (item.isPackageUnit && item.unitsPerPackage) {
+	                      <span class="mt-1 inline-flex w-fit rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+	                        x {{ item.unitsPerPackage }} unid/empaque
+	                      </span>
+	                    }
+	                  </div>
                   <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
                 </div>
               }
@@ -353,19 +363,32 @@ effect(() => {
       const quantity = Number(item.quantity || 0);
       const totalPrice = Number(item.total_price || item.totalPrice || 0);
       const tax = Number(item.tax_amount || item.tax || 0) || (totalPrice - (unitPrice * quantity));
-      const weight = Number(item.weight || 0);
-      const weight_unit = item.weight_unit || 'kg';
-      const is_weight_product = weight > 0;
-      return {
-        name: item.product_name || item.name || 'Producto',
-        quantity,
-        unitPrice,
-        totalPrice,
-        tax,
-        weight,
-        weight_unit,
-        is_weight_product };
-    });
+	      const weight = Number(item.weight || 0);
+	      const weight_unit = item.weight_unit || 'kg';
+	      const is_weight_product = weight > 0;
+	      const stockUnitsConsumed = Number(item.stock_units_consumed || 0);
+	      const unitsPerPackage =
+	        item.units_per_package != null
+	          ? Number(item.units_per_package)
+	          : stockUnitsConsumed > 0 && quantity > 0 && stockUnitsConsumed !== quantity
+	            ? stockUnitsConsumed / quantity
+	            : null;
+	      return {
+	        name: item.product_name || item.name || 'Producto',
+	        quantity,
+	        unitPrice,
+	        totalPrice,
+	        tax,
+	        weight,
+	        weight_unit,
+	        is_weight_product,
+	        appliedPriceTierName:
+	          item.applied_price_tier_name_snapshot ||
+	          item.applied_price_tier_name ||
+	          null,
+	        isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
+	        unitsPerPackage };
+	    });
 
     this.orderSubtotal = Number(data.subtotal || 0);
     this.orderDiscount = Number(data.discount_amount || data.discount || 0);
@@ -404,9 +427,12 @@ effect(() => {
         unitPrice: item.unitPrice,
         totalPrice: item.totalPrice,
         discount: 0,
-        tax: item.tax,
-        weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined })),
+	        tax: item.tax,
+	        weight: item.weight || undefined,
+	        weight_unit: item.weight_unit || undefined,
+	        appliedPriceTierName: item.appliedPriceTierName,
+	        isPackageUnit: item.isPackageUnit,
+	        unitsPerPackage: item.unitsPerPackage })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,
       discount: this.orderDiscount,

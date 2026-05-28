@@ -12,6 +12,7 @@ export interface EcommerceProduct {
   base_price: number;
   sale_price?: number;
   is_on_sale?: boolean;
+  is_featured?: boolean;
   sku: string | null;
   stock_quantity: number | null;
   track_inventory?: boolean;
@@ -79,14 +80,23 @@ export interface CatalogQuery {
   search?: string;
   ids?: string;
   category_id?: number;
+  category_ids?: string;
   brand_id?: number;
+  brand_ids?: string;
   min_price?: number;
   max_price?: number;
-  sort_by?: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest';
+  sort_by?:
+    | 'name'
+    | 'price_asc'
+    | 'price_desc'
+    | 'newest'
+    | 'oldest'
+    | 'best_selling';
   page?: number;
   limit?: number;
   created_after?: string;
   has_discount?: boolean;
+  is_featured?: boolean;
   product_type?: 'physical' | 'service';
 }
 
@@ -129,8 +139,11 @@ export class CatalogService {
     if (query.ids) params = params.set('ids', query.ids);
     if (query.category_id)
       params = params.set('category_id', query.category_id.toString());
+    if (query.category_ids)
+      params = params.set('category_ids', query.category_ids);
     if (query.brand_id)
       params = params.set('brand_id', query.brand_id.toString());
+    if (query.brand_ids) params = params.set('brand_ids', query.brand_ids);
     if (query.min_price)
       params = params.set('min_price', query.min_price.toString());
     if (query.max_price)
@@ -142,6 +155,8 @@ export class CatalogService {
       params = params.set('created_after', query.created_after);
     if (query.has_discount !== undefined)
       params = params.set('has_discount', query.has_discount.toString());
+    if (query.is_featured !== undefined)
+      params = params.set('is_featured', query.is_featured.toString());
     if (query.product_type)
       params = params.set('product_type', query.product_type);
 

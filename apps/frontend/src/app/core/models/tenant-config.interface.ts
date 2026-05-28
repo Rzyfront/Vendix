@@ -19,6 +19,21 @@ export interface TenantConfig {
     enable?: boolean;
     photos?: any[];
   };
+  home_sections?: {
+    slider?: TenantHomeSectionConfig;
+    welcome?: TenantHomeSectionConfig;
+    categories?: TenantHomeSectionConfig;
+    brands?: TenantHomeSectionConfig;
+    featured_products?: TenantHomeSectionConfig;
+  };
+}
+
+export interface TenantHomeSectionConfig {
+  enabled?: boolean;
+  title?: string;
+  subtitle?: string;
+  limit?: number;
+  sort_order?: number;
 }
 
 export interface OrganizationConfig {

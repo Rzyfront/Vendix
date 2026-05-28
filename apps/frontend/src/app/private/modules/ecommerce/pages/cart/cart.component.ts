@@ -82,6 +82,17 @@ export class CartComponent implements OnInit {
     return !!config?.customConfig?.ecommerce?.checkout?.require_registration;
   }
 
+  relatedProductsEnabled(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return (
+      config?.customConfig?.ecommerce?.catalog?.show_related_products === true
+    );
+  }
+
+  maxQuantityPerItem(): number | null {
+    return this.cart_service.getMaxQuantityPerItem();
+  }
+
   private catalogService = inject(CatalogService);
   private checkoutService = inject(CheckoutService);
   private tenantFacade = inject(TenantFacade);
@@ -111,7 +122,9 @@ export class CartComponent implements OnInit {
         }
       });
 
-    this.loadRecommendations();
+    if (this.relatedProductsEnabled()) {
+      this.loadRecommendations();
+    }
   }
 
   private extractErrorMessage(err: any): string {
@@ -178,6 +191,13 @@ export class CartComponent implements OnInit {
     }
 
     if (new_quantity === item.quantity) return;
+    const maxQuantity = this.maxQuantityPerItem();
+    if (maxQuantity && new_quantity > maxQuantity) {
+      this.toast.warning(
+        `Puedes agregar máximo ${maxQuantity} unidades por producto.`,
+      );
+      return;
+    }
 
     this.updating_item_id.set(item.id);
 

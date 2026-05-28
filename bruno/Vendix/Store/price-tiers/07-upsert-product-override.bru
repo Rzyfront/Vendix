@@ -1,0 +1,30 @@
+meta {
+  name: 07 Upsert Product Override
+  type: http
+  seq: 7
+}
+
+put {
+  url: http://{{url}}/store/price-tiers/products/{{ecommerce_product_id}}/overrides/{{priceTierId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "override_price": 49999.00
+  }
+}
+
+tests {
+  test("Status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Override persisted", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('product_id');
+    expect(res.body.data).to.have.property('price_tier_id');
+    expect(Number(res.body.data.override_price)).to.equal(49999);
+  });
+}

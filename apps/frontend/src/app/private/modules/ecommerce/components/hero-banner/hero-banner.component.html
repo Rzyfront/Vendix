@@ -1,7 +1,12 @@
 <section
   class="hero-banner"
+  [class.is-clickable]="hasSlideAction()"
   [class]="class()"
   [style.background-color]="banner_config.background_color"
+  [attr.role]="hasSlideAction() ? 'link' : null"
+  [attr.tabindex]="hasSlideAction() ? 0 : null"
+  (click)="onBannerClick($event)"
+  (keydown.enter)="onBannerKeydown($event)"
 >
   @if (banner_config.image_url) {
     <div
@@ -16,21 +21,29 @@
     <div class="hero-overlay"></div>
   }
 
-  <div class="hero-content" [style.color]="banner_config.text_color">
-    <h1 class="hero-title">{{ banner_config.title }}</h1>
-    <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
-    <button class="hero-cta" (click)="onCtaClick()">
-      {{ banner_config.cta_text }}
-      <i class="pi pi-arrow-right"></i>
-    </button>
-  </div>
+  @if (hasHeroContent()) {
+    <div class="hero-content" [style.color]="banner_config.text_color">
+      @if (banner_config.title) {
+        <h1 class="hero-title">{{ banner_config.title }}</h1>
+      }
+      @if (banner_config.subtitle) {
+        <p class="hero-subtitle">{{ banner_config.subtitle }}</p>
+      }
+      @if (hasCta()) {
+        <button class="hero-cta" type="button" (click)="onCtaClick($event)">
+          {{ banner_config.cta_text }}
+          <i class="pi pi-arrow-right"></i>
+        </button>
+      }
+    </div>
+  }
 
   @if (slides().length > 1) {
     <div class="slider-indicators">
       @for (slide of slides(); track $index) {
         <button
           class="indicator"
-          [class.active]="$index === current_slide_index"
+          [class.active]="$index === current_slide_index()"
           (click)="setSlide($index)"
         ></button>
       }

@@ -244,7 +244,35 @@ export class CreateProductDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(2, {
+    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
+  })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  package_consumes_multiple_stock?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  enabled_price_tier_ids?: number[];
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -484,7 +512,35 @@ export class UpdateProductDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(2, {
+    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
+  })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  package_consumes_multiple_stock?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  enabled_price_tier_ids?: number[];
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -885,6 +941,11 @@ export class UpdateProductVariantDto {
   available_for_ecommerce?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
@@ -949,6 +1010,11 @@ export class UpdateProductWithVariantsDto {
   @IsBoolean()
   @Type(() => Boolean)
   available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -1165,6 +1231,11 @@ export class UpdateVariantWithStockDto {
   available_for_ecommerce?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_featured?: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -1221,6 +1292,9 @@ export class BulkProductItemDto {
   category_ids?: (number | string)[] | string;
 
   @IsOptional()
+  tax_category_ids?: (number | string)[] | string;
+
+  @IsOptional()
   @IsNumber({}, { message: 'Stock quantity must be a number' })
   @Min(0, { message: 'Stock quantity must be positive' })
   stock_quantity?: number;
@@ -1247,6 +1321,27 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   available_for_ecommerce?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_featured?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  allow_pos_price_override?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  has_multiple_price_tiers?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(2, { message: 'Units per package must be at least 2' })
+  units_per_package?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsArray()
@@ -1307,6 +1402,22 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_consultation?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  send_preconsultation?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  consultation_template_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  preconsultation_template_id?: number;
 
   @IsOptional()
   @IsNumber()
@@ -1402,6 +1513,36 @@ export class GenerateProductDescriptionDto {
   @IsOptional()
   @IsString()
   sku?: string;
+
+  @IsOptional()
+  @IsObject()
+  extra_context?: Record<string, any>;
+}
+
+export class GenerateProductImageEnhancementDto {
+  @IsString()
+  @IsNotEmpty()
+  image_url: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1200)
+  prompt: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  product_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['physical', 'service'])
+  product_type?: 'physical' | 'service';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
 
   @IsOptional()
   @IsObject()

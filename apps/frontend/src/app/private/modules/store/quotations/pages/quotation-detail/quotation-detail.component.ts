@@ -136,9 +136,17 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
                       </div>
                       <!-- Product Info -->
                       <div class="flex-1 min-w-0">
-                        <h3 class="text-sm sm:text-base font-semibold text-gray-900 truncate">{{ item.product_name }}</h3>
-                        <p class="text-[11px] font-mono text-gray-400 mt-0.5">SKU: {{ item.variant_sku || 'N/A' }}</p>
-                      </div>
+	                        <h3 class="text-sm sm:text-base font-semibold text-gray-900 truncate">{{ item.product_name }}</h3>
+	                        <p class="text-[11px] font-mono text-gray-400 mt-0.5">SKU: {{ item.variant_sku || 'N/A' }}</p>
+	                        @if (item.applied_price_tier_name_snapshot) {
+	                          <span
+	                            class="mt-2 inline-flex w-fit rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+	                            title="Snapshot inmutable de la tarifa aplicada"
+	                          >
+	                            Tarifa: {{ item.applied_price_tier_name_snapshot }}
+	                          </span>
+	                        }
+	                      </div>
                       <!-- Price -->
                       <div class="text-right flex-shrink-0">
                         <p class="font-bold text-gray-900 text-sm sm:text-lg">{{ item.total_price || 0 | currency }}</p>

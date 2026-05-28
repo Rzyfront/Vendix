@@ -39,6 +39,7 @@ export class EcommerceController {
         {
           exists: true,
           config: settings.config,
+          branding: settings.branding,
           ecommerceUrl: settings.ecommerceUrl,
           qrCodeDataUrl: settings.qrCodeDataUrl,
           qrCodeUrl: settings.qrCodeUrl,

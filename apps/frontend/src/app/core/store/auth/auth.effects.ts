@@ -578,6 +578,34 @@ export class AuthEffects {
     { dispatch: false },
   );
 
+  // Mark Panel UI Seen — silent, idempotente, sin toasts
+  markPanelUiSeen$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(AuthActions.markPanelUiSeen),
+      mergeMap(({ key, app_type }) =>
+        this.authService.markPanelUiSeen(key, app_type).pipe(
+          map((response: any) => {
+            if (response?.success && response.data?.config) {
+              return AuthActions.markPanelUiSeenSuccess({
+                config: response.data.config,
+              });
+            }
+            return AuthActions.markPanelUiSeenFailure({
+              error: 'Invalid response from server',
+            });
+          }),
+          catchError((error) =>
+            of(
+              AuthActions.markPanelUiSeenFailure({
+                error: normalizeApiPayload(error),
+              }),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   updateStoreSettingsSuccess$ = createEffect(
     () =>
       this.actions$.pipe(

@@ -1,0 +1,46 @@
+meta {
+  name: 11 Create Order WITHOUT Tier (regression)
+  type: http
+  seq: 11
+}
+
+# Regression test: legacy order without applied_price_tier_id must still work
+# and must NOT have any tier snapshot on the item.
+
+post {
+  url: http://{{url}}/store/orders
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "customer_id": 1,
+    "subtotal": 100.00,
+    "total_amount": 100.00,
+    "skip_schedule_validation": true,
+    "items": [
+      {
+        "product_id": {{ecommerce_product_id}},
+        "product_name": "Bruno smoke item no tier",
+        "quantity": 1,
+        "unit_price": 100.00,
+        "total_price": 100.00
+      }
+    ]
+  }
+}
+
+tests {
+  test("Status is 201", function () {
+    expect(res.status).to.equal(201);
+  });
+
+  test("Item has no applied price tier snapshot", function () {
+    expect(res.body.data.items).to.be.an('array').that.is.not.empty;
+    var item = res.body.data.items[0];
+    // applied_price_tier_id is null/undefined; snapshot likewise.
+    expect(item.applied_price_tier_id == null).to.be.true;
+    expect(item.applied_price_tier_name_snapshot == null).to.be.true;
+  });
+}

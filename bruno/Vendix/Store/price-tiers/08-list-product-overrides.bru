@@ -1,0 +1,29 @@
+meta {
+  name: 08 List Product Overrides
+  type: http
+  seq: 8
+}
+
+get {
+  url: http://{{url}}/store/price-tiers/products/{{ecommerce_product_id}}/overrides
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Status is 200", function () {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Overrides list contains the one from request 07", function () {
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.be.an('array');
+    var tierId = bru.getVar('priceTierId');
+    if (tierId) {
+      var found = res.body.data.find(function (o) {
+        return String(o.price_tier_id) === String(tierId);
+      });
+      expect(found, 'override from request 07 should appear in list').to.exist;
+    }
+  });
+}

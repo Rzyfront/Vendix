@@ -391,6 +391,39 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/products/images/:imageId',
       method: 'DELETE',
     },
+    {
+      name: 'store:products:apply_pricing_tier',
+      description:
+        'Aplicar tarifa de precios (multi-tarifa) en POS/órdenes/cotizaciones',
+      path: '/api/store/products/apply-pricing-tier',
+      method: 'POST',
+    },
+
+    // Tarifas de Precios (CRUD multi-tarifa)
+    {
+      name: 'store:price-tiers:read',
+      description: 'Listar tarifas de precios de la tienda',
+      path: '/api/store/price-tiers',
+      method: 'GET',
+    },
+    {
+      name: 'store:price-tiers:create',
+      description: 'Crear tarifa de precios',
+      path: '/api/store/price-tiers',
+      method: 'POST',
+    },
+    {
+      name: 'store:price-tiers:update',
+      description: 'Actualizar tarifa de precios',
+      path: '/api/store/price-tiers/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:price-tiers:delete',
+      description: 'Eliminar tarifa de precios',
+      path: '/api/store/price-tiers/:id',
+      method: 'DELETE',
+    },
 
     // Órdenes
     {
@@ -2854,6 +2887,31 @@ export async function seedPermissionsAndRoles(
       description: 'Actualizar configuración Meta para Social Sales',
       path: '/api/superadmin/social-sales/meta/config',
       method: 'PATCH',
+    },
+    {
+      name: 'superadmin:notification_sounds:read',
+      description: 'Ver catálogo global de sonidos de notificación',
+      path: '/api/superadmin/notification-sounds',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:notification_sounds:create',
+      description: 'Subir nuevos sonidos al catálogo global de notificaciones',
+      path: '/api/superadmin/notification-sounds',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:notification_sounds:update',
+      description:
+        'Actualizar nombre, orden o estado activo de sonidos del catálogo global de notificaciones',
+      path: '/api/superadmin/notification-sounds/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:notification_sounds:delete',
+      description: 'Eliminar sonidos del catálogo global de notificaciones',
+      path: '/api/superadmin/notification-sounds/:id',
+      method: 'DELETE',
     },
     {
       name: 'super_admin.settings.sync_all',

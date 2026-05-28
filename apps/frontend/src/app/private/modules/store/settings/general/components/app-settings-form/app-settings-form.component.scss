@@ -2,6 +2,29 @@
   display: block;
 }
 
+.form-intro {
+  margin: 0 0 20px;
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.section-kicker {
+  margin: 0 0 16px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.brand-heading {
+  margin: 24px 0 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+}
+
 // ─── Color Grid ─────────────────────────────────────────
 // auto-fill adapts to actual container width (not viewport)
 
@@ -90,23 +113,30 @@
 
 .brand-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: 12px;
 }
 
 .brand-card {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px;
+  gap: 12px;
+  min-height: 76px;
+  padding: 12px;
   background: #f9fafb;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
+  transition: border-color 180ms ease, background 180ms ease;
+
+  &:hover {
+    background: #fff;
+    border-color: #d1d5db;
+  }
 }
 
 .brand-preview {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
   border-radius: 10px;
   background: #fff;
   border: 1px solid #e5e7eb;
@@ -118,14 +148,27 @@
   padding: 4px;
 }
 
+.brand-preview--favicon {
+  width: 40px;
+  height: 40px;
+}
+
 .brand-preview-img {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
 }
 
-.brand-info {
+.brand-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   flex: 1;
+  min-width: 0;
+}
+
+.brand-copy {
   min-width: 0;
 }
 
@@ -136,27 +179,63 @@
   color: #6b7280;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  margin-bottom: 6px;
+  line-height: 1.25;
+  margin-bottom: 3px;
 }
 
-.brand-url-input {
-  width: 100%;
-  padding: 10px 12px;
-  min-height: 44px; // WCAG touch target
-  font-size: 16px; // Prevent iOS zoom
-  color: #2563eb;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  transition: border-color 200ms ease, box-shadow 200ms ease;
+.brand-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
 
-  &::placeholder {
-    color: #9ca3af;
+.brand-help {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #6b7280;
+}
+
+.brand-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #fee2e2;
+  color: #dc2626;
+  background: #fff;
+  transition: background 180ms ease, border-color 180ms ease;
+
+  &:hover {
+    background: #fef2f2;
+    border-color: #fecaca;
+  }
+}
+
+@media (min-width: 640px) {
+  .brand-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .brand-card,
+  .brand-content {
+    align-items: flex-start;
   }
 
-  &:focus {
-    outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+  .brand-content {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .brand-help {
+    white-space: normal;
   }
 }

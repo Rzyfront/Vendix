@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Cache } from 'cache-manager';
 import { EcommercePrismaService } from '../../../prisma/services/ecommerce-prisma.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
@@ -11,6 +12,7 @@ import { PriceResolverService } from '../../store/products/services/price-resolv
 export class CatalogService {
   constructor(
     private readonly prisma: EcommercePrismaService,
+    private readonly storePrisma: StorePrismaService,
     private readonly s3Service: S3Service,
     private readonly priceResolverService: PriceResolverService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
@@ -20,7 +22,9 @@ export class CatalogService {
     const {
       search,
       category_id,
+      category_ids,
       brand_id,
+      brand_ids,
       ids,
       min_price,
       max_price,
@@ -31,12 +35,16 @@ export class CatalogService {
 
     const skip = (page - 1) * limit;
     const store_id = RequestContextService.getStoreId();
+    const catalogSettings = await this.getCatalogSettings(store_id);
 
     const where: any = {
       state: 'active',
       available_for_ecommerce: true,
       // store_id se aplica automáticamente por EcommercePrismaService
     };
+    const andFilters: any[] = [];
+    const categoryIds = this.mergeIdFilters(category_id, category_ids);
+    const brandIds = this.mergeIdFilters(brand_id, brand_ids);
 
     if (search) {
       where.OR = [
@@ -46,14 +54,17 @@ export class CatalogService {
       ];
     }
 
-    if (category_id) {
+    if (categoryIds.length > 0) {
       where.product_categories = {
-        some: { category_id },
+        some: {
+          category_id:
+            categoryIds.length === 1 ? categoryIds[0] : { in: categoryIds },
+        },
       };
     }
 
-    if (brand_id) {
-      where.brand_id = brand_id;
+    if (brandIds.length > 0) {
+      where.brand_id = brandIds.length === 1 ? brandIds[0] : { in: brandIds };
     }
 
     if (ids) {
@@ -76,6 +87,37 @@ export class CatalogService {
 
     if (String(query.has_discount) === 'true') {
       where.is_on_sale = true;
+    }
+
+    if (String(query.is_featured) === 'true') {
+      where.is_featured = true;
+    }
+
+    if (catalogSettings.show_out_of_stock !== true) {
+      andFilters.push({
+        OR: [
+          { product_type: 'service' },
+          { track_inventory: false },
+          { stock_quantity: { gt: 0 } },
+          {
+            product_variants: {
+              some: {
+                OR: [
+                  { track_inventory_override: false },
+                  { stock_quantity: { gt: 0 } },
+                ],
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (andFilters.length > 0) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        ...andFilters,
+      ];
     }
 
     let orderBy: any;
@@ -408,7 +450,68 @@ export class CatalogService {
         store_settings: true,
       },
     });
-    return store?.store_settings?.settings || {};
+    const settings = (store?.store_settings?.settings || {}) as any;
+    const has_configured_shipping = await this.hasConfiguredShipping();
+
+    return {
+      ...settings,
+      ecommerce: {
+        ...(settings.ecommerce || {}),
+        shipping: {
+          ...(settings.ecommerce?.shipping || {}),
+          has_configured_shipping,
+        },
+      },
+    };
+  }
+
+  private mergeIdFilters(singleId?: number, csvIds?: string): number[] {
+    const ids = [...(singleId ? [singleId] : []), ...this.parseIdList(csvIds)];
+
+    return [...new Set(ids)];
+  }
+
+  private parseIdList(value?: string): number[] {
+    if (!value) return [];
+
+    return value
+      .split(',')
+      .map((id) => Number(id.trim()))
+      .filter((id) => Number.isInteger(id) && id > 0);
+  }
+
+  private async hasConfiguredShipping(): Promise<boolean> {
+    const active_rates = await this.storePrisma.shipping_rates.count({
+      where: {
+        is_active: true,
+        shipping_zone: {
+          is_active: true,
+          is_system: false,
+        },
+        shipping_method: {
+          is_active: true,
+          is_system: false,
+          type: { not: 'pickup' },
+        },
+      },
+    });
+
+    return active_rates > 0;
+  }
+
+  private async getCatalogSettings(storeId?: number | null): Promise<{
+    show_out_of_stock?: boolean;
+  }> {
+    if (!storeId) return {};
+
+    const settings = await this.prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+
+    return ((settings?.settings as any)?.ecommerce?.catalog ?? {}) as {
+      show_out_of_stock?: boolean;
+    };
   }
 
   private async areReviewsEnabled(): Promise<boolean> {
@@ -484,6 +587,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,
@@ -539,6 +643,7 @@ export class CatalogService {
       base_price: product.base_price,
       sale_price: product.sale_price,
       is_on_sale: product.is_on_sale,
+      is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
       stock_quantity: product.stock_quantity,

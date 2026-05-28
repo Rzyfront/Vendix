@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -54,6 +55,208 @@ export class CustomersService {
       password += charset[randomIndex];
     }
     return password;
+  }
+
+  private async generateUnreachablePassword(): Promise<string> {
+    const random = randomBytes(32).toString('hex');
+    return bcrypt.hash(random, 12);
+  }
+
+  async resolveGuestCustomerForCheckout(
+    storeId: number,
+    guest: {
+      first_name?: string | null;
+      last_name?: string | null;
+      email?: string | null;
+      phone?: string | null;
+      document_type?: string | null;
+      document_number?: string | null;
+    } | null,
+  ): Promise<{
+    customer_id: number;
+    was_created: boolean;
+    was_updated: boolean;
+  } | null> {
+    if (!guest) return null;
+
+    const normalizedEmail = guest.email?.toLowerCase().trim() || null;
+    const normalizedPhone = guest.phone?.replace(/\s+/g, '').trim() || null;
+
+    if (!normalizedEmail && !normalizedPhone) return null;
+
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { id: true, organization_id: true },
+    });
+
+    if (!store) {
+      throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
+    }
+
+    let existing: { id: number } | null = null;
+
+    if (normalizedEmail) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          email: { equals: normalizedEmail, mode: 'insensitive' },
+          store_users: { some: { store_id: storeId } },
+          user_roles: { some: { roles: { name: 'customer' } } },
+        },
+        select: { id: true },
+      });
+    }
+
+    if (!existing && normalizedPhone) {
+      existing = await this.prisma.users.findFirst({
+        where: {
+          phone: normalizedPhone,
+          store_users: { some: { store_id: storeId } },
+          user_roles: { some: { roles: { name: 'customer' } } },
+        },
+        select: { id: true },
+      });
+    }
+
+    if (!existing) {
+      if (!normalizedEmail) return null;
+
+      const customerRole = await this.prisma.roles.findFirst({
+        where: { name: 'customer' },
+      });
+
+      if (!customerRole) {
+        throw new VendixHttpException(ErrorCodes.CUST_CREATE_001);
+      }
+
+      const hashedPassword = await this.generateUnreachablePassword();
+      const formattedFirstName =
+        toTitleCase(guest.first_name ?? '') || 'Cliente';
+      const formattedLastName =
+        toTitleCase(guest.last_name ?? '') || 'Invitado';
+
+      const buildUserData = (username: string) => ({
+        email: normalizedEmail,
+        password: hashedPassword,
+        first_name: formattedFirstName,
+        last_name: formattedLastName,
+        phone: this.normalizeOptionalString(normalizedPhone),
+        document_type: this.normalizeOptionalString(guest.document_type),
+        document_number: this.normalizeOptionalString(guest.document_number),
+        username,
+        email_verified: false,
+        state: 'pending_verification' as const,
+        organization_id: store.organization_id,
+        user_roles: {
+          create: {
+            role_id: customerRole.id,
+          },
+        },
+        store_users: {
+          create: {
+            store_id: store.id,
+          },
+        },
+        user_settings: {
+          create: {
+            app_type: 'STORE_ECOMMERCE' as const,
+            config: {
+              panel_ui: {
+                profile: true,
+                history: true,
+                dashboard: true,
+                favorites: true,
+                orders: true,
+                settings: true,
+              },
+            },
+          },
+        },
+      });
+
+      let user: { id: number; first_name: string; last_name: string | null; email: string };
+      try {
+        const username = await this.generateUniqueUsername(normalizedEmail);
+        user = await this.prisma.users.create({
+          data: buildUserData(username),
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        });
+      } catch (error: any) {
+        const isUsernameConflict =
+          error?.code === 'P2002' &&
+          Array.isArray(error?.meta?.target) &&
+          error.meta.target.includes('username');
+
+        if (!isUsernameConflict) throw error;
+
+        const retryUsername =
+          await this.generateUniqueUsername(normalizedEmail);
+        user = await this.prisma.users.create({
+          data: buildUserData(retryUsername),
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+          },
+        });
+      }
+
+      this.eventEmitter.emit('customer.created', {
+        store_id: store.id,
+        customer_id: user.id,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        email: user.email,
+      });
+
+      return {
+        customer_id: user.id,
+        was_created: true,
+        was_updated: false,
+      };
+    }
+
+    const data: Record<string, string> = {};
+    if (guest.first_name?.trim()) {
+      data.first_name = toTitleCase(guest.first_name);
+    }
+    if (guest.last_name?.trim()) {
+      data.last_name = toTitleCase(guest.last_name);
+    }
+    if (normalizedPhone) {
+      data.phone = normalizedPhone;
+    }
+    if (guest.document_type?.trim()) {
+      data.document_type = guest.document_type.trim();
+    }
+    if (guest.document_number?.trim()) {
+      data.document_number = guest.document_number.trim();
+    }
+
+    const hasUpdates = Object.keys(data).length > 0;
+    if (hasUpdates) {
+      await this.prisma.users.update({
+        where: { id: existing.id },
+        data,
+      });
+    }
+
+    try {
+      await this.linkCustomerToStore(existing.id, storeId);
+    } catch {
+      // El enlace ya existe o se creó en paralelo; ignorar para mantener idempotencia.
+    }
+
+    return {
+      customer_id: existing.id,
+      was_created: false,
+      was_updated: hasUpdates,
+    };
   }
 
   async create(storeId: number, dto: CreateCustomerDto) {

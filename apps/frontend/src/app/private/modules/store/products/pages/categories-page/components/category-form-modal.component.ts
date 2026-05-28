@@ -1,4 +1,13 @@
-import { Component, input, output, effect } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -22,6 +31,7 @@ import {
   CreateCategoryDto,
   UpdateCategoryDto,
 } from '../../../interfaces';
+import { CategoriesService } from '../../../services/categories.service';
 
 @Component({
   selector: 'app-category-form-modal',
@@ -68,6 +78,63 @@ import {
             placeholder="https://..."
             [error]="getError('image_url')"
           ></app-input>
+
+          <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
+            <div class="flex items-center gap-3">
+              <div
+                class="h-16 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 bg-white"
+              >
+                @if (imagePreviewUrl()) {
+                  <img
+                    [src]="imagePreviewUrl()"
+                    alt="Imagen de categoría"
+                    class="h-full w-full object-cover"
+                  />
+                } @else {
+                  <div
+                    class="flex h-full w-full items-center justify-center text-xs text-gray-400"
+                  >
+                    Imagen
+                  </div>
+                }
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-gray-900">
+                  Imagen para la tienda online
+                </p>
+                <p class="text-xs text-gray-500">
+                  Se usará en el inicio y en filtros visuales de categorías.
+                </p>
+              </div>
+              <input
+                #categoryImageInput
+                type="file"
+                accept="image/*"
+                class="hidden"
+                (change)="onImageSelected($event)"
+              />
+              <app-button
+                variant="outline"
+                type="button"
+                size="sm"
+                [loading]="isUploadingImage()"
+                [disabled]="isUploadingImage()"
+                (clicked)="categoryImageInput.click()"
+              >
+                Subir
+              </app-button>
+              @if (imagePreviewUrl()) {
+                <app-button
+                  variant="ghost"
+                  type="button"
+                  size="sm"
+                  (clicked)="removeImage()"
+                >
+                  Quitar
+                </app-button>
+              }
+            </div>
+          </div>
 
           <!-- Description -->
           <app-textarea
@@ -118,7 +185,12 @@ export class CategoryFormModalComponent {
   readonly cancel = output<void>();
   readonly save = output<CreateCategoryDto | UpdateCategoryDto>();
 
+  readonly imagePreviewUrl = signal<string | null>(null);
+  readonly isUploadingImage = signal(false);
+
   form: FormGroup;
+  private readonly categoriesService = inject(CategoriesService);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor(private fb: FormBuilder) {
     this.form = this.createForm();
@@ -129,6 +201,7 @@ export class CategoryFormModalComponent {
         this.patchForm(cat);
       } else if (isOpen && !cat) {
         this.form.reset({ state: true });
+        this.imagePreviewUrl.set(null);
       }
     });
   }
@@ -158,6 +231,7 @@ export class CategoryFormModalComponent {
       image_url: category.image_url ?? '',
       state: category.state ? category.state === 'active' : true,
     });
+    this.imagePreviewUrl.set(category.image_url ?? null);
   }
 
   getError(field: string): string {
@@ -198,10 +272,46 @@ export class CategoryFormModalComponent {
     if (description) payload.description = description;
 
     const imageUrl = (raw.image_url ?? '').trim();
-    if (imageUrl) payload.image_url = imageUrl;
+    if (imageUrl || this.category()) payload.image_url = imageUrl;
 
     payload.state = raw.state ? 'active' : 'inactive';
 
     this.save.emit(payload);
+  }
+
+  onImageSelected(event: Event): void {
+    const inputElement = event.target as HTMLInputElement;
+    const file = inputElement.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      inputElement.value = '';
+      return;
+    }
+
+    this.isUploadingImage.set(true);
+    this.categoriesService
+      .uploadCategoryImage(file)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          this.form.patchValue({ image_url: result.key });
+          this.imagePreviewUrl.set(result.url);
+          this.form.markAsDirty();
+        },
+        error: () => {
+          this.isUploadingImage.set(false);
+        },
+        complete: () => {
+          this.isUploadingImage.set(false);
+          inputElement.value = '';
+        },
+      });
+  }
+
+  removeImage(): void {
+    this.form.patchValue({ image_url: '' });
+    this.imagePreviewUrl.set(null);
+    this.form.markAsDirty();
   }
 }

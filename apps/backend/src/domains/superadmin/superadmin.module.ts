@@ -22,6 +22,7 @@ import { PayrollDefaultsModule } from './payroll-defaults/payroll-defaults.modul
 import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
 import { SuperadminSocialSalesModule } from './social-sales/social-sales.module';
+import { NotificationSoundsModule } from './notification-sounds/notification-sounds.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { SuperadminSocialSalesModule } from './social-sales/social-sales.module'
     SuperadminSubscriptionsModule,
     SuperadminSettingsSyncModule,
     SuperadminSocialSalesModule,
+    NotificationSoundsModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

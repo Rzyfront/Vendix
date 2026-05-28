@@ -15,6 +15,7 @@
     @for (product of products(); track product.id) {
       <app-product-card
         [product]="product"
+        [show_shipping_badge]="show_shipping_badge()"
         (add_to_cart)="onAddToCart($event)"
         (toggle_wishlist)="onToggleWishlist($event)"
         (quick_view)="onQuickView($event)"
