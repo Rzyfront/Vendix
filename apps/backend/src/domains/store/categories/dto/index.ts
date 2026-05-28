@@ -74,7 +74,7 @@ export class CreateCategoryDto {
   })
   @IsBoolean()
   @IsOptional()
-  is_featured?: boolean = false;
+  is_featured?: boolean;
 }
 
 // Update Category DTO

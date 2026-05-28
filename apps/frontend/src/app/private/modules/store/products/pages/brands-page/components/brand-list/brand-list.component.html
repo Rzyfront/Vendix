@@ -105,4 +105,13 @@
       </div>
     }
   </app-card>
+
+  <app-image-lightbox
+    [isOpen]="imagePreviewOpen()"
+    [currentImage]="getSelectedImageUrl()"
+    [alt]="getSelectedImageAlt()"
+    [title]="getSelectedImageAlt()"
+    [showInfo]="true"
+    (close)="closeImagePreview()"
+  ></app-image-lightbox>
 </div>

@@ -67,7 +67,7 @@ export class CreateBrandDto {
   })
   @IsBoolean()
   @IsOptional()
-  is_featured?: boolean = false;
+  is_featured?: boolean;
 }
 
 // Update Brand DTO
