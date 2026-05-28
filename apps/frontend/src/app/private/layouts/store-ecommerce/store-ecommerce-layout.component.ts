@@ -310,9 +310,13 @@ export class StoreEcommerceLayoutComponent {
     this.router.navigate(['/cart']);
   }
 
+  private previous_path: string | null = null;
+
   private shouldScrollToTopOnNavigation(url: string): boolean {
     const path = url.split(/[?#]/)[0].replace(/\/+$/, '') || '/';
-    return path === '/cart' || path === '/checkout';
+    const changed = path !== this.previous_path;
+    this.previous_path = path;
+    return changed;
   }
 
   private scrollToTop(): void {

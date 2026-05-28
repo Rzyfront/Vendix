@@ -17,6 +17,8 @@ import { InvoicingModule } from '../../store/invoicing/invoicing.module';
 import { InvoiceDataRequestsModule } from '../../store/invoicing/invoice-data-requests/invoice-data-requests.module';
 import { S3Module } from '../../../common/services/s3.module';
 import { CustomersModule } from '../../store/customers/customers.module';
+import { PromotionsModule } from '../../store/promotions/promotions.module';
+import { CouponsModule } from '../../store/coupons/coupons.module';
 
 @Module({
   imports: [
@@ -37,6 +39,13 @@ import { CustomersModule } from '../../store/customers/customers.module';
     InvoiceDataRequestsModule,
     S3Module,
     CustomersModule,
+    // PromotionsModule exposes PromotionEngineService.quoteDiscounts, the
+    // shared source-of-truth used by checkout to recompute automatic promo
+    // discounts. CouponsModule exposes CouponsService.validate/registerUse
+    // for the optional coupon flow. Both must be available scoped per-store
+    // (StorePrismaService inside).
+    PromotionsModule,
+    CouponsModule,
     // 5 MB max upload — matches what the checkout controller's
     // FileInterceptor advertises so multer rejects oversized uploads early
     // (before the buffer is even allocated).

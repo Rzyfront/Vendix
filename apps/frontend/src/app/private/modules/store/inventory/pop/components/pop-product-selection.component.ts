@@ -2,6 +2,7 @@ import {
   Component,
   NO_ERRORS_SCHEMA,
   signal,
+  computed,
   output,
   inject,
   DestroyRef,
@@ -9,13 +10,13 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
-
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import { DropdownAction } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 
 import { PopCartService } from '../services/pop-cart.service';
 import { ProductsService } from '../../../products/services/products.service';
@@ -34,17 +35,17 @@ import {
     OptionsDropdownComponent,
     BadgeComponent,
     PopBulkDataModalComponent,
-    PopProductConfigModalComponent
-],
+    PopProductConfigModalComponent,
+  ],
   schemas: [NO_ERRORS_SCHEMA],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border"
-      >
+    >
       <!-- Products Header - Outside overflow container -->
       <div
         class="products-header flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border bg-surface rounded-t-card"
-        >
+      >
         <!-- Desktop Header -->
         <div class="hidden lg:flex justify-between items-center gap-4">
           <div class="flex-1 min-w-0">
@@ -52,7 +53,7 @@ import {
               Productos Disponibles ({{ filteredProducts().length }})
             </h2>
           </div>
-    
+
           <div class="flex items-center gap-3">
             <app-inputsearch
               class="w-64"
@@ -60,8 +61,8 @@ import {
               placeholder="Buscar productos..."
               [debounceTime]="300"
               (searchChange)="onSearch($event)"
-              />
-    
+            />
+
             <app-options-dropdown
               [actions]="dropdownActions"
               triggerIcon="package-plus"
@@ -71,7 +72,7 @@ import {
             ></app-options-dropdown>
           </div>
         </div>
-    
+
         <!-- Mobile Header (Compact) -->
         <div class="lg:hidden flex items-center gap-2">
           <app-inputsearch
@@ -80,8 +81,8 @@ import {
             placeholder="Buscar..."
             [debounceTime]="300"
             (searchChange)="onSearch($event)"
-            />
-    
+          />
+
           <app-options-dropdown
             [actions]="dropdownActions"
             triggerIcon="package-plus"
@@ -91,7 +92,7 @@ import {
           ></app-options-dropdown>
         </div>
       </div>
-    
+
       <!-- Products Content -->
       <div class="flex-1 overflow-y-auto p-6">
         <!-- Loading State -->
@@ -103,15 +104,15 @@ import {
             <p class="mt-2 text-text-secondary">Cargando productos...</p>
           </div>
         }
-    
+
         <!-- Empty State -->
         @if (!loading() && filteredProducts().length === 0) {
           <div
             class="flex flex-col items-center justify-center h-64 text-center p-8"
-            >
+          >
             <div
               class="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4"
-              >
+            >
               <app-icon
                 name="package"
                 [size]="32"
@@ -126,22 +127,25 @@ import {
             </p>
           </div>
         }
-    
+
         <!-- Modern Compact Products Grid (Responsive) -->
         @if (!loading() && filteredProducts().length > 0) {
           <div
             class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
-            >
+          >
             <!-- Modern Product Card -->
-            @for (product of filteredProducts(); track trackByProductId($index, product)) {
+            @for (
+              product of filteredProducts();
+              track trackByProductId($index, product)
+            ) {
               <div
                 (click)="onAddToCart(product)"
                 class="group relative bg-surface border border-border rounded-card shadow-card hover:shadow-lg transition-all duration-200 hover:scale-[1.02] cursor-pointer overflow-hidden"
-                >
+              >
                 <!-- Product Image or Icon -->
                 <div
                   class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
-                  >
+                >
                   <!-- Product Image -->
                   @if (product.image_url) {
                     <img
@@ -149,16 +153,16 @@ import {
                       [alt]="product.name"
                       class="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
                       (error)="onImageError($event)"
-                      />
+                    />
                   }
                   <!-- Placeholder Icon -->
                   @if (!product.image_url) {
                     <div
                       class="absolute inset-0 flex items-center justify-center text-muted-foreground/30 group-hover:text-primary/30 transition-colors"
-                      >
+                    >
                       <div
                         class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
-                        >
+                      >
                         <app-icon
                           name="image"
                           [size]="24"
@@ -170,14 +174,20 @@ import {
                   <!-- Compact Stock Badge -->
                   @if (product.track_inventory !== false) {
                     <app-badge
-                      [variant]="product.stock_quantity === 0 ? 'error' : product.stock_quantity <= 10 ? 'warning' : 'success'"
+                      [variant]="getStockBadgeVariant(product)"
                       size="xs"
                       badgeStyle="outline"
-                      class="absolute top-2 right-2 z-[1]">
+                      class="absolute top-2 right-2 z-[1]"
+                    >
                       {{ product.stock_quantity }}
                     </app-badge>
                   } @else {
-                    <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
+                    <app-badge
+                      variant="info"
+                      size="xs"
+                      badgeStyle="outline"
+                      class="absolute top-2 right-2 z-[1]"
+                    >
                       Disponible
                     </app-badge>
                   }
@@ -187,27 +197,27 @@ import {
                   <h3
                     class="text-sm font-medium text-text-primary line-clamp-2 min-h-[2.5em] mb-1 group-hover:text-primary transition-colors"
                     [title]="product.name"
-                    >
+                  >
                     {{ product.name }}
                   </h3>
                   <div class="flex items-center justify-between mt-auto">
                     <div class="flex items-center gap-1 min-w-0">
                       <span
                         class="text-xs text-text-secondary font-mono truncate max-w-[60%]"
-                        >
+                      >
                         {{ product.sku }}
                       </span>
                       @if (product.pricing_type === 'weight') {
                         <span
                           class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-50 text-blue-600 shrink-0"
-                          >
+                        >
                           Peso
                         </span>
                       }
                     </div>
                     <button
                       class="w-6 h-6 rounded-full bg-primary/10 hover:bg-primary/20 text-primary flex items-center justify-center transition-colors"
-                      >
+                    >
                       <app-icon name="plus" [size]="14"></app-icon>
                     </button>
                   </div>
@@ -218,7 +228,7 @@ import {
         }
       </div>
     </div>
-    
+
     <app-pop-bulk-data-modal
       [isOpen]="bulkModalOpen()"
       (close)="bulkModalOpen.set(false)"
@@ -231,7 +241,7 @@ import {
       (confirmed)="onProductConfigConfirmed($event)"
       (closed)="configModalOpen.set(false)"
     ></app-pop-product-config-modal>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -314,7 +324,15 @@ export class PopProductSelectionComponent {
   private productsService = inject(ProductsService);
   private cartService = inject(PopCartService);
   private toastService = inject(ToastService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
   private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
+
+  readonly lowStockThreshold = computed(() => {
+    const threshold = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
+  });
 
   constructor() {
     this.setupSearchSubscription();
@@ -323,7 +341,11 @@ export class PopProductSelectionComponent {
 
   private setupSearchSubscription(): void {
     this.searchSubject$
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe((query) => {
         this.searchQuery = query;
         this.filterProducts();
@@ -389,7 +411,8 @@ export class PopProductSelectionComponent {
 
     const product = {
       ...this.configModalProduct(),
-      pricing_type: result.pricing_type || this.configModalProduct()?.pricing_type,
+      pricing_type:
+        result.pricing_type || this.configModalProduct()?.pricing_type,
     };
 
     if (result.variants?.length) {
@@ -435,7 +458,7 @@ export class PopProductSelectionComponent {
         (p: any) => p.id === this.configModalProduct()?.id,
       );
       if (productIndex >= 0) {
-        this.filteredProducts.update(products => {
+        this.filteredProducts.update((products) => {
           const updated = [...products];
           updated[productIndex] = {
             ...updated[productIndex],
@@ -454,6 +477,31 @@ export class PopProductSelectionComponent {
     event.target.style.display = 'none';
   }
 
+  getStockBadgeVariant(product: any): 'error' | 'warning' | 'success' {
+    const stock = Number(product?.stock_quantity ?? product?.stock ?? 0);
+    if (stock === 0) return 'error';
+    return stock <= this.getProductLowStockThreshold(product)
+      ? 'warning'
+      : 'success';
+  }
+
+  private getProductLowStockThreshold(product: any): number {
+    const productThreshold = [product?.reorder_point, product?.min_stock_level]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0);
+
+    if (productThreshold !== undefined) {
+      return productThreshold;
+    }
+
+    const apiThreshold = Number(product?.low_stock_threshold);
+    if (Number.isFinite(apiThreshold) && apiThreshold >= 0) {
+      return apiThreshold;
+    }
+
+    return this.lowStockThreshold();
+  }
+
   trackByProductId(index: number, product: any): string {
     return product.id;
   }
@@ -463,7 +511,7 @@ export class PopProductSelectionComponent {
       (p: any) => p.id === productId,
     );
     if (productIndex >= 0) {
-      this.filteredProducts.update(products => {
+      this.filteredProducts.update((products) => {
         const updated = [...products];
         updated[productIndex] = {
           ...updated[productIndex],

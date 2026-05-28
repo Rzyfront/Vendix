@@ -377,7 +377,16 @@ export class PosPaymentService {
       );
     }
 
-    // Build sale data with conditional customer fields
+    // Build sale data with conditional customer fields.
+    //
+    // IMPORTANT — Promotions and coupons:
+    //   The backend is the source of truth for `discount_amount` and the
+    //   final `grand_total`. We send `promotion_ids` (manual promotions
+    //   selected by the cashier) and `coupon_code`; the backend recalculates
+    //   the actual discount via `PromotionEngineService.quoteDiscounts` and
+    //   `CouponsService.validate`. Any locally computed `discount_amount` is
+    //   intentionally omitted so the frontend cannot override the server
+    //   calculation.
     const sale_data: any = {
       store_id: this.getStoreId(),
       items: this.mapCartItemsForPos(cartState),
@@ -386,9 +395,6 @@ export class PosPaymentService {
       ),
       tax_amount: Number(
         parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
-      ),
-      discount_amount: Number(
-        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
@@ -503,6 +509,9 @@ export class PosPaymentService {
       ).toFixed(2),
     );
 
+    // See `processSaleWithPayment` for the rationale on not sending
+    // `discount_amount`: the backend recalculates it from `promotion_ids` +
+    // `coupon_code` and is the source of truth for the final `grand_total`.
     const sale_data: Record<string, any> = {
       customer_id: cartState.customer.id,
       customer_name:
@@ -516,9 +525,6 @@ export class PosPaymentService {
       ),
       tax_amount: Number(
         parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
-      ),
-      discount_amount: Number(
-        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: totalWithShipping,
@@ -619,6 +625,8 @@ export class PosPaymentService {
       return throwError(() => new Error('Debe seleccionar un cliente.'));
     }
 
+    // Backend recalculates discounts from `promotion_ids` + `coupon_code`.
+    // See `processSaleWithPayment` comment for full rationale.
     const credit_data = {
       customer_id: cartState.customer.id,
       customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
@@ -631,9 +639,6 @@ export class PosPaymentService {
       ),
       tax_amount: Number(
         parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
-      ),
-      discount_amount: Number(
-        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
@@ -699,6 +704,8 @@ export class PosPaymentService {
       return throwError(() => new Error('Debe seleccionar un cliente para ventas a crédito.'));
     }
 
+    // Backend recalculates discounts from `promotion_ids` + `coupon_code`.
+    // See `processSaleWithPayment` comment for full rationale.
     const credit_data: any = {
       customer_id: cartState.customer.id,
       customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
@@ -711,9 +718,6 @@ export class PosPaymentService {
       ),
       tax_amount: Number(
         parseFloat(cartState.summary.taxAmount.toString()).toFixed(2),
-      ),
-      discount_amount: Number(
-        parseFloat(cartState.summary.discountAmount.toString()).toFixed(2),
       ),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(
@@ -778,6 +782,8 @@ export class PosPaymentService {
       );
     }
 
+    // Drafts: backend still recalculates discounts when saved.
+    // See `processSaleWithPayment` comment for the rationale.
     const draft_data = {
       customer_id: cartState.customer.id,
       customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
@@ -787,7 +793,6 @@ export class PosPaymentService {
       items: this.mapCartItemsForPos(cartState),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),
       tax_amount: Number(cartState.summary.taxAmount.toFixed(2)),
-      discount_amount: Number(cartState.summary.discountAmount.toFixed(2)),
       promotion_ids: this.getAppliedPromotionIds(cartState),
       total_amount: Number(cartState.summary.total.toFixed(2)),
       is_draft: true,

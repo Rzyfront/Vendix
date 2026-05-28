@@ -26,6 +26,7 @@ import { StorePaymentMethodsService } from './services/store-payment-methods.ser
 import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { CouponsModule } from '../coupons/coupons.module';
 import { CashRegistersModule } from '../cash-registers/cash-registers.module';
 import {
   CashPaymentModule,
@@ -63,6 +64,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
     TaxesModule,
     SettingsModule,
     PromotionsModule,
+    CouponsModule,
     CashRegistersModule,
     InvoiceDataRequestsModule,
   ],

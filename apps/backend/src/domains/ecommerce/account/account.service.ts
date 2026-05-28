@@ -209,6 +209,45 @@ export class AccountService {
           include: { product: { select: { name: true } } },
           orderBy: { date: 'asc' },
         },
+        // Persisted discount snapshots — read what was actually charged,
+        // never recalculate against current promotions/coupons.
+        order_promotions: {
+          select: {
+            id: true,
+            promotion_id: true,
+            discount_amount: true,
+            created_at: true,
+            promotions: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                type: true,
+                scope: true,
+                value: true,
+              },
+            },
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        coupon_uses: {
+          select: {
+            id: true,
+            coupon_id: true,
+            discount_applied: true,
+            used_at: true,
+            coupon: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                discount_type: true,
+                discount_value: true,
+              },
+            },
+          },
+          orderBy: { used_at: 'asc' },
+        },
       },
     });
 
@@ -269,6 +308,28 @@ export class AccountService {
           product_id: b.product_id,
           product_name: b.product?.name,
         })) || [],
+      // Historical discount snapshots persisted on the order.
+      applied_promotions: order.order_promotions.map((op) => ({
+        id: op.id,
+        promotion_id: op.promotion_id,
+        name: op.promotions?.name ?? null,
+        code: op.promotions?.code ?? null,
+        type: op.promotions?.type ?? null,
+        scope: op.promotions?.scope ?? null,
+        value: op.promotions?.value ?? null,
+        discount_amount: op.discount_amount,
+        created_at: op.created_at,
+      })),
+      applied_coupons: order.coupon_uses.map((cu) => ({
+        id: cu.id,
+        coupon_id: cu.coupon_id,
+        code: cu.coupon?.code ?? null,
+        name: cu.coupon?.name ?? null,
+        discount_type: cu.coupon?.discount_type ?? null,
+        discount_value: cu.coupon?.discount_value ?? null,
+        discount_applied: cu.discount_applied,
+        used_at: cu.used_at,
+      })),
     };
   }
 

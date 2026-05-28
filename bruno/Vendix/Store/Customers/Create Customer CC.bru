@@ -1,0 +1,48 @@
+meta {
+  name: Create Customer CC
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/store/customers
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "rafael.test.cc@vendix.example",
+    "first_name": "Rafael",
+    "last_name": "Martínez",
+    "phone": "+57 300 000 0001",
+    "document_type": "CC",
+    "document_number": "1023456001"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Customer with CC created successfully", function() {
+    expect(res.status).to.be.oneOf([200, 201]);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('document_type', 'CC');
+    expect(res.body.data).to.have.property('document_number', '1023456001');
+  });
+
+  test("Persisted document_number is normalized (uppercase, no spaces/hyphens)", function() {
+    const doc = res.body.data.document_number;
+    expect(doc).to.match(/^[A-Z0-9]+$/);
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("createdCustomerIdCC", res.body.data.id);
+  }
+}

@@ -107,7 +107,7 @@ export class PosCashRegisterService {
   getRegisterId(): string | null {
     if (this.featureEnabled) {
       const session = this.activeSession();
-      return session?.register?.code || null;
+      return session?.status === 'open' ? session.register?.code || null : null;
     }
     return localStorage.getItem('pos_register_id');
   }
@@ -115,7 +115,7 @@ export class PosCashRegisterService {
   /** Check if the user has an active session (for sales validation) */
   hasActiveSession(): boolean {
     if (!this.featureEnabled) return true; // No validation when disabled
-    return this.activeSession() !== null;
+    return this.activeSession()?.status === 'open';
   }
 
   // --- API calls ---
@@ -133,12 +133,11 @@ export class PosCashRegisterService {
       .get<any>(`${this.baseUrl}/sessions/active`)
       .pipe(
         map((res) => res.data || null),
-        tap((session) => {
-          if (session) {
-            this.activeSession.set(session);
-          }
+        tap((session) => this.activeSession.set(session)),
+        catchError(() => {
+          this.activeSession.set(null);
+          return of(null);
         }),
-        catchError(() => of(null)),
       );
   }
 

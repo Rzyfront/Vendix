@@ -6,6 +6,10 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException } from '@common/errors/vendix-http.exception';
 import { ErrorCodes } from '@common/errors/error-codes';
 import {
+  DOCUMENT_TYPE_CODES,
+  DOCUMENT_TYPE_RULES,
+} from '@common/constants/document-types';
+import {
   BulkCustomerUploadDto,
   BulkCustomerUploadResultDto,
   BulkCustomerUploadItemResultDto,
@@ -23,7 +27,11 @@ export class CustomersBulkService {
 
   /**
    * Genera la plantilla de carga masiva en formato Excel (.xlsx)
-   * Incluye ejemplos con y sin email para mostrar que es opcional
+   * Incluye ejemplos con y sin email para mostrar que es opcional.
+   *
+   * Los códigos de "Tipo Documento" se derivan del catálogo DIAN compartido
+   * (`@common/constants/document-types`). No mantener una lista hardcodeada
+   * aquí — añadir nuevos tipos en el catálogo y los ejemplos los respetarán.
    */
   async generateExcelTemplate(): Promise<Buffer> {
     const headers = [
@@ -40,7 +48,7 @@ export class CustomersBulkService {
         Correo: 'maria.garcia@email.com',
         Nombre: 'Maria',
         Apellido: 'Garcia',
-        Documento: '12345678',
+        Documento: '1023456789',
         'Tipo Documento': 'CC',
         Teléfono: '3001234567',
       },
@@ -48,7 +56,7 @@ export class CustomersBulkService {
         Correo: 'juan.perez@email.com',
         Nombre: 'Juan',
         Apellido: 'Perez',
-        Documento: '23456789',
+        Documento: '1023456780',
         'Tipo Documento': 'CC',
         Teléfono: '3012345678',
       },
@@ -56,7 +64,7 @@ export class CustomersBulkService {
         Correo: '',
         Nombre: 'Ana',
         Apellido: 'Martinez',
-        Documento: '34567890',
+        Documento: '1023456781',
         'Tipo Documento': 'CC',
         Teléfono: '3023456789',
       },
@@ -64,7 +72,7 @@ export class CustomersBulkService {
         Correo: 'carlos.rodriguez@email.com',
         Nombre: 'Carlos',
         Apellido: 'Rodriguez',
-        Documento: '45678901',
+        Documento: '1023456782',
         'Tipo Documento': 'CE',
         Teléfono: '3034567890',
       },
@@ -72,15 +80,15 @@ export class CustomersBulkService {
         Correo: '',
         Nombre: 'Laura',
         Apellido: 'Sanchez',
-        Documento: '56789012',
-        'Tipo Documento': 'CC',
+        Documento: '900123456-7',
+        'Tipo Documento': 'NIT',
         Teléfono: '3045678901',
       },
       {
         Correo: 'pedro.gomez@email.com',
         Nombre: 'Pedro',
         Apellido: 'Gomez',
-        Documento: '67890123',
+        Documento: '1023456783',
         'Tipo Documento': 'CC',
         Teléfono: '3056789012',
       },
@@ -88,7 +96,7 @@ export class CustomersBulkService {
         Correo: 'sofia.lopez@email.com',
         Nombre: 'Sofia',
         Apellido: 'Lopez',
-        Documento: '78901234',
+        Documento: '1012345678',
         'Tipo Documento': 'TI',
         Teléfono: '3067890123',
       },
@@ -96,7 +104,7 @@ export class CustomersBulkService {
         Correo: 'andres.diaz@email.com',
         Nombre: 'Andres',
         Apellido: 'Diaz',
-        Documento: '89012345',
+        Documento: '1023456784',
         'Tipo Documento': 'CC',
         Teléfono: '3078901234',
       },
@@ -104,7 +112,7 @@ export class CustomersBulkService {
         Correo: '',
         Nombre: 'Valentina',
         Apellido: 'Hernandez',
-        Documento: '90123456',
+        Documento: '1023456785',
         'Tipo Documento': 'CC',
         Teléfono: '3089012345',
       },
@@ -112,8 +120,8 @@ export class CustomersBulkService {
         Correo: 'diego.torres@email.com',
         Nombre: 'Diego',
         Apellido: 'Torres',
-        Documento: '01234567',
-        'Tipo Documento': 'PP',
+        Documento: 'AB123456',
+        'Tipo Documento': 'PA',
         Teléfono: '3090123456',
       },
     ];
@@ -126,6 +134,57 @@ export class CustomersBulkService {
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Plantilla Clientes');
+
+    // Hoja de instrucciones con códigos válidos del catálogo DIAN.
+    const instructions: Array<Record<string, string>> = [
+      {
+        Campo: 'Correo',
+        Descripción: 'Correo electrónico del cliente (opcional)',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Nombre',
+        Descripción: 'Nombre(s) del cliente',
+        Obligatorio: 'Sí (o Documento)',
+      },
+      {
+        Campo: 'Apellido',
+        Descripción: 'Apellido(s) del cliente',
+        Obligatorio: 'No',
+      },
+      {
+        Campo: 'Documento',
+        Descripción: 'Número de identificación',
+        Obligatorio: 'Sí (o Nombre)',
+      },
+      {
+        Campo: 'Tipo Documento',
+        Descripción: 'Código DIAN del tipo de documento (ver lista abajo)',
+        Obligatorio: 'No (por defecto CC)',
+      },
+      {
+        Campo: 'Teléfono',
+        Descripción: 'Número de contacto',
+        Obligatorio: 'No',
+      },
+      { Campo: '', Descripción: '', Obligatorio: '' },
+      {
+        Campo: 'Códigos válidos de Tipo Documento',
+        Descripción: '',
+        Obligatorio: '',
+      },
+      ...DOCUMENT_TYPE_CODES.map((code) => ({
+        Campo: code,
+        Descripción: DOCUMENT_TYPE_RULES[code].label,
+        Obligatorio: '',
+      })),
+    ];
+
+    const wsInstructions = XLSX.utils.json_to_sheet(instructions, {
+      header: ['Campo', 'Descripción', 'Obligatorio'],
+    });
+    wsInstructions['!cols'] = [{ wch: 30 }, { wch: 55 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instrucciones');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }

@@ -55,7 +55,7 @@ export class SessionsService {
       where: { id: dto.cash_register_id, is_active: true },
     });
     if (!register) {
-      throw new NotFoundException('Cash register not found or inactive');
+      throw new NotFoundException('Caja registradora no encontrada o inactiva');
     }
 
     // Validate no open session on this register
@@ -69,7 +69,7 @@ export class SessionsService {
     );
     if (existing_session) {
       throw new BadRequestException(
-        'This cash register already has an open session',
+        'Esta caja ya tiene una sesión abierta',
       );
     }
 
@@ -82,7 +82,7 @@ export class SessionsService {
     });
     if (user_session) {
       throw new BadRequestException(
-        'You already have an open session on another register',
+        'Ya tienes una sesión abierta en otra caja',
       );
     }
 
@@ -141,10 +141,13 @@ export class SessionsService {
     const context = RequestContextService.getContext()!;
 
     const session = await this.prisma.cash_register_sessions.findFirst({
-      where: { id: session_id, status: 'open' },
+      where: { id: session_id },
     });
     if (!session) {
-      throw new NotFoundException('Open session not found');
+      throw new NotFoundException('Sesión de caja no encontrada');
+    }
+    if (session.status !== 'open') {
+      throw new BadRequestException('La sesión de caja ya no está abierta');
     }
 
     // Calculate expected closing amount from movements
@@ -171,12 +174,36 @@ export class SessionsService {
       }
     }
 
-    const difference = dto.actual_closing_amount - expected;
+    const actual_closing_amount = Number(dto.actual_closing_amount);
+    const difference = actual_closing_amount - expected;
 
     // Generate summary grouped by payment method
     const summary = this.generateSessionSummary(movements);
+    const closed_at = new Date();
 
     const closed_session = await this.prisma.$transaction(async (tx: any) => {
+      const updated = await tx.cash_register_sessions.updateMany({
+        where: {
+          id: session_id,
+          store_id: context.store_id,
+          status: 'open',
+        },
+        data: {
+          status: 'closed',
+          closed_by: context.user_id,
+          closed_at,
+          expected_closing_amount: expected,
+          actual_closing_amount,
+          difference,
+          closing_notes: dto.closing_notes,
+          summary,
+        },
+      });
+
+      if (updated.count !== 1) {
+        throw new BadRequestException('La sesión de caja ya no está abierta');
+      }
+
       // Create closing balance movement
       await tx.cash_register_movements.create({
         data: {
@@ -184,24 +211,13 @@ export class SessionsService {
           store_id: context.store_id,
           user_id: context.user_id,
           type: 'closing_balance',
-          amount: dto.actual_closing_amount,
+          amount: actual_closing_amount,
           payment_method: 'cash',
         },
       });
 
-      // Update session
-      const updated_session = await tx.cash_register_sessions.update({
-        where: { id: session_id },
-        data: {
-          status: 'closed',
-          closed_by: context.user_id,
-          closed_at: new Date(),
-          expected_closing_amount: expected,
-          actual_closing_amount: dto.actual_closing_amount,
-          difference,
-          closing_notes: dto.closing_notes,
-          summary,
-        },
+      const updated_session = await tx.cash_register_sessions.findFirst({
+        where: { id: session_id, store_id: context.store_id },
         include: {
           register: true,
           opened_by_user: {
@@ -212,6 +228,10 @@ export class SessionsService {
           },
         },
       });
+
+      if (!updated_session) {
+        throw new NotFoundException('Sesión de caja no encontrada');
+      }
 
       return updated_session;
     });
@@ -237,17 +257,33 @@ export class SessionsService {
   }
 
   async suspendSession(session_id: number) {
+    const context = RequestContextService.getContext()!;
     const session = await this.prisma.cash_register_sessions.findFirst({
-      where: { id: session_id, status: 'open' },
+      where: { id: session_id },
     });
     if (!session) {
-      throw new NotFoundException('Open session not found');
+      throw new NotFoundException('Sesión de caja abierta no encontrada');
+    }
+    if (session.status !== 'open') {
+      throw new BadRequestException('La sesión de caja ya no está abierta');
     }
 
-    return this.prisma.cash_register_sessions.update({
-      where: { id: session_id },
+    const updated = await this.prisma.cash_register_sessions.updateMany({
+      where: { id: session_id, store_id: context.store_id, status: 'open' },
       data: { status: 'suspended' },
     });
+    if (updated.count !== 1) {
+      throw new BadRequestException('La sesión de caja ya no está abierta');
+    }
+
+    const suspended_session = await this.prisma.cash_register_sessions.findFirst({
+      where: { id: session_id },
+    });
+    if (!suspended_session) {
+      throw new NotFoundException('Sesión de caja no encontrada');
+    }
+
+    return suspended_session;
   }
 
   async findAll(query: QuerySessionDto) {
@@ -311,7 +347,7 @@ export class SessionsService {
     });
 
     if (!session) {
-      throw new NotFoundException('Session not found');
+      throw new NotFoundException('Sesión de caja no encontrada');
     }
 
     return session;
@@ -539,10 +575,17 @@ export class SessionsService {
     summary: string,
   ): Promise<void> {
     try {
-      await this.prisma.cash_register_sessions.update({
-        where: { id: sessionId },
+      const context = RequestContextService.getContext();
+      const result = await this.prisma.cash_register_sessions.updateMany({
+        where: {
+          id: sessionId,
+          ...(context?.store_id ? { store_id: context.store_id } : {}),
+        },
         data: { ai_summary: summary },
       });
+      if (result.count !== 1) {
+        this.logger.warn(`AI summary target session ${sessionId} was not updated`);
+      }
     } catch (error: any) {
       this.logger.error(
         `Failed to save AI summary for session ${sessionId}: ${error.message}`,

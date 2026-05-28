@@ -32,6 +32,7 @@ import {
 } from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import { CardComponent } from '../../../../shared/components';
+import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-help-center-admin',
@@ -401,8 +402,9 @@ export class HelpCenterAdminComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        console.error('Error loading articles', err);
-        this.toast.error('Error al cargar los artículos');
+        const parsed = parseApiError(err);
+        console.error('Error loading articles', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al cargar los artículos');
         this.loading.set(false);
       },
     });
@@ -442,8 +444,9 @@ export class HelpCenterAdminComponent implements OnInit {
         this.loadStats();
       },
       error: (err) => {
-        this.toast.error('Error al cambiar el estado');
-        console.error(err);
+        const parsed = parseApiError(err);
+        console.error('Error toggling article status', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al cambiar el estado');
       },
     });
   }
@@ -464,8 +467,9 @@ export class HelpCenterAdminComponent implements OnInit {
         this.loadStats();
       },
       error: (err) => {
-        this.toast.error('Error al eliminar el artículo');
-        console.error(err);
+        const parsed = parseApiError(err);
+        console.error('Error deleting article', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al eliminar el artículo');
       },
     });
   }

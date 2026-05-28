@@ -18,6 +18,16 @@ export const ERROR_MESSAGES: Record<string, string> = {
   BRAND_DELETE_HAS_PRODUCTS:
     'Esta marca tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta marca.',
 
+  // Help Center
+  HELP_ARTICLE_NOT_FOUND: 'El artículo no fue encontrado.',
+  HELP_CATEGORY_NOT_FOUND: 'La categoría no fue encontrada.',
+  HELP_CATEGORY_HAS_ARTICLES:
+    'No se puede eliminar la categoría porque tiene artículos asociados. Reasigna o elimina los artículos primero.',
+  HELP_IMAGE_REQUIRED: 'Debes seleccionar una imagen.',
+  HELP_IMAGE_TYPE_INVALID:
+    'Tipo de imagen no soportado. Usa JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC o AVIF.',
+  HELP_IMAGE_TOO_LARGE: 'La imagen supera el tamaño máximo permitido (10 MB).',
+
   // Uploads
   UPLOAD_FILE_001: 'Seleccione un archivo para subir.',
   UPLOAD_CONTEXT_001: 'Debe seleccionar una organizacion para subir archivos.',

@@ -5,6 +5,7 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { HelpCenterAdminService } from '../../services/help-center-admin.service';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import {
@@ -153,6 +154,11 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
               (contentChange)="onContentChange($event)"
               (uploadError)="toast.error($event)"
             ></app-markdown-editor>
+            @if (contentError()) {
+              <p class="mt-2 text-sm text-[var(--color-destructive)]">
+                {{ contentError() }}
+              </p>
+            }
           </section>
           <!-- Section 5: Extra -->
           <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
@@ -244,7 +250,7 @@ export class ArticleFormComponent implements OnInit {
   categorySubmitting = signal(false);
   categoryForm: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(100)]],
-    description: [''],
+    description: ['', [Validators.maxLength(500)]],
   });
 
   headerActions = computed(() => [
@@ -290,11 +296,13 @@ export class ArticleFormComponent implements OnInit {
     type: ['GUIDE', Validators.required],
     category_id: [null as number | null, Validators.required],
     status: ['DRAFT'],
-    module: [''],
+    module: ['', [Validators.maxLength(50)]],
     tags: [''],
     is_featured: [false],
     sort_order: [0],
   });
+
+  contentError = signal<string | null>(null);
 
   // Bind upload function for markdown editor
   imageUploadFn = (file: File): Observable<{ key: string; url: string }> => {
@@ -354,8 +362,9 @@ export class ArticleFormComponent implements OnInit {
         this.loadingArticle.set(false);
       },
       error: (err) => {
-        console.error('Error loading article', err);
-        this.toast.error('Error al cargar el artículo');
+        const parsed = parseApiError(err);
+        console.error('Error loading article', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al cargar el artículo');
         this.loadingArticle.set(false);
         this.goBack();
       },
@@ -364,6 +373,9 @@ export class ArticleFormComponent implements OnInit {
 
   onContentChange(content: string) {
     this.contentValue.set(content);
+    if (this.contentError() && content && content.trim()) {
+      this.contentError.set(null);
+    }
   }
 
   onCoverImageSelected(file: File) {
@@ -374,8 +386,9 @@ export class ArticleFormComponent implements OnInit {
         this.existingCoverUrl.set(result.url);
       },
       error: (err) => {
-        console.error('Error uploading cover image', err);
-        this.toast.error('Error al subir la imagen de portada');
+        const parsed = parseApiError(err);
+        console.error('Error uploading cover image', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al subir la imagen de portada');
         this.coverFile.set(null);
       },
     });
@@ -387,7 +400,14 @@ export class ArticleFormComponent implements OnInit {
   }
 
   onSubmit() {
-    if (this.form.invalid) return;
+    const contentEmpty = !this.contentValue() || !this.contentValue().trim();
+    this.contentError.set(contentEmpty ? 'El contenido es requerido.' : null);
+
+    if (this.form.invalid || contentEmpty) {
+      this.form.markAllAsTouched();
+      this.toast.error('Revisa los campos marcados.');
+      return;
+    }
 
     this.submitting.set(true);
 
@@ -423,10 +443,12 @@ export class ArticleFormComponent implements OnInit {
         this.goBack();
       },
       error: (err) => {
-        console.error('Error saving article', err);
-        this.toast.error(
-          this.isEditMode() ? 'Error al actualizar el artículo' : 'Error al crear el artículo',
-        );
+        const parsed = parseApiError(err);
+        console.error('Error saving article', parsed.devMessage ?? err);
+        const fallback = this.isEditMode()
+          ? 'Error al actualizar el artículo'
+          : 'Error al crear el artículo';
+        this.toast.error(parsed.errorCode ? parsed.userMessage : fallback);
         this.submitting.set(false);
       },
     });
@@ -437,7 +459,10 @@ export class ArticleFormComponent implements OnInit {
   }
 
   onCategoryCreated() {
-    if (this.categoryForm.invalid) return;
+    if (this.categoryForm.invalid) {
+      this.categoryForm.markAllAsTouched();
+      return;
+    }
 
     this.categorySubmitting.set(true);
     this.service.createCategory(this.categoryForm.value).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -449,8 +474,9 @@ export class ArticleFormComponent implements OnInit {
         this.loadCategories();
       },
       error: (err) => {
-        console.error('Error creating category', err);
-        this.toast.error('Error al crear la categoría');
+        const parsed = parseApiError(err);
+        console.error('Error creating category', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al crear la categoría');
         this.categorySubmitting.set(false);
       },
     });

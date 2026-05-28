@@ -17,8 +17,14 @@ export class ProductUtils {
    * Check if a product is low stock
    */
   static isLowStock(product: Product, threshold: number = 10): boolean {
+    const effectiveThreshold =
+      product.low_stock_threshold !== undefined &&
+      product.low_stock_threshold !== null
+        ? product.low_stock_threshold
+        : threshold;
+
     return (
-      (product.stock_quantity || 0) <= threshold &&
+      (product.stock_quantity || 0) <= effectiveThreshold &&
       product.state === ProductState.ACTIVE
     );
   }
@@ -72,10 +78,13 @@ export class ProductUtils {
     return JSON.stringify(
       Object.keys(attributes)
         .sort()
-        .reduce((sorted, key) => {
-          sorted[key] = attributes[key];
-          return sorted;
-        }, {} as Record<string, string>)
+        .reduce(
+          (sorted, key) => {
+            sorted[key] = attributes[key];
+            return sorted;
+          },
+          {} as Record<string, string>,
+        ),
     );
   }
 }

@@ -128,6 +128,20 @@ export class CheckoutDto {
   @ValidateNested({ each: true })
   @Type(() => CheckoutCartItemDto)
   items?: CheckoutCartItemDto[];
+
+  /**
+   * Optional coupon code provided by the customer. When set, the backend
+   * validates it against {@link CouponsService.validate}; the discount is
+   * applied on top of automatic promotion discounts. Invalid codes raise an
+   * error and abort the checkout — frontend must NOT send the code unless
+   * the customer explicitly entered it.
+   *
+   * Trim + uppercase is done by the validator. Totals are never sent from
+   * the client — backend recomputes every value.
+   */
+  @IsOptional()
+  @IsString()
+  coupon_code?: string;
 }
 
 class CheckoutBookingDto {

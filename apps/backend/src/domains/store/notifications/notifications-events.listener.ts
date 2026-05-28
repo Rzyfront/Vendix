@@ -633,7 +633,11 @@ export class NotificationsEventsListener {
       'new_review',
       'Nueva Reseña',
       `${event.customer_name} dejó una reseña de ${'★'.repeat(event.rating)}${'☆'.repeat(5 - event.rating)} para ${event.product_name}`,
-      { review_id: event.review_id, product_id: event.product_id },
+      {
+        review_id: event.review_id,
+        product_id: event.product_id,
+        route: `/admin/customers/reviews?review_id=${event.review_id}`,
+      },
     );
   }
 

@@ -1,6 +1,5 @@
 import {Component, inject, input, output, signal, computed, effect, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { DatePipe } from '@angular/common';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -19,12 +18,12 @@ import { PoReceiveModalComponent } from '../po-receive-modal/po-receive-modal.co
 import { PoPaymentModalComponent } from '../po-payment-modal/po-payment-modal.component';
 import { PoTimelineComponent } from '../po-timeline/po-timeline.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-po-detail-modal',
   standalone: true,
   imports: [
-    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -47,12 +46,10 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
             [class]="orderStatusClass()">
             {{ orderStatusLabel() }}
           </span>
-          @if (order()?.payment_status && order()!.payment_status !== 'unpaid') {
-            <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide"
-              [class]="paymentStatusClass()">
-              {{ paymentStatusLabel() }}
-            </span>
-          }
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide"
+            [class]="paymentStatusClass()">
+            {{ paymentStatusLabel() }}
+          </span>
         </div>
       </div>
 
@@ -72,23 +69,23 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
       @if (activeTab() === 'detail') {
         <div class="space-y-5">
           <!-- Summary cards row -->
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div class="p-3 rounded-lg bg-muted/20 border border-border/50">
               <p class="text-[10px] text-text-muted uppercase tracking-wider font-medium">Proveedor</p>
-              <p class="text-sm font-semibold text-text-primary mt-1 truncate">
+              <p class="text-sm font-semibold text-text-primary mt-1 break-words">
                 {{ order()?.supplier?.name || order()?.suppliers?.name || '—' }}
               </p>
             </div>
             <div class="p-3 rounded-lg bg-muted/20 border border-border/50">
               <p class="text-[10px] text-text-muted uppercase tracking-wider font-medium">Bodega</p>
-              <p class="text-sm font-semibold text-text-primary mt-1 truncate">
+              <p class="text-sm font-semibold text-text-primary mt-1 break-words">
                 {{ order()?.location?.name || '—' }}
               </p>
             </div>
             <div class="p-3 rounded-lg bg-muted/20 border border-border/50">
-              <p class="text-[10px] text-text-muted uppercase tracking-wider font-medium">Fecha</p>
+              <p class="text-[10px] text-text-muted uppercase tracking-wider font-medium">Fecha de orden</p>
               <p class="text-sm font-semibold text-text-primary mt-1">
-                {{ order()?.order_date | date:'dd MMM yyyy' }}
+                {{ formatDate(order()?.order_date) }}
               </p>
             </div>
             <div class="p-3 rounded-lg bg-primary/5 border border-primary/20">
@@ -96,6 +93,69 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
               <p class="text-sm font-bold text-primary mt-1">
                 {{ formatCurrency(order()?.total_amount || 0) }}
               </p>
+            </div>
+          </div>
+
+          <!-- Order metadata -->
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_280px] gap-4">
+            <div class="rounded-lg border border-border/60 overflow-hidden">
+              <div class="px-3 py-2.5 bg-muted/20 border-b border-border/50">
+                <h4 class="text-xs text-text-muted uppercase tracking-wider font-semibold">Información de la orden</h4>
+              </div>
+              <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 p-3">
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Fecha esperada</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ formatDate(order()?.expected_date) }}</dd>
+                </div>
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Fecha recibida</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ formatDate(order()?.received_date) }}</dd>
+                </div>
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Vencimiento de pago</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ formatDate(order()?.payment_due_date) }}</dd>
+                </div>
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Condiciones de pago</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ order()?.payment_terms || '—' }}</dd>
+                </div>
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Método de envío</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ order()?.shipping_method || '—' }}</dd>
+                </div>
+                <div>
+                  <dt class="text-[10px] text-text-muted uppercase tracking-wider">Actualizada</dt>
+                  <dd class="text-sm text-text-primary mt-0.5">{{ formatDateTime(order()?.updated_at) }}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="rounded-lg border border-border/60 overflow-hidden">
+              <div class="px-3 py-2.5 bg-muted/20 border-b border-border/50">
+                <h4 class="text-xs text-text-muted uppercase tracking-wider font-semibold">Resumen financiero</h4>
+              </div>
+              <div class="p-3 space-y-2 text-sm">
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Subtotal</span>
+                  <span class="font-medium text-text-primary tabular-nums">{{ formatCurrency(order()?.subtotal_amount || 0) }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Descuento</span>
+                  <span class="font-medium text-text-primary tabular-nums">{{ formatCurrency(order()?.discount_amount || 0) }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Impuestos</span>
+                  <span class="font-medium text-text-primary tabular-nums">{{ formatCurrency(order()?.tax_amount || 0) }}</span>
+                </div>
+                <div class="flex justify-between gap-3">
+                  <span class="text-text-secondary">Envío</span>
+                  <span class="font-medium text-text-primary tabular-nums">{{ formatCurrency(order()?.shipping_cost || 0) }}</span>
+                </div>
+                <div class="flex justify-between gap-3 border-t border-border pt-2">
+                  <span class="font-semibold text-text-primary">Total</span>
+                  <span class="font-bold text-primary tabular-nums">{{ formatCurrency(order()?.total_amount || 0) }}</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -118,6 +178,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                     <th class="py-2.5 px-3">Producto</th>
                     <th class="py-2.5 px-3 text-right w-16">Cant.</th>
                     <th class="py-2.5 px-3 text-right w-20 hidden sm:table-cell">Recibido</th>
+                    <th class="py-2.5 px-3 text-right w-20 hidden md:table-cell">Pendiente</th>
                     <th class="py-2.5 px-3 text-right w-24">Costo</th>
                     <th class="py-2.5 px-3 text-right w-24">Subtotal</th>
                   </tr>
@@ -129,6 +190,15 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                         <span class="font-medium text-text-primary">{{ getItemProductName(item) }}</span>
                         @if (item.product_variants?.sku) {
                           <span class="text-[11px] text-text-muted block mt-0.5">SKU: {{ item.product_variants!.sku }}</span>
+                        }
+                        @if (item.product_variants?.name) {
+                          <span class="text-[11px] text-text-muted block mt-0.5">Variante: {{ item.product_variants!.name }}</span>
+                        }
+                        @if (getItemLotDetails(item)) {
+                          <span class="text-[11px] text-text-muted block mt-0.5">{{ getItemLotDetails(item) }}</span>
+                        }
+                        @if (item.notes) {
+                          <span class="text-[11px] text-text-secondary block mt-1">{{ item.notes }}</span>
                         }
                         <!-- Reception progress bar per item (mobile-visible) -->
                         @if (getItemReceived(item) > 0) {
@@ -158,6 +228,9 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                           </span>
                         </div>
                       </td>
+                      <td class="py-2.5 px-3 text-right hidden md:table-cell text-text-secondary tabular-nums">
+                        {{ getItemPending(item) }}
+                      </td>
                       <td class="py-2.5 px-3 text-right text-text-secondary tabular-nums">
                         {{ formatCurrency(item.unit_price || item.unit_cost || 0) }}
                       </td>
@@ -170,14 +243,14 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                 <tfoot>
                   @if (order()?.shipping_cost) {
                     <tr class="border-t border-border/50">
-                      <td [attr.colspan]="4" class="py-2 px-3 text-right text-xs text-text-muted">Envio</td>
+                      <td [attr.colspan]="5" class="py-2 px-3 text-right text-xs text-text-muted">Envío</td>
                       <td class="py-2 px-3 text-right text-sm text-text-secondary tabular-nums">
                         {{ formatCurrency(order()!.shipping_cost || 0) }}
                       </td>
                     </tr>
                   }
                   <tr class="border-t-2 border-border">
-                    <td [attr.colspan]="4" class="py-3 px-3 text-right font-semibold text-text-primary">Total</td>
+                    <td [attr.colspan]="5" class="py-3 px-3 text-right font-semibold text-text-primary">Total</td>
                     <td class="py-3 px-3 text-right font-bold text-primary text-base tabular-nums">
                       {{ formatCurrency(order()?.total_amount || 0) }}
                     </td>
@@ -188,30 +261,18 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
           </div>
 
           <!-- Notes + extra info -->
-          @if (order()?.notes || order()?.expected_date || order()?.payment_due_date) {
+          @if (order()?.notes || order()?.internal_notes) {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              @if (order()?.expected_date) {
-                <div class="flex items-center gap-2 p-2.5 rounded-lg bg-muted/10 border border-border/30">
-                  <app-icon name="calendar" [size]="14" class="text-text-muted flex-shrink-0"></app-icon>
-                  <div>
-                    <span class="text-[10px] text-text-muted uppercase">Entrega esperada</span>
-                    <p class="text-sm text-text-primary">{{ order()!.expected_date | date:'dd MMM yyyy' }}</p>
-                  </div>
-                </div>
-              }
-              @if (order()?.payment_due_date) {
-                <div class="flex items-center gap-2 p-2.5 rounded-lg bg-muted/10 border border-border/30">
-                  <app-icon name="clock" [size]="14" class="text-text-muted flex-shrink-0"></app-icon>
-                  <div>
-                    <span class="text-[10px] text-text-muted uppercase">Vencimiento pago</span>
-                    <p class="text-sm text-text-primary">{{ order()!.payment_due_date | date:'dd MMM yyyy' }}</p>
-                  </div>
-                </div>
-              }
               @if (order()?.notes) {
-                <div class="sm:col-span-2 p-2.5 rounded-lg bg-muted/10 border border-border/30">
-                  <span class="text-[10px] text-text-muted uppercase font-medium">Notas</span>
-                  <p class="text-sm text-text-secondary mt-0.5">{{ order()!.notes }}</p>
+                <div class="p-3 rounded-lg bg-muted/10 border border-border/30">
+                  <span class="text-[10px] text-text-muted uppercase font-medium">Notas proveedor</span>
+                  <p class="text-sm text-text-secondary mt-1 whitespace-pre-line">{{ order()!.notes }}</p>
+                </div>
+              }
+              @if (order()?.internal_notes) {
+                <div class="p-3 rounded-lg bg-muted/10 border border-border/30">
+                  <span class="text-[10px] text-text-muted uppercase font-medium">Notas internas</span>
+                  <p class="text-sm text-text-secondary mt-1 whitespace-pre-line">{{ order()!.internal_notes }}</p>
                 </div>
               }
             </div>
@@ -288,13 +349,13 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                       <div>
                         <span class="text-sm font-medium text-text-primary">Recepcion #{{ reception.id }}</span>
                         <span class="text-[11px] text-text-muted block">
-                          {{ reception.received_at | date:'dd MMM yyyy, HH:mm' }}
+                          {{ formatDateTime(reception.received_at) }}
                         </span>
                       </div>
                     </div>
                     @if (reception.received_by) {
                       <span class="text-[11px] text-text-muted bg-muted/20 px-2 py-0.5 rounded-full">
-                        {{ reception.received_by.first_name || reception.received_by.user_name }}
+                        {{ getUserDisplayName(reception.received_by) }}
                       </span>
                     }
                   </div>
@@ -323,8 +384,13 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
         <div class="space-y-4">
           <!-- Header with action -->
           <div class="flex justify-between items-center">
-            <h4 class="text-sm font-semibold text-text-primary">Pagos</h4>
-            @if (order()?.payment_status !== 'paid' && order()?.status !== 'cancelled') {
+            <h4 class="text-sm font-semibold text-text-primary">
+              Pagos
+              @if (payments().length > 0) {
+                <span class="text-text-muted font-normal ml-1">({{ payments().length }})</span>
+              }
+            </h4>
+            @if (canRegisterPayment()) {
               <app-button variant="primary" size="sm" (clicked)="showPaymentModal.set(true)">
                 <app-icon name="dollar-sign" [size]="14" slot="icon"></app-icon>
                 Registrar Pago
@@ -392,7 +458,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                         {{ formatCurrency(payment.amount) }}
                       </span>
                       <span class="text-[11px] text-text-muted">
-                        {{ payment.payment_date | date:'dd MMM yyyy' }}
+                        {{ formatDate(payment.payment_date) }}
                       </span>
                     </div>
                     <div class="text-xs text-text-secondary mt-0.5">
@@ -401,13 +467,16 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                         <span class="text-text-muted"> · Ref: {{ payment.reference }}</span>
                       }
                     </div>
+                    <div class="text-[11px] text-text-muted mt-1">
+                      Registrado: {{ formatDateTime(payment.created_at) }}
+                    </div>
                     @if (payment.notes) {
-                      <p class="text-xs text-text-muted mt-1 italic">{{ payment.notes }}</p>
+                      <p class="text-xs text-text-muted mt-1 whitespace-pre-line">{{ payment.notes }}</p>
                     }
                   </div>
                   @if (payment.created_by) {
                     <span class="text-[10px] text-text-muted bg-muted/20 px-2 py-0.5 rounded-full whitespace-nowrap flex-shrink-0">
-                      {{ payment.created_by.first_name || payment.created_by.user_name }}
+                      {{ getUserDisplayName(payment.created_by) }}
                     </span>
                   }
                 </div>
@@ -479,7 +548,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium text-text-primary truncate">{{ attachment.file_name }}</p>
                     <p class="text-[11px] text-text-muted">
-                      {{ formatFileSize(attachment.file_size) }} · {{ attachment.created_at | date:'dd MMM yyyy' }}
+                      {{ formatFileSize(attachment.file_size) }} · {{ formatDateTime(attachment.created_at) }}
                     </p>
                     @if (attachment.supplier_invoice_number) {
                       <p class="text-[11px] text-primary font-medium mt-0.5">
@@ -538,7 +607,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
             Recibir
           </app-button>
         }
-        @if (order()?.payment_status !== 'paid' && order()?.status !== 'cancelled' && activeTab() === 'detail') {
+        @if (canRegisterPayment() && activeTab() === 'detail') {
           <app-button variant="outline" (clicked)="showPaymentModal.set(true)">
             <app-icon name="dollar-sign" [size]="14" slot="icon"></app-icon>
             Pagar
@@ -634,6 +703,19 @@ export class PoDetailModalComponent {
     return Math.round((this.totalPaid() / total) * 100);
   });
 
+  readonly effectivePaymentStatus = computed<'unpaid' | 'partial' | 'paid'>(() => {
+    const total = Number(this.order()?.total_amount || 0);
+    const paid = this.totalPaid();
+
+    if (this.paymentsLoaded() && total > 0) {
+      if (paid >= total) return 'paid';
+      if (paid > 0) return 'partial';
+      return 'unpaid';
+    }
+
+    return this.order()?.payment_status || 'unpaid';
+  });
+
   readonly receptionProgress = computed(() => {
     const items = this.orderItems();
     if (items.length === 0) return 0;
@@ -646,6 +728,13 @@ export class PoDetailModalComponent {
   readonly canReceive = computed(() => {
     const status = this.order()?.status;
     return status === 'approved' || status === 'partial' || status === 'ordered';
+  });
+
+  readonly canRegisterPayment = computed(() => {
+    const po = this.order();
+    if (!po || po.status === 'cancelled') return false;
+    if (this.effectivePaymentStatus() === 'paid') return false;
+    return this.remainingBalance() > 0;
   });
 
   constructor() {
@@ -718,7 +807,7 @@ export class PoDetailModalComponent {
   }
 
   paymentStatusClass(): string {
-    const status = this.order()?.payment_status;
+    const status = this.effectivePaymentStatus();
     const map: Record<string, string> = {
       unpaid: 'bg-red-100 text-red-700',
       partial: 'bg-amber-100 text-amber-700',
@@ -728,7 +817,7 @@ export class PoDetailModalComponent {
   }
 
   paymentStatusLabel(): string {
-    const status = this.order()?.payment_status;
+    const status = this.effectivePaymentStatus();
     const map: Record<string, string> = {
       unpaid: 'Sin pagar',
       partial: 'Pago parcial',
@@ -897,10 +986,22 @@ export class PoDetailModalComponent {
     return item.quantity_received ?? 0;
   }
 
+  getItemPending(item: PurchaseOrderItem): number {
+    return Math.max(0, this.getItemOrdered(item) - this.getItemReceived(item));
+  }
+
   getItemProgress(item: PurchaseOrderItem): number {
     const ordered = this.getItemOrdered(item);
     if (ordered <= 0) return 0;
     return Math.min(100, Math.round((this.getItemReceived(item) / ordered) * 100));
+  }
+
+  getItemLotDetails(item: PurchaseOrderItem): string {
+    const details: string[] = [];
+    if (item.batch_number) details.push(`Lote: ${item.batch_number}`);
+    if (item.manufacturing_date) details.push(`Fabricación: ${this.formatDate(item.manufacturing_date)}`);
+    if (item.expiration_date) details.push(`Vence: ${this.formatDate(item.expiration_date)}`);
+    return details.join(' · ');
   }
 
   getReceptionItemName(rItem: any): string {
@@ -909,8 +1010,27 @@ export class PoDetailModalComponent {
       || 'Producto';
   }
 
-  formatCurrency(amount: number): string {
+  formatCurrency(amount: number | string | null | undefined): string {
     return this.currencyService.format(Number(amount) || 0);
+  }
+
+  formatDate(value?: string | null): string {
+    if (!value) return '—';
+    return formatDateOnlyUTC(value);
+  }
+
+  formatDateTime(value?: string | null): string {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+
+    return new Intl.DateTimeFormat('es-CO', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
   }
 
   formatFileSize(bytes: number): string {
@@ -933,8 +1053,15 @@ export class PoDetailModalComponent {
       cash: 'Efectivo',
       bank_transfer: 'Transferencia bancaria',
       check: 'Cheque',
-      credit_card: 'Tarjeta de credito',
+      credit_card: 'Tarjeta de crédito',
     };
-    return labels[method] || method;
+    return labels[method] || method || 'Sin método';
+  }
+
+  getUserDisplayName(user: { first_name?: string | null; last_name?: string | null; username?: string | null; user_name?: string | null } | null | undefined): string {
+    if (!user) return 'Sistema';
+
+    const name = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+    return name || user.username || user.user_name || 'Sistema';
   }
 }

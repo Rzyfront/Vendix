@@ -18,6 +18,7 @@ import {
   CashRegister,
 } from '../services/pos-cash-register.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-pos-session-open-modal',
@@ -234,9 +235,7 @@ export class PosSessionOpenModalComponent {
         },
         error: (err) => {
           this.submitting.set(false);
-          this.toastService.error(
-            err.error?.message || 'Error al abrir la caja',
-          );
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
   }

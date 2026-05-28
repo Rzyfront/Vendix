@@ -111,25 +111,38 @@ import { CategoriesService } from '../../../../products/services/categories.serv
         <!-- Product Selector (when scope is product) -->
         @if (form.get('scope')?.value === 'product') {
           <app-multi-selector
-            label="Productos"
+            label="Productos elegibles"
             [options]="productOptions()"
             formControlName="product_ids"
             placeholder="Buscar productos..."
             [required]="true"
-            [errorText]="form.get('product_ids')?.touched && form.get('product_ids')?.invalid ? 'Selecciona al menos un producto' : ''"
+            [errorText]="form.get('product_ids')?.touched && form.get('product_ids')?.invalid ? 'Selecciona al menos un producto para esta promocion' : ''"
           ></app-multi-selector>
+          <p class="text-xs text-gray-500 -mt-1">
+            La promocion solo aplicara cuando los productos seleccionados esten en el carrito.
+          </p>
         }
 
         <!-- Category Selector (when scope is category) -->
         @if (form.get('scope')?.value === 'category') {
           <app-multi-selector
-            label="Categorias"
+            label="Categorias elegibles"
             [options]="categoryOptions()"
             formControlName="category_ids"
             placeholder="Buscar categorias..."
             [required]="true"
-            [errorText]="form.get('category_ids')?.touched && form.get('category_ids')?.invalid ? 'Selecciona al menos una categoria' : ''"
+            [errorText]="form.get('category_ids')?.touched && form.get('category_ids')?.invalid ? 'Selecciona al menos una categoria para esta promocion' : ''"
           ></app-multi-selector>
+          <p class="text-xs text-gray-500 -mt-1">
+            La promocion aplicara a todos los productos que pertenezcan a las categorias seleccionadas.
+          </p>
+        }
+
+        <!-- Helper note for order scope -->
+        @if (form.get('scope')?.value === 'order') {
+          <p class="text-xs text-gray-500">
+            La promocion aplicara al total de la compra cuando se cumpla la compra minima configurada.
+          </p>
         }
 
         <!-- Dates + Min purchase -->
@@ -270,7 +283,17 @@ export class PromotionFormModalComponent {
 
     this.form.get('scope')?.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((scope) => this.configureScopeValidators(scope));
+      .subscribe((scope) => {
+        this.configureScopeValidators(scope);
+        // Clear fields that no longer apply for the new scope so they
+        // are not submitted as dirty data.
+        if (scope !== 'product') {
+          this.form.patchValue({ product_ids: [] }, { emitEvent: false });
+        }
+        if (scope !== 'category') {
+          this.form.patchValue({ category_ids: [] }, { emitEvent: false });
+        }
+      });
 
     // Load product and category options for multi-selectors
     this.productsService.getProducts({ limit: 500 })
@@ -355,6 +378,10 @@ export class PromotionFormModalComponent {
   }
 
   onSubmit(): void {
+    // Re-run scope validators in case the user changed scope and never blurred
+    // the dependent selector. This prevents stale validity state.
+    this.configureScopeValidators(this.form.get('scope')?.value);
+
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
@@ -373,13 +400,28 @@ export class PromotionFormModalComponent {
     if (dto.per_customer_limit === null || dto.per_customer_limit === '') delete dto.per_customer_limit;
     if (dto.type !== 'percentage') delete dto.max_discount_amount;
 
-    // Clean up scope-specific IDs
+    // Normalize scope-specific IDs:
+    // - Product scope: send product_ids, strip category_ids.
+    // - Category scope: send category_ids, strip product_ids.
+    // - Order scope: strip both — they must not be persisted as dirty data.
     if (dto.scope === 'product') {
       dto.product_ids = this.toNumberArray(dto.product_ids);
       delete dto.category_ids;
+      if (!dto.product_ids.length) {
+        // Defensive guard: should be unreachable because of form validators,
+        // but we never want to send an inconsistent payload.
+        this.form.get('product_ids')?.setErrors({ required: true });
+        this.form.markAllAsTouched();
+        return;
+      }
     } else if (dto.scope === 'category') {
       dto.category_ids = this.toNumberArray(dto.category_ids);
       delete dto.product_ids;
+      if (!dto.category_ids.length) {
+        this.form.get('category_ids')?.setErrors({ required: true });
+        this.form.markAllAsTouched();
+        return;
+      }
     } else {
       delete dto.product_ids;
       delete dto.category_ids;

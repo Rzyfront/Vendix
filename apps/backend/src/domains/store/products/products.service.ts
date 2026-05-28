@@ -45,8 +45,14 @@ import {
   resolvePosStockScope,
   ResolvedInventoryScope,
 } from '../inventory/shared/helpers/pos-stock-scope.helper';
+import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low-stock-threshold.helper';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import type {
+  ActiveProductPromotion,
+  ActivePromotionProductInput,
+} from '../promotions/dto/promotion-quote.interface';
 
 type OnlinePurchaseStatusReason =
   | 'ready'
@@ -82,6 +88,7 @@ export class ProductsService {
     private readonly remoteImageService: RemoteImageService,
     private readonly s3PathHelper: S3PathHelper,
     private readonly ai_engine: AIEngineService,
+    private readonly promotionEngine: PromotionEngineService,
   ) {}
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
@@ -768,7 +775,7 @@ export class ProductsService {
     // denormalized cross-location aggregate.
     const includeStockEffective = pos_optimized ? true : include_stock;
 
-    const [products, total] = await Promise.all([
+    const [products, total, settings] = await Promise.all([
       this.prisma.products.findMany({
         where,
         skip,
@@ -881,7 +888,15 @@ export class ProductsService {
         orderBy: { created_at: 'desc' },
       }),
       this.prisma.products.count({ where }),
+      this.loadMergedSettings(),
     ]);
+
+    // Resolve active auto-apply promotions for every product in the listing
+    // (batch query). Cards use the promotional unit price computed off the
+    // tax-inclusive `final_price`, so the displayed savings stay consistent
+    // with the rest of the listing pricing math.
+    const activePromotionsByProductId =
+      await this.resolveActivePromotionsForListing(products);
 
     // Para POS optimizado, retornar productos directamente con imágenes firmadas
     if (pos_optimized) {
@@ -889,6 +904,10 @@ export class ProductsService {
         products.map(async (product) => {
           const raw_image_url = product.product_images?.[0]?.image_url || null;
           const signed_image_url = await this.s3Service.signUrl(raw_image_url);
+          const lowStockThreshold = resolveProductLowStockThreshold(
+            settings,
+            product,
+          );
 
           // Map variant data for POS
           const product_variants =
@@ -952,6 +971,8 @@ export class ProductsService {
             ? product_variants.some((v: any) => v.is_available)
             : !product.track_inventory || productStockQty > 0;
 
+          const activePromotion =
+            activePromotionsByProductId.get(product.id) ?? null;
           return {
             id: product.id,
             name: product.name,
@@ -961,9 +982,13 @@ export class ProductsService {
             sale_price: product.sale_price,
             is_on_sale: product.is_on_sale,
             final_price: this.calculateFinalPrice(product),
+            active_promotion: activePromotion,
             sku: product.sku,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
+            min_stock_level: product.min_stock_level,
+            reorder_point: product.reorder_point,
+            low_stock_threshold: lowStockThreshold,
             stock_quantity: productStockQty,
             available_stock: product.track_inventory ? productStockQty : null,
             is_available: productIsAvailable,
@@ -1034,6 +1059,10 @@ export class ProductsService {
     // Cuando el producto tiene variantes, excluir filas base para no duplicar stock.
     const productsWithStock = await Promise.all(
       products.map(async (product) => {
+        const lowStockThreshold = resolveProductLowStockThreshold(
+          settings,
+          product,
+        );
         const hasVariants =
           (product._count?.product_variants ??
             product.product_variants?.length ??
@@ -1092,6 +1121,8 @@ export class ProductsService {
             }) || []
           : undefined;
 
+        const activePromotion =
+          activePromotionsByProductId.get(product.id) ?? null;
         return {
           id: product.id,
           name: product.name,
@@ -1101,9 +1132,13 @@ export class ProductsService {
           sale_price: product.sale_price,
           is_on_sale: product.is_on_sale,
           final_price: this.calculateFinalPrice(product),
+          active_promotion: activePromotion,
           sku: product.sku,
           cost_price: product.cost_price,
           profit_margin: product.profit_margin,
+          min_stock_level: product.min_stock_level,
+          reorder_point: product.reorder_point,
+          low_stock_threshold: lowStockThreshold,
           state: product.state,
           pricing_type: String(product.pricing_type),
           product_type: product.product_type,
@@ -1298,8 +1333,13 @@ export class ProductsService {
 
     // Sign all images
     await this.signProductImages(product);
-    const onlinePurchaseStatus = await this.resolveOnlinePurchaseStatus(
-      product.store_id,
+    const [onlinePurchaseStatus, settings] = await Promise.all([
+      this.resolveOnlinePurchaseStatus(product.store_id),
+      this.loadMergedSettings(product.store_id),
+    ]);
+    const lowStockThreshold = resolveProductLowStockThreshold(
+      settings,
+      product,
     );
 
     // Retornar producto con información de stock enriquecida
@@ -1315,6 +1355,9 @@ export class ProductsService {
       sku: product.sku,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
+      min_stock_level: product.min_stock_level,
+      reorder_point: product.reorder_point,
+      low_stock_threshold: lowStockThreshold,
       state: product.state,
       pricing_type: String(product.pricing_type),
       product_type: product.product_type,
@@ -2365,6 +2408,8 @@ export class ProductsService {
         },
       });
 
+      const settings = await this.loadMergedSettings(storeId);
+
       // Calculate stats
       const active_products = products.filter(
         (p) => p.state === ProductState.ACTIVE,
@@ -2378,13 +2423,15 @@ export class ProductsService {
       ).length;
 
       // Stock calculations (simplified - using stock_quantity field)
-      const low_stock_products = products.filter(
-        (p) =>
+      const low_stock_products = products.filter((p) => {
+        const stockQuantity = Number(p.stock_quantity ?? 0);
+        return (
           p.stock_quantity !== null &&
           p.stock_quantity !== undefined &&
-          p.stock_quantity > 0 &&
-          p.stock_quantity <= 10,
-      ).length;
+          stockQuantity > 0 &&
+          stockQuantity <= resolveProductLowStockThreshold(settings, p)
+        );
+      }).length;
 
       const out_of_stock_products = products.filter(
         (p) =>
@@ -2806,6 +2853,50 @@ export class ProductsService {
   }
 
   /**
+   * Batch-resolve active auto-apply promotions for a list of products. The
+   * resulting map keys are product ids; values are the highest-priority
+   * promotion eligible by scope=product or scope=category. POS cards display
+   * the promotional price computed off the same tax-inclusive `final_price`
+   * the rest of the listing uses, so the badge stays visually consistent.
+   */
+  private async resolveActivePromotionsForListing(
+    products: any[],
+  ): Promise<Map<number, ActiveProductPromotion>> {
+    if (!Array.isArray(products) || products.length === 0) {
+      return new Map();
+    }
+
+    const inputs: ActivePromotionProductInput[] = products
+      .map((product) => {
+        const productId = Number(product?.id);
+        if (!Number.isFinite(productId)) return null;
+        const unitPrice = this.calculateFinalPrice(product);
+        if (!Number.isFinite(unitPrice) || unitPrice <= 0) return null;
+        const categoryIds: number[] = (product.product_categories ?? [])
+          .map((pc: any) => Number(pc?.categories?.id ?? pc?.category_id))
+          .filter((id: number) => Number.isFinite(id));
+        return {
+          product_id: productId,
+          category_ids: categoryIds,
+          unit_price: unitPrice,
+        } as ActivePromotionProductInput;
+      })
+      .filter((value): value is ActivePromotionProductInput => value !== null);
+
+    if (inputs.length === 0) return new Map();
+
+    try {
+      return await this.promotionEngine.findActiveAutoPromotionsForProducts(
+        inputs,
+      );
+    } catch {
+      // Listing must never fail because of promotions; surface no badge
+      // instead of erroring the whole catalog.
+      return new Map();
+    }
+  }
+
+  /**
    * Calculates the final price of a product including taxes and active offers.
    */
   private calculateFinalPrice(product: any): number {
@@ -2854,8 +2945,9 @@ export class ProductsService {
     return { default_location_id: store?.default_location_id ?? null };
   }
 
-  private async loadMergedSettings(): Promise<StoreSettings> {
+  private async loadMergedSettings(storeId?: number): Promise<StoreSettings> {
     const row = await this.prisma.store_settings.findFirst({
+      ...(storeId && { where: { store_id: storeId } }),
       select: { settings: true },
     });
     return mergeStoreSettingsWithDefaults(row?.settings);

@@ -99,6 +99,33 @@ export class OrderDetailsPageComponent {
     }
     return Array.from(groups.values());
   });
+
+  // ── Discount snapshots (read-only from order; never recalculated) ──
+  readonly appliedPromotions = computed(() =>
+    (this.order()?.order_promotions ?? []).map((op) => ({
+      id: op.id,
+      promotion_id: op.promotion_id,
+      name: op.promotions?.name ?? `Promoción #${op.promotion_id}`,
+      code: op.promotions?.code ?? null,
+      type: op.promotions?.type ?? null,
+      scope: op.promotions?.scope ?? null,
+      discount_amount: Number(op.discount_amount || 0),
+    })),
+  );
+
+  readonly appliedCoupons = computed(() =>
+    (this.order()?.coupon_uses ?? []).map((cu) => ({
+      id: cu.id,
+      coupon_id: cu.coupon_id,
+      code: cu.coupon?.code ?? `CUP-${cu.coupon_id}`,
+      name: cu.coupon?.name ?? null,
+      discount_applied: Number(cu.discount_applied || 0),
+    })),
+  );
+
+  readonly hasDiscountSnapshot = computed(
+    () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
+  );
   orderRefunds = signal<RefundRecord[]>([]);
   private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
@@ -864,6 +891,18 @@ export class OrderDetailsPageComponent {
                 item.stock_units_consumed != null
                   ? Number(item.stock_units_consumed)
                   : null,
+            })),
+            // Persisted discount snapshots — numeric coercion only,
+            // never recalculated against current promotions/coupons.
+            order_promotions: (orderData.order_promotions || []).map(
+              (op: any) => ({
+                ...op,
+                discount_amount: Number(op.discount_amount || 0),
+              }),
+            ),
+            coupon_uses: (orderData.coupon_uses || []).map((cu: any) => ({
+              ...cu,
+              discount_applied: Number(cu.discount_applied || 0),
             })),
           });
 

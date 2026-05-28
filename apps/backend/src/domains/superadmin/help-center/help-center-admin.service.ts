@@ -1,12 +1,9 @@
-import {
-  Injectable,
-  NotFoundException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { S3Service } from '../../../common/services/s3.service';
 import { S3PathHelper } from '../../../common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import {
   CreateArticleDto,
   UpdateArticleDto,
@@ -92,7 +89,7 @@ export class HelpCenterAdminService {
     });
 
     if (!article) {
-      throw new NotFoundException('Article not found');
+      throw new VendixHttpException(ErrorCodes.HELP_ARTICLE_NOT_FOUND);
     }
 
     return {
@@ -122,7 +119,7 @@ export class HelpCenterAdminService {
     );
 
     if (!category) {
-      throw new BadRequestException('Category not found');
+      throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_NOT_FOUND);
     }
 
     // Sanitize cover_image_url before storage
@@ -168,7 +165,7 @@ export class HelpCenterAdminService {
     });
 
     if (!article) {
-      throw new NotFoundException('Article not found');
+      throw new VendixHttpException(ErrorCodes.HELP_ARTICLE_NOT_FOUND);
     }
 
     // If title changed, regenerate slug
@@ -188,7 +185,7 @@ export class HelpCenterAdminService {
           where: { id: dto.category_id },
         });
       if (!category) {
-        throw new BadRequestException('Category not found');
+        throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_NOT_FOUND);
       }
     }
 
@@ -239,7 +236,7 @@ export class HelpCenterAdminService {
     });
 
     if (!article) {
-      throw new NotFoundException('Article not found');
+      throw new VendixHttpException(ErrorCodes.HELP_ARTICLE_NOT_FOUND);
     }
 
     await this.globalPrisma.help_articles.delete({ where: { id } });
@@ -311,7 +308,7 @@ export class HelpCenterAdminService {
     );
 
     if (!category) {
-      throw new NotFoundException('Category not found');
+      throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_NOT_FOUND);
     }
 
     // If name changed, regenerate slug
@@ -350,13 +347,11 @@ export class HelpCenterAdminService {
     );
 
     if (!category) {
-      throw new NotFoundException('Category not found');
+      throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_NOT_FOUND);
     }
 
     if (category._count.articles > 0) {
-      throw new BadRequestException(
-        'Cannot delete category with associated articles. Remove or reassign articles first.',
-      );
+      throw new VendixHttpException(ErrorCodes.HELP_CATEGORY_HAS_ARTICLES);
     }
 
     await this.globalPrisma.help_article_categories.delete({ where: { id } });
@@ -370,7 +365,7 @@ export class HelpCenterAdminService {
 
   async uploadArticleImage(file: Express.Multer.File) {
     if (!file) {
-      throw new BadRequestException('Image file is required');
+      throw new VendixHttpException(ErrorCodes.HELP_IMAGE_REQUIRED);
     }
 
     const allowedMimes = [
@@ -386,14 +381,12 @@ export class HelpCenterAdminService {
       'image/avif',
     ];
     if (!allowedMimes.includes(file.mimetype)) {
-      throw new BadRequestException(
-        'Only image files are allowed (JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC, AVIF)',
-      );
+      throw new VendixHttpException(ErrorCodes.HELP_IMAGE_TYPE_INVALID);
     }
 
     const MAX_SIZE = 10 * 1024 * 1024; // 10MB
     if (file.size > MAX_SIZE) {
-      throw new BadRequestException('Image file must be smaller than 10MB');
+      throw new VendixHttpException(ErrorCodes.HELP_IMAGE_TOO_LARGE);
     }
 
     const path = this.s3PathHelper.buildHelpCenterPath();

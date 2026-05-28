@@ -46,7 +46,7 @@ export class CashRegistersService {
     });
 
     if (!register) {
-      throw new NotFoundException('Cash register not found');
+      throw new NotFoundException('Caja registradora no encontrada');
     }
 
     return register;
@@ -59,7 +59,7 @@ export class CashRegistersService {
     });
     if (existing) {
       throw new ConflictException(
-        `A cash register with code "${dto.code}" already exists`,
+        `Ya existe una caja registradora con el código "${dto.code}"`,
       );
     }
 
@@ -83,24 +83,34 @@ export class CashRegistersService {
       });
       if (existing) {
         throw new ConflictException(
-          `A cash register with code "${dto.code}" already exists`,
+          `Ya existe una caja registradora con el código "${dto.code}"`,
         );
       }
     }
 
-    return this.prisma.cash_registers.update({
+    const updated = await this.prisma.cash_registers.updateMany({
       where: { id },
       data: dto,
     });
+    if (updated.count !== 1) {
+      throw new NotFoundException('Caja registradora no encontrada');
+    }
+
+    return this.findOne(id);
   }
 
   async remove(id: number) {
     await this.findOne(id);
 
     // Soft delete — deactivate instead of deleting
-    return this.prisma.cash_registers.update({
+    const updated = await this.prisma.cash_registers.updateMany({
       where: { id },
       data: { is_active: false },
     });
+    if (updated.count !== 1) {
+      throw new NotFoundException('Caja registradora no encontrada');
+    }
+
+    return this.findOne(id);
   }
 }

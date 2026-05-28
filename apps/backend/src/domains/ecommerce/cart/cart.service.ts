@@ -11,6 +11,9 @@ import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
+import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class CartService {
@@ -22,6 +25,8 @@ export class CartService {
     private readonly settingsService: SettingsService,
     private readonly stockValidatorService: StockValidatorService,
     private readonly priceResolverService: PriceResolverService,
+    private readonly promotionEngine: PromotionEngineService,
+    private readonly storePrisma: StorePrismaService,
   ) {}
 
   private readonly cartInclude = {
@@ -425,6 +430,135 @@ export class CartService {
     if (!availability.isAvailable) {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
     }
+  }
+
+  /**
+   * Build an authoritative cart summary with the items the customer has
+   * loaded (authenticated DB cart OR DTO items from localStorage) and the
+   * promotion engine output. Pure quote — no order is created. Used by the
+   * cart view to surface a realistic total before checkout.
+   *
+   * Coupons are intentionally NOT evaluated here — the cart UI only hints
+   * at automatic promotional discounts. The coupon enters the picture in
+   * the checkout payload.
+   */
+  async getCartSummary(items?: Array<{
+    product_id: number;
+    product_variant_id?: number | null;
+    quantity: number;
+  }>): Promise<{
+    subtotal: number;
+    promotion_discount: number;
+    promotional_subtotal: number;
+    item_count: number;
+    applied_promotions: Array<{
+      promotion_id: number;
+      name: string;
+      discount_amount: number;
+    }>;
+  }> {
+    // Auth users: prefer the backend cart so quantities are server-side
+    // canonical. Guests: use the DTO items array as the source of truth.
+    let resolvedItems: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      unit_price: number;
+    }> = [];
+
+    if (items && items.length > 0) {
+      resolvedItems = await Promise.all(
+        items.map(async (item) => {
+          const product = await this.prisma.products.findUnique({
+            where: { id: item.product_id },
+          });
+          if (!product) {
+            return null;
+          }
+          const variant = item.product_variant_id
+            ? await this.prisma.product_variants.findUnique({
+                where: { id: item.product_variant_id },
+              })
+            : null;
+          const priceResult = this.priceResolverService.resolvePrice(
+            this.toPriceResolverParams(product, variant),
+          );
+          return {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            quantity: item.quantity,
+            unit_price: Math.round(priceResult.unitPrice * 100) / 100,
+          };
+        }),
+      ).then((rows) => rows.filter((r): r is NonNullable<typeof r> => r !== null));
+    } else {
+      const cart = await this.prisma.carts.findFirst({
+        include: { cart_items: true },
+      });
+      if (!cart) {
+        return {
+          subtotal: 0,
+          promotion_discount: 0,
+          promotional_subtotal: 0,
+          item_count: 0,
+          applied_promotions: [],
+        };
+      }
+      resolvedItems = cart.cart_items.map((ci) => ({
+        product_id: ci.product_id,
+        product_variant_id: ci.product_variant_id,
+        quantity: ci.quantity,
+        unit_price: Number(ci.unit_price),
+      }));
+    }
+
+    if (resolvedItems.length === 0) {
+      return {
+        subtotal: 0,
+        promotion_discount: 0,
+        promotional_subtotal: 0,
+        item_count: 0,
+        applied_promotions: [],
+      };
+    }
+
+    const productIds = Array.from(
+      new Set(resolvedItems.map((i) => i.product_id)),
+    );
+    const categoryRows = await this.storePrisma.product_categories.findMany({
+      where: { product_id: { in: productIds } },
+      select: { product_id: true, category_id: true },
+    });
+    const categoryMap = new Map<number, number[]>();
+    for (const row of categoryRows) {
+      const existing = categoryMap.get(row.product_id) ?? [];
+      existing.push(row.category_id);
+      categoryMap.set(row.product_id, existing);
+    }
+
+    const quote = await this.promotionEngine.quoteDiscounts({
+      items: resolvedItems.map((item, index) => ({
+        line_id: index,
+        product_id: item.product_id,
+        variant_id: item.product_variant_id,
+        category_ids: categoryMap.get(item.product_id) ?? [],
+        unit_price: item.unit_price,
+        quantity: item.quantity,
+      })),
+      customer_id: RequestContextService.getUserId() ?? null,
+    });
+
+    return {
+      subtotal: quote.subtotal,
+      promotion_discount: quote.total_discount,
+      promotional_subtotal: quote.promotional_subtotal,
+      item_count: resolvedItems.reduce((sum, i) => sum + i.quantity, 0),
+      applied_promotions: quote.applied_promotions.map((p) => ({
+        promotion_id: p.promotion_id,
+        name: p.name,
+        discount_amount: p.discount_amount,
+      })),
+    };
   }
 
   private toPriceResolverParams(product: any, variant?: any) {

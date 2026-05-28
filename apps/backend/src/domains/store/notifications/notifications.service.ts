@@ -188,6 +188,7 @@ export class NotificationsService {
       'layaway_overdue',
       'layaway_completed',
       'layaway_cancelled',
+      'new_review',
     ];
 
     const existing = await this.subscriptionsModel.findMany({

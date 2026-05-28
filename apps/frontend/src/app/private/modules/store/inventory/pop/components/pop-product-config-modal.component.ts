@@ -1,4 +1,13 @@
-import {Component, input, output, signal, computed, effect, inject, DestroyRef} from '@angular/core';
+import {
+  Component,
+  input,
+  output,
+  signal,
+  computed,
+  effect,
+  inject,
+  DestroyRef,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -16,6 +25,7 @@ import { InputComponent } from '../../../../../../shared/components/input/input.
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { ProductsService } from '../../../products/services/products.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
   PopProduct,
   PopProductVariant,
@@ -41,8 +51,8 @@ export interface PopProductConfigResult {
     SettingToggleComponent,
     IconComponent,
     ButtonComponent,
-    InputComponent
-],
+    InputComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -410,7 +420,7 @@ export interface PopProductConfigResult {
                       <span
                         class="text-xs mt-0.5"
                         [class]="
-                          variant.stock_quantity <= 5
+                          isVariantLowStock(variant)
                             ? 'text-warning'
                             : 'text-text-muted'
                         "
@@ -544,6 +554,7 @@ export class PopProductConfigModalComponent {
 
   private productsService = inject(ProductsService);
   private toastService = inject(ToastService);
+  private storeSettingsFacade = inject(StoreSettingsFacade);
   private currencyService: CurrencyFormatService;
 
   tabItems = computed<ScrollableTab[]>(() => {
@@ -583,7 +594,8 @@ export class PopProductConfigModalComponent {
   get allVariantsSelected(): boolean {
     return (
       !!this.product()?.product_variants?.length &&
-      this.selectedVariantIds.size === (this.product()?.product_variants?.length ?? 0)
+      this.selectedVariantIds.size ===
+        (this.product()?.product_variants?.length ?? 0)
     );
   }
 
@@ -617,6 +629,34 @@ export class PopProductConfigModalComponent {
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount || 0);
+  }
+
+  isVariantLowStock(variant: PopProductVariant): boolean {
+    const stock = Number(variant.stock_quantity ?? 0);
+    return stock > 0 && stock <= this.getProductLowStockThreshold();
+  }
+
+  private getProductLowStockThreshold(): number {
+    const product = this.product();
+    const productThreshold = [product?.reorder_point, product?.min_stock_level]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0);
+
+    if (productThreshold !== undefined) {
+      return productThreshold;
+    }
+
+    const apiThreshold = Number(product?.low_stock_threshold);
+    if (Number.isFinite(apiThreshold) && apiThreshold >= 0) {
+      return apiThreshold;
+    }
+
+    const configuredThreshold = Number(
+      this.storeSettingsFacade.settings()?.inventory?.low_stock_threshold,
+    );
+    return Number.isFinite(configuredThreshold) && configuredThreshold >= 0
+      ? configuredThreshold
+      : 10;
   }
 
   isVariantSelected(variantId: number): boolean {
@@ -684,60 +724,62 @@ export class PopProductConfigModalComponent {
           .pipe(catchError(() => of(null))),
       );
 
-      forkJoin(createRequests).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (results) => {
-          const createdVariants = results
-            .filter((r): r is any => r !== null)
-            .map((r) => ({
-              id: r.id,
-              name: r.name,
-              sku: r.sku,
-              cost_price: r.cost_price ? Number(r.cost_price) : undefined,
-              stock_quantity: r.stock_quantity || 0,
-              attributes: r.attributes,
-            }));
+      forkJoin(createRequests)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (results) => {
+            const createdVariants = results
+              .filter((r): r is any => r !== null)
+              .map((r) => ({
+                id: r.id,
+                name: r.name,
+                sku: r.sku,
+                cost_price: r.cost_price ? Number(r.cost_price) : undefined,
+                stock_quantity: r.stock_quantity || 0,
+                attributes: r.attributes,
+              }));
 
-          if (createdVariants.length === 0) {
+            if (createdVariants.length === 0) {
+              this.creatingVariants.set(false);
+              this.toastService.error('No se pudieron crear las variantes');
+              return;
+            }
+
+            const failedCount =
+              this.generatedVariants.length - createdVariants.length;
+            if (failedCount > 0) {
+              this.toastService.warning(
+                `Se crearon ${createdVariants.length} variantes, ${failedCount} fallaron`,
+              );
+            }
+
+            // Update local product reference
+            const currentProduct = this.product();
+            if (currentProduct) {
+              currentProduct.product_variants = createdVariants;
+            }
+
+            const lotInfo = this.buildLotInfo();
+            const pricingType = this.selectedPricingType();
+
+            this.confirmed.emit({
+              variants: createdVariants,
+              quantity: 1,
+              unit_cost: Number(
+                this.product()?.cost || this.product()?.cost_price || 0,
+              ),
+              pricing_type: pricingType,
+              lot_info: lotInfo,
+            });
+
             this.creatingVariants.set(false);
-            this.toastService.error('No se pudieron crear las variantes');
-            return;
-          }
-
-          const failedCount =
-            this.generatedVariants.length - createdVariants.length;
-          if (failedCount > 0) {
-            this.toastService.warning(
-              `Se crearon ${createdVariants.length} variantes, ${failedCount} fallaron`,
-            );
-          }
-
-          // Update local product reference
-          const currentProduct = this.product();
-          if (currentProduct) {
-            currentProduct.product_variants = createdVariants;
-          }
-
-          const lotInfo = this.buildLotInfo();
-          const pricingType = this.selectedPricingType();
-
-          this.confirmed.emit({
-            variants: createdVariants,
-            quantity: 1,
-            unit_cost: Number(
-              this.product()?.cost || this.product()?.cost_price || 0,
-            ),
-            pricing_type: pricingType,
-            lot_info: lotInfo,
-          });
-
-          this.creatingVariants.set(false);
-          this.closed.emit();
-        },
-        error: () => {
-          this.creatingVariants.set(false);
-          this.toastService.error('Error al crear variantes');
-        },
-      });
+            this.closed.emit();
+          },
+          error: () => {
+            this.creatingVariants.set(false);
+            this.toastService.error('Error al crear variantes');
+          },
+        });
       return;
     }
 
@@ -746,8 +788,8 @@ export class PopProductConfigModalComponent {
     const pricingType = this.selectedPricingType();
 
     if (this.hasVariantsToggle() && this.product()?.product_variants) {
-      const selectedVariants = (this.product()?.product_variants ?? []).filter((v) =>
-        this.selectedVariantIds.has(v.id),
+      const selectedVariants = (this.product()?.product_variants ?? []).filter(
+        (v) => this.selectedVariantIds.has(v.id),
       );
 
       if (this.isEditing()) {
@@ -775,7 +817,9 @@ export class PopProductConfigModalComponent {
     } else {
       this.confirmed.emit({
         quantity: 1,
-        unit_cost: Number(this.product()?.cost || this.product()?.cost_price || 0),
+        unit_cost: Number(
+          this.product()?.cost || this.product()?.cost_price || 0,
+        ),
         pricing_type: pricingType,
         lot_info: lotInfo,
       });
@@ -933,14 +977,10 @@ export class PopProductConfigModalComponent {
       this.requiresLotToggle.set(true);
       this.lotBatchNumber = lotInfo.batch_number || '';
       this.lotManufacturingDate = lotInfo.manufacturing_date
-        ? new Date(lotInfo.manufacturing_date)
-            .toISOString()
-            .split('T')[0]
+        ? new Date(lotInfo.manufacturing_date).toISOString().split('T')[0]
         : '';
       this.lotExpirationDate = lotInfo.expiration_date
-        ? new Date(lotInfo.expiration_date)
-            .toISOString()
-            .split('T')[0]
+        ? new Date(lotInfo.expiration_date).toISOString().split('T')[0]
         : '';
     } else if (this.product()?.requires_batch_tracking) {
       this.requiresLotToggle.set(true);

@@ -24,6 +24,26 @@ export class CustomersService {
     return normalized ? normalized : null;
   }
 
+  /**
+   * Normalize a Colombian DIAN document pair for both storage and lookup.
+   *
+   * - Type is uppercased + trimmed (e.g. `cc` → `CC`).
+   * - Number is uppercased, trimmed, and stripped of separators (`. - space`).
+   *   The trailing verification digit on NITs (`123456789-0`) is preserved as
+   *   a single concatenated value so equality lookups work on the stored
+   *   value regardless of whether the input used a hyphen.
+   */
+  private normalizeDocument(input: {
+    type?: string | null;
+    number?: string | null;
+  }): { type: string | null; number: string | null } {
+    const type = input.type ? input.type.trim().toUpperCase() : null;
+    const number = input.number
+      ? input.number.trim().toUpperCase().replace(/[\s\-.]/g, '')
+      : null;
+    return { type, number };
+  }
+
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
     // Eliminar caracteres especiales
@@ -81,6 +101,10 @@ export class CustomersService {
 
     const normalizedEmail = guest.email?.toLowerCase().trim() || null;
     const normalizedPhone = guest.phone?.replace(/\s+/g, '').trim() || null;
+    const normalizedDoc = this.normalizeDocument({
+      type: guest.document_type ?? null,
+      number: guest.document_number ?? null,
+    });
 
     if (!normalizedEmail && !normalizedPhone) return null;
 
@@ -140,8 +164,8 @@ export class CustomersService {
         first_name: formattedFirstName,
         last_name: formattedLastName,
         phone: this.normalizeOptionalString(normalizedPhone),
-        document_type: this.normalizeOptionalString(guest.document_type),
-        document_number: this.normalizeOptionalString(guest.document_number),
+        document_type: normalizedDoc.type,
+        document_number: normalizedDoc.number,
         username,
         email_verified: false,
         state: 'pending_verification' as const,
@@ -231,11 +255,11 @@ export class CustomersService {
     if (normalizedPhone) {
       data.phone = normalizedPhone;
     }
-    if (guest.document_type?.trim()) {
-      data.document_type = guest.document_type.trim();
+    if (normalizedDoc.type) {
+      data.document_type = normalizedDoc.type;
     }
-    if (guest.document_number?.trim()) {
-      data.document_number = guest.document_number.trim();
+    if (normalizedDoc.number) {
+      data.document_number = normalizedDoc.number;
     }
 
     const hasUpdates = Object.keys(data).length > 0;
@@ -280,6 +304,28 @@ export class CustomersService {
       throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
     }
 
+    // Normalize document pair before any DB lookup so uniqueness, storage
+    // and downstream queries all share the same canonical form.
+    const normalizedDoc = this.normalizeDocument({
+      type: dto.document_type ?? null,
+      number: dto.document_number ?? null,
+    });
+
+    if (normalizedDoc.number && normalizedDoc.type) {
+      const existingByDocument = await this.findByDocumentInOrganization(
+        store.organization_id,
+        normalizedDoc.number,
+        normalizedDoc.type,
+      );
+
+      if (existingByDocument) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un cliente con este documento en la organización',
+        );
+      }
+    }
+
     // Find customer role
     const customerRole = await this.prisma.roles.findFirst({
       where: { name: 'customer' },
@@ -305,8 +351,8 @@ export class CustomersService {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
         phone: this.normalizeOptionalString(dto.phone),
-        document_type: this.normalizeOptionalString(dto.document_type),
-        document_number: this.normalizeOptionalString(dto.document_number),
+        document_type: normalizedDoc.type,
+        document_number: normalizedDoc.number,
         username: username,
         email_verified: false,
         organization_id: store.organization_id,
@@ -446,14 +492,54 @@ export class CustomersService {
   async update(storeId: number, id: number, dto: UpdateCustomerDto) {
     const user = await this.findOne(storeId, id);
 
+    // Effective document pair to validate: payload overrides take precedence;
+    // when a payload field is undefined we fall back to the current stored value.
+    const effectiveType =
+      dto.document_type !== undefined ? dto.document_type : user.document_type;
+    const effectiveNumber =
+      dto.document_number !== undefined
+        ? dto.document_number
+        : user.document_number;
+
+    const normalizedDoc = this.normalizeDocument({
+      type: effectiveType ?? null,
+      number: effectiveNumber ?? null,
+    });
+
+    // Only check uniqueness when caller actually changes type or number.
+    const isChangingDocument =
+      dto.document_type !== undefined || dto.document_number !== undefined;
+
+    if (
+      isChangingDocument &&
+      normalizedDoc.number &&
+      normalizedDoc.type &&
+      user.organization_id
+    ) {
+      const conflict = await this.findByDocumentInOrganization(
+        user.organization_id,
+        normalizedDoc.number,
+        normalizedDoc.type,
+      );
+
+      if (conflict && conflict.id !== user.id) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_CONFLICT_001,
+          'Ya existe un cliente con este documento en la organización',
+        );
+      }
+    }
+
     return this.prisma.users.update({
       where: { id: user.id },
       data: {
         first_name: dto.first_name,
         last_name: dto.last_name,
         phone: this.normalizeOptionalString(dto.phone),
-        document_number: this.normalizeOptionalString(dto.document_number),
-        document_type: this.normalizeOptionalString(dto.document_type),
+        document_number:
+          dto.document_number !== undefined ? normalizedDoc.number : undefined,
+        document_type:
+          dto.document_type !== undefined ? normalizedDoc.type : undefined,
         email: dto.email, // Can we update email? Usually requires verification, but for CRUD basic...
       },
     });
@@ -478,9 +564,21 @@ export class CustomersService {
     documentNumber: string,
     documentType?: string,
   ): Promise<any | null> {
+    // Defensive normalization: callers may pass raw user input (POS lookup,
+    // legacy clients, etc.). Stored values are normalized, so we must look
+    // them up by the same canonical form.
+    const normalized = this.normalizeDocument({
+      type: documentType ?? null,
+      number: documentNumber ?? null,
+    });
+
+    if (!normalized.number) {
+      return null;
+    }
+
     const where: any = {
       organization_id: organizationId,
-      document_number: { equals: documentNumber, mode: 'insensitive' },
+      document_number: { equals: normalized.number, mode: 'insensitive' },
       user_roles: {
         some: {
           roles: {
@@ -490,8 +588,8 @@ export class CustomersService {
       },
     };
 
-    if (documentType) {
-      where.document_type = documentType;
+    if (normalized.type) {
+      where.document_type = normalized.type;
     }
 
     return this.prisma.users.findFirst({

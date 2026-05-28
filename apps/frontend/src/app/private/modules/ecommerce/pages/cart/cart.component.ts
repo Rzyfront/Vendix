@@ -292,7 +292,16 @@ export class CartComponent implements OnInit {
     }));
 
     this.checkoutService
-      .whatsappCheckout(undefined, items, this.toGuestCustomer(data), null)
+      .whatsappCheckout(
+        undefined,
+        items,
+        this.toGuestCustomer(data),
+        null,
+        // Cart page doesn't currently expose a coupon input — leave it
+        // null so the backend computes only automatic promotional
+        // discounts. Coupon entry lives on the checkout page.
+        null,
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {

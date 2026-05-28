@@ -120,14 +120,14 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           }
           <div class="product-price">
             <span class="price" [class.sale-price]="hasActiveDiscount()">
-              {{ product().final_price | currency }}
+              {{ displayPrice() | currency }}
             </span>
             @if (product().pricing_type === 'weight') {
               <span class="weight-unit">/kg</span>
             }
             @if (hasActiveDiscount()) {
               <span class="original-price">{{ product().base_price | currency }}</span>
-              <span class="discount-badge">-{{ discountPercentage() }}% OFF</span>
+              <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
             }
           </div>
         </div>
@@ -548,16 +548,36 @@ export class ProductCardComponent {
 
   hasActiveDiscount(): boolean {
     const product = this.product();
-    if (!product.is_on_sale) return false;
-
     const basePrice = Number(product.base_price) || 0;
     const promoPrice = this.promoPrice();
 
+    // An active backend-resolved promotion ALWAYS wins, regardless of the
+    // legacy `is_on_sale` flag. Without a promotion we still honour the
+    // existing sale_price flow.
+    if (product.active_promotion) {
+      return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
+    }
+
+    if (!product.is_on_sale) return false;
     return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
   }
 
   discountPercentage(): number {
-    const basePrice = Number(this.product().base_price) || 0;
+    const product = this.product();
+
+    // Prefer the engine-provided percentage when the promotion is
+    // percentage-typed; otherwise compute from prices for parity with the
+    // sale_price path.
+    if (
+      product.active_promotion?.type === 'percentage' &&
+      product.active_promotion.discount_percentage !== undefined
+    ) {
+      return Math.round(
+        Number(product.active_promotion.discount_percentage) || 0,
+      );
+    }
+
+    const basePrice = Number(product.base_price) || 0;
     const promoPrice = this.promoPrice();
 
     if (basePrice <= 0 || promoPrice <= 0 || promoPrice >= basePrice) return 0;
@@ -565,8 +585,44 @@ export class ProductCardComponent {
     return Math.round(((basePrice - promoPrice) / basePrice) * 100);
   }
 
+  promotionBadgeLabel(): string {
+    const promo = this.product().active_promotion;
+    return promo?.badge_label ?? `-${this.discountPercentage()}% OFF`;
+  }
+
+  /**
+   * Price shown front-and-center on the card. Falls back to the existing
+   * `final_price` (already tax-inclusive) when there is no promotional
+   * override so non-discounted products keep their previous layout.
+   */
+  displayPrice(): number {
+    const product = this.product();
+    const promo = product.active_promotion;
+    const promoPrice = promo ? Number(promo.promotional_price) : NaN;
+    if (Number.isFinite(promoPrice) && promoPrice > 0) {
+      return promoPrice;
+    }
+
+    // sale_price path retained for backward compatibility — only when the
+    // backend marks the product on sale and the sale price is lower.
+    const salePrice = Number(product.sale_price) || 0;
+    const basePrice = Number(product.base_price) || 0;
+    if (product.is_on_sale && salePrice > 0 && salePrice < basePrice) {
+      return Number(product.final_price);
+    }
+
+    return Number(product.final_price) || 0;
+  }
+
   private promoPrice(): number {
     const product = this.product();
+
+    // Backend-resolved promotion takes priority for the displayed final price.
+    const promotionalPrice = Number(product.active_promotion?.promotional_price);
+    if (Number.isFinite(promotionalPrice) && promotionalPrice > 0) {
+      return promotionalPrice;
+    }
+
     const salePrice = Number(product.sale_price) || 0;
     const finalPrice = Number(product.final_price) || 0;
 

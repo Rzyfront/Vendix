@@ -505,12 +505,35 @@
               </div>
             }
 
+            <div class="summary-coupon">
+              <label for="coupon-code">¿Tienes un cupón?</label>
+              <input
+                id="coupon-code"
+                type="text"
+                class="coupon-input"
+                placeholder="Código de cupón"
+                [value]="coupon_code()"
+                (input)="
+                  coupon_code.set(
+                    $any($event.target).value.toUpperCase().trim()
+                  )
+                "
+                autocomplete="off"
+              />
+              <small class="summary-coupon-hint">
+                El descuento se calcula al confirmar la compra.
+              </small>
+            </div>
+
             <hr />
 
             <div class="summary-row total">
-              <span>Total</span>
+              <span>Total estimado</span>
               <span>{{ cart()!.subtotal + shipping_cost | currency }}</span>
             </div>
+            <small class="summary-total-hint">
+              Las promociones automáticas y cupones se aplican al confirmar.
+            </small>
           }
         </div>
       </div>

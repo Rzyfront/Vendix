@@ -114,6 +114,26 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     };
   });
 
+  // ── Discount snapshots (read-only from order; never recalculated) ──
+  readonly appliedPromotions = computed(() =>
+    (this.order()?.applied_promotions ?? []).map((p) => ({
+      ...p,
+      discount_amount: Number(p.discount_amount || 0),
+    })),
+  );
+
+  readonly appliedCoupons = computed(() =>
+    (this.order()?.applied_coupons ?? []).map((c) => ({
+      ...c,
+      discount_applied: Number(c.discount_applied || 0),
+    })),
+  );
+
+  readonly hasDiscountSnapshot = computed(
+    () =>
+      this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
+  );
+
   readonly orderTimelineSteps = computed(() => {
     const o = this.order();
     if (!o) return [];

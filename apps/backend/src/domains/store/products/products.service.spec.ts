@@ -12,6 +12,7 @@ import { QrService } from '@common/services/qr.service';
 import { RemoteImageService } from '@common/services/remote-image.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import {
   CreateProductDto,
   UpdateProductDto,
@@ -132,7 +133,9 @@ describe('ProductsService', () => {
 
   const mockQrService = {
     generateDataUrl: jest.fn((content) =>
-      Promise.resolve(`data:image/png;base64,${Buffer.from(content).toString('base64')}`),
+      Promise.resolve(
+        `data:image/png;base64,${Buffer.from(content).toString('base64')}`,
+      ),
     ),
   };
 
@@ -141,11 +144,17 @@ describe('ProductsService', () => {
   };
 
   const mockS3PathHelper = {
-    buildProductPath: jest.fn(() => 'organizations/org-1/stores/store-1/products'),
+    buildProductPath: jest.fn(
+      () => 'organizations/org-1/stores/store-1/products',
+    ),
   };
 
   const mockAIEngineService = {
     run: jest.fn(),
+  };
+
+  const mockPromotionEngineService = {
+    findActiveAutoPromotionsForProducts: jest.fn().mockResolvedValue(new Map()),
   };
 
   beforeEach(async () => {
@@ -208,12 +217,19 @@ describe('ProductsService', () => {
           provide: AIEngineService,
           useValue: mockAIEngineService,
         },
+        {
+          provide: PromotionEngineService,
+          useValue: mockPromotionEngineService,
+        },
       ],
     }).compile();
 
     service = module.get<ProductsService>(ProductsService);
     prismaService = module.get<StorePrismaService>(StorePrismaService);
     variantService = module.get<ProductVariantService>(ProductVariantService);
+    mockPrismaService.store_settings.findFirst.mockResolvedValue({
+      settings: { inventory: { low_stock_threshold: 10 } },
+    });
   });
 
   afterEach(() => {
@@ -845,6 +861,36 @@ describe('ProductsService', () => {
 
       expect(result).toEqual(expectedStats);
     });
+
+    it('should use store low stock threshold when product threshold is not set', async () => {
+      mockPrismaService.store_settings.findFirst.mockResolvedValue({
+        settings: { inventory: { low_stock_threshold: 8 } },
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([
+        {
+          state: ProductState.ACTIVE,
+          stock_quantity: 8,
+          min_stock_level: 0,
+          reorder_point: 0,
+          base_price: 10,
+          product_images: [],
+        },
+        {
+          state: ProductState.ACTIVE,
+          stock_quantity: 9,
+          min_stock_level: 0,
+          reorder_point: 0,
+          base_price: 10,
+          product_images: [],
+        },
+      ]);
+      mockPrismaService.categories.count.mockResolvedValue(0);
+      mockPrismaService.brands.count.mockResolvedValue(0);
+
+      const result = await service.getProductStats(1);
+
+      expect(result.low_stock_products).toBe(1);
+    });
   });
 
   describe('ADVANCED SCENARIOS', () => {
@@ -925,6 +971,133 @@ describe('ProductsService', () => {
         take: 10,
         orderBy: { created_at: 'desc' },
       });
+    });
+  });
+
+  describe('ACTIVE PROMOTIONS ON LISTING', () => {
+    const buildListedProduct = (override: Partial<any> = {}) => ({
+      id: override.id ?? 1,
+      name: 'Sample Product',
+      slug: 'sample-product',
+      description: 'desc',
+      base_price: 100,
+      sale_price: null,
+      is_on_sale: false,
+      sku: 'SKU-1',
+      cost_price: null,
+      profit_margin: null,
+      min_stock_level: null,
+      reorder_point: null,
+      state: ProductState.ACTIVE,
+      pricing_type: 'unit',
+      product_type: 'physical',
+      track_inventory: true,
+      available_for_ecommerce: true,
+      is_featured: false,
+      allow_pos_price_override: false,
+      requires_batch_tracking: false,
+      requires_booking: false,
+      booking_mode: null,
+      buffer_minutes: 0,
+      is_recurring: false,
+      service_duration_minutes: null,
+      service_modality: null,
+      service_pricing_type: null,
+      service_instructions: null,
+      product_images: [],
+      brands: null,
+      product_categories: override.product_categories ?? [],
+      product_tax_assignments: [],
+      product_price_tier_assignments: [],
+      product_variants: [],
+      stock_levels: [],
+      stores: { id: 1, name: 'T', slug: 't' },
+      _count: { product_variants: 0, product_images: 0, reviews: 0 },
+      ...override,
+    });
+
+    it('attaches active_promotion when the engine returns one for the product', async () => {
+      const product = buildListedProduct({ id: 10 });
+      mockPrismaService.products.findMany.mockResolvedValue([product]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+      mockPromotionEngineService.findActiveAutoPromotionsForProducts.mockResolvedValueOnce(
+        new Map([
+          [
+            10,
+            {
+              id: 55,
+              name: 'Direct 15%',
+              type: 'percentage',
+              scope: 'product',
+              discount_percentage: 15,
+              promotional_price: 85,
+              badge_label: '-15% OFF',
+              priority: 2,
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.findAll({ page: 1, limit: 10 });
+
+      expect(result.data).toHaveLength(1);
+      expect((result.data[0] as any).active_promotion).toMatchObject({
+        id: 55,
+        promotional_price: 85,
+        badge_label: '-15% OFF',
+      });
+    });
+
+    it('forwards product category ids so the engine can resolve scope=category eligibility', async () => {
+      const product = buildListedProduct({
+        id: 20,
+        product_categories: [
+          { category_id: 5, categories: { id: 5, name: 'Cat A' } },
+        ],
+      });
+      mockPrismaService.products.findMany.mockResolvedValue([product]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+      mockPromotionEngineService.findActiveAutoPromotionsForProducts.mockResolvedValueOnce(
+        new Map([
+          [
+            20,
+            {
+              id: 77,
+              name: 'Cat 10%',
+              type: 'percentage',
+              scope: 'category',
+              discount_percentage: 10,
+              promotional_price: 90,
+              badge_label: '-10% OFF',
+              priority: 1,
+            },
+          ],
+        ]),
+      );
+
+      const result = await service.findAll({ page: 1, limit: 10 });
+
+      const callArgs =
+        mockPromotionEngineService.findActiveAutoPromotionsForProducts.mock
+          .calls[0][0];
+      expect(callArgs[0].category_ids).toContain(5);
+      expect((result.data[0] as any).active_promotion).toMatchObject({
+        id: 77,
+        scope: 'category',
+      });
+    });
+
+    it('returns active_promotion=null when the engine does not match the product', async () => {
+      const product = buildListedProduct({ id: 30 });
+      mockPrismaService.products.findMany.mockResolvedValue([product]);
+      mockPrismaService.products.count.mockResolvedValue(1);
+      mockPromotionEngineService.findActiveAutoPromotionsForProducts.mockResolvedValueOnce(
+        new Map(),
+      );
+
+      const result = await service.findAll({ page: 1, limit: 10 });
+
+      expect((result.data[0] as any).active_promotion).toBeNull();
     });
   });
 });

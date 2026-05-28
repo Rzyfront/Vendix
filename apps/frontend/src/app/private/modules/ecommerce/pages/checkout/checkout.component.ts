@@ -101,6 +101,11 @@ export class CheckoutComponent implements OnInit {
 
   address_form!: FormGroup;
   readonly notes = signal('');
+  /**
+   * Optional coupon code typed by the customer. We only send the raw string
+   * to the backend; totals are recomputed there. Empty string = no coupon.
+   */
+  readonly coupon_code = signal('');
 
   readonly etaPreview = signal<{
     readyAt: string;
@@ -905,6 +910,9 @@ export class CheckoutComponent implements OnInit {
         quantity: item.quantity,
       })),
       guest_customer: this.toGuestCustomer(this.guest_checkout_data),
+      // Send coupon code as raw string; backend validates and recomputes
+      // the total. Frontend never sends a precomputed grand_total.
+      coupon_code: this.coupon_code().trim() || undefined,
     };
 
     if (!this.cartHasOnlyServices && this.use_new_address()) {
@@ -950,8 +958,10 @@ export class CheckoutComponent implements OnInit {
             this.orderPlaced = true;
             const orderId = response.data.order_id;
             const publicOrderToken = response.data.public_order_token;
-            const totalAmount =
-              (this.cart()?.subtotal ?? 0) + this.shipping_cost;
+            // Use the backend-authoritative total returned in the order
+            // creation response — never recompute on the client because
+            // promotions + coupon discounts only exist server-side.
+            const totalAmount = Number(response.data.total);
 
             this.checkout_service
               .prepareWompiPayment(

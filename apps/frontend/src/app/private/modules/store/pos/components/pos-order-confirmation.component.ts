@@ -130,9 +130,30 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
               <span>Subtotal:</span>
               <span>{{ formatCurrency(orderSubtotal) }}</span>
             </div>
+            @for (promo of appliedPromotions; track promo.id) {
+              <div class="flex justify-between text-xs text-success">
+                <span class="truncate">
+                  <app-icon name="tag" [size]="12" class="inline mr-1"></app-icon>
+                  {{ promo.name }}
+                  @if (promo.code) {
+                    <span class="opacity-70">({{ promo.code }})</span>
+                  }
+                </span>
+                <span class="font-medium whitespace-nowrap">-{{ formatCurrency(promo.discount_amount) }}</span>
+              </div>
+            }
+            @for (cp of appliedCoupons; track cp.id) {
+              <div class="flex justify-between text-xs text-success">
+                <span class="truncate">
+                  <app-icon name="ticket" [size]="12" class="inline mr-1"></app-icon>
+                  Cupón <strong>{{ cp.code }}</strong>
+                </span>
+                <span class="font-medium whitespace-nowrap">-{{ formatCurrency(cp.discount_applied) }}</span>
+              </div>
+            }
             @if (hasDiscount()) {
               <div class="flex justify-between text-sm text-destructive font-medium">
-                <span>Descuento:</span>
+                <span>Descuento total:</span>
                 <span>-{{ formatCurrency(orderDiscount) }}</span>
               </div>
             }
@@ -310,6 +331,22 @@ export class PosOrderConfirmationComponent {
   orderDiscount = 0;
   orderTax = 0;
   orderTotal = 0;
+  // Persisted discount snapshots — populated only when the POS payment
+  // response includes them; never recalculated client-side.
+  appliedPromotions: Array<{
+    id?: number;
+    promotion_id?: number;
+    name: string;
+    code?: string | null;
+    discount_amount: number;
+  }> = [];
+  appliedCoupons: Array<{
+    id?: number;
+    coupon_id?: number;
+    code: string;
+    name?: string | null;
+    discount_applied: number;
+  }> = [];
   paymentInfo: any = null;
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
@@ -390,10 +427,41 @@ effect(() => {
 	        unitsPerPackage };
 	    });
 
+    // Totals come directly from the backend response (source of truth).
+    // The backend recalculates promotions and coupons server-side and
+    // returns the final `discount_amount` and `total_amount` (mapped from
+    // `orders.grand_total`). This component MUST NOT recalculate them
+    // from items — that would diverge from what was actually persisted
+    // and charged. See `PaymentsService.processPosPayment` /
+    // `calculatePosPromotionQuote` / `calculatePosCouponDiscount`.
     this.orderSubtotal = Number(data.subtotal || 0);
     this.orderDiscount = Number(data.discount_amount || data.discount || 0);
     this.orderTax = Number(data.tax_amount || data.tax || 0);
     this.orderTotal = Number(data.total_amount || data.total || 0);
+
+    // Optional persisted discount snapshots from POS response. Fall back to
+    // empty arrays — the order detail page still shows the full breakdown.
+    const promoSnapshots: any[] =
+      data.applied_promotions || data.order_promotions || [];
+    this.appliedPromotions = promoSnapshots.map((op: any) => ({
+      id: op.id,
+      promotion_id: op.promotion_id,
+      name:
+        op.name ??
+        op.promotions?.name ??
+        `Promoción #${op.promotion_id ?? ''}`,
+      code: op.code ?? op.promotions?.code ?? null,
+      discount_amount: Number(op.discount_amount || 0),
+    }));
+    const couponSnapshots: any[] =
+      data.applied_coupons || data.coupon_uses || [];
+    this.appliedCoupons = couponSnapshots.map((cu: any) => ({
+      id: cu.id,
+      coupon_id: cu.coupon_id,
+      code: cu.code ?? cu.coupon?.code ?? `CUP-${cu.coupon_id ?? ''}`,
+      name: cu.name ?? cu.coupon?.name ?? null,
+      discount_applied: Number(cu.discount_applied || 0),
+    }));
 
     if (data.payment) {
       this.paymentInfo = {

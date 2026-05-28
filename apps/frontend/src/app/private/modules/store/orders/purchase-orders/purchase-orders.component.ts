@@ -89,5 +89,17 @@ export class PurchaseOrdersComponent {
     if (this.purchaseOrderList) {
       this.purchaseOrderList.loadOrders();
     }
+
+    const currentOrder = this.selectedOrder();
+    if (this.isDetailModalOpen() && currentOrder) {
+      this.purchaseOrdersService
+        .getPurchaseOrderById(currentOrder.id)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (response: any) => {
+            this.selectedOrder.set(response.data || response);
+          },
+        });
+    }
   }
 }

@@ -45,6 +45,9 @@ export interface Product {
   allow_pos_price_override?: boolean;
   sku?: string;
   stock_quantity?: number;
+  min_stock_level?: number | null;
+  reorder_point?: number | null;
+  low_stock_threshold?: number | null;
   track_inventory?: boolean;
   weight?: number;
   dimensions?: {

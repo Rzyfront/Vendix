@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsEmail,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -9,6 +10,8 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { DOCUMENT_TYPE_CODES } from '../../../../common/constants/document-types';
+import { DocumentNumberMatchesType } from '../../../../common/validators/document-number.validator';
 
 export class BulkCustomerItemDto {
   @ApiPropertyOptional({ example: 'maria.garcia@email.com' })
@@ -27,13 +30,17 @@ export class BulkCustomerItemDto {
   last_name: string;
 
   @ApiPropertyOptional({ example: '12345678' })
-  @IsString()
   @IsOptional()
+  @IsString()
+  @DocumentNumberMatchesType()
   document_number?: string;
 
-  @ApiPropertyOptional({ example: 'CC' })
-  @IsString()
+  @ApiPropertyOptional({ example: 'CC', enum: DOCUMENT_TYPE_CODES })
   @IsOptional()
+  @IsString()
+  @IsIn(DOCUMENT_TYPE_CODES as unknown as string[], {
+    message: 'document_type debe ser uno de los códigos DIAN válidos',
+  })
   document_type?: string;
 
   @ApiPropertyOptional({ example: '3001234567' })

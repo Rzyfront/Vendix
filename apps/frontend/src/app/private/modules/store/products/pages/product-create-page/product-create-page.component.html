@@ -25,7 +25,12 @@
 </app-sticky-header>
 
 <div class="space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
-  <form [formGroup]="productForm" class="space-y-4 md:space-y-6">
+  <form
+    [formGroup]="productForm"
+    class="space-y-4 md:space-y-6"
+    (submit)="preventNativeFormSubmit($event)"
+    (keydown.enter)="preventImplicitEnterSubmit($event)"
+  >
     <!-- Tipo de Producto -->
     <section
       class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
@@ -417,8 +422,8 @@
                             >Descuento por defecto:
                             {{ row.tier.discount_percentage }}%</span
                           >
-                          }
-                        </div>
+                        }
+                      </div>
                       <div class="flex items-center gap-2">
                         @if (row.tier.is_default) {
                           <app-badge variant="primary" size="sm"
@@ -2322,6 +2327,7 @@
                       [(ngModel)]="attr.name"
                       [ngModelOptions]="{ standalone: true }"
                       placeholder="Ej. Talla, Color"
+                      (keydown.enter)="confirmAttributeName(i, $event)"
                       (inputBlur)="onAttributeNameBlur(i)"
                       tooltipText="Etiqueta del eje de variación. Ejemplos: 'Color', 'Talla', 'Material', 'Capacidad'. Define la dimensión, no los valores."
                       customWrapperClass="!mt-0"
@@ -2372,6 +2378,7 @@
                     </div>
                   </div>
                   <button
+                    type="button"
                     (click)="removeAttribute(i)"
                     title="Eliminar este atributo"
                     class="self-end md:mt-6 text-destructive hover:text-destructive/80 p-2"
@@ -3037,9 +3044,7 @@
         @for (sl of product?.stock_levels; track sl) {
           <div
             class="p-3 bg-white rounded-lg border border-gray-200"
-            [class.bg-destructive/5]="
-              sl.quantity_available <= (sl.reorder_point || 0)
-            "
+            [class.bg-destructive/5]="isStockLevelLowStock(sl)"
           >
             <div class="flex justify-between items-start mb-2">
               <div>
@@ -3052,18 +3057,10 @@
               </div>
               <span
                 class="px-2 py-1 rounded-md text-xs font-bold"
-                [class.bg-primary-50]="
-                  sl.quantity_available > (sl.reorder_point || 0)
-                "
-                [class.text-primary-700]="
-                  sl.quantity_available > (sl.reorder_point || 0)
-                "
-                [class.bg-destructive/10]="
-                  sl.quantity_available <= (sl.reorder_point || 0)
-                "
-                [class.text-destructive]="
-                  sl.quantity_available <= (sl.reorder_point || 0)
-                "
+                [class.bg-primary-50]="!isStockLevelLowStock(sl)"
+                [class.text-primary-700]="!isStockLevelLowStock(sl)"
+                [class.bg-destructive/10]="isStockLevelLowStock(sl)"
+                [class.text-destructive]="isStockLevelLowStock(sl)"
               >
                 {{ sl.quantity_available }} disp.
               </span>
@@ -3082,7 +3079,7 @@
               <div>
                 <span class="text-text-muted">Reorden:</span>
                 <span class="font-medium ml-1">{{
-                  sl.reorder_point || "-"
+                  getStockLevelLowStockThreshold(sl)
                 }}</span>
               </div>
             </div>
@@ -3126,11 +3123,7 @@
           @if (product?.stock_levels) {
             <tbody class="divide-y divide-border">
               @for (sl of product!.stock_levels; track sl) {
-                <tr
-                  [class.bg-destructive/5]="
-                    sl.quantity_available <= (sl.reorder_point || 0)
-                  "
-                >
+                <tr [class.bg-destructive/5]="isStockLevelLowStock(sl)">
                   <td class="px-4 py-3">
                     <span class="text-sm font-semibold text-text-primary">{{
                       sl.inventory_locations.name
@@ -3153,24 +3146,16 @@
                   <td class="px-4 py-3 text-center">
                     <span
                       class="px-2 py-1 rounded-md text-xs font-bold"
-                      [class.bg-primary-50]="
-                        sl.quantity_available > (sl.reorder_point || 0)
-                      "
-                      [class.text-primary-700]="
-                        sl.quantity_available > (sl.reorder_point || 0)
-                      "
-                      [class.bg-destructive/10]="
-                        sl.quantity_available <= (sl.reorder_point || 0)
-                      "
-                      [class.text-destructive]="
-                        sl.quantity_available <= (sl.reorder_point || 0)
-                      "
+                      [class.bg-primary-50]="!isStockLevelLowStock(sl)"
+                      [class.text-primary-700]="!isStockLevelLowStock(sl)"
+                      [class.bg-destructive/10]="isStockLevelLowStock(sl)"
+                      [class.text-destructive]="isStockLevelLowStock(sl)"
                     >
                       {{ sl.quantity_available }}
                     </span>
                   </td>
                   <td class="px-4 py-3 text-right text-sm text-text-secondary">
-                    {{ sl.reorder_point || "-" }}
+                    {{ getStockLevelLowStockThreshold(sl) }}
                   </td>
                 </tr>
               }

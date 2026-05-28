@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -31,6 +35,16 @@ export class MovementsService {
     },
   ) {
     const context = RequestContextService.getContext()!;
+
+    const session = await this.prisma.cash_register_sessions.findFirst({
+      where: { id: session_id },
+    });
+    if (!session) {
+      throw new NotFoundException('Sesión de caja no encontrada');
+    }
+    if (session.status !== 'open') {
+      throw new BadRequestException('La sesión de caja ya no está abierta');
+    }
 
     const movement = await this.prisma.cash_register_movements.create({
       data: {
@@ -79,7 +93,7 @@ export class MovementsService {
       amount: number;
       payment_method: string;
       order_id: number;
-      payment_id: number;
+      payment_id?: number;
     },
   ) {
     return this.prisma.withoutScope().cash_register_movements.create({
@@ -91,7 +105,7 @@ export class MovementsService {
         amount: data.amount,
         payment_method: data.payment_method,
         order_id: data.order_id,
-        payment_id: data.payment_id,
+        payment_id: data.payment_id ?? null,
       },
     });
   }

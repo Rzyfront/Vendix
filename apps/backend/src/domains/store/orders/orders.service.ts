@@ -397,6 +397,47 @@ export class OrdersService {
         order_installments: {
           orderBy: { installment_number: 'asc' },
         },
+        // Persisted discount snapshots — read what was actually charged,
+        // never recalculate against current promotions/coupons.
+        order_promotions: {
+          select: {
+            id: true,
+            promotion_id: true,
+            customer_id: true,
+            discount_amount: true,
+            created_at: true,
+            promotions: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                type: true,
+                scope: true,
+                value: true,
+              },
+            },
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        coupon_uses: {
+          select: {
+            id: true,
+            coupon_id: true,
+            customer_id: true,
+            discount_applied: true,
+            used_at: true,
+            coupon: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+                discount_type: true,
+                discount_value: true,
+              },
+            },
+          },
+          orderBy: { used_at: 'asc' },
+        },
       },
     });
 

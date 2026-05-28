@@ -171,6 +171,7 @@ export interface PurchaseOrder {
   total_amount?: number;
   discount_amount?: number;
   notes?: string;
+  internal_notes?: string;
   created_by_user_id?: number;
   approved_by_user_id?: number;
   created_at?: string;
@@ -534,7 +535,7 @@ export interface PurchaseOrderReception {
   received_by_user_id: number | null;
   notes: string | null;
   received_at: string;
-  received_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  received_by?: { id: number; username?: string; user_name?: string; first_name: string; last_name: string };
   items: PurchaseOrderReceptionItem[];
 }
 
@@ -557,7 +558,7 @@ export interface PurchaseOrderAttachment {
   supplier_invoice_date: string | null;
   supplier_invoice_amount: number | null;
   notes: string | null;
-  uploaded_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  uploaded_by?: { id: number; username?: string; user_name?: string; first_name: string; last_name: string };
   download_url?: string;
   created_at: string;
 }
@@ -570,12 +571,12 @@ export interface PurchaseOrderPayment {
   payment_method: string;
   reference: string | null;
   notes: string | null;
-  created_by?: { id: number; user_name: string; first_name: string; last_name: string };
+  created_by?: { id: number; username?: string; user_name?: string; first_name: string; last_name: string };
   created_at: string;
 }
 
 export interface PurchaseOrderTimelineEntry {
-  type: 'audit' | 'reception' | 'payment';
+  type: 'audit' | 'reception' | 'payment' | 'attachment';
   date: string;
   data: Record<string, unknown>;
 }

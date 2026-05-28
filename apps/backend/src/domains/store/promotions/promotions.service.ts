@@ -160,28 +160,37 @@ export class PromotionsService {
   }
 
   async create(dto: CreatePromotionDto) {
+    const scope = dto.scope || 'order';
     const { product_ids, category_ids, ...promotionData } = dto;
-    this.validateScopeSelection(dto.scope || 'order', product_ids, category_ids);
+
+    // Normalize payload: only keep IDs that match the configured scope.
+    const normalizedProductIds =
+      scope === 'product' ? this.sanitizeIds(product_ids) : [];
+    const normalizedCategoryIds =
+      scope === 'category' ? this.sanitizeIds(category_ids) : [];
+
+    this.validateScopeSelection(scope, normalizedProductIds, normalizedCategoryIds);
 
     const data: any = {
       ...promotionData,
+      scope,
       start_date: new Date(dto.start_date),
       end_date: dto.end_date ? new Date(dto.end_date) : null,
       state: 'draft',
       usage_count: 0,
     };
 
-    // Nested create for product associations
-    if (product_ids?.length) {
+    // Nested create for product associations (only when scope === 'product')
+    if (normalizedProductIds.length) {
       data.promotion_products = {
-        create: product_ids.map((product_id) => ({ product_id })),
+        create: normalizedProductIds.map((product_id) => ({ product_id })),
       };
     }
 
-    // Nested create for category associations
-    if (category_ids?.length) {
+    // Nested create for category associations (only when scope === 'category')
+    if (normalizedCategoryIds.length) {
       data.promotion_categories = {
-        create: category_ids.map((category_id) => ({ category_id })),
+        create: normalizedCategoryIds.map((category_id) => ({ category_id })),
       };
     }
 
@@ -208,28 +217,53 @@ export class PromotionsService {
     }
 
     const { product_ids, category_ids, ...updateData } = dto;
+    const effectiveScope = (dto.scope || existing.scope) as
+      | 'order'
+      | 'product'
+      | 'category';
+
+    // Resolve effective ID arrays after merging with existing values.
+    const mergedProductIds =
+      product_ids ?? existing.promotion_products.map((pp) => pp.product_id);
+    const mergedCategoryIds =
+      category_ids ?? existing.promotion_categories.map((pc) => pc.category_id);
+
+    // Normalize: ignore IDs that do not belong to the effective scope.
+    const normalizedProductIds =
+      effectiveScope === 'product' ? this.sanitizeIds(mergedProductIds) : [];
+    const normalizedCategoryIds =
+      effectiveScope === 'category' ? this.sanitizeIds(mergedCategoryIds) : [];
+
     this.validateScopeSelection(
-      dto.scope || existing.scope,
-      product_ids ?? existing.promotion_products.map((pp) => pp.product_id),
-      category_ids ?? existing.promotion_categories.map((pc) => pc.category_id),
+      effectiveScope,
+      normalizedProductIds,
+      normalizedCategoryIds,
     );
 
     // Prepare date conversions
     const data: any = { ...updateData };
+    if (dto.scope) data.scope = effectiveScope;
     if (dto.start_date) data.start_date = new Date(dto.start_date);
     if (dto.end_date !== undefined) {
       data.end_date = dto.end_date ? new Date(dto.end_date) : null;
     }
 
+    // Decide whether to rewrite each association table.
+    // - If user sent the field explicitly, replace with normalized value.
+    // - If user changed scope away from product/category, clear the now-orphan IDs.
+    const shouldRewriteProducts =
+      product_ids !== undefined || effectiveScope !== 'product';
+    const shouldRewriteCategories =
+      category_ids !== undefined || effectiveScope !== 'category';
+
     return this.prisma.$transaction(async (tx) => {
-      // Replace product associations if provided
-      if (product_ids !== undefined) {
+      if (shouldRewriteProducts) {
         await tx.promotion_products.deleteMany({
           where: { promotion_id: id },
         });
-        if (product_ids.length) {
+        if (normalizedProductIds.length) {
           await tx.promotion_products.createMany({
-            data: product_ids.map((product_id) => ({
+            data: normalizedProductIds.map((product_id) => ({
               promotion_id: id,
               product_id,
             })),
@@ -237,14 +271,13 @@ export class PromotionsService {
         }
       }
 
-      // Replace category associations if provided
-      if (category_ids !== undefined) {
+      if (shouldRewriteCategories) {
         await tx.promotion_categories.deleteMany({
           where: { promotion_id: id },
         });
-        if (category_ids.length) {
+        if (normalizedCategoryIds.length) {
           await tx.promotion_categories.createMany({
-            data: category_ids.map((category_id) => ({
+            data: normalizedCategoryIds.map((category_id) => ({
               promotion_id: id,
               category_id,
             })),
@@ -357,5 +390,33 @@ export class PromotionsService {
         'Selecciona al menos una categoria para esta promocion',
       );
     }
+
+    if (scope !== 'product' && scope !== 'category' && scope !== 'order') {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'El alcance de la promocion no es valido',
+      );
+    }
+  }
+
+  /**
+   * Sanitize a list of incoming IDs:
+   * - drops null/undefined/NaN/<=0 entries
+   * - coerces numeric strings to numbers
+   * - removes duplicates preserving order
+   */
+  private sanitizeIds(ids?: Array<number | string | null | undefined>): number[] {
+    if (!Array.isArray(ids)) return [];
+    const seen = new Set<number>();
+    const out: number[] = [];
+    for (const raw of ids) {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      const intVal = Math.trunc(n);
+      if (seen.has(intVal)) continue;
+      seen.add(intVal);
+      out.push(intVal);
+    }
+    return out;
   }
 }

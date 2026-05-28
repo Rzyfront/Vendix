@@ -1,22 +1,18 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-} from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
-import {
-  Product,
-  PosProductVariant,
-} from '../../services/pos-product.service';
+import { Product, PosProductVariant } from '../../services/pos-product.service';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
 import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing-variants-banner/pos-product-missing-variants-banner.component';
 
 @Component({
   selector: 'app-pos-variant-selector',
   standalone: true,
-  imports: [IconComponent, CurrencyPipe, PosProductMissingVariantsBannerComponent],
+  imports: [
+    IconComponent,
+    CurrencyPipe,
+    PosProductMissingVariantsBannerComponent,
+  ],
   template: `
     <!-- Backdrop -->
     <div
@@ -31,18 +27,26 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
         (click)="$event.stopPropagation()"
       >
         <!-- Header -->
-        <div class="px-5 py-4 border-b border-border flex items-center justify-between">
+        <div
+          class="px-5 py-4 border-b border-border flex items-center justify-between"
+        >
           <div>
             <h3 class="text-lg font-semibold text-text-primary">
               Seleccionar variante
             </h3>
-            <p class="text-sm text-text-secondary mt-0.5">{{ product().name }}</p>
+            <p class="text-sm text-text-secondary mt-0.5">
+              {{ product().name }}
+            </p>
           </div>
           <button
             (click)="onClose()"
             class="w-8 h-8 rounded-full bg-muted hover:bg-muted/80 flex items-center justify-center transition-colors"
           >
-            <app-icon name="x" [size]="18" class="text-text-secondary"></app-icon>
+            <app-icon
+              name="x"
+              [size]="18"
+              class="text-text-secondary"
+            ></app-icon>
           </button>
         </div>
 
@@ -59,21 +63,27 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
             @for (variant of variants(); track variant.id) {
               <button
                 class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left relative"
-                [class]="isVariantAvailable(variant)
-                  ? 'border-border hover:border-primary hover:bg-primary/5 cursor-pointer active:scale-[0.98]'
-                  : 'border-border/50 opacity-50 cursor-not-allowed'"
+                [class]="
+                  isVariantAvailable(variant)
+                    ? 'border-border hover:border-primary hover:bg-primary/5 cursor-pointer active:scale-[0.98]'
+                    : 'border-border/50 opacity-50 cursor-not-allowed'
+                "
                 [disabled]="!isVariantAvailable(variant)"
                 (click)="onSelectVariant(variant)"
               >
                 <!-- Sale Badge -->
                 @if (isVariantOnSale(variant)) {
-                  <span class="absolute top-2 right-2 px-1.5 py-0.5 bg-error text-white text-[10px] font-bold rounded">
+                  <span
+                    class="absolute top-2 right-2 px-1.5 py-0.5 bg-error text-white text-[10px] font-bold rounded"
+                  >
                     OFERTA
                   </span>
                 }
 
                 <!-- Variant Image or Icon -->
-                <div class="w-14 h-14 rounded-lg bg-muted/50 flex-shrink-0 overflow-hidden">
+                <div
+                  class="w-14 h-14 rounded-lg bg-muted/50 flex-shrink-0 overflow-hidden"
+                >
                   @if (variant.image_url) {
                     <img
                       [src]="variant.image_url"
@@ -82,7 +92,11 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                     />
                   } @else {
                     <div class="w-full h-full flex items-center justify-center">
-                      <app-icon name="package" [size]="20" class="text-text-muted"></app-icon>
+                      <app-icon
+                        name="package"
+                        [size]="20"
+                        class="text-text-muted"
+                      ></app-icon>
                     </div>
                   }
                 </div>
@@ -103,25 +117,41 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                 <div class="flex flex-col items-end flex-shrink-0">
                   @if (getVariantPriceResolution(variant); as resolution) {
                     <div class="flex items-center gap-2">
-                      <span class="font-bold text-sm" [class]="resolution.isOnSale ? 'text-error' : 'text-text-primary'">
+                      <span
+                        class="font-bold text-sm"
+                        [class]="
+                          resolution.isOnSale
+                            ? 'text-error'
+                            : 'text-text-primary'
+                        "
+                      >
                         {{ resolution.unitPrice | currency }}
                       </span>
                     </div>
                     @if (resolution.isOnSale && resolution.compareAtPrice) {
-                      <span class="text-[10px] text-text-muted line-through mt-0.5">
+                      <span
+                        class="text-[10px] text-text-muted line-through mt-0.5"
+                      >
                         {{ resolution.compareAtPrice | currency }}
                       </span>
                     }
                   }
                   @if (doesVariantTrackInventory(variant)) {
                     @if (isVariantAvailable(variant)) {
-                      <span class="text-xs mt-0.5"
-                        [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
+                      <span
+                        class="text-xs mt-0.5"
+                        [class]="
+                          isVariantLowStock(variant)
+                            ? 'text-warning'
+                            : 'text-text-muted'
+                        "
                       >
                         {{ variant.stock }} disp.
                       </span>
                     } @else {
-                      <span class="text-xs text-error font-medium mt-0.5">Agotado</span>
+                      <span class="text-xs text-error font-medium mt-0.5"
+                        >Agotado</span
+                      >
                     }
                   } @else {
                     <span class="text-xs text-info mt-0.5">Disponible</span>
@@ -134,11 +164,13 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
       </div>
     </div>
   `,
-  styles: [`
-    :host {
-      display: contents;
-    }
-  `],
+  styles: [
+    `
+      :host {
+        display: contents;
+      }
+    `,
+  ],
 })
 export class PosVariantSelectorComponent {
   private priceResolver = inject(PriceResolverService);
@@ -154,7 +186,8 @@ export class PosVariantSelectorComponent {
     if (!this.variants()?.length) return [];
     // Only group if there are multiple attribute types
     const firstVariant = this.variants()[0];
-    if (!firstVariant?.attributes || firstVariant.attributes.length <= 1) return [];
+    if (!firstVariant?.attributes || firstVariant.attributes.length <= 1)
+      return [];
     const groups: Record<string, PosProductVariant[]> = {};
     for (const v of this.variants()) {
       const groupKey = v.attributes?.[0]?.attribute_value || 'Otros';
@@ -162,10 +195,12 @@ export class PosVariantSelectorComponent {
       groups[groupKey].push(v);
     }
     const groupName = firstVariant.attributes[0]?.attribute_name || 'Tipo';
-    return Object.entries(groups).map(([name, variants]: [string, PosProductVariant[]]) => ({
-      name: `${groupName}: ${name}`,
-      variants,
-    }));
+    return Object.entries(groups).map(
+      ([name, variants]: [string, PosProductVariant[]]) => ({
+        name: `${groupName}: ${name}`,
+        variants,
+      }),
+    );
   }
 
   /** Check if a variant is available considering track_inventory */
@@ -181,7 +216,20 @@ export class PosVariantSelectorComponent {
     if (typeof variant.effective_track_inventory === 'boolean') {
       return variant.effective_track_inventory;
     }
-    return variant.track_inventory_override ?? this.product().track_inventory ?? true;
+    return (
+      variant.track_inventory_override ?? this.product().track_inventory ?? true
+    );
+  }
+
+  isVariantLowStock(variant: PosProductVariant): boolean {
+    return (
+      variant.stock > 0 && variant.stock <= this.getProductLowStockThreshold()
+    );
+  }
+
+  private getProductLowStockThreshold(): number {
+    const threshold = Number(this.product().minStock);
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
   }
 
   /** Check if a specific variant is on sale */
@@ -201,7 +249,7 @@ export class PosVariantSelectorComponent {
 
   getVariantLabel(variant: PosProductVariant): string {
     if (variant.attributes && variant.attributes.length > 0) {
-      return variant.attributes.map(a => a.attribute_value).join(' / ');
+      return variant.attributes.map((a) => a.attribute_value).join(' / ');
     }
     return variant.sku || `Variante #${variant.id}`;
   }
