@@ -151,6 +151,12 @@ import { CategoriesService } from '../../../services/categories.service';
             label="Categoría activa"
             description="Desactiva para ocultar esta categoría del catálogo"
           ></app-setting-toggle>
+
+          <app-setting-toggle
+            formControlName="is_featured"
+            label="Categoría destacada"
+            description="Dale prioridad en el inicio de la tienda online"
+          ></app-setting-toggle>
         </div>
       </form>
 
@@ -200,7 +206,7 @@ export class CategoryFormModalComponent {
       if (cat) {
         this.patchForm(cat);
       } else if (isOpen && !cat) {
-        this.form.reset({ state: true });
+        this.form.reset({ state: true, is_featured: false });
         this.imagePreviewUrl.set(null);
       }
     });
@@ -220,6 +226,7 @@ export class CategoryFormModalComponent {
       description: ['', [Validators.maxLength(1000)]],
       image_url: ['', [Validators.maxLength(500)]],
       state: [true],
+      is_featured: [false],
     });
   }
 
@@ -230,6 +237,7 @@ export class CategoryFormModalComponent {
       description: category.description ?? '',
       image_url: category.image_url ?? '',
       state: category.state ? category.state === 'active' : true,
+      is_featured: !!category.is_featured,
     });
     this.imagePreviewUrl.set(category.image_url ?? null);
   }
@@ -275,6 +283,7 @@ export class CategoryFormModalComponent {
     if (imageUrl || this.category()) payload.image_url = imageUrl;
 
     payload.state = raw.state ? 'active' : 'inactive';
+    payload.is_featured = !!raw.is_featured;
 
     this.save.emit(payload);
   }

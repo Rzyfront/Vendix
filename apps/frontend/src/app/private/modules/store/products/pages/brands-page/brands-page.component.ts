@@ -72,6 +72,15 @@ type BrandStateFilter = BrandState | 'all';
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
+
+        <app-stats
+          title="Destacadas"
+          [value]="stats().featured"
+          smallText="Prioridad en el inicio"
+          iconName="star"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
+        ></app-stats>
       </div>
 
       <!-- Brand List -->
@@ -91,6 +100,7 @@ type BrandStateFilter = BrandState | 'all';
         (create)="openCreate()"
         (edit)="openEdit($event)"
         (toggleState)="onToggleState($event)"
+        (toggleFeatured)="onToggleFeatured($event)"
         (delete)="onDelete($event)"
         (sort)="onSort($event)"
         (pageChange)="onPageChange($event)"
@@ -120,9 +130,11 @@ export class BrandsPageComponent implements OnInit {
     total: 0,
     active: 0,
     inactive: 0,
+    featured: 0,
   });
 
   state_filter = signal<BrandStateFilter>('all');
+  featured_filter = signal<'all' | 'featured' | 'not_featured'>('all');
   search_term = signal('');
   sort_by = signal<string | null>(null);
   sort_order = signal<'asc' | 'desc' | null>(null);
@@ -175,6 +187,10 @@ export class BrandsPageComponent implements OnInit {
       query.state = this.state_filter() as BrandState;
     }
 
+    if (this.featured_filter() !== 'all') {
+      query.is_featured = this.featured_filter() === 'featured';
+    }
+
     const sortBy = this.sort_by();
     const sortOrder = this.sort_order();
     if (sortBy && sortOrder) {
@@ -189,7 +205,10 @@ export class BrandsPageComponent implements OnInit {
         next: (response) => {
           this.brands.set(response.data ?? []);
           this.totalItems.set(
-            response.meta?.pagination?.total ?? response.data?.length ?? 0,
+            response.meta?.pagination?.total ??
+              response.meta?.total ??
+              response.data?.length ??
+              0,
           );
           this.calculateStats();
           this.is_loading.set(false);
@@ -204,9 +223,10 @@ export class BrandsPageComponent implements OnInit {
   private calculateStats(): void {
     const list = this.brands();
     this.stats.set({
-      total: list.length,
+      total: this.totalItems(),
       active: list.filter((b) => b.state === 'active').length,
       inactive: list.filter((b) => b.state === 'inactive').length,
+      featured: list.filter((b) => b.is_featured).length,
     });
   }
 
@@ -223,6 +243,16 @@ export class BrandsPageComponent implements OnInit {
     } else {
       this.state_filter.set('all');
     }
+
+    const featuredValue = values['is_featured'] as string | undefined;
+    if (featuredValue === 'true') {
+      this.featured_filter.set('featured');
+    } else if (featuredValue === 'false') {
+      this.featured_filter.set('not_featured');
+    } else {
+      this.featured_filter.set('all');
+    }
+
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadBrands();
   }
@@ -331,6 +361,29 @@ export class BrandsPageComponent implements OnInit {
         error: (error) => {
           this.toastService.error(
             error?.message || 'Error al cambiar el estado de la marca',
+          );
+        },
+      });
+  }
+
+  onToggleFeatured(brand: Brand): void {
+    if (!this.canUpdate()) return;
+    const nextValue = !brand.is_featured;
+    this.brandsService
+      .updateBrand(brand.id, { is_featured: nextValue })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            nextValue
+              ? 'Marca marcada como destacada'
+              : 'Marca retirada de destacadas',
+          );
+          this.loadBrands();
+        },
+        error: (error) => {
+          this.toastService.error(
+            error?.message || 'Error al cambiar destacado de la marca',
           );
         },
       });

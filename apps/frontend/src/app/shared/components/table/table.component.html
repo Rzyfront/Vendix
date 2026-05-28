@@ -96,7 +96,11 @@
 
                   <!-- Image content -->
                   @if (column.type === 'image' && !column.badge && !column.template) {
-                    <div class="cell-image-container">
+                    <div
+                      class="cell-image-container"
+                      [class.cell-image-clickable]="!!column.imageClick && !!getNestedValue(item, column.key)"
+                      (click)="onImageClick(column, item, $event)"
+                    >
                       @if (getNestedValue(item, column.key)) {
                         <img [src]="getNestedValue(item, column.key)"
                           [alt]="column.label" class="cell-image"

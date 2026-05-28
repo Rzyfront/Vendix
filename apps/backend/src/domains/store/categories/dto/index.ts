@@ -188,4 +188,10 @@ export class CategoryResponseDto {
     description: 'Estado de la categoría',
   })
   state: CategoryState;
+
+  @ApiProperty({
+    example: false,
+    description: 'Indica si se destaca en la tienda online',
+  })
+  is_featured: boolean;
 }

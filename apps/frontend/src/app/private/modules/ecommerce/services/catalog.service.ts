@@ -72,12 +72,15 @@ export interface Category {
   slug: string;
   description: string | null;
   image_url: string | null;
+  is_featured?: boolean;
 }
 
 export interface Brand {
   id: number;
   name: string;
+  slug?: string;
   logo_url: string | null;
+  is_featured?: boolean;
 }
 
 export interface CatalogQuery {

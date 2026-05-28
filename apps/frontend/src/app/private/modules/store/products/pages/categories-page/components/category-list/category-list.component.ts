@@ -57,6 +57,7 @@ export class CategoryListComponent {
   readonly edit = output<ProductCategory>();
   readonly delete = output<ProductCategory>();
   readonly toggleState = output<ProductCategory>();
+  readonly toggleFeatured = output<ProductCategory>();
   readonly sort = output<{
     column: string;
     direction: 'asc' | 'desc' | null;
@@ -75,6 +76,16 @@ export class CategoryListComponent {
         { value: '', label: 'Todos' },
         { value: 'active', label: 'Activas' },
         { value: 'inactive', label: 'Inactivas' },
+      ],
+    },
+    {
+      key: 'is_featured',
+      label: 'Destacado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas' },
+        { value: 'true', label: 'Destacadas' },
+        { value: 'false', label: 'No destacadas' },
       ],
     },
   ];
@@ -114,6 +125,23 @@ export class CategoryListComponent {
       priority: 4,
     },
     {
+      key: 'is_featured',
+      label: 'Destacado',
+      sortable: true,
+      priority: 2,
+      transform: (value: boolean) => (value ? 'Destacada' : 'Normal'),
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          'true': '#d97706',
+          'false': '#6b7280',
+          Destacada: '#d97706',
+          Normal: '#6b7280',
+        },
+      },
+    },
+    {
       key: 'state',
       label: 'Estado',
       priority: 1,
@@ -148,6 +176,18 @@ export class CategoryListComponent {
             : 'Activar categoría',
         action: (item: ProductCategory) => this.toggleState.emit(item),
       });
+      actions.push({
+        label: (item: ProductCategory) =>
+          item.is_featured ? 'Quitar destacado' : 'Destacar',
+        icon: 'star',
+        variant: (item: ProductCategory) =>
+          item.is_featured ? 'muted' : 'warning',
+        tooltip: (item: ProductCategory) =>
+          item.is_featured
+            ? 'Quitar prioridad en el inicio'
+            : 'Dar prioridad en el inicio',
+        action: (item: ProductCategory) => this.toggleFeatured.emit(item),
+      });
     }
     if (this.canDelete()) {
       actions.push({
@@ -170,6 +210,12 @@ export class CategoryListComponent {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: string) => (val === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
+      {
+        key: 'is_featured',
+        label: 'Destacada',
+        icon: 'star',
+        transform: (value: boolean) => (value ? 'Sí' : 'No'),
+      },
       { key: 'description', label: 'Descripción', icon: 'file-text' },
     ],
   };
@@ -223,6 +269,10 @@ export class CategoryListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm() || this.selectedStatus());
+    return !!(
+      this.searchTerm() ||
+      this.selectedStatus() ||
+      this.filterValues['is_featured']
+    );
   }
 }

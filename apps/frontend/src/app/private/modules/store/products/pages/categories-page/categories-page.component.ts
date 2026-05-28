@@ -70,6 +70,15 @@ import { CategoryListComponent } from './components/category-list/category-list.
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
+
+        <app-stats
+          title="Destacadas"
+          [value]="stats().featured"
+          smallText="Prioridad en el inicio"
+          iconName="star"
+          iconBgColor="bg-yellow-100"
+          iconColor="text-yellow-600"
+        ></app-stats>
       </div>
 
       <!-- Categories List -->
@@ -90,6 +99,7 @@ import { CategoryListComponent } from './components/category-list/category-list.
         (edit)="openEdit($event)"
         (delete)="onDelete($event)"
         (toggleState)="onToggleState($event)"
+        (toggleFeatured)="onToggleFeatured($event)"
         (sort)="onSort($event)"
         (pageChange)="onPageChange($event)"
       ></app-category-list>
@@ -124,10 +134,14 @@ export class CategoriesPageComponent implements OnInit {
     total: 0,
     active: 0,
     inactive: 0,
+    featured: 0,
   });
 
   searchTerm = signal('');
   statusFilter = signal<'all' | 'active' | 'inactive'>('all');
+  featuredFilter = signal<'all' | 'featured' | 'not_featured'>('all');
+  sortBy = signal<string | null>(null);
+  sortOrder = signal<'asc' | 'desc' | null>(null);
 
   isLoading = signal(false);
   isModalOpen = signal(false);
@@ -171,6 +185,17 @@ export class CategoriesPageComponent implements OnInit {
       query.state = this.statusFilter() as CategoryState;
     }
 
+    if (this.featuredFilter() !== 'all') {
+      query.is_featured = this.featuredFilter() === 'featured';
+    }
+
+    const sortBy = this.sortBy();
+    const sortOrder = this.sortOrder();
+    if (sortBy && sortOrder) {
+      query.sort_by = sortBy;
+      query.sort_order = sortOrder;
+    }
+
     this.categoriesService
       .getPaginated(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -179,7 +204,9 @@ export class CategoriesPageComponent implements OnInit {
           if (response?.data) {
             this.categories.set(response.data);
             this.totalItems.set(
-              response.meta?.pagination?.total ?? response.data.length,
+              response.meta?.pagination?.total ??
+                response.meta?.total ??
+                response.data.length,
             );
             this.calculateStats();
           }
@@ -198,6 +225,7 @@ export class CategoriesPageComponent implements OnInit {
       total: this.totalItems(),
       active: list.filter((c) => c.state === 'active').length,
       inactive: list.filter((c) => c.state === 'inactive').length,
+      featured: list.filter((c) => c.is_featured).length,
     });
   }
 
@@ -216,6 +244,16 @@ export class CategoriesPageComponent implements OnInit {
     } else {
       this.statusFilter.set('all');
     }
+
+    const featuredValue = (values['is_featured'] as string) || '';
+    if (featuredValue === 'true') {
+      this.featuredFilter.set('featured');
+    } else if (featuredValue === 'false') {
+      this.featuredFilter.set('not_featured');
+    } else {
+      this.featuredFilter.set('all');
+    }
+
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadCategories();
   }
@@ -227,17 +265,15 @@ export class CategoriesPageComponent implements OnInit {
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {
     if (!event.direction) {
+      this.sortBy.set(null);
+      this.sortOrder.set(null);
       this.loadCategories();
       return;
     }
-    this.categories.update((list) =>
-      [...list].sort((a, b) => {
-        const valA = (a as unknown as Record<string, unknown>)[event.column] ?? '';
-        const valB = (b as unknown as Record<string, unknown>)[event.column] ?? '';
-        const comparison = String(valA).localeCompare(String(valB));
-        return event.direction === 'asc' ? comparison : -comparison;
-      }),
-    );
+    this.sortBy.set(event.column);
+    this.sortOrder.set(event.direction);
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadCategories();
   }
 
   openCreate(): void {
@@ -315,6 +351,30 @@ export class CategoriesPageComponent implements OnInit {
         },
         error: (error) => {
           this.toastService.error(error || 'Error al cambiar estado');
+        },
+      });
+  }
+
+  onToggleFeatured(category: ProductCategory): void {
+    if (!this.canUpdate()) return;
+    const nextValue = !category.is_featured;
+
+    this.categoriesService
+      .updateCategory(category.id, { is_featured: nextValue })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success(
+            nextValue
+              ? 'Categoría marcada como destacada'
+              : 'Categoría retirada de destacadas',
+          );
+          this.loadCategories();
+        },
+        error: (error) => {
+          this.toastService.error(
+            error || 'Error al cambiar destacado de la categoría',
+          );
         },
       });
   }
