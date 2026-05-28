@@ -161,12 +161,77 @@ export class ReportDataAdapterService {
       mappedRows = this.ensureRowId(mappedRows, trackKey);
     }
 
-    return { data: mappedRows, meta: normalized.meta };
+    let summaryData = this.extractSummaryFromMeta(normalized);
+    if (!summaryData || Object.keys(summaryData).length === 0) {
+      summaryData = this.computeSummaryFromRows(mappedRows, report);
+    }
+
+    return { data: mappedRows, meta: normalized.meta, summaryData };
   }
 
   private adaptNested(normalized: NormalizedResponse): ReportAdaptedData {
-    // Specialized components (balance-sheet, aging) handle their own rendering
-    return { data: normalized.data, meta: normalized.meta };
+    let summaryData = this.extractSummaryFromMeta(normalized);
+    if (!summaryData || Object.keys(summaryData).length === 0) {
+      summaryData = this.computeSummaryFromRows(normalized.data);
+    }
+    return { data: normalized.data, meta: normalized.meta, summaryData };
+  }
+
+  /**
+   * Extracts summaryData from the normalized meta object.
+   * Backend often sends aggregated values alongside list data:
+   *   { data: [...], meta: { total_sales: 500, order_count: 30 } }
+   *   { data: [...], meta: { totals: { total_sales: 500 } } }
+   *   { data: [...], total_sales: 500, order_count: 30 }
+   */
+  private extractSummaryFromMeta(normalized: NormalizedResponse): Record<string, any> | undefined {
+    const meta = normalized.meta;
+    if (!meta || typeof meta !== 'object') return undefined;
+
+    const summaryData: Record<string, any> = {};
+
+    // Check for nested totals/summary in meta (e.g., meta.totals, meta.summary)
+    const nestedKeys = ['totals', 'summary', 'stats', 'aggregates'];
+    for (const nk of nestedKeys) {
+      if (meta[nk] && typeof meta[nk] === 'object' && !Array.isArray(meta[nk])) {
+        Object.assign(summaryData, meta[nk]);
+      }
+    }
+
+    // Also extract primitive values directly from meta
+    for (const [key, value] of Object.entries(meta)) {
+      if (!Array.isArray(value) && typeof value !== 'object') {
+        summaryData[key] = value;
+      }
+    }
+
+    return Object.keys(summaryData).length > 0 ? summaryData : undefined;
+  }
+
+  /**
+   * Computes summaryData from data rows when the backend doesn't provide
+   * aggregate totals in the meta. Sums all numeric fields from the rows
+   * and adds a `_count` for row-count based stats.
+   */
+  private computeSummaryFromRows(rows: any[], report?: ReportDefinition): Record<string, any> | undefined {
+    if (!rows || rows.length === 0) return undefined;
+
+    const summaryData: Record<string, any> = { _count: rows.length };
+
+    const numericKeys = new Set<string>();
+    for (const row of rows) {
+      for (const [key, value] of Object.entries(row)) {
+        if (typeof value === 'number' && !key.startsWith('_')) {
+          numericKeys.add(key);
+        }
+      }
+    }
+
+    for (const key of numericKeys) {
+      summaryData[key] = rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+    }
+
+    return Object.keys(summaryData).length > 1 ? summaryData : undefined;
   }
 
   /**
@@ -245,7 +310,14 @@ export class ReportDataAdapterService {
       rows.push({ section: 'Resultado Final', concept: 'Utilidad Neta', amount: Number(d.bottom_line.net_profit || 0), is_total: true, percentage: d.bottom_line.net_margin });
     }
 
-    return { data: rows, meta: undefined };
+    const summaryData: Record<string, any> = {
+      gross_revenue: Number(d.revenue?.gross_revenue || 0),
+      cogs: Number(d.costs?.cost_of_goods_sold || 0),
+      net_profit: Number(d.bottom_line?.net_profit || 0),
+      net_margin: d.bottom_line?.net_margin ?? 0,
+    };
+
+    return { data: rows, meta: undefined, summaryData };
   }
 
   /**

@@ -6,7 +6,9 @@ export type ReportCategoryId =
   | 'customers'
   | 'purchases'
   | 'reviews'
-  | 'financial';
+  | 'financial'
+  | 'accounting'
+  | 'payroll';
 
 export type ReportType = 'summary' | 'list' | 'nested';
 
@@ -20,6 +22,13 @@ export interface SummaryField {
 export interface SummaryLayoutConfig {
   sections?: { title: string; fields: SummaryField[] }[];
   fields: SummaryField[];
+}
+
+export interface ReportStatField {
+  key: string;
+  label: string;
+  type: 'currency' | 'number' | 'text' | 'percentage' | 'date';
+  icon: string;
 }
 
 export interface ReportDefinition {
@@ -41,6 +50,7 @@ export interface ReportDefinition {
   keyMapping?: Record<string, string>;
   trackKey?: string;
   summaryLayout?: SummaryLayoutConfig;
+  stats?: ReportStatField[];
 }
 
 export interface ReportAdaptedData {

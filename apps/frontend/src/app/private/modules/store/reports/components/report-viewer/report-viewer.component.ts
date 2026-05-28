@@ -1,6 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { ReportColumn, ReportDefinition } from '../../interfaces/report.interface';
-import { SummaryReportComponent } from '../summary-report/summary-report.component';
+import { ReportColumn, ReportDefinition, ReportStatField } from '../../interfaces/report.interface';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
 import { DateRangeFilterComponent } from '../../../analytics/components/date-range-filter/date-range-filter.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
@@ -8,9 +7,26 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import {
   ResponsiveDataViewComponent,
   IconComponent,
+  StatsComponent,
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../../shared/components';
+
+interface StatCard {
+  title: string;
+  value: string | number;
+  iconName: string;
+  iconBgColor: string;
+  iconColor: string;
+}
+
+const TYPE_ICONS: Record<string, { icon: string; bg: string; color: string }> = {
+  currency: { icon: 'dollar-sign', bg: 'bg-green-100', color: 'text-green-600' },
+  number: { icon: 'hash', bg: 'bg-blue-100', color: 'text-blue-600' },
+  percentage: { icon: 'percent', bg: 'bg-amber-100', color: 'text-amber-600' },
+  text: { icon: 'file-text', bg: 'bg-purple-100', color: 'text-purple-600' },
+  date: { icon: 'calendar', bg: 'bg-indigo-100', color: 'text-indigo-600' },
+};
 
 function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   return columns.map((col) => ({
@@ -20,11 +36,27 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   }));
 }
 
+function formatStatValue(value: any, type: string): string | number {
+  if (value == null || value === undefined) return 0;
+  const num = Number(value);
+  if (isNaN(num)) return 0;
+  if (type === 'currency') {
+    return '$' + num.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  }
+  if (type === 'percentage') {
+    return num.toLocaleString('es-CO', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '%';
+  }
+  if (type === 'number') {
+    return num.toLocaleString('es-CO');
+  }
+  return String(value);
+}
+
 @Component({
   selector: 'app-report-viewer',
   standalone: true,
   imports: [
-    SummaryReportComponent,
+    StatsComponent,
     NestedReportComponent,
     DateRangeFilterComponent,
     PaginationComponent,
@@ -34,11 +66,20 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
   ],
   template: `
     <div class="flex flex-col gap-6">
-      @if (report()?.type === 'summary' && summaryData()) {
-        <app-summary-report
-          [summaryData]="summaryData()!"
-          [layout]="report()!.summaryLayout!"
-        />
+      <!-- Stats Cards -->
+      @if (statsCards().length > 0) {
+        <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
+          @for (stat of statsCards(); track stat.title) {
+            <app-stats
+              [title]="stat.title"
+              [value]="stat.value"
+              [iconName]="stat.iconName"
+              [iconBgColor]="stat.iconBgColor"
+              [iconColor]="stat.iconColor"
+              [loading]="loading()"
+            />
+          }
+        </div>
       }
 
       <app-card [padding]="false" overflow="hidden">
@@ -50,8 +91,8 @@ function toTableColumns(columns: ReportColumn[]): TableColumn[] {
             </h2>
             <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
               {{ report()?.description || '' }}
-              @if (totalItems() > 0) {
-                &middot; {{ totalItems() }} registros
+              @if (computedTotalItems() > 0) {
+                &middot; {{ computedTotalItems() }} registros
               }
             </p>
           </div>
@@ -128,6 +169,39 @@ export class ReportViewerComponent {
 
   readonly dateRangeChange = output<any>();
   readonly pageChange = output<number>();
+
+  readonly statsCards = computed<StatCard[]>(() => {
+    const report = this.report();
+    const data = this.data();
+    const summaryData = this.summaryData();
+    if (!report || !report.stats) return [];
+
+    const source = summaryData || {};
+    const hasSourceData = Object.keys(source).length > 0;
+
+    return report.stats.map((s) => {
+      const ic = TYPE_ICONS[s.type] || TYPE_ICONS['number'];
+      let value: string | number = '-';
+
+      if (hasSourceData && source[s.key] != null) {
+        value = formatStatValue(source[s.key], s.type);
+      } else if (data && data.length > 0) {
+        const sum = data.reduce((acc, row) => {
+          const v = Number(row[s.key]);
+          return isNaN(v) ? acc : acc + v;
+        }, 0);
+        value = formatStatValue(sum, s.type);
+      }
+
+      return {
+        title: s.label,
+        value,
+        iconName: s.icon || ic.icon,
+        iconBgColor: ic.bg,
+        iconColor: ic.color,
+      };
+    });
+  });
 
   readonly paginatedData = computed(() => {
     const d = this.data();

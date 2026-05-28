@@ -24,6 +24,13 @@ export class ReportsEffects {
     ),
   );
 
+  reloadOnFilterChange$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ReportsActions.setDateRange, ReportsActions.setFiscalPeriod),
+      map(() => ReportsActions.loadReportData()),
+    ),
+  );
+
   loadReportData$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ReportsActions.loadReportData),
