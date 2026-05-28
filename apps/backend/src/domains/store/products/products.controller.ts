@@ -22,6 +22,7 @@ import {
   ProductImageDto,
   ProductQueryDto,
   GenerateProductDescriptionDto,
+  GenerateProductImageEnhancementDto,
   UpdateProductPromotionsDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -54,6 +55,13 @@ export class ProductsController {
         error.status || 400,
       );
     }
+  }
+
+  @Post('enhance-image')
+  @Permissions('store:products:create', 'store:products:update')
+  async enhanceImage(@Body() dto: GenerateProductImageEnhancementDto) {
+    const result = await this.productsService.enhanceImage(dto);
+    return this.responseService.success(result, 'Imagen mejorada exitosamente');
   }
 
   @Post()

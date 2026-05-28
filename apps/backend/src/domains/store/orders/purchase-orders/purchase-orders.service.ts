@@ -46,6 +46,62 @@ export class PurchaseOrdersService {
         throw new BadRequestException('Organization ID not found in context');
       }
 
+      const normalizeText = (value: unknown) =>
+        String(value ?? '')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim()
+          .toLowerCase();
+
+      const normalizeBool = (val: any, fallback = false) => {
+        if (val === undefined || val === null || val === '') return fallback;
+        if (typeof val === 'boolean') return val;
+        if (typeof val === 'number') return val !== 0;
+        const s = normalizeText(val);
+        if (
+          ['si', 'yes', 'verdadero', 'true', '1', 'activo', 'x'].includes(s)
+        ) {
+          return true;
+        }
+        if (['no', 'false', 'falso', '0', 'inactivo'].includes(s)) {
+          return false;
+        }
+        return fallback;
+      };
+
+      const normalizeProductType = (value: unknown) =>
+        ['servicio', 'service'].includes(normalizeText(value))
+          ? 'service'
+          : 'physical';
+
+      const normalizePricingType = (value: unknown) =>
+        ['peso', 'weight', 'por peso'].includes(normalizeText(value))
+          ? 'weight'
+          : 'unit';
+
+      const parseOptionalNumber = (value: unknown): number | undefined => {
+        if (value === undefined || value === null || value === '') {
+          return undefined;
+        }
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : undefined;
+      };
+
+      const normalizeTaxCategoryIds = (value: unknown): number[] | undefined => {
+        if (value === undefined || value === null || value === '') {
+          return undefined;
+        }
+        const rawValues = Array.isArray(value)
+          ? value
+          : String(value)
+              .split(/[;,]/)
+              .map((item) => item.trim());
+        const ids = rawValues
+          .map((item) => Number(item))
+          .filter((item) => Number.isInteger(item) && item > 0);
+        return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+      };
+
       for (const item of createPurchaseOrderDto.items) {
         let finalProductId = item.product_id;
 
@@ -86,28 +142,41 @@ export class PurchaseOrdersService {
             },
           });
 
-          // Normalize Data first
-          // Normalize Booleanos (Si/No -> true/false)
-          const normalizeBool = (val: any) => {
-            if (typeof val === 'boolean') return val;
-            if (typeof val === 'string') {
-              const s = val.trim().toLowerCase();
-              return (
-                s === 'si' || s === 'yes' || s === 'verdadero' || s === 'true'
-              );
-            }
-            return !!val;
-          };
-
           const availableForEcommerce = normalizeBool(
             item.available_for_ecommerce ?? true,
+            true,
           );
-          const isOnSale = normalizeBool((item as any).is_on_sale ?? false);
+          const isOnSale = normalizeBool((item as any).is_on_sale, false);
+          const productType = normalizeProductType((item as any).product_type);
+          const trackInventory =
+            productType === 'service'
+              ? false
+              : normalizeBool((item as any).track_inventory, true);
+          const pricingType = normalizePricingType((item as any).pricing_type);
+          const isFeatured = normalizeBool((item as any).is_featured, false);
+          const allowPosPriceOverride = normalizeBool(
+            (item as any).allow_pos_price_override,
+            false,
+          );
+          const hasMultiplePriceTiers = normalizeBool(
+            (item as any).has_multiple_price_tiers,
+            false,
+          );
+          const packageConsumesMultipleStock = normalizeBool(
+            (item as any).package_consumes_multiple_stock,
+            false,
+          );
+          const unitsPerPackage = parseOptionalNumber(
+            (item as any).units_per_package,
+          );
+          const requestedTaxCategoryIds = normalizeTaxCategoryIds(
+            (item as any).tax_category_ids,
+          );
 
           // Normalize State
           let productState: any = 'active';
           if (item.state && typeof item.state === 'string') {
-            const s = item.state.trim().toLowerCase();
+            const s = normalizeText(item.state);
             if (s === 'activo' || s === 'active' || s === 'habilitado')
               productState = 'active';
             else if (
@@ -161,9 +230,14 @@ export class PurchaseOrdersService {
           }
 
           // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
-          const categoryIds: number[] = [];
-          if (item.category_names) {
-            const names = item.category_names
+	          const categoryIds: number[] = [];
+	          const categoryNames =
+	            typeof item.category_names === 'string'
+	              ? item.category_names
+	              : '';
+	          const hasCategoryNames = categoryNames.trim().length > 0;
+	          if (hasCategoryNames) {
+	            const names = categoryNames
               .split(',')
               .map((n) => n.trim())
               .filter((n) => n);
@@ -194,34 +268,99 @@ export class PurchaseOrdersService {
             }
           }
 
+          let taxCategoryIds: number[] | undefined;
+          if (requestedTaxCategoryIds?.length) {
+            const taxCategories = await tx.tax_categories.findMany({
+              where: {
+                id: { in: requestedTaxCategoryIds },
+                OR: [{ store_id: storeId }, { store_id: null }],
+              },
+              select: { id: true },
+            });
+            if (taxCategories.length !== requestedTaxCategoryIds.length) {
+              throw new BadRequestException(
+                'Una o más categorías de impuesto no existen para esta tienda.',
+              );
+            }
+            taxCategoryIds = taxCategories.map((taxCategory) => taxCategory.id);
+          }
+
           if (existingProduct) {
             finalProductId = existingProduct.id;
             // Update existing product with new metadata if provided
+            const productUpdateData: any = {
+              state: productState,
+              weight: item.weight || existingProduct.weight,
+              brand_id:
+                brandId !== undefined ? brandId : existingProduct.brand_id,
+              base_price:
+                basePrice > 0 ? basePrice : existingProduct.base_price,
+              profit_margin:
+                margin > 0 ? margin : existingProduct.profit_margin,
+              cost_price: cost > 0 ? cost : existingProduct.cost_price,
+              description:
+                item.product_description || existingProduct.description,
+            };
+
+            if ((item as any).available_for_ecommerce !== undefined) {
+              productUpdateData.available_for_ecommerce =
+                availableForEcommerce;
+            }
+            if ((item as any).is_on_sale !== undefined) {
+              productUpdateData.is_on_sale = isOnSale;
+            }
+            if (item.sale_price !== undefined) {
+              productUpdateData.sale_price = item.sale_price;
+            }
+
+            if ((item as any).product_type !== undefined) {
+              productUpdateData.product_type = productType;
+            }
+            if (
+              (item as any).track_inventory !== undefined ||
+              (item as any).product_type !== undefined
+            ) {
+              productUpdateData.track_inventory = trackInventory;
+            }
+            if ((item as any).pricing_type !== undefined) {
+              productUpdateData.pricing_type = pricingType;
+            }
+            if ((item as any).is_featured !== undefined) {
+              productUpdateData.is_featured = isFeatured;
+            }
+            if ((item as any).allow_pos_price_override !== undefined) {
+              productUpdateData.allow_pos_price_override =
+                allowPosPriceOverride;
+            }
+            if ((item as any).has_multiple_price_tiers !== undefined) {
+              productUpdateData.has_multiple_price_tiers =
+                hasMultiplePriceTiers;
+            }
+            if (unitsPerPackage !== undefined) {
+              productUpdateData.units_per_package = unitsPerPackage;
+            }
+            if ((item as any).package_consumes_multiple_stock !== undefined) {
+              productUpdateData.package_consumes_multiple_stock =
+                packageConsumesMultipleStock;
+            }
+
+            if (hasCategoryNames) {
+              productUpdateData.product_categories = {
+                deleteMany: {},
+                create: categoryIds.map((id) => ({ category_id: id })),
+              };
+            }
+
+            if (taxCategoryIds !== undefined) {
+              productUpdateData.product_tax_assignments = {
+                deleteMany: {},
+                create: taxCategoryIds.map((id) => ({ tax_category_id: id })),
+              };
+            }
+
             await tx.products.update({
               where: { id: existingProduct.id },
-              data: {
-                state: productState,
-                weight: item.weight || existingProduct.weight,
-                available_for_ecommerce: availableForEcommerce,
-                is_on_sale: isOnSale,
-                sale_price:
-                  item.sale_price !== undefined
-                    ? item.sale_price
-                    : existingProduct.sale_price,
-                brand_id:
-                  brandId !== undefined ? brandId : existingProduct.brand_id,
-                product_categories: {
-                  deleteMany: {},
-                  create: categoryIds.map((id) => ({ category_id: id })),
-                },
-                base_price:
-                  basePrice > 0 ? basePrice : existingProduct.base_price,
-                profit_margin:
-                  margin > 0 ? margin : existingProduct.profit_margin,
-                cost_price: cost > 0 ? cost : existingProduct.cost_price,
-                description:
-                  item.product_description || existingProduct.description,
-              },
+              data: productUpdateData,
             });
           } else {
             const newProduct = await tx.products.create({
@@ -241,13 +380,29 @@ export class PurchaseOrdersService {
                 state: productState,
                 store_id: storeId,
                 weight: item.weight || 0,
+                product_type: productType,
+                track_inventory: trackInventory,
+                pricing_type: pricingType,
                 available_for_ecommerce: availableForEcommerce,
+                is_featured: isFeatured,
+                allow_pos_price_override: allowPosPriceOverride,
+                has_multiple_price_tiers: hasMultiplePriceTiers,
+                units_per_package: unitsPerPackage,
+                package_consumes_multiple_stock: packageConsumesMultipleStock,
                 is_on_sale: isOnSale,
                 sale_price: item.sale_price || 0,
                 brand_id: brandId,
                 product_categories: {
                   create: categoryIds.map((id) => ({ category_id: id })),
                 },
+                product_tax_assignments:
+                  taxCategoryIds !== undefined
+                    ? {
+                        create: taxCategoryIds.map((id) => ({
+                          tax_category_id: id,
+                        })),
+                      }
+                    : undefined,
               },
             });
             finalProductId = newProduct.id;

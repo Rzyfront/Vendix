@@ -669,6 +669,11 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Insufficient stock',
   },
+  POS_STOCK_INSUFFICIENT_001: {
+    code: 'POS_STOCK_INSUFFICIENT_001',
+    httpStatus: 409,
+    devMessage: 'Stock insuficiente para una o más líneas del POS',
+  },
   INV_LOC_001: {
     code: 'INV_LOC_001',
     httpStatus: 404,
@@ -2337,6 +2342,11 @@ export const ErrorCodes = {
     code: 'PRICE_TIER_VALIDATE_001',
     httpStatus: 400,
     devMessage: 'Datos inválidos para la tarifa de precios',
+  },
+  PRICE_TIER_NOT_ALLOWED: {
+    code: 'PRICE_TIER_NOT_ALLOWED',
+    httpStatus: 422,
+    devMessage: 'La tarifa seleccionada no está habilitada para este producto',
   },
   PRICING_TIER_PERMISSION_DENIED: {
     code: 'PRICING_TIER_PERMISSION_DENIED',

@@ -501,6 +501,12 @@ export class OrganizationOrdersService {
         quantity: item.quantity,
         unit_price: Number(item.unit_price),
         total_price: Number(item.total_price),
+        applied_price_tier_name:
+          (item as { applied_price_tier_name_snapshot?: string | null })
+            .applied_price_tier_name_snapshot ?? null,
+        stock_units_consumed:
+          (item as { stock_units_consumed?: number | null })
+            .stock_units_consumed ?? null,
       })),
       subtotal: Number(order.subtotal_amount),
       tax_amount: Number(order.tax_amount),

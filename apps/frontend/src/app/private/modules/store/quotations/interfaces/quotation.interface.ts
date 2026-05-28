@@ -13,6 +13,9 @@ export interface QuotationItem {
   tax_rate?: number;
   tax_amount_item?: number;
   total_price: number;
+  applied_price_tier_id?: number | null;
+  applied_price_tier_name_snapshot?: string | null;
+  stock_units_consumed?: number | null;
   notes?: string;
   product?: any;
   product_variant?: any;
@@ -107,6 +110,7 @@ export interface CreateQuotationItemDto {
   tax_rate?: number;
   tax_amount_item?: number;
   total_price: number;
+  applied_price_tier_id?: number | null;
   notes?: string;
 }
 

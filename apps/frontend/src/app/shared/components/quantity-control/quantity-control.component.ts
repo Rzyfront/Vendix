@@ -97,6 +97,7 @@ export class QuantityControlComponent {
   readonly value = input(1);
   readonly min = input(1);
   readonly max = input<number | null>(null);
+  readonly unitsPerPackage = input<number | null>(null);
   readonly step = input(1);
   readonly editable = input(true);
   readonly disabled = input(false);

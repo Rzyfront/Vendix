@@ -49,6 +49,7 @@ export interface Product {
   has_multiple_price_tiers?: boolean;
   units_per_package?: number | null;
   package_consumes_multiple_stock?: boolean;
+  enabled_price_tier_ids?: number[];
 }
 
 export interface ProductTaxAssignment {
@@ -437,6 +438,11 @@ export class PosProductService {
         pricing_type: product.pricing_type || 'unit',
         // Multi-tarifa (Phase 5)
         has_multiple_price_tiers: product.has_multiple_price_tiers === true,
+        enabled_price_tier_ids: Array.isArray(product.enabled_price_tier_ids)
+          ? product.enabled_price_tier_ids
+              .map((id: unknown) => Number(id))
+              .filter((id: number) => Number.isFinite(id))
+          : [],
         units_per_package:
           product.units_per_package != null && product.units_per_package > 0
             ? Number(product.units_per_package)

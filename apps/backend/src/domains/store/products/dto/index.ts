@@ -270,6 +270,11 @@ export class CreateProductDto {
   package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  enabled_price_tier_ids?: number[];
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio de oferta no puede ser negativo' })
@@ -531,6 +536,11 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   package_consumes_multiple_stock?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  enabled_price_tier_ids?: number[];
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -1503,6 +1513,36 @@ export class GenerateProductDescriptionDto {
   @IsOptional()
   @IsString()
   sku?: string;
+
+  @IsOptional()
+  @IsObject()
+  extra_context?: Record<string, any>;
+}
+
+export class GenerateProductImageEnhancementDto {
+  @IsString()
+  @IsNotEmpty()
+  image_url: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(1200)
+  prompt: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  product_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['physical', 'service'])
+  product_type?: 'physical' | 'service';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
 
   @IsOptional()
   @IsObject()

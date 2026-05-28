@@ -542,6 +542,8 @@ export class QuotationsService {
       items: quotation.quotation_items.map((item: any) => ({
         product_name: item.product_name,
         variant_sku: item.variant_sku,
+        applied_price_tier_name_snapshot:
+          item.applied_price_tier_name_snapshot ?? null,
         quantity: item.quantity,
         unit_price: Number(item.unit_price),
         total_price: Number(item.total_price),
@@ -643,7 +645,7 @@ export class QuotationsService {
     }
 
     const tiers = await this.prisma.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIds) } },
+      where: { id: { in: Array.from(tierIds) }, is_active: true },
       select: { id: true, name: true, is_package_unit: true },
     });
     type TierRow = (typeof tiers)[number];
@@ -672,12 +674,32 @@ export class QuotationsService {
     const productById = new Map<number, ProductRow>(
       productsList.map((p): [number, ProductRow] => [p.id, p]),
     );
+    const assignments = productIds.length
+      ? await this.prisma.product_price_tier_assignments.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIds) },
+          },
+          select: { product_id: true, price_tier_id: true },
+        })
+      : [];
+    const allowedTierKeys = new Set(
+      assignments.map((assignment) =>
+        `${assignment.product_id}:${assignment.price_tier_id}`,
+      ),
+    );
 
     return items.map((item) => {
       const tid = item.applied_price_tier_id;
       if (tid === undefined || tid === null) return null;
       const tier = tierById.get(Number(tid));
-      if (!tier) return null;
+      if (!tier) {
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
+      }
+      const productId = item.product_id;
+      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tid)}`)) {
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
+      }
       const product = item.product_id ? productById.get(item.product_id) : null;
       const isPackage =
         tier.is_package_unit &&

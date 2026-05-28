@@ -3,6 +3,7 @@ import {
   computed,
   DestroyRef,
   ElementRef,
+  effect,
   inject,
   input,
   model,
@@ -23,26 +24,11 @@ import {
 } from '../../../../../shared/components';
 import { ProductsService } from '../services/products.service';
 
-type Stage = 'select' | 'url' | 'camera' | 'crop';
-type AspectRatio =
-  | 'free'
-  | '1:1'
-  | '4:3'
-  | '3:2'
-  | '16:9'
-  | '4:5'
-  | '9:16';
+type Stage = 'select' | 'url' | 'camera' | 'crop' | 'loading';
+type ImageModalMode = 'add' | 'edit';
+type AspectRatio = 'free' | '1:1' | '4:3' | '3:2' | '16:9' | '4:5' | '9:16';
 
-type DragMode =
-  | 'move'
-  | 'n'
-  | 's'
-  | 'e'
-  | 'w'
-  | 'nw'
-  | 'ne'
-  | 'sw'
-  | 'se';
+type DragMode = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
 
 interface PendingImage {
   dataUrl: string;
@@ -65,7 +51,11 @@ interface DragState {
   target: Element;
 }
 
-const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }[] = [
+const ASPECT_RATIOS: {
+  value: AspectRatio;
+  label: string;
+  ratio: number | null;
+}[] = [
   { value: 'free', label: 'Libre', ratio: null },
   { value: '1:1', label: '1:1', ratio: 1 },
   { value: '4:3', label: '4:3', ratio: 4 / 3 },
@@ -238,25 +228,23 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
               Descargamos la imagen desde nuestro servidor para evitar bloqueos
               de origen y poder recortarla.
             </p>
+          </div>
+        }
 
-            <div class="flex justify-end gap-2 pt-2">
-              <app-button
-                variant="outline"
-                (clicked)="backToSelect()"
-                [disabled]="isFetchingUrl()"
-              >
-                <app-icon slot="icon" name="x" size="16"></app-icon>
-                Cancelar
-              </app-button>
-              <app-button
-                variant="primary"
-                (clicked)="fetchUrl()"
-                [loading]="isFetchingUrl()"
-                [disabled]="!urlInput.trim() || isFetchingUrl()"
-              >
-                <app-icon slot="icon" name="download" size="16"></app-icon>
-                Obtener imagen
-              </app-button>
+        @case ('loading') {
+          <div
+            class="min-h-[220px] flex flex-col items-center justify-center text-center gap-3"
+          >
+            <div
+              class="h-10 w-10 rounded-full border-2 border-primary-200 border-t-primary-600 animate-spin"
+            ></div>
+            <div>
+              <p class="text-sm font-semibold text-gray-800">
+                Preparando imagen
+              </p>
+              <p class="text-xs text-gray-500 mt-1">
+                Cargando la foto seleccionada para editarla.
+              </p>
             </div>
           </div>
         }
@@ -270,43 +258,53 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
               (captured)="onCameraCaptured($event)"
               (closed)="backToSelect()"
             ></app-camera>
-
-            <!-- Footer actions: hidden on mobile (camera renders its own fullscreen controls) -->
-            @if (!cameraRef()?.isMobile()) {
-              <div class="flex justify-end gap-2 pt-3 border-t border-gray-200">
-                <app-button variant="outline" (clicked)="backToSelect()">
-                  <app-icon slot="icon" name="x" size="16"></app-icon>
-                  Cancelar
-                </app-button>
-                <app-button
-                  variant="primary"
-                  (clicked)="cameraRef()?.capture()"
-                  [disabled]="!cameraRef()?.cameraReady()"
-                >
-                  <app-icon slot="icon" name="camera" size="16"></app-icon>
-                  Capturar
-                </app-button>
-              </div>
-            }
           </div>
         }
 
         @case ('crop') {
           <div class="space-y-4">
             <div class="flex flex-wrap items-center gap-2">
-              <span class="text-xs font-semibold text-gray-700">Transformar:</span>
-              <app-button variant="outline" size="sm" (clicked)="rotateBy(-90)" title="Rotar izquierda">
+              <span class="text-xs font-semibold text-gray-700"
+                >Transformar:</span
+              >
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="rotateBy(-90)"
+                title="Rotar izquierda"
+              >
                 <app-icon slot="icon" name="rotate-ccw" size="14"></app-icon>
               </app-button>
-              <app-button variant="outline" size="sm" (clicked)="rotateBy(90)" title="Rotar derecha">
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="rotateBy(90)"
+                title="Rotar derecha"
+              >
                 <app-icon slot="icon" name="rotate-cw" size="14"></app-icon>
               </app-button>
-              <app-button variant="outline" size="sm" (clicked)="toggleFlipH()"
-                          [class.bg-primary-600]="flipH()" [class.text-white]="flipH()" title="Voltear horizontal">
-                <app-icon slot="icon" name="flip-horizontal" size="14"></app-icon>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="toggleFlipH()"
+                [class.bg-primary-600]="flipH()"
+                [class.text-white]="flipH()"
+                title="Voltear horizontal"
+              >
+                <app-icon
+                  slot="icon"
+                  name="flip-horizontal"
+                  size="14"
+                ></app-icon>
               </app-button>
-              <app-button variant="outline" size="sm" (clicked)="toggleFlipV()"
-                          [class.bg-primary-600]="flipV()" [class.text-white]="flipV()" title="Voltear vertical">
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="toggleFlipV()"
+                [class.bg-primary-600]="flipV()"
+                [class.text-white]="flipV()"
+                title="Voltear vertical"
+              >
                 <app-icon slot="icon" name="flip-vertical" size="14"></app-icon>
               </app-button>
             </div>
@@ -471,28 +469,85 @@ const ASPECT_RATIOS: { value: AspectRatio; label: string; ratio: number | null }
               Imagen {{ queueCursor() + 1 }} de {{ queue().length }} · Arrastra
               el marco para reposicionarlo y los puntos para redimensionarlo
             </div>
+          </div>
+        }
+      }
 
-            <div class="flex flex-wrap justify-end gap-2">
-              <app-button variant="outline" (clicked)="resetFrame()">
-                <app-icon slot="icon" name="rotate-ccw" size="16"></app-icon>
-                Restablecer
+      <div slot="footer" class="flex flex-wrap justify-end gap-2">
+        @switch (stage()) {
+          @case ('select') {
+            <app-button variant="outline" (clicked)="onClose()">
+              <app-icon slot="icon" name="x" size="16"></app-icon>
+              Cerrar
+            </app-button>
+          }
+
+          @case ('loading') {
+            <app-button variant="outline" (clicked)="onClose()">
+              <app-icon slot="icon" name="x" size="16"></app-icon>
+              Cancelar
+            </app-button>
+          }
+
+          @case ('url') {
+            <app-button
+              variant="outline"
+              (clicked)="backToSelect()"
+              [disabled]="isFetchingUrl()"
+            >
+              <app-icon slot="icon" name="x" size="16"></app-icon>
+              Cancelar
+            </app-button>
+            <app-button
+              variant="primary"
+              (clicked)="fetchUrl()"
+              [loading]="isFetchingUrl()"
+              [disabled]="!urlInput.trim() || isFetchingUrl()"
+            >
+              <app-icon slot="icon" name="download" size="16"></app-icon>
+              Obtener imagen
+            </app-button>
+          }
+
+          @case ('camera') {
+            @if (!cameraRef()?.isMobile()) {
+              <app-button variant="outline" (clicked)="backToSelect()">
+                <app-icon slot="icon" name="x" size="16"></app-icon>
+                Cancelar
               </app-button>
+              <app-button
+                variant="primary"
+                (clicked)="cameraRef()?.capture()"
+                [disabled]="!cameraRef()?.cameraReady()"
+              >
+                <app-icon slot="icon" name="camera" size="16"></app-icon>
+                Capturar
+              </app-button>
+            }
+          }
+
+          @case ('crop') {
+            <app-button variant="outline" (clicked)="resetFrame()">
+              <app-icon slot="icon" name="rotate-ccw" size="16"></app-icon>
+              Restablecer
+            </app-button>
+            @if (mode() === 'add') {
               <app-button variant="outline" (clicked)="skipCurrent()">
                 <app-icon slot="icon" name="skip-forward" size="16"></app-icon>
                 Omitir
               </app-button>
-              <app-button variant="outline" (clicked)="cancelCrop()">
-                <app-icon slot="icon" name="x" size="16"></app-icon>
-                Cancelar
-              </app-button>
-              <app-button variant="primary" (clicked)="applyCrop()">
-                <app-icon slot="icon" name="check" size="16"></app-icon>
-                Aplicar y agregar
-              </app-button>
-            </div>
-          </div>
+            }
+            <app-button variant="outline" (clicked)="cancelCrop()">
+              <app-icon slot="icon" name="x" size="16"></app-icon>
+              Cancelar
+            </app-button>
+            <app-button variant="primary" (clicked)="applyCrop()">
+              <app-icon slot="icon" name="check" size="16"></app-icon>
+              {{ mode() === 'edit' ? 'Guardar ajuste' : 'Aplicar y agregar' }}
+            </app-button>
+          }
         }
-      }
+      </div>
     </app-modal>
   `,
 })
@@ -503,7 +558,10 @@ export class ProductImageSourceModalComponent {
 
   readonly isOpen = model<boolean>(false);
   readonly remainingSlots = input<number>(5);
+  readonly mode = input<ImageModalMode>('add');
+  readonly sourceImageUrl = input<string | null>(null);
   readonly imagesAdded = output<string[]>();
+  readonly imageEdited = output<string>();
 
   readonly stage = signal<Stage>('select');
   readonly queue = signal<PendingImage[]>([]);
@@ -515,15 +573,18 @@ export class ProductImageSourceModalComponent {
   readonly isFetchingUrl = signal(false);
 
   readonly rotation = signal<0 | 90 | 180 | 270>(0);
-  readonly flipH    = signal<boolean>(false);
-  readonly flipV    = signal<boolean>(false);
-  readonly axesSwapped = computed(() => this.rotation() === 90 || this.rotation() === 270);
+  readonly flipH = signal<boolean>(false);
+  readonly flipV = signal<boolean>(false);
+  readonly axesSwapped = computed(
+    () => this.rotation() === 90 || this.rotation() === 270,
+  );
 
   readonly cropFrame = signal<CropFrame | null>(null);
   readonly canvasSize = signal<{ w: number; h: number }>({ w: 0, h: 0 });
 
   private dragState: DragState | null = null;
   private readonly MIN_FRAME = 24;
+  private lastStartedEditUrl: string | null = null;
 
   readonly modalTitle = computed(() => {
     switch (this.stage()) {
@@ -532,13 +593,18 @@ export class ProductImageSourceModalComponent {
       case 'camera':
         return 'Tomar foto';
       case 'crop':
-        return 'Recortar imagen';
+        return this.mode() === 'edit'
+          ? 'Ajustar y recortar'
+          : 'Recortar imagen';
+      case 'loading':
+        return 'Preparando imagen';
       default:
         return 'Agregar imágenes';
     }
   });
 
   readonly modalSubtitle = computed(() => {
+    if (this.mode() === 'edit') return 'Edita la foto seleccionada';
     if (this.stage() === 'select') return 'Elige una fuente';
     return undefined;
   });
@@ -565,6 +631,24 @@ export class ProductImageSourceModalComponent {
 
   private loadedImages = new Map<number, HTMLImageElement>();
 
+  constructor() {
+    effect(() => {
+      const isOpen = this.isOpen();
+      const mode = this.mode();
+      const sourceUrl = this.sourceImageUrl();
+
+      if (!isOpen || mode !== 'edit') {
+        this.lastStartedEditUrl = null;
+        return;
+      }
+
+      if (!sourceUrl || this.lastStartedEditUrl === sourceUrl) return;
+
+      this.lastStartedEditUrl = sourceUrl;
+      queueMicrotask(() => this.startEditFlow(sourceUrl));
+    });
+  }
+
   onClose(): void {
     this.stage.set('select');
     this.queue.set([]);
@@ -580,6 +664,8 @@ export class ProductImageSourceModalComponent {
     this.isFetchingUrl.set(false);
     this.loadedImages.clear();
     this.dragState = null;
+    this.pendingResults = [];
+    this.lastStartedEditUrl = null;
     this.isOpen.set(false);
   }
 
@@ -687,6 +773,56 @@ export class ProductImageSourceModalComponent {
     setTimeout(() => this.renderCropPreview(), 0);
   }
 
+  private startEditFlow(sourceUrl: string): void {
+    this.pendingResults = [];
+    this.stage.set('loading');
+    this.queue.set([]);
+    this.queueCursor.set(0);
+    this.aspect.set('free');
+    this.rotation.set(0);
+    this.flipH.set(false);
+    this.flipV.set(false);
+    this.cropFrame.set(null);
+    this.canvasSize.set({ w: 0, h: 0 });
+    this.loadedImages.clear();
+
+    if (sourceUrl.startsWith('data:image') || sourceUrl.startsWith('blob:')) {
+      this.startCropFlow([{ dataUrl: sourceUrl }]);
+      return;
+    }
+
+    this.productsService
+      .getRemoteImagePreview(sourceUrl)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result: {
+          dataUrl: string;
+          fileName: string;
+          contentType: string;
+          byteLength: number;
+        }) => {
+          if (
+            !this.isOpen() ||
+            this.mode() !== 'edit' ||
+            this.sourceImageUrl() !== sourceUrl
+          ) {
+            return;
+          }
+
+          this.startCropFlow([
+            { dataUrl: result.dataUrl, fileName: result.fileName },
+          ]);
+        },
+        error: () => {
+          if (!this.isOpen()) return;
+          this.toastService.error(
+            'No pudimos preparar la imagen para editarla',
+          );
+          this.onClose();
+        },
+      });
+  }
+
   setAspect(value: AspectRatio): void {
     this.dragState = null;
     this.aspect.set(value);
@@ -699,18 +835,22 @@ export class ProductImageSourceModalComponent {
   }
 
   rotateBy(delta: 90 | -90): void {
-    const next = (((this.rotation() + delta) % 360) + 360) % 360 as 0 | 90 | 180 | 270;
+    const next = ((((this.rotation() + delta) % 360) + 360) % 360) as
+      | 0
+      | 90
+      | 180
+      | 270;
     this.rotation.set(next);
     this.renderCropPreview();
   }
 
   toggleFlipH(): void {
-    this.flipH.update(v => !v);
+    this.flipH.update((v) => !v);
     this.renderCropPreview();
   }
 
   toggleFlipV(): void {
-    this.flipV.update(v => !v);
+    this.flipV.update((v) => !v);
     this.renderCropPreview();
   }
 
@@ -860,9 +1000,11 @@ export class ProductImageSourceModalComponent {
     let bottom = start.y + start.h;
 
     if (mode === 'n' || mode === 'nw' || mode === 'ne') top = start.y + dy;
-    if (mode === 's' || mode === 'sw' || mode === 'se') bottom = start.y + start.h + dy;
+    if (mode === 's' || mode === 'sw' || mode === 'se')
+      bottom = start.y + start.h + dy;
     if (mode === 'w' || mode === 'nw' || mode === 'sw') left = start.x + dx;
-    if (mode === 'e' || mode === 'ne' || mode === 'se') right = start.x + start.w + dx;
+    if (mode === 'e' || mode === 'ne' || mode === 'se')
+      right = start.x + start.w + dx;
 
     left = Math.max(0, left);
     top = Math.max(0, top);
@@ -885,7 +1027,16 @@ export class ProductImageSourceModalComponent {
     }
 
     if (ratio !== null) {
-      const adjusted = this.lockRatio(mode, start, left, top, right, bottom, ratio, c);
+      const adjusted = this.lockRatio(
+        mode,
+        start,
+        left,
+        top,
+        right,
+        bottom,
+        ratio,
+        c,
+      );
       if (!adjusted) return null;
       left = adjusted.left;
       top = adjusted.top;
@@ -978,7 +1129,10 @@ export class ProductImageSourceModalComponent {
     return { left, top, right, bottom };
   }
 
-  private loadImage(cursor: number, dataUrl: string): Promise<HTMLImageElement> {
+  private loadImage(
+    cursor: number,
+    dataUrl: string,
+  ): Promise<HTMLImageElement> {
     const cached = this.loadedImages.get(cursor);
     if (cached) return Promise.resolve(cached);
     return new Promise((resolve, reject) => {
@@ -1037,6 +1191,13 @@ export class ProductImageSourceModalComponent {
     octx.drawImage(tmp, sx, sy, sw, sh, 0, 0, sw, sh);
 
     const dataUrl = out.toDataURL('image/jpeg', 0.9);
+
+    if (this.mode() === 'edit') {
+      this.imageEdited.emit(dataUrl);
+      this.onClose();
+      return;
+    }
+
     this.appendResult(dataUrl);
     this.advanceQueue();
   }
@@ -1046,6 +1207,11 @@ export class ProductImageSourceModalComponent {
   }
 
   cancelCrop(): void {
+    if (this.mode() === 'edit') {
+      this.onClose();
+      return;
+    }
+
     this.queue.set([]);
     this.queueCursor.set(0);
     this.rotation.set(0);
@@ -1093,7 +1259,8 @@ export class ProductImageSourceModalComponent {
         if (typeof result === 'string') resolve(result);
         else reject(new Error('Resultado inválido'));
       };
-      reader.onerror = () => reject(reader.error ?? new Error('Error de lectura'));
+      reader.onerror = () =>
+        reject(reader.error ?? new Error('Error de lectura'));
       reader.readAsDataURL(file);
     });
   }

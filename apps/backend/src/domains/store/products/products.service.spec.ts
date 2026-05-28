@@ -77,9 +77,11 @@ describe('ProductsService', () => {
     },
     categories: {
       findUnique: jest.fn(),
+      count: jest.fn(),
     },
     brands: {
       findUnique: jest.fn(),
+      count: jest.fn(),
     },
     tax_categories: {
       findMany: jest.fn(),
@@ -798,26 +800,46 @@ describe('ProductsService', () => {
   describe('getProductStats', () => {
     it('should return product statistics for store', async () => {
       const expectedStats = {
-        total_products: 100,
-        active_products: 85,
-        inactive_products: 10,
-        archived_products: 5,
-        low_stock_products: 8,
-        out_of_stock_products: 3,
-        products_without_images: 15,
-        total_value: 5000,
-        categories_count: 12,
-        brands_count: 8,
+        total_products: 3,
+        active_products: 2,
+        inactive_products: 1,
+        archived_products: 1,
+        low_stock_products: 3,
+        out_of_stock_products: 1,
+        products_without_images: 3,
+        total_value: 500,
+        categories_count: 2,
+        brands_count: 1,
       };
 
-      mockPrismaService.products.count
-        .mockResolvedValueOnce(100) // total
-        .mockResolvedValueOnce(85) // active
-        .mockResolvedValueOnce(10) // inactive
-        .mockResolvedValueOnce(5) // archived
-        .mockResolvedValueOnce(8) // low stock
-        .mockResolvedValueOnce(3) // out of stock
-        .mockResolvedValueOnce(25); // with variants
+      mockPrismaService.products.findMany.mockResolvedValue([
+        {
+          state: ProductState.ACTIVE,
+          stock_quantity: 2,
+          base_price: 100,
+          product_images: [],
+        },
+        {
+          state: ProductState.ACTIVE,
+          stock_quantity: 0,
+          base_price: 100,
+          product_images: [{ id: 1 }],
+        },
+        {
+          state: ProductState.INACTIVE,
+          stock_quantity: 5,
+          base_price: 20,
+          product_images: [],
+        },
+        {
+          state: ProductState.ARCHIVED,
+          stock_quantity: 10,
+          base_price: 20,
+          product_images: [],
+        },
+      ]);
+      mockPrismaService.categories.count.mockResolvedValue(2);
+      mockPrismaService.brands.count.mockResolvedValue(1);
 
       const result = await service.getProductStats(1);
 

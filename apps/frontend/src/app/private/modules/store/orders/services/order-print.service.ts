@@ -98,10 +98,12 @@ export class OrderPrintService {
       <tr>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${i + 1}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
-          ${item.product_name}
-          ${item.variant_sku ? `<br><span style="font-size: 11px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
-          ${(() => { const v = formatVariantAttributes(item.variant_attributes, ', '); return v ? `<br><span style="font-size: 11px; color: #9ca3af;">${v}</span>` : ''; })()}
-        </td>
+	          ${item.product_name}
+	          ${item.variant_sku ? `<br><span style="font-size: 11px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
+	          ${(() => { const v = formatVariantAttributes(item.variant_attributes, ', '); return v ? `<br><span style="font-size: 11px; color: #9ca3af;">${v}</span>` : ''; })()}
+	          ${item.applied_price_tier_name_snapshot ? `<br><span style="font-size: 11px; color: #92400e;">Tarifa: ${item.applied_price_tier_name_snapshot}</span>` : ''}
+	          ${item.stock_units_consumed && Number(item.stock_units_consumed) !== Number(item.quantity) ? `<br><span style="font-size: 11px; color: #1d4ed8;">Descontó ${item.stock_units_consumed} unid. de stock</span>` : ''}
+	        </td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${item.quantity}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price))}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace; font-weight: 600;">${fmt(Number(item.total_price))}</td>

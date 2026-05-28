@@ -108,9 +108,18 @@ export interface PreBulkData {
     name: string;
     code?: string;
     description?: string;
+    product_type?: string;
+    track_inventory?: boolean;
+    pricing_type?: string;
+    tax_category_ids?: number[];
     state?: string;
     weight?: number;
     available_for_ecommerce?: boolean;
+    is_featured?: boolean;
+    allow_pos_price_override?: boolean;
+    has_multiple_price_tiers?: boolean;
+    units_per_package?: number;
+    package_consumes_multiple_stock?: boolean;
     base_price?: number;
     profit_margin?: number;
     brand_id?: number | string;

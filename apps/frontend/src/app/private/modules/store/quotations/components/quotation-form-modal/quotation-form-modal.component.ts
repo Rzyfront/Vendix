@@ -227,7 +227,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                       @if (canShowTierSelector(asFormGroup(itemGroup))) {
                         <div class="mt-0.5">
                           <app-price-tier-selector
-                            [tiers]="availableTiers()"
+                            [tiers]="visibleTiersForItem(asFormGroup(itemGroup))"
                             [selectedTierId]="getItemTierId(asFormGroup(itemGroup))"
                             [unitsPerPackage]="getItemUnitsPerPackage(asFormGroup(itemGroup))"
                             (selectedTierIdChange)="onTierChange(i, $event)"
@@ -490,6 +490,7 @@ export class QuotationFormModalComponent {
           applied_price_tier_id: anyItem.applied_price_tier_id ?? null,
           applied_price_tier_name: anyItem.applied_price_tier_name_snapshot ?? null,
           has_multiple_price_tiers: anyItem.product?.has_multiple_price_tiers === true,
+          enabled_price_tier_ids: anyItem.product?.enabled_price_tier_ids ?? [],
           units_per_package: anyItem.product?.units_per_package ?? null,
           base_price: Number(anyItem.product?.base_price ?? item.unit_price),
         }));
@@ -561,6 +562,7 @@ export class QuotationFormModalComponent {
       tax_amount_item: taxAmountItem,
       total_price: totalPrice,
       has_multiple_price_tiers: product.has_multiple_price_tiers === true,
+      enabled_price_tier_ids: product.enabled_price_tier_ids ?? [],
       units_per_package: product.units_per_package ?? null,
       base_price: Number(product.price ?? basePrice),
     }));
@@ -693,6 +695,7 @@ export class QuotationFormModalComponent {
     applied_price_tier_id?: number | null;
     applied_price_tier_name?: string | null;
     has_multiple_price_tiers?: boolean;
+    enabled_price_tier_ids?: number[];
     units_per_package?: number | null;
     base_price?: number;
   }): FormGroup {
@@ -711,6 +714,7 @@ export class QuotationFormModalComponent {
       applied_price_tier_id: [item.applied_price_tier_id ?? null],
       applied_price_tier_name: [item.applied_price_tier_name ?? null],
       has_multiple_price_tiers: [item.has_multiple_price_tiers ?? false],
+      enabled_price_tier_ids: [item.enabled_price_tier_ids ?? []],
       units_per_package: [item.units_per_package ?? null],
       base_price: [item.base_price ?? item.unit_price],
     });
@@ -728,8 +732,15 @@ export class QuotationFormModalComponent {
     return (
       !!itemGroup.get('has_multiple_price_tiers')?.value &&
       this.canApplyPricingTier() &&
-      this.availableTiers().length > 0
+      this.visibleTiersForItem(itemGroup).length > 0
     );
+  }
+
+  visibleTiersForItem(itemGroup: FormGroup): PriceTier[] {
+    const enabledIds = itemGroup.get('enabled_price_tier_ids')?.value ?? [];
+    if (!Array.isArray(enabledIds) || enabledIds.length === 0) return [];
+    const enabled = new Set(enabledIds.map(Number));
+    return this.availableTiers().filter((tier) => enabled.has(tier.id));
   }
 
   getItemTierId(itemGroup: FormGroup): number | null {
@@ -754,7 +765,8 @@ export class QuotationFormModalComponent {
 
     const tier = tierId == null
       ? null
-      : this.availableTiers().find((t) => t.id === tierId) || null;
+      : this.visibleTiersForItem(group).find((t) => t.id === tierId) || null;
+    if (tierId != null && !tier) return;
 
     const productId = Number(group.get('product_id')?.value);
     const product = Number.isFinite(productId)

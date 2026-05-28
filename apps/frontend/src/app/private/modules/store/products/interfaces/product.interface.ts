@@ -88,6 +88,7 @@ export interface Product {
   has_multiple_price_tiers?: boolean;
   units_per_package?: number | null;
   package_consumes_multiple_stock?: boolean;
+  enabled_price_tier_ids?: number[];
   created_at: Date;
   updated_at: Date;
 
@@ -318,6 +319,7 @@ export interface CreateProductDto {
   has_multiple_price_tiers?: boolean;
   units_per_package?: number | null;
   package_consumes_multiple_stock?: boolean;
+  enabled_price_tier_ids?: number[];
 }
 
 export interface UpdateProductDto {
@@ -372,6 +374,7 @@ export interface UpdateProductDto {
   has_multiple_price_tiers?: boolean;
   units_per_package?: number | null;
   package_consumes_multiple_stock?: boolean;
+  enabled_price_tier_ids?: number[];
 }
 
 export interface CreateProductVariantDto {

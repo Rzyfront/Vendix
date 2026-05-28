@@ -61,6 +61,7 @@ import { CategoryQuickCreateComponent } from '../../components/category-quick-cr
 import { BrandQuickCreateComponent } from '../../components/brand-quick-create.component';
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
 import { ProductImageSourceModalComponent } from '../../components/product-image-source-modal.component';
+import { ProductImageAiEnhanceModalComponent } from '../../components/product-image-ai-enhance-modal.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
 import {
@@ -73,6 +74,7 @@ import { PromotionsService } from '../../../marketing/promotions/services/promot
 import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator } from '../../utils/product-validators';
 import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
+import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import {
   PriceTier,
   ProductPriceTierOverride,
@@ -116,6 +118,8 @@ export type { GeneratedVariant };
  */
 interface PriceTierOverrideRow {
   tier: PriceTier;
+  enabled: boolean;
+  initial_enabled: boolean;
   // null/undefined => no override stored; the tier's discount_percentage applies.
   override_price: number | null;
   // Snapshot of the persisted value to detect dirty edits on save.
@@ -142,6 +146,7 @@ interface PriceTierOverrideRow {
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
     ProductImageSourceModalComponent,
+    ProductImageAiEnhanceModalComponent,
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
     CurrencyPipe,
@@ -204,6 +209,34 @@ interface PriceTierOverrideRow {
         cursor: not-allowed;
         transform: none;
         animation: ai-shimmer 1.5s ease-in-out infinite;
+      }
+
+      .ai-image-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 10px;
+        border-radius: 9999px;
+        border: 1px solid rgba(var(--color-primary-rgb), 0.35);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1;
+        color: #fff;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.9) 0%,
+          rgba(var(--color-secondary-rgb, var(--color-primary-rgb)), 0.95) 100%
+        );
+        box-shadow: 0 8px 20px rgba(var(--color-primary-rgb), 0.28);
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease,
+          box-shadow 0.2s ease;
+      }
+
+      .ai-image-action-btn:hover {
+        transform: scale(1.08);
+        box-shadow: 0 10px 24px rgba(var(--color-primary-rgb), 0.38);
       }
 
       /* ── Hover propagation: button hover → label + textarea ── */
@@ -419,6 +452,7 @@ export class ProductCreatePageComponent {
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
   private priceTiersService = inject(PriceTiersService);
+  private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
 
   // Data Collection Templates (for consultation configuration)
@@ -479,9 +513,7 @@ export class ProductCreatePageComponent {
   readonly isGeneratingOnlinePurchaseLink = signal(false);
   readonly hasOnlinePurchaseLink = computed(() => {
     const product = this.onlinePurchaseProduct();
-    return !!(
-      product?.online_purchase_url && product?.online_purchase_qr_code
-    );
+    return !!(product?.online_purchase_url && product?.online_purchase_qr_code);
   });
   readonly onlinePurchaseUrl = computed(
     () => this.onlinePurchaseProduct()?.online_purchase_url || '',
@@ -502,6 +534,8 @@ export class ProductCreatePageComponent {
   imageIds: (number | null)[] = []; // Parallel array: DB image ID (null for new/unsaved images)
   activeImageIndex = 0;
   mainImageIndex = 0;
+  readonly imageListVersion = signal(0);
+  readonly imagesTouched = signal(false);
   isStockDetailsOpen = false;
   isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
@@ -541,7 +575,9 @@ export class ProductCreatePageComponent {
   }
 
   get preparationTimeMinutesControl(): FormControl<number | null> {
-    return this.productForm.get('preparation_time_minutes') as FormControl<number | null>;
+    return this.productForm.get('preparation_time_minutes') as FormControl<
+      number | null
+    >;
   }
 
   get hasDuplicateSkus(): boolean {
@@ -630,9 +666,16 @@ export class ProductCreatePageComponent {
   isBrandCreateOpen = false;
   isTaxCategoryCreateOpen = false;
   isImageSourceModalOpen = signal(false);
-  readonly remainingImageSlots = computed(() =>
-    Math.max(0, 5 - this.imageUrls.length),
-  );
+  readonly imageModalMode = signal<'add' | 'edit'>('add');
+  readonly imageEditSourceUrl = signal<string | null>(null);
+  readonly editingImageIndex = signal<number | null>(null);
+  readonly isImageAiEnhanceModalOpen = signal(false);
+  readonly aiEnhanceImageUrl = signal<string | null>(null);
+  readonly aiEnhanceImageIndex = signal<number | null>(null);
+  readonly remainingImageSlots = computed(() => {
+    this.imageListVersion();
+    return Math.max(0, 5 - this.imageUrls.length);
+  });
   isAdjustmentModalOpen = false;
   isAdjusting = false;
   adjustmentLocationOptions: SelectorOption[] = [];
@@ -888,59 +931,62 @@ export class ProductCreatePageComponent {
   }
 
   private createForm(): FormGroup {
-    const form = this.fb.group({
-      name: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(1),
-          Validators.maxLength(255),
+    const form = this.fb.group(
+      {
+        name: [
+          '',
+          [
+            Validators.required,
+            Validators.minLength(1),
+            Validators.maxLength(255),
+          ],
         ],
-      ],
-      slug: ['', [Validators.maxLength(255)]],
-      description: [''],
-      cost_price: [0, [Validators.min(0)]],
-      profit_margin: [0, [Validators.min(0)]],
-      base_price: [0, [Validators.required, Validators.min(0)]],
-      is_on_sale: [false],
-      sale_price: [0, [Validators.min(0)]],
-      available_for_ecommerce: [true],
-      is_featured: [false],
-      allow_pos_price_override: [false],
-      sku: ['', [Validators.maxLength(100)]],
-      stock_quantity: [0, [Validators.min(0)]],
-      track_inventory: [true],
-      category_ids: [[] as number[]],
-      brand_ids: [[]],
-      tax_category_ids: [[] as number[]],
-      weight: [0, [Validators.min(0)]],
-      dimensions: this.fb.group({
-        length: [0, [Validators.min(0)]],
-        width: [0, [Validators.min(0)]],
-        height: [0, [Validators.min(0)]],
-      }),
-      state: [ProductState.ACTIVE],
-      pricing_type: ['unit' as const],
-      product_type: ['physical' as const],
-      service_duration_minutes: [null],
-      service_modality: [null],
-      service_pricing_type: [null],
-      requires_booking: [false],
-      booking_mode: [null],
-      is_recurring: [false],
-      service_instructions: [''],
-      is_consultation: [false],
-      send_preconsultation: [false],
-      consultation_template_id: [null],
-      preconsultation_template_id: [null],
-      preparation_time_minutes: [null as number | null],
-      // Multi-tarifa + empaque (Phase 4)
-      has_multiple_price_tiers: [false],
-      units_per_package: [null as number | null, [Validators.min(2)]],
-      package_consumes_multiple_stock: [false],
-    }, {
-      validators: [saleLessThanBaseValidator()],
-    });
+        slug: ['', [Validators.maxLength(255)]],
+        description: [''],
+        cost_price: [0, [Validators.min(0)]],
+        profit_margin: [0, [Validators.min(0)]],
+        base_price: [0, [Validators.required, Validators.min(0)]],
+        is_on_sale: [false],
+        sale_price: [0, [Validators.min(0)]],
+        available_for_ecommerce: [true],
+        is_featured: [false],
+        allow_pos_price_override: [false],
+        sku: ['', [Validators.maxLength(100)]],
+        stock_quantity: [0, [Validators.min(0)]],
+        track_inventory: [true],
+        category_ids: [[] as number[]],
+        brand_ids: [[]],
+        tax_category_ids: [[] as number[]],
+        weight: [0, [Validators.min(0)]],
+        dimensions: this.fb.group({
+          length: [0, [Validators.min(0)]],
+          width: [0, [Validators.min(0)]],
+          height: [0, [Validators.min(0)]],
+        }),
+        state: [ProductState.ACTIVE],
+        pricing_type: ['unit' as const],
+        product_type: ['physical' as const],
+        service_duration_minutes: [null],
+        service_modality: [null],
+        service_pricing_type: [null],
+        requires_booking: [false],
+        booking_mode: [null],
+        is_recurring: [false],
+        service_instructions: [''],
+        is_consultation: [false],
+        send_preconsultation: [false],
+        consultation_template_id: [null],
+        preconsultation_template_id: [null],
+        preparation_time_minutes: [null as number | null],
+        // Multi-tarifa + empaque (Phase 4)
+        has_multiple_price_tiers: [false],
+        units_per_package: [null as number | null, [Validators.min(2)]],
+        package_consumes_multiple_stock: [false],
+      },
+      {
+        validators: [saleLessThanBaseValidator()],
+      },
+    );
 
     this.setupPriceCalculations(form);
     return form;
@@ -1035,7 +1081,7 @@ export class ProductCreatePageComponent {
         this.patchForm(product);
         // Auto-load tier rows if the product already has multi-tarifa enabled.
         if (product.has_multiple_price_tiers) {
-          this.loadPriceTiersForProduct(id);
+          this.loadPriceTiersForProduct(id, product.enabled_price_tier_ids);
         }
       },
       error: (error: any) => {
@@ -1116,7 +1162,17 @@ export class ProductCreatePageComponent {
     if (product.product_images && product.product_images.length > 0) {
       this.imageUrls = product.product_images.map((img: any) => img.image_url);
       this.imageIds = product.product_images.map((img: any) => img.id ?? null);
+    } else {
+      this.imageUrls = [];
+      this.imageIds = [];
     }
+    this.activeImageIndex = 0;
+    this.mainImageIndex = Math.max(
+      0,
+      product.product_images?.findIndex((img: any) => !!img.is_main) ?? 0,
+    );
+    this.imagesTouched.set(false);
+    this.refreshImageList();
 
     // Capture original baseline for strict variant/stock transition guards
     this.originalBaseStock.set(Number(product.stock_quantity ?? 0));
@@ -1460,7 +1516,8 @@ export class ProductCreatePageComponent {
         sale_price: 0,
         stock: 0,
         attributes,
-        track_inventory_override: this.getDefaultVariantTrackInventoryOverride(),
+        track_inventory_override:
+          this.getDefaultVariantTrackInventoryOverride(),
       });
     }
 
@@ -1825,6 +1882,15 @@ export class ProductCreatePageComponent {
       });
   }
 
+  private refreshImageList(): void {
+    this.imageListVersion.update((version) => version + 1);
+  }
+
+  private markImagesTouched(): void {
+    this.imagesTouched.set(true);
+    this.refreshImageList();
+  }
+
   triggerFileUpload(): void {
     this.openImageSourceModal();
   }
@@ -1834,7 +1900,35 @@ export class ProductCreatePageComponent {
       this.toastService.warning('Límite de 5 imágenes alcanzado');
       return;
     }
+    this.imageModalMode.set('add');
+    this.imageEditSourceUrl.set(null);
+    this.editingImageIndex.set(null);
     this.isImageSourceModalOpen.set(true);
+  }
+
+  openImageEditor(index = this.activeImageIndex): void {
+    const sourceUrl = this.imageUrls[index];
+    if (!sourceUrl) {
+      this.toastService.warning('Selecciona una imagen para editar');
+      return;
+    }
+
+    this.imageModalMode.set('edit');
+    this.imageEditSourceUrl.set(sourceUrl);
+    this.editingImageIndex.set(index);
+    this.isImageSourceModalOpen.set(true);
+  }
+
+  openImageAiEnhancer(index = this.activeImageIndex): void {
+    const sourceUrl = this.imageUrls[index];
+    if (!sourceUrl) {
+      this.toastService.warning('Selecciona una imagen para mejorar con IA');
+      return;
+    }
+
+    this.aiEnhanceImageUrl.set(sourceUrl);
+    this.aiEnhanceImageIndex.set(index);
+    this.isImageAiEnhanceModalOpen.set(true);
   }
 
   onImagesFromModal(urls: string[]): void {
@@ -1849,15 +1943,51 @@ export class ProductCreatePageComponent {
       this.activeImageIndex = 0;
     }
     if (toAdd.length > 0) {
-      this.toastService.success(
-        `${toAdd.length} imagen(es) agregada(s)`,
-      );
+      this.markImagesTouched();
+    }
+    if (toAdd.length > 0) {
+      this.toastService.success(`${toAdd.length} imagen(es) agregada(s)`);
     }
     if (urls.length > toAdd.length) {
       this.toastService.warning(
         `Se omitieron ${urls.length - toAdd.length} imagen(es) por el límite de 5`,
       );
     }
+  }
+
+  onImageEdited(dataUrl: string): void {
+    const index = this.editingImageIndex();
+    if (index === null || !this.imageUrls[index]) return;
+
+    this.imageUrls[index] = dataUrl;
+    this.imageIds[index] = null;
+    this.activeImageIndex = index;
+    this.markImagesTouched();
+    this.toastService.success('Imagen ajustada correctamente');
+  }
+
+  onAiImageReplace(dataUrl: string): void {
+    const index = this.aiEnhanceImageIndex();
+    if (index === null || !this.imageUrls[index]) return;
+
+    this.imageUrls[index] = dataUrl;
+    this.imageIds[index] = null;
+    this.activeImageIndex = index;
+    this.markImagesTouched();
+    this.toastService.success('Imagen reemplazada por la versión IA');
+  }
+
+  onAiImageKeepBoth(dataUrl: string): void {
+    if (this.imageUrls.length >= 5) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      return;
+    }
+
+    this.imageUrls.push(dataUrl);
+    this.imageIds.push(null);
+    this.activeImageIndex = this.imageUrls.length - 1;
+    this.markImagesTouched();
+    this.toastService.success('Versión IA agregada como nueva imagen');
   }
 
   async onFileSelect(event: Event): Promise<void> {
@@ -1897,6 +2027,7 @@ export class ProductCreatePageComponent {
           const dataUrl = await this.readFileAsDataURL(file);
           this.imageUrls.push(dataUrl);
           this.imageIds.push(null);
+          this.markImagesTouched();
           successCount++;
         } catch (err) {
           this.toastService.error(`Error al cargar la imagen: ${file.name}`);
@@ -1949,32 +2080,37 @@ export class ProductCreatePageComponent {
     });
   }
 
-  async removeImage(index: number): Promise<void> {
-    const imageId = this.imageIds[index];
-
-    // If the image exists in DB, delete it via API (also removes from S3)
-    if (imageId) {
-      try {
-        await this.productsService.deleteProductImage(imageId).toPromise();
-      } catch (err: any) {
-        console.error('Error deleting image:', err);
-        this.toastService.error('Error al eliminar la imagen');
-        return;
-      }
-    }
-
+  removeImage(index: number): void {
     this.imageUrls.splice(index, 1);
     this.imageIds.splice(index, 1);
-    // Adjust mainImageIndex first since activeImageIndex may depend on it
-    if (index === this.mainImageIndex) {
-      this.mainImageIndex = Math.max(0, index - 1);
-      this.activeImageIndex = this.mainImageIndex;
-    } else if (index < this.mainImageIndex) {
-      this.mainImageIndex--;
-      this.activeImageIndex--;
-    } else if (this.activeImageIndex >= this.imageUrls.length) {
-      this.activeImageIndex = Math.max(0, this.imageUrls.length - 1);
+    this.markImagesTouched();
+
+    if (this.imageUrls.length === 0) {
+      this.mainImageIndex = 0;
+      this.activeImageIndex = 0;
+      return;
     }
+
+    if (index < this.mainImageIndex) {
+      this.mainImageIndex--;
+    } else if (index === this.mainImageIndex) {
+      this.mainImageIndex = Math.min(index, this.imageUrls.length - 1);
+    }
+
+    if (index < this.activeImageIndex) {
+      this.activeImageIndex--;
+    } else if (index === this.activeImageIndex) {
+      this.activeImageIndex = Math.min(index, this.imageUrls.length - 1);
+    }
+
+    this.mainImageIndex = Math.max(
+      0,
+      Math.min(this.mainImageIndex, this.imageUrls.length - 1),
+    );
+    this.activeImageIndex = Math.max(
+      0,
+      Math.min(this.activeImageIndex, this.imageUrls.length - 1),
+    );
   }
 
   setActiveImage(index: number): void {
@@ -1984,6 +2120,7 @@ export class ProductCreatePageComponent {
   setMainImage(index: number): void {
     this.mainImageIndex = index;
     this.activeImageIndex = index;
+    this.markImagesTouched();
   }
 
   nextImage(): void {
@@ -2101,7 +2238,8 @@ export class ProductCreatePageComponent {
 
       // Track-inventory products with variants must declare at least one unit of stock
       // across the variants (otherwise the product becomes unsellable silently).
-      const trackInventoryEnabled = !!this.productForm.get('track_inventory')?.value;
+      const trackInventoryEnabled =
+        !!this.productForm.get('track_inventory')?.value;
       if (trackInventoryEnabled) {
         const allVariantsTrackInventory = this.generatedVariants.every((v) => {
           if (v.track_inventory_override === false) return false;
@@ -2141,6 +2279,9 @@ export class ProductCreatePageComponent {
         is_main: index === this.mainImageIndex,
       }),
     );
+    const shouldSendImages = this.isEditMode()
+      ? this.imagesTouched()
+      : images.length > 0;
 
     const isServiceType = formValue.product_type === 'service';
 
@@ -2195,7 +2336,7 @@ export class ProductCreatePageComponent {
         preconsultation_template_id:
           formValue.preconsultation_template_id || null,
       }),
-      images: images.length > 0 ? images : undefined,
+      images: shouldSendImages ? images : undefined,
       weight: isServiceType
         ? undefined
         : formValue.weight > 0
@@ -2215,6 +2356,11 @@ export class ProductCreatePageComponent {
           : undefined,
       // Multi-tarifa + empaque (Phase 4)
       has_multiple_price_tiers: !!formValue.has_multiple_price_tiers,
+      enabled_price_tier_ids: !!formValue.has_multiple_price_tiers
+        ? this.hasLoadedPriceTiers()
+          ? this.enabledPriceTierIdsFromRows()
+          : (this.product?.enabled_price_tier_ids ?? [])
+        : [],
       units_per_package:
         formValue.units_per_package !== null &&
         formValue.units_per_package !== undefined &&
@@ -2657,7 +2803,10 @@ export class ProductCreatePageComponent {
     if (this.hasLoadedPriceTiers()) return;
 
     if (this.productId) {
-      this.loadPriceTiersForProduct(this.productId);
+      this.loadPriceTiersForProduct(
+        this.productId,
+        this.product?.enabled_price_tier_ids,
+      );
     } else {
       // Create mode: load tiers anyway so the user sees the catalog and the
       // help message. Overrides cannot be persisted until the product is saved.
@@ -2698,7 +2847,10 @@ export class ProductCreatePageComponent {
    * Loads active tiers + existing overrides for an existing product. Combines
    * them into rows so the UI can render in a single render pass.
    */
-  private loadPriceTiersForProduct(productId: number): void {
+  private loadPriceTiersForProduct(
+    productId: number,
+    enabledPriceTierIds?: number[],
+  ): void {
     this.isLoadingPriceTiers.set(true);
     forkJoin({
       tiers: this.priceTiersService
@@ -2719,6 +2871,11 @@ export class ProductCreatePageComponent {
           overrideByTierId.set(o.price_tier_id, Number(o.override_price));
         }
 
+        const enabledSet =
+          enabledPriceTierIds === undefined
+            ? new Set(tiers.map((tier) => tier.id))
+            : new Set(enabledPriceTierIds.map(Number));
+
         const rows: PriceTierOverrideRow[] = tiers
           .slice()
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
@@ -2726,8 +2883,11 @@ export class ProductCreatePageComponent {
             const existing = overrideByTierId.has(tier.id)
               ? Number(overrideByTierId.get(tier.id))
               : null;
+            const enabled = enabledSet.has(tier.id);
             return {
               tier,
+              enabled,
+              initial_enabled: enabled,
               override_price: existing,
               initial_override_price: existing,
             };
@@ -2760,6 +2920,8 @@ export class ProductCreatePageComponent {
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
           .map((tier) => ({
             tier,
+            enabled: true,
+            initial_enabled: true,
             override_price: null,
             initial_override_price: null,
           }));
@@ -2802,9 +2964,23 @@ export class ProductCreatePageComponent {
     this.priceTierRows.set(next);
   }
 
+  toggleTierAssignment(tierId: number, enabled: boolean): void {
+    const next = this.priceTierRows().map((row) =>
+      row.tier.id === tierId ? { ...row, enabled } : row,
+    );
+    this.priceTierRows.set(next);
+  }
+
   /** Clear an override row's value (user clicked "Limpiar"). */
   clearTierOverride(tierId: number): void {
     this.updateTierOverridePrice(tierId, null);
+  }
+
+  private enabledPriceTierIdsFromRows(): number[] {
+    if (!this.hasLoadedPriceTiers()) return [];
+    return this.priceTierRows()
+      .filter((row) => row.enabled)
+      .map((row) => row.tier.id);
   }
 
   /**
@@ -2858,9 +3034,10 @@ export class ProductCreatePageComponent {
     if (operations.length === 0) return Promise.resolve();
 
     this.isSyncingOverrides.set(true);
-    return Promise.all(operations)
-      .then(() => {
-        // Update snapshots so subsequent edits diff correctly.
+	    return Promise.all(operations)
+	      .then(() => {
+	        this.priceTierCache.invalidateProductOverrides(productId);
+	        // Update snapshots so subsequent edits diff correctly.
         const refreshed = this.priceTierRows().map((row) => ({
           ...row,
           initial_override_price: row.override_price,

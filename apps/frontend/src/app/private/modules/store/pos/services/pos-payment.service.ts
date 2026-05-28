@@ -158,6 +158,9 @@ export class PosPaymentService {
       product_variant_id: isCustomItem ? null : item.variant_id || null,
       variant_sku: isCustomItem ? null : item.variant_sku || null,
       variant_attributes: isCustomItem ? null : item.variant_attributes || null,
+      applied_price_tier_id: isCustomItem
+        ? null
+        : item.applied_price_tier_id || null,
       weight: item.weight || undefined,
       weight_unit: item.weight_unit || undefined,
       price_override_reason: item.isPriceOverridden

@@ -33,6 +33,21 @@ interface ApiResponse<T> {
   error?: string;
 }
 
+export interface ProductImageEnhancementRequest {
+  image_url: string;
+  prompt: string;
+  product_name?: string;
+  product_type?: 'physical' | 'service';
+  description?: string;
+  extra_context?: Record<string, any>;
+}
+
+export interface ProductImageEnhancementResult {
+  image_url: string;
+  revised_prompt?: string;
+  model?: string;
+}
+
 // Caché estático global (persiste entre instancias del servicio)
 interface CacheEntry<T> {
   observable: T;
@@ -284,6 +299,24 @@ export class ProductsService {
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
+      );
+  }
+
+  enhanceProductImage(
+    data: ProductImageEnhancementRequest,
+  ): Observable<ProductImageEnhancementResult> {
+    return this.http
+      .post<
+        ApiResponse<ProductImageEnhancementResult>
+      >(`${this.apiUrl}/store/products/enhance-image`, data)
+      .pipe(
+        map((response) => {
+          if (!response?.success || !response.data?.image_url) {
+            throw response;
+          }
+
+          return response.data;
+        }),
       );
   }
 

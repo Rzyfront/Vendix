@@ -7,6 +7,7 @@ import { forkJoin, firstValueFrom } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
+  OrderItem,
   OrderState,
   OrderInstallment,
   OrderFlowMetadata,
@@ -74,6 +75,19 @@ export class OrderDetailsPageComponent {
   private destroyRef = inject(DestroyRef);
   orderId: string | null = null;
   order = signal<Order | null>(null);
+  readonly appliedTierSummary = computed(() => {
+    const order = this.order();
+    const groups = new Map<string, { name: string; total: number; count: number }>();
+    for (const item of order?.order_items ?? []) {
+      const name = item.applied_price_tier_name_snapshot;
+      if (!name) continue;
+      const current = groups.get(name) ?? { name, total: 0, count: 0 };
+      current.total += Number(item.total_price || 0);
+      current.count += 1;
+      groups.set(name, current);
+    }
+    return Array.from(groups.values());
+  });
   orderRefunds = signal<RefundRecord[]>([]);
   private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
@@ -822,6 +836,10 @@ export class OrderDetailsPageComponent {
               unit_price: Number(item.unit_price),
               total_price: Number(item.total_price),
               quantity: Number(item.quantity),
+              stock_units_consumed:
+                item.stock_units_consumed != null
+                  ? Number(item.stock_units_consumed)
+                  : null,
             })),
           });
 
@@ -1371,6 +1389,9 @@ export class OrderDetailsPageComponent {
       unitPrice: Number(item.unit_price) || 0,
       totalPrice: Number(item.total_price) || 0,
       tax: Number(item.tax_amount_item) || 0,
+      appliedPriceTierName: item.applied_price_tier_name_snapshot ?? null,
+      isPackageUnit: this.hasPackageStockConsumption(item),
+      unitsPerPackage: this.getPackageMultiplier(item),
     }));
 
     // Determine payment method from the latest succeeded payment
@@ -1767,6 +1788,20 @@ export class OrderDetailsPageComponent {
 
   parseVariantAttributes(raw: unknown): VariantAttribute[] {
     return parseVariantAttributes(raw);
+  }
+
+  hasPackageStockConsumption(item: OrderItem): boolean {
+    const consumed = Number(item.stock_units_consumed || 0);
+    const quantity = Number(item.quantity || 0);
+    return consumed > 0 && quantity > 0 && consumed !== quantity;
+  }
+
+  getPackageMultiplier(item: OrderItem): number | null {
+    if (!this.hasPackageStockConsumption(item)) return null;
+    const consumed = Number(item.stock_units_consumed || 0);
+    const quantity = Number(item.quantity || 0);
+    if (quantity <= 0) return null;
+    return consumed / quantity;
   }
 
   getAuditActionLabel(action: string): string {

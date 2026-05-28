@@ -651,6 +651,9 @@ export class PosCartService {
     const variant = product.product_variants?.find(
       (v) => v.id === item.variant_id,
     );
+    if (tier && !this.isTierEnabledForProduct(product, tier.id)) {
+      throw new Error('Esta tarifa no está habilitada para el producto');
+    }
 
     const taxRate = this.calculateRateSum(product);
     const resolution = this.priceResolver.resolveWithTier(
@@ -693,8 +696,21 @@ export class PosCartService {
 
     const unitPrice = this.roundMoney(resolution.unitPrice);
     const finalUnitPrice = this.roundMoney(resolution.unitPriceWithTax);
+    const maxQuantity = this.getMaxSellableQuantity(
+      product,
+      variant,
+      !!resolution.isPackageUnit,
+      resolution.unitsPerPackage ?? null,
+    );
+    const quantity =
+      this.doesLineTrackInventory(product, variant) && !item.is_weight_product
+        ? Math.min(item.quantity, maxQuantity)
+        : item.quantity;
+    if (!item.is_weight_product && quantity <= 0) {
+      throw new Error('Stock insuficiente para aplicar esta tarifa');
+    }
     const multiplier =
-      item.is_weight_product && item.weight ? item.weight : item.quantity;
+      item.is_weight_product && item.weight ? item.weight : quantity;
     const taxAmount = this.roundMoney(
       (finalUnitPrice - unitPrice) * multiplier,
     );
@@ -702,6 +718,7 @@ export class PosCartService {
     const updatedItems = [...currentState.items];
     updatedItems[itemIndex] = {
       ...item,
+      quantity,
       unitPrice,
       finalPrice: finalUnitPrice,
       originalFinalPrice: finalUnitPrice,
@@ -883,6 +900,30 @@ export class PosCartService {
 
     if (request.quantity <= 0) {
       return this.processRemoveFromCart(request.itemId);
+    }
+
+    const variant = item.variant_id
+      ? item.product.product_variants?.find((v) => v.id === item.variant_id)
+      : undefined;
+    if (
+      !item.is_weight_product &&
+      this.doesLineTrackInventory(item.product, variant)
+    ) {
+      const maxQuantity = this.getMaxSellableQuantity(
+        item.product,
+        variant,
+        !!item.is_package_unit,
+        item.units_per_package ?? null,
+      );
+      if (request.quantity > maxQuantity) {
+        const unitsHint =
+          item.is_package_unit && item.units_per_package
+            ? ` (${item.units_per_package} unidades por empaque)`
+            : '';
+        throw new Error(
+          `Stock insuficiente. Máximo permitido: ${maxQuantity}${unitsHint}`,
+        );
+      }
     }
 
     const updatedItems = [...currentState.items];
@@ -1165,7 +1206,10 @@ export class PosCartService {
 
     // Only validate stock when the line effectively tracks inventory
     if (this.doesLineTrackInventory(request.product, request.variant)) {
-      const availableStock = request.variant ? request.variant.stock : request.product.stock;
+      const availableStock = this.getAvailableStock(
+        request.product,
+        request.variant,
+      );
 
       // Check current cart quantity for this product+variant combo
       const currentState = this.cartState();
@@ -1176,13 +1220,23 @@ export class PosCartService {
       );
       const currentCartQuantity = existingItem ? existingItem.quantity : 0;
       const totalRequestedQuantity = currentCartQuantity + request.quantity;
+      const requiredPerUnit = existingItem
+        ? this.getRequiredStockPerUnit(
+            existingItem.product,
+            !!existingItem.is_package_unit,
+            existingItem.units_per_package ?? null,
+          )
+        : 1;
+      const totalRequiredStock = totalRequestedQuantity * requiredPerUnit;
 
-      if (request.product && totalRequestedQuantity > availableStock) {
+      if (request.product && totalRequiredStock > availableStock) {
+        const packageHint =
+          requiredPerUnit > 1 ? ` (${requiredPerUnit} unidades por empaque)` : '';
         errors.push({
           field: 'quantity',
           message: currentCartQuantity > 0
-            ? `Stock insuficiente. Ya tienes ${currentCartQuantity} en el carrito. Disponible: ${availableStock}`
-            : `Stock insuficiente. Disponible: ${availableStock}`,
+            ? `Stock insuficiente. Ya tienes ${currentCartQuantity} en el carrito${packageHint}. Disponible: ${availableStock} unidades`
+            : `Stock insuficiente. Disponible: ${availableStock} unidades`,
         });
       }
     }
@@ -1195,6 +1249,47 @@ export class PosCartService {
     variant?: PosProductVariant,
   ): boolean {
     return variant?.track_inventory_override ?? product.track_inventory ?? true;
+  }
+
+  private isTierEnabledForProduct(product: Product, tierId: number): boolean {
+    const enabledIds = product.enabled_price_tier_ids ?? [];
+    return enabledIds.map(Number).includes(Number(tierId));
+  }
+
+  private getAvailableStock(
+    product: Product,
+    variant?: PosProductVariant,
+  ): number {
+    if (variant) return Number(variant.stock ?? 0);
+    return Number(product.stock ?? 0);
+  }
+
+  private getRequiredStockPerUnit(
+    product: Product,
+    isPackageUnit: boolean,
+    unitsPerPackage?: number | null,
+  ): number {
+    if (!isPackageUnit || product.package_consumes_multiple_stock !== true) {
+      return 1;
+    }
+    const units = Number(unitsPerPackage ?? product.units_per_package ?? 1);
+    return Number.isFinite(units) && units > 1 ? units : 1;
+  }
+
+  private getMaxSellableQuantity(
+    product: Product,
+    variant: PosProductVariant | undefined,
+    isPackageUnit: boolean,
+    unitsPerPackage?: number | null,
+  ): number {
+    if (!this.doesLineTrackInventory(product, variant)) return 999;
+    const availableStock = this.getAvailableStock(product, variant);
+    const requiredStockPerUnit = this.getRequiredStockPerUnit(
+      product,
+      isPackageUnit,
+      unitsPerPackage,
+    );
+    return Math.max(0, Math.floor(availableStock / requiredStockPerUnit));
   }
 
   private resolveUnitPrice(product: Product, variant?: PosProductVariant): number {

@@ -168,9 +168,16 @@ export class PosTicketService {
       const qtyDisplay = isWeightItem
         ? `${item.weight} ${item.weight_unit || 'kg'}`
         : `${item.quantity}`;
+      const tierLine = item.appliedPriceTierName
+        ? `<br><span style="font-size: 10px; color: #92400e;">Tarifa: ${item.appliedPriceTierName}</span>`
+        : '';
+      const packageLine =
+        item.isPackageUnit && item.unitsPerPackage
+          ? `<br><span style="font-size: 10px; color: #1d4ed8;">x ${item.unitsPerPackage} unid c/u</span>`
+          : '';
       html += `
         <tr>
-          <td style="padding: 2px; vertical-align: top;">${item.name}</td>
+          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>

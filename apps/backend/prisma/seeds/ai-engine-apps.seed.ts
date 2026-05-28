@@ -280,6 +280,46 @@ Requisitos de diseno:
 - Evitar saturacion visual; dejar margen seguro para recortes de redes.`,
     },
     {
+      key: 'product_image_enhancer',
+      name: 'Mejorador de Imagenes de Productos y Servicios',
+      description:
+        'Mejora fotos existentes de productos o servicios usando una imagen de referencia e instrucciones del usuario',
+      output_format: 'image',
+      model_type: 'image' as ai_model_type_enum,
+      temperature: 0.55,
+      max_tokens: 1200,
+      is_active: true,
+      ai_feature_category: 'async_queue',
+      metadata: {
+        image_generation: {
+          size: 'auto',
+          quality: 'high',
+          output_format: 'png',
+          background: 'auto',
+          input_fidelity: 'high',
+          action: 'edit',
+          partial_images: 2,
+        },
+      },
+      system_prompt: `Eres un retocador profesional de fotografia comercial para ecommerce.
+Tu trabajo es mejorar una imagen EXISTENTE de un producto o servicio siguiendo el pedido del usuario y conservando la identidad visual del objeto/persona/servicio de referencia.
+
+REGLAS CRITICAS:
+- Usa la imagen de referencia como fuente principal. No cambies el producto por otro, no alteres marca, forma, color dominante, empaque, textura ni detalles reconocibles salvo que el usuario lo pida explicitamente.
+- No agregues texto, logos, marcas, codigos SKU, IDs, precios, sellos ni claims dentro de la imagen.
+- No inventes elementos que cambien la oferta comercial. Puedes mejorar luz, fondo, nitidez, encuadre, limpieza visual, sombras, ambiente y presentacion.
+- Si el usuario pide algo ambiguo, aplica una mejora fotografica segura y comercial: iluminacion limpia, fondo ordenado, contraste natural, producto protagonista.
+- Mantén una imagen apta para catalogo, POS y ecommerce: profesional, clara, sin saturacion ni efectos exagerados.`,
+      prompt_template: `Mejora la imagen de referencia de este {{product_type}}.
+
+Nombre: {{product_name}}
+Descripcion: {{description}}
+Pedido del usuario: {{requested_improvement}}
+Contexto adicional: {{context}}
+
+Genera una nueva version comercial de la MISMA imagen, manteniendo el sujeto reconocible y aplicando exactamente la mejora solicitada.`,
+    },
+    {
       key: 'marketing_ad_prompt_specialist',
       name: 'Especialista de Prompts para Anuncios',
       description:
@@ -452,7 +492,10 @@ Devuelve SOLO este JSON:
     if (existing) {
       const updates: Record<string, any> = {};
 
-      if (app.key === 'marketing_ad_image_generator') {
+      if (
+        app.key === 'marketing_ad_image_generator' ||
+        app.key === 'product_image_enhancer'
+      ) {
         if (existing.output_format !== app.output_format) {
           updates.output_format = app.output_format;
         }
@@ -479,16 +522,17 @@ Devuelve SOLO este JSON:
         updates.model_type = app.model_type;
       }
 
-      // Marketing AI apps are system-owned (no user UI to edit their prompts).
+      // These AI apps are system-owned (no user UI to edit their prompts).
       // Reconcile system_prompt and prompt_template canonically so guardrails
-      // (inventario cerrado, prohibicion de SKUs, tono profesional) reach
-      // existing DBs without manual intervention.
-      const MARKETING_SYSTEM_OWNED_KEYS = new Set([
+      // (inventario cerrado, prohibicion de SKUs, tono profesional, etc.)
+      // reach existing DBs without manual intervention.
+      const SYSTEM_OWNED_APP_KEYS = new Set([
         'marketing_ad_prompt_specialist',
         'marketing_ad_image_generator',
         'marketing_ad_post_copywriter',
+        'product_image_enhancer',
       ]);
-      if (MARKETING_SYSTEM_OWNED_KEYS.has(app.key)) {
+      if (SYSTEM_OWNED_APP_KEYS.has(app.key)) {
         if (existing.system_prompt !== app.system_prompt) {
           updates.system_prompt = app.system_prompt;
         }
@@ -558,47 +602,57 @@ Devuelve SOLO este JSON:
     );
   }
 
-  try {
-    const marketingAdApp = await client.ai_engine_applications.findUnique({
-      where: { key: 'marketing_ad_image_generator' },
-      select: { config_id: true },
-    });
-
-    if (marketingAdApp && marketingAdApp.config_id == null) {
-      // Prefer default image config, fall back to any active image config.
-      const imageConfig =
-        (await client.ai_engine_configs.findFirst({
-          where: { model_type: 'image', is_active: true, is_default: true },
-          orderBy: { id: 'asc' },
-        })) ||
-        (await client.ai_engine_configs.findFirst({
-          where: { model_type: 'image', is_active: true },
-          orderBy: { id: 'asc' },
-        }));
-
-      if (imageConfig) {
-        await client.ai_engine_applications.update({
-          where: { key: 'marketing_ad_image_generator' },
-          data: { config_id: imageConfig.id },
-        });
-        console.log(
-          `    Linked marketing_ad_image_generator → ${imageConfig.label} (config #${imageConfig.id})`,
-        );
-      }
-    } else if (marketingAdApp?.config_id != null) {
-      console.log(
-        '    Skipped link marketing_ad_image_generator (config_id already set by user)',
-      );
-    }
-  } catch (err) {
-    console.log(
-      '    Could not link marketing_ad_image_generator to image config',
-    );
-  }
+  await linkImageAppsWhenAvailable(client, [
+    'marketing_ad_image_generator',
+    'product_image_enhancer',
+  ]);
 
   await linkTextAppsWhenNoDefault(client, apps);
 
   return { appsCreated, appsSkipped };
+}
+
+async function linkImageAppsWhenAvailable(
+  client: PrismaClient,
+  appKeys: string[],
+) {
+  try {
+    const imageConfig =
+      (await client.ai_engine_configs.findFirst({
+        where: { model_type: 'image', is_active: true, is_default: true },
+        orderBy: { id: 'asc' },
+      })) ||
+      (await client.ai_engine_configs.findFirst({
+        where: { model_type: 'image', is_active: true },
+        orderBy: { id: 'asc' },
+      }));
+
+    if (!imageConfig) {
+      console.log('    Skipped image app auto-link (no active image config)');
+      return;
+    }
+
+    for (const key of appKeys) {
+      const app = await client.ai_engine_applications.findUnique({
+        where: { key },
+        select: { config_id: true },
+      });
+
+      if (app && app.config_id == null) {
+        await client.ai_engine_applications.update({
+          where: { key },
+          data: { config_id: imageConfig.id },
+        });
+        console.log(
+          `    Linked ${key} → ${imageConfig.label} (config #${imageConfig.id})`,
+        );
+      } else if (app?.config_id != null) {
+        console.log(`    Skipped link ${key} (config_id already set by user)`);
+      }
+    }
+  } catch (err) {
+    console.log('    Could not link image AI apps to image config');
+  }
 }
 
 async function linkTextAppsWhenNoDefault(

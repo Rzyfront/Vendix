@@ -1,6 +1,5 @@
 import {
   Component,
-  input,
   output,
   model,
   inject,
@@ -9,10 +8,8 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
 import * as XLSX from 'xlsx';
-import { ProductsService } from '../../../products/services/products.service';
 import {
   ModalComponent,
   ButtonComponent,
@@ -33,12 +30,23 @@ interface AnalyzedItem {
   stock_quantity: number;
   base_price: number;
   profit_margin: number;
+  product_type?: string;
+  track_inventory?: boolean;
+  pricing_type?: string;
+  tax_category_ids?: number[];
   description?: string;
   brand_id?: string;
   category_ids?: string;
   state?: string;
-  available_for_ecommerce?: string;
+  available_for_ecommerce?: boolean;
+  is_featured?: boolean;
+  allow_pos_price_override?: boolean;
+  has_multiple_price_tiers?: boolean;
+  units_per_package?: number;
+  package_consumes_multiple_stock?: boolean;
   weight: number;
+  is_on_sale?: boolean;
+  sale_price?: number;
   status: 'ready' | 'warning' | 'error';
   warnings: string[];
   errors: string[];
@@ -312,8 +320,8 @@ interface AnalysisResult {
                       Plantilla Completa
                     </p>
                     <p class="text-[10px] text-green-600 truncate">
-                      Todos los datos: Bodega, Marca, Categorías, Peso, Ofertas,
-                      etc.
+                      Compra + catálogo: Marca, impuestos, ecommerce, POS,
+                      listas y empaques.
                     </p>
                     <div
                       class="flex items-center text-[10px] font-bold text-green-600 group-hover:text-green-800 mt-1"
@@ -853,7 +861,6 @@ interface AnalysisResult {
   ],
 })
 export class PopBulkDataModalComponent {
-  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
   readonly dataLoaded = output<any[]>();
@@ -898,7 +905,6 @@ export class PopBulkDataModalComponent {
     return result.items.filter((i) => i.status !== 'error').length;
   });
 
-  private productsService = inject(ProductsService);
   private toastService = inject(ToastService);
 
   constructor() {
@@ -1002,22 +1008,127 @@ export class PopBulkDataModalComponent {
 
   // Step 0: File operations
   downloadTemplate(type: 'quick' | 'complete') {
-    this.productsService
-      .getBulkUploadTemplate(type)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (blob: Blob) => {
-          const url = window.URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `plantilla-pedido-${type}.xlsx`;
-          link.click();
-          window.URL.revokeObjectURL(url);
-        },
-        error: () => {
-          this.toastService.error('Error al descargar la plantilla');
-        },
-      });
+    const headers =
+      type === 'complete'
+        ? [
+            'Nombre',
+            'SKU',
+            'Tipo',
+            'Estado',
+            'Controla Inventario',
+            'Precio Venta',
+            'Precio Compra',
+            'Cantidad Inicial',
+            'Descripción',
+            'Marca',
+            'Categorías',
+            'Impuestos IDs',
+            'Tipo Precio',
+            'Disponible Ecommerce',
+            'Destacado',
+            'Permite Cambiar Precio POS',
+            'Usa Listas de Precio',
+            'Unidades por Empaque',
+            'Empaque Descuenta Múltiples Unidades',
+            'Peso',
+            'En Oferta',
+            'Precio Oferta',
+          ]
+        : [
+            'Nombre',
+            'SKU',
+            'Tipo',
+            'Estado',
+            'Precio Venta',
+            'Precio Compra',
+            'Cantidad Inicial',
+            'Controla Inventario',
+            'Disponible Ecommerce',
+          ];
+
+    const rows =
+      type === 'complete'
+        ? [
+            {
+              Nombre: 'Zapatillas Running Pro',
+              SKU: 'ZAP-RUN-PRO-42',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'sí',
+              'Precio Venta': 85000,
+              'Precio Compra': 52000,
+              'Cantidad Inicial': 12,
+              Descripción: 'Zapatillas ideales para correr largas distancias.',
+              Marca: 'Nike',
+              Categorías: 'Deportes, Calzado',
+              'Impuestos IDs': '',
+              'Tipo Precio': 'unidad',
+              'Disponible Ecommerce': 'sí',
+              Destacado: 'sí',
+              'Permite Cambiar Precio POS': 'no',
+              'Usa Listas de Precio': 'no',
+              'Unidades por Empaque': '',
+              'Empaque Descuenta Múltiples Unidades': 'no',
+              Peso: 0.8,
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+            },
+            {
+              Nombre: 'Leche Entera 1L',
+              SKU: 'LEC-ENT-1L-COL',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Controla Inventario': 'sí',
+              'Precio Venta': 5200,
+              'Precio Compra': 3400,
+              'Cantidad Inicial': 48,
+              Descripción: 'Leche entera pasteurizada.',
+              Marca: 'Colanta',
+              Categorías: 'Alimentos, Lácteos',
+              'Impuestos IDs': '',
+              'Tipo Precio': 'unidad',
+              'Disponible Ecommerce': 'no',
+              Destacado: 'no',
+              'Permite Cambiar Precio POS': 'no',
+              'Usa Listas de Precio': 'no',
+              'Unidades por Empaque': 6,
+              'Empaque Descuenta Múltiples Unidades': 'sí',
+              Peso: 1.05,
+              'En Oferta': 'no',
+              'Precio Oferta': 0,
+            },
+          ]
+        : [
+            {
+              Nombre: 'Camiseta Básica Blanca',
+              SKU: 'CAM-BAS-BLA-001',
+              Tipo: 'físico',
+              Estado: 'activo',
+              'Precio Venta': 15000,
+              'Precio Compra': 8000,
+              'Cantidad Inicial': 50,
+              'Controla Inventario': 'sí',
+              'Disponible Ecommerce': 'sí',
+            },
+          ];
+
+    const worksheet = XLSX.utils.json_to_sheet(rows, { header: headers });
+    worksheet['!cols'] = headers.map((header) => ({
+      wch: Math.max(14, header.length + 2),
+    }));
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Pedido POP');
+    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([buffer], {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `plantilla-pedido-${type}.xlsx`;
+    link.click();
+    window.URL.revokeObjectURL(url);
   }
 
   onDragOver(event: DragEvent) {
@@ -1074,6 +1185,125 @@ export class PopBulkDataModalComponent {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   }
 
+  private normalizeHeaderKey(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private createRowReader(row: Record<string, any>) {
+    const normalizedRow = new Map<string, any>();
+    Object.keys(row).forEach((key) => {
+      normalizedRow.set(this.normalizeHeaderKey(key), row[key]);
+    });
+
+    return (...aliases: string[]) => {
+      for (const alias of aliases) {
+        const value = normalizedRow.get(this.normalizeHeaderKey(alias));
+        if (value !== undefined && value !== null && value !== '') return value;
+      }
+      return undefined;
+    };
+  }
+
+  private parseText(value: unknown, fallback = ''): string {
+    if (value === undefined || value === null) return fallback;
+    return String(value).trim();
+  }
+
+  private parseNumber(value: unknown, fallback = 0): number {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+
+    let normalized = String(value)
+      .trim()
+      .replace(/[^\d,.-]/g, '');
+
+    const lastComma = normalized.lastIndexOf(',');
+    const lastDot = normalized.lastIndexOf('.');
+
+    if (lastComma > -1 && lastDot > -1) {
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, '').replace(',', '.')
+          : normalized.replace(/,/g, '');
+    } else if (lastComma > -1) {
+      normalized = normalized.replace(',', '.');
+    } else if (/^-?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+      normalized = normalized.replace(/\./g, '');
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private parseOptionalNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const parsed = this.parseNumber(value, Number.NaN);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private parseBoolean(value: unknown, fallback: boolean): boolean {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+
+    const normalized = this.normalizeHeaderKey(String(value));
+    if (
+      ['si', 'yes', 'true', 'verdadero', '1', 'activo', 'x'].includes(
+        normalized,
+      )
+    ) {
+      return true;
+    }
+    if (
+      ['no', 'false', 'falso', '0', 'inactivo', 'ninguno'].includes(
+        normalized,
+      )
+    ) {
+      return false;
+    }
+    return fallback;
+  }
+
+  private normalizeProductType(value: unknown): string {
+    const normalized = this.normalizeHeaderKey(String(value ?? ''));
+    return ['servicio', 'service'].includes(normalized) ? 'service' : 'physical';
+  }
+
+  private normalizeState(value: unknown): string {
+    const normalized = this.normalizeHeaderKey(String(value ?? ''));
+    if (['inactivo', 'inactive', 'deshabilitado'].includes(normalized)) {
+      return 'inactive';
+    }
+    if (['archivado', 'archived'].includes(normalized)) {
+      return 'archived';
+    }
+    return 'active';
+  }
+
+  private normalizePricingType(value: unknown): string {
+    const normalized = this.normalizeHeaderKey(String(value ?? ''));
+    return ['peso', 'weight', 'por peso'].includes(normalized) ? 'weight' : 'unit';
+  }
+
+  private parseTaxCategoryIds(value: unknown): number[] | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const values = Array.isArray(value)
+      ? value
+      : String(value)
+          .split(/[;,]/)
+          .map((item) => item.trim());
+    const ids = values
+      .map((item) => this.parseOptionalNumber(item))
+      .filter((item): item is number => item !== undefined && item > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+  }
+
   // Step 0 -> 1: Analyze file client-side
   analyzeFile() {
     const file = this.selectedFile();
@@ -1111,39 +1341,99 @@ export class PopBulkDataModalComponent {
         }
 
         const items: AnalyzedItem[] = data.map((row: any) => {
-          const name = row['Nombre'] || row['name'] || '';
-          const sku = row['SKU'] || row['sku'] || '';
-          const cost = parseFloat(
-            row['Precio Compra'] ||
-              row['Costo'] ||
-              row['cost_price'] ||
-              row['unit_cost'] ||
-              0,
+          const read = this.createRowReader(row);
+          const name = this.parseText(read('Nombre', 'name', 'producto'));
+          const sku = this.parseText(read('SKU', 'sku', 'código', 'codigo'));
+          const product_type = this.normalizeProductType(read('Tipo', 'product_type'));
+          const state = this.normalizeState(read('Estado', 'state', 'status'));
+          const track_inventory = this.parseBoolean(
+            read('Controla Inventario', 'track_inventory'),
+            product_type !== 'service',
           );
-          const qty = parseFloat(
-            row['Cantidad'] ||
-              row['Cantidad Inicial'] ||
-              row['stock_quantity'] ||
-              row['quantity'] ||
-              row['qty'] ||
-              0,
+          const cost = this.parseNumber(
+            read('Precio Compra', 'Costo', 'cost_price', 'unit_cost'),
           );
-          const base_price = parseFloat(
-            row['Precio Venta'] || row['base_price'] || 0,
+          const qty = this.parseNumber(
+            read(
+              'Cantidad',
+              'Cantidad Inicial',
+              'stock_quantity',
+              'quantity',
+              'qty',
+            ),
           );
-          let profit_margin = parseFloat(
-            row['Margen'] || row['profit_margin'] || 0,
+          const base_price = this.parseNumber(
+            read('Precio Venta', 'base_price'),
+          );
+          let profit_margin = this.parseNumber(
+            read('Margen', 'profit_margin'),
           );
           if (profit_margin > 0 && profit_margin < 1) {
             profit_margin = profit_margin * 100;
           }
-          const description = row['Descripción'] || row['description'];
-          const brand_id = row['Marca'] || row['brand_id'];
-          const category_ids = row['Categorías'] || row['category_ids'];
-          const state = row['Estado'] || row['state'];
-          const available_for_ecommerce =
-            row['Disponible Ecommerce'] || row['available_for_ecommerce'];
-          const weight = parseFloat(row['Peso'] || row['weight'] || 0);
+          const description = this.parseText(
+            read('Descripción', 'description', 'detalle'),
+          );
+          const brand_id = this.parseText(read('Marca', 'brand_id', 'brand'));
+          const category_ids = this.parseText(
+            read('Categorías', 'Categorias', 'category_ids', 'categories'),
+          );
+          const tax_category_ids = this.parseTaxCategoryIds(
+            read('Impuestos IDs', 'tax_category_ids', 'impuestos'),
+          );
+          const pricingTypeRaw = read('Tipo Precio', 'pricing_type');
+          const pricing_type =
+            pricingTypeRaw === undefined
+              ? undefined
+              : this.normalizePricingType(pricingTypeRaw);
+          const available_for_ecommerce = this.parseBoolean(
+            read('Disponible Ecommerce', 'available_for_ecommerce', 'ecommerce'),
+            true,
+          );
+          const featuredRaw = read('Destacado', 'is_featured');
+          const is_featured =
+            featuredRaw === undefined
+              ? undefined
+              : this.parseBoolean(featuredRaw, false);
+          const allowPosRaw = read(
+            'Permite Cambiar Precio POS',
+            'allow_pos_price_override',
+            'cambiar precio pos',
+          );
+          const allow_pos_price_override =
+            allowPosRaw === undefined
+              ? undefined
+              : this.parseBoolean(allowPosRaw, false);
+          const priceTiersRaw = read(
+            'Usa Listas de Precio',
+            'has_multiple_price_tiers',
+          );
+          const has_multiple_price_tiers =
+            priceTiersRaw === undefined
+              ? undefined
+              : this.parseBoolean(priceTiersRaw, false);
+          const units_per_package = this.parseOptionalNumber(
+            read('Unidades por Empaque', 'units_per_package'),
+          );
+          const packageConsumesRaw = read(
+            'Empaque Descuenta Múltiples Unidades',
+            'package_consumes_multiple_stock',
+          );
+          const package_consumes_multiple_stock =
+            packageConsumesRaw === undefined
+              ? undefined
+              : this.parseBoolean(packageConsumesRaw, false);
+          const weight = this.parseNumber(read('Peso', 'weight'));
+          const onSaleRaw = read('En Oferta', 'is_on_sale');
+          const is_on_sale =
+            onSaleRaw === undefined
+              ? undefined
+              : this.parseBoolean(onSaleRaw, false);
+          const salePriceRaw = read('Precio Oferta', 'sale_price');
+          const sale_price =
+            salePriceRaw === undefined
+              ? undefined
+              : this.parseNumber(salePriceRaw);
 
           const warnings: string[] = [];
           const errors: string[] = [];
@@ -1163,6 +1453,16 @@ export class PopBulkDataModalComponent {
           if (isNaN(cost) || cost <= 0) {
             warnings.push('Precio de compra no especificado');
           }
+          if (
+            units_per_package !== undefined &&
+            units_per_package > 0 &&
+            units_per_package < 2
+          ) {
+            warnings.push('Unidades por empaque debe ser 2 o mayor');
+          }
+          if (is_on_sale && (sale_price ?? 0) <= 0) {
+            warnings.push('Producto en oferta sin precio de oferta');
+          }
 
           let status: 'ready' | 'warning' | 'error' = 'ready';
           if (errors.length > 0) {
@@ -1180,12 +1480,23 @@ export class PopBulkDataModalComponent {
             stock_quantity: isNaN(qty) ? 0 : qty,
             base_price: isNaN(base_price) ? 0 : base_price,
             profit_margin: isNaN(profit_margin) ? 0 : profit_margin,
+            product_type,
+            track_inventory,
+            pricing_type,
+            tax_category_ids,
             description,
             brand_id,
             category_ids,
             state,
             available_for_ecommerce,
+            is_featured,
+            allow_pos_price_override,
+            has_multiple_price_tiers,
+            units_per_package,
+            package_consumes_multiple_stock,
             weight: isNaN(weight) ? 0 : weight,
+            is_on_sale,
+            sale_price,
             status,
             warnings,
             errors,

@@ -608,115 +608,272 @@ export class PopComponent implements OnInit, OnDestroy {
     );
   }
 
+  private normalizeBulkKey(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private normalizeBulkRow(row: any): Record<string, any> {
+    const normalizedRow: Record<string, any> = {};
+    Object.keys(row).forEach((key) => {
+      normalizedRow[this.normalizeBulkKey(key)] = row[key];
+    });
+    return normalizedRow;
+  }
+
+  private getBulkValue(row: Record<string, any>, ...aliases: string[]) {
+    for (const alias of aliases) {
+      const value = row[this.normalizeBulkKey(alias)];
+      if (value !== undefined && value !== null && value !== '') return value;
+    }
+    return undefined;
+  }
+
+  private parseBulkText(value: unknown, fallback = ''): string {
+    if (value === undefined || value === null) return fallback;
+    return String(value).trim();
+  }
+
+  private parseBulkNumber(value: unknown, fallback = 0): number {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+
+    let normalized = String(value)
+      .trim()
+      .replace(/[^\d,.-]/g, '');
+    const lastComma = normalized.lastIndexOf(',');
+    const lastDot = normalized.lastIndexOf('.');
+
+    if (lastComma > -1 && lastDot > -1) {
+      normalized =
+        lastComma > lastDot
+          ? normalized.replace(/\./g, '').replace(',', '.')
+          : normalized.replace(/,/g, '');
+    } else if (lastComma > -1) {
+      normalized = normalized.replace(',', '.');
+    } else if (/^-?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+      normalized = normalized.replace(/\./g, '');
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  private parseBulkOptionalNumber(value: unknown): number | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const parsed = this.parseBulkNumber(value, Number.NaN);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private parseBulkBoolean(value: unknown, fallback: boolean): boolean {
+    if (value === undefined || value === null || value === '') return fallback;
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value !== 0;
+
+    const normalized = this.normalizeBulkKey(String(value));
+    if (
+      ['si', 'yes', 'true', 'verdadero', '1', 'activo', 'x'].includes(
+        normalized,
+      )
+    ) {
+      return true;
+    }
+    if (
+      ['no', 'false', 'falso', '0', 'inactivo', 'ninguno'].includes(
+        normalized,
+      )
+    ) {
+      return false;
+    }
+    return fallback;
+  }
+
+  private parseBulkOptionalBoolean(value: unknown): boolean | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    return this.parseBulkBoolean(value, false);
+  }
+
+  private normalizeBulkProductType(value: unknown): string {
+    const normalized = this.normalizeBulkKey(String(value ?? ''));
+    return ['servicio', 'service'].includes(normalized) ? 'service' : 'physical';
+  }
+
+  private normalizeBulkState(value: unknown): string {
+    const normalized = this.normalizeBulkKey(String(value ?? ''));
+    if (['inactivo', 'inactive', 'deshabilitado'].includes(normalized)) {
+      return 'inactive';
+    }
+    if (['archivado', 'archived'].includes(normalized)) {
+      return 'archived';
+    }
+    return 'active';
+  }
+
+  private normalizeBulkPricingType(value: unknown): string {
+    const normalized = this.normalizeBulkKey(String(value ?? ''));
+    return ['peso', 'weight', 'por peso'].includes(normalized) ? 'weight' : 'unit';
+  }
+
+  private parseBulkTaxCategoryIds(value: unknown): number[] | undefined {
+    if (value === undefined || value === null || value === '') return undefined;
+    const values = Array.isArray(value)
+      ? value
+      : String(value)
+          .split(/[;,]/)
+          .map((item) => item.trim());
+    const ids = values
+      .map((item) => this.parseBulkOptionalNumber(item))
+      .filter((item): item is number => item !== undefined && item > 0);
+    return ids.length > 0 ? Array.from(new Set(ids)) : undefined;
+  }
+
   onBulkDataReceived(items: any[]): void {
     if (!items || items.length === 0) return;
 
     let addedCount = 0;
 
     items.forEach((row) => {
-      const normalizedRow: any = {};
-      Object.keys(row).forEach((key) => {
-        normalizedRow[key.toLowerCase().trim()] = row[key];
-      });
+      const normalizedRow = this.normalizeBulkRow(row);
 
       const name =
-        normalizedRow['name'] ||
-        normalizedRow['nombre'] ||
-        normalizedRow['producto'] ||
-        normalizedRow['product'];
+        this.getBulkValue(normalizedRow, 'name', 'nombre', 'producto', 'product');
 
       const sku =
-        normalizedRow['sku'] ||
-        normalizedRow['code'] ||
-        normalizedRow['codigo'] ||
-        normalizedRow['id'];
+        this.getBulkValue(normalizedRow, 'sku', 'code', 'codigo', 'id');
 
       if (!name || !sku) {
         return;
       }
 
-      const costRaw =
-        normalizedRow['cost'] ||
-        normalizedRow['costo'] ||
-        normalizedRow['price'] ||
-        normalizedRow['precio'] ||
-        normalizedRow['unit_cost'] ||
-        normalizedRow['cost_price'] ||
-        normalizedRow['precio compra'] ||
-        normalizedRow['precio_compra'] ||
-        0;
-      const unit_cost = Number(costRaw) || 0;
+      const product_type = this.normalizeBulkProductType(
+        this.getBulkValue(normalizedRow, 'product_type', 'tipo'),
+      );
+      const track_inventory = this.parseBulkBoolean(
+        this.getBulkValue(normalizedRow, 'track_inventory', 'controla inventario'),
+        product_type !== 'service',
+      );
+      const unit_cost = this.parseBulkNumber(
+        this.getBulkValue(
+          normalizedRow,
+          'cost',
+          'costo',
+          'price',
+          'precio',
+          'unit_cost',
+          'cost_price',
+          'precio compra',
+        ),
+      );
+      const quantity =
+        this.parseBulkNumber(
+          this.getBulkValue(
+            normalizedRow,
+            'quantity',
+            'qty',
+            'cantidad',
+            'cant',
+            'cantidad inicial',
+          ),
+          1,
+        ) || 1;
 
-      const qtyRaw =
-        normalizedRow['quantity'] ||
-        normalizedRow['qty'] ||
-        normalizedRow['cantidad'] ||
-        normalizedRow['cant'] ||
-        normalizedRow['cantidad inicial'] ||
-        normalizedRow['cantidad_inicial'] ||
-        1;
-      const quantity = Number(qtyRaw) || 1;
-
-      const description = (
-        normalizedRow['description'] ||
-        normalizedRow['descripción'] ||
-        normalizedRow['detalle'] ||
-        ''
-      ).trim();
-      const state = (
-        normalizedRow['state'] ||
-        normalizedRow['estado'] ||
-        normalizedRow['status'] ||
-        'active'
-      ).trim();
-      const weight =
-        Number(normalizedRow['weight'] || normalizedRow['peso']) || 0;
-      const available_for_ecommerce =
-        normalizedRow['available_for_ecommerce'] ||
-        normalizedRow['disponible ecommerce'] ||
-        normalizedRow['ecommerce'] ||
-        true;
-      const base_price =
-        Number(
-          normalizedRow['base_price'] ||
-            normalizedRow['precio venta'] ||
-            normalizedRow['precio_venta'],
-        ) || 0;
-      const profit_margin =
-        Number(
-          normalizedRow['profit_margin'] ||
-            normalizedRow['margen'] ||
-            normalizedRow['margin'],
-        ) || 0;
+      const description = this.parseBulkText(
+        this.getBulkValue(normalizedRow, 'description', 'descripción', 'detalle'),
+      );
+      const state = this.normalizeBulkState(
+        this.getBulkValue(normalizedRow, 'state', 'estado', 'status'),
+      );
+      const weight = this.parseBulkNumber(
+        this.getBulkValue(normalizedRow, 'weight', 'peso'),
+      );
+      const available_for_ecommerce = this.parseBulkBoolean(
+        this.getBulkValue(
+          normalizedRow,
+          'available_for_ecommerce',
+          'disponible ecommerce',
+          'ecommerce',
+        ),
+        true,
+      );
+      const base_price = this.parseBulkNumber(
+        this.getBulkValue(normalizedRow, 'base_price', 'precio venta'),
+      );
+      const profit_margin = this.parseBulkNumber(
+        this.getBulkValue(normalizedRow, 'profit_margin', 'margen', 'margin'),
+      );
 
       const brand = (
-        normalizedRow['brand_id'] ||
-        normalizedRow['marca'] ||
-        normalizedRow['brand'] ||
-        ''
+        this.getBulkValue(normalizedRow, 'brand_id', 'marca', 'brand') || ''
       )
         .toString()
         .trim();
       const categories = (
-        normalizedRow['category_ids'] ||
-        normalizedRow['categorías'] ||
-        normalizedRow['categorias'] ||
-        normalizedRow['categories'] ||
-        ''
+        this.getBulkValue(
+          normalizedRow,
+          'category_ids',
+          'categorías',
+          'categorias',
+          'categories',
+        ) || ''
       )
         .toString()
         .trim();
-      const isOnSale =
-        normalizedRow['en oferta'] ||
-        normalizedRow['en_oferta'] ||
-        normalizedRow['is_on_sale'] ||
-        false;
+      const taxCategoryIds = this.parseBulkTaxCategoryIds(
+        this.getBulkValue(normalizedRow, 'tax_category_ids', 'impuestos ids', 'impuestos'),
+      );
+      const pricingTypeRaw = this.getBulkValue(
+        normalizedRow,
+        'pricing_type',
+        'tipo precio',
+      );
+      const pricingType =
+        pricingTypeRaw === undefined
+          ? undefined
+          : this.normalizeBulkPricingType(pricingTypeRaw);
+      const isFeatured = this.parseBulkOptionalBoolean(
+        this.getBulkValue(normalizedRow, 'is_featured', 'destacado'),
+      );
+      const allowPosPriceOverride = this.parseBulkOptionalBoolean(
+        this.getBulkValue(
+          normalizedRow,
+          'allow_pos_price_override',
+          'permite cambiar precio pos',
+        ),
+      );
+      const hasMultiplePriceTiers = this.parseBulkOptionalBoolean(
+        this.getBulkValue(
+          normalizedRow,
+          'has_multiple_price_tiers',
+          'usa listas de precio',
+        ),
+      );
+      const unitsPerPackage = this.parseBulkOptionalNumber(
+        this.getBulkValue(normalizedRow, 'units_per_package', 'unidades por empaque'),
+      );
+      const packageConsumesMultipleStock = this.parseBulkOptionalBoolean(
+        this.getBulkValue(
+          normalizedRow,
+          'package_consumes_multiple_stock',
+          'empaque descuenta multiples unidades',
+        ),
+      );
+      const isOnSale = this.parseBulkOptionalBoolean(
+        this.getBulkValue(normalizedRow, 'en oferta', 'is_on_sale'),
+      );
+      const salePriceRaw = this.getBulkValue(
+        normalizedRow,
+        'precio oferta',
+        'sale_price',
+      );
       const salePrice =
-        Number(
-          normalizedRow['precio oferta'] ||
-            normalizedRow['precio_oferta'] ||
-            normalizedRow['sale_price'],
-        ) || 0;
+        salePriceRaw === undefined
+          ? undefined
+          : this.parseBulkNumber(salePriceRaw);
 
       const dummyProduct = {
         id: 0,
@@ -743,6 +900,15 @@ export class PopComponent implements OnInit, OnDestroy {
             available_for_ecommerce: available_for_ecommerce,
             base_price: base_price,
             profit_margin: profit_margin,
+            product_type,
+            track_inventory,
+            pricing_type: pricingType,
+            tax_category_ids: taxCategoryIds,
+            is_featured: isFeatured,
+            allow_pos_price_override: allowPosPriceOverride,
+            has_multiple_price_tiers: hasMultiplePriceTiers,
+            units_per_package: unitsPerPackage,
+            package_consumes_multiple_stock: packageConsumesMultipleStock,
             brand_id: String(brand),
             category_ids: String(categories),
             is_on_sale: isOnSale,

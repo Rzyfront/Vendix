@@ -28,6 +28,13 @@ export const ERROR_MESSAGES: Record<string, string> = {
   UPLOAD_TYPE_001: 'El tipo de archivo no esta soportado en esta seccion.',
   UPLOAD_FORBIDDEN_001: 'No tiene permisos para acceder a este archivo.',
   UPLOAD_FAILED_001: 'No se pudo subir el archivo. Intente de nuevo.',
+  UPLOAD_REMOTE_URL_001: 'La URL de la imagen no es valida.',
+  UPLOAD_REMOTE_FORBIDDEN_001:
+    'No se puede usar esa imagen remota por seguridad.',
+  UPLOAD_REMOTE_TYPE_001: 'La URL no devolvio una imagen compatible.',
+  UPLOAD_REMOTE_SIZE_001: 'La imagen remota supera el tamano permitido.',
+  UPLOAD_REMOTE_FETCH_001:
+    'No pudimos descargar la imagen remota. Intenta de nuevo.',
 
   // Payments
   PAY_INVALID_ORDER_001: 'La orden no es valida o no existe.',

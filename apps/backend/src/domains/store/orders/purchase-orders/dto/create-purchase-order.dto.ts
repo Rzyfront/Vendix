@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsOptional,
   IsDateString,
+  IsArray,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -85,6 +86,25 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   product_description?: string;
 
+  @ApiProperty({ description: 'Product type (for new products)' })
+  @IsString()
+  @IsOptional()
+  product_type?: string;
+
+  @ApiProperty({ description: 'Track inventory flag (for new products)' })
+  @IsOptional()
+  track_inventory?: any;
+
+  @ApiProperty({ description: 'Pricing type (for new products)' })
+  @IsString()
+  @IsOptional()
+  pricing_type?: string;
+
+  @ApiProperty({ description: 'Tax category IDs (for new products)' })
+  @IsArray()
+  @IsOptional()
+  tax_category_ids?: number[];
+
   @ApiProperty({ description: 'Product State (for new products)' })
   @IsString()
   @IsOptional()
@@ -98,6 +118,29 @@ export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Available for Ecommerce (for new products)' })
   @IsOptional()
   available_for_ecommerce?: any;
+
+  @ApiProperty({ description: 'Featured flag (for new products)' })
+  @IsOptional()
+  is_featured?: any;
+
+  @ApiProperty({ description: 'Allow POS price override (for new products)' })
+  @IsOptional()
+  allow_pos_price_override?: any;
+
+  @ApiProperty({ description: 'Use price tiers flag (for new products)' })
+  @IsOptional()
+  has_multiple_price_tiers?: any;
+
+  @ApiProperty({ description: 'Units per package (for new products)' })
+  @IsNumber()
+  @IsOptional()
+  units_per_package?: number;
+
+  @ApiProperty({
+    description: 'Package consumes multiple stock units (for new products)',
+  })
+  @IsOptional()
+  package_consumes_multiple_stock?: any;
 
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()

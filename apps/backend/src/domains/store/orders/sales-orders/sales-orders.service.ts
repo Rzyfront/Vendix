@@ -607,7 +607,7 @@ export class SalesOrdersService {
     }
 
     const tiers = await this.prisma.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIdsInUse) } },
+      where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
       select: { id: true, name: true, is_package_unit: true },
     });
     type TierRow = (typeof tiers)[number];
@@ -634,15 +634,31 @@ export class SalesOrdersService {
     const productById = new Map<number, ProductRow>(
       productsList.map((p): [number, ProductRow] => [p.id, p]),
     );
+    const assignments = productIds.length
+      ? await this.prisma.product_price_tier_assignments.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIdsInUse) },
+          },
+          select: { product_id: true, price_tier_id: true },
+        })
+      : [];
+    const allowedTierKeys = new Set(
+      assignments.map((assignment) =>
+        `${assignment.product_id}:${assignment.price_tier_id}`,
+      ),
+    );
 
     return items.map((item) => {
       const tierId = item.applied_price_tier_id;
       if (tierId === undefined || tierId === null) return null;
       const tier = tierById.get(Number(tierId));
       if (!tier) {
-        // Soft fall-through: invalid tier id → don't crash the order, just
-        // skip the snapshot. Mirrors OrdersService behavior.
-        return null;
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
+      }
+      const productId = item.product_id;
+      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
       const product = item.product_id
         ? productById.get(item.product_id)

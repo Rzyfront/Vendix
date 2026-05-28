@@ -1347,7 +1347,8 @@ model products {
   data_collection_template_products data_collection_template_products[]
 
   // Multi-tarifa overrides (Phase 1: price tiers)
-  price_tier_overrides product_price_tier_overrides[]
+  price_tier_overrides           product_price_tier_overrides[]
+  product_price_tier_assignments product_price_tier_assignments[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -1381,11 +1382,12 @@ model price_tiers {
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
-  store             stores                         @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  product_overrides product_price_tier_overrides[]
-  order_items       order_items[]                  @relation("order_items_applied_price_tier")
-  quotation_items   quotation_items[]              @relation("quotation_items_applied_price_tier")
-  sales_order_items sales_order_items[]            @relation("sales_order_items_applied_price_tier")
+  store               stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  product_overrides   product_price_tier_overrides[]
+  product_assignments product_price_tier_assignments[]
+  order_items         order_items[]                    @relation("order_items_applied_price_tier")
+  quotation_items     quotation_items[]                @relation("quotation_items_applied_price_tier")
+  sales_order_items   sales_order_items[]              @relation("sales_order_items_applied_price_tier")
 
   @@unique([store_id, name])
   @@index([store_id, is_active])
@@ -1406,6 +1408,18 @@ model product_price_tier_overrides {
   price_tier price_tiers       @relation(fields: [price_tier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([product_id, variant_id, price_tier_id])
+  @@index([price_tier_id])
+}
+
+model product_price_tier_assignments {
+  product_id    Int
+  price_tier_id Int
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  product    products    @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  price_tier price_tiers @relation(fields: [price_tier_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([product_id, price_tier_id])
   @@index([price_tier_id])
 }
 

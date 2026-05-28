@@ -678,13 +678,24 @@ export class PaymentsService {
 
           const available = stockAggregate._sum.quantity_available ?? 0;
 
-          // BLOCK: If not allowing oversell and requested quantity exceeds available, throw immediately
-          if (!allowOversell && item.quantity > available) {
+          const requiredStock =
+            typeof item.stock_units_consumed === 'number' &&
+            item.stock_units_consumed > 0
+              ? item.stock_units_consumed
+              : item.quantity;
+
+          // BLOCK: If not allowing oversell and required units exceed available, throw immediately.
+          if (!allowOversell && requiredStock > available) {
             const variantInfo = item.product_variant_id
               ? ` (variant ${item.product_variant_id})`
               : '';
-            throw new BadRequestException(
-              `Stock insuficiente para ${product.name}${variantInfo}: solicitado ${item.quantity}, disponible ${available}.`,
+            const packageHint =
+              requiredStock !== item.quantity
+                ? ` (${item.quantity} x ${requiredStock / Math.max(item.quantity, 1)} unid/empaque)`
+                : '';
+            throw new VendixHttpException(
+              ErrorCodes.POS_STOCK_INSUFFICIENT_001,
+              `Stock insuficiente para ${product.name}${variantInfo}: requiere ${requiredStock} unidades${packageHint}, disponible ${available}.`,
             );
           }
         }
@@ -764,7 +775,7 @@ export class PaymentsService {
               'order',
               order.id,
               user?.id,
-              false, // POS: don't validate availability (non-restrictive UX)
+              false, // Already validated above against stock_levels source of truth.
               tx,
               undefined, // expires_at
               false, // skip_reservation
@@ -1424,7 +1435,7 @@ export class PaymentsService {
     }
 
     const tiers = await tx.price_tiers.findMany({
-      where: { id: { in: Array.from(tierIdsInUse) } },
+      where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
       select: { id: true, name: true, is_package_unit: true },
     });
     type TierRow = (typeof tiers)[number];
@@ -1449,14 +1460,32 @@ export class PaymentsService {
     const productById = new Map<number, ProductRow>(
       productsList.map((p: ProductRow): [number, ProductRow] => [p.id, p]),
     );
+    const assignments = productIds.length
+      ? await tx.product_price_tier_assignments.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIdsInUse) },
+          },
+          select: { product_id: true, price_tier_id: true },
+        })
+      : [];
+    const allowedTierKeys = new Set(
+      assignments.map(
+        (assignment: { product_id: number; price_tier_id: number }) =>
+          `${assignment.product_id}:${assignment.price_tier_id}`,
+      ),
+    );
 
     return items.map((item) => {
       const tierId = item.applied_price_tier_id;
       if (tierId === undefined || tierId === null) return null;
       const tier = tierById.get(Number(tierId));
       if (!tier) {
-        // Lenient: tier desconocida en esta tienda → no snapshot, no crash.
-        return null;
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
+      }
+      const productId = item.product_id;
+      if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
+        throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
       const product = item.product_id ? productById.get(item.product_id) : null;
       const isPackage =

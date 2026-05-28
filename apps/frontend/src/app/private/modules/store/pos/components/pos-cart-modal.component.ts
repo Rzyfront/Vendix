@@ -159,7 +159,7 @@ import {
                     @if (canShowTierSelector(item)) {
                       <div class="item-tier-selector">
                         <app-price-tier-selector
-                          [tiers]="availableTiers()"
+                          [tiers]="visibleTiersForItem(item)"
                           [selectedTierId]="item.applied_price_tier_id ?? null"
                           [unitsPerPackage]="item.units_per_package ?? null"
                           (selectedTierIdChange)="onTierChange(item, $event)"
@@ -185,7 +185,8 @@ import {
                       <app-quantity-control
                         [value]="item.quantity"
                         [min]="1"
-                        [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                        [max]="getQuantityMax(item)"
+                        [unitsPerPackage]="getRequiredStockPerUnit(item)"
                         [editable]="true"
                         [size]="'sm'"
                         (valueChange)="onQuantityChange(item.id, $event)"
@@ -907,8 +908,16 @@ export class PosCartModalComponent {
       item.itemType !== 'custom' &&
       item.product.has_multiple_price_tiers === true &&
       this.canApplyPricingTier() &&
-      this.availableTiers().length > 0
+      this.visibleTiersForItem(item).length > 0
     );
+  }
+
+  visibleTiersForItem(item: CartItem): PriceTier[] {
+    if (item.itemType === 'custom') return [];
+    const enabledIds = item.product.enabled_price_tier_ids ?? [];
+    if (!Array.isArray(enabledIds) || enabledIds.length === 0) return [];
+    const enabled = new Set(enabledIds.map(Number));
+    return this.availableTiers().filter((tier) => enabled.has(tier.id));
   }
 
   private getOverridesForItem(
@@ -931,7 +940,11 @@ export class PosCartModalComponent {
     const tier =
       tierId == null
         ? null
-        : this.availableTiers().find((t) => t.id === tierId) || null;
+        : this.visibleTiersForItem(item).find((t) => t.id === tierId) || null;
+    if (tierId != null && !tier) {
+      this.toastService.warning('Esta tarifa no está habilitada para el producto');
+      return;
+    }
     const overrides = this.getOverridesForItem(item, tier?.id ?? null);
 
     this.cartService
@@ -950,6 +963,38 @@ export class PosCartModalComponent {
             typeof error === 'string' ? error : 'Error al aplicar tarifa',
           ),
       });
+  }
+
+  getRequiredStockPerUnit(item: CartItem): number {
+    if (
+      item.is_package_unit &&
+      item.product.package_consumes_multiple_stock === true &&
+      item.units_per_package
+    ) {
+      const units = Number(item.units_per_package);
+      return Number.isFinite(units) && units > 1 ? units : 1;
+    }
+    return 1;
+  }
+
+  getQuantityMax(item: CartItem): number {
+    if (item.itemType === 'custom' || item.product.track_inventory === false) {
+      return 999;
+    }
+    const availableStock = this.getAvailableStockForItem(item);
+    const requiredPerUnit = this.getRequiredStockPerUnit(item);
+    return Math.max(0, Math.floor(availableStock / requiredPerUnit));
+  }
+
+  private getAvailableStockForItem(item: CartItem): number {
+    if (item.variant_id) {
+      const variant = item.product.product_variants?.find(
+        (candidate) => Number(candidate.id) === Number(item.variant_id),
+      );
+      if (variant?.track_inventory_override === false) return 999;
+      return Number(variant?.stock ?? 0);
+    }
+    return Number(item.product.stock ?? 0);
   }
 
   onOverlayClick(event: MouseEvent): void {

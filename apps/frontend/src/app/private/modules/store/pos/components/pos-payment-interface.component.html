@@ -18,9 +18,26 @@
       <div class="product-list">
         @for (item of cartState()?.items; track item) {
           <div class="product-item">
-            <span class="product-name">{{ item.product.name }}@if (item.variant_display_name) {
-              <span style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span>
-            }</span>
+            <div class="product-info">
+              <span class="product-name">{{ item.product.name }}@if (item.variant_display_name) {
+                <span style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span>
+              }</span>
+              <div class="product-badges">
+                @if (item.applied_price_tier_id && item.applied_price_tier_name) {
+                  <span
+                    class="tier-badge"
+                    [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
+                  >
+                    {{ item.applied_price_tier_name }}
+                  </span>
+                }
+                @if (item.is_package_unit && item.units_per_package) {
+                  <span class="item-package-badge">
+                    x {{ item.units_per_package }} unid/empaque
+                  </span>
+                }
+              </div>
+            </div>
             @if (item.is_weight_product) {
               <span class="product-qty">
                 {{ item.weight }} {{ item.weight_unit || 'kg' }}

@@ -131,17 +131,51 @@ interface PaymentState {
       .product-item {
         display: flex;
         justify-content: space-between;
-        align-items: center;
+        align-items: flex-start;
+        gap: 8px;
         font-size: 13px;
+      }
+
+      .product-info {
+        display: flex;
+        min-width: 0;
+        flex: 1;
+        flex-direction: column;
+        gap: 4px;
       }
 
       .product-name {
         color: var(--color-text-secondary);
-        flex: 1;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        margin-right: 8px;
+      }
+
+      .product-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .tier-badge,
+      .item-package-badge {
+        display: inline-flex;
+        align-items: center;
+        border-radius: 999px;
+        padding: 1px 6px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.4;
+      }
+
+      .tier-badge {
+        background: #fef3c7;
+        color: #92400e;
+      }
+
+      .item-package-badge {
+        background: #dbeafe;
+        color: #1d4ed8;
       }
 
       .product-qty {
