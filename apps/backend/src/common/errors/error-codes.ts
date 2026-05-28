@@ -2373,6 +2373,39 @@ export const ErrorCodes = {
     devMessage:
       'El sonido está siendo usado por una o más tiendas y no puede eliminarse.',
   },
+
+  // Help Center
+  HELP_ARTICLE_NOT_FOUND: {
+    code: 'HELP_ARTICLE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Help article not found',
+  },
+  HELP_CATEGORY_NOT_FOUND: {
+    code: 'HELP_CATEGORY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Help category not found',
+  },
+  HELP_CATEGORY_HAS_ARTICLES: {
+    code: 'HELP_CATEGORY_HAS_ARTICLES',
+    httpStatus: 409,
+    devMessage: 'Cannot delete category with associated articles',
+  },
+  HELP_IMAGE_REQUIRED: {
+    code: 'HELP_IMAGE_REQUIRED',
+    httpStatus: 400,
+    devMessage: 'Image file is required',
+  },
+  HELP_IMAGE_TYPE_INVALID: {
+    code: 'HELP_IMAGE_TYPE_INVALID',
+    httpStatus: 400,
+    devMessage:
+      'Only image files are allowed (JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC, AVIF)',
+  },
+  HELP_IMAGE_TOO_LARGE: {
+    code: 'HELP_IMAGE_TOO_LARGE',
+    httpStatus: 400,
+    devMessage: 'Image file must be smaller than 10MB',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

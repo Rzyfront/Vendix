@@ -13,9 +13,16 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '@common/services/s3.module';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { QrService } from '@common/services/qr.service';
+import { PromotionsModule } from '../promotions/promotions.module';
 
 @Module({
-  imports: [ResponseModule, InventoryModule, PrismaModule, S3Module],
+  imports: [
+    ResponseModule,
+    InventoryModule,
+    PrismaModule,
+    S3Module,
+    PromotionsModule,
+  ],
   controllers: [
     ProductsController,
     ProductsBulkController,

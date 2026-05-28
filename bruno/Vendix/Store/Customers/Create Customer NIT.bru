@@ -1,0 +1,45 @@
+meta {
+  name: Create Customer NIT
+  type: http
+  seq: 3
+}
+
+post {
+  url: http://{{url}}/store/customers
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "empresa.test.nit@vendix.example",
+    "first_name": "Comercializadora",
+    "last_name": "Andina SAS",
+    "phone": "+57 601 555 0001",
+    "document_type": "NIT",
+    "document_number": "900123456-7"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Customer with NIT created successfully", function() {
+    expect(res.status).to.be.oneOf([200, 201]);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body.data).to.have.property('document_type', 'NIT');
+  });
+
+  test("NIT verification digit hyphen is stripped on persist", function() {
+    expect(res.body.data.document_number).to.equal('9001234567');
+  });
+}
+
+post_response {
+  if (res.status === 200 || res.status === 201) {
+    bru.setVar("createdCustomerIdNIT", res.body.data.id);
+  }
+}

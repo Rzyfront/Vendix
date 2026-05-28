@@ -12,6 +12,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ConfirmationModalComponent } from '../../../../../../shared/components/confirmation-modal/confirmation-modal.component';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-categories-tab',
@@ -202,8 +203,8 @@ export class CategoriesTabComponent implements OnInit {
 
   categoryForm: FormGroup = this.fb.group({
     name: ['', [Validators.required, Validators.maxLength(100)]],
-    description: [''],
-    icon: [''],
+    description: ['', [Validators.maxLength(500)]],
+    icon: ['', [Validators.maxLength(50)]],
     sort_order: [0],
     is_active: [true],
   });
@@ -220,8 +221,9 @@ export class CategoriesTabComponent implements OnInit {
         this.loading.set(false);
       },
       error: (err) => {
-        console.error('Error loading categories', err);
-        this.toast.error('Error al cargar las categorías');
+        const parsed = parseApiError(err);
+        console.error('Error loading categories', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al cargar las categorías');
         this.loading.set(false);
       },
     });
@@ -252,7 +254,11 @@ export class CategoriesTabComponent implements OnInit {
   }
 
   onSaveCategory() {
-    if (this.categoryForm.invalid) return;
+    if (this.categoryForm.invalid) {
+      this.categoryForm.markAllAsTouched();
+      this.toast.error('Revisa los campos marcados.');
+      return;
+    }
 
     this.modalSubmitting.set(true);
     const dto = this.categoryForm.value;
@@ -270,8 +276,9 @@ export class CategoriesTabComponent implements OnInit {
         this.loadCategories();
       },
       error: (err) => {
-        console.error('Error saving category', err);
-        this.toast.error('Error al guardar la categoría');
+        const parsed = parseApiError(err);
+        console.error('Error saving category', parsed.devMessage ?? err);
+        this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al guardar la categoría');
         this.modalSubmitting.set(false);
       },
     });
@@ -292,8 +299,13 @@ export class CategoriesTabComponent implements OnInit {
         this.loadCategories();
       },
       error: (err) => {
-        console.error('Error deleting category', err);
-        this.toast.error('Error al eliminar la categoría. Verifica que no tenga artículos asociados.');
+        const parsed = parseApiError(err);
+        console.error('Error deleting category', parsed.devMessage ?? err);
+        this.toast.error(
+          parsed.errorCode
+            ? parsed.userMessage
+            : 'Error al eliminar la categoría. Verifica que no tenga artículos asociados.',
+        );
       },
     });
   }

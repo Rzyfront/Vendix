@@ -24,6 +24,7 @@ import {
 } from '../../../../../shared/components';
 import { PosCashRegisterService } from '../services/pos-cash-register.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-pos-cash-movement-modal',
@@ -221,9 +222,7 @@ export class PosCashMovementModalComponent {
         },
         error: (err) => {
           this.submitting.set(false);
-          this.toastService.error(
-            err.error?.message || 'Error al registrar movimiento',
-          );
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
   }

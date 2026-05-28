@@ -1,5 +1,4 @@
 import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
-import { DatePipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import {
@@ -14,11 +13,10 @@ import { environment } from '../../../../../../environments/environment';
 import { CustomersService } from '../services/customers.service';
 import { MetadataFieldsService } from '../../data-collection/services/metadata-fields.service';
 import { CustomerHistoryService, ConsultationHistoryEntry } from '../services/customer-history.service';
-import {
-  CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../app/shared/pipes/currency';
-import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { CurrencyPipe } from '../../../../../../app/shared/pipes/currency';
+import { translateCustomerError } from '../utils/customer-error.translator';
+import { getDocumentTypeLabel } from '../../../../../shared/constants/document-types';
+import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 import {
   CardComponent,
   ButtonComponent,
@@ -37,7 +35,6 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
   imports: [
     FormsModule,
     ReactiveFormsModule,
-    DatePipe,
     CurrencyPipe,
     CardComponent,
     ButtonComponent,
@@ -113,28 +110,30 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
               class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 pt-4"
               style="border-top: 1px solid var(--color-border)"
               >
-              @if (customer().document_number) {
-                <div class="flex flex-col gap-1">
-                  <span class="text-xs" style="color: var(--color-text-muted)">Documento</span>
-                  <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
-                    {{ customer().document_type || 'CC' }} {{ customer().document_number }}
-                  </span>
-                </div>
-              }
+              <div class="flex flex-col gap-1">
+                <span class="text-xs" style="color: var(--color-text-muted)">Documento</span>
+                <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
+                  @if (customer().document_number) {
+                    {{ getDocumentLabel(customer().document_type) }} {{ customer().document_number }}
+                  } @else {
+                    Sin documento
+                  }
+                </span>
+              </div>
               <div class="flex flex-col gap-1">
                 <span class="text-xs" style="color: var(--color-text-muted)">Cliente desde</span>
                 <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
-                  {{ customer().created_at | date:'mediumDate' }}
+                  {{ formatDate(customer().created_at) }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
                 <span class="text-xs" style="color: var(--color-text-muted)">Última compra</span>
                 <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
-                  {{ customer().last_order_date ? (customer().last_order_date | date:'mediumDate') : 'Sin compras' }}
+                  {{ customer().last_order_date ? formatDate(customer().last_order_date) : 'Sin compras' }}
                 </span>
               </div>
               <div class="flex flex-col gap-1">
-                <span class="text-xs" style="color: var(--color-text-muted)">Órdenes</span>
+                <span class="text-xs" style="color: var(--color-text-muted)">Pedidos</span>
                 <span class="text-sm font-semibold" style="color: var(--color-text-primary)">
                   {{ customer().total_orders || 0 }}
                 </span>
@@ -220,11 +219,11 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                     <span class="text-xs px-2 py-0.5 rounded-full flex-shrink-0"
                       [style.background]="entry.status === 'completed' ? '#dcfce7' : entry.status === 'confirmed' ? '#dbeafe' : '#fee2e2'"
                       [style.color]="entry.status === 'completed' ? '#166534' : entry.status === 'confirmed' ? '#1e40af' : '#991b1b'">
-                      {{ entry.status }}
+                      {{ getBookingStatusLabel(entry.status) }}
                     </span>
                   </div>
                   <div class="text-xs mt-1" style="color: var(--color-text-muted)">
-                    {{ entry.date | date:'mediumDate' }} · {{ entry.start_time }}
+                    {{ formatDate(entry.date) }} · {{ entry.start_time }}
                     @if (entry.provider) { · {{ entry.provider.display_name }} }
                     </div>
                     <div class="flex gap-2 mt-1.5 flex-wrap">
@@ -264,7 +263,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                     class="text-lg font-bold"
                     style="color: var(--color-text-primary)"
                     >
-                    Wallet
+                    Billetera
                   </h3>
                 </div>
                 @if (wallet()) {
@@ -345,7 +344,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                               <span
                                 class="text-xs block"
                                 style="color: var(--color-text-muted)"
-                                >Balance total</span
+                                >Saldo total</span
                                 >
                                 <span
                                   class="text-xl font-bold"
@@ -367,7 +366,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                     class="font-semibold mb-3"
                                     style="color: var(--color-text-primary)"
                                     >
-                                    Recargar Wallet
+                                    Recargar saldo
                                   </h4>
                                   <form [formGroup]="topUpForm" (ngSubmit)="topUpWallet()">
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -430,7 +429,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                       style="background: var(--color-background); border: 1px solid var(--color-border);"
                                       >
                                       <h4 class="font-semibold mb-3" style="color: var(--color-text-primary)">
-                                        Ajustar Wallet
+                                        Ajustar saldo
                                       </h4>
                                       <form [formGroup]="adjustForm" (ngSubmit)="adjustWallet()">
                                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -556,7 +555,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                       @if (walletHistory().length === 0) {
                                         <app-empty-state
                                           icon="inbox"
-                                          message="No hay movimientos aún"
+                                          message="Sin movimientos en la billetera"
                                         ></app-empty-state>
                                       }
                                       @if (walletHistory().length > 0) {
@@ -622,7 +621,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                                   class="text-xs"
                                                   style="color: var(--color-text-muted)"
                                                   >
-                                                  {{ tx.created_at | date : 'short' }}
+                                                  {{ formatDateTime(tx.created_at) }}
                                                 </p>
                                               </div>
                                             </div>
@@ -653,14 +652,14 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                   >
                                   <app-empty-state
                                     icon="wallet"
-                                    message="Este cliente no tiene wallet aún."
+                                    message="Este cliente aún no tiene billetera."
                                   ></app-empty-state>
                                   <app-button
                                     variant="primary"
                                     size="sm"
                                     class="mt-3"
                                     (clicked)="createAndLoadWallet()"
-                                    >Crear Wallet</app-button
+                                    >Crear billetera</app-button
                                     >
                                   </div>
                                 }
@@ -780,7 +779,9 @@ export class CustomerDetailsComponent {
         },
         error: (err) => {
           this.loadingCustomer.set(false);
-          this.errorMessage.set(extractApiErrorMessage(err));
+          this.errorMessage.set(
+            translateCustomerError(err, 'No se pudo cargar el cliente'),
+          );
         },
       });
   }
@@ -799,7 +800,9 @@ export class CustomerDetailsComponent {
         error: (err) => {
           this.wallet.set(null);
           this.loadingWallet.set(false);
-          this.walletError.set(extractApiErrorMessage(err));
+          this.walletError.set(
+            translateCustomerError(err, 'No se pudo cargar el saldo'),
+          );
         },
       });
   }
@@ -855,7 +858,9 @@ export class CustomerDetailsComponent {
         },
         error: (err) => {
           this.topUpLoading.set(false);
-          this.topUpError.set(extractApiErrorMessage(err));
+          this.topUpError.set(
+            translateCustomerError(err, 'No se pudo recargar el saldo'),
+          );
         },
       });
   }
@@ -894,6 +899,46 @@ export class CustomerDetailsComponent {
     return labels[type] || type;
   }
 
+  getBookingStatusLabel(status: string): string {
+    const labels: Record<string, string> = {
+      pending: 'Pendiente',
+      confirmed: 'Confirmada',
+      completed: 'Completada',
+      cancelled: 'Cancelada',
+      no_show: 'No asistió',
+      in_progress: 'En curso',
+    };
+    return labels[status] || status;
+  }
+
+  getDocumentLabel(code: string | null | undefined): string {
+    return getDocumentTypeLabel(code);
+  }
+
+  formatDate(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    try {
+      return formatDateOnlyUTC(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  formatDateTime(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleString('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return String(value);
+    }
+  }
+
   adjustWallet(): void {
     if (!this.adjustForm.valid || !this.customerId()) return;
     this.adjustLoading.set(true);
@@ -916,7 +961,9 @@ export class CustomerDetailsComponent {
         },
         error: (err) => {
           this.adjustLoading.set(false);
-          this.adjustError.set(extractApiErrorMessage(err));
+          this.adjustError.set(
+            translateCustomerError(err, 'No se pudo ajustar el saldo'),
+          );
         },
       });
   }

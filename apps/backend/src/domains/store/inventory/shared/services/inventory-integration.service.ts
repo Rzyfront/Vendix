@@ -1,5 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
+import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
+import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
+import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
 
 @Injectable()
 export class InventoryIntegrationService {
@@ -260,7 +263,8 @@ export class InventoryIntegrationService {
 
     const stockValue = stockLevels.reduce(
       (sum, stock) =>
-        sum + Number(stock.quantity_on_hand || 0) * Number(stock.cost_per_unit || 0),
+        sum +
+        Number(stock.quantity_on_hand || 0) * Number(stock.cost_per_unit || 0),
       0,
     );
     const stockQty = stockLevels.reduce(
@@ -288,7 +292,8 @@ export class InventoryIntegrationService {
 
     const layerValue = layers.reduce(
       (sum, layer) =>
-        sum + Number(layer.quantity_remaining || 0) * Number(layer.unit_cost || 0),
+        sum +
+        Number(layer.quantity_remaining || 0) * Number(layer.unit_cost || 0),
       0,
     );
     const layerQty = layers.reduce(
@@ -464,8 +469,9 @@ export class InventoryIntegrationService {
       reorderPoint: number;
     }>
   > {
+    const settings = await this.loadMergedSettings();
+
     const where: any = {
-      reorder_point: { not: null },
       inventory_locations: {
         organization_id: organizationId,
       },
@@ -494,9 +500,10 @@ export class InventoryIntegrationService {
     });
 
     // Filter in memory since Prisma doesn't support field-to-field comparison
-    const lowStockItems = stockItems.filter(
-      (item) => item.quantity_available <= (item.reorder_point ?? Infinity),
-    );
+    const lowStockItems = stockItems.filter((item) => {
+      const threshold = resolveStockLevelLowStockThreshold(settings, item);
+      return Number(item.quantity_available ?? 0) <= threshold;
+    });
 
     return lowStockItems.map((item) => ({
       productId: item.product_id,
@@ -504,8 +511,15 @@ export class InventoryIntegrationService {
       locationId: item.location_id,
       locationName: item.inventory_locations.name,
       currentStock: item.quantity_available,
-      reorderPoint: item.reorder_point ?? 0,
+      reorderPoint: resolveStockLevelLowStockThreshold(settings, item),
     }));
+  }
+
+  private async loadMergedSettings(): Promise<StoreSettings> {
+    const row = await this.prisma.store_settings.findFirst({
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 
   /**

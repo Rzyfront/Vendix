@@ -18,6 +18,7 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  ImageLightboxComponent,
 } from '../../../../../../../../shared/components/index';
 
 // Interfaces
@@ -36,6 +37,7 @@ import { ProductCategory } from '../../../../interfaces';
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
+    ImageLightboxComponent,
   ],
   templateUrl: './category-list.component.html',
 })
@@ -66,6 +68,8 @@ export class CategoryListComponent {
 
   searchTerm = signal('');
   selectedStatus = signal('');
+  readonly selectedImageCategory = signal<ProductCategory | null>(null);
+  readonly imagePreviewOpen = signal(false);
 
   filterConfigs: FilterConfig[] = [
     {
@@ -115,6 +119,8 @@ export class CategoryListComponent {
       width: '80px',
       priority: 3,
       defaultValue: '',
+      imageClick: (category: ProductCategory, event: MouseEvent) =>
+        this.openImagePreview(category, event),
     },
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
     { key: 'slug', label: 'Slug', sortable: true, priority: 3 },
@@ -134,8 +140,8 @@ export class CategoryListComponent {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'true': '#d97706',
-          'false': '#6b7280',
+          true: '#d97706',
+          false: '#6b7280',
           Destacada: '#d97706',
           Normal: '#6b7280',
         },
@@ -204,6 +210,8 @@ export class CategoryListComponent {
     titleKey: 'name',
     subtitleKey: 'slug',
     avatarKey: 'image_url',
+    avatarClick: (category: ProductCategory, event: MouseEvent) =>
+      this.openImagePreview(category, event),
     avatarFallbackIcon: 'layers',
     avatarShape: 'square',
     badgeKey: 'state',
@@ -254,6 +262,26 @@ export class CategoryListComponent {
   onRowClick(category: ProductCategory): void {
     if (!this.canUpdate()) return;
     this.edit.emit(category);
+  }
+
+  openImagePreview(category: ProductCategory, event?: MouseEvent): void {
+    event?.stopPropagation();
+    if (!category.image_url) return;
+    this.selectedImageCategory.set(category);
+    this.imagePreviewOpen.set(true);
+  }
+
+  closeImagePreview(): void {
+    this.imagePreviewOpen.set(false);
+    this.selectedImageCategory.set(null);
+  }
+
+  getSelectedImageUrl(): string {
+    return this.selectedImageCategory()?.image_url ?? '';
+  }
+
+  getSelectedImageAlt(): string {
+    return this.selectedImageCategory()?.name || 'Imagen de categoría';
   }
 
   getEmptyStateTitle(): string {

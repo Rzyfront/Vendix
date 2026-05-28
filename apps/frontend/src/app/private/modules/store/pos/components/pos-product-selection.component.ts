@@ -229,7 +229,9 @@ import {
                     </div>
                   }
                   <!-- Stock Badge -->
-                  @if (product.track_inventory !== false && !product.has_variants) {
+                  @if (
+                    product.track_inventory !== false && !product.has_variants
+                  ) {
                     @if (product.is_available === false) {
                       <app-badge
                         variant="error"
@@ -239,7 +241,7 @@ import {
                       >
                         AGOTADO
                       </app-badge>
-                    } @else if (product.stock <= 5) {
+                    } @else if (isProductLowStock(product)) {
                       <app-badge
                         variant="warning"
                         size="xs"
@@ -257,6 +259,17 @@ import {
                       class="absolute top-2 right-2 z-[1]"
                     >
                       Disponible
+                    </app-badge>
+                  }
+                  <!-- Promotion Badge — backend-resolved auto promotion. -->
+                  @if (product.active_promotion) {
+                    <app-badge
+                      variant="success"
+                      size="xs"
+                      badgeStyle="outline"
+                      class="absolute bottom-2 right-2 z-[1]"
+                    >
+                      {{ product.active_promotion.badge_label }}
                     </app-badge>
                   }
                   <!-- Variant Indicator -->
@@ -310,17 +323,38 @@ import {
                   <div class="flex items-center justify-between">
                     <!-- Price -->
                     <div class="flex flex-col">
-                      <span
-                        class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
-                      >
-                        {{ product.final_price | currency }}
-                        @if (product.pricing_type === 'weight') {
+                      @if (hasActivePromoOrSale(product)) {
+                        <div class="flex items-baseline gap-1 flex-wrap">
                           <span
-                            class="text-[10px] font-normal text-text-secondary"
-                            >/{{ defaultWeightUnit() }}</span
+                            class="text-success font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
                           >
-                        }
-                      </span>
+                            {{ promotionalPrice(product) | currency }}
+                            @if (product.pricing_type === 'weight') {
+                              <span
+                                class="text-[10px] font-normal text-text-secondary"
+                                >/{{ defaultWeightUnit() }}</span
+                              >
+                            }
+                          </span>
+                          <span
+                            class="text-[10px] sm:text-xs text-text-muted line-through"
+                          >
+                            {{ product.final_price | currency }}
+                          </span>
+                        </div>
+                      } @else {
+                        <span
+                          class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                        >
+                          {{ product.final_price | currency }}
+                          @if (product.pricing_type === 'weight') {
+                            <span
+                              class="text-[10px] font-normal text-text-secondary"
+                              >/{{ defaultWeightUnit() }}</span
+                            >
+                          }
+                        </span>
+                      }
                       <!-- Stock indicator for non-variant products -->
                       @if (product.track_inventory !== false) {
                         @if (!product.has_variants) {
@@ -329,7 +363,7 @@ import {
                             [class]="
                               product.is_available === false
                                 ? 'text-error font-semibold'
-                                : product.stock <= 5
+                                : isProductLowStock(product)
                                   ? 'text-warning font-medium'
                                   : 'text-text-muted'
                             "
@@ -519,6 +553,7 @@ export class PosProductSelectionComponent {
   readonly scaleEnabled = signal(false);
   readonly defaultWeightUnit = signal<'kg' | 'g' | 'lb'>('kg');
   readonly allowManualWeightEntry = signal(true);
+  readonly lowStockThreshold = signal(10);
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -1032,9 +1067,8 @@ export class PosProductSelectionComponent {
             return;
           }
           const variantLabel =
-            variant?.attributes
-              ?.map((a) => a.attribute_value)
-              .join(' / ') || '';
+            variant?.attributes?.map((a) => a.attribute_value).join(' / ') ||
+            '';
           this.sourcingResponse.set(response);
           this.sourcingProductName.set(product?.name ?? '');
           this.sourcingVariantLabel.set(variantLabel);
@@ -1057,7 +1091,7 @@ export class PosProductSelectionComponent {
 
   private async addToCartNormal(product: any): Promise<void> {
     if (product.track_inventory !== false) {
-      if (product.stock > 0 && product.stock <= 5) {
+      if (product.stock > 0 && this.isProductLowStock(product)) {
         this.toastService.warning(
           `Producto con existencias bajo (${product.stock} unidades restantes)`,
         );
@@ -1262,11 +1296,72 @@ export class PosProductSelectionComponent {
     return this.currencyService.format(amount);
   }
 
+  /**
+   * Cards render the promotional price when the product has either a
+   * backend-resolved auto promotion (`active_promotion`) or an active
+   * `sale_price < base_price`. Both paths are visually consistent —
+   * struck-through original next to the discounted price + a badge.
+   */
+  hasActivePromoOrSale(product: any): boolean {
+    const promo = product?.active_promotion;
+    if (promo && Number(promo.promotional_price) < Number(product.final_price)) {
+      return true;
+    }
+    const salePrice = Number(product?.sale_price);
+    const basePrice = Number(product?.price ?? product?.base_price);
+    return (
+      Number.isFinite(salePrice) &&
+      salePrice > 0 &&
+      Number.isFinite(basePrice) &&
+      salePrice < basePrice &&
+      product?.is_on_sale === true
+    );
+  }
+
+  /**
+   * Resolve the promotional unit price for a card. Prefer the
+   * backend-resolved `active_promotion.promotional_price`; fall back to
+   * `sale_price` when the product is on sale and the promotion is absent.
+   */
+  promotionalPrice(product: any): number {
+    const promo = product?.active_promotion;
+    if (promo && Number.isFinite(Number(promo.promotional_price))) {
+      return Number(promo.promotional_price);
+    }
+    const salePrice = Number(product?.sale_price);
+    if (Number.isFinite(salePrice) && salePrice > 0) {
+      return salePrice;
+    }
+    return Number(product?.final_price ?? 0);
+  }
+
+  isProductLowStock(product: any): boolean {
+    const stock = Number(product?.stock ?? product?.stock_quantity ?? 0);
+    return stock > 0 && stock <= this.getProductLowStockThreshold(product);
+  }
+
+  private getProductLowStockThreshold(product: any): number {
+    const productThreshold = Number(product?.minStock);
+    if (Number.isFinite(productThreshold) && productThreshold >= 0) {
+      return productThreshold;
+    }
+
+    const configuredThreshold = Number(this.lowStockThreshold());
+    return Number.isFinite(configuredThreshold) && configuredThreshold >= 0
+      ? configuredThreshold
+      : 10;
+  }
+
   private loadScaleSettings(): void {
     this.store
       .select(selectStoreSettings)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
+        const threshold = Number(storeSettings?.inventory?.low_stock_threshold);
+        this.lowStockThreshold.set(
+          Number.isFinite(threshold) && threshold >= 0 ? threshold : 10,
+        );
+
         if (storeSettings?.pos?.scale) {
           this.scaleEnabled.set(storeSettings.pos.scale.enabled ?? false);
           this.defaultWeightUnit.set(

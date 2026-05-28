@@ -245,12 +245,31 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   tax_amount?: number = 0;
 
+  /**
+   * @deprecated for final-total purposes. Backend ignores this value when
+   * computing `orders.discount_amount` and `orders.grand_total` — those are
+   * recalculated server-side from `promotion_ids` (manual promotions) +
+   * auto-applied promotions resolved by `PromotionEngineService.quoteDiscounts`
+   * and the coupon (resolved via `CouponsService.validate` using `coupon_code`).
+   *
+   * Frontend may still send this field as a local estimate for UX purposes,
+   * but the backend will overwrite the final values with its own
+   * recalculation. See `PaymentsService.calculatePosPromotionQuote` and
+   * `calculatePosCouponDiscount`.
+   */
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
   @Type(() => Number)
   discount_amount?: number = 0;
 
+  /**
+   * IDs of manual promotions (non auto-applied) the cashier selected.
+   * Backend uses these together with auto-applied promotions in
+   * `PromotionEngineService.quoteDiscounts` to recalculate the final
+   * promotional discount. The frontend MUST send IDs only — never a
+   * precomputed `discount_amount` for these promotions.
+   */
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -263,11 +282,24 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   booking_ids?: number[];
 
+  /**
+   * @deprecated for resolution. Backend resolves the coupon via
+   * `coupon_code` against `CouponsService.validate`. Any `coupon_id` sent
+   * by the client is ignored; the resolved server-side id is what gets
+   * persisted on `orders.coupon_id` and `coupon_uses.coupon_id`.
+   */
   @IsOptional()
   @IsInt()
   @Type(() => Number)
   coupon_id?: number;
 
+  /**
+   * Coupon code applied by the cashier. Backend recalculates the coupon
+   * discount via `CouponsService.validate` using this code; any
+   * frontend-sent `discount_amount` is ignored. If the code is missing,
+   * invalid, or fails business rules, the sale proceeds with zero coupon
+   * discount.
+   */
   @IsOptional()
   @IsString()
   @MaxLength(50)

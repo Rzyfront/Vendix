@@ -9,6 +9,9 @@ import {
   IsDateString,
   Min,
   MaxLength,
+  ValidateIf,
+  ArrayNotEmpty,
+  ArrayUnique,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -80,15 +83,23 @@ export class CreatePromotionDto {
   @Type(() => Number)
   priority?: number = 0;
 
-  @IsOptional()
-  @IsArray()
-  @IsInt({ each: true })
+  @ValidateIf((o) => o.scope === 'product')
+  @IsArray({ message: 'Debes proporcionar la lista de productos' })
+  @ArrayNotEmpty({
+    message: 'Selecciona al menos un producto para esta promocion',
+  })
+  @ArrayUnique({ message: 'No se permiten productos duplicados' })
+  @IsInt({ each: true, message: 'Cada producto debe ser un id valido' })
   @Type(() => Number)
   product_ids?: number[];
 
-  @IsOptional()
-  @IsArray()
-  @IsInt({ each: true })
+  @ValidateIf((o) => o.scope === 'category')
+  @IsArray({ message: 'Debes proporcionar la lista de categorias' })
+  @ArrayNotEmpty({
+    message: 'Selecciona al menos una categoria para esta promocion',
+  })
+  @ArrayUnique({ message: 'No se permiten categorias duplicadas' })
+  @IsInt({ each: true, message: 'Cada categoria debe ser un id valido' })
   @Type(() => Number)
   category_ids?: number[];
 }

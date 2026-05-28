@@ -140,6 +140,9 @@ export class NotificationsDropdownComponent {
 
   private getRouteForNotification(n: AppNotification): string | null {
     const d = n.data;
+    const explicitRoute = this.getSafeRoute(d?.route ?? d?.url);
+    if (explicitRoute) return explicitRoute;
+
     switch (n.type) {
       case 'new_order':
       case 'order_status_change':
@@ -155,6 +158,10 @@ export class NotificationsDropdownComponent {
         return d?.product_id
           ? `/admin/products/edit/${d.product_id}`
           : '/admin/products';
+      case 'new_review':
+        return d?.review_id
+          ? `/admin/customers/reviews?review_id=${d.review_id}`
+          : '/admin/customers/reviews';
       case 'layaway_payment_received':
       case 'layaway_payment_reminder':
       case 'layaway_overdue':
@@ -173,6 +180,12 @@ export class NotificationsDropdownComponent {
     }
   }
 
+  private getSafeRoute(route: unknown): string | null {
+    if (typeof route !== 'string') return null;
+    if (!route.startsWith('/') || route.startsWith('//')) return null;
+    return route;
+  }
+
   getIconForType(type: string): string {
     const map: Record<string, string> = {
       new_order: 'shopping-cart',
@@ -180,6 +193,7 @@ export class NotificationsDropdownComponent {
       low_stock: 'alert-triangle',
       new_customer: 'user-plus',
       payment_received: 'credit-card',
+      new_review: 'star',
       layaway_payment_received: 'credit-card',
       layaway_payment_reminder: 'clock',
       layaway_overdue: 'alert-triangle',

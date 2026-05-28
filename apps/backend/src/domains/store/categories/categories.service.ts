@@ -54,9 +54,12 @@ export class CategoriesService {
       description: createCategoryDto.description,
       store_id: store_id, // Manual injection required for create
       image_url: sanitizedImageUrl,
-      is_featured: createCategoryDto.is_featured ?? false,
       state: 'active',
     };
+
+    if (createCategoryDto.is_featured !== undefined) {
+      categoryData.is_featured = createCategoryDto.is_featured;
+    }
 
     const category = await this.prisma.categories.create({
       data: categoryData,
@@ -187,11 +190,7 @@ export class CategoriesService {
     };
   }
 
-  async remove(
-    id: number,
-    user: any,
-    options: { force?: boolean } = {},
-  ) {
+  async remove(id: number, user: any, options: { force?: boolean } = {}) {
     const category = await this.findOne(id, { includeInactive: true });
 
     const productCount = await this.prisma.product_categories.count({

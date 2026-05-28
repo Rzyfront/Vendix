@@ -1,0 +1,45 @@
+meta {
+  name: Create Customer Duplicate
+  type: http
+  seq: 5
+}
+
+post {
+  url: http://{{url}}/store/customers
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "duplicate.test@vendix.example",
+    "first_name": "Duplicate",
+    "last_name": "Document",
+    "document_type": "CC",
+    "document_number": "1023456001"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Duplicate document returns 409 Conflict", function() {
+    expect(res.status).to.equal(409);
+  });
+
+  test("Error response uses Spanish copy", function() {
+    const message = JSON.stringify(res.body).toLowerCase();
+    expect(message).to.match(/ya existe|este documento|conflict/);
+  });
+
+  test("Error code is SYS_CONFLICT_001", function() {
+    const code = res.body?.error_code
+      ?? res.body?.error?.error_code
+      ?? res.body?.error?.code
+      ?? res.body?.code;
+    expect(code).to.equal('SYS_CONFLICT_001');
+  });
+}

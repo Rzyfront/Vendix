@@ -5,8 +5,9 @@ import {
   inject,
   effect,
   DestroyRef,
-  signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+  signal,
+  computed } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormsModule,
   FormBuilder,
@@ -24,6 +25,11 @@ import {
   IconComponent,
   InputsearchComponent,
   DialogService } from '../../../../../shared/components';
+import {
+  DOCUMENT_TYPES,
+  findDocumentType,
+  DocumentTypeOption,
+} from '../../../../../shared/constants/document-types';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
 import {
@@ -391,7 +397,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 <app-input
                   formControlName="documentNumber"
                   label="Número *"
-                  placeholder="12345678"
+                  [placeholder]="documentNumberPlaceholder()"
                   type="text"
                   [size]="'md'"
                   [error]="getFieldError('documentNumber')"
@@ -544,13 +550,20 @@ export class PosCustomerModalComponent {
   readonly queueLoading = signal(false);
   readonly queueQrData = signal<{ qr_data_url: string; url: string } | null>(null);
 
-  documentTypeOptions = [
-    { value: 'CC', label: 'Cédula de Ciudadanía' },
-    { value: 'NIT', label: 'NIT' },
-    { value: 'CE', label: 'Cédula de Extranjería' },
-    { value: 'PP', label: 'Pasaporte' },
-    { value: 'TI', label: 'Tarjeta de Identidad' },
-  ];
+  /** Opciones del selector derivadas del catálogo compartido (single source of truth). */
+  readonly documentTypeOptions = DOCUMENT_TYPES.map((opt) => ({
+    value: opt.code,
+    label: opt.label,
+  }));
+
+  /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
+  readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
+
+  /** Placeholder dinámico para el input de número de documento. */
+  readonly documentNumberPlaceholder = computed(() => {
+    const type = this.selectedDocumentType();
+    return type?.placeholder ?? '12345678';
+  });
 
   // Document lookup
   documentLookupQuery = '';
@@ -566,8 +579,35 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
 
   constructor() {
     this.customerForm = this.createCustomerForm();
-this.setupFormListeners();
     this.setupSearchSubscription();
+
+    // Bridge document_type valueChanges -> signal (Zoneless-safe reactive read).
+    const documentTypeControl = this.customerForm.controls['documentType'];
+    const documentTypeValue = toSignal(documentTypeControl.valueChanges, {
+      initialValue: documentTypeControl.value as string | null,
+    });
+
+    // Mantener `selectedDocumentType` sincronizado con el FormControl.
+    effect(() => {
+      const code = documentTypeValue();
+      this.selectedDocumentType.set(findDocumentType(code));
+    });
+
+    // Validadores dinámicos del número de documento según el tipo elegido.
+    effect(() => {
+      const ctrl = this.customerForm.controls['documentNumber'];
+      const type = this.selectedDocumentType();
+      if (type) {
+        ctrl.setValidators([
+          Validators.required,
+          Validators.pattern(type.regex),
+          Validators.maxLength(type.maxLength),
+        ]);
+      } else {
+        ctrl.setValidators([Validators.required]);
+      }
+      ctrl.updateValueAndValidity({ emitEvent: false });
+    });
 
     // If customer is provided, populate form for editing
     effect(() => {
@@ -592,23 +632,6 @@ this.setupFormListeners();
       phone: [''],
       documentType: [''],
       documentNumber: ['', [Validators.required]] });
-  }
-
-  private setupFormListeners(): void {
-    // Auto-validate document number when document type changes
-    this.customerForm
-      .get('documentType')
-      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((documentType) => {
-        const documentNumberControl = this.customerForm.get('documentNumber');
-        if (documentType && documentNumberControl) {
-          documentNumberControl.setValidators([
-            Validators.required,
-            Validators.minLength(5),
-          ]);
-          documentNumberControl.updateValueAndValidity();
-        }
-      });
   }
 
   private setupSearchSubscription(): void {

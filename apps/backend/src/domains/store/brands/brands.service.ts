@@ -44,16 +44,21 @@ export class BrandsService {
         ? this.generateSlug(createBrandDto.slug)
         : this.generateSlug(createBrandDto.name);
 
+      const brandData: any = {
+        name: createBrandDto.name,
+        slug,
+        description: createBrandDto.description,
+        logo_url: sanitizedLogoUrl,
+        store_id,
+        state: createBrandDto.state ?? 'active',
+      };
+
+      if (createBrandDto.is_featured !== undefined) {
+        brandData.is_featured = createBrandDto.is_featured;
+      }
+
       const brand = await this.prisma.brands.create({
-        data: {
-          name: createBrandDto.name,
-          slug,
-          description: createBrandDto.description,
-          logo_url: sanitizedLogoUrl,
-          is_featured: createBrandDto.is_featured ?? false,
-          store_id,
-          state: createBrandDto.state ?? 'active',
-        },
+        data: brandData,
       });
 
       return {
@@ -208,11 +213,7 @@ export class BrandsService {
     }
   }
 
-  async remove(
-    id: number,
-    user: any,
-    options: { force?: boolean } = {},
-  ) {
+  async remove(id: number, user: any, options: { force?: boolean } = {}) {
     const brand = await this.findOne(id);
 
     const productCount = await this.prisma.products.count({

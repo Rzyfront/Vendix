@@ -14,6 +14,9 @@ import {
 } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
+import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
+import { resolveProductLowStockThreshold } from '../../inventory/shared/helpers/low-stock-threshold.helper';
 
 @Injectable()
 export class InventoryAnalyticsService {
@@ -23,6 +26,8 @@ export class InventoryAnalyticsService {
   ) {}
 
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
+    const settings = await this.loadMergedSettings();
+
     // Get all products with stock info (store scoping is automatic)
     // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
@@ -49,9 +54,7 @@ export class InventoryAnalyticsService {
       totalSkuCount++;
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
-      const reorderPoint = Number(
-        product.reorder_point || product.min_stock_level || 5,
-      );
+      const reorderPoint = resolveProductLowStockThreshold(settings, product);
 
       totalQuantity += qty;
       totalStockValue += qty * cost;
@@ -83,6 +86,8 @@ export class InventoryAnalyticsService {
   }
 
   async getStockLevels(query: InventoryAnalyticsQueryDto) {
+    const settings = await this.loadMergedSettings();
+
     const productWhere: any = {
       state: 'active',
       track_inventory: true,
@@ -119,9 +124,7 @@ export class InventoryAnalyticsService {
     let results = products.map((product) => {
       const qty = Number(product.stock_quantity || 0);
       const cost = Number(product.cost_price || 0);
-      const reorderPoint = Number(
-        product.reorder_point || product.min_stock_level || 5,
-      );
+      const reorderPoint = resolveProductLowStockThreshold(settings, product);
       const maxStock = Number(product.max_stock_level || 1000);
 
       let status: 'in_stock' | 'low_stock' | 'out_of_stock' | 'overstock';
@@ -180,6 +183,8 @@ export class InventoryAnalyticsService {
   }
 
   async getLowStockAlerts(query: InventoryAnalyticsQueryDto) {
+    const settings = await this.loadMergedSettings();
+
     // track_inventory is Boolean @default(false), not nullable
     const products = await this.prisma.products.findMany({
       where: {
@@ -207,14 +212,12 @@ export class InventoryAnalyticsService {
     const results = products
       .filter((p) => {
         const qty = Number(p.stock_quantity || 0);
-        const reorderPoint = Number(p.reorder_point || p.min_stock_level || 5);
+        const reorderPoint = resolveProductLowStockThreshold(settings, p);
         return qty <= reorderPoint;
       })
       .map((product) => {
         const qty = Number(product.stock_quantity || 0);
-        const reorderPoint = Number(
-          product.reorder_point || product.min_stock_level || 5,
-        );
+        const reorderPoint = resolveProductLowStockThreshold(settings, product);
 
         return {
           product_id: product.id,
@@ -250,6 +253,13 @@ export class InventoryAnalyticsService {
 
     // Non-paginated: respect original limit behavior
     return results.slice(0, query.limit || 100);
+  }
+
+  private async loadMergedSettings(): Promise<StoreSettings> {
+    const row = await this.prisma.store_settings.findFirst({
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 
   async getStockMovements(query: InventoryAnalyticsQueryDto) {
@@ -391,10 +401,7 @@ export class InventoryAnalyticsService {
     );
     const baseClient = this.prisma.withoutScope() as any;
     const asOf = (query as any).as_of ? new Date((query as any).as_of) : null;
-    const storeFilter =
-      scope === 'STORE'
-        ? { store_id: context.store_id }
-        : {};
+    const storeFilter = scope === 'STORE' ? { store_id: context.store_id } : {};
 
     if (scope === 'STORE' && !context.store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);

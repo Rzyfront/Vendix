@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 
 import {
   FormBuilder,
@@ -20,9 +21,11 @@ import {
 import {
   ModalComponent,
   ButtonComponent,
+  IconComponent,
   InputComponent,
   TextareaComponent,
   SettingToggleComponent,
+  ToastService,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
@@ -32,6 +35,7 @@ import {
   UpdateCategoryDto,
 } from '../../../interfaces';
 import { CategoriesService } from '../../../services/categories.service';
+import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
 
 @Component({
   selector: 'app-category-form-modal',
@@ -40,9 +44,11 @@ import { CategoriesService } from '../../../services/categories.service';
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
+    IconComponent,
     InputComponent,
     TextareaComponent,
     SettingToggleComponent,
+    ProductImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -71,14 +77,6 @@ import { CategoriesService } from '../../../services/categories.service';
             ></app-input>
           </div>
 
-          <!-- Image URL -->
-          <app-input
-            label="URL de Imagen"
-            formControlName="image_url"
-            placeholder="https://..."
-            [error]="getError('image_url')"
-          ></app-input>
-
           <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
             <div class="flex items-center gap-3">
               <div
@@ -106,22 +104,16 @@ import { CategoriesService } from '../../../services/categories.service';
                   Se usará en el inicio y en filtros visuales de categorías.
                 </p>
               </div>
-              <input
-                #categoryImageInput
-                type="file"
-                accept="image/*"
-                class="hidden"
-                (change)="onImageSelected($event)"
-              />
               <app-button
                 variant="outline"
                 type="button"
                 size="sm"
                 [loading]="isUploadingImage()"
                 [disabled]="isUploadingImage()"
-                (clicked)="categoryImageInput.click()"
+                (clicked)="openImageSourceModal()"
               >
-                Subir
+                <app-icon slot="icon" name="image" size="16"></app-icon>
+                {{ imagePreviewUrl() ? 'Cambiar' : 'Agregar' }}
               </app-button>
               @if (imagePreviewUrl()) {
                 <app-button
@@ -172,7 +164,7 @@ import { CategoriesService } from '../../../services/categories.service';
             variant="primary"
             type="button"
             [loading]="isSubmitting()"
-            [disabled]="form.invalid || isSubmitting()"
+            [disabled]="form.invalid || isSubmitting() || isUploadingImage()"
             (clicked)="onSubmit()"
           >
             {{ category() ? 'Guardar Cambios' : 'Crear Categoría' }}
@@ -180,6 +172,14 @@ import { CategoriesService } from '../../../services/categories.service';
         </div>
       </div>
     </app-modal>
+
+    <app-product-image-source-modal
+      [isOpen]="isImageSourceModalOpen()"
+      (isOpenChange)="isImageSourceModalOpen.set($event)"
+      [remainingSlots]="1"
+      [allowAiEnhance]="false"
+      (imagesAdded)="onImagesAdded($event)"
+    ></app-product-image-source-modal>
   `,
 })
 export class CategoryFormModalComponent {
@@ -193,9 +193,11 @@ export class CategoryFormModalComponent {
 
   readonly imagePreviewUrl = signal<string | null>(null);
   readonly isUploadingImage = signal(false);
+  readonly isImageSourceModalOpen = signal(false);
 
   form: FormGroup;
   private readonly categoriesService = inject(CategoriesService);
+  private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   constructor(private fb: FormBuilder) {
@@ -259,6 +261,7 @@ export class CategoryFormModalComponent {
   }
 
   onCancel(): void {
+    this.isImageSourceModalOpen.set(false);
     this.cancel.emit();
   }
 
@@ -283,44 +286,63 @@ export class CategoryFormModalComponent {
     if (imageUrl || this.category()) payload.image_url = imageUrl;
 
     payload.state = raw.state ? 'active' : 'inactive';
-    payload.is_featured = !!raw.is_featured;
+
+    const nextFeatured = !!raw.is_featured;
+    const currentFeatured = !!this.category()?.is_featured;
+    if (nextFeatured || (this.category() && nextFeatured !== currentFeatured)) {
+      payload.is_featured = nextFeatured;
+    }
 
     this.save.emit(payload);
   }
 
-  onImageSelected(event: Event): void {
-    const inputElement = event.target as HTMLInputElement;
-    const file = inputElement.files?.[0];
-    if (!file) return;
+  openImageSourceModal(): void {
+    if (this.isUploadingImage()) return;
+    this.isImageSourceModalOpen.set(true);
+  }
 
-    if (!file.type.startsWith('image/')) {
-      inputElement.value = '';
-      return;
-    }
+  async onImagesAdded(images: string[]): Promise<void> {
+    const dataUrl = images?.[0];
+    if (!dataUrl) return;
 
     this.isUploadingImage.set(true);
-    this.categoriesService
-      .uploadCategoryImage(file)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.form.patchValue({ image_url: result.key });
-          this.imagePreviewUrl.set(result.url);
-          this.form.markAsDirty();
-        },
-        error: () => {
-          this.isUploadingImage.set(false);
-        },
-        complete: () => {
-          this.isUploadingImage.set(false);
-          inputElement.value = '';
-        },
-      });
+    try {
+      const file = await this.dataUrlToFile(
+        dataUrl,
+        `category-image-${Date.now()}.jpg`,
+      );
+      const result = await firstValueFrom(
+        this.categoriesService
+          .uploadCategoryImage(file)
+          .pipe(takeUntilDestroyed(this.destroyRef)),
+      );
+
+      this.form.patchValue({ image_url: result.key });
+      this.imagePreviewUrl.set(result.url);
+      this.form.markAsDirty();
+      this.toastService.success('Imagen cargada correctamente');
+    } catch {
+      this.toastService.error('No pudimos cargar la imagen de la categoría');
+    } finally {
+      this.isUploadingImage.set(false);
+    }
   }
 
   removeImage(): void {
     this.form.patchValue({ image_url: '' });
     this.imagePreviewUrl.set(null);
     this.form.markAsDirty();
+  }
+
+  private async dataUrlToFile(
+    dataUrl: string,
+    fileName: string,
+  ): Promise<File> {
+    const response = await fetch(dataUrl);
+    if (!response.ok) {
+      throw new Error('No se pudo preparar la imagen');
+    }
+    const blob = await response.blob();
+    return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
   }
 }

@@ -20,6 +20,7 @@ import {
   CashRegisterMovement,
 } from '../services/pos-cash-register.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-pos-session-close-modal',
@@ -429,9 +430,7 @@ export class PosSessionCloseModalComponent {
         },
         error: (err) => {
           this.submitting.set(false);
-          this.toastService.error(
-            err.error?.message || 'Error al cerrar la caja',
-          );
+          this.toastService.error(extractApiErrorMessage(err));
         },
       });
   }

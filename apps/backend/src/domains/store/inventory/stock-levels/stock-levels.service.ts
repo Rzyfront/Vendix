@@ -9,6 +9,7 @@ import {
   resolveLowStockAlertsScope,
   ResolvedInventoryScope,
 } from '../shared/helpers/pos-stock-scope.helper';
+import { resolveStockLevelLowStockThreshold } from '../shared/helpers/low-stock-threshold.helper';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 
@@ -85,15 +86,13 @@ export class StockLevelsService {
   }
 
   async getStockAlerts(query: StockLevelQueryDto) {
-    const locationFilter = await this.resolveScopedLocationFilter(
-      query.location_id,
-      'low_stock_alerts',
-    );
-    return this.prisma.stock_levels.findMany({
+    const [locationFilter, settings] = await Promise.all([
+      this.resolveScopedLocationFilter(query.location_id, 'low_stock_alerts'),
+      this.loadMergedSettings(),
+    ]);
+
+    const stockLevels = await this.prisma.stock_levels.findMany({
       where: {
-        quantity_available: {
-          lte: this.prisma.stock_levels.fields.reorder_point,
-        },
         product_id: query.product_id,
         ...locationFilter,
       },
@@ -102,6 +101,14 @@ export class StockLevelsService {
         product_variants: true,
         inventory_locations: true,
       },
+    });
+
+    return stockLevels.filter((stockLevel) => {
+      const threshold = resolveStockLevelLowStockThreshold(
+        settings,
+        stockLevel,
+      );
+      return Number(stockLevel.quantity_available ?? 0) <= threshold;
     });
   }
 

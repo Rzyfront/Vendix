@@ -136,6 +136,11 @@ describe('StockLevelManager', () => {
     prismaService = module.get(StorePrismaService);
     transactionsService = module.get(InventoryTransactionsService);
     eventEmitter = module.get(EventEmitter2);
+    prismaService.products.findUnique.mockResolvedValue({
+      track_inventory: true,
+      store_id: 1,
+      name: 'Test Product',
+    } as any);
 
     // Mock RequestContextService
     jest

@@ -66,6 +66,8 @@ const ASPECT_RATIOS: {
   { value: '9:16', label: '9:16', ratio: 9 / 16 },
 ];
 
+const DEFAULT_ASPECT: AspectRatio = 'free';
+
 @Component({
   selector: 'app-product-image-source-modal',
   standalone: true,
@@ -590,7 +592,7 @@ export class ProductImageSourceModalComponent {
   readonly stage = signal<Stage>('select');
   readonly queue = signal<PendingImage[]>([]);
   readonly queueCursor = signal(0);
-  readonly aspect = signal<AspectRatio>('free');
+  readonly aspect = signal<AspectRatio>(DEFAULT_ASPECT);
 
   urlInput = '';
   readonly urlError = signal<string | null>(null);
@@ -678,7 +680,7 @@ export class ProductImageSourceModalComponent {
     this.stage.set('select');
     this.queue.set([]);
     this.queueCursor.set(0);
-    this.aspect.set('free');
+    this.aspect.set(DEFAULT_ASPECT);
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -788,7 +790,7 @@ export class ProductImageSourceModalComponent {
     if (items.length === 0) return;
     this.queue.set(items);
     this.queueCursor.set(0);
-    this.aspect.set('free');
+    this.aspect.set(DEFAULT_ASPECT);
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -803,7 +805,7 @@ export class ProductImageSourceModalComponent {
     this.stage.set('loading');
     this.queue.set([]);
     this.queueCursor.set(0);
-    this.aspect.set('free');
+    this.aspect.set(DEFAULT_ASPECT);
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);
@@ -919,15 +921,15 @@ export class ProductImageSourceModalComponent {
     let w: number;
     let h: number;
     if (ratio === null) {
-      w = c.w * 0.8;
-      h = c.h * 0.8;
+      w = c.w;
+      h = c.h;
     } else {
       const canvasRatio = c.w / c.h;
       if (canvasRatio > ratio) {
-        h = c.h * 0.9;
+        h = c.h;
         w = h * ratio;
       } else {
-        w = c.w * 0.9;
+        w = c.w;
         h = w / ratio;
       }
     }
@@ -1267,7 +1269,7 @@ export class ProductImageSourceModalComponent {
       return;
     }
     this.queueCursor.set(next);
-    this.aspect.set('free');
+    this.aspect.set(DEFAULT_ASPECT);
     this.rotation.set(0);
     this.flipH.set(false);
     this.flipV.set(false);

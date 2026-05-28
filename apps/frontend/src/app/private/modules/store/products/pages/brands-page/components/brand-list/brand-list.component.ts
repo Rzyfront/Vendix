@@ -18,6 +18,7 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  ImageLightboxComponent,
 } from '../../../../../../../../shared/components/index';
 
 // Interfaces
@@ -36,6 +37,7 @@ import { Brand } from '../../../../interfaces';
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
+    ImageLightboxComponent,
   ],
   templateUrl: './brand-list.component.html',
 })
@@ -68,6 +70,8 @@ export class BrandListComponent {
 
   searchTerm = signal('');
   selectedState = signal('');
+  readonly selectedImageBrand = signal<Brand | null>(null);
+  readonly imagePreviewOpen = signal(false);
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -121,6 +125,8 @@ export class BrandListComponent {
       width: '80px',
       priority: 3,
       defaultValue: '',
+      imageClick: (brand: Brand, event: MouseEvent) =>
+        this.openImagePreview(brand, event),
     },
     { key: 'name', label: 'Nombre', sortable: true, priority: 1 },
     { key: 'slug', label: 'Slug', sortable: true, priority: 3 },
@@ -140,8 +146,8 @@ export class BrandListComponent {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'true': '#d97706',
-          'false': '#6b7280',
+          true: '#d97706',
+          false: '#6b7280',
           Destacada: '#d97706',
           Normal: '#6b7280',
         },
@@ -186,8 +192,7 @@ export class BrandListComponent {
         label: (item: Brand) =>
           item.is_featured ? 'Quitar destacado' : 'Destacar',
         icon: 'star',
-        variant: (item: Brand) =>
-          item.is_featured ? 'muted' : 'warning',
+        variant: (item: Brand) => (item.is_featured ? 'muted' : 'warning'),
         tooltip: (item: Brand) =>
           item.is_featured
             ? 'Quitar prioridad en el inicio'
@@ -213,6 +218,8 @@ export class BrandListComponent {
     titleKey: 'name',
     subtitleKey: 'slug',
     avatarKey: 'logo_url',
+    avatarClick: (brand: Brand, event: MouseEvent) =>
+      this.openImagePreview(brand, event),
     avatarFallbackIcon: 'tag',
     avatarShape: 'square',
     badgeKey: 'state',
@@ -265,6 +272,26 @@ export class BrandListComponent {
   onRowClick(brand: Brand): void {
     if (!this.canUpdate()) return;
     this.edit.emit(brand);
+  }
+
+  openImagePreview(brand: Brand, event?: MouseEvent): void {
+    event?.stopPropagation();
+    if (!brand.logo_url) return;
+    this.selectedImageBrand.set(brand);
+    this.imagePreviewOpen.set(true);
+  }
+
+  closeImagePreview(): void {
+    this.imagePreviewOpen.set(false);
+    this.selectedImageBrand.set(null);
+  }
+
+  getSelectedImageUrl(): string {
+    return this.selectedImageBrand()?.logo_url ?? '';
+  }
+
+  getSelectedImageAlt(): string {
+    return this.selectedImageBrand()?.name || 'Logo de marca';
   }
 
   // Helper methods

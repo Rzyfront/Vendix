@@ -27,6 +27,12 @@ import { calculateSchedule } from '../orders/utils/installment-schedule-calculat
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import type {
+  PromotionQuoteInput,
+  PromotionQuoteResult,
+  OrderPromotionSnapshot,
+} from '../promotions/dto';
+import { CouponsService } from '../coupons/coupons.service';
 import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
@@ -49,6 +55,7 @@ export class PaymentsService {
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
     private readonly promotionEngine: PromotionEngineService,
+    private readonly couponsService: CouponsService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
     private readonly paymentEncryption: PaymentEncryptionService,
@@ -631,12 +638,24 @@ export class PaymentsService {
       }
 
       const result = await this.prisma.$transaction(async (tx) => {
-        // 1. Create or update order
-        const order = await this.createOrUpdateOrderFromPos(
+        // 1. Create or update order. Backend recalculates promotions/coupon
+        // server-side and returns the persistence-ready snapshots so this
+        // function can write `order_promotions` + `coupon_uses` consistently.
+        const orderCreation = (await this.createOrUpdateOrderFromPos(
           tx,
           createPosPaymentDto,
           user,
-        );
+        ))!;
+        const order = orderCreation.order;
+        const promotionsSnapshot: OrderPromotionSnapshot[] =
+          orderCreation.promotionsSnapshot ?? [];
+        const appliedPromotionDetails =
+          orderCreation.appliedPromotions ?? [];
+        const couponInfo = orderCreation.couponInfo ?? {
+          coupon_id: null as number | null,
+          coupon_code: null as string | null,
+          discount_amount: 0,
+        };
 
         // 1.5. BLOCKING stock validation using stock_levels (source of truth)
         // Validate ALL items before any reservation occurs
@@ -796,33 +815,25 @@ export class PaymentsService {
           }
         }
 
-        // 1.6. Apply promotions if provided
-        if (createPosPaymentDto.promotion_ids?.length) {
-          for (const promoId of createPosPaymentDto.promotion_ids) {
-            try {
-              const { discount } = await this.promotionEngine.validatePromotion(
-                promoId,
-                createPosPaymentDto.items
-                  .filter((i) => i.product_id)
-                  .map((i) => ({
-                    product_id: i.product_id!,
-                    category_id: i.category_id,
-                    category_ids: i.category_ids,
-                    unit_price: i.final_unit_price ?? i.unit_price,
-                    quantity: i.quantity,
-                  })),
-                createPosPaymentDto.customer_id,
-              );
-              await this.promotionEngine.applyPromotion(
-                order.id,
-                promoId,
-                discount,
-                createPosPaymentDto.customer_id ?? null,
-                tx,
-              );
-            } catch (e) {
-              // Silent: promotion validation failed, continue without it
-            }
+        // 1.6. Persist promotions from the server-recalculated snapshot.
+        // Backend already validated each promotion via `quoteDiscounts` and
+        // the `order_promotions_snapshot` array contains one entry per
+        // applied promotion (manual + auto). Inserting from the snapshot
+        // guarantees `order_promotions.discount_amount` matches the
+        // `orders.discount_amount` totals computed earlier.
+        for (const promo of promotionsSnapshot) {
+          try {
+            await this.promotionEngine.applyPromotion(
+              order.id,
+              promo.promotion_id,
+              promo.discount_amount,
+              createPosPaymentDto.customer_id ?? null,
+              tx,
+            );
+          } catch (e) {
+            this.logger.warn(
+              `[POS] Failed to persist order_promotion for promotion_id=${promo.promotion_id}: ${(e as Error).message}`,
+            );
           }
         }
 
@@ -946,21 +957,22 @@ export class PaymentsService {
           }
         }
 
-        // 5d. Register coupon use if applicable
-        if (
-          createPosPaymentDto.coupon_id &&
-          (createPosPaymentDto.discount_amount ?? 0) > 0
-        ) {
+        // 5d. Register coupon use from the server-recalculated coupon
+        // discount. The frontend's `dto.discount_amount` is intentionally
+        // ignored — only the value returned by `CouponsService.validate`
+        // (computed server-side) is persisted in `coupon_uses`, kept
+        // separate from the promotional discount stored in `order_promotions`.
+        if (couponInfo.coupon_id && couponInfo.discount_amount > 0) {
           await tx.coupon_uses.create({
             data: {
-              coupon_id: createPosPaymentDto.coupon_id,
+              coupon_id: couponInfo.coupon_id,
               order_id: order.id,
               customer_id: createPosPaymentDto.customer_id || null,
-              discount_applied: createPosPaymentDto.discount_amount,
+              discount_applied: couponInfo.discount_amount,
             },
           });
           await tx.coupons.update({
-            where: { id: createPosPaymentDto.coupon_id },
+            where: { id: couponInfo.coupon_id },
             data: { current_uses: { increment: 1 } },
           });
         }
@@ -969,6 +981,29 @@ export class PaymentsService {
         if (createPosPaymentDto.send_email_confirmation) {
           // TODO: Implement email confirmation
         }
+
+        // Persisted discount snapshots — surface them on the response so the
+        // POS confirmation modal can render promotion/coupon detail without
+        // a separate roundtrip. The order detail page also returns these.
+        const appliedPromotionsResponse = appliedPromotionDetails.map((p) => ({
+          promotion_id: p.promotion_id,
+          name: p.name,
+          code: p.code,
+          type: p.type,
+          scope: p.scope,
+          value: p.value,
+          discount_amount: p.discount_amount,
+        }));
+        const appliedCouponsResponse =
+          couponInfo.coupon_id && couponInfo.discount_amount > 0
+            ? [
+                {
+                  coupon_id: couponInfo.coupon_id,
+                  code: couponInfo.coupon_code,
+                  discount_applied: couponInfo.discount_amount,
+                },
+              ]
+            : [];
 
         return {
           success: true,
@@ -987,7 +1022,15 @@ export class PaymentsService {
                 ? 'pending'
                 : 'pending',
             total_amount: order.grand_total,
+            subtotal: order.subtotal_amount,
+            tax_amount: order.tax_amount,
+            discount_amount: order.discount_amount,
+            shipping_cost: order.shipping_cost,
+            applied_promotions: appliedPromotionsResponse,
+            applied_coupons: appliedCouponsResponse,
           },
+          applied_promotions: appliedPromotionsResponse,
+          applied_coupons: appliedCouponsResponse,
           payment: payment
             ? {
                 id: payment.id,
@@ -1260,6 +1303,131 @@ export class PaymentsService {
 
   private roundMoney(value: number): number {
     return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100;
+  }
+
+  /**
+   * Recalculate promotional discounts for a POS sale using `PromotionEngineService.quoteDiscounts`.
+   *
+   * Backend is the source of truth: it ignores any `discount_amount` sent by
+   * the frontend and only honours `promotion_ids` (manual promotions) plus
+   * auto-applied promotions. Returns the full quote result including the
+   * `order_promotions_snapshot` ready to persist 1 row per applied promotion.
+   *
+   * The cart items passed by POS already contain the catalog `final_unit_price`
+   * (tax-inclusive). Promotions in Vendix operate on this same unit price,
+   * matching the legacy behavior in `PromotionEngineService.validatePromotion`.
+   */
+  private async calculatePosPromotionQuote(
+    dto: CreatePosPaymentDto,
+  ): Promise<PromotionQuoteResult> {
+    const input: PromotionQuoteInput = {
+      customer_id: dto.customer_id ?? null,
+      manual_promotion_ids: Array.isArray(dto.promotion_ids)
+        ? dto.promotion_ids
+        : [],
+      items: (dto.items || [])
+        .filter((item) => item.product_id)
+        .map((item, index) => ({
+          line_id: index,
+          product_id: item.product_id as number,
+          variant_id: item.product_variant_id ?? null,
+          category_id: item.category_id ?? null,
+          category_ids: item.category_ids ?? null,
+          unit_price: Number(
+            item.final_unit_price ?? item.unit_price ?? 0,
+          ),
+          quantity: Number(item.quantity || 0),
+        })),
+    };
+
+    try {
+      return await this.promotionEngine.quoteDiscounts(input);
+    } catch (error) {
+      this.logger.warn(
+        `[POS] quoteDiscounts failed, falling back to no-discount: ${
+          (error as Error).message
+        }`,
+      );
+      const subtotal = input.items.reduce(
+        (sum, item) => sum + item.unit_price * item.quantity,
+        0,
+      );
+      return {
+        subtotal: this.roundMoney(subtotal),
+        total_discount: 0,
+        promotional_subtotal: this.roundMoney(subtotal),
+        applied_promotions: [],
+        items: [],
+        order_promotions_snapshot: [],
+      };
+    }
+  }
+
+  /**
+   * Recalculate coupon discount server-side via `CouponsService.validate`.
+   *
+   * Coupons are independent of promotions: their discount stacks on top of the
+   * promotional discount but is capped so the combined discount does not
+   * exceed the items subtotal. Returns an object with the validated
+   * coupon_id/code plus the recalculated `discount_amount` (0 if the coupon
+   * is missing, invalid, or fails business rules — silent failure mirrors
+   * the legacy behavior to avoid breaking POS sales due to coupon issues).
+   */
+  private async calculatePosCouponDiscount(
+    dto: CreatePosPaymentDto,
+    productsSubtotal: number,
+    promotionsDiscount: number,
+  ): Promise<{
+    coupon_id: number | null;
+    coupon_code: string | null;
+    discount_amount: number;
+  }> {
+    const code = (dto.coupon_code || '').trim();
+    if (!code) {
+      return { coupon_id: null, coupon_code: null, discount_amount: 0 };
+    }
+
+    try {
+      const remainingSubtotal = Math.max(
+        0,
+        this.roundMoney(productsSubtotal - promotionsDiscount),
+      );
+      const cartItems = (dto.items || [])
+        .filter((item) => item.product_id)
+        .map((item) => {
+          const unitPrice = Number(item.final_unit_price ?? item.unit_price ?? 0);
+          return {
+            product_id: item.product_id as number,
+            category_id: item.category_id,
+            category_ids: item.category_ids,
+            line_total: this.roundMoney(unitPrice * Number(item.quantity || 0)),
+          };
+        });
+
+      const validation = await this.couponsService.validate({
+        code,
+        cart_subtotal: remainingSubtotal,
+        customer_id: dto.customer_id,
+        items: cartItems,
+      } as any);
+
+      const discount = this.roundMoney(
+        Math.min(validation.discount_amount || 0, remainingSubtotal),
+      );
+
+      return {
+        coupon_id: validation.coupon_id,
+        coupon_code: validation.code,
+        discount_amount: discount,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `[POS] Coupon validation failed for code="${code}": ${
+          (error as Error).message
+        }`,
+      );
+      return { coupon_id: null, coupon_code: null, discount_amount: 0 };
+    }
   }
 
   private roundRate(value: number): number {
@@ -1874,14 +2042,29 @@ export class PaymentsService {
             return sum + Number(item.tax_amount_item || 0) * multiplier;
           }, 0),
         );
-        const discountAmount = this.roundMoney(dto.discount_amount || 0);
+
+        // Backend is the source of truth for promotion and coupon discounts.
+        // Any `dto.discount_amount` sent by the frontend is intentionally
+        // ignored for final totals — it is only kept by the frontend as a
+        // local estimate and is recalculated here via `quoteDiscounts` +
+        // CouponsService.
+        const promotionQuote = await this.calculatePosPromotionQuote(dto);
+        const couponInfo = await this.calculatePosCouponDiscount(
+          dto,
+          calculatedSubtotal,
+          promotionQuote.total_discount,
+        );
+
+        const totalDiscount = this.roundMoney(
+          promotionQuote.total_discount + couponInfo.discount_amount,
+        );
         const shippingCost = this.roundMoney(dto.shipping_cost || 0);
         const grandTotal = this.roundMoney(
           Math.max(
             0,
             calculatedSubtotal +
               calculatedTaxAmount -
-              discountAmount +
+              totalDiscount +
               shippingCost,
           ),
         );
@@ -1897,11 +2080,11 @@ export class PaymentsService {
           channel: 'pos', // POS orders are assigned 'pos' channel
           subtotal_amount: calculatedSubtotal,
           tax_amount: calculatedTaxAmount,
-          discount_amount: discountAmount,
+          discount_amount: totalDiscount,
           grand_total: grandTotal,
           currency: dto.currency,
-          coupon_id: dto.coupon_id || undefined,
-          coupon_code: dto.coupon_code || undefined,
+          coupon_id: couponInfo.coupon_id ?? dto.coupon_id ?? undefined,
+          coupon_code: couponInfo.coupon_code ?? dto.coupon_code ?? undefined,
           billing_address_id: dto.billing_address_id,
           shipping_address_id: dto.shipping_address_id,
           internal_notes: dto.internal_notes,
@@ -1952,7 +2135,12 @@ export class PaymentsService {
           });
         }
 
-        return order;
+        return {
+          order,
+          promotionsSnapshot: promotionQuote.order_promotions_snapshot,
+          appliedPromotions: promotionQuote.applied_promotions,
+          couponInfo,
+        };
       } catch (error) {
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&

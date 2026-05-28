@@ -52,7 +52,10 @@ export class FormatUtils {
   /**
    * Format stock status
    */
-  static formatStockStatus(quantity: number | undefined): {
+  static formatStockStatus(
+    quantity: number | undefined,
+    threshold = 10,
+  ): {
     text: string;
     color: string;
   } {
@@ -60,7 +63,7 @@ export class FormatUtils {
 
     if (qty === 0) {
       return { text: 'Out of Stock', color: 'red' };
-    } else if (qty <= 5) {
+    } else if (qty <= threshold) {
       return { text: `Low Stock (${qty})`, color: 'yellow' };
     } else {
       return { text: `In Stock (${qty})`, color: 'green' };

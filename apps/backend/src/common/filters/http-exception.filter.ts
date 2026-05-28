@@ -32,15 +32,22 @@ export class AllExceptionsFilter implements ExceptionFilter {
       details = resp.details;
     } else if (exception instanceof HttpException) {
       const resp = exception.getResponse() as any;
-      message = resp;
-      if (resp?.error_code) {
-        errorCode = resp.error_code;
-      }
-      // Detect class-validator ValidationPipe errors (array of messages)
-      if (Array.isArray(resp?.message)) {
+      if (resp?.error_code) errorCode = resp.error_code;
+      details = resp?.details;
+
+      const rawMessage =
+        resp && typeof resp === 'object'
+          ? (resp.message ?? resp.error ?? exception.message)
+          : (resp ?? exception.message);
+
+      if (Array.isArray(rawMessage)) {
         errorCode = 'SYS_VALIDATION_001';
-        details = { validationErrors: resp.message };
+        details = { validationErrors: rawMessage };
         message = 'Validation failed';
+      } else if (typeof rawMessage === 'string') {
+        message = rawMessage;
+      } else {
+        message = exception.message || 'Request failed';
       }
     } else {
       errorCode = 'SYS_INTERNAL_001';

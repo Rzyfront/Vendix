@@ -38,6 +38,7 @@ import { PosSessionDetailModalComponent } from '../pos/components/pos-session-de
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { LocationsService } from '../inventory/services/locations.service';
 import { InventoryLocation } from '../inventory/interfaces';
+import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-cash-registers',
@@ -803,7 +804,7 @@ export class CashRegistersComponent {
           this.is_loading_registers.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error('Error al cargar cajas: ' + error.message);
+          this.toast_service.error(extractApiErrorMessage(error));
           this.registers.set([]);
           this.is_loading_registers.set(false);
         },
@@ -821,9 +822,7 @@ export class CashRegistersComponent {
           this.is_loading_sessions.set(false);
         },
         error: (error: any) => {
-          this.toast_service.error(
-            'Error al cargar sesiones: ' + error.message,
-          );
+          this.toast_service.error(extractApiErrorMessage(error));
           this.sessions.set([]);
           this.is_loading_sessions.set(false);
         },
@@ -899,9 +898,7 @@ export class CashRegistersComponent {
       },
       error: (err: any) => {
         this.is_saving_register.set(false);
-        this.toast_service.error(
-          err.error?.message || 'Error al guardar la caja',
-        );
+        this.toast_service.error(extractApiErrorMessage(err));
       },
     });
   }
@@ -926,9 +923,7 @@ export class CashRegistersComponent {
                 this.loadRegisters();
               },
               error: (err: any) => {
-                this.toast_service.error(
-                  err.error?.message || 'Error al desactivar la caja',
-                );
+                this.toast_service.error(extractApiErrorMessage(err));
               },
             });
         }

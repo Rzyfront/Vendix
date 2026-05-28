@@ -195,6 +195,23 @@ import {
                 {{ formatCurrency(summary()?.total || 0) }}
               </span>
             </div>
+
+            <!--
+              Local estimate disclaimer.
+              Backend (PromotionEngineService + CouponsService) is the source
+              of truth for the final discount and grand total. The values
+              shown above are computed locally for UX feedback only and are
+              recalculated server-side when the sale is processed.
+            -->
+            @if (getPromotionDiscounts().length > 0 || getAppliedCoupon()) {
+              <div
+                class="flex items-center gap-1 text-[10px] text-text-secondary/80 italic mt-1"
+                title="Los totales finales se confirman al procesar el pago"
+              >
+                <app-icon name="info" [size]="10"></app-icon>
+                <span>Estimación. El total final se confirma al cobrar.</span>
+              </div>
+            }
           </div>
 
           <!-- Checkout Actions -->

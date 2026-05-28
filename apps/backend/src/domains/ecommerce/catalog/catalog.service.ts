@@ -7,6 +7,11 @@ import { CatalogQueryDto, ProductSortBy } from './dto/catalog-query.dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
+import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
+import type {
+  ActiveProductPromotion,
+  ActivePromotionProductInput,
+} from '../../store/promotions/dto/promotion-quote.interface';
 
 @Injectable()
 export class CatalogService {
@@ -15,6 +20,7 @@ export class CatalogService {
     private readonly storePrisma: StorePrismaService,
     private readonly s3Service: S3Service,
     private readonly priceResolverService: PriceResolverService,
+    private readonly promotionEngine: PromotionEngineService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
@@ -85,8 +91,23 @@ export class CatalogService {
       where.base_price = { ...where.base_price, lte: max_price };
     }
 
+    // `has_discount=true` filters products that should show some kind of
+    // promotional badge on the card. We surface either:
+    //  (a) products with an explicit sale price (is_on_sale = true), or
+    //  (b) products eligible for an active auto-apply promotion by
+    //      scope=product (direct) or scope=category (via product_categories).
+    // Order-scope promotions are not included because they depend on cart
+    // context, not on the product itself.
     if (String(query.has_discount) === 'true') {
-      where.is_on_sale = true;
+      const promotedProductIds =
+        await this.fetchPromotedProductIdsForActiveAutoPromotions();
+      const promotionalIdFilter =
+        promotedProductIds.length > 0
+          ? [{ id: { in: promotedProductIds } }]
+          : [];
+      andFilters.push({
+        OR: [{ is_on_sale: true }, ...promotionalIdFilter],
+      });
     }
 
     if (String(query.is_featured) === 'true') {
@@ -277,8 +298,15 @@ export class CatalogService {
         // O simplemente devolvemos vacío si es muy complejo.
         // Lo mejor: Comportamiento normal (orderBy created_at) para page > 1
       } else {
+        const activePromotionsByProductId =
+          await this.resolveActivePromotionsForListing(finalData);
         const mappedData = await Promise.all(
-          finalData.map((p) => this.mapProductToResponse(p)),
+          finalData.map((p) =>
+            this.mapProductToResponse(
+              p,
+              activePromotionsByProductId.get(p.id) ?? null,
+            ),
+          ),
         );
 
         return {
@@ -337,8 +365,15 @@ export class CatalogService {
       this.prisma.products.count({ where }),
     ]);
 
+    const activePromotionsByProductId =
+      await this.resolveActivePromotionsForListing(data);
     const mappedData = await Promise.all(
-      data.map((product) => this.mapProductToResponse(product)),
+      data.map((product) =>
+        this.mapProductToResponse(
+          product,
+          activePromotionsByProductId.get(product.id) ?? null,
+        ),
+      ),
     );
 
     return {
@@ -616,7 +651,10 @@ export class CatalogService {
       .map((item) => item.product_id as number);
   }
 
-  private async mapProductToResponse(product: any) {
+  private async mapProductToResponse(
+    product: any,
+    activePromotion: ActiveProductPromotion | null = null,
+  ) {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
@@ -647,6 +685,7 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
       stock_quantity: availableStock,
@@ -889,5 +928,112 @@ export class CatalogService {
       (sl: any) => sl.product_variant_id == null,
     );
     return this.sumStockLevelsAvailable(baseLevels);
+  }
+
+  /**
+   * Batch-resolve the active auto-apply promotion for each product in a
+   * listing. Cards display the promotional price computed off the same
+   * tax-inclusive `final_price` they would otherwise show, so the badge
+   * stays visually consistent. Errors are swallowed: the catalog must
+   * never fail because of promotions, the card simply omits the badge.
+   */
+  private async resolveActivePromotionsForListing(
+    products: any[],
+  ): Promise<Map<number, ActiveProductPromotion>> {
+    if (!Array.isArray(products) || products.length === 0) {
+      return new Map();
+    }
+
+    const inputs: ActivePromotionProductInput[] = products
+      .map((product) => {
+        const productId = Number(product?.id);
+        if (!Number.isFinite(productId)) return null;
+        const unitPrice = this.calculateFinalPrice(product);
+        if (!Number.isFinite(unitPrice) || unitPrice <= 0) return null;
+        const categoryIds: number[] = (product.product_categories ?? [])
+          .map((pc: any) => Number(pc?.categories?.id ?? pc?.category_id))
+          .filter((id: number) => Number.isFinite(id));
+        return {
+          product_id: productId,
+          category_ids: categoryIds,
+          unit_price: unitPrice,
+        } as ActivePromotionProductInput;
+      })
+      .filter((value): value is ActivePromotionProductInput => value !== null);
+
+    if (inputs.length === 0) return new Map();
+
+    try {
+      return await this.promotionEngine.findActiveAutoPromotionsForProducts(
+        inputs,
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
+   * Return the product ids covered by at least one active auto-apply
+   * promotion eligible by scope=product or scope=category. Used by the
+   * `has_discount=true` filter so the catalog returns BOTH products with
+   * sale_price and products with an active promotional badge.
+   */
+  private async fetchPromotedProductIdsForActiveAutoPromotions(): Promise<
+    number[]
+  > {
+    const now = new Date();
+
+    // `promotions` and `product_categories` are not scoped by
+    // EcommercePrismaService, so we use storePrisma — which scopes by the
+    // request store via its standard interceptors.
+    const promotions = await this.storePrisma.promotions.findMany({
+      where: {
+        state: { in: ['active', 'scheduled'] },
+        start_date: { lte: now },
+        OR: [{ end_date: null }, { end_date: { gte: now } }],
+        is_auto_apply: true,
+        scope: { in: ['product', 'category'] },
+      },
+      select: {
+        scope: true,
+        promotion_products: { select: { product_id: true } },
+        promotion_categories: { select: { category_id: true } },
+      },
+    });
+
+    if (promotions.length === 0) return [];
+
+    const directProductIds = new Set<number>();
+    const categoryIds = new Set<number>();
+    for (const promo of promotions) {
+      if (promo.scope === 'product') {
+        for (const pp of promo.promotion_products) {
+          if (Number.isFinite(pp.product_id)) {
+            directProductIds.add(Number(pp.product_id));
+          }
+        }
+      } else if (promo.scope === 'category') {
+        for (const pc of promo.promotion_categories) {
+          if (Number.isFinite(pc.category_id)) {
+            categoryIds.add(Number(pc.category_id));
+          }
+        }
+      }
+    }
+
+    if (categoryIds.size > 0) {
+      const categoryProductLinks =
+        await this.storePrisma.product_categories.findMany({
+          where: { category_id: { in: Array.from(categoryIds) } },
+          select: { product_id: true },
+        });
+      for (const link of categoryProductLinks) {
+        if (Number.isFinite(link.product_id)) {
+          directProductIds.add(Number(link.product_id));
+        }
+      }
+    }
+
+    return Array.from(directProductIds);
   }
 }

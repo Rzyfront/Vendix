@@ -11,6 +11,7 @@ const NOTIFICATION_TYPES = [
   'layaway_overdue',
   'layaway_completed',
   'layaway_cancelled',
+  'new_review',
 ] as const;
 
 export class UpdateSubscriptionDto {

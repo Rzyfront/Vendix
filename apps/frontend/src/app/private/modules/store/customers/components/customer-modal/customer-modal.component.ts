@@ -1,4 +1,5 @@
 import { Component, inject, input, output, effect, signal, computed } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -6,7 +7,16 @@ import {
   InputComponent,
   SelectorComponent,
 } from '../../../../../../shared/components';
+import {
+  DOCUMENT_TYPES,
+  findDocumentType,
+  DocumentTypeOption,
+} from '../../../../../../shared/constants/document-types';
 import { Customer, CreateCustomerRequest } from '../../models/customer.model';
+
+// Re-export del traductor centralizado para compatibilidad con consumidores
+// que importaban `translateCustomerError` desde este archivo.
+export { translateCustomerError } from '../../utils/customer-error.translator';
 
 @Component({
   selector: 'app-customer-modal',
@@ -16,7 +26,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent
+    SelectorComponent,
   ],
   template: `
     <app-modal
@@ -24,15 +34,15 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
-      [title]="customer() ? 'Editar cliente' : 'Nuevo cliente'"
+      [title]="modalTitle()"
       subtitle="Administra la información del cliente"
     >
       <form [formGroup]="form" class="space-y-4">
         <!-- Email -->
         <app-input
           formControlName="email"
-          label="Email"
-          placeholder="john.doe@example.com"
+          label="Correo electrónico *"
+          placeholder="cliente@ejemplo.com"
           type="email"
           [required]="true"
           [error]="getFieldError('email')"
@@ -44,8 +54,8 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
         <div class="grid grid-cols-2 gap-4">
           <app-input
             formControlName="first_name"
-            label="Nombre"
-            placeholder="John"
+            label="Nombre *"
+            placeholder="Ej. María"
             [required]="true"
             [error]="getFieldError('first_name')"
             (blur)="onFieldBlur('first_name')"
@@ -54,8 +64,8 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
 
           <app-input
             formControlName="last_name"
-            label="Apellido"
-            placeholder="Rodriguez"
+            label="Apellido *"
+            placeholder="Ej. Rodríguez"
             [required]="true"
             [error]="getFieldError('last_name')"
             (blur)="onFieldBlur('last_name')"
@@ -68,7 +78,7 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
           formControlName="phone"
           label="Teléfono"
           type="tel"
-          placeholder="+57 300 567 8900"
+          placeholder="+57 300 000 0000"
           [error]="getFieldError('phone')"
           (blur)="onFieldBlur('phone')"
           customWrapperClass="mt-0"
@@ -78,15 +88,15 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
         <div class="grid grid-cols-2 gap-4">
           <app-selector
             formControlName="document_type"
-            label="Tipo documento"
-            placeholder="Seleccionar tipo"
-            [options]="documentTypes"
+            label="Tipo de documento"
+            placeholder="Selecciona un tipo"
+            [options]="documentTypeOptions"
           ></app-selector>
 
           <app-input
             formControlName="document_number"
-            label="Nº documento"
-            placeholder="12345678"
+            label="Número de documento"
+            [placeholder]="documentNumberPlaceholder()"
             [error]="getFieldError('document_number')"
             (blur)="onFieldBlur('document_number')"
             customWrapperClass="mt-0"
@@ -103,11 +113,11 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
           [loading]="loading()"
           (clicked)="onSubmit()"
         >
-          {{ customer() ? 'Actualizar' : 'Crear' }}
+          {{ submitLabel() }}
         </app-button>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class CustomerModalComponent {
   private fb = inject(FormBuilder);
@@ -123,11 +133,32 @@ export class CustomerModalComponent {
 
   form: FormGroup;
 
-  documentTypes = [
-    { value: 'DNI', label: 'DNI' },
-    { value: 'PASSPORT', label: 'Passport' },
-    { value: 'LICENSE', label: 'Driver License' }
-  ];
+  /** Opciones (catalog -> SelectorOption shape: value/label). */
+  readonly documentTypeOptions = DOCUMENT_TYPES.map((opt) => ({
+    value: opt.code,
+    label: opt.label,
+  }));
+
+  /** Acceso al catálogo completo si se necesita (placeholder, regex, etc). */
+  readonly documentTypes: ReadonlyArray<DocumentTypeOption> = DOCUMENT_TYPES;
+
+  /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
+  readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
+
+  /** Placeholder dinámico para el input de número de documento. */
+  readonly documentNumberPlaceholder = computed(() => {
+    const type = this.selectedDocumentType();
+    return type?.placeholder ?? 'Selecciona primero el tipo';
+  });
+
+  /** Título del modal según modo crear/editar. */
+  readonly isEditMode = computed(() => this.customer() !== null);
+  readonly modalTitle = computed(() =>
+    this.isEditMode() ? 'Editar cliente' : 'Crear cliente',
+  );
+  readonly submitLabel = computed(() =>
+    this.isEditMode() ? 'Guardar cambios' : 'Crear cliente',
+  );
 
   constructor() {
     this.form = this.fb.group({
@@ -136,10 +167,43 @@ export class CustomerModalComponent {
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       phone: [''],
       document_type: [''],
-      document_number: ['']
+      document_number: [''],
     });
 
-    // Reemplaza ngOnChanges para customer y isOpen
+    // Bridge document_type valueChanges -> signal (Zoneless-safe reactive read).
+    const documentTypeControl = this.form.controls['document_type'];
+    const documentTypeValue = toSignal(documentTypeControl.valueChanges, {
+      initialValue: documentTypeControl.value as string | null,
+    });
+
+    // Mantener `selectedDocumentType` sincronizado con el FormControl.
+    effect(() => {
+      const code = documentTypeValue();
+      this.selectedDocumentType.set(findDocumentType(code));
+    });
+
+    // Validadores dinámicos del número de documento según el tipo elegido.
+    effect(() => {
+      const ctrl = this.form.controls['document_number'];
+      const type = this.selectedDocumentType();
+      if (type) {
+        ctrl.setValidators([
+          Validators.pattern(type.regex),
+          Validators.maxLength(type.maxLength),
+        ]);
+        if (ctrl.disabled) {
+          ctrl.enable({ emitEvent: false });
+        }
+      } else {
+        ctrl.clearValidators();
+        if (!ctrl.disabled) {
+          ctrl.disable({ emitEvent: false });
+        }
+      }
+      ctrl.updateValueAndValidity({ emitEvent: false });
+    });
+
+    // Reemplaza ngOnChanges para customer y isOpen.
     effect(() => {
       const customer = this.customer();
       if (customer) {
@@ -149,7 +213,7 @@ export class CustomerModalComponent {
           last_name: customer.last_name,
           phone: customer.phone,
           document_type: customer.document_type,
-          document_number: customer.document_number
+          document_number: customer.document_number,
         });
       }
     });
@@ -173,7 +237,10 @@ export class CustomerModalComponent {
 
   onSubmit() {
     if (this.form.valid) {
-      this.save.emit(this.form.value);
+      // `getRawValue()` para incluir controles deshabilitados (document_number
+      // se deshabilita cuando no hay tipo seleccionado, pero igual queremos
+      // emitir el valor actual del formulario).
+      this.save.emit(this.form.getRawValue() as CreateCustomerRequest);
     } else {
       this.form.markAllAsTouched();
     }
@@ -181,11 +248,51 @@ export class CustomerModalComponent {
 
   getFieldError(field: string): string {
     const control = this.form.get(field);
-    if (control?.touched && control?.errors) {
-      if (control.errors['required']) return 'This field is required';
-      if (control.errors['email']) return 'Invalid email address';
-      if (control.errors['minlength']) return `Min length is ${control.errors['minlength'].requiredLength}`;
+    if (!control?.touched || !control?.errors) return '';
+
+    const errors = control.errors;
+
+    if (errors['required']) {
+      switch (field) {
+        case 'email':
+          return 'El correo es obligatorio';
+        case 'first_name':
+          return 'El nombre es obligatorio';
+        case 'last_name':
+          return 'El apellido es obligatorio';
+        default:
+          return 'Este campo es obligatorio';
+      }
     }
+
+    if (errors['email']) {
+      return 'Ingresa un correo válido';
+    }
+
+    if (errors['minlength']) {
+      switch (field) {
+        case 'first_name':
+          return 'El nombre debe tener al menos 2 caracteres';
+        case 'last_name':
+          return 'El apellido debe tener al menos 2 caracteres';
+        default:
+          return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres`;
+      }
+    }
+
+    if (errors['maxlength']) {
+      const type = this.selectedDocumentType();
+      if (field === 'document_number' && type) {
+        return `Máximo ${type.maxLength} caracteres`;
+      }
+      return `Máximo ${errors['maxlength'].requiredLength} caracteres`;
+    }
+
+    if (errors['pattern'] && field === 'document_number') {
+      const type = this.selectedDocumentType();
+      return `Número de documento inválido para ${type?.label ?? 'el tipo seleccionado'}`;
+    }
+
     return '';
   }
 

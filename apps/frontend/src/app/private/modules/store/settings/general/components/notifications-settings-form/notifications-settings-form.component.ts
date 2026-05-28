@@ -1,4 +1,13 @@
-import {Component, OnInit, effect, inject, input, output, DestroyRef, computed} from '@angular/core';
+import {
+  Component,
+  OnInit,
+  effect,
+  inject,
+  input,
+  output,
+  DestroyRef,
+  computed,
+} from '@angular/core';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 
 import {
@@ -12,10 +21,16 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { NotificationsApiService } from '../../../../../../../core/services/notifications.service';
 import { PushSubscriptionService } from '../../../../../../../core/services/push-subscription.service';
-import { NotificationSoundsCatalogService, NotificationSoundCatalogItem } from '../../../../../../../core/services/notification-sounds-catalog.service';
+import {
+  NotificationSoundsCatalogService,
+  NotificationSoundCatalogItem,
+} from '../../../../../../../core/services/notification-sounds-catalog.service';
 
 export interface NotificationsSettings {
   email_enabled: boolean;
@@ -84,6 +99,7 @@ export class NotificationsSettingsForm implements OnInit {
     low_stock: true,
     new_customer: true,
     payment_received: true,
+    new_review: true,
   };
 
   subscriptionLabels: Record<string, string> = {
@@ -92,6 +108,7 @@ export class NotificationsSettingsForm implements OnInit {
     low_stock: 'Stock bajo',
     new_customer: 'Nuevos clientes',
     payment_received: 'Pagos recibidos',
+    new_review: 'Nuevas reseñas',
   };
 
   form: FormGroup = new FormGroup({
@@ -233,19 +250,22 @@ export class NotificationsSettingsForm implements OnInit {
   }
 
   loadSubscriptions() {
-    this.notificationsApi.getSubscriptions().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response: any) => {
-        const subs = response?.data || [];
-        for (const sub of subs) {
-          if (sub.type in this.subscriptions) {
-            this.subscriptions[sub.type] = sub.in_app;
+    this.notificationsApi
+      .getSubscriptions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const subs = response?.data || [];
+          for (const sub of subs) {
+            if (sub.type in this.subscriptions) {
+              this.subscriptions[sub.type] = sub.in_app;
+            }
           }
-        }
-      },
-      error: () => {
-        // Silently fail — subscriptions will use defaults
-      },
-    });
+        },
+        error: () => {
+          // Silently fail — subscriptions will use defaults
+        },
+      });
   }
 
   get devicePushDescription(): string {
@@ -261,7 +281,8 @@ export class NotificationsSettingsForm implements OnInit {
     this.subscriptions[type] = !this.subscriptions[type];
     this.notificationsApi
       .updateSubscription({ type, in_app: this.subscriptions[type] })
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
   }
 
   async onDevicePushToggle() {

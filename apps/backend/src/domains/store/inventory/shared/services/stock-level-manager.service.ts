@@ -11,6 +11,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
+import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
+import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
 
 export interface UpdateStockParams {
   product_id: number;
@@ -97,7 +100,7 @@ export class StockLevelManager {
     // Skip stock operations for products that don't track inventory
     const productForTracking = await prisma.products.findUnique({
       where: { id: params.product_id },
-      select: { track_inventory: true },
+      select: { track_inventory: true, store_id: true, name: true },
     });
 
     if (!productForTracking || !productForTracking.track_inventory) {
@@ -234,20 +237,23 @@ export class StockLevelManager {
     } as StockUpdatedEvent);
 
     // 9. Emitir alerta de stock bajo si aplica
-    const low_threshold = existing_stock_level.reorder_point ?? 5;
+    const settings = await this.loadMergedSettingsForStore(
+      prisma,
+      productForTracking.store_id,
+    );
+    const low_threshold = resolveStockLevelLowStockThreshold(
+      settings,
+      existing_stock_level,
+    );
     if (
       updated_stock.quantity_available <= low_threshold &&
       updated_stock.quantity_available >= 0
     ) {
-      const product = await prisma.products.findUnique({
-        where: { id: params.product_id },
-        select: { name: true, store_id: true },
-      });
-      if (product?.store_id) {
+      if (productForTracking.store_id) {
         this.eventEmitter.emit('stock.low', {
-          store_id: product.store_id,
+          store_id: productForTracking.store_id,
           product_id: params.product_id,
-          product_name: product.name || 'Producto',
+          product_name: productForTracking.name || 'Producto',
           quantity: updated_stock.quantity_available,
           threshold: low_threshold,
         });
@@ -1382,25 +1388,53 @@ export class StockLevelManager {
    * Verifica puntos de reorden
    */
   async checkReorderPoints(product_id: number): Promise<any[]> {
-    const stock_levels = await this.prisma.stock_levels.findMany({
-      where: {
-        product_id: product_id,
-        reorder_point: { not: null },
-      },
-      include: {
-        inventory_locations: {
-          select: {
-            id: true,
-            name: true,
-            code: true,
+    const [product, stock_levels] = await Promise.all([
+      this.prisma.products.findUnique({
+        where: { id: product_id },
+        select: { store_id: true },
+      }),
+      this.prisma.stock_levels.findMany({
+        where: {
+          product_id: product_id,
+        },
+        include: {
+          inventory_locations: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
           },
         },
-      },
-    });
+      }),
+    ]);
 
-    return stock_levels.filter(
-      (sl) => sl.quantity_available <= (sl.reorder_point || 0),
+    const settings = await this.loadMergedSettingsForStore(
+      this.prisma,
+      product?.store_id,
     );
+    return stock_levels.filter((stockLevel) => {
+      const threshold = resolveStockLevelLowStockThreshold(
+        settings,
+        stockLevel,
+      );
+      return Number(stockLevel.quantity_available ?? 0) <= threshold;
+    });
+  }
+
+  private async loadMergedSettingsForStore(
+    prisma: any,
+    storeId: number | null | undefined,
+  ): Promise<StoreSettings> {
+    if (!storeId || !prisma.store_settings?.findFirst) {
+      return mergeStoreSettingsWithDefaults(undefined);
+    }
+
+    const row = await prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    return mergeStoreSettingsWithDefaults(row?.settings);
   }
 
   async transferBaseStockToVariants(

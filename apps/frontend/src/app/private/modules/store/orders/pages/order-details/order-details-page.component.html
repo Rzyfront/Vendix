@@ -1303,9 +1303,74 @@
                   orderData.subtotal_amount || 0 | currency
                 }}</span>
               </div>
+
+              <!-- Applied promotions (persisted snapshot) -->
+              @if (appliedPromotions().length > 0) {
+                <div class="pt-1 space-y-1.5">
+                  @for (promo of appliedPromotions(); track promo.id) {
+                    <div
+                      class="flex justify-between items-start text-xs sm:text-sm gap-2"
+                    >
+                      <div class="flex items-start gap-1.5 min-w-0">
+                        <app-icon
+                          name="tag"
+                          size="14"
+                          class="text-green-600 mt-0.5 flex-shrink-0"
+                        ></app-icon>
+                        <span class="text-text-secondary truncate">
+                          {{ promo.name }}
+                          @if (promo.code) {
+                            <span class="text-text-secondary/70">
+                              ({{ promo.code }})</span
+                            >
+                          }
+                        </span>
+                      </div>
+                      <span class="font-semibold text-green-600 whitespace-nowrap"
+                        >-{{ promo.discount_amount | currency }}</span
+                      >
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- Applied coupons (persisted snapshot) -->
+              @if (appliedCoupons().length > 0) {
+                <div class="pt-1 space-y-1.5">
+                  @for (cp of appliedCoupons(); track cp.id) {
+                    <div
+                      class="flex justify-between items-start text-xs sm:text-sm gap-2"
+                    >
+                      <div class="flex items-start gap-1.5 min-w-0">
+                        <app-icon
+                          name="ticket"
+                          size="14"
+                          class="text-green-600 mt-0.5 flex-shrink-0"
+                        ></app-icon>
+                        <span class="text-text-secondary truncate">
+                          Cupón
+                          <span class="font-semibold text-gray-900">{{
+                            cp.code
+                          }}</span>
+                          @if (cp.name) {
+                            <span class="text-text-secondary/70">
+                              — {{ cp.name }}</span
+                            >
+                          }
+                        </span>
+                      </div>
+                      <span class="font-semibold text-green-600 whitespace-nowrap"
+                        >-{{ cp.discount_applied | currency }}</span
+                      >
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- Total discount (always shown when > 0; aggregates snapshot or legacy discount_amount) -->
               @if (orderData.discount_amount && orderData.discount_amount > 0) {
                 <div class="flex justify-between items-center text-sm">
-                  <span class="text-text-secondary">Descuento</span>
+                  <span class="text-text-secondary">Descuento total</span>
                   <span class="font-semibold text-green-600"
                     >-{{ orderData.discount_amount || 0 | currency }}</span
                   >

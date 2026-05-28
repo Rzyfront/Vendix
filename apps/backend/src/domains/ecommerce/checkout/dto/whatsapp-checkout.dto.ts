@@ -55,4 +55,13 @@ export class WhatsappCheckoutDto {
   @ValidateNested()
   @Type(() => GuestCheckoutCustomerDto)
   guest_customer?: GuestCheckoutCustomerDto;
+
+  /**
+   * Optional coupon code applied to the WhatsApp checkout. Backend validates
+   * via CouponsService and persists `coupon_uses` + `discount_amount` on the
+   * order. Invalid codes abort the checkout.
+   */
+  @IsOptional()
+  @IsString()
+  coupon_code?: string;
 }

@@ -24,6 +24,7 @@ import {
 } from '../../../../../../shared/components';
 import { Customer } from '../../models/customer.model';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { getDocumentTypeLabel } from '../../../../../../shared/constants/document-types';
 
 @Component({
   selector: 'app-customer-list',
@@ -39,7 +40,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     PaginationComponent,
   ],
   template: `
-    <!-- Customer List Container - Mobile First -->
+    <!-- Contenedor de lista de clientes - Mobile First -->
     <app-card [responsive]="true" [padding]="false" overflow="visible">
       <!-- Search Section: sticky below stats on mobile -->
       <div
@@ -78,7 +79,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         </div>
       </div>
 
-      <!-- Loading State -->
+      <!-- Estado de carga -->
       @if (loading()) {
         <div class="p-6 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
@@ -86,7 +87,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         </div>
       }
 
-      <!-- Empty State -->
+      <!-- Estado vacío -->
       @if (!loading() && customers().length === 0) {
         <div class="p-12 text-center text-gray-500">
           <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
@@ -112,7 +113,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             [loading]="loading()"
             [hoverable]="true"
             [striped]="true"
-            [emptyMessage]="'No se encontraron clientes'"
+            [emptyMessage]="'No hay clientes para mostrar'"
             [emptyIcon]="'users'"
             tableSize="md"
           ></app-responsive-data-view>
@@ -192,15 +193,59 @@ export class CustomerListComponent {
   ];
 
   columns: TableColumn[] = [
-    { key: 'first_name', label: 'Nombre', sortable: true, priority: 1 },
-    { key: 'last_name', label: 'Apellido', sortable: true, priority: 1 },
-    { key: 'email', label: 'Correo', sortable: true, priority: 2 },
-    { key: 'phone', label: 'Teléfono', priority: 3 },
-    { key: 'document_number', label: 'Número de ID', priority: 2 },
+    {
+      key: 'first_name',
+      label: 'Cliente',
+      sortable: true,
+      priority: 1,
+      transform: (_val: any, row?: any) => {
+        const parts = [row?.first_name, row?.last_name].filter(Boolean);
+        return parts.length > 0 ? parts.join(' ') : '-';
+      },
+    },
+    {
+      key: 'document_number',
+      label: 'Documento',
+      priority: 2,
+      transform: (_val: any, row?: any) => {
+        const docNumber = row?.document_number;
+        const docType = row?.document_type;
+        if (!docNumber) return 'Sin documento';
+        return docType ? `${getDocumentTypeLabel(docType)} ${docNumber}` : docNumber;
+      },
+    },
+    {
+      key: 'email',
+      label: 'Correo',
+      sortable: true,
+      priority: 2,
+      transform: (val: any) => val || 'Sin correo',
+    },
+    {
+      key: 'phone',
+      label: 'Teléfono',
+      priority: 3,
+      transform: (val: any) => val || 'Sin teléfono',
+    },
     { key: 'total_orders', label: 'Pedidos', sortable: true, priority: 3 },
     {
+      key: 'last_order_date',
+      label: 'Última compra',
+      sortable: true,
+      priority: 3,
+      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : 'Nunca'),
+    },
+    {
+      key: 'state',
+      label: 'Estado',
+      priority: 2,
+      badge: true,
+      badgeConfig: { type: 'status', size: 'sm' },
+      badgeTransform: (v: any) => (v === 'active' ? 'Activo' : 'Inactivo'),
+    },
+    {
       key: 'created_at',
-      label: 'Unido',
+      label: 'Registrado',
       sortable: true,
       priority: 3,
       transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '-'),
@@ -209,17 +254,41 @@ export class CustomerListComponent {
 
   cardConfig: ItemListCardConfig = {
     titleKey: 'first_name',
-    titleTransform: (item: any) => `${item.first_name} ${item.last_name}`,
+    titleTransform: (item: any) => {
+      const parts = [item?.first_name, item?.last_name].filter(Boolean);
+      return parts.length > 0 ? parts.join(' ') : '-';
+    },
     subtitleKey: 'email',
+    subtitleTransform: (item: any) => item?.email || 'Sin correo',
     avatarFallbackIcon: 'user',
     avatarShape: 'circle',
     badgeKey: 'state',
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (v: any) => (v === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'phone', label: 'Teléfono', icon: 'phone' },
-      { key: 'document_number', label: 'Documento', icon: 'credit-card' },
+      {
+        key: 'phone',
+        label: 'Teléfono',
+        icon: 'phone',
+        transform: (v: any) => v || 'Sin teléfono',
+      },
+      {
+        key: 'document_number',
+        label: 'Documento',
+        icon: 'credit-card',
+        transform: (_v: any, item?: any) => {
+          const docNumber = item?.document_number;
+          const docType = item?.document_type;
+          if (!docNumber) return 'Sin documento';
+          return docType ? `${getDocumentTypeLabel(docType)} ${docNumber}` : docNumber;
+        },
+      },
       { key: 'total_orders', label: 'Pedidos' },
+      {
+        key: 'last_order_date',
+        label: 'Última compra',
+        transform: (v: any) => (v ? new Date(v).toLocaleDateString() : 'Nunca'),
+      },
       {
         key: 'created_at',
         label: 'Registrado',
@@ -235,18 +304,21 @@ export class CustomerListComponent {
   actions: TableAction[] = [
     {
       label: 'Ver',
+      tooltip: 'Ver detalle',
       icon: 'eye',
       variant: 'secondary',
       action: (row: any) => this.viewDetail.emit(row),
     },
     {
       label: 'Editar',
+      tooltip: 'Editar',
       icon: 'edit',
       variant: 'info',
       action: (row: any) => this.edit.emit(row),
     },
     {
       label: 'Eliminar',
+      tooltip: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
       action: (row: any) => this.delete.emit(row),

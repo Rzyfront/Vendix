@@ -1439,15 +1439,22 @@ export class ProductCreatePageComponent {
     this.reconcileVariants();
   }
 
-  addAttributeValue(attrIndex: number, event: any): void {
-    const value = event.target.value.trim();
-    if (value) {
-      if (!this.variantAttributes[attrIndex].values.includes(value)) {
-        this.variantAttributes[attrIndex].values.push(value);
-        // Auto-generate variants when attributes change
-        this.reconcileVariants();
-      }
-      event.target.value = '';
+  addAttributeValue(attrIndex: number, event: Event): void {
+    const attr = this.variantAttributes[attrIndex];
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement)) return;
+
+    const value = input.value.trim();
+    if (!attr || !value) return;
+
+    input.value = '';
+
+    if (!attr.values.includes(value)) {
+      attr.values.push(value);
+      // Auto-generate only after the attribute has a name. This keeps
+      // existing variants intact while the user is still configuring a row.
+      if (!attr.name.trim()) return;
+      this.reconcileVariants();
     }
   }
 
@@ -1560,9 +1567,16 @@ export class ProductCreatePageComponent {
     }
   }
 
+  confirmAttributeName(attrIndex: number, event: Event): void {
+    event.preventDefault();
+    this.onAttributeNameBlur(attrIndex);
+  }
+
   onAttributeNameBlur(attrIndex: number): void {
     const attr = this.variantAttributes[attrIndex];
     if (!attr || !attr.name.trim()) return;
+
+    attr.name = attr.name.trim();
 
     // Only reconcile if there are values to generate variants with
     if (attr.values.length > 0) {
@@ -1922,6 +1936,36 @@ export class ProductCreatePageComponent {
     return (this.product?.stock_levels || []).length;
   }
 
+  isStockLevelLowStock(stockLevel: any): boolean {
+    return (
+      Number(stockLevel?.quantity_available ?? 0) <=
+      this.getStockLevelLowStockThreshold(stockLevel)
+    );
+  }
+
+  getStockLevelLowStockThreshold(stockLevel: any): number {
+    const stockLevelThreshold = Number(stockLevel?.reorder_point);
+    if (Number.isFinite(stockLevelThreshold) && stockLevelThreshold > 0) {
+      return stockLevelThreshold;
+    }
+
+    const productThreshold = [
+      this.product?.reorder_point,
+      this.product?.min_stock_level,
+    ]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0);
+
+    if (productThreshold !== undefined) {
+      return productThreshold;
+    }
+
+    const configuredThreshold = Number(this.product?.low_stock_threshold);
+    return Number.isFinite(configuredThreshold) && configuredThreshold >= 0
+      ? configuredThreshold
+      : 10;
+  }
+
   isExpired(date: Date | string): boolean {
     if (!date) return false;
     const expiryDate = new Date(date);
@@ -2239,6 +2283,27 @@ export class ProductCreatePageComponent {
   onHeaderAction(actionId: string): void {
     if (actionId === 'cancel') this.onCancel();
     else if (actionId === 'save') this.onSubmit();
+  }
+
+  preventNativeFormSubmit(event: SubmitEvent): void {
+    event.preventDefault();
+  }
+
+  preventImplicitEnterSubmit(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+
+    const submitSafeTypes = new Set([
+      'button',
+      'checkbox',
+      'file',
+      'radio',
+      'reset',
+      'submit',
+    ]);
+    if (submitSafeTypes.has(target.type)) return;
+
+    event.preventDefault();
   }
 
   onSubmit(): void {
@@ -3134,10 +3199,10 @@ export class ProductCreatePageComponent {
     if (operations.length === 0) return Promise.resolve();
 
     this.isSyncingOverrides.set(true);
-	    return Promise.all(operations)
-	      .then(() => {
-	        this.priceTierCache.invalidateProductOverrides(productId);
-	        // Update snapshots so subsequent edits diff correctly.
+    return Promise.all(operations)
+      .then(() => {
+        this.priceTierCache.invalidateProductOverrides(productId);
+        // Update snapshots so subsequent edits diff correctly.
         const refreshed = this.priceTierRows().map((row) => ({
           ...row,
           initial_override_price: row.override_price,

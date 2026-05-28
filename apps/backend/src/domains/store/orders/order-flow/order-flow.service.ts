@@ -1502,7 +1502,6 @@ export class OrderFlowService {
         amount,
         payment_method: paymentMethodType,
         order_id: orderId,
-        payment_id: 0, // Payment ID not available in this flow
       });
     } catch {
       // Non-critical: don't fail the payment if movement recording fails

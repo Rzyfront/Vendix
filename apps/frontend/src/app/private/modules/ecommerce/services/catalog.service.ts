@@ -4,6 +4,24 @@ import { Observable } from 'rxjs';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
+/**
+ * Promotional descriptor returned by the catalog endpoints for product
+ * cards. Mirrors backend `ActiveProductPromotion`. The card uses
+ * `promotional_price` + `badge_label` for the visual discount; the real
+ * discount is recomputed in backend at checkout.
+ */
+export interface ActiveProductPromotion {
+  id: number;
+  name: string;
+  type: 'percentage' | 'fixed_amount';
+  scope: 'product' | 'category';
+  discount_percentage?: number;
+  discount_amount?: number;
+  promotional_price: number;
+  badge_label: string;
+  priority: number;
+}
+
 export interface EcommerceProduct {
   id: number;
   name: string;
@@ -13,6 +31,7 @@ export interface EcommerceProduct {
   sale_price?: number;
   is_on_sale?: boolean;
   is_featured?: boolean;
+  active_promotion?: ActiveProductPromotion | null;
   sku: string | null;
   stock_quantity: number | null;
   track_inventory?: boolean;

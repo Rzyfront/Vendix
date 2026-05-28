@@ -44,6 +44,29 @@ export interface Order {
   item_count: number;
 }
 
+export interface OrderAppliedPromotion {
+  id: number;
+  promotion_id: number;
+  name: string | null;
+  code: string | null;
+  type: string | null;
+  scope: string | null;
+  value: number | string | null;
+  discount_amount: number | string;
+  created_at: string | null;
+}
+
+export interface OrderAppliedCoupon {
+  id: number;
+  coupon_id: number;
+  code: string | null;
+  name: string | null;
+  discount_type: string | null;
+  discount_value: number | string | null;
+  discount_applied: number | string;
+  used_at: string | null;
+}
+
 export interface OrderDetail extends Order {
   subtotal_amount: number;
   discount_amount: number;
@@ -81,6 +104,9 @@ export interface OrderDetail extends Order {
     product_id: number;
     product_name: string;
   }[];
+  // Persisted discount snapshots — read-only, never recalculated client-side.
+  applied_promotions?: OrderAppliedPromotion[];
+  applied_coupons?: OrderAppliedCoupon[];
 }
 
 @Injectable({

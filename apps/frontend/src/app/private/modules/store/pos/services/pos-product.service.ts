@@ -16,6 +16,25 @@ import {
   StockSourcingSuggestionResponse,
 } from '../models/sourcing.model';
 
+/**
+ * Promotional descriptor surfaced on POS product cards. Mirrors the backend
+ * `ActiveProductPromotion` shape returned by the products listing endpoint.
+ * The card uses `promotional_price` + `badge_label` to render the visual
+ * discount, but the authoritative discount is always re-computed in backend
+ * at checkout via the promotion engine.
+ */
+export interface ActiveProductPromotion {
+  id: number;
+  name: string;
+  type: 'percentage' | 'fixed_amount';
+  scope: 'product' | 'category';
+  discount_percentage?: number;
+  discount_amount?: number;
+  promotional_price: number;
+  badge_label: string;
+  priority: number;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -25,6 +44,7 @@ export interface Product {
   cost?: number;
   is_on_sale?: boolean;
   sale_price?: number | null;
+  active_promotion?: ActiveProductPromotion | null;
   allow_pos_price_override?: boolean;
   category: string;
   category_id?: number | null;
@@ -36,6 +56,9 @@ export interface Product {
   effective_track_inventory?: boolean;
   track_inventory?: boolean;
   minStock: number;
+  min_stock_level?: number | null;
+  reorder_point?: number | null;
+  low_stock_threshold?: number | null;
   image?: string;
   image_url?: string;
   description?: string;
@@ -169,6 +192,14 @@ export class PosProductService {
       | InventorySettings
       | undefined;
     return inventory?.pos_stock_scope ?? 'all_locations';
+  }
+
+  getLowStockThreshold(): number {
+    const inventory = this.storeSettingsFacade.settings()?.inventory as
+      | InventorySettings
+      | undefined;
+    const threshold = Number(inventory?.low_stock_threshold);
+    return Number.isFinite(threshold) && threshold >= 0 ? threshold : 10;
   }
 
   /**
@@ -390,15 +421,15 @@ export class PosProductService {
           v.stock_quantity ??
           (Array.isArray(v.stock_levels) && v.stock_levels.length > 0
             ? v.stock_levels.reduce(
-                (sum: number, sl: any) =>
-                  sum + (sl?.quantity_available ?? 0),
+                (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
                 0,
               )
             : (v.stock ?? 0));
 
         const variantEffectiveTracking =
           v.effective_track_inventory ??
-          (v.track_inventory_override ?? product.track_inventory);
+          v.track_inventory_override ??
+          product.track_inventory;
 
         const variantIsAvailable =
           typeof v.is_available === 'boolean'
@@ -438,10 +469,16 @@ export class PosProductService {
 
       const categories = Array.isArray(product.categories)
         ? product.categories
-        : product.product_categories?.map((pc: any) => pc.categories || pc.category || pc) || [];
+        : product.product_categories?.map(
+            (pc: any) => pc.categories || pc.category || pc,
+          ) || [];
       const categoryIds = categories
         .map((category: any) => Number(category?.id))
         .filter((id: number) => Number.isFinite(id));
+
+      const activePromotion = this.parseActivePromotion(
+        product.active_promotion,
+      );
 
       const transformed = {
         id: product.id?.toString() || '',
@@ -451,9 +488,11 @@ export class PosProductService {
         final_price: parseFloat(
           product.final_price || product.base_price || product.price || 0,
         ),
+        active_promotion: activePromotion,
         allow_pos_price_override: product.allow_pos_price_override === true,
         cost: product.cost_price ? parseFloat(product.cost_price) : undefined,
-        category: categories[0]?.name || product.category?.name || 'Sin categoría',
+        category:
+          categories[0]?.name || product.category?.name || 'Sin categoría',
         category_id: categoryIds[0] ?? null,
         category_ids: categoryIds,
         brand: product.brands?.name || '',
@@ -465,7 +504,10 @@ export class PosProductService {
         is_available: productIsAvailable,
         effective_track_inventory: effectiveTrackInventory ?? true,
         track_inventory: product.track_inventory,
-        minStock: product.min_stock_level || 5,
+        minStock: this.resolveLowStockThreshold(product),
+        min_stock_level: product.min_stock_level ?? null,
+        reorder_point: product.reorder_point ?? null,
+        low_stock_threshold: product.low_stock_threshold ?? null,
         image: imageUrl,
         image_url: imageUrl,
         description: product.description || '',
@@ -691,5 +733,59 @@ export class PosProductService {
   updateStock(productId: string, quantity: number): Observable<Product | null> {
     // This would normally call an endpoint, for now return null
     return of(null).pipe(delay(100));
+  }
+
+  /**
+   * Defensive parser for the `active_promotion` payload that the backend
+   * attaches to listing rows. Returns `null` when the field is missing,
+   * malformed, or numerically invalid so the card can fall back to the
+   * regular price without throwing on legacy/cached responses.
+   */
+  private parseActivePromotion(raw: any): ActiveProductPromotion | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const id = Number(raw.id);
+    const promotionalPrice = Number(raw.promotional_price);
+    if (!Number.isFinite(id) || !Number.isFinite(promotionalPrice)) {
+      return null;
+    }
+    const type = raw.type === 'fixed_amount' ? 'fixed_amount' : 'percentage';
+    const scope = raw.scope === 'category' ? 'category' : 'product';
+    const badgeLabel =
+      typeof raw.badge_label === 'string' && raw.badge_label.length > 0
+        ? raw.badge_label
+        : 'OFERTA';
+
+    return {
+      id,
+      name: typeof raw.name === 'string' ? raw.name : 'Promoción',
+      type,
+      scope,
+      discount_percentage:
+        raw.discount_percentage != null
+          ? Number(raw.discount_percentage)
+          : undefined,
+      discount_amount:
+        raw.discount_amount != null ? Number(raw.discount_amount) : undefined,
+      promotional_price: promotionalPrice,
+      badge_label: badgeLabel,
+      priority: Number.isFinite(Number(raw.priority)) ? Number(raw.priority) : 0,
+    };
+  }
+
+  private resolveLowStockThreshold(product: any): number {
+    const productThreshold = [product.reorder_point, product.min_stock_level]
+      .map((value) => Number(value))
+      .find((value) => Number.isFinite(value) && value > 0);
+
+    if (productThreshold !== undefined) {
+      return productThreshold;
+    }
+
+    const apiThreshold = Number(product.low_stock_threshold);
+    if (Number.isFinite(apiThreshold) && apiThreshold >= 0) {
+      return apiThreshold;
+    }
+
+    return this.getLowStockThreshold();
   }
 }

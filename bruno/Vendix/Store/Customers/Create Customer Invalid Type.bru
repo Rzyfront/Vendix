@@ -1,0 +1,41 @@
+meta {
+  name: Create Customer Invalid Type
+  type: http
+  seq: 4
+}
+
+post {
+  url: http://{{url}}/store/customers
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email": "invalid.type@vendix.example",
+    "first_name": "Test",
+    "last_name": "Invalid",
+    "document_type": "DNI",
+    "document_number": "12345678"
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
+
+tests {
+  test("Invalid document_type is rejected with 400", function() {
+    expect(res.status).to.equal(400);
+  });
+
+  test("Error response mentions document_type", function() {
+    const message = JSON.stringify(res.body);
+    expect(message.toLowerCase()).to.match(/document_type|tipo de documento/);
+  });
+
+  test("No customer is persisted on rejection", function() {
+    expect(res.body).to.not.have.property('data');
+  });
+}

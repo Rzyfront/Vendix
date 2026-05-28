@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
+import { translateCustomerError } from './utils/customer-error.translator';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
 import {
@@ -14,7 +15,6 @@ import {
 import { ToastService, DialogService } from '../../../../shared/components';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
-import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 @Component({
   selector: 'app-customers',
@@ -30,36 +30,36 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
       <!-- Stats Grid -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Total de Clientes"
+          title="Total clientes"
           [value]="stats()?.total_customers || 0"
-          smallText="+12% vs last month"
+          smallText="+12% vs el mes pasado"
           iconName="users"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
         ></app-stats>
 
         <app-stats
-          title="Clientes Activos"
+          title="Clientes activos"
           [value]="stats()?.active_customers || 0"
-          smallText="+5% vs last month"
+          smallText="+5% vs el mes pasado"
           iconName="user-check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
 
         <app-stats
-          title="Nuevos Este Mes"
+          title="Nuevos este mes"
           [value]="stats()?.new_customers_this_month || 0"
-          smallText="+8% vs last month"
+          smallText="+8% vs el mes pasado"
           iconName="user-plus"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
 
         <app-stats
-          title="Ingresos Totales"
+          title="Ingresos totales"
           [value]="formatRevenue(stats()?.total_revenue || 0)"
-          smallText="+15% vs last month"
+          smallText="+15% vs el mes pasado"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -158,7 +158,7 @@ export class CustomersComponent {
         error: (error: any) => {
           console.error('Error loading stats:', error);
           this.toastService.error(
-            extractApiErrorMessage(error),
+            translateCustomerError(error, 'No se pudieron cargar las estadísticas'),
             'Error al cargar estadísticas',
           );
         },
@@ -180,7 +180,7 @@ export class CustomersComponent {
         },
         error: (error) => {
           this.toastService.error(
-            extractApiErrorMessage(error),
+            translateCustomerError(error, 'No se pudieron cargar los clientes'),
             'Error al cargar clientes',
           );
         },
@@ -231,7 +231,9 @@ export class CustomersComponent {
       .subscribe({
         next: () => {
           this.toastService.success(
-            `Cliente ${this.selectedCustomer() ? 'actualizado' : 'creado'} exitosamente`,
+            this.selectedCustomer()
+              ? 'Cliente actualizado correctamente'
+              : 'Cliente creado correctamente',
           );
           this.closeModal();
           this.loadCustomers();
@@ -240,8 +242,10 @@ export class CustomersComponent {
         error: (error) => {
           console.error('Error saving customer:', error);
           this.toastService.error(
-            extractApiErrorMessage(error),
-            `Error al ${this.selectedCustomer() ? 'actualizar' : 'crear'} cliente`,
+            translateCustomerError(error),
+            this.selectedCustomer()
+              ? 'Error al actualizar cliente'
+              : 'Error al crear cliente',
           );
         },
       });
@@ -258,10 +262,11 @@ export class CustomersComponent {
   onDelete(customer: Customer) {
     this.dialogService
       .confirm({
-        title: 'Eliminar Cliente',
-        message: `¿Estás seguro de que quieres eliminar ${customer.first_name} ${customer.last_name}?`,
+        title: '¿Eliminar cliente?',
+        message: `Esta acción no se puede deshacer. Se eliminará a ${customer.first_name} ${customer.last_name}.`,
         confirmVariant: 'danger',
         confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
       })
       .then((confirmed) => {
         if (confirmed) {
@@ -276,7 +281,7 @@ export class CustomersComponent {
               },
               error: (error) => {
                 this.toastService.error(
-                  extractApiErrorMessage(error),
+                  translateCustomerError(error, 'No se pudo eliminar el cliente'),
                   'Error al eliminar cliente',
                 );
               },

@@ -38,8 +38,11 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             placeholder="0.00"
           >
           <p class="text-xs text-text-muted mt-1">
-            Total orden: {{ formatCurrency(totalAmount()) }} · Pagado: {{ formatCurrency(paidAmount()) }}
+            Total orden: {{ formatCurrency(totalAmount()) }} · Pagado: {{ formatCurrency(paidAmount()) }} · Pendiente: {{ formatCurrency(remaining()) }}
           </p>
+          @if (amount > remaining()) {
+            <p class="text-xs text-destructive mt-1">El monto no puede superar el saldo pendiente.</p>
+          }
         </div>
 
         <!-- Date -->
@@ -171,7 +174,7 @@ export class PoPaymentModalComponent {
   }
 
   isValid(): boolean {
-    return this.amount > 0 && !!this.paymentDate;
+    return this.amount > 0 && this.amount <= this.remaining() && !!this.paymentDate;
   }
 
   formatCurrency(value: number): string {

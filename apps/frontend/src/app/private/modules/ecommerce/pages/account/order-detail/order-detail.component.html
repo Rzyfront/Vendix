@@ -320,9 +320,43 @@
               <span>Subtotal</span>
               <span>{{ order.subtotal_amount | currency }}</span>
             </div>
+
+            <!-- Applied promotions (persisted snapshot) -->
+            @for (promo of appliedPromotions(); track promo.id) {
+              <div class="summary-row discount">
+                <span class="discount-label">
+                  <app-icon name="tag" [size]="14"></app-icon>
+                  <span>
+                    {{ promo.name }}
+                    @if (promo.code) {
+                      <small>({{ promo.code }})</small>
+                    }
+                  </span>
+                </span>
+                <span>-{{ promo.discount_amount | currency }}</span>
+              </div>
+            }
+
+            <!-- Applied coupons (persisted snapshot) -->
+            @for (cp of appliedCoupons(); track cp.id) {
+              <div class="summary-row discount">
+                <span class="discount-label">
+                  <app-icon name="ticket" [size]="14"></app-icon>
+                  <span>
+                    Cupón <strong>{{ cp.code }}</strong>
+                    @if (cp.name) {
+                      <small>— {{ cp.name }}</small>
+                    }
+                  </span>
+                </span>
+                <span>-{{ cp.discount_applied | currency }}</span>
+              </div>
+            }
+
+            <!-- Total discount (legacy/fallback or aggregated) -->
             @if (order.discount_amount > 0) {
               <div class="summary-row discount">
-                <span>Descuento</span>
+                <span>Descuento total</span>
                 <span>-{{ order.discount_amount | currency }}</span>
               </div>
             }

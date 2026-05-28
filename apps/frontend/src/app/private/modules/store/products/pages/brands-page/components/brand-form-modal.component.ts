@@ -8,6 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 
 import {
   FormBuilder,
@@ -19,19 +20,18 @@ import {
 // Shared Components
 import {
   ButtonComponent,
+  IconComponent,
   InputComponent,
   ModalComponent,
   SettingToggleComponent,
   TextareaComponent,
+  ToastService,
 } from '../../../../../../../shared/components/index';
 
 // Interfaces
-import {
-  Brand,
-  CreateBrandDto,
-  UpdateBrandDto,
-} from '../../../interfaces';
+import { Brand, CreateBrandDto, UpdateBrandDto } from '../../../interfaces';
 import { BrandsService } from '../../../services/brands.service';
+import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
 
 @Component({
   selector: 'app-brand-form-modal',
@@ -40,9 +40,11 @@ import { BrandsService } from '../../../services/brands.service';
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
+    IconComponent,
     InputComponent,
     TextareaComponent,
     SettingToggleComponent,
+    ProductImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -63,20 +65,12 @@ import { BrandsService } from '../../../services/brands.service';
             [error]="getError('name')"
           ></app-input>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <app-input
-              label="Slug"
-              formControlName="slug"
-              placeholder="nike"
-              [error]="getError('slug')"
-            ></app-input>
-            <app-input
-              label="URL del Logo"
-              formControlName="logo_url"
-              placeholder="https://..."
-              [error]="getError('logo_url')"
-            ></app-input>
-          </div>
+          <app-input
+            label="Slug"
+            formControlName="slug"
+            placeholder="nike"
+            [error]="getError('slug')"
+          ></app-input>
 
           <div class="rounded-lg border border-gray-100 bg-gray-50 p-3">
             <div class="flex items-center gap-3">
@@ -105,22 +99,16 @@ import { BrandsService } from '../../../services/brands.service';
                   Se usará en el inicio y en filtros visuales de marcas.
                 </p>
               </div>
-              <input
-                #brandLogoInput
-                type="file"
-                accept="image/*"
-                class="hidden"
-                (change)="onLogoSelected($event)"
-              />
               <app-button
                 variant="outline"
                 type="button"
                 size="sm"
                 [loading]="isUploadingLogo()"
                 [disabled]="isUploadingLogo()"
-                (clicked)="brandLogoInput.click()"
+                (clicked)="openLogoSourceModal()"
               >
-                Subir
+                <app-icon slot="icon" name="image" size="16"></app-icon>
+                {{ logoPreviewUrl() ? 'Cambiar' : 'Agregar' }}
               </app-button>
               @if (logoPreviewUrl()) {
                 <app-button
@@ -171,7 +159,7 @@ import { BrandsService } from '../../../services/brands.service';
             variant="primary"
             type="button"
             [loading]="isSubmitting()"
-            [disabled]="form.invalid || isSubmitting()"
+            [disabled]="form.invalid || isSubmitting() || isUploadingLogo()"
             (clicked)="onSubmit()"
           >
             {{ brand() ? 'Guardar Cambios' : 'Crear Marca' }}
@@ -179,6 +167,14 @@ import { BrandsService } from '../../../services/brands.service';
         </div>
       </div>
     </app-modal>
+
+    <app-product-image-source-modal
+      [isOpen]="isLogoSourceModalOpen()"
+      (isOpenChange)="isLogoSourceModalOpen.set($event)"
+      [remainingSlots]="1"
+      [allowAiEnhance]="false"
+      (imagesAdded)="onLogoImagesAdded($event)"
+    ></app-product-image-source-modal>
   `,
 })
 export class BrandFormModalComponent {
@@ -192,9 +188,11 @@ export class BrandFormModalComponent {
 
   readonly logoPreviewUrl = signal<string | null>(null);
   readonly isUploadingLogo = signal(false);
+  readonly isLogoSourceModalOpen = signal(false);
 
   form: FormGroup;
   private readonly brandsService = inject(BrandsService);
+  private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   constructor(private fb: FormBuilder) {
@@ -258,6 +256,7 @@ export class BrandFormModalComponent {
   }
 
   onCancel(): void {
+    this.isLogoSourceModalOpen.set(false);
     this.cancel.emit();
   }
 
@@ -282,45 +281,64 @@ export class BrandFormModalComponent {
       description: value.description ? value.description : undefined,
       logo_url: value.logo_url ? value.logo_url : this.brand() ? '' : undefined,
       state: value.state ? 'active' : 'inactive',
-      is_featured: !!value.is_featured,
     };
+
+    const nextFeatured = !!value.is_featured;
+    const currentFeatured = !!this.brand()?.is_featured;
+    if (nextFeatured || (this.brand() && nextFeatured !== currentFeatured)) {
+      payload.is_featured = nextFeatured;
+    }
 
     this.save.emit(payload);
   }
 
-  onLogoSelected(event: Event): void {
-    const inputElement = event.target as HTMLInputElement;
-    const file = inputElement.files?.[0];
-    if (!file) return;
+  openLogoSourceModal(): void {
+    if (this.isUploadingLogo()) return;
+    this.isLogoSourceModalOpen.set(true);
+  }
 
-    if (!file.type.startsWith('image/')) {
-      inputElement.value = '';
-      return;
-    }
+  async onLogoImagesAdded(images: string[]): Promise<void> {
+    const dataUrl = images?.[0];
+    if (!dataUrl) return;
 
     this.isUploadingLogo.set(true);
-    this.brandsService
-      .uploadBrandLogo(file)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          this.form.patchValue({ logo_url: result.key });
-          this.logoPreviewUrl.set(result.url);
-          this.form.markAsDirty();
-        },
-        error: () => {
-          this.isUploadingLogo.set(false);
-        },
-        complete: () => {
-          this.isUploadingLogo.set(false);
-          inputElement.value = '';
-        },
-      });
+    try {
+      const file = await this.dataUrlToFile(
+        dataUrl,
+        `brand-logo-${Date.now()}.jpg`,
+      );
+      const result = await firstValueFrom(
+        this.brandsService
+          .uploadBrandLogo(file)
+          .pipe(takeUntilDestroyed(this.destroyRef)),
+      );
+
+      this.form.patchValue({ logo_url: result.key });
+      this.logoPreviewUrl.set(result.url);
+      this.form.markAsDirty();
+      this.toastService.success('Logo cargado correctamente');
+    } catch {
+      this.toastService.error('No pudimos cargar el logo de la marca');
+    } finally {
+      this.isUploadingLogo.set(false);
+    }
   }
 
   removeLogo(): void {
     this.form.patchValue({ logo_url: '' });
     this.logoPreviewUrl.set(null);
     this.form.markAsDirty();
+  }
+
+  private async dataUrlToFile(
+    dataUrl: string,
+    fileName: string,
+  ): Promise<File> {
+    const response = await fetch(dataUrl);
+    if (!response.ok) {
+      throw new Error('No se pudo preparar la imagen');
+    }
+    const blob = await response.blob();
+    return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
   }
 }

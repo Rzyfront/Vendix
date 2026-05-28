@@ -1,7 +1,8 @@
 import { Component, inject, signal, DestroyRef } from '@angular/core';
-import { DecimalPipe, DatePipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { AdminReviewsService } from './services/reviews.service';
 import { Review, ReviewStats, ReviewFilters } from './models/review.model';
@@ -23,14 +24,14 @@ import {
 import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
-import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { translateCustomerError } from '../utils/customer-error.translator';
+import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-reviews',
   standalone: true,
   imports: [
     DecimalPipe,
-    DatePipe,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -66,7 +67,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         ></app-stats>
 
         <app-stats
-          title="Rating Promedio"
+          title="Calificación promedio"
           [value]="
             stats()!.average_rating !== null
               ? (stats()!.average_rating! | number: '1.1-1') + ' ★'
@@ -132,7 +133,9 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
       }
 
       @if (listError()) {
-        <div class="mx-2 mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700 md:mx-4">
+        <div
+          class="mx-2 mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700 md:mx-4"
+        >
           {{ listError() }}
         </div>
       }
@@ -146,7 +149,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             [cardConfig]="cardConfig"
             [actions]="actions"
             [loading]="loading()"
-            emptyMessage="No hay reseñas registradas"
+            emptyMessage="No hay reseñas para mostrar"
             emptyIcon="star"
             (rowClick)="openDetail($event)"
           ></app-responsive-data-view>
@@ -239,7 +242,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           </div>
 
           <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500">
-            <span>{{ review.created_at | date: 'dd/MM/yyyy' }}</span>
+            <span>{{ formatDate(review.created_at) }}</span>
             <span>{{ review.helpful_count }} votos útiles</span>
             <span [class.text-red-600]="review.report_count > 0">
               {{ review.report_count }} reportes
@@ -302,7 +305,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
                     <p class="mt-1 text-xs text-red-600">
                       {{ report.users?.first_name || 'Cliente' }}
                       {{ report.users?.last_name || '' }} ·
-                      {{ report.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                      {{ formatDateTime(report.created_at) }}
                     </p>
                   </div>
                 }
@@ -349,7 +352,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
                   {{ review.review_responses.content }}
                 </p>
                 <p class="mt-2 text-xs text-blue-600">
-                  {{ review.review_responses.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                  {{ formatDateTime(review.review_responses.created_at) }}
                 </p>
               </div>
             } @else {
@@ -375,11 +378,17 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
                   (click)="submitResponse()"
                 >
                   @if (responseSubmitting()) {
-                    <app-icon name="loader-2" [size]="16" [spin]="true"></app-icon>
+                    <app-icon
+                      name="loader-2"
+                      [size]="16"
+                      [spin]="true"
+                    ></app-icon>
                   } @else {
                     <app-icon name="save" [size]="16"></app-icon>
                   }
-                  {{ responseEditing() ? 'Guardar respuesta' : 'Enviar respuesta' }}
+                  {{
+                    responseEditing() ? 'Guardar respuesta' : 'Enviar respuesta'
+                  }}
                 </button>
               </div>
             }
@@ -400,6 +409,8 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 export class ReviewsComponent {
   private reviewsService = inject(AdminReviewsService);
   private destroyRef = inject(DestroyRef);
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
 
   // State signals
   reviews = signal<Review[]>([]);
@@ -423,6 +434,7 @@ export class ReviewsComponent {
   responseSubmitting = signal(false);
   responseError = signal<string | null>(null);
   listError = signal<string | null>(null);
+  private routedReviewId = signal<number | null>(null);
 
   // Filters
   filters = signal<ReviewFilters>({ page: 1, limit: 10 });
@@ -444,7 +456,7 @@ export class ReviewsComponent {
     },
     {
       key: 'rating',
-      label: 'Rating',
+      label: 'Calificación',
       type: 'select',
       placeholder: 'Todos',
       options: [
@@ -474,7 +486,7 @@ export class ReviewsComponent {
     },
     {
       key: 'rating',
-      label: 'Rating',
+      label: 'Calificación',
       transform: (v: any) => '\u2605'.repeat(v) + '\u2606'.repeat(5 - v),
     },
     {
@@ -501,12 +513,7 @@ export class ReviewsComponent {
     {
       key: 'created_at',
       label: 'Fecha',
-      transform: (v: any) =>
-        new Date(v).toLocaleDateString('es', {
-          day: '2-digit',
-          month: '2-digit',
-          year: 'numeric',
-        }),
+      transform: (v: any) => (v ? formatDateOnlyUTC(v) : ''),
     },
   ];
 
@@ -533,7 +540,7 @@ export class ReviewsComponent {
     detailKeys: [
       {
         key: 'rating',
-        label: 'Rating',
+        label: 'Calificaci\u00f3n',
         transform: (v: any) => '\u2605'.repeat(v) + '\u2606'.repeat(5 - v),
       },
       {
@@ -544,12 +551,7 @@ export class ReviewsComponent {
     footerKey: 'created_at',
     footerLabel: 'Fecha',
     footerStyle: 'prominent',
-    footerTransform: (v: any) =>
-      new Date(v).toLocaleDateString('es', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      }),
+    footerTransform: (v: any) => (v ? formatDateOnlyUTC(v) : ''),
   };
 
   // Table actions
@@ -584,6 +586,7 @@ export class ReviewsComponent {
   ];
 
   constructor() {
+    this.watchRouteReviewId();
     this.loadStats();
     this.loadReviews();
   }
@@ -596,7 +599,13 @@ export class ReviewsComponent {
         next: (res) => {
           this.stats.set(res.data || res);
         },
-        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+        error: (error) =>
+          this.listError.set(
+            translateCustomerError(
+              error,
+              'No se pudieron cargar las estadísticas de reseñas',
+            ),
+          ),
       });
   }
 
@@ -619,7 +628,9 @@ export class ReviewsComponent {
           this.loading.set(false);
         },
         error: (error) => {
-          this.listError.set(extractApiErrorMessage(error));
+          this.listError.set(
+            translateCustomerError(error, 'No se pudieron cargar las reseñas'),
+          );
           this.loading.set(false);
         },
       });
@@ -656,7 +667,10 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+        error: (error) =>
+          this.listError.set(
+            translateCustomerError(error, 'No se pudo aprobar la rese\u00f1a'),
+          ),
       });
   }
 
@@ -670,7 +684,10 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+        error: (error) =>
+          this.listError.set(
+            translateCustomerError(error, 'No se pudo rechazar la rese\u00f1a'),
+          ),
       });
   }
 
@@ -684,7 +701,10 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+        error: (error) =>
+          this.listError.set(
+            translateCustomerError(error, 'No se pudo ocultar la rese\u00f1a'),
+          ),
       });
   }
 
@@ -700,13 +720,20 @@ export class ReviewsComponent {
           this.loadStats();
           this.closeDetail();
         },
-        error: (error) => this.listError.set(extractApiErrorMessage(error)),
+        error: (error) =>
+          this.listError.set(
+            translateCustomerError(error, 'No se pudo eliminar la rese\u00f1a'),
+          ),
       });
   }
 
   openDetail(review: Review): void {
+    this.openDetailById(review.id, review);
+  }
+
+  private openDetailById(reviewId: number, seedReview?: Review): void {
     this.detailOpen.set(true);
-    this.selectedReview.set(review);
+    this.selectedReview.set(seedReview ?? null);
     this.responseContent.set('');
     this.responseEditing.set(false);
     this.responseError.set(null);
@@ -714,7 +741,7 @@ export class ReviewsComponent {
     this.detailLoading.set(true);
 
     this.reviewsService
-      .getOne(review.id)
+      .getOne(reviewId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
@@ -722,7 +749,12 @@ export class ReviewsComponent {
           this.detailLoading.set(false);
         },
         error: (error) => {
-          this.detailError.set(extractApiErrorMessage(error));
+          this.detailError.set(
+            translateCustomerError(
+              error,
+              'No se pudo cargar el detalle de la reseña',
+            ),
+          );
           this.detailLoading.set(false);
         },
       });
@@ -730,10 +762,12 @@ export class ReviewsComponent {
 
   closeDetail(): void {
     this.detailOpen.set(false);
+    this.clearRoutedReviewId();
     this.clearDetailState();
   }
 
   onDetailClosed(): void {
+    this.clearRoutedReviewId();
     this.clearDetailState();
   }
 
@@ -764,21 +798,21 @@ export class ReviewsComponent {
             this.responseContent().trim(),
           );
 
-    request
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.responseSubmitting.set(false);
-          this.responseEditing.set(false);
-          this.responseContent.set('');
-          this.reloadSelectedReview(review.id);
-          this.loadReviews();
-        },
-        error: (error) => {
-          this.responseSubmitting.set(false);
-          this.responseError.set(extractApiErrorMessage(error));
-        },
-      });
+    request.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.responseSubmitting.set(false);
+        this.responseEditing.set(false);
+        this.responseContent.set('');
+        this.reloadSelectedReview(review.id);
+        this.loadReviews();
+      },
+      error: (error) => {
+        this.responseSubmitting.set(false);
+        this.responseError.set(
+          translateCustomerError(error, 'No se pudo guardar la respuesta'),
+        );
+      },
+    });
   }
 
   onDeleteResponse(reviewId: number): void {
@@ -794,7 +828,9 @@ export class ReviewsComponent {
           this.loadReviews();
         },
         error: (error) => {
-          this.responseError.set(extractApiErrorMessage(error));
+          this.responseError.set(
+            translateCustomerError(error, 'No se pudo eliminar la respuesta'),
+          );
         },
       });
   }
@@ -818,9 +854,54 @@ export class ReviewsComponent {
       .subscribe({
         next: (res) => this.selectedReview.set(res.data || res),
         error: (error) => {
-          this.detailError.set(extractApiErrorMessage(error));
+          this.detailError.set(
+            translateCustomerError(
+              error,
+              'No se pudo recargar el detalle de la reseña',
+            ),
+          );
         },
       });
+  }
+
+  private watchRouteReviewId(): void {
+    this.route.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const reviewId = this.parseReviewId(
+          params.get('review_id') ?? params.get('reviewId'),
+        );
+
+        if (!reviewId) {
+          this.routedReviewId.set(null);
+          return;
+        }
+
+        if (this.routedReviewId() === reviewId && this.detailOpen()) return;
+
+        this.routedReviewId.set(reviewId);
+        this.openDetailById(
+          reviewId,
+          this.reviews().find((review) => review.id === reviewId),
+        );
+      });
+  }
+
+  private parseReviewId(value: string | null): number | null {
+    const reviewId = Number(value);
+    return Number.isInteger(reviewId) && reviewId > 0 ? reviewId : null;
+  }
+
+  private clearRoutedReviewId(): void {
+    if (!this.routedReviewId()) return;
+
+    this.routedReviewId.set(null);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { review_id: null, reviewId: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
   }
 
   getStars(rating: number): string {
@@ -847,5 +928,29 @@ export class ReviewsComponent {
       flagged: 'bg-red-100 text-red-800',
     };
     return classes[state] || 'bg-gray-100 text-gray-800';
+  }
+
+  formatDate(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    try {
+      return formatDateOnlyUTC(value);
+    } catch {
+      return String(value);
+    }
+  }
+
+  formatDateTime(value: string | Date | null | undefined): string {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleString('es-CO', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return String(value);
+    }
   }
 }

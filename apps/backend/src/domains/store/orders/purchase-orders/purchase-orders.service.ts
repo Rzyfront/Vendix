@@ -1006,9 +1006,19 @@ export class PurchaseOrdersService {
   // ===== Timeline =====
 
   async getTimeline(purchaseOrderId: number) {
-    const [auditLogs, receptions, payments] = await Promise.all([
+    const [auditLogs, receptions, payments, attachments] = await Promise.all([
       this.prisma.audit_logs.findMany({
         where: { resource: 'purchase_orders', resource_id: purchaseOrderId },
+        include: {
+          users: {
+            select: {
+              id: true,
+              username: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
+        },
         orderBy: { created_at: 'desc' },
       }),
       this.prisma.purchase_order_receptions.findMany({
@@ -1022,6 +1032,18 @@ export class PurchaseOrdersService {
               last_name: true,
             },
           },
+          items: {
+            include: {
+              purchase_order_item: {
+                include: {
+                  products: { select: { id: true, name: true, sku: true } },
+                  product_variants: {
+                    select: { id: true, sku: true, name: true },
+                  },
+                },
+              },
+            },
+          },
         },
         orderBy: { received_at: 'desc' },
       }),
@@ -1029,6 +1051,20 @@ export class PurchaseOrdersService {
         where: { purchase_order_id: purchaseOrderId },
         include: {
           created_by: {
+            select: {
+              id: true,
+              username: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
+        },
+        orderBy: { created_at: 'desc' },
+      }),
+      this.prisma.purchase_order_attachments.findMany({
+        where: { purchase_order_id: purchaseOrderId },
+        include: {
+          uploaded_by: {
             select: {
               id: true,
               username: true,
@@ -1056,6 +1092,11 @@ export class PurchaseOrdersService {
         type: 'payment' as const,
         date: p.created_at,
         data: p,
+      })),
+      ...attachments.map((a) => ({
+        type: 'attachment' as const,
+        date: a.created_at,
+        data: a,
       })),
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 

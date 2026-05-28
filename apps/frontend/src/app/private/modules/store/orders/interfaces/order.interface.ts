@@ -79,6 +79,40 @@ export interface Order {
     phone?: string;
     avatar_url?: string;
   };
+  // Persisted discount snapshots — read-only from backend, never recalculated.
+  order_promotions?: OrderPromotionSnapshot[];
+  coupon_uses?: CouponUseSnapshot[];
+}
+
+export interface OrderPromotionSnapshot {
+  id: number;
+  promotion_id: number;
+  customer_id?: number | null;
+  discount_amount: number | string;
+  created_at?: string | null;
+  promotions?: {
+    id: number;
+    name: string;
+    code?: string | null;
+    type?: 'percentage' | 'fixed_amount' | string | null;
+    scope?: 'order' | 'product' | 'category' | string | null;
+    value?: number | string | null;
+  } | null;
+}
+
+export interface CouponUseSnapshot {
+  id: number;
+  coupon_id: number;
+  customer_id?: number | null;
+  discount_applied: number | string;
+  used_at?: string | null;
+  coupon?: {
+    id: number;
+    code: string;
+    name?: string | null;
+    discount_type?: string | null;
+    discount_value?: number | string | null;
+  } | null;
 }
 
 export interface OrderItem {

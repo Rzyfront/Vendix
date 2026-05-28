@@ -40,7 +40,7 @@ import { PosCustomer } from '../models/customer.model';
         }
 
         <!-- Cash register dot -->
-        @if (cashSession()) {
+        @if (cashSession()?.status === 'open') {
           <span class="relative flex h-2 w-2 flex-shrink-0">
             <span
               class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
@@ -145,7 +145,7 @@ import { PosCustomer } from '../models/customer.model';
           }
 
           <!-- Cash register section -->
-          @if (cashSession()) {
+          @if (cashSession()?.status === 'open') {
             <div class="p-3 space-y-2">
               <div class="flex items-center gap-2">
                 <span class="relative flex h-2.5 w-2.5 flex-shrink-0">

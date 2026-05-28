@@ -30,6 +30,10 @@ import { FiscalStatusService } from '@common/services/fiscal-status.service';
 import { S3Service } from '@common/services/s3.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { CustomersService } from '../../store/customers/customers.service';
+import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
+import { CouponsService } from '../../store/coupons/coupons.service';
+import { CouponAppliesTo } from '../../store/coupons/dto';
+import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
 
 @Injectable()
 export class CheckoutService {
@@ -57,6 +61,8 @@ export class CheckoutService {
     private readonly s3Service: S3Service,
     private readonly s3PathHelper: S3PathHelper,
     private readonly customersService: CustomersService,
+    private readonly promotionEngine: PromotionEngineService,
+    private readonly couponsService: CouponsService,
   ) {}
 
   /**
@@ -357,6 +363,190 @@ export class CheckoutService {
 
     if (customerId !== userId) {
       throw new NotFoundException('No se encontró la orden');
+    }
+  }
+
+  /**
+   * Round money to 2 decimals (HALF_UP). Centralized so quote, coupon and
+   * order totals don't drift due to floating arithmetic.
+   */
+  private roundMoney(value: number): number {
+    return Math.round((Number.isFinite(value) ? value : 0) * 100) / 100;
+  }
+
+  /**
+   * Fetch the categories every product in `productIds` belongs to. Returned
+   * as a Map<productId, number[]> so the promotion engine and coupon validator
+   * can match category-scoped rules without extra round-trips.
+   *
+   * Uses the store-scoped client because `product_categories` is multi-tenant
+   * by transitive `products.store_id` filter.
+   */
+  private async resolveProductCategories(
+    productIds: number[],
+  ): Promise<Map<number, number[]>> {
+    const map = new Map<number, number[]>();
+    if (productIds.length === 0) return map;
+
+    const rows = await this.store_prisma.product_categories.findMany({
+      where: { product_id: { in: productIds } },
+      select: { product_id: true, category_id: true },
+    });
+
+    for (const row of rows) {
+      const existing = map.get(row.product_id) ?? [];
+      existing.push(row.category_id);
+      map.set(row.product_id, existing);
+    }
+    return map;
+  }
+
+  /**
+   * Run the promotion engine for the resolved cart items and optionally
+   * validate the coupon supplied in the checkout payload. Returns subtotal,
+   * promotion + coupon discounts, totals, and persistence-ready snapshots.
+   *
+   * Discount base is the items SUBTOTAL (excludes shipping and taxes); taxes
+   * and shipping are added back to compute the grand total in the caller.
+   */
+  private async resolveCheckoutDiscounts(params: {
+    items: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      quantity: number;
+      net_price: number;
+    }>;
+    customerId: number | null;
+    couponCode?: string | null;
+  }): Promise<{
+    quote: PromotionQuoteResult;
+    coupon: {
+      coupon_id: number;
+      discount_amount: number;
+    } | null;
+    promotion_discount: number;
+    coupon_discount: number;
+    total_discount: number;
+  }> {
+    const items = params.items;
+    if (items.length === 0) {
+      return {
+        quote: {
+          subtotal: 0,
+          total_discount: 0,
+          promotional_subtotal: 0,
+          applied_promotions: [],
+          items: [],
+          order_promotions_snapshot: [],
+        },
+        coupon: null,
+        promotion_discount: 0,
+        coupon_discount: 0,
+        total_discount: 0,
+      };
+    }
+
+    const productIds = Array.from(new Set(items.map((i) => i.product_id)));
+    const categoryMap = await this.resolveProductCategories(productIds);
+
+    const quote = await this.promotionEngine.quoteDiscounts({
+      items: items.map((item, index) => ({
+        line_id: index,
+        product_id: item.product_id,
+        variant_id: item.product_variant_id,
+        category_ids: categoryMap.get(item.product_id) ?? [],
+        unit_price: this.roundMoney(item.net_price),
+        quantity: item.quantity,
+      })),
+      customer_id: params.customerId,
+    });
+
+    const couponCode = params.couponCode?.trim();
+    let coupon: { coupon_id: number; discount_amount: number } | null = null;
+
+    if (couponCode) {
+      // Discount base for the coupon is the post-promotion subtotal so we
+      // never refund money the customer didn't actually pay. We pass per-line
+      // totals so SPECIFIC_PRODUCTS / SPECIFIC_CATEGORIES coupons can
+      // recompute their applicable subtotal correctly.
+      const couponItems = quote.items.map((it) => ({
+        product_id: it.product_id,
+        category_ids: categoryMap.get(it.product_id) ?? [],
+        line_total: this.roundMoney(it.final_line_total),
+      }));
+
+      const validation = await this.couponsService.validate({
+        code: couponCode,
+        customer_id: params.customerId ?? undefined,
+        cart_subtotal: this.roundMoney(quote.promotional_subtotal),
+        product_ids: productIds,
+        category_ids: Array.from(
+          new Set(
+            productIds.flatMap((id) => categoryMap.get(id) ?? []),
+          ),
+        ),
+        items: couponItems,
+      });
+
+      coupon = {
+        coupon_id: validation.coupon_id,
+        discount_amount: this.roundMoney(validation.discount_amount),
+      };
+    }
+
+    const promotion_discount = this.roundMoney(quote.total_discount);
+    const coupon_discount = this.roundMoney(coupon?.discount_amount ?? 0);
+    const total_discount = this.roundMoney(promotion_discount + coupon_discount);
+
+    return {
+      quote,
+      coupon,
+      promotion_discount,
+      coupon_discount,
+      total_discount,
+    };
+  }
+
+  /**
+   * Persist `order_promotions` + `coupon_uses` after the ecommerce order
+   * has been created. Each promotion is wrapped in its own try/catch so a
+   * race on usage limits doesn't break the checkout (the order is already
+   * committed; we'd rather emit a warning than 500 the customer).
+   */
+  private async persistPromotionsAndCoupon(params: {
+    orderId: number;
+    customerId: number | null;
+    quote: PromotionQuoteResult;
+    coupon: { coupon_id: number; discount_amount: number } | null;
+  }): Promise<void> {
+    for (const snapshot of params.quote.order_promotions_snapshot) {
+      try {
+        await this.promotionEngine.applyPromotion(
+          params.orderId,
+          snapshot.promotion_id,
+          snapshot.discount_amount,
+          params.customerId,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Promotion ${snapshot.promotion_id} could not be applied to order ${params.orderId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (params.coupon && params.coupon.discount_amount > 0) {
+      try {
+        await this.couponsService.registerUse(
+          params.coupon.coupon_id,
+          params.orderId,
+          params.customerId,
+          params.coupon.discount_amount,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Coupon ${params.coupon.coupon_id} could not be registered for order ${params.orderId}: ${(err as Error).message}`,
+        );
+      }
     }
   }
 
@@ -697,15 +887,35 @@ export class CheckoutService {
       }),
     );
 
-    const subtotal = itemsWithTaxes.reduce(
-      (sum, item) => sum + item.total_net,
-      0,
+    const subtotal = this.roundMoney(
+      itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0),
     );
-    const total_tax = itemsWithTaxes.reduce(
-      (sum, item) => sum + item.total_tax,
-      0,
+    const total_tax = this.roundMoney(
+      itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
-    const grand_total = subtotal + total_tax + shipping_cost;
+
+    // Recompute promotional + coupon discounts on the backend. Frontend
+    // only sends the coupon code (if any); totals here are authoritative.
+    const discountResult = await this.resolveCheckoutDiscounts({
+      items: itemsWithTaxes.map((item) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        quantity: item.quantity,
+        net_price: item.net_price,
+      })),
+      customerId: resolved_customer_id,
+      couponCode: dto.coupon_code,
+    });
+
+    // Discount base is the products subtotal BEFORE shipping. We add taxes
+    // and shipping AFTER subtracting the discount, mirroring the POS flow.
+    // Clamp grand_total at >= 0 in case a fixed coupon exceeds subtotal.
+    const grand_total = this.roundMoney(
+      Math.max(
+        0,
+        subtotal + total_tax - discountResult.total_discount + shipping_cost,
+      ),
+    );
 
     // store_id y customer_id (user_id) se inyectan automáticamente
     const order = await this.prisma.orders.create({
@@ -716,6 +926,7 @@ export class CheckoutService {
         currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
+        discount_amount: discountResult.total_discount,
         shipping_cost: shipping_cost,
         shipping_method_id: shipping_method_id,
         shipping_rate_id: shipping_rate_id,
@@ -755,6 +966,17 @@ export class CheckoutService {
       include: {
         order_items: true,
       },
+    });
+
+    // Persist applied promotions + coupon usage. We do this OUTSIDE the order
+    // create call so the snapshot/coupon flow doesn't tangle with order_items
+    // nested writes — they live under different scoped clients (store vs
+    // ecommerce) and need transparent error handling per promo.
+    await this.persistPromotionsAndCoupon({
+      orderId: order.id,
+      customerId: resolved_customer_id,
+      quote: discountResult.quote,
+      coupon: discountResult.coupon,
     });
 
     // Emit order.created event for notifications
@@ -871,6 +1093,12 @@ export class CheckoutService {
       order_id: order.id,
       order_number: order.order_number,
       total: order.grand_total,
+      subtotal,
+      tax_amount: total_tax,
+      discount_amount: discountResult.total_discount,
+      promotion_discount: discountResult.promotion_discount,
+      coupon_discount: discountResult.coupon_discount,
+      shipping_cost,
       state: order.state,
       public_order_token: guestArtifacts?.invoice_data_token ?? null,
       invoice_data_token: guestArtifacts?.invoice_data_token ?? null,
@@ -1152,14 +1380,26 @@ export class CheckoutService {
       }),
     );
 
-    const subtotal = itemsWithTaxes.reduce(
-      (sum, item) => sum + item.total_net,
-      0,
+    const subtotal = this.roundMoney(
+      itemsWithTaxes.reduce((sum, item) => sum + item.total_net, 0),
     );
-    const total_tax = itemsWithTaxes.reduce(
-      (sum, item) => sum + item.total_tax,
-      0,
+    const total_tax = this.roundMoney(
+      itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
+
+    // Resolve promotional + coupon discounts on the backend (same source of
+    // truth used by the normal checkout). Frontend never sends totals.
+    const discountResult = await this.resolveCheckoutDiscounts({
+      items: itemsWithTaxes.map((item) => ({
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? null,
+        quantity: item.quantity,
+        net_price: item.net_price,
+      })),
+      customerId: resolved_customer_id,
+      couponCode: dto.coupon_code,
+    });
+
     // Resolve optional shipping method/rate from DTO (scoped by store)
     const wa_store_id = RequestContextService.getStoreId();
     let wa_shipping_method_id: number | null = null;
@@ -1204,7 +1444,12 @@ export class CheckoutService {
       wa_delivery_type = deriveDeliveryType(method.type);
     }
 
-    const grand_total = subtotal + total_tax + wa_shipping_cost;
+    const grand_total = this.roundMoney(
+      Math.max(
+        0,
+        subtotal + total_tax - discountResult.total_discount + wa_shipping_cost,
+      ),
+    );
 
     const order = await this.prisma.orders.create({
       data: {
@@ -1214,6 +1459,7 @@ export class CheckoutService {
         currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
+        discount_amount: discountResult.total_discount,
         shipping_cost: wa_shipping_cost,
         shipping_method_id: wa_shipping_method_id,
         shipping_rate_id: wa_shipping_rate_id,
@@ -1253,6 +1499,15 @@ export class CheckoutService {
       include: {
         order_items: true,
       },
+    });
+
+    // Persist promotions + coupon usage (WhatsApp checkout shares the same
+    // discount source of truth as the normal checkout flow).
+    await this.persistPromotionsAndCoupon({
+      orderId: order.id,
+      customerId: resolved_customer_id,
+      quote: discountResult.quote,
+      coupon: discountResult.coupon,
     });
 
     // Emit order.created event for notifications
@@ -1311,6 +1566,12 @@ export class CheckoutService {
       invoice_id: guestArtifacts?.invoice_id ?? invoice_id,
       subtotal: subtotal,
       tax: total_tax,
+      // Discounts surfaced so the WhatsApp UI / order detail can render
+      // the promo + coupon lines without recomputing on the client.
+      discount_amount: discountResult.total_discount,
+      promotion_discount: discountResult.promotion_discount,
+      coupon_discount: discountResult.coupon_discount,
+      shipping_cost: wa_shipping_cost,
       item_count: cart_items.reduce((sum, i) => sum + i.quantity, 0),
       items: order.order_items.map((oi) => ({
         name: oi.product_name,

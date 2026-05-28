@@ -67,6 +67,12 @@ export interface CheckoutRequest {
     quantity: number;
   }>;
   guest_customer?: GuestCheckoutCustomer;
+  /**
+   * Optional coupon code typed by the customer. Backend validates against
+   * {@link CouponsService.validate} and rejects the checkout if invalid.
+   * The frontend NEVER sends precomputed totals.
+   */
+  coupon_code?: string;
 }
 
 export interface CheckoutResponse {
@@ -78,11 +84,25 @@ export interface CheckoutResponse {
   public_order_token?: string | null;
   invoice_data_token?: string | null;
   invoice_id?: number | null;
+  // Backend-authoritative totals — the frontend renders these instead of
+  // recomputing on its own to avoid drift.
+  subtotal?: number;
+  tax_amount?: number;
+  discount_amount?: number;
+  promotion_discount?: number;
+  coupon_discount?: number;
+  shipping_cost?: number;
 }
 
 export interface WhatsappCheckoutResponse extends CheckoutResponse {
   subtotal: number;
   tax: number;
+  // Detailed discount totals so the WhatsApp UI surfaces promos + coupons
+  // and the message can include the final price the customer will pay.
+  discount_amount?: number;
+  promotion_discount?: number;
+  coupon_discount?: number;
+  shipping_cost?: number;
   item_count: number;
   items: Array<{
     name: string;
@@ -234,6 +254,7 @@ export class CheckoutService {
     }>,
     guestCustomer?: GuestCheckoutCustomer | null,
     shippingAddress?: CheckoutShippingAddress | null,
+    couponCode?: string | null,
   ): Observable<{ success: boolean; data: WhatsappCheckoutResponse }> {
     return this.http.post<{ success: boolean; data: WhatsappCheckoutResponse }>(
       `${this.api_url}/whatsapp`,
@@ -242,6 +263,7 @@ export class CheckoutService {
         items,
         guest_customer: guestCustomer,
         shipping_address: shippingAddress,
+        coupon_code: couponCode || undefined,
       },
       { headers: this.getHeaders() },
     );

@@ -976,9 +976,7 @@ export class PosComponent {
 
     effect(() => {
       const serviceSession = this.cashRegisterService.activeSession();
-      if (serviceSession !== null) {
-        this.activeSession.set(serviceSession);
-      }
+      this.activeSession.set(serviceSession);
     });
   }
 
@@ -2094,6 +2092,8 @@ export class PosComponent {
       this.initCashRegisterSession();
     } else if (!crEnabled) {
       this.cashRegisterSessionInitialized = false;
+      this.cashRegisterService.clearSession();
+      this.activeSession.set(null);
     }
 
     const customerQueueSettings = posSettings.customer_queue;
