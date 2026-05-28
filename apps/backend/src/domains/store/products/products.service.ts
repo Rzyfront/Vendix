@@ -1746,9 +1746,10 @@ export class ProductsService {
               where: { product_id: id },
               include: { product_images: { select: { image_url: true } } },
             });
-            const existingVariantMap = new Map(
-              allExistingVariants.map((v) => [v.id, v]),
-            );
+            const existingVariantMap = new Map<
+              number,
+              (typeof allExistingVariants)[number]
+            >(allExistingVariants.map((v) => [v.id, v]));
 
             // Detect simple → variant transition
             const isTransitionToVariants =
