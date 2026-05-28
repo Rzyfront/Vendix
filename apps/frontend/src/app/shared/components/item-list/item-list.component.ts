@@ -86,6 +86,15 @@ export class ItemListComponent {
     return null;
   }
 
+  onAvatarClick(item: any, event: MouseEvent): void {
+    const avatarClick = this.cardConfig().avatarClick;
+    if (!avatarClick || !this.getAvatarUrl(item)) {
+      return;
+    }
+    event.stopPropagation();
+    avatarClick(item, event);
+  }
+
   getBadgeValue(item: any): any {
     const key = this.cardConfig().badgeKey;
     if (key) {

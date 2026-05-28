@@ -2440,7 +2440,10 @@
                   >
                     <div
                       (click)="
-                        $event.stopPropagation(); triggerVariantImageUpload(idx)
+                        $event.stopPropagation();
+                        variant.image_url
+                          ? openVariantImageEditor(idx)
+                          : openVariantImageModal(idx)
                       "
                       class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-white cursor-pointer group"
                     >
@@ -2456,7 +2459,7 @@
                           class="w-full h-full flex items-center justify-center rounded-lg"
                         >
                           <app-icon
-                            name="package"
+                            name="image-plus"
                             size="14"
                             class="text-gray-400"
                           ></app-icon>
@@ -2495,6 +2498,44 @@
                     <div
                       class="px-3 pb-3 space-y-3 border-t border-gray-200 pt-3"
                     >
+                      <!-- Acciones de imagen -->
+                      <div class="flex items-center gap-2">
+                        @if (variant.image_url) {
+                          <button
+                            type="button"
+                            (click)="openVariantImageEditor(idx)"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-md border border-gray-200"
+                          >
+                            <app-icon name="crop" size="12"></app-icon>
+                            Ajustar
+                          </button>
+                          <button
+                            type="button"
+                            (click)="openVariantImageAi(idx)"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-md border border-gray-200"
+                          >
+                            <app-icon name="sparkles" size="12"></app-icon>
+                            IA
+                          </button>
+                          <button
+                            type="button"
+                            (click)="removeVariantImage(idx)"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs text-destructive hover:bg-red-50 rounded-md border border-gray-200"
+                          >
+                            <app-icon name="trash-2" size="12"></app-icon>
+                            Quitar
+                          </button>
+                        } @else {
+                          <button
+                            type="button"
+                            (click)="openVariantImageModal(idx)"
+                            class="inline-flex items-center gap-1 px-2 py-1 text-xs text-primary-700 bg-primary-50 hover:bg-primary-100 rounded-md border border-primary-200"
+                          >
+                            <app-icon name="image-plus" size="12"></app-icon>
+                            Agregar foto
+                          </button>
+                        }
+                      </div>
                       <div class="grid grid-cols-2 gap-3">
                         <app-input
                           label="Costo"
@@ -2676,7 +2717,11 @@
                       <!-- Image -->
                       <td class="px-3 py-2">
                         <div
-                          (click)="triggerVariantImageUpload(idx)"
+                          (click)="
+                            variant.image_url
+                              ? openVariantImageEditor(idx)
+                              : openVariantImageModal(idx)
+                          "
                           class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group"
                         >
                           @if (variant.image_url) {
@@ -2697,15 +2742,46 @@
                               ></app-icon>
                             </div>
                           }
-                          <div
-                            class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg overflow-hidden"
-                          >
-                            <app-icon
-                              name="camera"
-                              size="14"
-                              class="text-white"
-                            ></app-icon>
-                          </div>
+                          @if (variant.image_url) {
+                            <div
+                              class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 rounded-lg overflow-hidden"
+                            >
+                              <button
+                                type="button"
+                                (click)="
+                                  $event.stopPropagation();
+                                  openVariantImageEditor(idx)
+                                "
+                                aria-label="Ajustar imagen"
+                                title="Ajustar"
+                                class="p-1 bg-white/90 rounded-full text-gray-700 hover:text-primary-600"
+                              >
+                                <app-icon name="crop" size="12"></app-icon>
+                              </button>
+                              <button
+                                type="button"
+                                (click)="
+                                  $event.stopPropagation();
+                                  openVariantImageAi(idx)
+                                "
+                                aria-label="Mejorar con IA"
+                                title="IA"
+                                class="p-1 bg-white/90 rounded-full text-gray-700 hover:text-primary-600"
+                              >
+                                <app-icon name="sparkles" size="12"></app-icon>
+                              </button>
+                            </div>
+                          } @else {
+                            <div
+                              class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg overflow-hidden"
+                            >
+                              <app-icon
+                                name="image-plus"
+                                size="14"
+                                class="text-white"
+                              ></app-icon>
+                            </div>
+                          }
                           @if (variant.image_url) {
                             <button
                               type="button"
@@ -3253,4 +3329,36 @@
   [remainingSlots]="remainingImageSlots()"
   (replace)="onAiImageReplace($event)"
   (keep)="onAiImageKeepBoth($event)"
+></app-product-image-ai-enhance-modal>
+
+<!-- Variant Image Modals (paridad con producto base) -->
+<app-product-image-source-modal
+  [isOpen]="isVariantImageModalOpen()"
+  (isOpenChange)="isVariantImageModalOpen.set($event)"
+  [target]="'variant'"
+  [remainingSlots]="1"
+  [mode]="'add'"
+  (imagesAdded)="onVariantImagesAdded($event)"
+></app-product-image-source-modal>
+
+<app-product-image-source-modal
+  [isOpen]="isVariantImageEditModalOpen()"
+  (isOpenChange)="isVariantImageEditModalOpen.set($event)"
+  [target]="'variant'"
+  [remainingSlots]="1"
+  [mode]="'edit'"
+  [sourceImageUrl]="editingVariantImageUrl()"
+  (imageEdited)="onVariantImageEdited($event)"
+></app-product-image-source-modal>
+
+<app-product-image-ai-enhance-modal
+  [isOpen]="isVariantAiModalOpen()"
+  (isOpenChange)="isVariantAiModalOpen.set($event)"
+  [sourceImageUrl]="editingVariantImageUrl()"
+  [productName]="productForm.get('name')?.value || ''"
+  [productType]="isService ? 'service' : 'physical'"
+  [description]="productForm.get('description')?.value || ''"
+  [remainingSlots]="1"
+  (replace)="onVariantAiReplace($event)"
+  (keep)="onVariantAiKeep($event)"
 ></app-product-image-ai-enhance-modal>

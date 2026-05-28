@@ -2,12 +2,14 @@ import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
+import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, firstValueFrom } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
   OrderItem,
+  Payment,
   OrderState,
   OrderInstallment,
   OrderFlowMetadata,
@@ -48,6 +50,15 @@ export interface LifecycleStep {
   key: string;
   label: string;
   status: 'completed' | 'current' | 'upcoming' | 'terminal';
+}
+
+type PaymentReceiptPreviewKind = 'image' | 'pdf';
+
+interface PaymentReceiptPreview {
+  url: string;
+  safeUrl: SafeResourceUrl;
+  kind: PaymentReceiptPreviewKind;
+  uploadedAt?: string | null;
 }
 
 @Component({
@@ -102,9 +113,13 @@ export class OrderDetailsPageComponent {
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
   showRefundModal = signal(false);
+  showPaymentReceiptModal = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
+  isLoadingPaymentReceipt = signal(false);
+  loadingPaymentReceiptId = signal<number | null>(null);
+  paymentReceiptPreview = signal<PaymentReceiptPreview | null>(null);
 
   // Pre-selected installment for pay modal
   preSelectedInstallment = signal<any>(null);
@@ -736,6 +751,14 @@ export class OrderDetailsPageComponent {
     { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
   ]);
 
+  readonly paymentReceiptSubtitle = computed(() => {
+    const receipt = this.paymentReceiptPreview();
+    if (!receipt) return '';
+    return receipt.uploadedAt
+      ? `Subido ${this.formatDate(receipt.uploadedAt)}`
+      : 'Archivo adjunto por el cliente';
+  });
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private fb = inject(FormBuilder);
@@ -748,6 +771,7 @@ export class OrderDetailsPageComponent {
   private authFacade = inject(AuthFacade);
   private ticketService = inject(PosTicketService);
   private posShippingService = inject(PosShippingService);
+  private sanitizer = inject(DomSanitizer);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -1305,19 +1329,58 @@ export class OrderDetailsPageComponent {
     }
   }
 
-  async viewPaymentReceipt(payment: { id: number }): Promise<void> {
+  async viewPaymentReceipt(payment: Payment): Promise<void> {
     if (!this.orderId) return;
+
+    this.isLoadingPaymentReceipt.set(true);
+    this.loadingPaymentReceiptId.set(payment.id);
+
     try {
       const res = await firstValueFrom(
         this.ordersService.getPaymentReceiptUrl(this.orderId, payment.id),
       );
-      window.open(res.url, '_blank', 'noopener,noreferrer');
-    } catch (err: any) {
+
+      this.paymentReceiptPreview.set({
+        url: res.url,
+        safeUrl: this.sanitizer.bypassSecurityTrustResourceUrl(res.url),
+        kind: this.getPaymentReceiptPreviewKind(
+          res.content_type,
+          payment.receipt_s3_key,
+          res.url,
+        ),
+        uploadedAt: payment.receipt_uploaded_at,
+      });
+      this.showPaymentReceiptModal.set(true);
+    } catch (err: unknown) {
       this.toastService.error(
-        err?.message || 'No se pudo abrir el comprobante',
+        err instanceof Error ? err.message : 'No se pudo abrir el comprobante',
         'Error',
       );
+    } finally {
+      this.isLoadingPaymentReceipt.set(false);
+      this.loadingPaymentReceiptId.set(null);
     }
+  }
+
+  closePaymentReceiptModal(): void {
+    this.showPaymentReceiptModal.set(false);
+    this.paymentReceiptPreview.set(null);
+  }
+
+  private getPaymentReceiptPreviewKind(
+    contentType?: string,
+    receiptKey?: string | null,
+    url?: string,
+  ): PaymentReceiptPreviewKind {
+    const normalizedContentType = (contentType ?? '').toLowerCase();
+    if (normalizedContentType.startsWith('image/')) return 'image';
+    if (normalizedContentType.includes('pdf')) return 'pdf';
+
+    const source = `${receiptKey ?? ''} ${url ?? ''}`
+      .split('?')[0]
+      .toLowerCase();
+    if (/\.(jpe?g|png|webp)$/.test(source)) return 'image';
+    return 'pdf';
   }
 
   async printOrder(): Promise<void> {

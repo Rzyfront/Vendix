@@ -152,6 +152,24 @@
 // Avatar
 .card-avatar-wrapper {
   flex-shrink: 0;
+
+  &.avatar-clickable {
+    cursor: zoom-in;
+
+    .card-avatar {
+      outline: 1px solid transparent;
+      transition:
+        outline-color var(--transition-fast) ease,
+        box-shadow var(--transition-fast) ease,
+        transform var(--transition-fast) ease;
+    }
+
+    &:hover .card-avatar {
+      outline-color: var(--color-primary);
+      box-shadow: var(--shadow-sm);
+      transform: scale(1.02);
+    }
+  }
 }
 
 .card-avatar {

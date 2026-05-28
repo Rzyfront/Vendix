@@ -80,8 +80,8 @@
           @for (item of order.items; track item.id) {
             <div class="item-row">
               <div class="item-thumb">
-                @if (item.image_url) {
-                  <img [src]="item.image_url" [alt]="item.product_name" />
+                @if (item.variant_image_url || item.image_url) {
+                  <img [src]="item.variant_image_url || item.image_url" [alt]="item.product_name" />
                 } @else {
                   <div class="thumb-placeholder">
                     <app-icon name="image" [size]="18"></app-icon>

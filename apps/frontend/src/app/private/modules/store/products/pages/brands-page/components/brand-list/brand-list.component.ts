@@ -58,6 +58,7 @@ export class BrandListComponent {
   readonly create = output<void>();
   readonly edit = output<Brand>();
   readonly toggleState = output<Brand>();
+  readonly toggleFeatured = output<Brand>();
   readonly delete = output<Brand>();
   readonly sort = output<{
     column: string;
@@ -78,6 +79,16 @@ export class BrandListComponent {
         { value: '', label: 'Todos' },
         { value: 'active', label: 'Activas' },
         { value: 'inactive', label: 'Inactivas' },
+      ],
+    },
+    {
+      key: 'is_featured',
+      label: 'Destacado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'true', label: 'Destacadas' },
+        { value: 'false', label: 'No destacadas' },
       ],
     },
   ];
@@ -120,6 +131,23 @@ export class BrandListComponent {
       priority: 4,
     },
     {
+      key: 'is_featured',
+      label: 'Destacado',
+      sortable: true,
+      priority: 2,
+      transform: (value: boolean) => (value ? 'Destacada' : 'Normal'),
+      badge: true,
+      badgeConfig: {
+        type: 'custom',
+        colorMap: {
+          'true': '#d97706',
+          'false': '#6b7280',
+          Destacada: '#d97706',
+          Normal: '#6b7280',
+        },
+      },
+    },
+    {
       key: 'state',
       label: 'Estado',
       priority: 1,
@@ -154,6 +182,18 @@ export class BrandListComponent {
           item.state === 'active' ? 'Desactivar marca' : 'Activar marca',
         action: (item: Brand) => this.toggleState.emit(item),
       });
+      actions.push({
+        label: (item: Brand) =>
+          item.is_featured ? 'Quitar destacado' : 'Destacar',
+        icon: 'star',
+        variant: (item: Brand) =>
+          item.is_featured ? 'muted' : 'warning',
+        tooltip: (item: Brand) =>
+          item.is_featured
+            ? 'Quitar prioridad en el inicio'
+            : 'Dar prioridad en el inicio',
+        action: (item: Brand) => this.toggleFeatured.emit(item),
+      });
     }
 
     if (this.canDelete()) {
@@ -179,6 +219,12 @@ export class BrandListComponent {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: string) => (val === 'active' ? 'Activo' : 'Inactivo'),
     detailKeys: [
+      {
+        key: 'is_featured',
+        label: 'Destacada',
+        icon: 'star',
+        transform: (value: boolean) => (value ? 'Sí' : 'No'),
+      },
       { key: 'description', label: 'Descripción' },
     ],
   };
@@ -235,6 +281,10 @@ export class BrandListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm() || this.selectedState());
+    return !!(
+      this.searchTerm() ||
+      this.selectedState() ||
+      this.filterValues['is_featured']
+    );
   }
 }

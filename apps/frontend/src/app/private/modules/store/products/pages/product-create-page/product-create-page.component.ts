@@ -672,6 +672,17 @@ export class ProductCreatePageComponent {
   readonly isImageAiEnhanceModalOpen = signal(false);
   readonly aiEnhanceImageUrl = signal<string | null>(null);
   readonly aiEnhanceImageIndex = signal<number | null>(null);
+
+  // Variant image modals state (paridad con producto base)
+  readonly isVariantImageModalOpen = signal(false);
+  readonly isVariantImageEditModalOpen = signal(false);
+  readonly isVariantAiModalOpen = signal(false);
+  readonly editingVariantIndex = signal<number | null>(null);
+  readonly editingVariantImageUrl = computed<string | null>(() => {
+    const idx = this.editingVariantIndex();
+    if (idx === null) return null;
+    return this.generatedVariants[idx]?.image_url ?? null;
+  });
   readonly remainingImageSlots = computed(() => {
     this.imageListVersion();
     return Math.max(0, 5 - this.imageUrls.length);
@@ -1198,7 +1209,7 @@ export class ProductCreatePageComponent {
         stock: v.stock_quantity,
         attributes: v.attributes || {},
         image_url: v.product_images?.image_url || undefined,
-        image_id: v.image_id || undefined,
+        image_id: v.product_images?.id ?? v.image_id ?? undefined,
         track_inventory_override:
           v.track_inventory_override === undefined
             ? undefined
@@ -1620,26 +1631,94 @@ export class ProductCreatePageComponent {
     return activePrice * (1 + totalTaxRate);
   }
 
-  // --- Variant Image Handling ---
-  triggerVariantImageUpload(idx: number): void {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.onchange = (event: Event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      if (file.size > 2 * 1024 * 1024) {
-        this.toastService.warning('La imagen no puede superar 2MB');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        this.generatedVariants[idx].image_url = e.target?.result as string;
-        this.generatedVariants[idx].image_file = file;
-      };
-      reader.readAsDataURL(file);
-    };
-    input.click();
+  // --- Variant Image Handling (modal: archivo, URL, cámara, recorte, IA) ---
+  openVariantImageModal(idx: number): void {
+    this.editingVariantIndex.set(idx);
+    this.isVariantImageModalOpen.set(true);
+  }
+
+  openVariantImageEditor(idx: number): void {
+    const variant = this.generatedVariants[idx];
+    if (!variant?.image_url) {
+      this.toastService.warning('La variante no tiene imagen para ajustar');
+      return;
+    }
+    this.editingVariantIndex.set(idx);
+    this.isVariantImageEditModalOpen.set(true);
+  }
+
+  openVariantImageAi(idx: number): void {
+    const variant = this.generatedVariants[idx];
+    if (!variant?.image_url) {
+      this.toastService.warning('La variante no tiene imagen para mejorar');
+      return;
+    }
+    this.editingVariantIndex.set(idx);
+    this.isVariantAiModalOpen.set(true);
+  }
+
+  onVariantImagesAdded(images: string[]): void {
+    const idx = this.editingVariantIndex();
+    if (idx === null || !images?.length) {
+      this.isVariantImageModalOpen.set(false);
+      return;
+    }
+    const variant = this.generatedVariants[idx];
+    if (!variant) {
+      this.isVariantImageModalOpen.set(false);
+      return;
+    }
+    variant.image_url = images[0];
+    variant.image_file = undefined;
+    variant.image_id = undefined;
+    this.generatedVariants = [...this.generatedVariants];
+    this.markImagesTouched();
+    this.isVariantImageModalOpen.set(false);
+  }
+
+  onVariantImageEdited(image: string): void {
+    const idx = this.editingVariantIndex();
+    if (idx === null) {
+      this.isVariantImageEditModalOpen.set(false);
+      return;
+    }
+    const variant = this.generatedVariants[idx];
+    if (!variant) {
+      this.isVariantImageEditModalOpen.set(false);
+      return;
+    }
+    variant.image_url = image;
+    variant.image_file = undefined;
+    variant.image_id = undefined;
+    this.generatedVariants = [...this.generatedVariants];
+    this.markImagesTouched();
+    this.isVariantImageEditModalOpen.set(false);
+    this.toastService.success('Imagen ajustada correctamente');
+  }
+
+  onVariantAiReplace(newImageUrl: string): void {
+    const idx = this.editingVariantIndex();
+    if (idx === null) {
+      this.isVariantAiModalOpen.set(false);
+      return;
+    }
+    const variant = this.generatedVariants[idx];
+    if (!variant) {
+      this.isVariantAiModalOpen.set(false);
+      return;
+    }
+    variant.image_url = newImageUrl;
+    variant.image_file = undefined;
+    variant.image_id = undefined;
+    this.generatedVariants = [...this.generatedVariants];
+    this.markImagesTouched();
+    this.isVariantAiModalOpen.set(false);
+    this.toastService.success('Imagen reemplazada por la versión IA');
+  }
+
+  // Una variante solo permite 1 foto, por lo que "conservar ambas" se trata como reemplazo.
+  onVariantAiKeep(newImageUrl: string): void {
+    this.onVariantAiReplace(newImageUrl);
   }
 
   trackByIndex(index: number): number {
@@ -2374,28 +2453,49 @@ export class ProductCreatePageComponent {
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
     // When hasVariants is false, send empty array to delete all existing variants
     if (this.hasVariants) {
-      productData.variants = this.generatedVariants.map((v) => ({
-        id: v.id,
-        sku: v.sku,
-        name: v.name,
-        // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
-        price_override: Number(v.price) > 0 ? Number(v.price) : null,
-        cost_price: Number(v.cost_price),
-        profit_margin: Number(v.profit_margin),
-        is_on_sale: !!v.is_on_sale,
-        sale_price: Number(v.sale_price),
-        stock_quantity: formValue.track_inventory ? Number(v.stock) : undefined,
-        attributes: v.attributes,
-        image_id: v.image_id ?? undefined,
-        variant_image_url: v.image_url?.startsWith('data:')
-          ? v.image_url
-          : undefined,
-        // null = heredar track_inventory del producto; true/false = override explícito
-        track_inventory_override:
-          v.track_inventory_override === undefined
-            ? null
-            : v.track_inventory_override,
-      }));
+      productData.variants = this.generatedVariants.map((v) => {
+        const isNewImage = !!v.image_url && v.image_url.startsWith('data:');
+        const hasImage = !!v.image_url;
+        const variantImagePayload: {
+          image_id: number | null | undefined;
+          variant_image_url: string | null | undefined;
+        } = isNewImage
+          ? {
+              image_id: v.image_id ?? null,
+              variant_image_url: v.image_url,
+            }
+          : !hasImage
+            ? {
+                image_id: null,
+                variant_image_url: null,
+              }
+            : {
+                image_id: v.image_id,
+                variant_image_url: undefined,
+              };
+
+        return {
+          id: v.id,
+          sku: v.sku,
+          name: v.name,
+          // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
+          price_override: Number(v.price) > 0 ? Number(v.price) : null,
+          cost_price: Number(v.cost_price),
+          profit_margin: Number(v.profit_margin),
+          is_on_sale: !!v.is_on_sale,
+          sale_price: Number(v.sale_price),
+          stock_quantity: formValue.track_inventory
+            ? Number(v.stock)
+            : undefined,
+          attributes: v.attributes,
+          ...variantImagePayload,
+          // null = heredar track_inventory del producto; true/false = override explícito
+          track_inventory_override:
+            v.track_inventory_override === undefined
+              ? null
+              : v.track_inventory_override,
+        };
+      });
 
       // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
       // Backend syncProductStock() handles the real sync

@@ -114,7 +114,7 @@ import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing
                     }
                   }
                   @if (doesVariantTrackInventory(variant)) {
-                    @if (variant.stock > 0) {
+                    @if (isVariantAvailable(variant)) {
                       <span class="text-xs mt-0.5"
                         [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
                       >
@@ -171,10 +171,16 @@ export class PosVariantSelectorComponent {
   /** Check if a variant is available considering track_inventory */
   isVariantAvailable(variant: PosProductVariant): boolean {
     if (!this.doesVariantTrackInventory(variant)) return true;
+    if (typeof variant.is_available === 'boolean') {
+      return variant.is_available;
+    }
     return variant.stock > 0;
   }
 
   doesVariantTrackInventory(variant: PosProductVariant): boolean {
+    if (typeof variant.effective_track_inventory === 'boolean') {
+      return variant.effective_track_inventory;
+    }
     return variant.track_inventory_override ?? this.product().track_inventory ?? true;
   }
 

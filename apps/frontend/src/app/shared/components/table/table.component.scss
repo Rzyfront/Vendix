@@ -147,6 +147,20 @@
           overflow: hidden;
           background-color: var(--color-background);
           border: 1px solid var(--color-border);
+
+          &.cell-image-clickable {
+            cursor: zoom-in;
+            transition:
+              border-color var(--transition-fast) ease,
+              box-shadow var(--transition-fast) ease,
+              transform var(--transition-fast) ease;
+
+            &:hover {
+              border-color: var(--color-primary);
+              box-shadow: var(--shadow-sm);
+              transform: scale(1.03);
+            }
+          }
         }
 
         .cell-image {

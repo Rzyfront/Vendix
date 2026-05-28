@@ -350,9 +350,9 @@
                     <div
                       class="w-11 h-11 sm:w-14 sm:h-14 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
                     >
-                      @if (item.products && item.products.image_url) {
+                      @if (item.variant_image_url || (item.products && item.products.image_url)) {
                         <img
-                          [src]="item.products.image_url"
+                          [src]="item.variant_image_url || item.products?.image_url"
                           class="w-full h-full object-cover"
                         />
                       } @else {
@@ -1449,13 +1449,20 @@
                           variant="outline"
                           size="xsm"
                           (clicked)="viewPaymentReceipt(payment)"
+                          [disabled]="isLoadingPaymentReceipt()"
+                          [loading]="loadingPaymentReceiptId() === payment.id"
+                          [showTextWhileLoading]="true"
                         >
                           <app-icon
                             slot="icon"
                             name="receipt"
                             size="14"
                           ></app-icon>
-                          Ver comprobante
+                          {{
+                            loadingPaymentReceiptId() === payment.id
+                              ? "Cargando..."
+                              : "Ver comprobante"
+                          }}
                         </app-button>
                       </div>
                     }
@@ -1497,6 +1504,44 @@
     <!-- ═══════════════════════════════════════════════════════════
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->
+
+    <app-modal
+      [isOpen]="showPaymentReceiptModal()"
+      (closed)="closePaymentReceiptModal()"
+      title="Comprobante de pago"
+      [subtitle]="paymentReceiptSubtitle()"
+      size="xl"
+      customClasses="receipt-preview-modal"
+    >
+      @if (paymentReceiptPreview(); as receipt) {
+        <div class="payment-receipt-preview-shell">
+          @if (receipt.kind === "image") {
+            <img
+              [src]="receipt.url"
+              alt="Comprobante de pago adjunto"
+              class="payment-receipt-image"
+            />
+          } @else {
+            <iframe
+              [src]="receipt.safeUrl"
+              title="Comprobante de pago adjunto"
+              class="payment-receipt-frame"
+            ></iframe>
+          }
+        </div>
+      } @else {
+        <div class="payment-receipt-empty">
+          <app-icon name="file-text" size="28"></app-icon>
+          <p>No hay un comprobante cargado para previsualizar.</p>
+        </div>
+      }
+
+      <div slot="footer" class="flex items-center justify-end gap-2">
+        <app-button variant="outline" (clicked)="closePaymentReceiptModal()">
+          Cerrar
+        </app-button>
+      </div>
+    </app-modal>
 
     @defer (when showPayModal()) {
       <app-order-payment-modal

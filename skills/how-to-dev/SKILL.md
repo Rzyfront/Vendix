@@ -22,6 +22,7 @@ Use this skill to execute development work safely and consistently after the req
 ## Core Rules
 
 - Load every relevant skill before editing code.
+- **Mobile detection:** If the task involves `apps/mobile/`, load `mobile-dev` first — all edits are exclusive to `apps/mobile/`; other projects are read-only reference.
 - Follow the approved plan when one exists; do not replan unless the human asks.
 - If no approved plan exists for non-trivial work, use `how-to-plan` before development.
 - Keep changes minimal, scoped, and aligned with the mapped skills.
@@ -34,9 +35,10 @@ Use this skill to execute development work safely and consistently after the req
 Before changing files:
 
 1. Identify the affected domain, layer, and file types.
-2. Load the matching skills from `AGENTS.md` or provider-specific skill routing.
-3. Apply the rules from those skills during implementation.
-4. If no skill covers a required pattern, mark it as a knowledge gap and ask whether to create or update a skill.
+2. If the affected path is `apps/mobile/`, load `mobile-dev` — all edits are restricted to that directory.
+3. Load the matching skills from `AGENTS.md` or provider-specific skill routing.
+4. Apply the rules from those skills during implementation.
+5. If no skill covers a required pattern, mark it as a knowledge gap and ask whether to create or update a skill.
 
 ## Execution Discipline
 

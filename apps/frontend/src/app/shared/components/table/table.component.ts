@@ -38,6 +38,7 @@ export interface TableColumn {
   };
   priority?: number; // Priority for responsiveness: 0 (high) to infinite (low). Default logic applies if not set.
   type?: 'text' | 'image'; // Type of content to display
+  imageClick?: (item: any, event: MouseEvent) => void;
   badgeTransform?: (value: any) => string; // Transform value for badge display
 }
 
@@ -169,6 +170,14 @@ export class TableComponent {
 
   onRowClick(item: any): void {
     this.rowClick.emit(item);
+  }
+
+  onImageClick(column: TableColumn, item: any, event: MouseEvent): void {
+    if (!column.imageClick || !this.getNestedValue(item, column.key)) {
+      return;
+    }
+    event.stopPropagation();
+    column.imageClick(item, event);
   }
 
   executeAction(action: TableAction, item: any): void {

@@ -10,18 +10,28 @@ interface ApiResponse<T> {
   message: string;
 }
 
+interface PaginationMeta {
+  total?: number;
+  page?: number;
+  limit?: number;
+  totalPages?: number;
+  total_pages?: number;
+  pages?: number;
+  pagination?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+    totalPages?: number;
+    total_pages?: number;
+    pages?: number;
+  };
+}
+
 interface PaginatedApiResponse<T> {
   success: boolean;
   data: T[];
   message?: string;
-  meta: {
-    pagination: {
-      total: number;
-      page: number;
-      limit: number;
-      pages?: number;
-    };
-  };
+  meta?: PaginationMeta;
 }
 
 export interface CategoryImageUploadResponse {
@@ -85,6 +95,9 @@ export class CategoriesService {
     if (query.search) params = params.set('search', query.search);
     if (query.state && query.state !== 'all') {
       params = params.set('state', query.state);
+    }
+    if (query.is_featured !== undefined) {
+      params = params.set('is_featured', String(query.is_featured));
     }
     if (query.sort_by) params = params.set('sort_by', query.sort_by);
     if (query.sort_order) params = params.set('sort_order', query.sort_order);

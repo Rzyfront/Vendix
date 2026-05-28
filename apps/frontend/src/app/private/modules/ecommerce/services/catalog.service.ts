@@ -16,6 +16,8 @@ export interface EcommerceProduct {
   sku: string | null;
   stock_quantity: number | null;
   track_inventory?: boolean;
+  available_stock: number | null;
+  is_available: boolean;
   final_price: number;
   image_url: string | null;
   weight?: number | null;
@@ -28,6 +30,7 @@ export interface EcommerceProduct {
   brand: { id: number; name: string } | null;
   categories: { id: number; name: string; slug: string }[];
   variant_count?: number;
+  variants?: ProductVariantDetail[];
 }
 
 export interface ProductVariantDetail {
@@ -38,9 +41,10 @@ export interface ProductVariantDetail {
   effective_base_price: number;
   final_price: number;
   stock_quantity: number;
+  available_stock: number | null;
+  is_available: boolean;
   track_inventory_override?: boolean | null;
-  effective_track_inventory?: boolean;
-  is_available?: boolean;
+  effective_track_inventory: boolean;
   attributes: any;
   image_url: string | null;
   is_on_sale: boolean;
@@ -68,12 +72,15 @@ export interface Category {
   slug: string;
   description: string | null;
   image_url: string | null;
+  is_featured?: boolean;
 }
 
 export interface Brand {
   id: number;
   name: string;
+  slug?: string;
   logo_url: string | null;
+  is_featured?: boolean;
 }
 
 export interface CatalogQuery {

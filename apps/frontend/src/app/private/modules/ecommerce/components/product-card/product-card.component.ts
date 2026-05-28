@@ -28,15 +28,17 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           </app-badge>
         } @else if (product().track_inventory !== false) {
           <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
-          @if (product().stock_quantity !== null && product().stock_quantity! <= 5 && product().stock_quantity! > 0) {
-            <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
-              ¡Últimas {{ product().stock_quantity }}!
-            </app-badge>
-          }
-          @if (product().stock_quantity === 0) {
-            <app-badge class="stock-badge-pos" variant="error" size="sm" badgeStyle="outline">
-              Agotado
-            </app-badge>
+          @if (!hasVariants()) {
+            @if (product().available_stock !== null && product().available_stock! <= 5 && product().available_stock! > 0) {
+              <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
+                ¡Últimas {{ product().available_stock }}!
+              </app-badge>
+            }
+            @if (!product().is_available) {
+              <app-badge class="stock-badge-pos" variant="error" size="sm" badgeStyle="outline">
+                Agotado
+              </app-badge>
+            }
           }
         } @else {
           <app-badge class="stock-badge-pos" variant="success" size="sm" badgeStyle="outline">
@@ -540,7 +542,7 @@ export class ProductCardComponent {
     this.currencyService.loadCurrency();
   }
 
-  private get hasVariants(): boolean {
+  hasVariants(): boolean {
     return !!this.product().variant_count && this.product().variant_count! > 0;
   }
 
@@ -589,7 +591,7 @@ export class ProductCardComponent {
       this.router.navigate(['/book', this.product().id]);
       return;
     }
-    if (this.hasVariants) {
+    if (this.hasVariants()) {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
@@ -604,7 +606,7 @@ export class ProductCardComponent {
       this.router.navigate(['/book', this.product().id]);
       return;
     }
-    if (this.hasVariants) {
+    if (this.hasVariants()) {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
@@ -612,18 +614,23 @@ export class ProductCardComponent {
   }
 
   isUnavailable(): boolean {
-    return (
-      this.product().product_type !== 'service' &&
-      this.product().track_inventory !== false &&
-      this.product().stock_quantity === 0
-    );
+    const product = this.product();
+    if (product.product_type === 'service') return false;
+    if (product.track_inventory === false) return false;
+
+    const variants = product.variants;
+    if (variants && variants.length > 0) {
+      return variants.every((v) => v.is_available === false);
+    }
+
+    return product.is_available === false;
   }
 
   quickActionIcon(): string {
     if (this.product().requires_booking && this.product().product_type === 'service') {
       return 'calendar-check';
     }
-    if (this.hasVariants) return 'eye';
+    if (this.hasVariants()) return 'eye';
     return 'shopping-cart';
   }
 
@@ -631,7 +638,7 @@ export class ProductCardComponent {
     if (this.product().requires_booking && this.product().product_type === 'service') {
       return 'Agendar';
     }
-    if (this.hasVariants) return 'Ver opciones';
+    if (this.hasVariants()) return 'Ver opciones';
     return 'Agregar al carrito';
   }
 

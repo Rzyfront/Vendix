@@ -144,6 +144,10 @@
   @media (max-width: 992px) {
     grid-template-columns: 1fr;
   }
+
+  &.no-sidebar {
+    grid-template-columns: 1fr;
+  }
 }
 
 // Sidebar

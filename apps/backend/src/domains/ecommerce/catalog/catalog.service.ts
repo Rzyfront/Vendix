@@ -208,6 +208,12 @@ export class CatalogService {
                 },
               },
             },
+            stock_levels: {
+              select: {
+                product_variant_id: true,
+                quantity_available: true,
+              },
+            },
             _count: { select: { product_variants: true } },
           },
         }),
@@ -245,6 +251,12 @@ export class CatalogService {
                     tax_rates: true,
                   },
                 },
+              },
+            },
+            stock_levels: {
+              select: {
+                product_variant_id: true,
+                quantity_available: true,
               },
             },
             _count: { select: { product_variants: true } },
@@ -311,6 +323,14 @@ export class CatalogService {
               },
             },
           },
+          // Source of truth de disponibilidad para card del listado.
+          // Incluye filas base y de variantes; el mapper decide cuál sumar.
+          stock_levels: {
+            select: {
+              product_variant_id: true,
+              quantity_available: true,
+            },
+          },
           _count: { select: { product_variants: true } },
         },
       }),
@@ -345,7 +365,22 @@ export class CatalogService {
         },
       },
       product_variants: {
-        include: { product_images: true },
+        include: {
+          product_images: true,
+          // Source of truth de disponibilidad por variante.
+          stock_levels: {
+            select: {
+              quantity_available: true,
+            },
+          },
+        },
+      },
+      // Stock base del producto (cuando NO hay variantes).
+      stock_levels: {
+        select: {
+          product_variant_id: true,
+          quantity_available: true,
+        },
       },
       product_tax_assignments: {
         include: {
@@ -394,13 +429,14 @@ export class CatalogService {
         state: 'active',
         // store_id se aplica automáticamente por EcommercePrismaService
       },
-      orderBy: { name: 'asc' },
+      orderBy: [{ is_featured: 'desc' }, { name: 'asc' }],
       select: {
         id: true,
         name: true,
         slug: true,
         description: true,
         image_url: true,
+        is_featured: true,
       },
     });
 
@@ -411,6 +447,7 @@ export class CatalogService {
         slug: cat.slug,
         description: cat.description,
         image_url: await this.s3Service.signUrl(cat.image_url),
+        is_featured: cat.is_featured,
       })),
     );
   }
@@ -423,11 +460,13 @@ export class CatalogService {
         state: 'active',
         store_id,
       },
-      orderBy: { name: 'asc' },
+      orderBy: [{ is_featured: 'desc' }, { name: 'asc' }],
       select: {
         id: true,
         name: true,
+        slug: true,
         logo_url: true,
+        is_featured: true,
       },
     });
 
@@ -435,7 +474,9 @@ export class CatalogService {
       brands.map(async (brand) => ({
         id: brand.id,
         name: brand.name,
+        slug: brand.slug,
         logo_url: await this.s3Service.signUrl(brand.logo_url),
+        is_featured: brand.is_featured,
       })),
     );
   }
@@ -579,6 +620,23 @@ export class CatalogService {
     const raw_image_url = product.product_images?.[0]?.image_url || null;
     const signed_image_url = await this.s3Service.signUrl(raw_image_url);
 
+    const variantCount = product._count?.product_variants || 0;
+    const effectiveTracking = this.resolveEffectiveTracking(product);
+
+    // Stock del producto base se calcula sólo cuando NO hay variantes.
+    // Si hay variantes, la disponibilidad real depende de cada variante y se
+    // resuelve en detalle; el card no agrega variantes en este endpoint.
+    const baseAvailable = this.sumBaseProductStock(product);
+    const totalLevelsAvailable = this.sumStockLevelsAvailable(
+      product.stock_levels,
+    );
+    // Para listado: si tiene variantes, considerar disponible si cualquier
+    // stock_level (incluyendo variantes) tiene unidades; si no, sólo base.
+    const availableStock = variantCount > 0
+      ? totalLevelsAvailable
+      : baseAvailable;
+    const isAvailable = !effectiveTracking || availableStock > 0;
+
     return {
       id: product.id,
       name: product.name,
@@ -590,13 +648,17 @@ export class CatalogService {
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
-      stock_quantity: product.stock_quantity,
+      // Mantener compatibilidad: stock_quantity ahora se calcula desde stock_levels.
+      stock_quantity: availableStock,
+      available_stock: effectiveTracking ? availableStock : null,
+      is_available: isAvailable,
+      effective_track_inventory: effectiveTracking,
       track_inventory: product.track_inventory,
       image_url: signed_image_url || null,
       brand: product.brands,
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
-      variant_count: product._count?.product_variants || 0,
+      variant_count: variantCount,
       product_type: product.product_type,
       requires_booking: product.requires_booking,
       service_duration_minutes: product.service_duration_minutes,
@@ -635,6 +697,25 @@ export class CatalogService {
       })),
     );
 
+    const variants = await this.mapVariantsToResponse(product);
+    const hasVariants = variants.length > 0;
+    const effectiveTracking = this.resolveEffectiveTracking(product);
+
+    // Disponibilidad del producto:
+    // - Con variantes: el frontend muestra variant pickers; el flag a nivel
+    //   producto refleja "al menos una variante disponible".
+    // - Sin variantes: usar el stock base desde stock_levels.
+    const productAvailableStock = hasVariants
+      ? variants.reduce(
+          (sum: number, v: any) =>
+            sum + (typeof v.available_stock === 'number' ? v.available_stock : 0),
+          0,
+        )
+      : this.sumBaseProductStock(product);
+    const productIsAvailable = hasVariants
+      ? variants.some((v: any) => v.is_available)
+      : !effectiveTracking || productAvailableStock > 0;
+
     return {
       id: product.id,
       name: product.name,
@@ -646,14 +727,18 @@ export class CatalogService {
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
-      stock_quantity: product.stock_quantity,
+      // Mantener compatibilidad: ahora reflejan stock_levels.
+      stock_quantity: productAvailableStock,
+      available_stock: effectiveTracking ? productAvailableStock : null,
+      is_available: productIsAvailable,
+      effective_track_inventory: effectiveTracking,
       track_inventory: product.track_inventory,
       images: signed_images,
       image_url: signed_images[0]?.image_url || null,
       brand: product.brands,
       categories:
         product.product_categories?.map((pc: any) => pc.categories) || [],
-      variants: await this.mapVariantsToResponse(product),
+      variants,
       reviews: reviews.map((r: any) => ({
         id: r.id,
         rating: r.rating,
@@ -690,6 +775,13 @@ export class CatalogService {
           variant,
         );
 
+        // Disponibilidad real desde stock_levels (source of truth), NUNCA desde
+        // el denormalizado variant.stock_quantity que puede desfasarse.
+        const availableStock = this.sumStockLevelsAvailable(
+          variant.stock_levels,
+        );
+        const isAvailable = !effectiveTrackInventory || availableStock > 0;
+
         return {
           id: variant.id,
           sku: variant.sku,
@@ -700,10 +792,12 @@ export class CatalogService {
             : null,
           effective_base_price: priceResult.unitBasePrice,
           final_price: Math.round(priceResult.unitPriceWithTax * 100) / 100,
-          stock_quantity: variant.stock_quantity,
+          // Compatibilidad: stock_quantity refleja ahora la suma desde stock_levels.
+          stock_quantity: availableStock,
+          available_stock: effectiveTrackInventory ? availableStock : null,
           track_inventory_override: variant.track_inventory_override,
           effective_track_inventory: effectiveTrackInventory,
-          is_available: !effectiveTrackInventory || variant.stock_quantity > 0,
+          is_available: isAvailable,
           image_url: signedImageUrl,
           is_on_sale: variant.is_on_sale,
           sale_price: variant.sale_price ? Number(variant.sale_price) : null,
@@ -770,5 +864,30 @@ export class CatalogService {
 
   private resolveEffectiveTracking(product: any, variant?: any): boolean {
     return variant?.track_inventory_override ?? product.track_inventory;
+  }
+
+  /**
+   * Suma `quantity_available` desde stock_levels (source of truth).
+   * Catalog ecommerce no aplica `pos_stock_scope`; agrega todas las locations
+   * del store. El scope tenant ya se aplica vía la relación con
+   * inventory_locations.store_id en la query de productos.
+   */
+  private sumStockLevelsAvailable(stockLevels: any[] | undefined): number {
+    if (!Array.isArray(stockLevels) || stockLevels.length === 0) return 0;
+    return stockLevels.reduce(
+      (sum, sl) => sum + Number(sl?.quantity_available ?? 0),
+      0,
+    );
+  }
+
+  /**
+   * Suma stock base del producto (filas en stock_levels con product_variant_id = null).
+   * Usado cuando el producto NO tiene variantes.
+   */
+  private sumBaseProductStock(product: any): number {
+    const baseLevels = (product.stock_levels || []).filter(
+      (sl: any) => sl.product_variant_id == null,
+    );
+    return this.sumStockLevelsAvailable(baseLevels);
   }
 }

@@ -1465,15 +1465,17 @@ export class ProductDetailComponent implements OnInit {
     const variant = this.selectedVariant();
     const p = this.product();
     if (variant && !this.variantTracksInventory(variant)) return 999;
-    if (variant) return variant.stock_quantity;
+    if (variant) return variant.available_stock ?? 0;
     if (p?.variants?.length) {
       return p.variants.reduce(
         (sum, v) =>
-          sum + (this.variantTracksInventory(v) ? v.stock_quantity || 0 : 999),
+          sum +
+          (this.variantTracksInventory(v) ? v.available_stock ?? 0 : 999),
         0,
       );
     }
-    return p?.stock_quantity || 0;
+    if (p && p.track_inventory === false) return 999;
+    return p?.available_stock ?? 0;
   });
 
   /** Check if variant attributes are missing when product has variants with attributes */
@@ -1748,8 +1750,9 @@ export class ProductDetailComponent implements OnInit {
       this.activeImageUrl.set(variant.image_url);
     }
     // Reset quantity if it exceeds variant stock (skip for on-demand products)
-    if (!this.isOnDemand() && this.quantity() > variant.stock_quantity) {
-      this.quantity.set(Math.max(1, variant.stock_quantity));
+    const stock = variant.available_stock ?? variant.stock_quantity ?? 0;
+    if (!this.isOnDemand() && this.quantity() > stock) {
+      this.quantity.set(Math.max(1, stock));
     }
   }
 
@@ -1773,8 +1776,9 @@ export class ProductDetailComponent implements OnInit {
       if (matched.image_url) {
         this.activeImageUrl.set(matched.image_url);
       }
-      if (!this.isOnDemand() && this.quantity() > matched.stock_quantity) {
-        this.quantity.set(Math.max(1, matched.stock_quantity));
+      const matchedStock = matched.available_stock ?? matched.stock_quantity ?? 0;
+      if (!this.isOnDemand() && this.quantity() > matchedStock) {
+        this.quantity.set(Math.max(1, matchedStock));
       }
     } else {
       this.selectedVariantId.set(null);
@@ -1865,7 +1869,7 @@ export class ProductDetailComponent implements OnInit {
   isVariantAvailable(variant: ProductVariantDetail): boolean {
     if (typeof variant.is_available === 'boolean') return variant.is_available;
     if (!this.variantTracksInventory(variant)) return true;
-    return (variant.stock_quantity ?? 0) > 0;
+    return (variant.available_stock ?? variant.stock_quantity ?? 0) > 0;
   }
 
   onSubmitReview(): void {

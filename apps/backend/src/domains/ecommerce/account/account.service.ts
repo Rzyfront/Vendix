@@ -246,6 +246,9 @@ export class AccountService {
                 item.products.product_images[0].image_url,
               )
             : null,
+          variant_image_url: item.variant_image_url
+            ? await this.s3Service.signUrl(item.variant_image_url)
+            : null,
         })),
       ),
       payments: order.payments.map((p) => ({

@@ -192,6 +192,7 @@ export interface ProductCategory {
   slug: string;
   description?: string | null;
   image_url?: string | null;
+  is_featured?: boolean;
   state?: CategoryState;
   store_id?: number | null;
   created_at?: string | Date;
@@ -204,6 +205,7 @@ export interface Brand {
   slug: string;
   description?: string | null;
   logo_url?: string | null;
+  is_featured?: boolean;
   state?: BrandState;
   store_id: number;
   created_at?: string | Date;
@@ -215,6 +217,7 @@ export interface CreateCategoryDto {
   slug?: string;
   description?: string;
   image_url?: string;
+  is_featured?: boolean;
   state?: CategoryState;
 }
 
@@ -225,6 +228,7 @@ export interface CreateBrandDto {
   slug?: string;
   description?: string;
   logo_url?: string;
+  is_featured?: boolean;
   state?: BrandState;
 }
 
@@ -235,6 +239,7 @@ export interface CategoryQuery {
   limit?: number;
   search?: string;
   state?: CategoryState | 'all';
+  is_featured?: boolean;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -244,6 +249,7 @@ export interface BrandQuery {
   limit?: number;
   search?: string;
   state?: BrandState | 'all';
+  is_featured?: boolean;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
 }
@@ -387,9 +393,9 @@ export interface CreateProductVariantDto {
   is_on_sale?: boolean;
   sale_price?: number;
   stock_quantity?: number;
-  image_id?: number;
+  image_id?: number | null;
   attributes?: Record<string, any>;
-  variant_image_url?: string;
+  variant_image_url?: string | null;
   track_inventory_override?: boolean | null;
   service_duration_minutes?: number;
   service_pricing_type?: 'per_session' | 'package' | 'subscription';

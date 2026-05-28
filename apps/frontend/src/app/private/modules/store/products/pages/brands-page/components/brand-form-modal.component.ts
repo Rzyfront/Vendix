@@ -150,6 +150,12 @@ import { BrandsService } from '../../../services/brands.service';
             label="Marca activa"
             description="Desactiva para ocultar esta marca del catálogo"
           ></app-setting-toggle>
+
+          <app-setting-toggle
+            formControlName="is_featured"
+            label="Marca destacada"
+            description="Dale prioridad en el inicio de la tienda online"
+          ></app-setting-toggle>
         </div>
       </form>
 
@@ -199,7 +205,7 @@ export class BrandFormModalComponent {
       if (current) {
         this.patchForm(current);
       } else if (open && !current) {
-        this.form.reset({ state: true });
+        this.form.reset({ state: true, is_featured: false });
         this.logoPreviewUrl.set(null);
       }
     });
@@ -219,6 +225,7 @@ export class BrandFormModalComponent {
       description: ['', [Validators.maxLength(1000)]],
       logo_url: ['', [Validators.maxLength(500)]],
       state: [true],
+      is_featured: [false],
     });
   }
 
@@ -229,6 +236,7 @@ export class BrandFormModalComponent {
       description: brand.description || '',
       logo_url: brand.logo_url || '',
       state: brand.state !== 'inactive',
+      is_featured: !!brand.is_featured,
     });
     this.logoPreviewUrl.set(brand.logo_url || null);
   }
@@ -265,6 +273,7 @@ export class BrandFormModalComponent {
       description: string;
       logo_url: string;
       state: boolean;
+      is_featured: boolean;
     };
 
     const payload: CreateBrandDto | UpdateBrandDto = {
@@ -273,6 +282,7 @@ export class BrandFormModalComponent {
       description: value.description ? value.description : undefined,
       logo_url: value.logo_url ? value.logo_url : this.brand() ? '' : undefined,
       state: value.state ? 'active' : 'inactive',
+      is_featured: !!value.is_featured,
     };
 
     this.save.emit(payload);

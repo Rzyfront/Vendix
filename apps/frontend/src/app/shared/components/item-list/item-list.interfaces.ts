@@ -36,6 +36,8 @@ export interface ItemListCardConfig {
   subtitleTransform?: (item: any) => string;
   /** Key path for avatar/image URL */
   avatarKey?: string;
+  /** Optional click handler for avatar/image interactions */
+  avatarClick?: (item: any, event: MouseEvent) => void;
   /** Fallback icon name when no avatar is available */
   avatarFallbackIcon?: string;
   /** Key path for the badge/status value */

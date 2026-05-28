@@ -7,6 +7,7 @@ import {
   MaxLength,
   Min,
   IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -59,6 +60,14 @@ export class CreateBrandDto {
   @IsEnum(BrandState)
   @IsOptional()
   state?: BrandState = BrandState.ACTIVE;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Indica si la marca se destaca en la tienda online',
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_featured?: boolean = false;
 }
 
 // Update Brand DTO
@@ -102,6 +111,15 @@ export class BrandQueryDto {
   @IsOptional()
   @IsEnum(BrandState)
   state?: BrandState;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Filtra marcas destacadas o no destacadas',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  is_featured?: boolean;
 
   @ApiPropertyOptional({
     example: 'created_at',
