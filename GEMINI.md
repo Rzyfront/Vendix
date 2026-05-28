@@ -60,6 +60,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding a new AI provider | `vendix-ai-platform-core` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding chat features | `vendix-ai-chat` |
+| Adding dependencies to apps/mobile/package.json | `mobile-dev` |
 | Adding feature gates or paywalls backed by subscription state | `vendix-subscription-gate` |
 | Adding frontend routes | `vendix-frontend-routing` |
 | Adding modules or submodules to the sidebar | `vendix-panel-ui` |
@@ -140,6 +141,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
+| Developing features for the mobile app | `mobile-dev` |
 | Discovering reusable assets before proposing new code | `how-to-plan` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
@@ -150,6 +152,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing Schema | `vendix-prisma-schema` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
 | Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
+| Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
