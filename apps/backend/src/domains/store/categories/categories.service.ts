@@ -54,6 +54,7 @@ export class CategoriesService {
       description: createCategoryDto.description,
       store_id: store_id, // Manual injection required for create
       image_url: sanitizedImageUrl,
+      is_featured: createCategoryDto.is_featured ?? false,
       state: 'active',
     };
 
@@ -76,12 +77,17 @@ export class CategoriesService {
       sort_by = 'name',
       sort_order = 'asc',
       state,
+      is_featured,
     } = query;
     const skip = (page - 1) * limit;
     const where: any = {};
 
     if (state) where.state = state;
     else where.state = { not: 'archived' }; // Excluir archivados por defecto
+
+    if (is_featured !== undefined) {
+      where.is_featured = is_featured;
+    }
 
     if (search)
       where.OR = [
@@ -160,6 +166,9 @@ export class CategoriesService {
     }
     if (updateCategoryDto.state !== undefined) {
       updateData.state = updateCategoryDto.state;
+    }
+    if (updateCategoryDto.is_featured !== undefined) {
+      updateData.is_featured = updateCategoryDto.is_featured;
     }
     // store_id se gestiona automáticamente por el contexto de Prisma
     // if (updateCategoryDto.store_id !== undefined) {

@@ -7,6 +7,7 @@ import {
   MaxLength,
   Min,
   IsEnum,
+  IsBoolean,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { PartialType } from '@nestjs/mapped-types';
@@ -66,6 +67,14 @@ export class CreateCategoryDto {
   @IsEnum(CategoryState)
   @IsOptional()
   state?: CategoryState = CategoryState.ACTIVE;
+
+  @ApiPropertyOptional({
+    example: false,
+    description: 'Indica si la categoría se destaca en la tienda online',
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_featured?: boolean = false;
 }
 
 // Update Category DTO
@@ -109,6 +118,15 @@ export class CategoryQueryDto {
   @IsOptional()
   @IsEnum(CategoryState)
   state?: CategoryState;
+
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Filtra categorías destacadas o no destacadas',
+  })
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  is_featured?: boolean;
 
   @ApiPropertyOptional({
     example: 'name',

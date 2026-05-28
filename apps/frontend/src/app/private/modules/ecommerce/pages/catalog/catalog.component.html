@@ -39,7 +39,7 @@
     </div>
   </div>
 
-  <div class="catalog-content">
+  <div class="catalog-content" [class.no-sidebar]="!filters_enabled()">
     <!-- Sidebar Filters -->
     @if (filters_enabled()) {
       <aside class="catalog-sidebar" [class.open]="show_filters()">

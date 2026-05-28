@@ -45,7 +45,11 @@
           <div class="card-body">
             <!-- Avatar Section -->
             @if (showAvatar()) {
-              <div class="card-avatar-wrapper">
+              <div
+                class="card-avatar-wrapper"
+                [class.avatar-clickable]="!!cardConfig().avatarClick && !!getAvatarUrl(item)"
+                (click)="onAvatarClick(item, $event)"
+              >
                 <div
                   class="card-avatar"
                   [class.avatar-square]="cardConfig().avatarShape === 'square'"

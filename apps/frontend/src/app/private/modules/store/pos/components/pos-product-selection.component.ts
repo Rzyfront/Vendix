@@ -229,22 +229,27 @@ import {
                     </div>
                   }
                   <!-- Stock Badge -->
-                  @if (product.track_inventory !== false) {
-                    @if (product.stock <= 5) {
+                  @if (product.track_inventory !== false && !product.has_variants) {
+                    @if (product.is_available === false) {
                       <app-badge
-                        [variant]="product.stock === 0 ? 'error' : 'warning'"
+                        variant="error"
                         size="xs"
                         badgeStyle="outline"
                         class="absolute top-2 right-2 z-[1]"
                       >
-                        {{
-                          product.stock === 0
-                            ? 'AGOTADO'
-                            : 'Últimas ' + product.stock
-                        }}
+                        AGOTADO
+                      </app-badge>
+                    } @else if (product.stock <= 5) {
+                      <app-badge
+                        variant="warning"
+                        size="xs"
+                        badgeStyle="outline"
+                        class="absolute top-2 right-2 z-[1]"
+                      >
+                        Últimas {{ product.stock }}
                       </app-badge>
                     }
-                  } @else {
+                  } @else if (product.track_inventory === false) {
                     <app-badge
                       variant="info"
                       size="xs"
@@ -322,7 +327,7 @@ import {
                           <span
                             class="text-[10px] sm:text-xs leading-tight"
                             [class]="
-                              product.stock === 0
+                              product.is_available === false
                                 ? 'text-error font-semibold'
                                 : product.stock <= 5
                                   ? 'text-warning font-medium'
@@ -330,7 +335,7 @@ import {
                             "
                           >
                             {{
-                              product.stock === 0
+                              product.is_available === false
                                 ? 'Sin stock'
                                 : product.stock + ' en stock'
                             }}
@@ -823,11 +828,19 @@ export class PosProductSelectionComponent {
   }
 
   isProductCardUnavailable(product: any): boolean {
-    return (
-      !product.has_variants &&
-      product.track_inventory !== false &&
-      product.stock === 0
-    );
+    if (product.effective_track_inventory === false) return false;
+    if (product.track_inventory === false) return false;
+
+    if (product.has_variants) {
+      const variants = product.product_variants ?? [];
+      if (!variants.length) return false;
+      return variants.every((v: any) => v.is_available === false);
+    }
+
+    if (typeof product.is_available === 'boolean') {
+      return !product.is_available;
+    }
+    return product.stock === 0;
   }
 
   getAddButtonClass(product: any): string {

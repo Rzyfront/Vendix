@@ -879,6 +879,7 @@ model brands {
   slug        String           @db.VarChar(120)
   description String?
   logo_url    String?
+  is_featured Boolean          @default(false)
   created_at  DateTime?        @default(now()) @db.Timestamp(6)
   updated_at  DateTime?        @default(now()) @db.Timestamp(6)
   state       brand_state_enum @default(active)
@@ -888,6 +889,7 @@ model brands {
   @@unique([store_id, name])
   @@unique([store_id, slug])
   @@index([store_id])
+  @@index([store_id, is_featured])
 }
 
 model categories {
@@ -897,6 +899,7 @@ model categories {
   slug                 String                 @db.VarChar(255)
   description          String?
   image_url            String?
+  is_featured          Boolean                @default(false)
   state                category_state_enum    @default(active)
   stores               stores?                @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product_categories   product_categories[]
@@ -904,6 +907,7 @@ model categories {
   coupon_categories    coupon_categories[]
 
   @@unique([store_id, slug])
+  @@index([store_id, is_featured])
 }
 
 model currencies {
@@ -972,6 +976,7 @@ model order_items {
   product_name                     String                   @db.VarChar(255)
   variant_sku                      String?                  @db.VarChar(100)
   variant_attributes               String?
+  variant_image_url                String?                  @db.VarChar(500)
   quantity                         Int
   unit_price                       Decimal                  @db.Decimal(12, 2)
   total_price                      Decimal                  @db.Decimal(12, 2)
@@ -2038,6 +2043,7 @@ model sales_order_items {
   // is_package_unit + product.package_consumes_multiple_stock applies.
   applied_price_tier_id            Int?
   applied_price_tier_name_snapshot String?           @db.VarChar(255)
+  variant_image_url                String?           @db.VarChar(500)
   stock_units_consumed             Int?
   created_at                       DateTime?         @default(now()) @db.Timestamp(6)
   products                         products          @relation(fields: [product_id], references: [id], onDelete: Cascade)

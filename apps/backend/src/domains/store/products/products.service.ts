@@ -893,8 +893,13 @@ export class ProductsService {
           // Map variant data for POS
           const product_variants =
             product.product_variants?.map((variant: any) => {
+              // Disponibilidad calculada desde stock_levels (filtrados ya por
+              // posStockScope en el include), NUNCA desde variant.stock_quantity.
               const variantStock = this.sumVariantStock(variant);
               const variantImageUrl = variant.product_images?.image_url || null;
+              const effectiveTracking =
+                variant.track_inventory_override ?? product.track_inventory;
+              const isAvailable = !effectiveTracking || variantStock > 0;
 
               return {
                 id: variant.id,
@@ -915,6 +920,10 @@ export class ProductsService {
                   : null,
                 stock: variantStock,
                 stock_quantity: variantStock,
+                // Campos explícitos source-of-truth para el frontend POS.
+                available_stock: effectiveTracking ? variantStock : null,
+                is_available: isAvailable,
+                effective_track_inventory: effectiveTracking,
                 track_inventory_override: variant.track_inventory_override,
                 service_duration_minutes: variant.service_duration_minutes,
                 service_pricing_type: variant.service_pricing_type,
@@ -924,6 +933,24 @@ export class ProductsService {
                 attributes: this.parseVariantAttributes(variant.attributes),
               };
             }) || [];
+
+          // Stock del producto en modo POS:
+          // - El include ya filtró stock_levels por posStockScope.
+          // - Si el producto tiene variantes, sumar sólo filas con
+          //   product_variant_id != null para no duplicar; si no, sumar base.
+          const hasVariantsRaw = (product.product_variants?.length ?? 0) > 0;
+          const stockLevelsForProductTotals = hasVariantsRaw
+            ? (product.stock_levels ?? []).filter(
+                (sl: any) => sl.product_variant_id != null,
+              )
+            : (product.stock_levels ?? []);
+          const productStockQty = stockLevelsForProductTotals.reduce(
+            (s: number, l: any) => s + (l.quantity_available ?? 0),
+            0,
+          );
+          const productIsAvailable = hasVariantsRaw
+            ? product_variants.some((v: any) => v.is_available)
+            : !product.track_inventory || productStockQty > 0;
 
           return {
             id: product.id,
@@ -937,10 +964,10 @@ export class ProductsService {
             sku: product.sku,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
-            stock_quantity: (product.stock_levels ?? []).reduce(
-              (s: number, l: any) => s + (l.quantity_available ?? 0),
-              0,
-            ),
+            stock_quantity: productStockQty,
+            available_stock: product.track_inventory ? productStockQty : null,
+            is_available: productIsAvailable,
+            effective_track_inventory: product.track_inventory,
             state: product.state,
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
@@ -1030,31 +1057,39 @@ export class ProductsService {
 
         // Map variant data when requested
         const mapped_variants = include_variants
-          ? product.product_variants?.map((variant: any) => ({
-              id: variant.id,
-              name: variant.name,
-              sku: variant.sku,
-              price_override: variant.price_override
-                ? Number(variant.price_override)
-                : null,
-              cost_price: variant.cost_price
-                ? Number(variant.cost_price)
-                : null,
-              profit_margin: variant.profit_margin
-                ? Number(variant.profit_margin)
-                : null,
-              is_on_sale: variant.is_on_sale,
-              sale_price: variant.sale_price
-                ? Number(variant.sale_price)
-                : null,
-              stock_quantity: this.sumVariantStock(variant),
-              track_inventory_override: variant.track_inventory_override,
-              service_duration_minutes: variant.service_duration_minutes,
-              service_pricing_type: variant.service_pricing_type,
-              buffer_minutes: variant.buffer_minutes,
-              preparation_time_minutes: variant.preparation_time_minutes,
-              attributes: this.parseVariantAttributes(variant.attributes),
-            })) || []
+          ? product.product_variants?.map((variant: any) => {
+              const variantStock = this.sumVariantStock(variant);
+              const effectiveTracking =
+                variant.track_inventory_override ?? product.track_inventory;
+              return {
+                id: variant.id,
+                name: variant.name,
+                sku: variant.sku,
+                price_override: variant.price_override
+                  ? Number(variant.price_override)
+                  : null,
+                cost_price: variant.cost_price
+                  ? Number(variant.cost_price)
+                  : null,
+                profit_margin: variant.profit_margin
+                  ? Number(variant.profit_margin)
+                  : null,
+                is_on_sale: variant.is_on_sale,
+                sale_price: variant.sale_price
+                  ? Number(variant.sale_price)
+                  : null,
+                stock_quantity: variantStock,
+                available_stock: effectiveTracking ? variantStock : null,
+                is_available: !effectiveTracking || variantStock > 0,
+                effective_track_inventory: effectiveTracking,
+                track_inventory_override: variant.track_inventory_override,
+                service_duration_minutes: variant.service_duration_minutes,
+                service_pricing_type: variant.service_pricing_type,
+                buffer_minutes: variant.buffer_minutes,
+                preparation_time_minutes: variant.preparation_time_minutes,
+                attributes: this.parseVariantAttributes(variant.attributes),
+              };
+            }) || []
           : undefined;
 
         return {
@@ -1092,6 +1127,11 @@ export class ProductsService {
           product_tax_assignments: product.product_tax_assignments,
           // Mantener compatibilidad con el campo existente pero basado en stock_levels
           stock_quantity: totalStockAvailable,
+          available_stock: product.track_inventory ? totalStockAvailable : null,
+          is_available: hasVariants
+            ? (mapped_variants?.some((v: any) => v.is_available) ?? false)
+            : !product.track_inventory || totalStockAvailable > 0,
+          effective_track_inventory: product.track_inventory,
           // Nuevos campos agregados para mayor claridad
           total_stock_available: totalStockAvailable,
           total_stock_reserved: totalStockReserved,
@@ -1868,11 +1908,37 @@ export class ProductsService {
 
               keptVariantIds.add(variantId);
 
-              // Process variant image if new base64 provided
-              if (
-                variant_image_url &&
+              const previousVariantState = existingVariantMap.get(variantId);
+              const previousImageId = previousVariantState?.image_id ?? null;
+              const previousImageKey =
+                previousVariantState?.product_images?.image_url ?? null;
+
+              const deletePreviousVariantImage = async () => {
+                if (!previousImageId) return;
+                await prisma.product_variants.update({
+                  where: { id: variantId },
+                  data: { image_id: null },
+                });
+                await prisma.product_images
+                  .delete({ where: { id: previousImageId } })
+                  .catch(() => {});
+                if (previousImageKey) {
+                  const parts = previousImageKey.split('/');
+                  const fileName = parts.pop();
+                  const thumbKey = [...parts, `thumb_${fileName}`].join('/');
+                  this.s3Service.deleteFile(previousImageKey).catch(() => {});
+                  this.s3Service.deleteFile(thumbKey).catch(() => {});
+                }
+              };
+
+              // Process variant image: null = clear, data:image = replace, otherwise preserve
+              if (variant_image_url === null) {
+                await deletePreviousVariantImage();
+              } else if (
+                typeof variant_image_url === 'string' &&
                 variant_image_url.startsWith('data:image')
               ) {
+                await deletePreviousVariantImage();
                 const { org, store: storeCtx } =
                   await this.getStoreWithOrgContext(existingProduct.store_id);
                 const basePath = this.s3PathHelper.buildProductPath(
@@ -1897,6 +1963,7 @@ export class ProductsService {
                   data: { image_id: variantImage.id },
                 });
               }
+              // else: undefined or other string -> preserve existing image_id
             }
 
             // Before deleting variants: check for active reservations and stock

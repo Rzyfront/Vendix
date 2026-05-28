@@ -1255,11 +1255,11 @@ export class UpdateVariantWithStockDto {
 
   @IsOptional()
   @IsInt()
-  image_id?: number;
+  image_id?: number | null;
 
   @IsOptional()
   @IsString()
-  variant_image_url?: string;
+  variant_image_url?: string | null;
 }
 
 // Bulk Upload DTOs

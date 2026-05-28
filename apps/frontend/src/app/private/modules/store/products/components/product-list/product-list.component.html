@@ -1,4 +1,26 @@
 <div class="md:space-y-4">
+  <ng-template #productImageTemplate let-product>
+    @if (getProductImageUrl(product); as imageUrl) {
+      <button
+        type="button"
+        class="product-image-preview-trigger"
+        title="Ver imagen ampliada"
+        [attr.aria-label]="'Ver imagen ampliada de ' + (product.name || 'producto')"
+        (click)="openImagePreview(product, $event)"
+      >
+        <img
+          [src]="imageUrl"
+          [alt]="product.name || 'Imagen del producto'"
+          class="product-image-preview-thumb"
+        />
+      </button>
+    } @else {
+      <div class="product-image-preview-placeholder" aria-hidden="true">
+        <app-icon name="image" [size]="16" class="text-gray-400"></app-icon>
+      </div>
+    }
+  </ng-template>
+
   <!-- Lista de Productos -->
   <app-card [responsive]="true" [padding]="false" overflow="visible" customClasses="md:min-h-[600px]">
     <!-- Search Section: sticky below stats on mobile, normal on desktop -->
@@ -51,7 +73,7 @@
     <!-- Products List -->
     @if (!isLoading() && products().length > 0) {
     <div class="px-2 pb-2 pt-3 md:p-4">
-      <app-responsive-data-view [data]="products()" [columns]="tableColumns" [actions]="tableActions"
+      <app-responsive-data-view [data]="products()" [columns]="tableColumns()" [actions]="tableActions"
         [cardConfig]="cardConfig" [loading]="isLoading()" [sortable]="true" (sort)="sort.emit($event)"
         (rowClick)="edit.emit($event)">
       </app-responsive-data-view>
@@ -69,4 +91,13 @@
     </div>
     }
   </app-card>
+
+  <app-image-lightbox
+    [isOpen]="imagePreviewOpen()"
+    [currentImage]="selectedImageUrl()"
+    [alt]="selectedImageAlt()"
+    [title]="selectedImageAlt()"
+    [showInfo]="true"
+    (close)="closeImagePreview()"
+  ></app-image-lightbox>
 </div>

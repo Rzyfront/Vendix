@@ -4,6 +4,10 @@ import {
   output,
   inject,
   effect,
+  computed,
+  signal,
+  viewChild,
+  TemplateRef,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -30,6 +34,8 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  ImageLightboxComponent,
+  IconComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 
@@ -48,11 +54,15 @@ import './product-list.component.css';
     ResponsiveDataViewComponent,
     PaginationComponent,
     CardComponent,
+    ImageLightboxComponent,
+    IconComponent,
   ],
   templateUrl: './product-list.component.html',
 })
 export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
+  private readonly productImageTemplate =
+    viewChild<TemplateRef<{ $implicit: Product }>>('productImageTemplate');
 
   readonly products = input<Product[]>([]);
   readonly isLoading = input(false);
@@ -77,6 +87,14 @@ export class ProductListComponent {
   selectedCategory = '';
   selectedBrand = '';
   selectedProductType = '';
+  readonly selectedImageProduct = signal<Product | null>(null);
+  readonly imagePreviewOpen = signal(false);
+  readonly selectedImageUrl = computed(
+    () => this.selectedImageProduct()?.image_url ?? '',
+  );
+  readonly selectedImageAlt = computed(
+    () => this.selectedImageProduct()?.name || 'Imagen del producto',
+  );
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -133,7 +151,7 @@ export class ProductListComponent {
   ];
 
   // Table configuration
-  tableColumns: TableColumn[] = [
+  readonly tableColumns = computed<TableColumn[]>(() => [
     {
       key: 'image_url',
       label: '', // Empty label for symmetry
@@ -142,6 +160,7 @@ export class ProductListComponent {
       align: 'center',
       priority: 1,
       type: 'image',
+      template: this.productImageTemplate(),
       transform: (value: string) => value || '',
     },
     {
@@ -217,7 +236,7 @@ export class ProductListComponent {
       },
       transform: (value: ProductState) => this.formatProductState(value),
     },
-  ];
+  ]);
 
   tableActions: TableAction[] = [
     {
@@ -253,6 +272,8 @@ export class ProductListComponent {
     subtitleKey: 'brand',
     subtitleTransform: (item: any) => item?.brand?.name || '-',
     avatarKey: 'image_url',
+    avatarClick: (item: Product, event: MouseEvent) =>
+      this.openImagePreview(item, event),
     avatarShape: 'square', // Square images for products
     badgeKey: 'state',
     badgeConfig: {
@@ -384,7 +405,25 @@ export class ProductListComponent {
     }
   }
 
+  openImagePreview(product: Product, event?: MouseEvent): void {
+    event?.stopPropagation();
+    if (!this.getProductImageUrl(product)) {
+      return;
+    }
+    this.selectedImageProduct.set(product);
+    this.imagePreviewOpen.set(true);
+  }
+
+  closeImagePreview(): void {
+    this.imagePreviewOpen.set(false);
+    this.selectedImageProduct.set(null);
+  }
+
   // Helper methods
+  getProductImageUrl(product: Product): string {
+    return product.image_url ?? '';
+  }
+
   formatProductState(state: ProductState): string {
     return state;
   }

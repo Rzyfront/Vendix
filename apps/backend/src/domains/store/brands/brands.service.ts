@@ -50,6 +50,7 @@ export class BrandsService {
           slug,
           description: createBrandDto.description,
           logo_url: sanitizedLogoUrl,
+          is_featured: createBrandDto.is_featured ?? false,
           store_id,
           state: createBrandDto.state ?? 'active',
         },
@@ -73,6 +74,7 @@ export class BrandsService {
       limit = 10,
       search,
       state,
+      is_featured,
       sort_by = 'created_at',
       sort_order = 'desc',
     } = query;
@@ -83,6 +85,10 @@ export class BrandsService {
 
     if (state) where.state = state;
     else where.state = { not: 'archived' }; // Excluir archivados por defecto
+
+    if (is_featured !== undefined) {
+      where.is_featured = is_featured;
+    }
 
     if (search) {
       where.OR = [
@@ -173,6 +179,10 @@ export class BrandsService {
 
     if (updateBrandDto.state !== undefined) {
       updateData.state = updateBrandDto.state;
+    }
+
+    if (updateBrandDto.is_featured !== undefined) {
+      updateData.is_featured = updateBrandDto.is_featured;
     }
 
     try {

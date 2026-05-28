@@ -31,6 +31,9 @@ export interface Product {
   category_ids?: number[];
   brand?: string;
   stock: number;
+  available_stock?: number | null;
+  is_available?: boolean;
+  effective_track_inventory?: boolean;
   track_inventory?: boolean;
   minStock: number;
   image?: string;
@@ -100,6 +103,9 @@ export interface PosProductVariant {
   price_override: number | null;
   cost_price: number | null;
   stock: number;
+  available_stock?: number | null;
+  is_available?: boolean;
+  effective_track_inventory?: boolean;
   is_active: boolean;
   is_on_sale?: boolean;
   sale_price?: number | null;
@@ -342,9 +348,11 @@ export class PosProductService {
 
   private transformProducts(products: any[]): any[] {
     return products.map((product) => {
-      // Backend already scoped stock_quantity under pos_stock_scope; trust it
-      // and fall back to summing per-location levels only if missing.
+      // Backend computes available_stock from stock_levels honoring pos_stock_scope.
+      // Prefer it; fall back to legacy denormalized stock_quantity, then to
+      // summing per-location levels locally only if neither is present.
       const totalStock =
+        product.available_stock ??
         product.stock_quantity ??
         (Array.isArray(product.stock_levels)
           ? product.stock_levels.reduce(
@@ -353,6 +361,16 @@ export class PosProductService {
               0,
             )
           : 0);
+
+      const effectiveTrackInventory =
+        product.effective_track_inventory ?? product.track_inventory;
+
+      const productIsAvailable =
+        typeof product.is_available === 'boolean'
+          ? product.is_available
+          : effectiveTrackInventory === false
+            ? true
+            : totalStock > 0;
 
       // Get image URL with fallbacks - PRIORITIZE signed URL at the root
       let imageUrl = '';
@@ -366,8 +384,30 @@ export class PosProductService {
 
       // Map product variants
       const rawVariants = product.product_variants || [];
-      const productVariants: PosProductVariant[] = rawVariants.map(
-        (v: any) => ({
+      const productVariants: PosProductVariant[] = rawVariants.map((v: any) => {
+        const variantStock =
+          v.available_stock ??
+          v.stock_quantity ??
+          (Array.isArray(v.stock_levels) && v.stock_levels.length > 0
+            ? v.stock_levels.reduce(
+                (sum: number, sl: any) =>
+                  sum + (sl?.quantity_available ?? 0),
+                0,
+              )
+            : (v.stock ?? 0));
+
+        const variantEffectiveTracking =
+          v.effective_track_inventory ??
+          (v.track_inventory_override ?? product.track_inventory);
+
+        const variantIsAvailable =
+          typeof v.is_available === 'boolean'
+            ? v.is_available
+            : variantEffectiveTracking === false
+              ? true
+              : variantStock > 0;
+
+        return {
           id: v.id,
           sku: v.sku || null,
           price_override:
@@ -376,15 +416,11 @@ export class PosProductService {
           is_on_sale: v.is_on_sale ?? false,
           sale_price: v.sale_price != null ? Number(v.sale_price) : null,
           track_inventory_override: v.track_inventory_override ?? null,
-          stock:
-            v.stock_quantity ??
-            (Array.isArray(v.stock_levels) && v.stock_levels.length > 0
-              ? v.stock_levels.reduce(
-                  (sum: number, sl: any) =>
-                    sum + (sl?.quantity_available ?? 0),
-                  0,
-                )
-              : (v.stock ?? 0)),
+          stock: variantStock,
+          available_stock:
+            v.available_stock != null ? Number(v.available_stock) : null,
+          is_available: variantIsAvailable,
+          effective_track_inventory: variantEffectiveTracking ?? true,
           is_active: v.is_active ?? true,
           attributes: Array.isArray(v.attributes)
             ? v.attributes
@@ -397,8 +433,8 @@ export class PosProductService {
                 )
               : [],
           image_url: v.image_url || v.product_images?.image_url || undefined,
-        }),
-      );
+        };
+      });
 
       const categories = Array.isArray(product.categories)
         ? product.categories
@@ -422,6 +458,12 @@ export class PosProductService {
         category_ids: categoryIds,
         brand: product.brands?.name || '',
         stock: totalStock,
+        available_stock:
+          product.available_stock != null
+            ? Number(product.available_stock)
+            : null,
+        is_available: productIsAvailable,
+        effective_track_inventory: effectiveTrackInventory ?? true,
         track_inventory: product.track_inventory,
         minStock: product.min_stock_level || 5,
         image: imageUrl,

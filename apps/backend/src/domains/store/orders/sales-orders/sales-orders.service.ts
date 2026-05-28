@@ -96,6 +96,16 @@ export class SalesOrdersService {
           item.product_variant_id,
         );
 
+        // Snapshot variant image S3 key (never signed URL)
+        let variant_image_url: string | null = null;
+        if (item.product_variant_id) {
+          const variant = await tx.product_variants.findUnique({
+            where: { id: item.product_variant_id },
+            include: { product_images: true },
+          });
+          variant_image_url = variant?.product_images?.image_url ?? null;
+        }
+
         await tx.sales_order_items.create({
           data: {
             sales_order_id: salesOrder.id,
@@ -106,6 +116,7 @@ export class SalesOrdersService {
             unit_price: item.unit_price,
             total_price: item.quantity * item.unit_price,
             cost_price,
+            variant_image_url,
             // Multi-tarifa snapshot (Phase 1.5)
             applied_price_tier_id: tierSnap?.tier_id ?? null,
             applied_price_tier_name_snapshot: tierSnap?.tier_name ?? null,
@@ -693,6 +704,11 @@ export class SalesOrdersService {
             mainImage.image_url,
           );
           item.products.image_url = mainImage.image_url;
+        }
+        if (item.variant_image_url) {
+          item.variant_image_url = await this.s3Service.signUrl(
+            item.variant_image_url,
+          );
         }
       }),
     );

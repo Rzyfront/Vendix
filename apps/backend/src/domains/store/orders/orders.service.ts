@@ -133,6 +133,17 @@ export class OrdersService {
                       ? product?.product_type || 'physical'
                       : item.item_type || product?.product_type || 'custom';
                   const tierSnap = tierSnapshots[index];
+                  // Snapshot variant image S3 key (never signed URL)
+                  let variant_image_url: string | null = null;
+                  if (item.product_id && item.product_variant_id) {
+                    const variant =
+                      await this.prisma.product_variants.findUnique({
+                        where: { id: item.product_variant_id },
+                        include: { product_images: true },
+                      });
+                    variant_image_url =
+                      variant?.product_images?.image_url ?? null;
+                  }
                   return {
                     product_id: item.product_id || null,
                     product_variant_id: item.product_id
@@ -142,6 +153,7 @@ export class OrdersService {
                     description: item.description,
                     variant_sku: item.variant_sku,
                     variant_attributes: item.variant_attributes,
+                    variant_image_url,
                     quantity: item.quantity,
                     unit_price: item.unit_price,
                     total_price: item.total_price,
@@ -414,6 +426,11 @@ export class OrdersService {
           );
           item.products.image_url = mainImage.image_url;
         }
+        if (item.variant_image_url) {
+          item.variant_image_url = await this.s3Service.signUrl(
+            item.variant_image_url,
+          );
+        }
       }),
     );
   }
@@ -599,10 +616,29 @@ export class OrdersService {
         where: { order_id: id },
       });
 
+      // Pre-resolve variant image S3 keys for items that have a variant
+      const variantIds = dto.items
+        .map((it) => (it.product_id ? it.product_variant_id : null))
+        .filter((v): v is number => typeof v === 'number');
+      const variantImageById = new Map<number, string | null>();
+      if (variantIds.length) {
+        const variants = await tx.product_variants.findMany({
+          where: { id: { in: Array.from(new Set(variantIds)) } },
+          include: { product_images: true },
+        });
+        for (const v of variants) {
+          variantImageById.set(v.id, v.product_images?.image_url ?? null);
+        }
+      }
+
       // Create new items
       await tx.order_items.createMany({
         data: dto.items.map((item, index) => {
           const tierSnap = tierSnapshots[index];
+          const variant_image_url =
+            item.product_id && item.product_variant_id
+              ? variantImageById.get(item.product_variant_id) ?? null
+              : null;
           return {
             order_id: id,
             product_id: item.product_id || null,
@@ -613,6 +649,7 @@ export class OrdersService {
             description: item.description,
             variant_sku: item.variant_sku,
             variant_attributes: item.variant_attributes,
+            variant_image_url,
             quantity: item.quantity,
             unit_price: item.unit_price,
             total_price: item.total_price,

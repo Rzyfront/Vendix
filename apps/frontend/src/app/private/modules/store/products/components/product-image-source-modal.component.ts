@@ -26,6 +26,7 @@ import { ProductsService } from '../services/products.service';
 
 type Stage = 'select' | 'url' | 'camera' | 'crop' | 'loading';
 type ImageModalMode = 'add' | 'edit';
+type ImageTarget = 'product' | 'variant';
 type AspectRatio = 'free' | '1:1' | '4:3' | '3:2' | '16:9' | '4:5' | '9:16';
 
 type DragMode = 'move' | 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
@@ -87,17 +88,25 @@ const ASPECT_RATIOS: {
       @switch (stage()) {
         @case ('select') {
           <div class="space-y-4">
-            @if (remainingSlots() <= 0) {
+            @if (effectiveRemainingSlots() <= 0) {
               <div
                 class="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-center gap-2"
               >
                 <app-icon name="alert-triangle" size="16"></app-icon>
-                Límite de 5 imágenes alcanzado
+                @if (target() === 'variant') {
+                  Esta variante ya tiene su imagen
+                } @else {
+                  Límite de 5 imágenes alcanzado
+                }
               </div>
             } @else {
               <p class="text-sm text-text-secondary">
-                Quedan {{ remainingSlots() }} espacio(s) disponible(s). Elige
-                cómo quieres agregar imágenes:
+                @if (target() === 'variant') {
+                  Elige cómo quieres agregar la imagen de la variante:
+                } @else {
+                  Quedan {{ effectiveRemainingSlots() }} espacio(s)
+                  disponible(s). Elige cómo quieres agregar imágenes:
+                }
               </p>
             }
 
@@ -105,7 +114,7 @@ const ASPECT_RATIOS: {
               <button
                 type="button"
                 (click)="pickFile()"
-                [disabled]="remainingSlots() <= 0"
+                [disabled]="effectiveRemainingSlots() <= 0"
                 class="p-4 border border-gray-200 rounded-xl text-left hover:border-primary-400 hover:bg-primary-50/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-3"
               >
                 <div
@@ -124,7 +133,7 @@ const ASPECT_RATIOS: {
               <button
                 type="button"
                 (click)="goToUrl()"
-                [disabled]="remainingSlots() <= 0"
+                [disabled]="effectiveRemainingSlots() <= 0"
                 class="p-4 border border-gray-200 rounded-xl text-left hover:border-primary-400 hover:bg-primary-50/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-3"
               >
                 <div
@@ -143,7 +152,7 @@ const ASPECT_RATIOS: {
               <button
                 type="button"
                 (click)="goToCamera()"
-                [disabled]="remainingSlots() <= 0"
+                [disabled]="effectiveRemainingSlots() <= 0"
                 class="p-4 border border-gray-200 rounded-xl text-left hover:border-primary-400 hover:bg-primary-50/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-start gap-3"
               >
                 <div
@@ -176,22 +185,26 @@ const ASPECT_RATIOS: {
                 </div>
               </div>
 
-              <div
-                class="p-4 border border-gray-200 rounded-xl bg-gray-50 flex items-start gap-3 opacity-70 sm:col-span-2"
-                title="Aún no disponible"
-              >
+              @if (allowAiEnhance()) {
                 <div
-                  class="w-10 h-10 rounded-lg bg-gray-200 text-gray-500 flex items-center justify-center flex-shrink-0"
+                  class="p-4 border border-gray-200 rounded-xl bg-gray-50 flex items-start gap-3 opacity-70 sm:col-span-2"
+                  title="Aún no disponible"
                 >
-                  <app-icon name="sparkles" size="20"></app-icon>
+                  <div
+                    class="w-10 h-10 rounded-lg bg-gray-200 text-gray-500 flex items-center justify-center flex-shrink-0"
+                  >
+                    <app-icon name="sparkles" size="20"></app-icon>
+                  </div>
+                  <div>
+                    <p class="text-sm font-semibold text-gray-700">
+                      Generar con IA
+                    </p>
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Aún no disponible
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p class="text-sm font-semibold text-gray-700">
-                    Generar con IA
-                  </p>
-                  <p class="text-xs text-gray-500 mt-0.5">Aún no disponible</p>
-                </div>
-              </div>
+              }
             </div>
 
             <input
@@ -199,7 +212,7 @@ const ASPECT_RATIOS: {
               type="file"
               class="hidden"
               accept="image/*"
-              multiple
+              [multiple]="multiSelectEnabled()"
               (change)="onFileSelect($event)"
             />
           </div>
@@ -557,11 +570,22 @@ export class ProductImageSourceModalComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isOpen = model<boolean>(false);
+  readonly target = input<ImageTarget>('product');
   readonly remainingSlots = input<number>(5);
   readonly mode = input<ImageModalMode>('add');
+  readonly allowAiEnhance = input<boolean>(true);
   readonly sourceImageUrl = input<string | null>(null);
   readonly imagesAdded = output<string[]>();
   readonly imageEdited = output<string>();
+
+  readonly effectiveRemainingSlots = computed(() => {
+    const raw = this.remainingSlots();
+    if (this.target() === 'variant') return Math.min(raw, 1);
+    return raw;
+  });
+  readonly multiSelectEnabled = computed(
+    () => this.effectiveRemainingSlots() > 1,
+  );
 
   readonly stage = signal<Stage>('select');
   readonly queue = signal<PendingImage[]>([]);
@@ -587,6 +611,7 @@ export class ProductImageSourceModalComponent {
   private lastStartedEditUrl: string | null = null;
 
   readonly modalTitle = computed(() => {
+    const isVariant = this.target() === 'variant';
     switch (this.stage()) {
       case 'url':
         return 'Agregar desde URL';
@@ -599,7 +624,7 @@ export class ProductImageSourceModalComponent {
       case 'loading':
         return 'Preparando imagen';
       default:
-        return 'Agregar imágenes';
+        return isVariant ? 'Agregar imagen de la variante' : 'Agregar imágenes';
     }
   });
 
@@ -674,7 +699,7 @@ export class ProductImageSourceModalComponent {
   }
 
   pickFile(): void {
-    if (this.remainingSlots() <= 0) return;
+    if (this.effectiveRemainingSlots() <= 0) return;
     this.fileInputRef?.nativeElement.click();
   }
 
@@ -683,7 +708,7 @@ export class ProductImageSourceModalComponent {
     const files = input.files;
     if (!files || files.length === 0) return;
 
-    const remaining = this.remainingSlots();
+    const remaining = this.effectiveRemainingSlots();
     const filesArr = Array.from(files)
       .filter((f) => f.type.startsWith('image/'))
       .slice(0, remaining);
@@ -710,7 +735,7 @@ export class ProductImageSourceModalComponent {
   }
 
   goToUrl(): void {
-    if (this.remainingSlots() <= 0) return;
+    if (this.effectiveRemainingSlots() <= 0) return;
     this.urlInput = '';
     this.urlError.set(null);
     this.stage.set('url');
@@ -751,7 +776,7 @@ export class ProductImageSourceModalComponent {
   }
 
   goToCamera(): void {
-    if (this.remainingSlots() <= 0) return;
+    if (this.effectiveRemainingSlots() <= 0) return;
     this.stage.set('camera');
   }
 

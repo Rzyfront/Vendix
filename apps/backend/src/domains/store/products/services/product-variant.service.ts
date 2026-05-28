@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   BadRequestException,
   ConflictException,
@@ -20,6 +21,8 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ProductVariantService {
+  private readonly logger = new Logger(ProductVariantService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly inventoryLocationsService: LocationsService,
@@ -517,8 +520,19 @@ export class ProductVariantService {
           const parts = key.split('/');
           const fileName = parts.pop();
           const thumbKey = [...parts, `thumb_${fileName}`].join('/');
-          this.s3Service.deleteFile(key).catch(() => {});
-          this.s3Service.deleteFile(thumbKey).catch(() => {});
+          this.s3Service
+            .deleteFile(key)
+            .catch((err) =>
+              this.logger.warn('S3 delete failed', { key, err: err.message }),
+            );
+          this.s3Service
+            .deleteFile(thumbKey)
+            .catch((err) =>
+              this.logger.warn('S3 delete failed', {
+                key: thumbKey,
+                err: err.message,
+              }),
+            );
         }
 
         await prisma.product_variants.update({
@@ -529,7 +543,12 @@ export class ProductVariantService {
           .delete({
             where: { id: existingVariant.image_id },
           })
-          .catch(() => {});
+          .catch((err) =>
+            this.logger.warn('product_images delete failed', {
+              image_id: existingVariant.image_id,
+              err: err.message,
+            }),
+          );
       }
 
       return await prisma.product_variants.delete({

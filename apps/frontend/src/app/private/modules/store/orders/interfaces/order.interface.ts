@@ -89,6 +89,7 @@ export interface OrderItem {
   product_name: string;
   variant_sku?: string;
   variant_attributes?: string;
+  variant_image_url?: string | null;
   quantity: number;
   unit_price: number;
   total_price: number;
