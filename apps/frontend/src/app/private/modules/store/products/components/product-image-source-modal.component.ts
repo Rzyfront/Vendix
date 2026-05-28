@@ -66,7 +66,7 @@ const ASPECT_RATIOS: {
   { value: '9:16', label: '9:16', ratio: 9 / 16 },
 ];
 
-const DEFAULT_ASPECT: AspectRatio = '1:1';
+const DEFAULT_ASPECT: AspectRatio = 'free';
 
 @Component({
   selector: 'app-product-image-source-modal',
