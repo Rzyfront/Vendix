@@ -1,11 +1,4 @@
-import {
-  BadRequestException,
-  Body,
-  Controller,
-  Headers,
-  Logger,
-  Post,
-} from '@nestjs/common';
+import { Body, Controller, Headers, Logger, Post } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Public } from '../../../../common/decorators/public.decorator';
 import { SkipSubscriptionGate } from '../../../store/subscriptions/decorators/skip-subscription-gate.decorator';
@@ -21,9 +14,15 @@ import { PlatformWompiWebhookValidatorService } from './platform-wompi-webhook-v
  *  - This endpoint validates with PLATFORM credentials from
  *    platform_settings (PlatformGatewayService.getActiveCredentials).
  *  - That endpoint always returns 200 (Wompi retry compliance for store flows).
- *  - This endpoint returns 400 on bad references / signatures so the
- *    operator notices misrouting; Wompi will still retry (which is desired
- *    for transient validation issues).
+ *  - This endpoint ALSO always returns 200. Bad references / signatures and
+ *    processing errors are ACKed (logged at warn/error) instead of 400.
+ *    Rationale: a 400 makes Wompi retry with backoff and, after repeated
+ *    failures, can flag the endpoint as unhealthy. Validation failures
+ *    (bad signature, `reference_not_saas` misrouting) are permanent — retries
+ *    never succeed — so ACKing stops the noise; the operator notices via logs
+ *    and reroutes the gateway config. Transient processing errors are healed
+ *    by SubscriptionWebhookReconcilerJob + the checkout polling fallback, so
+ *    losing the Wompi retry is safe.
  *
  * Operational rollout:
  *  - SAAS_WEBHOOK_ENABLED env flag (default 'true'). When 'false', the
@@ -47,8 +46,11 @@ export class PlatformWebhookController {
   @ApiOperation({
     summary: 'Handle Wompi webhooks for platform-level (SaaS) billing',
   })
-  @ApiResponse({ status: 200, description: 'Webhook processed' })
-  @ApiResponse({ status: 400, description: 'Invalid signature or reference' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Always ACKed. Processed when valid; invalid/processing failures are logged and reconciled out-of-band.',
+  })
   async handleWompi(
     @Body() body: any,
     @Headers() _headers: Record<string, string>,
@@ -75,15 +77,15 @@ export class PlatformWebhookController {
 
     const result = await this.validator.validate(body);
     if (!result.valid) {
+      // ACK with 200 (do NOT 400). Validation failures are permanent — a bad
+      // signature or a `reference_not_saas` misroute will fail identically on
+      // every Wompi retry, so retrying only adds noise and risks Wompi marking
+      // the endpoint unhealthy. The operator notices via this log and reroutes
+      // the gateway config to /store/webhooks/wompi when the reference isn't SaaS.
       this.logger.warn(
-        `Rejecting platform Wompi webhook: reason=${result.reason ?? 'unknown'}`,
+        `ACK (not processed) platform Wompi webhook: reason=${result.reason ?? 'unknown'}`,
       );
-      // 400 — Wompi will retry with backoff. For 'reference_not_saas' the
-      // operator should reroute the gateway config to /store/webhooks/wompi.
-      throw new BadRequestException({
-        received: false,
-        reason: result.reason ?? 'unknown',
-      });
+      return { received: true };
     }
 
     try {
@@ -98,13 +100,11 @@ export class PlatformWebhookController {
         `Error processing platform Wompi webhook for invoice ${result.invoiceId}: ${error?.message ?? error}`,
         error?.stack,
       );
-      // Surface a 4xx so Wompi retries; the validator already passed so
-      // the next retry has a chance of succeeding once the underlying issue
-      // (e.g. transient DB error) is resolved.
-      throw new BadRequestException({
-        received: false,
-        reason: 'processing_error',
-      });
+      // ACK with 200 even on processing failure. The signature already passed,
+      // so the event is genuine; SubscriptionWebhookReconcilerJob + the
+      // checkout polling fallback will re-confirm the invoice, making the lost
+      // Wompi retry safe and avoiding endpoint-health penalties from repeated 4xx.
+      return { received: true };
     }
   }
 
