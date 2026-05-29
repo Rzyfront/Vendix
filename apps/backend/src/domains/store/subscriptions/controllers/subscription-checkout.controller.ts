@@ -773,22 +773,29 @@ export class SubscriptionCheckoutController {
       const subPending = sub as any;
       const previousPendingPlanId: number | null =
         subPending.pending_plan_id ?? null;
-      const planChangedWhilePending =
-        previousPendingPlanId != null && previousPendingPlanId !== dto.planId;
+      // issueInvoice() bills against sub.plan_id, so it MUST already point at
+      // the target plan before we emit. Two cases require (re)assignment:
+      //   - plan_id === null: a fresh pending_payment sub that was stranded
+      //     (created before the plan_id-at-creation fix, or a voided retry).
+      //   - plan_id !== dto.planId: the user switched plans while pending.
+      // applyResubscribe() sets plan_id + refreshes pricing/period WITHOUT
+      // touching `state` (stays pending_payment; promotion to active happens
+      // on payment via SubscriptionStateListener). It also lets issueInvoice
+      // detect+void any stale pending invoice for the previous plan.
+      const planNeedsAssignment =
+        sub.plan_id == null || sub.plan_id !== dto.planId;
 
-      if (planChangedWhilePending) {
-        // Plan changed while pending — refresh pricing/period so the next
-        // invoice reflects the latest selection. issueInvoice() will detect
-        // the plan mismatch on the existing pending row and void it.
+      if (planNeedsAssignment) {
         await this.proration.applyResubscribe(sub.id, dto.planId);
       }
 
       // issueInvoice handles both reuse (same plan, idempotent retries) and
-      // void+create (plan changed). Always non-null for a paid plan.
+      // void+create (plan changed). Always non-null for a paid plan now that
+      // plan_id is guaranteed to match the target.
       const invoice = await this.billing.issueInvoice(sub.id, {
         fromPlanId: subPending.paid_plan_id ?? sub.plan_id,
         toPlanId: dto.planId,
-        changeKind: planChangedWhilePending ? 'resubscribe' : undefined,
+        changeKind: planNeedsAssignment ? 'resubscribe' : undefined,
       });
 
       if (!invoice) {
@@ -1508,7 +1515,12 @@ export class SubscriptionCheckoutController {
       const created = await tx.store_subscriptions.create({
         data: {
           store_id: storeId,
-          plan_id: isFreePlan ? plan.id : null,
+          // Bill-against plan must be set even while pending_payment so
+          // issueInvoice() can emit the first invoice. The gate blocks by
+          // `state` (pending_payment → block) regardless of plan_id, and
+          // resolved_features stays empty until confirmPendingChange() runs,
+          // so no feature leaks before payment. Mirrors Path D (applyResubscribe).
+          plan_id: plan.id,
           paid_plan_id: isFreePlan ? plan.id : null,
           partner_override_id: null,
           state: initialState,
