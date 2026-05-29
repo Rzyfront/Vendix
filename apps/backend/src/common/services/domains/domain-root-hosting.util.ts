@@ -4,6 +4,7 @@ import {
   DomainDnsInstructionsPayload,
   DomainProvisioningStage,
   DomainValidationRecord,
+  VERIFIED_DOMAIN_STATUSES,
   getDomainSslConfig,
 } from './domain-custom-hosting.util';
 
@@ -143,7 +144,7 @@ export function buildDomainRootDnsInstructions(params: {
       : undefined;
 
   const ownershipComplete =
-    !!root.last_verified_at || root.status !== 'pending_ownership';
+    !!root.last_verified_at || VERIFIED_DOMAIN_STATUSES.has(root.status);
   const certificateComplete =
     root.ssl_status === 'issued' || certificateStatus === 'ISSUED';
   const routingComplete =
