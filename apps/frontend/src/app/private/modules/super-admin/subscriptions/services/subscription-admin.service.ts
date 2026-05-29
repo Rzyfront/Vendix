@@ -145,6 +145,28 @@ export class SubscriptionAdminService {
     const currency = raw.currency ?? 'COP';
     const grace_period_soft_days = Number(raw.grace_period_soft_days ?? 0);
 
+    // Multi-cycle: GET plans/:id returns the full group as `pricings[]`. The
+    // backend rows expose `currency` (not `currency_code`), so normalize the
+    // shape into the FE `PlanPricing` contract. Falls back to the synthesized
+    // single-cycle row (from base_price) for list endpoints that omit it.
+    const mappedPricings: PlanPricing[] = Array.isArray(raw.pricings) && raw.pricings.length
+      ? raw.pricings.map((p: any) => ({
+          id: String(p.id ?? `${raw.id}-${this.normalizeBillingCycle(p.billing_cycle)}`),
+          billing_cycle: this.normalizeBillingCycle(p.billing_cycle) as PlanPricing['billing_cycle'],
+          price: this.toNumberOrZero(p.price),
+          currency_code: p.currency ?? p.currency_code ?? currency,
+          is_default: Boolean(p.is_default),
+        }))
+      : [
+          {
+            id: `${raw.id}-${billing_cycle}`,
+            billing_cycle: billing_cycle as PlanPricing['billing_cycle'],
+            price: base_price,
+            currency_code: currency,
+            is_default: true,
+          },
+        ];
+
     return {
       id: String(raw.id),
       code: raw.code ?? '',
@@ -185,19 +207,16 @@ export class SubscriptionAdminService {
       updated_at: raw.updated_at,
       archived_at: raw.archived_at ?? null,
 
+      // Multi-cycle + rich details
+      details_md: raw.details_md ?? undefined,
+      plan_group_code: raw.plan_group_code ?? undefined,
+      pricings: mappedPricings,
+
       // Derived legacy
       slug: raw.code ?? '',
       is_active: raw.state === 'active',
       is_public: Boolean(raw.resellable),
-      pricing: [
-        {
-          id: `${raw.id}-${billing_cycle}`,
-          billing_cycle: (billing_cycle as PlanPricing['billing_cycle']),
-          price: base_price,
-          currency_code: currency,
-          is_default: true,
-        },
-      ],
+      pricing: mappedPricings,
       grace_threshold_days: grace_period_soft_days,
     };
   }
