@@ -19,7 +19,7 @@ import { PricingCardSelectEvent } from '../../../../../../shared/components/pric
 type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
 
 const CYCLE_ORDER: BillingCycle[] = [
-  'monthly', 'quarterly', 'semiannual', 'annual', 'lifetime',
+  'annual', 'semiannual', 'quarterly', 'monthly', 'lifetime',
 ];
 
 const CYCLE_LABEL: Record<BillingCycle, string> = {
@@ -269,7 +269,7 @@ export class PlanCatalogComponent implements OnInit {
             this.plans.set(res.data);
             const cycles = this.availableCycles();
             if (cycles.length > 0 && !this.selectedCycle()) {
-              this.selectedCycle.set(cycles.includes('monthly') ? 'monthly' : cycles[0]);
+              this.selectedCycle.set(cycles.includes('annual') ? 'annual' : cycles[0]);
             }
           }
           this.loading.set(false);
