@@ -39,6 +39,21 @@ describe('StoreOperationsGuard', () => {
     } as any;
   }
 
+  // Build the guard AFTER setting the enforce env vars: SubscriptionGateConfig
+  // reads and caches them at construction time, so the env must be set first.
+  function makeGuard() {
+    guard = new StoreOperationsGuard(
+      reflector as any,
+      access as any,
+      new SubscriptionGateConfig(),
+    );
+    logger = {
+      warn: jest
+        .spyOn((guard as any).logger, 'warn')
+        .mockImplementation(() => undefined),
+    };
+  }
+
   beforeEach(() => {
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
     access = { canUseModule: jest.fn() };
@@ -50,16 +65,8 @@ describe('StoreOperationsGuard', () => {
     delete process.env.STORE_GATE_ENFORCE;
     delete process.env.AI_GATE_ENFORCE;
 
-    guard = new StoreOperationsGuard(
-      reflector as any,
-      access as any,
-      new SubscriptionGateConfig(),
-    );
-    logger = {
-      warn: jest
-        .spyOn((guard as any).logger, 'warn')
-        .mockImplementation(() => undefined),
-    };
+    // Default build with no env override → enforce (the new code default).
+    makeGuard();
   });
 
   afterEach(() => {
@@ -103,6 +110,7 @@ describe('StoreOperationsGuard', () => {
 
   it('blocks when state=suspended and enforce=true', async () => {
     process.env.STORE_GATE_ENFORCE = 'true';
+    makeGuard();
     access.canUseModule.mockResolvedValue({
       allowed: false,
       mode: 'block',
@@ -120,7 +128,9 @@ describe('StoreOperationsGuard', () => {
     expect(caught).toBeInstanceOf(VendixHttpException);
   });
 
-  it('passes (log-only) when state=suspended and enforce=false', async () => {
+  it('passes (log-only) when state=suspended and STORE_GATE_ENFORCE=false', async () => {
+    process.env.STORE_GATE_ENFORCE = 'false';
+    makeGuard();
     access.canUseModule.mockResolvedValue({
       allowed: false,
       mode: 'block',

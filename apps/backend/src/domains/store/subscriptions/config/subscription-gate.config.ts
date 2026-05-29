@@ -3,8 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 /**
  * Canonical configuration for the subscription gate system.
  *
- * Default mode is **log-only** (observe without blocking).
- * Enforce mode is activated only when `STORE_GATE_ENFORCE === 'true'`.
+ * Default mode is **enforce**: stores without an active/trial subscription are
+ * blocked from store writes. The gate can be turned back to observe-only by
+ * explicitly setting `STORE_GATE_ENFORCE=false` (deprecated alias
+ * `AI_GATE_ENFORCE=false`), e.g. for a temporary incident bypass.
  *
  * Backwards-compat alias `AI_GATE_ENFORCE` is still honored for one release
  * but emits a deprecation warning on startup.
@@ -25,9 +27,11 @@ export class SubscriptionGateConfig {
   }
 
   private _loadConfig(): void {
+    // Enforce by default. Disabled only when explicitly opted out with
+    // STORE_GATE_ENFORCE=false (or the deprecated AI_GATE_ENFORCE=false).
     this._enforce =
-      process.env.STORE_GATE_ENFORCE === 'true' ||
-      process.env.AI_GATE_ENFORCE === 'true';
+      process.env.STORE_GATE_ENFORCE !== 'false' &&
+      process.env.AI_GATE_ENFORCE !== 'false';
     this._logOnly = !this._enforce;
     this._cronDryRun = process.env.SUBSCRIPTION_CRON_DRY_RUN === 'true';
 
@@ -40,7 +44,7 @@ export class SubscriptionGateConfig {
 
   /**
    * Returns `true` when the gate should actively block requests.
-   * Default is `false` (log-only) to preserve UX during rollout.
+   * Default is `true` (enforce); opt out with `STORE_GATE_ENFORCE=false`.
    */
   isEnforce(): boolean {
     return this._enforce;
