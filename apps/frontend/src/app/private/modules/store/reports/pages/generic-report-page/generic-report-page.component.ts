@@ -10,6 +10,10 @@ import {
   selectSummaryData,
   selectLoading,
   selectIsForbidden,
+  selectCurrentPage,
+  selectTotalPages,
+  selectTotalItems,
+  selectItemsPerPage,
 } from '../../state/reports.selectors';
 
 @Component({
@@ -23,6 +27,10 @@ import {
       [summaryData]="summaryData() ?? null"
       [loading]="loading()"
       [isForbidden]="isForbidden()"
+      [currentPage]="currentPage()"
+      [totalPages]="totalPages()"
+      [totalItems]="totalItems()"
+      [itemsPerPage]="itemsPerPage()"
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
     />
@@ -37,6 +45,10 @@ export class GenericReportPageComponent {
   readonly summaryData = toSignal(this.store.select(selectSummaryData));
   readonly loading = toSignal(this.store.select(selectLoading), { initialValue: false });
   readonly isForbidden = toSignal(this.store.select(selectIsForbidden), { initialValue: false });
+  readonly currentPage = toSignal(this.store.select(selectCurrentPage), { initialValue: 1 });
+  readonly totalPages = toSignal(this.store.select(selectTotalPages), { initialValue: 0 });
+  readonly totalItems = toSignal(this.store.select(selectTotalItems), { initialValue: 0 });
+  readonly itemsPerPage = toSignal(this.store.select(selectItemsPerPage), { initialValue: 10 });
 
   constructor() {
     const reportId = this.route.snapshot.data['reportId'];

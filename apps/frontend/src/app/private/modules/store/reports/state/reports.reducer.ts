@@ -16,6 +16,10 @@ export const reportsReducer = createReducer(
     reportData: null,
     reportMeta: null,
     error: null,
+    isForbidden: false,
+    isSummary: false,
+    summaryData: null,
+    currentPage: 1,
   })),
 
   on(ReportsActions.clearReport, (state) => ({

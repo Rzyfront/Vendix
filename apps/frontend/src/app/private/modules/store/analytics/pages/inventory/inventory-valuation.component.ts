@@ -2,7 +2,7 @@ import {Component, OnInit, computed, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { RouterModule } from '@angular/router';
+import { RouterModule, ActivatedRoute } from '@angular/router';
 
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -24,6 +24,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
@@ -227,6 +228,7 @@ export class InventoryValuationComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
   chartLoading = signal(false);
   tableLoading = signal(false);
   exporting = signal(false);
@@ -303,6 +305,14 @@ export class InventoryValuationComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    // Read date range from URL query params (e.g. when navigating from Reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.invalidateModeData();
+    }
+
     this.loadActiveView();
   }
 

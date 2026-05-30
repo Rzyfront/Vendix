@@ -1,6 +1,7 @@
 import { Component, DestroyRef, OnInit, computed, effect, inject, signal, viewChild, TemplateRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -12,6 +13,7 @@ import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.
 import { EChartsOption } from 'echarts';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
@@ -166,6 +168,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 export class PurchasesBySupplierComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
+  private readonly route = inject(ActivatedRoute);
 
   readonly supplierTemplate = viewChild<TemplateRef<any>>('supplierCell');
   readonly orderCountTemplate = viewChild<TemplateRef<any>>('orderCountCell');
@@ -231,6 +234,11 @@ export class PurchasesBySupplierComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.invalidateModeData();
+    }
     this.loadActiveView();
   }
 

@@ -82,7 +82,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'purchase-by-supplier',
     category: 'purchases',
-    title: 'Compras por Proveedor',
+    title: 'Por Proveedor',
     description: 'Desglose de compras agrupadas por proveedor',
     detailedDescription: 'Analisis detallado de las compras realizadas a cada proveedor, mostrando volumen, frecuencia y montos para evaluar relaciones comerciales.',
     icon: 'building-2',
@@ -165,11 +165,13 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       ],
     },
     columns: [
-      { key: 'period', header: 'Periodo', type: 'text' },
-      { key: 'total_sales', header: 'Total Ventas', type: 'currency', footer: 'sum' },
-      { key: 'order_count', header: 'Cantidad Ordenes', type: 'number', footer: 'sum' },
-      { key: 'avg_ticket', header: 'Ticket Promedio', type: 'currency', footer: 'average' },
-      { key: 'discount_amount', header: 'Descuentos', type: 'currency', footer: 'sum' },
+      { key: 'total_revenue', header: 'Ventas Totales', type: 'currency' },
+      { key: 'total_orders', header: 'Total Pedidos', type: 'number' },
+      { key: 'average_order_value', header: 'Ticket Promedio', type: 'currency' },
+      { key: 'total_units_sold', header: 'Productos Vendidos', type: 'number' },
+      { key: 'total_customers', header: 'Clientes', type: 'number' },
+      { key: 'revenue_growth', header: 'Crecimiento', type: 'percentage' },
+      { key: 'orders_growth', header: 'Crec. Ordenes', type: 'percentage' },
     ],
     exportFilename: 'sales_summary',
     stats: [
@@ -185,7 +187,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'sales-by-product',
     category: 'sales',
-    title: 'Ventas por Producto',
+    title: 'Por Producto',
     description: 'Ranking de productos vendidos con cantidades y montos',
     detailedDescription:
       'Identifica tus productos estrella con un ranking detallado por cantidad vendida e ingreso generado. Incluye margen de ganancia por producto.',
@@ -215,7 +217,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'sales-by-category',
     category: 'sales',
-    title: 'Ventas por Categoria',
+    title: 'Por Categoria',
     description: 'Desglose de ventas por categoria de producto',
     detailedDescription:
       'Analiza que categorias de productos generan mas ingresos. Util para decisiones de inventario y marketing.',
@@ -244,7 +246,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'sales-by-customer',
     category: 'sales',
-    title: 'Ventas por Cliente',
+    title: 'Por Cliente',
     description: 'Clientes con mayor facturacion en el periodo',
     detailedDescription:
       'Descubre quienes son tus mejores clientes por volumen de compra. Incluye frecuencia de compra y ticket promedio por cliente.',
@@ -274,7 +276,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'sales-by-payment',
     category: 'sales',
-    title: 'Ventas por Metodo de Pago',
+    title: 'Por Metodo de Pago',
     description: 'Distribucion por efectivo, tarjeta, transferencia, etc.',
     detailedDescription:
       'Conoce como prefieren pagar tus clientes. Desglose por metodo de pago con porcentaje de participacion y montos.',
@@ -304,7 +306,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'sales-trends',
     category: 'sales',
-    title: 'Tendencias de Ventas',
+    title: 'Tendencias',
     description: 'Evolucion temporal de ventas (diario/semanal/mensual)',
     detailedDescription:
       'Observa como evolucionan tus ventas en el tiempo. Detecta patrones estacionales, dias de mayor venta y tendencias de crecimiento.',
@@ -394,7 +396,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'inventory-valuation',
     category: 'inventory',
-    title: 'Valoracion de Inventario',
+    title: 'Valoracion',
     description: 'Valor total del inventario por costo y precio de venta',
     detailedDescription:
       'Calcula el valor total de tu inventario actual, tanto a precio de costo como a precio de venta. Incluye desglose por ubicacion y categoria.',
@@ -424,7 +426,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'inventory-movements',
     category: 'inventory',
-    title: 'Movimientos de Inventario',
+    title: 'Movimientos',
     description: 'Entradas, salidas, ajustes y transferencias del periodo',
     detailedDescription:
       'Rastrea todos los movimientos de inventario: compras, ventas, ajustes manuales y transferencias entre ubicaciones. Ideal para auditorias.',
@@ -488,7 +490,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'product-performance',
     category: 'products',
-    title: 'Rendimiento de Productos',
+    title: 'Rendimiento',
     description: 'Margen, rotacion y rentabilidad por producto',
     detailedDescription:
       'Evaluacion integral del rendimiento de cada producto: ventas, margen de ganancia, rotacion de inventario e indice de rentabilidad.',
@@ -519,7 +521,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'product-top-sellers',
     category: 'products',
-    title: 'Productos Mas Vendidos',
+    title: 'Top Sellers',
     description: 'Top sellers por cantidad vendida y por ingreso generado',
     detailedDescription:
       'Los productos mas exitosos de tu catalogo. Ranking dual: por unidades vendidas y por ingresos generados, para tomar decisiones de reabastecimiento.',
@@ -549,7 +551,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'product-profitability',
     category: 'products',
-    title: 'Rentabilidad por Producto',
+    title: 'Rentabilidad',
     description: 'Costo vs precio vs margen detallado de cada producto',
     detailedDescription:
       'Analisis de rentabilidad linea por linea. Compara precio de costo, precio de venta y margen real para optimizar tu catalogo de precios.',
@@ -618,7 +620,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'customer-acquisition',
     category: 'customers',
-    title: 'Adquisicion de Clientes',
+    title: 'Adquisicion',
     description: 'Nuevos clientes y canales de adquisicion',
     detailedDescription: 'Rastrea nuevos clientes e identifica cuales canales estan trayendo mas conversiones.',
     icon: 'user-plus',
@@ -849,7 +851,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: '_count', label: 'Total Asientos', type: 'number', icon: 'file-text' },
       { key: 'total_debit', label: 'Total Debitos', type: 'currency', icon: 'arrow-up' },
       { key: 'total_credit', label: 'Total Creditos', type: 'currency', icon: 'arrow-down' },
-      { key: 'total_debit', label: 'Saldo', type: 'currency', icon: 'scale' },
+      { key: 'balance', label: 'Saldo', type: 'currency', icon: 'scale' },
     ],
     dataEndpoint: 'store/accounting/journal-entries',
   },
@@ -1088,8 +1090,8 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     exportFilename: 'empleados',
     stats: [
       { key: '_count', label: 'Total Empleados', type: 'number', icon: 'users' },
-      { key: 'base_salary', label: 'Nomina Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'base_salary', label: 'Salario Promedio', type: 'currency', icon: 'calculator' },
+      { key: 'total_payroll', label: 'Nomina Total', type: 'currency', icon: 'dollar-sign' },
+      { key: 'average_salary', label: 'Salario Promedio', type: 'currency', icon: 'calculator' },
       { key: 'base_salary', label: 'Salario Base', type: 'currency', icon: 'banknote' },
     ],
     dataEndpoint: 'store/payroll/employees',
@@ -1175,7 +1177,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
     stats: [
       { key: '_count', label: 'Total Anticipos', type: 'number', icon: 'hand-coins' },
       { key: 'amount', label: 'Monto Total', type: 'currency', icon: 'dollar-sign' },
-      { key: 'amount', label: 'Promedio', type: 'currency', icon: 'calculator' },
+      { key: 'average_amount', label: 'Promedio', type: 'currency', icon: 'calculator' },
       { key: 'remaining_balance', label: 'Saldo Restante', type: 'currency', icon: 'clock' },
     ],
     dataEndpoint: 'store/payroll/advances',
@@ -1253,7 +1255,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'profit-loss',
     category: 'financial',
-    title: 'Perdidas y Ganancias',
+    title: 'Estado de Resultados',
     description: 'Ingreso neto del negocio en el periodo',
     detailedDescription:
       'El reporte mas importante para duenos de negocio: cuanto ganaste realmente? Ingresos por ventas menos costos de mercancia, gastos operativos y otros gastos.',

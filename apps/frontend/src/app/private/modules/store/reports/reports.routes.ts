@@ -135,9 +135,9 @@ export const reportsRoutes: Routes = [
         loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
         data: { categoryId: 'financial' },
         children: [
-          { path: '', redirectTo: 'profit-loss', pathMatch: 'full' },
-          { path: 'profit-loss', loadComponent: () => import('./pages/financial/profit-loss-report/profit-loss-report.component').then(c => c.ProfitLossReportComponent) },
+          { path: '', redirectTo: 'tax-summary', pathMatch: 'full' },
           { path: 'tax-summary', loadComponent: () => import('./pages/accounting/tax-summary-report/tax-summary-report.component').then(c => c.TaxSummaryReportComponent) },
+          { path: 'profit-loss', loadComponent: () => import('./pages/financial/profit-loss-report/profit-loss-report.component').then(c => c.ProfitLossReportComponent) },
           { path: 'financial-refunds', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'financial-refunds' } },
         ],
       },

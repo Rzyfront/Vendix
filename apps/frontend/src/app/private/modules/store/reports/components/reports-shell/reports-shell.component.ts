@@ -1,5 +1,6 @@
 import { Component, computed, inject } from '@angular/core';
 import { RouterOutlet, ActivatedRoute, Router } from '@angular/router';
+import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 import { ReportCategoryId } from '../../interfaces/report.interface';
@@ -7,6 +8,10 @@ import {
   getCategoryById,
   getReportsByCategory,
 } from '../../config/report-registry';
+import { selectDateRange } from '../../state/reports.selectors';
+import { ReportsActions } from '../../state/reports.actions';
+import { dateRangeToQueryParams, queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { getDefaultDateRange } from '../../state/reports.state';
 import {
   StickyHeaderComponent,
   StickyHeaderTab,
@@ -23,6 +28,16 @@ import {
 export class ReportsShellComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly store = inject(Store);
+
+  private readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
+
+  constructor() {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.store.dispatch(ReportsActions.setDateRange({ dateRange: urlRange }));
+    }
+  }
 
   private readonly categoryId = toSignal(
     this.route.data.pipe(map((data) => data['categoryId'] as ReportCategoryId)),
@@ -115,7 +130,9 @@ export class ReportsShellComponent {
       const reportId = this.extractReportId(currentUrl);
       const analyticsRoute = this.reportToAnalyticsRoute[reportId || '']
         || `/admin/analytics/${this.categoryId() || 'overview'}`;
-      this.router.navigateByUrl(analyticsRoute);
+      this.router.navigate([analyticsRoute], {
+        queryParams: dateRangeToQueryParams(this.dateRange()),
+      });
     }
   }
 

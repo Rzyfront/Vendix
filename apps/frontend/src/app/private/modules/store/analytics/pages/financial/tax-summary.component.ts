@@ -1,6 +1,7 @@
 import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -14,6 +15,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-tax-summary',
@@ -179,6 +181,7 @@ export class TaxSummaryComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 
   loading = signal(true);
   exporting = signal(false);
@@ -194,6 +197,10 @@ export class TaxSummaryComponent implements OnInit {
   readonly financialViews: AnalyticsView[] = getViewsByCategory('financial');
 
   ngOnInit(): void {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
     this.currencyService.loadCurrency();
     this.loadData();
   }

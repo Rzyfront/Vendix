@@ -121,12 +121,12 @@ export class ReportDataAdapterService {
   private adaptSummary(normalized: NormalizedResponse): ReportAdaptedData {
     const rawSummary = normalized.data[0] || {};
 
-    // For reports like expense-summary that have both summary fields and a nested array
-    // (e.g., category_breakdown), extract the array as tabular data
+    // For reports with a nested array (e.g., category_breakdown), use that as tabular data.
+    // Otherwise keep the normalized data rows for the table.
     const arrayKey = Object.keys(rawSummary).find(
       k => Array.isArray(rawSummary[k])
     );
-    const tableData = arrayKey ? rawSummary[arrayKey] : [];
+    const tableData = arrayKey ? rawSummary[arrayKey] : normalized.data;
 
     // Build summaryData from non-array, non-object primitives
     const summaryData: Record<string, any> = {};

@@ -21,7 +21,7 @@ export interface ReportsState {
   itemsPerPage: number;
 }
 
-function getDefaultDateRange(): DateRangeFilter {
+export function getDefaultDateRange(): DateRangeFilter {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   return {

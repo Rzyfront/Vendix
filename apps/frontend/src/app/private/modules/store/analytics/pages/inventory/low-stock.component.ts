@@ -1,7 +1,7 @@
 import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterModule } from '@angular/router';
+import { RouterModule, ActivatedRoute } from '@angular/router';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -17,6 +17,7 @@ import { DateRangeFilterComponent } from '../../components/date-range-filter/dat
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import {
@@ -199,6 +200,7 @@ export class LowStockComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
 // Signals
   summaryLoading = signal(false);
   tableLoading = signal(false);
@@ -307,6 +309,12 @@ export class LowStockComponent implements OnInit {
     ]};
 
   ngOnInit(): void {
+    // Read date range from URL query params (e.g. when navigating from Reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
+
     this.loadActiveView();
   }
 

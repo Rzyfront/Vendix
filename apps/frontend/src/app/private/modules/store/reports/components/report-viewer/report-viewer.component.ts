@@ -117,25 +117,22 @@ function formatStatValue(value: any, type: string): string | number {
               <p class="mt-4 text-sm font-medium">No tienes permisos para ver este reporte</p>
               <p class="mt-1 text-xs text-text-tertiary">Contacta al administrador para obtener acceso</p>
             </div>
-          } @switch (report()?.type) {
-            @case ('nested') {
-              <app-nested-report
-                [data]="data()!"
-                [columns]="report()!.columns"
-              />
-            }
-            @default {
-              <app-responsive-data-view
-                [data]="paginatedData()"
-                [columns]="tableColumns()"
-                [cardConfig]="cardConfig()"
-                [loading]="loading()"
-                [striped]="true"
-                tableSize="sm"
-                emptyMessage="Sin datos disponibles para este reporte"
-                emptyIcon="file-bar-chart"
-              />
-            }
+          } @else if (report()?.type === 'nested') {
+            <app-nested-report
+              [data]="data()!"
+              [columns]="report()!.columns"
+            />
+          } @else {
+            <app-responsive-data-view
+              [data]="paginatedData()"
+              [columns]="tableColumns()"
+              [cardConfig]="cardConfig()"
+              [loading]="loading()"
+              [striped]="true"
+              tableSize="sm"
+              emptyMessage="Sin datos disponibles para este reporte"
+              emptyIcon="file-bar-chart"
+            />
           }
 
           @if (!loading() && computedTotalItems() > 0) {
@@ -222,7 +219,13 @@ export class ReportViewerComponent {
 
   readonly tableColumns = computed<TableColumn[]>(() => {
     const cols = this.report()?.columns;
-    return cols ? toTableColumns(cols) : [];
+    if (cols && cols.length > 0) return toTableColumns(cols);
+
+    // Auto-generate columns from data keys when none defined
+    const d = this.data();
+    if (!d || d.length === 0) return [];
+    const keys = Object.keys(d[0]).filter(k => !k.startsWith('_'));
+    return keys.map(k => ({ key: k, label: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) }));
   });
 
   readonly cardConfig = computed<ItemListCardConfig>(() => {

@@ -2,7 +2,7 @@ import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { RouterModule } from '@angular/router';
+import { ActivatedRoute, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import type { EChartsOption } from 'echarts';
@@ -32,6 +32,7 @@ import {
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-movement-analysis',
@@ -213,6 +214,7 @@ export class MovementAnalysisComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
 // State
   activeView = signal<'chart' | 'table'>('chart');
   loadingSummary = signal(true);
@@ -349,6 +351,10 @@ export class MovementAnalysisComponent implements OnInit {
     ]};
 
   ngOnInit(): void {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
     this.loadChartData();
   }
 onDateRangeChange(range: DateRangeFilter): void {

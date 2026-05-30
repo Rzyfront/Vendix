@@ -1,6 +1,7 @@
 import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -26,6 +27,7 @@ import * as ProductsSelectors from './state/products-analytics.selectors';
 import { EChartsOption } from 'echarts';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-top-sellers',
@@ -54,6 +56,7 @@ export class TopSellersComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 topSellers$: Observable<TopSellingProduct[]> = this.store.select(
     ProductsSelectors.selectTopSellers,
   );
@@ -133,6 +136,12 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(ProductsActions.setDateRange({ dateRange: urlRange, reload: false }));
+    }
 
     this.loadActiveView();
 
