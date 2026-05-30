@@ -441,6 +441,9 @@ export class PlansService {
               }
               await tx.subscription_plans.create({
                 data: {
+                  // Derived per-cycle code (e.g. `enterprise-monthly`). Required
+                  // by the schema; omitting it makes Prisma reject the insert.
+                  code,
                   name: dto.name ?? existing.name,
                   description:
                     dto.description !== undefined

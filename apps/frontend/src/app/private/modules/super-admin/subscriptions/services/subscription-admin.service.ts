@@ -134,6 +134,24 @@ export class SubscriptionAdminService {
       }
     }
 
+    // Multi-cycle: forward the full pricings[] array (backend contract shape)
+    // so the API can materialize one plan row per billing cycle. Without this
+    // the whitelist above drops it and only the canonical cycle is persisted.
+    const pricings = (d as any).pricings;
+    if (Array.isArray(pricings)) {
+      payload['pricings'] = pricings.map((p: any) => ({
+        billing_cycle: this.normalizeBillingCycle(p.billing_cycle),
+        price: Number(p.price ?? 0),
+        currency: p.currency ?? p.currency_code ?? 'COP',
+        is_default: Boolean(p.is_default),
+      }));
+    }
+
+    // Markdown details body (rendered at checkout).
+    if ((d as any).details_md !== undefined) {
+      payload['details_md'] = (d as any).details_md;
+    }
+
     return payload;
   }
 
