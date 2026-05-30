@@ -17,6 +17,12 @@ export interface SubscriptionPlan {
    */
   is_free?: boolean;
   sort_order: number;
+  /**
+   * Rich plan details authored in Markdown by super-admin. Rendered as
+   * sanitized HTML in the store checkout below the plan details section.
+   * Optional + defensive: plans created before multi-cycle shipped omit it.
+   */
+  details_md?: string;
 }
 
 export interface PlanFeature {

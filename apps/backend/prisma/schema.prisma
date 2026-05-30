@@ -6652,6 +6652,8 @@ model subscription_plans {
   is_popular              Boolean                         @default(false)
   sort_order              Int                             @default(0)
   is_default              Boolean                         @default(false)
+  plan_group_code         String?                         @db.VarChar(64)
+  details_md              String?                         @db.Text
   parent_plan_id          Int?
   parent_plan             subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
   child_plans             subscription_plans[]            @relation("plan_lineage")
@@ -6671,6 +6673,7 @@ model subscription_plans {
 
   @@index([plan_type, state])
   @@index([is_promotional, promo_priority])
+  @@index([plan_group_code])
 }
 
 model partner_plan_overrides {

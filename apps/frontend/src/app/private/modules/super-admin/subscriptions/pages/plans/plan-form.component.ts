@@ -29,6 +29,7 @@ import {
 import { AiFeatureMatrixComponent } from '../../components/ai-feature-matrix.component';
 import { PricingCycleEditorComponent } from '../../components/pricing-cycle-editor.component';
 import { GraceThresholdEditorComponent } from '../../components/grace-threshold-editor.component';
+import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { AIEngineService } from '../../../ai-engine/services/ai-engine.service';
 
@@ -74,6 +75,7 @@ interface PlanFormControls {
     AiFeatureMatrixComponent,
     PricingCycleEditorComponent,
     GraceThresholdEditorComponent,
+    MarkdownEditorComponent,
   ],
   template: `
     <div class="flex flex-col">
@@ -144,6 +146,23 @@ interface PlanFormControls {
                 [required]="true"
               ></app-selector>
             </div>
+          </div>
+
+          <!-- Detalles enriquecidos (markdown) -->
+          <div class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4">
+            <div class="space-y-1">
+              <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
+                Detalles del plan
+              </h2>
+              <p class="text-sm text-text-secondary">
+                Contenido enriquecido en Markdown que se muestra en el checkout de la tienda, debajo
+                de los detalles del plan. Ideal para describir beneficios, condiciones o comparativas.
+              </p>
+            </div>
+            <app-markdown-editor
+              [content]="detailsMd()"
+              (contentChange)="onDetailsMdChange($event)"
+            ></app-markdown-editor>
           </div>
 
           <!-- Partner -->
@@ -372,6 +391,7 @@ export class PlanFormComponent {
   readonly isFreePlan = signal(false);
   readonly aiFeatures = signal<AIFeatureFlags | undefined>(this.defaultAiFeatures());
   readonly pricing = signal<PlanPricing[] | undefined>(undefined);
+  readonly detailsMd = signal<string>('');
   readonly graceDays = signal<number | undefined>(undefined);
   readonly systemAiModels = signal<string[]>([]);
   private readonly paidPricingBeforeFree = signal<PlanPricing[] | undefined>(undefined);
@@ -686,11 +706,16 @@ export class PlanFormComponent {
         } else {
           this.form.controls.setup_fee.enable({ emitEvent: false });
         }
+        // Rehidratar TODOS los ciclos del grupo. El backend devuelve el grupo
+        // completo en `plan.pricings`; usamos eso como fuente y caemos a
+        // `plan.pricing` (legacy/derivado) solo si no llega el array.
+        const rehydratedPricing = (plan.pricings?.length ? plan.pricings : plan.pricing) ?? [];
         this.pricing.set(
           plan.is_free
-            ? plan.pricing.map((item) => ({ ...item, price: 0 }))
-            : plan.pricing,
+            ? rehydratedPricing.map((item) => ({ ...item, price: 0 }))
+            : rehydratedPricing,
         );
+        this.detailsMd.set(plan.details_md ?? '');
         this.graceDays.set(plan.grace_period_soft_days ?? plan.grace_threshold_days ?? 0);
       },
     });
@@ -702,6 +727,10 @@ export class PlanFormComponent {
 
   onPricingChange(pricing: PlanPricing[]): void {
     this.pricing.set(pricing);
+  }
+
+  onDetailsMdChange(value: string): void {
+    this.detailsMd.set(value ?? '');
   }
 
   onGraceChange(days: number): void {
@@ -746,11 +775,27 @@ export class PlanFormComponent {
     const raw = this.form.getRawValue();
     const isFree = Boolean(raw.is_free);
 
+    // Array completo de ciclos mapeado al contrato API
+    // ({ billing_cycle, price, currency, is_default }). En planes gratuitos el
+    // importe efectivo de cada ciclo se fuerza a 0.
+    const pricings = pricing.map((p) => ({
+      billing_cycle: p.billing_cycle,
+      price: isFree ? 0 : Number(p.price ?? 0),
+      currency: p.currency_code ?? 'COP',
+      is_default: Boolean(p.is_default),
+    }));
+
+    const detailsMd = this.detailsMd().trim();
+
     const payload: Record<string, any> = {
       ...raw,
+      // Campos canónicos derivados del ciclo default (back-compat)
       base_price: isFree ? 0 : Number(pricingFirst.price ?? 0),
       currency: pricingFirst.currency_code ?? 'COP',
       billing_cycle: pricingFirst.billing_cycle ?? 'monthly',
+      // Array completo de ciclos (multi-cycle)
+      pricings,
+      details_md: detailsMd || null,
       setup_fee: isFree ? null : raw.setup_fee,
       is_free: isFree,
       redemption_code: raw.redemption_code.trim() || null,
