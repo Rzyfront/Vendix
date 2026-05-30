@@ -201,7 +201,6 @@ export class PlansService {
       sort_order = 'desc',
     } = query;
 
-    const skip = (page - 1) * Number(limit);
     const where: Prisma.subscription_plansWhereInput = {};
 
     if (search) {
@@ -215,15 +214,107 @@ export class PlansService {
     if (state) where.state = state as any;
     if (billing_cycle) where.billing_cycle = billing_cycle as any;
 
-    const [data, total] = await Promise.all([
-      this.prisma.subscription_plans.findMany({
-        where,
-        skip,
-        take: Number(limit),
-        orderBy: { [sort_by]: sort_order },
-      }),
-      this.prisma.subscription_plans.count({ where }),
-    ]);
+    // Multi-cycle plans are stored as one row PER billing cycle, all sharing a
+    // plan_group_code (the canonical cycle keeps the base code; the rest carry
+    // a `-${cycle}` suffix). The list must collapse each group to a SINGLE row
+    // so plans are not shown duplicated. Cycles remain visible in findOne via
+    // the pricings[] array.
+
+    // 1. Resolve the candidate group keys from rows matching the filters. A
+    // plan's group key is its plan_group_code (backfilled to its own code for
+    // legacy single-cycle rows).
+    const matches = await this.prisma.subscription_plans.findMany({
+      where,
+      select: { code: true, plan_group_code: true },
+    });
+
+    const groupKeys = Array.from(
+      new Set(matches.map((m) => m.plan_group_code ?? m.code)),
+    );
+
+    if (groupKeys.length === 0) {
+      return {
+        data: [],
+        meta: {
+          total: 0,
+          page: Number(page),
+          limit: Number(limit),
+          totalPages: 0,
+        },
+      };
+    }
+
+    // 2. Load every row of those groups to pick the canonical cycle row and
+    // build the pricings[] summary per group.
+    const groupRows = await this.prisma.subscription_plans.findMany({
+      where: {
+        OR: [
+          { plan_group_code: { in: groupKeys } },
+          { code: { in: groupKeys } },
+        ],
+      },
+    });
+
+    // 3. Bucket rows by group key.
+    const grouped = new Map<string, typeof groupRows>();
+    for (const row of groupRows) {
+      const key = row.plan_group_code ?? row.code;
+      const bucket = grouped.get(key);
+      if (bucket) bucket.push(row);
+      else grouped.set(key, [row]);
+    }
+
+    // 4. Collapse each group to its canonical cycle row + pricings[]. The
+    // canonical CYCLE is the row whose code equals the group key; fallback to
+    // the cheapest row. Same pricings mapping as findOne for consistency.
+    const collapsed = Array.from(grouped.entries()).map(([key, rows]) => {
+      const cheapest = [...rows].sort(
+        (a, b) => Number(a.base_price) - Number(b.base_price),
+      )[0];
+      const canonical = rows.find((r) => r.code === key) ?? cheapest;
+
+      const pricings = rows
+        .filter((r) => r.state !== 'archived')
+        .sort((a, b) => Number(a.base_price) - Number(b.base_price))
+        .map((r) => ({
+          id: r.id,
+          code: r.code,
+          billing_cycle: r.billing_cycle,
+          price: r.base_price,
+          currency: r.currency,
+          is_default: r.code === key,
+          state: r.state,
+        }));
+
+      return { ...canonical, plan_group_code: key, pricings };
+    });
+
+    // 5. Sort the collapsed groups by the requested column.
+    const norm = (v: unknown): number | string | null => {
+      if (v == null) return null;
+      if (v instanceof Date) return v.getTime();
+      if (typeof v === 'object' && typeof (v as any).toNumber === 'function') {
+        return (v as any).toNumber();
+      }
+      return typeof v === 'number' ? v : String(v);
+    };
+    const dir = sort_order === 'asc' ? 1 : -1;
+    collapsed.sort((a, b) => {
+      const av = norm((a as any)[sort_by]);
+      const bv = norm((b as any)[sort_by]);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      let cmp: number;
+      if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv));
+      return cmp * dir;
+    });
+
+    // 6. Paginate over groups (not rows).
+    const total = collapsed.length;
+    const skip = (Number(page) - 1) * Number(limit);
+    const data = collapsed.slice(skip, skip + Number(limit));
 
     return {
       data,

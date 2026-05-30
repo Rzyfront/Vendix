@@ -245,6 +245,56 @@ export class ProductsService {
     dto.requires_batch_tracking = undefined;
   }
 
+  /**
+   * Enforce store-level uniqueness of a barcode across BOTH products and
+   * product variants. Source of truth in application logic because variants
+   * carry no DB unique constraint; for products it also yields a clean
+   * conflict error instead of a raw DB constraint violation.
+   *
+   * Scoped via StorePrismaService (store-bounded reads). `excludeProductId` /
+   * `excludeVariantId` let create/update skip the row being mutated.
+   */
+  private async assertBarcodeUnique(
+    barcode: string | null | undefined,
+    options: { excludeProductId?: number; excludeVariantId?: number } = {},
+    tx?: Prisma.TransactionClient,
+  ): Promise<void> {
+    const normalized = barcode?.trim();
+    if (!normalized) return; // empty/undefined barcodes are not constrained
+
+    const prisma = tx || this.prisma;
+
+    const productConflict = await prisma.products.findFirst({
+      where: {
+        barcode: { equals: normalized },
+        ...(options.excludeProductId && { NOT: { id: options.excludeProductId } }),
+      },
+      select: { id: true },
+    });
+    if (productConflict) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_BARCODE_DUP_001,
+        'El código de barras ya está en uso en esta tienda',
+        { barcode: normalized, conflict_type: 'product' },
+      );
+    }
+
+    const variantConflict = await prisma.product_variants.findFirst({
+      where: {
+        barcode: { equals: normalized },
+        ...(options.excludeVariantId && { NOT: { id: options.excludeVariantId } }),
+      },
+      select: { id: true },
+    });
+    if (variantConflict) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_BARCODE_DUP_001,
+        'El código de barras ya está en uso en esta tienda',
+        { barcode: normalized, conflict_type: 'variant' },
+      );
+    }
+  }
+
   async create(createProductDto: CreateProductDto) {
     try {
       // Validate service-specific constraints
@@ -289,6 +339,26 @@ export class ProductsService {
 
         if (existingSku) {
           throw new VendixHttpException(ErrorCodes.PROD_DUP_001);
+        }
+      }
+
+      // Verificar unicidad del código de barras (producto y variantes) a
+      // nivel de tienda antes de crear.
+      await this.assertBarcodeUnique(createProductDto.barcode);
+      if (createProductDto.variants && createProductDto.variants.length > 0) {
+        const seenBarcodes = new Set<string>();
+        for (const variant of createProductDto.variants) {
+          const code = variant.barcode?.trim();
+          if (!code) continue;
+          if (seenBarcodes.has(code)) {
+            throw new VendixHttpException(
+              ErrorCodes.PROD_BARCODE_DUP_001,
+              'El código de barras ya está en uso en esta tienda',
+              { barcode: code, conflict_type: 'variant' },
+            );
+          }
+          seenBarcodes.add(code);
+          await this.assertBarcodeUnique(code);
         }
       }
 
@@ -363,6 +433,10 @@ export class ProductsService {
           const product = await prisma.products.create({
             data: {
               ...productData,
+              // Normalizar barcode: '' / whitespace-only → null. Postgres
+              // permite múltiples NULL bajo UNIQUE(store_id, barcode) pero NO
+              // múltiples '', así que un '' debe persistirse como null.
+              barcode: createProductDto.barcode?.trim() || null,
               store_id: store_id, // Agregar el store_id del contexto
               slug: slug,
               stock_quantity: 0, // Se inicializará via stock_levels
@@ -738,8 +812,12 @@ export class ProductsService {
           ? undefined
           : { not: 'archived' }, // Excluir archivados por defecto
       ...(barcode && {
-        // Búsqueda exacta por código de barras para POS
-        OR: [{ sku: { equals: barcode, mode: 'insensitive' } }],
+        // Búsqueda exacta por código de barras para POS.
+        // Resuelve por barcode a nivel de producto O de cualquier variante.
+        OR: [
+          { barcode: { equals: barcode } },
+          { product_variants: { some: { barcode: { equals: barcode } } } },
+        ],
       }),
       ...(search &&
         !barcode && {
@@ -837,11 +915,12 @@ export class ProductsService {
               },
             },
           }),
-          ...((include_variants || pos_optimized) && {
+          ...((include_variants || pos_optimized || barcode) && {
             product_variants: {
               select: {
                 id: true,
                 sku: true,
+                barcode: true,
                 price_override: true,
                 cost_price: true,
                 profit_margin: true,
@@ -1520,6 +1599,32 @@ export class ProductsService {
         }
       }
 
+      // Verificar unicidad del código de barras (producto y variantes) a
+      // nivel de tienda antes de actualizar, excluyendo la fila actual.
+      if (updateProductDto.barcode !== undefined) {
+        await this.assertBarcodeUnique(updateProductDto.barcode, {
+          excludeProductId: id,
+        });
+      }
+      if (updateProductDto.variants && updateProductDto.variants.length > 0) {
+        const seenBarcodes = new Set<string>();
+        for (const variant of updateProductDto.variants) {
+          const code = variant.barcode?.trim();
+          if (!code) continue;
+          if (seenBarcodes.has(code)) {
+            throw new VendixHttpException(
+              ErrorCodes.PROD_BARCODE_DUP_001,
+              'El código de barras ya está en uso en esta tienda',
+              { barcode: code, conflict_type: 'variant' },
+            );
+          }
+          seenBarcodes.add(code);
+          await this.assertBarcodeUnique(code, {
+            excludeVariantId: variant.id,
+          });
+        }
+      }
+
       // Validate: variants require product to have SKU
       if (updateProductDto.variants && updateProductDto.variants.length > 0) {
         const productSku = updateProductDto.sku || existingProduct.sku;
@@ -1631,6 +1736,13 @@ export class ProductsService {
             where: { id },
             data: {
               ...productData,
+              // PATCH semantics: solo tocar barcode si el DTO lo trae. Cuando
+              // viene, normalizar '' / whitespace-only → null para no violar
+              // UNIQUE(store_id, barcode). Si NO viene, no se sobreescribe el
+              // valor existente.
+              ...(updateProductDto.barcode !== undefined
+                ? { barcode: updateProductDto.barcode?.trim() || null }
+                : {}),
               ...(shouldRefreshOnlinePurchase ? onlinePurchaseData : {}),
               updated_at: new Date(),
             } as any,

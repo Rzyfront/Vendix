@@ -40,6 +40,18 @@
           ></app-input>
           <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
+
+        <div>
+          <app-input
+            label="Código de barras"
+            formControlName="barcode"
+            placeholder="Escanea o escribe el código"
+            [error]="getErrorMessage('barcode')"
+          ></app-input>
+          <small class="text-xs text-gray-400 mt-0.5 block"
+            >Código escaneable (EAN/UPC) único en la tienda.</small
+          >
+        </div>
       </div>
 
       @if (!isEditMode) {

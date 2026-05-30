@@ -135,6 +135,7 @@ export interface PosProductVariant {
   track_inventory_override?: boolean | null;
   attributes: PosVariantAttribute[];
   image_url?: string;
+  barcode?: string;
 }
 
 export interface SearchFilters {
@@ -464,6 +465,7 @@ export class PosProductService {
                 )
               : [],
           image_url: v.image_url || v.product_images?.image_url || undefined,
+          barcode: v.barcode || undefined,
         };
       });
 

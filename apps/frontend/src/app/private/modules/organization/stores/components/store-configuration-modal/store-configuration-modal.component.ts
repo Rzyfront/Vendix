@@ -458,7 +458,6 @@ export class StoreConfigurationModalComponent
       },
       enable_schedule_validation: false,
       show_onscreen_keypad: true,
-      require_cash_drawer_open: false,
       auto_print_receipt: true,
       allow_price_edit: true,
       allow_discount: true,

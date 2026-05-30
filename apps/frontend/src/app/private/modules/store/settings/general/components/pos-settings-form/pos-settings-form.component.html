@@ -40,9 +40,9 @@
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
-          [formControl]="requireCashDrawerOpenControl"
-          label="Apertura de Caja"
-          description="Monto inicial requerido"
+          [formControl]="barcodeScannerEnabledControl"
+          label="Lector de Código de Barras"
+          description="Escanea códigos para buscar y agregar productos en el POS"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
       </div>

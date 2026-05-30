@@ -177,13 +177,16 @@ export interface CashRegisterSettings {
   track_non_cash_payments: boolean;
 }
 
+export interface BarcodeScannerSettings {
+  enabled: boolean;
+}
+
 export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
   enable_schedule_validation: boolean;
   show_onscreen_keypad: boolean;
-  require_cash_drawer_open: boolean;
   auto_print_receipt: boolean;
   allow_price_edit: boolean;
   allow_discount: boolean;
@@ -191,6 +194,7 @@ export interface PosSettings {
   allow_refund_without_approval: boolean;
   scale?: ScaleSettings;
   cash_register?: CashRegisterSettings;
+  barcode_scanner?: BarcodeScannerSettings;
   customer_queue?: CustomerQueueSettings;
 }
 
