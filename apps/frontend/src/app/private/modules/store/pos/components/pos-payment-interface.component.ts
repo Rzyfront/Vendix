@@ -1508,8 +1508,11 @@ export class PosPaymentInterfaceComponent {
   readonly anonymousSalesAsDefault = computed(
     () => this.settingsFacade.pos()?.anonymous_sales_as_default ?? false,
   );
-  readonly requireCashDrawerOpen = computed(
-    () => this.settingsFacade.pos()?.require_cash_drawer_open ?? false,
+  readonly cashRegisterEnabled = computed(
+    () => this.settingsFacade.pos()?.cash_register?.enabled ?? false,
+  );
+  readonly autoCreateDefaultRegister = computed(
+    () => this.settingsFacade.pos()?.cash_register?.auto_create_default_register ?? false,
   );
   readonly enableScheduleValidation = computed(
     () => this.settingsFacade.pos()?.enable_schedule_validation ?? false,
@@ -1981,7 +1984,7 @@ export class PosPaymentInterfaceComponent {
 
     let register_id = localStorage.getItem('pos_register_id');
 
-    if (!register_id && !this.requireCashDrawerOpen()) {
+    if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
@@ -2099,7 +2102,7 @@ export class PosPaymentInterfaceComponent {
     }
 
     let register_id = localStorage.getItem('pos_register_id');
-    if (!register_id && !this.requireCashDrawerOpen()) {
+    if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
@@ -2198,7 +2201,7 @@ export class PosPaymentInterfaceComponent {
     let register_id = localStorage.getItem('pos_register_id');
 
     // Auto-configure default register if not required
-    if (!register_id && !this.requireCashDrawerOpen()) {
+    if (!register_id && (!this.cashRegisterEnabled() || this.autoCreateDefaultRegister())) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }

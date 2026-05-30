@@ -57,7 +57,6 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             sunday: { open: '10:00', close: '20:00' },
           },
           offline_mode_enabled: false,
-          require_cash_drawer_open: false,
           auto_print_receipt: true,
         },
         receipts: {

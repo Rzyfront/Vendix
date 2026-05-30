@@ -6,6 +6,7 @@ import {
   HostListener,
   inject,
   DestroyRef,
+  viewChildren,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
@@ -48,6 +49,12 @@ import { PosOrderService } from './services/pos-order.service';
 import { StoreOrdersService } from '../orders/services/store-orders.service';
 import { PosStatsComponent } from './components/pos-stats.component';
 import { PosProductSelectionComponent } from './components/pos-product-selection.component';
+import { PosBarcodeService } from './services/pos-barcode.service';
+import {
+  PosProductService,
+  Product,
+  PosProductVariant,
+} from './services/pos-product.service';
 import { PosCustomerModalComponent } from './components/pos-customer-modal.component';
 import { PosPaymentInterfaceComponent } from './components/pos-payment-interface.component';
 import { PosOrderConfirmationComponent } from './components/pos-order-confirmation.component';
@@ -926,6 +933,19 @@ export class PosComponent {
 
   private destroyRef = inject(DestroyRef);
   private cartService = inject(PosCartService);
+  private barcodeService = inject(PosBarcodeService);
+  private productService = inject(PosProductService);
+
+  /**
+   * Both desktop and mobile templates render an `app-pos-product-selection`
+   * (one hidden by CSS), so we query all instances and drive whichever is
+   * currently connected. We reuse the child's existing public add-to-cart /
+   * variant-selection methods so stock validation, variant mapping, sourcing
+   * fallback and success/error toasts stay consistent with a manual tap.
+   */
+  private readonly productSelectionList = viewChildren(
+    PosProductSelectionComponent,
+  );
   private customerService = inject(PosCustomerService);
   private paymentService = inject(PosPaymentService);
   private toastService = inject(ToastService);
@@ -973,6 +993,14 @@ export class PosComponent {
       .subscribe(() => {
         this.showSessionOpenModal.set(true);
       });
+
+    // Barcode scanner: PosBarcodeService gates emission behind the
+    // `barcode_scanner.enabled` setting, so scans$ only fires when the feature
+    // is enabled. We subscribe once and route each scan into the existing
+    // add-to-cart flow.
+    this.barcodeService.scans$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((code) => this.handleBarcodeScan(code));
 
     effect(() => {
       const serviceSession = this.cashRegisterService.activeSession();
@@ -1165,6 +1193,76 @@ export class PosComponent {
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
     // Toast is already handled in the child component
+  }
+
+  /**
+   * Handle a completed barcode scan: resolve the product/variant by barcode and
+   * route it through the product-selection child's existing add-to-cart flow.
+   *
+   * Resolution:
+   * - Product not found -> warning toast.
+   * - Product without variants -> add directly (child.onAddToCart, quantity 1).
+   * - Product with variants:
+   *   - A variant's barcode matches the scan -> add THAT exact variant via the
+   *     child's onVariantSelected (full stock/sourcing/toast path).
+   *   - The scan hit the product-level barcode of a variant-based product
+   *     (no variant matches) -> reuse child.onAddToCart, which opens the
+   *     existing variant-selection modal so the cashier picks the variant.
+   *
+   * Stock validation, variant mapping and toasts are all owned by the child's
+   * methods; we never reimplement cart logic here.
+   *
+   * Note: the POS search box (`searchQuery`) lives inside the
+   * PosProductSelectionComponent child, not the root, so it is not reset here.
+   * The scanner only suppresses the terminating Enter, so a scan does not leave
+   * residue in that input unless it happens to be focused; reaching across the
+   * component boundary to clear it is out of scope.
+   */
+  private handleBarcodeScan(code: string): void {
+    // Defensive gate: scans$ already only fires when enabled, but guard anyway.
+    if (!this.barcodeService.enabled()) {
+      return;
+    }
+
+    const child = this.productSelectionList()[0];
+    if (!child) {
+      return;
+    }
+
+    this.productService
+      .getProductByBarcode(code)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((product: Product | null) => {
+        if (!product) {
+          this.toastService.warning(`Producto no encontrado: ${code}`);
+          return;
+        }
+
+        const variants = product.product_variants ?? [];
+
+        if (variants.length > 0) {
+          const matchedVariant = variants.find(
+            (v: PosProductVariant) => v.barcode === code,
+          );
+
+          if (matchedVariant) {
+            // Exact variant scanned: add that variant directly. The child reads
+            // `selectedProductForVariant` inside onVariantSelected, so seed it
+            // before invoking the existing variant-add path.
+            child.selectedProductForVariant.set(product);
+            void child.onVariantSelected(matchedVariant);
+            return;
+          }
+
+          // Product-level barcode on a variant product: let the child open its
+          // existing variant-selection modal so the cashier picks the variant.
+          void child.onAddToCart(product);
+          return;
+        }
+
+        // No variants: reuse the standard add-to-cart path (quantity 1).
+        void child.onAddToCart(product);
+      });
   }
 
   onClearCart(): void {

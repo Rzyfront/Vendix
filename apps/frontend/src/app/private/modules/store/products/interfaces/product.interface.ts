@@ -44,6 +44,7 @@ export interface Product {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   sku?: string;
+  barcode?: string;
   stock_quantity?: number;
   min_stock_level?: number | null;
   reorder_point?: number | null;
@@ -153,6 +154,7 @@ export interface ProductVariant {
   id: number;
   product_id: number;
   sku: string;
+  barcode?: string;
   name?: string;
   attributes?: Record<string, any>;
   price_override?: number;
@@ -288,6 +290,7 @@ export interface CreateProductDto {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   sku?: string;
+  barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
   weight?: number;
@@ -341,6 +344,7 @@ export interface UpdateProductDto {
   sale_price?: number;
   is_on_sale?: boolean;
   sku?: string;
+  barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
   available_for_ecommerce?: boolean;
