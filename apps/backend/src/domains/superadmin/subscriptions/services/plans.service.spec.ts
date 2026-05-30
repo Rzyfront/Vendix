@@ -302,6 +302,10 @@ describe('PlansService', () => {
       const createArgs = tx.subscription_plans.create.mock.calls[0][0];
       expect(createArgs.data.billing_cycle).toBe('annual');
       expect(createArgs.data.plan_group_code).toBe('pro');
+      // `code` is a required column — the new cycle row must carry the derived
+      // `${group}-${cycle}` code, never be omitted (regression: Prisma rejects
+      // the insert with "Argument `code` is missing").
+      expect(createArgs.data.code).toBe('pro-annual');
     });
 
     it('archives (not deletes) a removed cycle that is still referenced by a subscription', async () => {
