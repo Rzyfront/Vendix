@@ -1,17 +1,11 @@
-import {Component, OnInit, computed, inject, signal,
+import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, ActivatedRoute } from '@angular/router';
-
-
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
-import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import {
-  ResponsiveDataViewComponent,
-  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
@@ -36,7 +30,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     CardComponent,
     ChartComponent,
     StatsComponent,
-    ResponsiveDataViewComponent,
     IconComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
@@ -104,33 +97,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <!-- Toggle Chart/Table -->
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="setActiveView('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'chart'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráficas
-            </button>
-            <button
-              (click)="setActiveView('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'table'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -139,7 +105,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
       </div>
 
       <!-- Total Value Card -->
-      @if (!activeLoading()) {
+      @if (!chartLoading()) {
         <div
           class="bg-gradient-to-r from-green-500 to-green-600 rounded-xl p-6 text-white"
         >
@@ -148,15 +114,13 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             {{ formatCurrency(totalValue()) }}
           </p>
           <p class="text-green-100 text-sm mt-2">
-            {{ totalQuantity() }} unidades en {{ activeData().length }} ubicaciones
+            {{ totalQuantity() }} unidades en {{ chartData().length }} ubicaciones
           </p>
         </div>
       }
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      <!-- Chart View -->
-      @if (activeView() === 'chart') {
         <app-card
           shadow="none"
           [padding]="false"
@@ -183,33 +147,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             }
           </div>
         </app-card>
-      }
-
-      <!-- Table View -->
-      @if (activeView() === 'table') {
-      <app-card
-        shadow="none"
-        [padding]="false"
-        overflow="hidden"
-        [showHeader]="true"
-      >
-        <div slot="header" class="flex flex-col">
-          <span class="text-sm font-bold text-[var(--color-text-primary)]"
-            >Detalle por Ubicación</span
-          >
-        </div>
-        <div class="p-4">
-          <app-responsive-data-view
-            [data]="tableData()"
-            [columns]="columns"
-            [cardConfig]="cardConfig"
-            [loading]="tableLoading()"
-            emptyMessage="No hay datos de valoración"
-            emptyIcon="dollar-sign"
-          ></app-responsive-data-view>
-        </div>
-      </app-card>
-      }
       </div>
 
       <!-- Quick Links -->
@@ -230,22 +167,12 @@ export class InventoryValuationComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
   chartLoading = signal(false);
-  tableLoading = signal(false);
   exporting = signal(false);
-  activeView = signal<'chart' | 'table'>('chart');
   chartData = signal<InventoryValuation[]>([]);
-  tableData = signal<InventoryValuation[]>([]);
   chartOptions = signal<EChartsOption>({});
   totalValue = signal(0);
   totalQuantity = signal(0);
   private chartQueryKey = signal<string | null>(null);
-  private tableQueryKey = signal<string | null>(null);
-  readonly activeData = computed(() =>
-    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
-  );
-  readonly activeLoading = computed(() =>
-    this.activeView() === 'chart' ? this.chartLoading() : this.tableLoading(),
-  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -254,54 +181,6 @@ export class InventoryValuationComponent implements OnInit {
   readonly inventoryViews: AnalyticsView[] = getViewsByCategory('inventory').filter(
     (v) => v.key !== 'inventory_valuation'
   );
-
-  columns: TableColumn[] = [
-    { key: 'location_name', label: 'Ubicación', sortable: true, priority: 1 },
-    {
-      key: 'total_quantity',
-      label: 'Cantidad',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '100px'},
-    {
-      key: 'average_cost',
-      label: 'Costo Prom.',
-      sortable: true,
-      align: 'right',
-      priority: 2,
-      width: '120px',
-      transform: (val) => this.formatCurrency(val)},
-    {
-      key: 'total_value',
-      label: 'Valor Total',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '140px',
-      transform: (val) => this.formatCurrency(val)},
-    {
-      key: 'percentage_of_total',
-      label: '% del Total',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '100px',
-      transform: (val) => `${val.toFixed(1)}%`},
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'location_name',
-    detailKeys: [
-      {
-        key: 'total_value',
-        label: 'Valor',
-        transform: (val: any) => this.formatCurrency(val)},
-      {
-        key: 'percentage_of_total',
-        label: 'Porcentaje',
-        transform: (val: any) => `${val.toFixed(1)}%`},
-    ]};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -313,33 +192,19 @@ export class InventoryValuationComponent implements OnInit {
       this.invalidateModeData();
     }
 
-    this.loadActiveView();
+    this.loadChartData();
   }
 
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    this.loadActiveView();
-  }
-
-  private loadActiveView(): void {
-    if (this.activeView() === 'chart') {
-      this.loadChartData();
-      return;
-    }
-    this.loadTableData();
-  }
-
-  private buildQueryKey(mode: 'chart' | 'table'): string {
-    return JSON.stringify({ mode, dateRange: this.dateRange() });
+  private buildQueryKey(): string {
+    return JSON.stringify({ dateRange: this.dateRange() });
   }
 
   private invalidateModeData(): void {
     this.chartQueryKey.set(null);
-    this.tableQueryKey.set(null);
   }
 
   private loadChartData(): void {
-    const queryKey = this.buildQueryKey('chart');
+    const queryKey = this.buildQueryKey();
     if (this.chartQueryKey() === queryKey) return;
 
     this.chartLoading.set(true);
@@ -358,28 +223,6 @@ export class InventoryValuationComponent implements OnInit {
         error: () => {
           this.toastService.error('Error al cargar valoración');
           this.chartLoading.set(false);
-        }});
-  }
-
-  private loadTableData(): void {
-    const queryKey = this.buildQueryKey('table');
-    if (this.tableQueryKey() === queryKey) return;
-
-    this.tableLoading.set(true);
-
-    this.analyticsService
-      .getInventoryValuation({ date_range: this.dateRange(), page: 1, limit: 25 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.tableData.set(response.data);
-          this.calculateTotals(response.data);
-          this.tableQueryKey.set(queryKey);
-          this.tableLoading.set(false);
-        },
-        error: () => {
-          this.toastService.error('Error al cargar tabla de valoración');
-          this.tableLoading.set(false);
         }});
   }
 
@@ -461,7 +304,7 @@ legend: {
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.invalidateModeData();
-    this.loadActiveView();
+    this.loadChartData();
   }
 
   formatCurrency(value: number): string {
@@ -469,21 +312,21 @@ legend: {
   }
 
   getLocationCount(): number {
-    return this.activeData().length;
+    return this.chartData().length;
   }
 
   getTotalValue(): string {
-    const total = this.activeData().reduce((sum, l) => sum + (l.total_value || 0), 0);
+    const total = this.chartData().reduce((sum, l) => sum + (l.total_value || 0), 0);
     return this.currencyService.format(total, 0);
   }
 
   getTotalUnits(): number {
-    return this.activeData().reduce((sum, l) => sum + (l.total_quantity || 0), 0);
+    return this.chartData().reduce((sum, l) => sum + (l.total_quantity || 0), 0);
   }
 
   getTopLocation(): string {
-    if (!this.activeData().length) return '-';
-    const top = [...this.activeData()].sort((a, b) => b.total_value - a.total_value)[0];
+    if (!this.chartData().length) return '-';
+    const top = [...this.chartData()].sort((a, b) => b.total_value - a.total_value)[0];
     return top?.location_name?.substring(0, 15) || '-';
   }
 }

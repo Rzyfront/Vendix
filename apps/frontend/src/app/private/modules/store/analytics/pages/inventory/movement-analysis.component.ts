@@ -7,10 +7,6 @@ import { FormsModule } from '@angular/forms';
 import { forkJoin } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
-import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import {
-  ResponsiveDataViewComponent,
-  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -26,7 +22,6 @@ import {
   getDefaultStartDate,
   getDefaultEndDate} from '../../../../../../shared/utils/date.util';
 import {
-  StockMovementReport,
   MovementSummaryItem,
   MovementTrend,
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
@@ -41,7 +36,6 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
     RouterModule,
     FormsModule,
     CardComponent,
-    ResponsiveDataViewComponent,
     IconComponent,
     StatsComponent,
     ChartComponent,
@@ -108,24 +102,6 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="setActiveView('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráficas
-            </button>
-            <button
-              (click)="setActiveView('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -135,8 +111,6 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      <!-- Chart View -->
-      @if (activeView() === 'chart') {
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <!-- Trends Line Chart -->
           <app-card shadow="none" [responsivePadding]="true">
@@ -164,39 +138,6 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
             </div>
           </app-card>
         </div>
-      }
-
-      <!-- Table View -->
-      @if (activeView() === 'table') {
-        <app-card
-          shadow="none"
-          [padding]="false"
-          overflow="hidden"
-          [showHeader]="true"
-        >
-          <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">
-              Movimientos Detallados
-              <span
-                class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-              >
-                ({{ movements().length }} registros)
-              </span>
-            </span>
-          </div>
-
-          <div class="p-4">
-            <app-responsive-data-view
-              [data]="movements()"
-              [columns]="columns"
-              [cardConfig]="cardConfig"
-              [loading]="loadingMovements()"
-              emptyMessage="No hay movimientos registrados en este período"
-              emptyIcon="activity"
-            ></app-responsive-data-view>
-          </div>
-        </app-card>
-      }
       </div>
 
       <!-- Quick Links -->
@@ -216,15 +157,12 @@ export class MovementAnalysisComponent implements OnInit {
   private toastService = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
 // State
-  activeView = signal<'chart' | 'table'>('chart');
   loadingSummary = signal(true);
   loadingTrends = signal(true);
-  loadingMovements = signal(false);
   exporting = signal(false);
 
   summary = signal<MovementSummaryItem[]>([]);
   trends = signal<MovementTrend[]>([]);
-  movements = signal<StockMovementReport[]>([]);
 
   // Computed stats
   totalMovements = signal(0);
@@ -264,92 +202,6 @@ export class MovementAnalysisComponent implements OnInit {
     (v) => v.key !== 'inventory_movement_analysis'
   );
 
-  columns: TableColumn[] = [
-    {
-      key: 'date',
-      label: 'Fecha',
-      sortable: true,
-      priority: 1,
-      width: '120px',
-      transform: (val) => new Date(val).toLocaleDateString('es-CO')},
-    { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
-    { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '100px' },
-    {
-      key: 'movement_type',
-      label: 'Tipo',
-      align: 'center',
-      priority: 1,
-      width: '120px',
-      badgeConfig: {
-        type: 'status',
-        colorMap: {
-          stock_in: 'success',
-          stock_out: 'info',
-          sale: 'primary',
-          return: 'warn',
-          transfer: 'info',
-          adjustment: 'default',
-          damage: 'danger',
-          expiration: 'danger'}}},
-    {
-      key: 'quantity',
-      label: 'Cantidad',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '100px'},
-    {
-      key: 'from_location',
-      label: 'Origen',
-      priority: 2,
-      width: '120px',
-      transform: (val) => val || '-'},
-    {
-      key: 'to_location',
-      label: 'Destino',
-      priority: 2,
-      width: '120px',
-      transform: (val) => val || '-'},
-    {
-      key: 'user_name',
-      label: 'Usuario',
-      priority: 2,
-      width: '120px',
-      transform: (val) => val || '-'},
-    {
-      key: 'reason',
-      label: 'Razón',
-      priority: 3,
-      width: '150px',
-      transform: (val) => val || '-'},
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'product_name',
-    subtitleKey: 'sku',
-    badgeKey: 'movement_type',
-    badgeConfig: {
-      type: 'status',
-      colorMap: {
-        stock_in: 'success',
-        stock_out: 'info',
-        sale: 'primary',
-        return: 'warn',
-        transfer: 'info',
-        adjustment: 'default',
-        damage: 'danger'}},
-    detailKeys: [
-      {
-        key: 'quantity',
-        label: 'Cantidad',
-        transform: (val: any) => `${val} uds`},
-      {
-        key: 'date',
-        label: 'Fecha',
-        icon: 'calendar',
-        transform: (val: any) => new Date(val).toLocaleDateString('es-CO')},
-    ]};
-
   ngOnInit(): void {
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
@@ -359,23 +211,12 @@ export class MovementAnalysisComponent implements OnInit {
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.movements.set([]);
     this.loadChartData();
-    if (this.activeView() === 'table') {
-      this.loadMovements();
-    }
   }
 
   onGranularityChange(value: string): void {
     this.granularity.set(value);
     this.loadTrends();
-  }
-
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    if (view === 'table' && this.movements().length === 0) {
-      this.loadMovements();
-    }
   }
 
   private buildQuery(): InventoryAnalyticsQueryDto {
@@ -428,24 +269,6 @@ onDateRangeChange(range: DateRangeFilter): void {
         error: () => {
           this.toastService.error('Error al cargar tendencias');
           this.loadingTrends.set(false);
-        }});
-  }
-
-  private loadMovements(): void {
-    this.loadingMovements.set(true);
-    const query = this.buildQuery();
-
-    this.analyticsService
-      .getStockMovements({ ...query, limit: 100 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.movements.set(response.data);
-          this.loadingMovements.set(false);
-        },
-        error: () => {
-          this.toastService.error('Error al cargar movimientos');
-          this.loadingMovements.set(false);
         }});
   }
 

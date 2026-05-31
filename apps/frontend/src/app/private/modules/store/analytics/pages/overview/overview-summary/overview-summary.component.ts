@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -32,6 +32,11 @@ import {
 import {
   DateRangeFilterComponent
 } from '../../../components/date-range-filter/date-range-filter.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+  StickyHeaderActionButton,
+} from '../../../../../../../shared/components/sticky-header/sticky-header.component';
 import {
   ANALYTICS_CATEGORIES,
   ANALYTICS_VIEWS,
@@ -62,6 +67,7 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
     AnalyticsCategoryChipsComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -70,6 +76,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
@@ -99,6 +106,14 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly searchTerm = signal<string>('');
 
   readonly categories = ANALYTICS_CATEGORIES;
+
+  readonly overviewTabs: StickyHeaderTab[] = [
+    { id: 'summary', label: 'Resumen General', icon: 'layout-dashboard', route: '/admin/analytics/overview' },
+  ];
+
+  readonly overviewActions: StickyHeaderActionButton[] = [
+    { id: 'view-reports', label: 'Ver Reportes', icon: 'file-text', variant: 'outline' },
+  ];
 
   private readonly categoryById = computed(() =>
     new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
@@ -199,6 +214,16 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   exportReport(): void {
+  }
+
+  goToReports(): void {
+    this.router.navigateByUrl('/admin/reports/overview/overview-summary');
+  }
+
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'view-reports') {
+      this.goToReports();
+    }
   }
 
   getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {

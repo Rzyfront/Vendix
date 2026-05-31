@@ -1,5 +1,6 @@
 import { Component, inject, DestroyRef, signal } from '@angular/core';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { filter } from 'rxjs/operators';
@@ -33,6 +34,7 @@ import {
   ScrollableTabsComponent,
   ScrollableTab,
 } from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 @Component({
@@ -49,9 +51,21 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     PayrollSettingsComponent,
     EmployeeBulkUploadModalComponent,
     ScrollableTabsComponent,
+    IconComponent,
   ],
   template: `
     <div class="w-full">
+      <!-- Reportes button -->
+      <div class="flex justify-end px-2 md:px-6 py-2">
+        <button
+          (click)="goToReports()"
+          class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-primary border border-border rounded-lg hover:bg-surface transition-colors"
+        >
+          <app-icon name="file-text" [size]="16" />
+          Ver Reportes
+        </button>
+      </div>
+
       <!-- Tab Navigation -->
       <div class="px-2 md:px-0 mb-0 md:mb-4">
         <app-scrollable-tabs
@@ -132,6 +146,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 })
 export class PayrollComponent {
   private store = inject(Store);
+  private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
   readonly employees = toSignal(this.store.select(selectEmployees), {
@@ -245,5 +260,9 @@ export class PayrollComponent {
   refreshPayrollRuns(): void {
     this.store.dispatch(loadPayrollRuns());
     this.store.dispatch(loadPayrollRunStats());
+  }
+
+  goToReports(): void {
+    this.router.navigateByUrl('/admin/reports/payroll/payroll-summary');
   }
 }

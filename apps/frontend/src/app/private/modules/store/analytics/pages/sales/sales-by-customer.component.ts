@@ -1,14 +1,10 @@
-import {Component, OnInit, computed, inject, signal,
+import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterModule, ActivatedRoute } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
-import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import {
-  ResponsiveDataViewComponent,
-  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -33,7 +29,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     CardComponent,
     ChartComponent,
     StatsComponent,
-    ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
@@ -45,7 +40,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Clientes"
-          [value]="activeData().length"
+          [value]="chartData().length"
           smallText=" clientes"
           iconName="users"
           iconBgColor="bg-blue-100"
@@ -102,33 +97,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <!-- Toggle Chart/Table -->
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="setActiveView('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'chart'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráficas
-            </button>
-            <button
-              (click)="setActiveView('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="
-                activeView() === 'table'
-                  ? 'bg-black text-white'
-                  : 'bg-surface text-text-secondary hover:bg-background'
-              "
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -138,8 +106,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      <!-- Main Content -->
-      @if (activeView() === 'chart') {
       <app-card
         shadow="none"
         [padding]="false"
@@ -149,10 +115,8 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         <div slot="header" class="flex flex-col">
           <span class="text-sm font-bold text-[var(--color-text-primary)]">
             Top Clientes
-            <span
-              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-            >
-            ({{ chartData().length }} clientes)
+            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
+              ({{ chartData().length }} clientes)
             </span>
           </span>
         </div>
@@ -171,39 +135,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
           }
         </div>
       </app-card>
-      }
-
-      <!-- Main Content Card -->
-      @if (activeView() === 'table') {
-      <app-card
-        shadow="none"
-        [padding]="false"
-        overflow="hidden"
-        [showHeader]="true"
-      >
-        <div slot="header" class="flex flex-col">
-          <span class="text-sm font-bold text-[var(--color-text-primary)]">
-            Detalle de Clientes
-            <span
-              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
-            >
-              ({{ tableData().length }} clientes)
-            </span>
-          </span>
-        </div>
-
-        <div class="p-4">
-          <app-responsive-data-view
-            [data]="tableData()"
-            [columns]="columns"
-            [cardConfig]="cardConfig"
-            [loading]="tableLoading()"
-            emptyMessage="No hay datos de clientes"
-            emptyIcon="users"
-          ></app-responsive-data-view>
-        </div>
-      </app-card>
-      }
       </div>
 
       <!-- Quick Links -->
@@ -224,17 +155,10 @@ export class SalesByCustomerComponent implements OnInit {
   private currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
   chartLoading = signal(false);
-  tableLoading = signal(false);
   exporting = signal(false);
-  activeView = signal<'chart' | 'table'>('chart');
   chartData = signal<SalesByCustomer[]>([]);
-  tableData = signal<SalesByCustomer[]>([]);
   topCustomersChartOptions = signal<EChartsOption>({});
   private chartQueryKey = signal<string | null>(null);
-  private tableQueryKey = signal<string | null>(null);
-  readonly activeData = computed(() =>
-    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
-  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -244,118 +168,33 @@ export class SalesByCustomerComponent implements OnInit {
     (v) => v.key !== 'sales_by_customer'
   );
 
-  columns: TableColumn[] = [
-    { key: 'customer_name', label: 'Cliente', sortable: true, priority: 1 },
-    {
-      key: 'email',
-      label: 'Email',
-      sortable: true,
-      priority: 2,
-      width: '200px'},
-    {
-      key: 'total_orders',
-      label: 'Órdenes',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '100px'},
-    {
-      key: 'total_spent',
-      label: 'Total Gastado',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '140px',
-      transform: (val) => this.formatCurrency(val)},
-    {
-      key: 'average_order_value',
-      label: 'Ticket Prom.',
-      sortable: true,
-      align: 'right',
-      priority: 2,
-      width: '120px',
-      transform: (val) => this.formatCurrency(val)},
-    {
-      key: 'last_order_date',
-      label: 'Última Compra',
-      sortable: true,
-      align: 'center',
-      priority: 2,
-      width: '120px',
-      transform: (val) =>
-        val ? new Date(val).toLocaleDateString('es-CO') : '-'},
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'customer_name',
-    subtitleKey: 'email',
-    detailKeys: [
-      {
-        key: 'total_orders',
-        label: 'Órdenes',
-        transform: (val: any) => `${val} órdenes`},
-      {
-        key: 'total_spent',
-        label: 'Total',
-        transform: (val: any) => this.formatCurrency(val)},
-    ]};
-
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
-    // Read date range from URL query params (e.g. when navigating from Reports)
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.dateRange.set(urlRange);
-      this.invalidateModeData();
     }
 
-    this.loadActiveView();
+    this.loadChartData();
   }
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.invalidateModeData();
-    this.loadActiveView();
+    this.loadChartData();
   }
 
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    this.loadActiveView();
-  }
-
-  private loadActiveView(): void {
-    if (this.activeView() === 'chart') {
-      this.loadChartData();
-      return;
-    }
-    this.loadTableData();
-  }
-
-  private buildQuery(mode: 'chart' | 'table'): SalesAnalyticsQueryDto {
-    return {
-      date_range: this.dateRange(),
-      limit: mode === 'chart' ? 10 : 25,
-      ...(mode === 'table' && { page: 1 }),
-    };
-  }
-
-  private buildQueryKey(mode: 'chart' | 'table'): string {
-    return JSON.stringify({ mode, query: this.buildQuery(mode) });
-  }
-
-  private invalidateModeData(): void {
-    this.chartQueryKey.set(null);
-    this.tableQueryKey.set(null);
+  private buildQuery(): SalesAnalyticsQueryDto {
+    return { date_range: this.dateRange(), limit: 10 };
   }
 
   private loadChartData(): void {
-    const queryKey = this.buildQueryKey('chart');
+    const queryKey = JSON.stringify({ query: this.buildQuery() });
     if (this.chartQueryKey() === queryKey) return;
 
     this.chartLoading.set(true);
 
     this.analyticsService
-      .getSalesByCustomer(this.buildQuery('chart'))
+      .getSalesByCustomer(this.buildQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -370,28 +209,6 @@ onDateRangeChange(range: DateRangeFilter): void {
           this.updateChart([]);
           this.toastService.error('Error al cargar ventas por cliente');
           this.chartLoading.set(false);
-        }});
-  }
-
-  private loadTableData(): void {
-    const queryKey = this.buildQueryKey('table');
-    if (this.tableQueryKey() === queryKey) return;
-
-    this.tableLoading.set(true);
-
-    this.analyticsService
-      .getSalesByCustomer(this.buildQuery('table'))
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
-          this.tableData.set(this.extractRows(response));
-          this.tableQueryKey.set(queryKey);
-          this.tableLoading.set(false);
-        },
-        error: () => {
-          this.tableData.set([]);
-          this.toastService.error('Error al cargar tabla de ventas por cliente');
-          this.tableLoading.set(false);
         }});
   }
 
@@ -427,7 +244,6 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(data: SalesByCustomer[]): void {
-
     const top10 = Array.isArray(data) && data.length > 0
       ? [...data].sort((a, b) => b.total_spent - a.total_spent).slice(0, 10)
       : [];
@@ -460,13 +276,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         itemWidth: 14,
         textStyle: { color: textSecondary },
       },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '25%',
-        top: '3%',
-        containLabel: true,
-      },
+      grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
       xAxis: {
         type: 'category',
         data: customerNames,
@@ -498,20 +308,19 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   getTotalRevenue(): string {
-    const total = this.activeData().reduce((sum, c) => sum + (c.total_spent || 0), 0);
+    const total = this.chartData().reduce((sum, c) => sum + (c.total_spent || 0), 0);
     return this.currencyService.format(total, 0);
   }
 
   getTopCustomerName(): string {
-    if (!this.activeData().length) return '-';
-    const top = [...this.activeData()].sort((a, b) => b.total_spent - a.total_spent)[0];
+    if (!this.chartData().length) return '-';
+    const top = [...this.chartData()].sort((a, b) => b.total_spent - a.total_spent)[0];
     return top?.customer_name?.substring(0, 15) || '-';
   }
 
   getAvgRevenue(): string {
-    if (!this.activeData().length) return '-';
-    const total = this.activeData().reduce((sum, c) => sum + (c.total_spent || 0), 0);
-    return this.currencyService.format(total / this.activeData().length, 0);
+    if (!this.chartData().length) return '-';
+    const total = this.chartData().reduce((sum, c) => sum + (c.total_spent || 0), 0);
+    return this.currencyService.format(total / this.chartData().length, 0);
   }
-
 }
