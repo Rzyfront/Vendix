@@ -327,7 +327,6 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Ingresos',
           position: 'left',
           min: 0,
-          max: 1000000,
           splitNumber: 5,
           axisLine: { show: false },
           axisLabel: {
@@ -340,7 +339,6 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Órdenes',
           position: 'right',
           min: 0,
-          max: 100,
           splitNumber: 5,
           axisLine: { show: false },
           axisLabel: { color: '#6b7280' },

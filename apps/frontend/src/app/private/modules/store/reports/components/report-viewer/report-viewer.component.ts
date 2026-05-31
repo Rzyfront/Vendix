@@ -2,6 +2,7 @@ import { Component, input, output, computed } from '@angular/core';
 import { ReportColumn, ReportDefinition, ReportStatField } from '../../interfaces/report.interface';
 import { NestedReportComponent } from '../nested-report/nested-report.component';
 import { DateRangeFilterComponent } from '../../../analytics/components/date-range-filter/date-range-filter.component';
+import { ExportButtonComponent } from '../../../analytics/components/export-button/export-button.component';
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -59,6 +60,7 @@ function formatStatValue(value: any, type: string): string | number {
     StatsComponent,
     NestedReportComponent,
     DateRangeFilterComponent,
+    ExportButtonComponent,
     PaginationComponent,
     CardComponent,
     ResponsiveDataViewComponent,
@@ -100,6 +102,10 @@ function formatStatValue(value: any, type: string): string | number {
             @if (report()?.requiresDateRange) {
               <vendix-date-range-filter (valueChange)="dateRangeChange.emit($event)" />
             }
+            <vendix-export-button
+              [loading]="exportLoading()"
+              (export)="exportClick.emit()"
+            />
           </div>
         </div>
 
@@ -166,6 +172,9 @@ export class ReportViewerComponent {
 
   readonly dateRangeChange = output<any>();
   readonly pageChange = output<number>();
+  readonly exportClick = output<void>();
+
+  readonly exportLoading = input<boolean>(false);
 
   readonly statsCards = computed<StatCard[]>(() => {
     const report = this.report();

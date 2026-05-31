@@ -21,6 +21,7 @@ import { ReportViewerComponent } from '../../../components/report-viewer/report-
       [itemsPerPage]="itemsPerPage()"
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
+      (exportClick)="onExport()"
     />
   `,
 })
@@ -47,5 +48,28 @@ export class TaxSummaryReportComponent {
 
   onPageChange(page: number): void {
     this.store.dispatch(ReportsActions.setPage({ page }));
+  }
+  onExport(): void {
+    const data = this.data();
+    if (!data || data.length === 0) return;
+
+    const report = this.report();
+    const cols = report?.columns || [];
+    const headers = cols.map(c => c.header).join(',');
+    const rows = data.map(row =>
+      cols.map(c => {
+        const val = row[c.key];
+        return typeof val === 'string' && val.includes(',') ? `"${val}"` : val ?? '';
+      }).join(',')
+    );
+
+    const csv = [headers, ...rows].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${report?.id || 'reporte'}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 }
