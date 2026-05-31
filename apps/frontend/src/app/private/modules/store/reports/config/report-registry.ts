@@ -37,7 +37,17 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         { key: 'net_profit_growth', label: 'Crecimiento Ganancia', type: 'percentage' },
       ],
     },
-    columns: [],
+    columns: [
+      { key: 'total_income', header: 'Ingresos Totales', type: 'currency' },
+      { key: 'total_expenses', header: 'Gastos Totales', type: 'currency' },
+      { key: 'net_profit', header: 'Ganancia Neta', type: 'currency' },
+      { key: 'breakeven_ratio', header: 'Punto de Equilibrio', type: 'percentage' },
+      { key: 'total_taxes', header: 'Impuestos', type: 'currency' },
+      { key: 'income_growth', header: 'Crec. Ingresos', type: 'percentage' },
+      { key: 'expenses_growth', header: 'Crec. Gastos', type: 'percentage' },
+      { key: 'net_profit_growth', header: 'Crec. Ganancia', type: 'percentage' },
+      { key: 'taxes_growth', header: 'Crec. Impuestos', type: 'percentage' },
+    ],
     exportFilename: 'resumen-general',
     stats: [
       { key: 'total_income', label: 'Ingresos Totales', type: 'currency', icon: 'dollar-sign' },
@@ -69,7 +79,12 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         { key: 'average_order_value', label: 'Ticket Promedio', type: 'currency' },
       ],
     },
-    columns: [],
+    columns: [
+      { key: 'total_spent', header: 'Total Compras', type: 'currency' },
+      { key: 'total_orders', header: 'Total Ordenes', type: 'number' },
+      { key: 'completed_orders', header: 'Completadas', type: 'number' },
+      { key: 'average_order_value', header: 'Ticket Promedio', type: 'currency' },
+    ],
     exportFilename: 'resumen-compras',
     stats: [
       { key: 'total_spent', label: 'Total Compras', type: 'currency', icon: 'dollar-sign' },
@@ -127,7 +142,12 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         { key: 'total_helpful_votes', label: 'Votos Utiles', type: 'number' },
       ],
     },
-    columns: [],
+    columns: [
+      { key: 'average_rating', header: 'Calificacion Promedio', type: 'number' },
+      { key: 'total_reviews', header: 'Total Reseñas', type: 'number' },
+      { key: 'approved_reviews', header: 'Aprobadas', type: 'number' },
+      { key: 'total_helpful_votes', header: 'Votos Utiles', type: 'number' },
+    ],
     exportFilename: 'resumen-resenas',
     stats: [
       { key: 'average_rating', label: 'Calificacion Promedio', type: 'number', icon: 'star' },
@@ -353,7 +373,12 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         { key: 'out_of_stock_count', label: 'Sin Stock', type: 'number' },
       ],
     },
-    columns: [],
+    columns: [
+      { key: 'total_stock_value', header: 'Valor en Stock', type: 'currency' },
+      { key: 'total_quantity_on_hand', header: 'Unidades en Mano', type: 'number' },
+      { key: 'low_stock_count', header: 'Bajo Stock', type: 'number' },
+      { key: 'out_of_stock_count', header: 'Sin Stock', type: 'number' },
+    ],
     exportFilename: 'resumen-inventario',
     stats: [
       { key: 'total_stock_value', label: 'Valor en Stock', type: 'currency', icon: 'dollar-sign' },
@@ -521,7 +546,7 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
   {
     id: 'product-top-sellers',
     category: 'products',
-    title: 'Top Sellers',
+    title: 'Mas Vendidos',
     description: 'Top sellers por cantidad vendida y por ingreso generado',
     detailedDescription:
       'Los productos mas exitosos de tu catalogo. Ranking dual: por unidades vendidas y por ingresos generados, para tomar decisiones de reabastecimiento.',
@@ -663,7 +688,12 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
         { key: 'recovered_value', label: 'Valor Recuperado', type: 'currency' },
       ],
     },
-    columns: [],
+    columns: [
+      { key: 'total_abandoned_carts', header: 'Carritos Abandonados', type: 'number' },
+      { key: 'total_abandoned_value', header: 'Valor Abandonado', type: 'currency' },
+      { key: 'recovery_rate', header: 'Tasa Recuperacion', type: 'percentage' },
+      { key: 'recovered_value', header: 'Valor Recuperado', type: 'currency' },
+    ],
     exportFilename: 'carritos-abandonados',
     stats: [
       { key: 'total_abandoned_carts', label: 'Carritos Abandonados', type: 'number', icon: 'shopping-cart' },
