@@ -2,7 +2,7 @@
 name: buildcheck-dev
 description: >
   Build and runtime verification steps for Vendix development.
-  Trigger: Verifying Build, checking Docker watch-mode logs, or confirming development changes do not introduce compile/runtime errors.
+  Trigger: Verifying Build, checking Docker watch-mode logs, checking current development app status, or confirming development changes do not introduce compile/runtime errors.
 license: MIT
 metadata:
   author: rzyfront
@@ -11,6 +11,7 @@ metadata:
   auto_invoke:
     - "Verifying Build"
     - "Checking Docker development logs after code changes"
+    - "Checking current development app status"
 ---
 
 # Buildcheck Dev
@@ -22,6 +23,43 @@ metadata:
 ## Core Rule
 
 Development verification always uses Docker watch-mode logs. Do **not** run production build commands unless the human explicitly asks for a production build, deployment check, or production compilation check.
+
+## Current Dev App Status Workflow
+
+Use this workflow when the human asks how the development app is doing, whether the dev environment is healthy, or to "check app dev" before or after changes.
+
+1. Check compose service state first:
+
+```bash
+docker compose ps
+docker ps --filter "name=vendix_" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+```
+
+2. Check short logs for the core development services:
+
+```bash
+docker logs --tail 80 vendix_backend
+docker logs --tail 80 vendix_frontend
+docker logs --tail 80 vendix_postgres
+docker logs --tail 80 vendix_redis
+```
+
+3. Run lightweight HTTP checks only after containers are running:
+
+```bash
+curl -fsS http://localhost:3000/api/health
+curl -I -fsS http://localhost:4200
+```
+
+4. If `vendix_nginx` is part of the reported problem, also inspect:
+
+```bash
+docker logs --tail 80 vendix_nginx
+```
+
+5. Summarize status by service: running/stopped, recent errors, HTTP health result, and next required fix.
+
+Do not treat a healthy HTTP response as enough if watch-mode logs still show TypeScript, Angular template, NestJS runtime, dependency, Prisma, Redis, or database errors.
 
 ## Default Verification Workflow
 
@@ -40,12 +78,14 @@ Use the commands that match the files changed:
 | Backend | `docker logs --tail 40 vendix_backend` |
 | Frontend | `docker logs --tail 40 vendix_frontend` |
 | Database/Prisma | `docker logs --tail 40 vendix_postgres` |
+| Redis/queues/cache | `docker logs --tail 40 vendix_redis` |
+| Nginx/domain routing | `docker logs --tail 40 vendix_nginx` |
 | Multiple areas | Check each affected container |
 | Container status | `docker ps` |
 
-Expected healthy signals include messages such as `Compiled successfully`, `Successfully compiled`, `Nest application successfully started`, or `database system is ready to accept connections`.
+Expected healthy signals include messages such as `Compiled successfully`, `Successfully compiled`, `Nest application successfully started`, `/api/health` returning `status: ok`, or `database system is ready to accept connections`.
 
-Blocking signals include `ERROR`, `ERROR in`, `TypeError`, `ReferenceError`, TypeScript errors, template parsing errors, missing dependency errors, database syntax errors, or connection failures.
+Blocking signals include `ERROR`, `ERROR in`, `TypeError`, `ReferenceError`, TypeScript errors, Angular template parsing errors, missing dependency errors, Prisma generation errors, database syntax errors, Redis connection failures, or repeated container restarts.
 
 ## Production Build Rule
 
@@ -98,6 +138,7 @@ After any restart or recreate, re-run the development log checks and `docker ps`
 
 - [ ] Logs checked for all affected development containers with `docker logs --tail 40`.
 - [ ] Container status checked with `docker ps`.
+- [ ] Dev app status requests include `docker compose ps` and lightweight HTTP checks when containers are running.
 - [ ] Zero relevant errors remain in affected logs.
 - [ ] Fixes were re-verified after changes.
 - [ ] Production build was not run unless explicitly requested.

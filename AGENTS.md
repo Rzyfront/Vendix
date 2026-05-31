@@ -84,6 +84,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
+| Checking current development app status | `buildcheck-dev` |
 | Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
