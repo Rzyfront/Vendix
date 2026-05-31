@@ -22,6 +22,15 @@ export class ReportDataAdapterService {
     if (report.id === 'profit-loss') {
       return this.adaptProfitLoss(rawData);
     }
+    if (report.id === 'balance-sheet') {
+      return this.adaptBalanceSheet(rawData);
+    }
+    if (report.id === 'income-statement') {
+      return this.adaptIncomeStatement(rawData);
+    }
+    if (report.id === 'aging-report') {
+      return this.adaptAgingReport(rawData);
+    }
     if (report.id === 'accounts-payable-aging') {
       return this.adaptAccountsPayableAging(rawData);
     }
@@ -353,5 +362,94 @@ export class ReportDataAdapterService {
       collected_this_month: Number(d.collected_this_month || 0),
     };
     return { data: [], isSummary: true, summaryData, meta: undefined };
+  }
+
+  private adaptBalanceSheet(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const rows: any[] = [];
+
+    const addSection = (section: string, accounts: any[], total: number) => {
+      for (const a of accounts) {
+        rows.push({
+          section,
+          account_code: a.account_code || '',
+          account_name: a.account_name || '',
+          balance: Number(a.balance || 0),
+        });
+      }
+      rows.push({ section, account_code: '', account_name: `Total ${section}`, balance: Number(total || 0), is_total: true });
+    };
+
+    if (d.assets) addSection('Activos', d.assets.accounts || [], d.assets.total || 0);
+    if (d.liabilities) addSection('Pasivos', d.liabilities.accounts || [], d.liabilities.total || 0);
+    if (d.equity) addSection('Patrimonio', d.equity.accounts || [], d.equity.total || 0);
+
+    const summaryData: Record<string, any> = {
+      total_assets: Number(d.assets?.total || 0),
+      total_liabilities: Number(d.liabilities?.total || 0),
+      total_equity: Number(d.equity?.total || 0),
+    };
+
+    return { data: rows, meta: undefined, summaryData };
+  }
+
+  private adaptIncomeStatement(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const rows: any[] = [];
+
+    const addSection = (section: string, accounts: any[], total: number) => {
+      for (const a of accounts) {
+        rows.push({
+          section,
+          account_code: a.account_code || '',
+          account_name: a.account_name || '',
+          balance: Number(a.balance || 0),
+        });
+      }
+      rows.push({ section, account_code: '', account_name: `Total ${section}`, balance: Number(total || 0), is_total: true });
+    };
+
+    if (d.revenue) addSection('Ingresos', d.revenue.accounts || [], d.revenue.total || 0);
+    if (d.expenses) addSection('Gastos', d.expenses.accounts || [], d.expenses.total || 0);
+
+    if (d.net_income !== undefined) {
+      rows.push({ section: 'Resultado', account_code: '', account_name: 'Utilidad Neta', balance: Number(d.net_income || 0), is_total: true });
+    }
+
+    const summaryData: Record<string, any> = {
+      total_revenue: Number(d.revenue?.total || 0),
+      total_costs: Number(d.expenses?.total || 0),
+      net_income: Number(d.net_income || 0),
+    };
+
+    return { data: rows, meta: undefined, summaryData };
+  }
+
+  private adaptAgingReport(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const buckets = d.buckets || {};
+
+    // Build rows from top customers with a single total column
+    const rows: any[] = (d.top_customers || []).map((c: any) => ({
+      customer_name: c.customer_name,
+      current: 0,
+      days_1_30: 0,
+      days_31_60: 0,
+      days_61_90: 0,
+      over_90: 0,
+      total: Number(c.total || 0),
+    }));
+
+    const summaryData: Record<string, any> = {
+      current: Number(buckets.current || 0),
+      days_1_30: Number(buckets.days_1_30 || 0),
+      days_31_60: Number(buckets.days_31_60 || 0),
+      days_61_90: Number(buckets.days_61_90 || 0),
+      days_91_120: Number(buckets.days_91_120 || 0),
+      days_120_plus: Number(buckets.days_120_plus || 0),
+      total: Number(d.total || 0),
+    };
+
+    return { data: rows, isSummary: true, summaryData, meta: undefined };
   }
 }
