@@ -26,6 +26,7 @@ import { SubscriptionMetricsController } from './controllers/metrics.controller'
 import { SubscriptionMetricsService } from './services/subscription-metrics.service';
 import { ManualPaymentController } from './controllers/manual-payment.controller';
 import { PlatformGatewayModule } from './gateway/gateway.module';
+import { SubscriptionFiscalModule } from './fiscal/subscription-fiscal.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     ResponseModule,
     NotificationsModule,
     PlatformGatewayModule,
+    SubscriptionFiscalModule,
     BullModule.registerQueue({ name: 'subscription-payment-retry' }),
   ],
   controllers: [
@@ -70,6 +72,7 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     SubscriptionsStatsService,
     SubscriptionMetricsService,
     PlatformGatewayModule,
+    SubscriptionFiscalModule,
   ],
 })
 export class SuperadminSubscriptionsModule {}

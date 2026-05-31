@@ -2877,6 +2877,18 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'superadmin:subscriptions:fiscal:read',
+      description: 'Ver configuración y registro de facturación DIAN SaaS',
+      path: '/api/superadmin/subscriptions/fiscal/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:fiscal:write',
+      description: 'Configurar, probar y reintentar facturación DIAN SaaS',
+      path: '/api/superadmin/subscriptions/fiscal/*',
+      method: 'POST,PATCH',
+    },
+    {
       name: 'superadmin:social_sales:config:read',
       description: 'Leer configuración Meta para Social Sales',
       path: '/api/superadmin/social-sales/meta/config',
