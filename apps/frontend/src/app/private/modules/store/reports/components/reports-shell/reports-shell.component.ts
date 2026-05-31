@@ -12,6 +12,8 @@ import { selectDateRange } from '../../state/reports.selectors';
 import { ReportsActions } from '../../state/reports.actions';
 import { dateRangeToQueryParams, queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { getDefaultDateRange } from '../../state/reports.state';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
   StickyHeaderComponent,
   StickyHeaderTab,
@@ -29,6 +31,8 @@ export class ReportsShellComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly store = inject(Store);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly toast = inject(ToastService);
 
   private readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
 
@@ -60,14 +64,19 @@ export class ReportsShellComponent {
     }));
   });
 
-  private readonly categoryActionConfig: Record<string, { id: string; label: string; icon: string; route: string }> = {
-    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', route: '/admin/accounting' },
-    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', route: '/admin/payroll' },
+  private readonly categoryActionConfig: Record<string, { id: string; label: string; icon: string; route: string; moduleKey?: string }> = {
+    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', route: '/admin/accounting', moduleKey: 'accounting' },
+    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', route: '/admin/payroll', moduleKey: 'payroll' },
   };
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
     const categoryId = this.categoryId();
     const config = categoryId ? this.categoryActionConfig[categoryId] : undefined;
+
+    if (config?.moduleKey && !this.authFacade.isModuleVisible(config.moduleKey)) {
+      return [];
+    }
+
     return [
       {
         id: config?.id || 'view-analytics',
