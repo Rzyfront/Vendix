@@ -100,7 +100,7 @@ function formatStatValue(value: any, type: string): string | number {
           </div>
           <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
             @if (report()?.requiresDateRange) {
-              <vendix-date-range-filter (valueChange)="dateRangeChange.emit($event)" />
+              <vendix-date-range-filter [value]="dateRange()" (valueChange)="dateRangeChange.emit($event)" />
             }
             <vendix-export-button
               [loading]="exportLoading()"
@@ -175,6 +175,7 @@ export class ReportViewerComponent {
   readonly exportClick = output<void>();
 
   readonly exportLoading = input<boolean>(false);
+  readonly dateRange = input<any>(undefined);
 
   readonly statsCards = computed<StatCard[]>(() => {
     const report = this.report();

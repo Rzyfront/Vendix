@@ -12,6 +12,7 @@ import { selectDateRange } from '../../state/reports.selectors';
 import { ReportsActions } from '../../state/reports.actions';
 import { dateRangeToQueryParams, queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { getDefaultDateRange } from '../../state/reports.state';
+import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import {
@@ -33,6 +34,7 @@ export class ReportsShellComponent {
   private readonly store = inject(Store);
   private readonly authFacade = inject(AuthFacade);
   private readonly toast = inject(ToastService);
+  private readonly dateRangeSync = inject(DateRangeSyncService);
 
   private readonly dateRange = toSignal(this.store.select(selectDateRange), { initialValue: getDefaultDateRange() });
 
@@ -40,6 +42,12 @@ export class ReportsShellComponent {
     const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
     if (urlRange) {
       this.store.dispatch(ReportsActions.setDateRange({ dateRange: urlRange }));
+    } else {
+      // Fallback: sync from analytics via shared service
+      const syncedRange = this.dateRangeSync.dateRange();
+      if (syncedRange) {
+        this.store.dispatch(ReportsActions.setDateRange({ dateRange: syncedRange }));
+      }
     }
   }
 

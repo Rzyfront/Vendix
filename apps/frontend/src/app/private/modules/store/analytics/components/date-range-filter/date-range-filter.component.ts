@@ -1,4 +1,4 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, input, output, signal, inject } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
@@ -8,6 +8,7 @@ import {
 } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
 type DatePreset =
   | 'today'
@@ -49,6 +50,8 @@ type DatePreset =
   `,
 })
 export class DateRangeFilterComponent {
+  private readonly dateRangeSync = inject(DateRangeSyncService);
+
   value = input<DateRangeFilter | undefined>();
   valueChange = output<DateRangeFilter>();
 
@@ -83,6 +86,7 @@ export class DateRangeFilterComponent {
     const range = this.getDateRange(preset as DatePreset);
     if (range) {
       this.selectedDate.set(range.start_date);
+      this.dateRangeSync.setDateRange(range);
       this.valueChange.emit(range);
     }
   }
@@ -94,6 +98,7 @@ export class DateRangeFilterComponent {
       end_date: date,
       preset: this.selectedPreset(),
     };
+    this.dateRangeSync.setDateRange(range);
     this.valueChange.emit(range);
   }
 

@@ -2,7 +2,7 @@ import { Component, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ReportsActions } from '../../../state/reports.actions';
-import { selectLoading, selectIsForbidden, selectReportData, selectSummaryData, selectSelectedReport, selectCurrentPage, selectTotalPages, selectTotalItems, selectItemsPerPage } from '../../../state/reports.selectors';
+import { selectLoading, selectIsForbidden, selectReportData, selectSummaryData, selectSelectedReport, selectCurrentPage, selectTotalPages, selectTotalItems, selectItemsPerPage, selectDateRange } from '../../../state/reports.selectors';
 import { ReportViewerComponent } from '../../../components/report-viewer/report-viewer.component';
 
 @Component({
@@ -19,6 +19,7 @@ import { ReportViewerComponent } from '../../../components/report-viewer/report-
       [totalPages]="totalPages()"
       [totalItems]="totalItems()"
       [itemsPerPage]="itemsPerPage()"
+       [dateRange]="dateRange() ?? null"
       (dateRangeChange)="onDateRangeChange($event)"
       (pageChange)="onPageChange($event)"
       (exportClick)="onExport()"
@@ -36,6 +37,7 @@ export class ProductProfitabilityReportComponent {
   readonly totalPages = toSignal(this.store.select(selectTotalPages), { initialValue: 0 });
   readonly totalItems = toSignal(this.store.select(selectTotalItems), { initialValue: 0 });
   readonly itemsPerPage = toSignal(this.store.select(selectItemsPerPage), { initialValue: 10 });
+  readonly dateRange = toSignal(this.store.select(selectDateRange));
 
   constructor() {
     this.store.dispatch(ReportsActions.selectReport({ reportId: 'product-profitability' }));
@@ -43,7 +45,6 @@ export class ProductProfitabilityReportComponent {
 
   onDateRangeChange(dateRange: any): void {
     this.store.dispatch(ReportsActions.setDateRange({ dateRange }));
-    this.store.dispatch(ReportsActions.loadReportData());
   }
 
   onPageChange(page: number): void {

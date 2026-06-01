@@ -12,6 +12,8 @@ import {
   StickyHeaderTab,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
+import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'app-analytics-shell',
@@ -23,6 +25,7 @@ import {
 export class AnalyticsShellComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly dateRangeSync = inject(DateRangeSyncService);
 
   private readonly categoryId = toSignal(
     this.route.data.pipe(map((data) => data['categoryId'] as AnalyticsCategoryId)),
@@ -88,7 +91,7 @@ export class AnalyticsShellComponent {
       const reportRoute = this.analyticsToReportRoute[currentUrl]
         || `/admin/reports/${this.categoryId() || 'overview'}`;
       this.router.navigate([reportRoute], {
-        queryParams: { ...this.route.snapshot.queryParams },
+        queryParams: dateRangeToQueryParams(this.dateRangeSync.dateRange()),
       });
     }
   }
