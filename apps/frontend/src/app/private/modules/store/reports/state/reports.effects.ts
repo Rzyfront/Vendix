@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
-import { of } from 'rxjs';
-import { map, mergeMap, catchError, withLatestFrom, tap } from 'rxjs/operators';
+import { of, EMPTY } from 'rxjs';
+import { map, mergeMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
 import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectReportData, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
@@ -43,7 +43,9 @@ export class ReportsEffects {
       ),
       mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage]) => {
         if (!report) {
-          return of(ReportsActions.loadReportDataFailure({ error: 'No hay reporte seleccionado' }));
+          // No report selected yet — shell may have set date range before child
+          // dispatched selectReport. Silently skip, selectReportAndLoad$ will retry.
+          return EMPTY;
         }
 
         return this.reportsDataService
