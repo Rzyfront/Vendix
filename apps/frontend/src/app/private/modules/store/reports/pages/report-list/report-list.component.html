@@ -11,6 +11,7 @@
 
     <vendix-report-category-chips
       [activeCategory]="activeCategory()"
+      [categories]="visibleCategories()"
       (categoryChange)="onCategoryChange($event)"
     />
   </div>

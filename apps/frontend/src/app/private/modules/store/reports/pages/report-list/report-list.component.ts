@@ -12,9 +12,10 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById, getReportById }
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 
-const DISABLED_MODULE_MESSAGES: Record<string, { moduleKey: string; message: string }> = {
-  accounting: { moduleKey: 'accounting', message: 'Módulo de Contabilidad desactivado' },
-  payroll: { moduleKey: 'payroll', message: 'Módulo de Nómina desactivado' },
+/** Categories that require a fiscal module to be active. */
+const MODULE_GATED_CATEGORIES: Record<string, string> = {
+  accounting: 'accounting',
+  payroll: 'payroll',
 };
 
 @Component({
@@ -43,14 +44,22 @@ export class ReportListComponent {
   categories = REPORT_CATEGORIES;
   allReports = REPORT_DEFINITIONS;
 
+  /** Categories visible to the current user (module-gated ones hidden when inactive). */
+  visibleCategories = computed(() =>
+    this.categories.filter(c => {
+      const moduleKey = MODULE_GATED_CATEGORIES[c.id];
+      return !moduleKey || this.authFacade.isModuleVisible(moduleKey);
+    }),
+  );
+
   filteredGroups = computed(() => {
     const search = this.searchTerm().toLowerCase().trim();
     const category = this.activeCategory();
 
-    // Filter categories to show
+    // Filter categories to show (only visible ones)
     const categoriesToShow = category
-      ? this.categories.filter(c => c.id === category)
-      : this.categories;
+      ? this.visibleCategories().filter(c => c.id === category)
+      : this.visibleCategories();
 
     return categoriesToShow
       .map(cat => {
@@ -91,21 +100,10 @@ export class ReportListComponent {
   }
 
   onCategoryChange(category: ReportCategoryId | null): void {
-    if (category && this.isModuleDisabled(category)) return;
     this.activeCategory.set(category);
   }
 
   onReportSelected(reportId: string): void {
-    const report = getReportById(reportId);
-    if (report && this.isModuleDisabled(report.category)) return;
     this.router.navigate([reportId], { relativeTo: this.route });
-  }
-
-  private isModuleDisabled(categoryId: string): boolean {
-    const config = DISABLED_MODULE_MESSAGES[categoryId];
-    if (!config) return false;
-    if (this.authFacade.isModuleVisible(config.moduleKey)) return false;
-    this.toast.warning(config.message);
-    return true;
   }
 }

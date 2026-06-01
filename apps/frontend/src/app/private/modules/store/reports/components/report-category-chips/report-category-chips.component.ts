@@ -1,7 +1,7 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { ReportCategoryId } from '../../interfaces/report.interface';
+import { ReportCategory, ReportCategoryId } from '../../interfaces/report.interface';
 import { REPORT_CATEGORIES, REPORT_DEFINITIONS } from '../../config/report-registry';
 
 @Component({
@@ -13,9 +13,9 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS } from '../../config/report-regis
 })
 export class ReportCategoryChipsComponent {
   activeCategory = input<ReportCategoryId | null>(null);
+  categories = input<ReportCategory[]>(REPORT_CATEGORIES);
   categoryChange = output<ReportCategoryId | null>();
 
-  categories = REPORT_CATEGORIES;
   totalReports = REPORT_DEFINITIONS.length;
 
   getReportCount(categoryId: ReportCategoryId): number {
