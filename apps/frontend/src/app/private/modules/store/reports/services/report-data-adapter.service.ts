@@ -28,6 +28,12 @@ export class ReportDataAdapterService {
     if (report.id === 'income-statement') {
       return this.adaptIncomeStatement(rawData);
     }
+    if (report.id === 'customer-summary') {
+      return this.adaptCustomerSummary(rawData);
+    }
+    if (report.id === 'overview-summary') {
+      return this.adaptOverviewSummary(rawData);
+    }
     if (report.id === 'aging-report') {
       return this.adaptAgingReport(rawData);
     }
@@ -449,6 +455,75 @@ export class ReportDataAdapterService {
       days_120_plus: Number(buckets.days_120_plus || 0),
       total: Number(d.total || 0),
     };
+
+    return { data: rows, isSummary: true, summaryData, meta: undefined };
+  }
+
+  /**
+   * Transforms the customer-summary flat object into metric/value/change rows.
+   */
+  private adaptCustomerSummary(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+
+    const metrics: Record<string, string> = {
+      total_customers: 'Total Clientes',
+      active_customers: 'Clientes Activos',
+      new_customers: 'Clientes Nuevos',
+      inactive_customers: 'Clientes Inactivos',
+      average_spend: 'Gasto Promedio',
+      new_customers_growth: 'Crecimiento Nuevos',
+      returning_customers: 'Clientes Recurrentes',
+      churn_rate: 'Tasa de Abandono',
+    };
+
+    const rows: any[] = [];
+    const summaryData: Record<string, any> = {};
+
+    for (const [key, label] of Object.entries(metrics)) {
+      if (d[key] !== undefined) {
+        rows.push({ metric: label, value: d[key], change: null });
+        summaryData[key] = d[key];
+      }
+    }
+
+    // Also pick up any extra keys not in the known metrics
+    for (const [key, value] of Object.entries(d)) {
+      if (!metrics[key] && typeof value !== 'object' && !Array.isArray(value)) {
+        rows.push({ metric: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), value, change: null });
+        summaryData[key] = value;
+      }
+    }
+
+    return { data: rows, isSummary: true, summaryData, meta: undefined };
+  }
+
+  /**
+   * Transforms the overview-summary flat object into labeled rows.
+   */
+  private adaptOverviewSummary(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+
+    const metrics: Record<string, string> = {
+      total_income: 'Ingresos Totales',
+      total_expenses: 'Gastos Totales',
+      net_profit: 'Ganancia Neta',
+      breakeven_ratio: 'Punto de Equilibrio',
+      total_taxes: 'Impuestos',
+      income_growth: 'Crec. Ingresos',
+      expenses_growth: 'Crec. Gastos',
+      net_profit_growth: 'Crec. Ganancia',
+      taxes_growth: 'Crec. Impuestos',
+    };
+
+    const rows: any[] = [];
+    const summaryData: Record<string, any> = {};
+
+    for (const [key, label] of Object.entries(metrics)) {
+      if (d[key] !== undefined) {
+        rows.push({ [key]: d[key] });
+        summaryData[key] = d[key];
+      }
+    }
 
     return { data: rows, isSummary: true, summaryData, meta: undefined };
   }
