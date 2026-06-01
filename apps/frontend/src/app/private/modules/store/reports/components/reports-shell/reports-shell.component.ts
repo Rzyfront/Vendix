@@ -60,21 +60,48 @@ export class ReportsShellComponent {
     return categoryId ? getCategoryById(categoryId) : undefined;
   });
 
+  /** Maps report IDs to their corresponding module view routes. */
+  private readonly reportToModuleRoute: Record<string, string> = {
+    // Accounting → /admin/accounting/*
+    'trial-balance': '/admin/accounting/reports/trial-balance',
+    'balance-sheet': '/admin/accounting/reports/balance-sheet',
+    'income-statement': '/admin/accounting/reports/income-statement',
+    'general-ledger': '/admin/accounting/reports/general-ledger',
+    'chart-of-accounts': '/admin/accounting/chart-of-accounts',
+    'journal-entries': '/admin/accounting/journal-entries',
+    'fixed-assets': '/admin/accounting/fixed-assets',
+    'receivables': '/admin/accounting/receivables',
+    'payables': '/admin/accounting/payables',
+    'aging-report': '/admin/accounting/aging',
+    // Payroll → /admin/payroll/*
+    'payroll-employees': '/admin/payroll/employees',
+    'payroll-runs': '/admin/payroll/runs',
+    'payroll-settlements': '/admin/payroll/settlements',
+    'payroll-advances': '/admin/payroll/advances',
+  };
+
+  /** Reports that have a corresponding module view route. */
+  private readonly reportsWithModuleView = new Set(Object.keys(this.reportToModuleRoute));
+
   readonly tabs = computed<StickyHeaderTab[]>(() => {
     const categoryId = this.categoryId();
     if (!categoryId) return [];
 
-    return getReportsByCategory(categoryId).map((report) => ({
-      id: report.id,
-      label: report.title,
-      icon: report.icon,
-      route: report.route,
-    }));
+    const isModuleCategory = categoryId === 'accounting' || categoryId === 'payroll';
+
+    return getReportsByCategory(categoryId)
+      .filter(report => !isModuleCategory || this.reportsWithModuleView.has(report.id))
+      .map((report) => ({
+        id: report.id,
+        label: report.title,
+        icon: report.icon,
+        route: report.route,
+      }));
   });
 
-  private readonly categoryActionConfig: Record<string, { id: string; label: string; icon: string; route: string; moduleKey?: string }> = {
-    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', route: '/admin/accounting', moduleKey: 'accounting' },
-    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', route: '/admin/payroll', moduleKey: 'payroll' },
+  private readonly categoryActionConfig: Record<string, { id: string; label: string; icon: string; moduleKey?: string }> = {
+    accounting: { id: 'view-module', label: 'Ver Contabilidad', icon: 'scale', moduleKey: 'accounting' },
+    payroll: { id: 'view-module', label: 'Ver Nomina', icon: 'banknote', moduleKey: 'payroll' },
   };
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
@@ -134,10 +161,18 @@ export class ReportsShellComponent {
 
   onActionClick(actionId: string): void {
     if (actionId === 'view-module') {
-      const categoryId = this.categoryId();
-      const config = categoryId ? this.categoryActionConfig[categoryId] : undefined;
-      if (config) {
-        this.router.navigateByUrl(config.route);
+      const reportId = this.extractReportId(this.router.url);
+      const moduleRoute = reportId ? this.reportToModuleRoute[reportId] : undefined;
+      if (moduleRoute) {
+        this.router.navigateByUrl(moduleRoute);
+      } else {
+        // Fallback to module root
+        const categoryId = this.categoryId();
+        const fallbacks: Record<string, string> = {
+          accounting: '/admin/accounting',
+          payroll: '/admin/payroll',
+        };
+        this.router.navigateByUrl(fallbacks[categoryId || ''] || '/admin');
       }
       return;
     }
