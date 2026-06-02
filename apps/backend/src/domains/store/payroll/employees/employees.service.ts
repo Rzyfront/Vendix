@@ -51,6 +51,8 @@ export class EmployeesService {
       sort_order = 'desc',
       status,
       department,
+      date_from,
+      date_to,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -76,6 +78,8 @@ export class EmployeesService {
       ...(department && {
         department: { contains: department, mode: 'insensitive' as const },
       }),
+      ...(date_from && { hire_date: { gte: new Date(date_from) } }),
+      ...(date_to && { hire_date: { lte: new Date(date_to + 'T23:59:59.999Z') } }),
     };
 
     const [data, total] = await Promise.all([
