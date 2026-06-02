@@ -146,7 +146,7 @@ export class PosScheduleModalComponent {
     if (hours.blocks && hours.blocks.length > 0) {
       return hours.blocks.every(b => b.open === 'closed' || b.close === 'closed');
     }
-    return !hours.open || !hours.close || hours.open === 'closed';
+    return !hours.open || !hours.close || hours.open === 'closed' || hours.close === 'closed';
   }
 
   getDayHours(key: string): string {

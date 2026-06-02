@@ -51,6 +51,7 @@ import {
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import type { BusinessHours } from '../../../../../core/models/store-settings.interface';
 
 interface PaymentState {
   selectedMethod: PaymentMethod | null;
@@ -1483,7 +1484,7 @@ export class PosPaymentInterfaceComponent {
   readonly showOnscreenKeypad = computed(
     () => this.settingsFacade.pos()?.show_onscreen_keypad !== false,
   );
-  readonly businessHours = computed<Record<string, { open: string; close: string; blocks?: Array<{ open: string; close: string }> }>>(
+  readonly businessHours = computed<Record<string, BusinessHours>>(
     () => (this.settingsFacade.pos()?.business_hours as any) ?? {},
   );
   readonly defaultPaymentForm = computed<'contado' | 'credito'>(

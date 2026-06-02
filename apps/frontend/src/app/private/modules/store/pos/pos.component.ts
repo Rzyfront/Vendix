@@ -880,7 +880,7 @@ export class PosComponent {
     if (schedule.blocks && schedule.blocks.length > 0) {
       return schedule.blocks.every(b => b.open === 'closed' || b.close === 'closed');
     }
-    return !schedule.open || !schedule.close || schedule.open === 'closed';
+    return !schedule.open || !schedule.close || schedule.open === 'closed' || schedule.close === 'closed';
   }
 
   // Customer Queue
