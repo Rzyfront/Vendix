@@ -4,6 +4,7 @@ import {
   IsNumber,
   IsInt,
   MaxLength,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -12,6 +13,14 @@ export class QueryEmployeeDto {
   @IsString()
   @MaxLength(100)
   search?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
 
   @IsOptional()
   @Type(() => Number)
