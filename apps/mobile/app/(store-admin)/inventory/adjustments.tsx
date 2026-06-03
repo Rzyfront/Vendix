@@ -82,6 +82,7 @@ export default function AdjustmentsScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [showTypeOptions, setShowTypeOptions] = useState(false);
   const [form, setForm] = useState<CreateAdjustmentDto>({
     product_id: '',
     description: '',
@@ -239,19 +240,31 @@ export default function AdjustmentsScreen() {
       </Modal>
 
       {/* Filter Dropdown */}
-      <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => setShowFilters(false)}>
-        <Pressable style={styles.dropdownBackdrop} onPress={() => setShowFilters(false)} />
+      <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => { setShowFilters(false); setShowTypeOptions(false); }}>
+        <Pressable style={styles.dropdownBackdrop} onPress={() => { setShowFilters(false); setShowTypeOptions(false); }} />
         <View style={[styles.dropdownPositioner, styles.filterDropdownPositioner]}>
           <View style={styles.dropdownArrow} />
           <View style={styles.dropdown}>
-            <Text style={styles.dropdownTitle}>Filtrar por tipo</Text>
-            <View style={styles.dropdownDivider} />
-            {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
-              <Pressable key={opt.value} style={[styles.dropdownFilterItem, activeFilter === opt.value && styles.dropdownFilterActive]} onPress={() => { setActiveFilter(opt.value); setShowFilters(false); }}>
-                <Text style={[styles.dropdownFilterText, activeFilter === opt.value && styles.dropdownFilterTextActive]}>{opt.label}</Text>
-                {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color="#22C55E" />}
+            <View style={styles.dropdownFilterRow}>
+              <Text style={styles.dropdownFilterLabel}>Tipo</Text>
+              <Pressable style={styles.dropdownSelectBtn} onPress={() => setShowTypeOptions((v) => !v)}>
+                <Text style={styles.dropdownSelectText}>
+                  {ADJUSTMENT_TYPE_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
+                </Text>
+                <Ionicons name="chevron-down" size={14} color="#6b7280" />
               </Pressable>
-            ))}
+            </View>
+            <View style={styles.dropdownDivider} />
+            {showTypeOptions && (
+              <View>
+                {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
+                  <Pressable key={opt.value} style={[styles.dropdownOption, activeFilter === opt.value && styles.dropdownOptionActive]} onPress={() => { setActiveFilter(opt.value); setShowTypeOptions(false); setShowFilters(false); }}>
+                    <Text style={[styles.dropdownOptionText, activeFilter === opt.value && styles.dropdownOptionTextActive]}>{opt.label}</Text>
+                    {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color="#22C55E" />}
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -411,10 +424,14 @@ const styles = StyleSheet.create({
   dropdownIconWrap: { width: 28, height: 28, borderRadius: 6, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
   dropdownItemText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
   dropdownItemPrimary: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
-  dropdownFilterItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[2], paddingHorizontal: spacing[3] },
-  dropdownFilterActive: { backgroundColor: '#f0fdf4' },
-  dropdownFilterText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
-  dropdownFilterTextActive: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
+  dropdownFilterRow: { paddingVertical: spacing[2], paddingHorizontal: spacing[3], gap: spacing[1] },
+  dropdownFilterLabel: { fontSize: 11, fontWeight: '600' as any, color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase' as any },
+  dropdownSelectBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, paddingHorizontal: spacing[2], borderRadius: 6, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colorScales.gray[50], marginTop: 4 },
+  dropdownSelectText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[800] },
+  dropdownOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[2], paddingHorizontal: spacing[3] },
+  dropdownOptionActive: { backgroundColor: '#f0fdf4' },
+  dropdownOptionText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
+  dropdownOptionTextActive: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
 
   /* Modal */
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
