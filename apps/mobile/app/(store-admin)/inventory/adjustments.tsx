@@ -208,59 +208,53 @@ export default function AdjustmentsScreen() {
         contentContainerStyle={styles.listContent}
       />
 
-      {/* Actions Bottom Sheet */}
-      <Modal visible={showActions} transparent animationType="slide" onRequestClose={() => setShowActions(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowActions(false)} />
-        <View style={styles.sheetContent}>
-          <View style={styles.modalHandleWrap}>
-            <View style={styles.modalHandle} />
-          </View>
-          <View style={styles.actionsList}>
-            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
-              <View style={styles.actionIconWrap}>
-                <Ionicons name="add-circle-outline" size={20} color="#22C55E" />
+      {/* Actions Dropdown */}
+      <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
+        <Pressable style={styles.dropdownBackdrop} onPress={() => setShowActions(false)} />
+        <View style={styles.dropdownPositioner}>
+          <View style={styles.dropdownArrow} />
+          <View style={styles.dropdown}>
+            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
+              <View style={styles.dropdownIconWrap}>
+                <Ionicons name="add" size={18} color="#22C55E" />
               </View>
-              <Text style={styles.actionText}>Nuevo Ajuste</Text>
+              <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
-            <View style={styles.actionDivider} />
-            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); /* bulk */ }}>
-              <View style={styles.actionIconWrap}>
-                <Ionicons name="cloud-upload-outline" size={20} color="#374151" />
+            <View style={styles.dropdownDivider} />
+            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); /* bulk */ }}>
+              <View style={styles.dropdownIconWrap}>
+                <Ionicons name="cloud-upload-outline" size={18} color="#6b7280" />
               </View>
-              <Text style={styles.actionText}>Carga Masiva</Text>
+              <Text style={styles.dropdownItemText}>Carga Masiva</Text>
             </Pressable>
-            <View style={styles.actionDivider} />
-            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
-              <View style={styles.actionIconWrap}>
-                <Ionicons name="refresh-outline" size={20} color="#374151" />
+            <View style={styles.dropdownDivider} />
+            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
+              <View style={styles.dropdownIconWrap}>
+                <Ionicons name="refresh-outline" size={18} color="#6b7280" />
               </View>
-              <Text style={styles.actionText}>Refrescar</Text>
+              <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
           </View>
         </View>
       </Modal>
 
-      {/* Filter Bottom Sheet */}
-      <Modal visible={showFilters} transparent animationType="slide" onRequestClose={() => setShowFilters(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setShowFilters(false)} />
-        <View style={styles.sheetContent}>
-          <View style={styles.modalHandleWrap}>
-            <View style={styles.modalHandle} />
+      {/* Filter Dropdown */}
+      <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => setShowFilters(false)}>
+        <Pressable style={styles.dropdownBackdrop} onPress={() => setShowFilters(false)} />
+        <View style={[styles.dropdownPositioner, styles.filterDropdownPositioner]}>
+          <View style={styles.dropdownArrow} />
+          <View style={styles.dropdown}>
+            <Text style={styles.dropdownTitle}>Filtrar por tipo</Text>
+            <View style={styles.dropdownDivider} />
+            {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
+              <Pressable key={opt.value} style={[styles.dropdownFilterItem, activeFilter === opt.value && styles.dropdownFilterActive]} onPress={() => { setActiveFilter(opt.value); setShowFilters(false); }}>
+                <Text style={[styles.dropdownFilterText, activeFilter === opt.value && styles.dropdownFilterTextActive]}>{opt.label}</Text>
+                {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color="#22C55E" />}
+              </Pressable>
+            ))}
           </View>
-          <Text style={styles.sheetTitle}>Filtrar por tipo</Text>
-          {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
-            <Pressable key={opt.value} style={[styles.sheetFilterItem, activeFilter === opt.value && styles.sheetFilterActive]} onPress={() => { setActiveFilter(opt.value); setShowFilters(false); }}>
-              <Text style={[styles.sheetFilterText, activeFilter === opt.value && styles.sheetFilterTextActive]}>{opt.label}</Text>
-              {activeFilter === opt.value && <Ionicons name="checkmark" size={18} color="#16a34a" />}
-            </Pressable>
-          ))}
         </View>
       </Modal>
-
-      {/* FAB */}
-      <Pressable style={styles.fab} onPress={() => setModalVisible(true)} hitSlop={8}>
-        <Ionicons name="add" size={24} color="#fff" />
-      </Pressable>
 
       {/* Create Modal */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
@@ -398,16 +392,29 @@ const styles = StyleSheet.create({
   /* List */
   listContent: { paddingBottom: spacing[6] },
 
-  /* FAB */
-  fab: { position: 'absolute', bottom: spacing[6], right: spacing[6], width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
-
-  /* Bottom Sheets */
-  sheetContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: spacing[8] },
-  sheetTitle: { fontSize: 14, fontWeight: '700', color: '#111827', paddingHorizontal: spacing[4], marginBottom: spacing[2] },
-  sheetFilterItem: { paddingHorizontal: spacing[4], paddingVertical: 12, marginHorizontal: spacing[4], borderRadius: 8, marginBottom: 2 },
-  sheetFilterActive: { backgroundColor: '#f0fdf4' },
-  sheetFilterText: { fontSize: 13, fontWeight: '500', color: '#374151' },
-  sheetFilterTextActive: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
+  /* Dropdowns (positioned near buttons) */
+  dropdownBackdrop: { flex: 1 },
+  dropdownPositioner: { position: 'absolute', top: 178, right: spacing[4], alignItems: 'flex-end' },
+  filterDropdownPositioner: { top: 178 },
+  dropdownArrow: {
+    width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#fff',
+    marginRight: 14, marginBottom: -1,
+  },
+  dropdown: {
+    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: colorScales.gray[200],
+    minWidth: 200, ...shadows.lg,
+  },
+  dropdownTitle: { fontSize: 12, fontWeight: '700', color: colorScales.gray[500], paddingVertical: spacing[2], paddingHorizontal: spacing[3], letterSpacing: 0.3, textTransform: 'uppercase' as any },
+  dropdownDivider: { height: 1, backgroundColor: colorScales.gray[100] },
+  dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], paddingVertical: spacing[2.5], paddingHorizontal: spacing[3] },
+  dropdownIconWrap: { width: 28, height: 28, borderRadius: 6, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
+  dropdownItemText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
+  dropdownItemPrimary: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
+  dropdownFilterItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[2], paddingHorizontal: spacing[3] },
+  dropdownFilterActive: { backgroundColor: '#f0fdf4' },
+  dropdownFilterText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
+  dropdownFilterTextActive: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
 
   /* Modal */
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
