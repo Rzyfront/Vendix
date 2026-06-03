@@ -207,11 +207,11 @@ export default function AdjustmentsScreen() {
                   </Pressable>
                 )}
               </View>
-              <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
-                <Ionicons name="filter-outline" size={18} color="#22C55E" />
-              </Pressable>
               <Pressable ref={actionsBtnRef} style={styles.iconBtn} onPress={handleShowActions} hitSlop={6}>
                 <Ionicons name="add-outline" size={20} color="#22C55E" />
+              </Pressable>
+              <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
+                <Ionicons name="filter-outline" size={18} color="#22C55E" />
               </Pressable>
             </View>
 
@@ -236,7 +236,7 @@ export default function AdjustmentsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add" size={18} color="#22C55E" />
+                <Ionicons name="add-outline" size={18} color="#22C55E" />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
@@ -250,7 +250,7 @@ export default function AdjustmentsScreen() {
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="refresh-outline" size={18} color="#6b7280" />
+                <Ionicons name="sync-outline" size={18} color="#6b7280" />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
@@ -264,6 +264,8 @@ export default function AdjustmentsScreen() {
         <View style={[styles.dropdownPositioner, { top: filterDropdownPos.top, right: filterDropdownPos.right }]}>
           <View style={[styles.dropdownArrow, { marginRight: Math.max(filterDropdownPos.right, 14) }]} />
           <View style={styles.dropdown}>
+            <Text style={styles.dropdownTitle}>Tipos de filtro</Text>
+            <View style={styles.dropdownDivider} />
             <View style={styles.dropdownFilterRow}>
               <Text style={styles.dropdownFilterLabel}>Tipo</Text>
               <Pressable style={styles.dropdownSelectBtn} onPress={() => setShowTypeOptions((v) => !v)}>
