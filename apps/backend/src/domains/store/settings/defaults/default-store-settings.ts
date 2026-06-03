@@ -90,6 +90,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       allow_anonymous_sales: true,
       anonymous_sales_as_default: true,
       business_hours: getDefaultBusinessHours(),
+      schedule_mode: 'continuous',
       enable_schedule_validation: false,
       offline_mode_enabled: false,
       require_cash_drawer_open: false,

@@ -5,6 +5,7 @@ import {
   ModalComponent,
   IconComponent,
 } from '../../../../../shared/components';
+import type { BusinessHours } from '../../../../../core/models/store-settings.interface';
 
 @Component({
   selector: 'app-pos-schedule-modal',
@@ -122,7 +123,7 @@ import {
 })
 export class PosScheduleModalComponent {
   readonly isOpen = input<boolean>(false);
-  readonly businessHours = input<Record<string, { open: string; close: string }>>({});
+  readonly businessHours = input<Record<string, BusinessHours>>({});
   readonly isWithinHours = input<boolean>(false);
   readonly todayKey = input<string>('');
 
@@ -141,12 +142,22 @@ export class PosScheduleModalComponent {
 
   isDayClosed(key: string): boolean {
     const hours = this.businessHours()[key];
-    return !hours || !hours.open || !hours.close;
+    if (!hours) return true;
+    if (hours.blocks && hours.blocks.length > 0) {
+      return hours.blocks.every(b => b.open === 'closed' || b.close === 'closed');
+    }
+    return !hours.open || !hours.close || hours.open === 'closed' || hours.close === 'closed';
   }
 
   getDayHours(key: string): string {
     const hours = this.businessHours()[key];
     if (!hours) return 'Cerrado';
+    if (hours.blocks && hours.blocks.length > 0) {
+      return hours.blocks
+        .filter(b => b.open !== 'closed' && b.close !== 'closed')
+        .map(b => `${b.open} – ${b.close}`)
+        .join(', ');
+    }
     return `${hours.open} – ${hours.close}`;
   }
 
