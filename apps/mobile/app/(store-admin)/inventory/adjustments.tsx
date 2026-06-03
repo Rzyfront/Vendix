@@ -1,6 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import {
-  View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput,
+  View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions,
 } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
@@ -83,6 +83,11 @@ export default function AdjustmentsScreen() {
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [showTypeOptions, setShowTypeOptions] = useState(false);
+  const filterBtnRef = useRef<View>(null);
+  const actionsBtnRef = useRef<View>(null);
+  const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, right: 0 });
+  const [actionsDropdownPos, setActionsDropdownPos] = useState({ top: 0, right: 0 });
+  const screenW = Dimensions.get('window').width;
   const [form, setForm] = useState<CreateAdjustmentDto>({
     product_id: '',
     description: '',
@@ -131,6 +136,20 @@ export default function AdjustmentsScreen() {
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleRefresh = useCallback(() => refetch(), [refetch]);
+
+  const handleShowFilters = useCallback(() => {
+    filterBtnRef.current?.measureInWindow((x, y, width, btnHeight) => {
+      setFilterDropdownPos({ top: y + btnHeight + 6, right: screenW - x - width });
+      setShowFilters(true);
+    });
+  }, [screenW]);
+
+  const handleShowActions = useCallback(() => {
+    actionsBtnRef.current?.measureInWindow((x, y, width, btnHeight) => {
+      setActionsDropdownPos({ top: y + btnHeight + 6, right: screenW - x - width });
+      setShowActions(true);
+    });
+  }, [screenW]);
 
   const handleSubmit = () => {
     if (!form.product_id || !form.description || form.quantity <= 0) return;
@@ -188,11 +207,13 @@ export default function AdjustmentsScreen() {
                   </Pressable>
                 )}
               </View>
-              <Pressable style={styles.iconBtn} onPress={() => setShowFilters(true)} hitSlop={6}>
+              <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
                 <Ionicons name="filter-outline" size={18} color="#22C55E" />
+                <Text style={styles.iconBtnText}>Filtros</Text>
               </Pressable>
-              <Pressable style={styles.iconBtn} onPress={() => setShowActions(true)} hitSlop={6}>
-                <Ionicons name="add-outline" size={20} color="#22C55E" />
+              <Pressable ref={actionsBtnRef} style={styles.iconBtn} onPress={handleShowActions} hitSlop={6}>
+                <Ionicons name="add" size={20} color="#22C55E" />
+                <Text style={styles.iconBtnText}>Acciones</Text>
               </Pressable>
             </View>
 
@@ -212,8 +233,8 @@ export default function AdjustmentsScreen() {
       {/* Actions Dropdown */}
       <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
         <Pressable style={styles.dropdownBackdrop} onPress={() => setShowActions(false)} />
-        <View style={styles.dropdownPositioner}>
-          <View style={styles.dropdownArrow} />
+        <View style={[styles.dropdownPositioner, { top: actionsDropdownPos.top, right: actionsDropdownPos.right }]}>
+          <View style={[styles.dropdownArrow, { marginRight: Math.max(actionsDropdownPos.right, 14) }]} />
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
@@ -242,8 +263,8 @@ export default function AdjustmentsScreen() {
       {/* Filter Dropdown */}
       <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => { setShowFilters(false); setShowTypeOptions(false); }}>
         <Pressable style={styles.dropdownBackdrop} onPress={() => { setShowFilters(false); setShowTypeOptions(false); }} />
-        <View style={[styles.dropdownPositioner, styles.filterDropdownPositioner]}>
-          <View style={styles.dropdownArrow} />
+        <View style={[styles.dropdownPositioner, { top: filterDropdownPos.top, right: filterDropdownPos.right }]}>
+          <View style={[styles.dropdownArrow, { marginRight: Math.max(filterDropdownPos.right, 14) }]} />
           <View style={styles.dropdown}>
             <View style={styles.dropdownFilterRow}>
               <Text style={styles.dropdownFilterLabel}>Tipo</Text>
@@ -377,10 +398,11 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900], padding: 0, height: '100%',
   },
   iconBtn: {
-    width: 40, height: 40, borderRadius: borderRadius.xl,
+    flexDirection: 'row', height: 40, borderRadius: borderRadius.xl,
     backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: spacing[2.5],
   },
+  iconBtnText: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colors.primary },
 
   /* Actions List */
   actionsList: { paddingHorizontal: spacing[4], gap: 0 },
@@ -407,8 +429,7 @@ const styles = StyleSheet.create({
 
   /* Dropdowns (positioned near buttons) */
   dropdownBackdrop: { flex: 1 },
-  dropdownPositioner: { position: 'absolute', top: 178, right: spacing[4], alignItems: 'flex-end' },
-  filterDropdownPositioner: { top: 178 },
+  dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
   dropdownArrow: {
     width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#fff',
