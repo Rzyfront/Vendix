@@ -1,30 +1,21 @@
 import { useState, useCallback } from 'react';
-import { View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet } from 'react-native';
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput,
+} from 'react-native';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
-import type {
-  StockAdjustment,
-  AdjustmentType,
-  AdjustmentState,
-} from '@/features/store/types';
-import {
-  ADJUSTMENT_TYPE_LABELS,
-  ADJUSTMENT_STATE_LABELS,
-} from '@/features/store/types';
-import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
-import { Card } from '@/shared/components/card/card';
+import type { StockAdjustment, AdjustmentType, AdjustmentState } from '@/features/store/types';
+import { ADJUSTMENT_TYPE_LABELS, ADJUSTMENT_STATE_LABELS } from '@/features/store/types';
 import { Badge } from '@/shared/components/badge/badge';
-import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatRelative } from '@/shared/utils/date';
-import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
+import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
 
 const TYPE_VARIANT: Record<AdjustmentType, 'success' | 'error' | 'info'> = {
   in: 'success',
@@ -46,31 +37,55 @@ const FILTER_CHIPS: FilterChip[] = [
   { label: 'Ajuste', value: 'adjustment' },
 ];
 
-const AdjustmentCard = ({ item }: { item: StockAdjustment }) => (
-  <Card style={styles.cardMargin}>
-    <View style={styles.cardHeader}>
-      <View style={styles.cardHeaderLeft}>
-        <Text style={styles.cardTitle} numberOfLines={1}>{item.description}</Text>
-        <Text style={styles.cardSubtitle}>{item.product_name}</Text>
-      </View>
-      <View style={styles.badgeRow}>
-        <Badge label={ADJUSTMENT_TYPE_LABELS[item.type]} variant={TYPE_VARIANT[item.type]} size="sm" />
-        <Badge label={ADJUSTMENT_STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
+interface StatItem {
+  title: string;
+  value: number;
+  smallText: string;
+  iconName: keyof typeof Ionicons.glyphMap;
+  bgColor: string;
+  iconColor: string;
+}
+
+const STATS: StatItem[] = [
+  { title: 'Total Ajustes', value: 0, smallText: 'Movimientos registrados', iconName: 'clipboard-outline', bgColor: '#dbeafe', iconColor: '#2563eb' },
+  { title: 'Pérdidas', value: 0, smallText: 'Productos extraviados', iconName: 'trending-down-outline', bgColor: '#fee2e2', iconColor: '#dc2626' },
+  { title: 'Daños', value: 0, smallText: 'Productos dañados', iconName: 'warning-outline', bgColor: '#fef3c7', iconColor: '#d97706' },
+  { title: 'Correcciones', value: 0, smallText: 'Ajustes de inventario', iconName: 'create-outline', bgColor: '#dcfce7', iconColor: '#16a34a' },
+];
+
+import { Ionicons } from '@expo/vector-icons';
+
+function AdjustmentCard({ item }: { item: StockAdjustment }) {
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardBody}>
+        <View style={styles.cardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.cardTitle} numberOfLines={1}>{item.description}</Text>
+            <Text style={styles.cardSubtitle}>{item.product_name}</Text>
+          </View>
+          <View style={styles.cardBadges}>
+            <Badge label={ADJUSTMENT_TYPE_LABELS[item.type]} variant={TYPE_VARIANT[item.type]} size="sm" />
+            <Badge label={ADJUSTMENT_STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
+          </View>
+        </View>
+        <View style={styles.cardMeta}>
+          <Text style={styles.metaText}>Qty: {item.quantity}</Text>
+          {item.location_name && <Text style={styles.metaText}>{item.location_name}</Text>}
+          <Text style={[styles.metaText, { marginLeft: 'auto' }]}>{formatRelative(item.created_at)}</Text>
+        </View>
       </View>
     </View>
-    <View style={styles.cardFooter}>
-      <Text style={styles.footerDetail}>Qty: {item.quantity}</Text>
-      {item.location_name && <Text style={styles.footerDetail}>{item.location_name}</Text>}
-      <Text style={styles.footerDate}>{formatRelative(item.created_at)}</Text>
-    </View>
-  </Card>
-);
+  );
+}
 
 export default function AdjustmentsScreen() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [showActions, setShowActions] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [form, setForm] = useState<CreateAdjustmentDto>({
     product_id: '',
     description: '',
@@ -107,6 +122,13 @@ export default function AdjustmentsScreen() {
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
 
+  const totals = {
+    total: adjustments.length,
+    losses: adjustments.filter((a) => a.type === 'out').length,
+    damages: adjustments.filter((a) => a.type === 'adjustment').length,
+    corrections: adjustments.filter((a) => a.type === 'in').length,
+  };
+
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
@@ -119,33 +141,65 @@ export default function AdjustmentsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
       <FlatList
         data={adjustments}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
           <View>
-            <StatsGrid
-              style={styles.statsWrap}
-              items={[
-                {
-                  label: 'Total',
-                  value: adjustments.length,
-                  icon: <Icon name="clipboard-list" size={14} color={colorScales.blue[600]} />,
-                },
-                {
-                  label: 'Pendientes',
-                  value: adjustments.filter((a) => a.state === 'pending').length,
-                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
-                },
-              ]}
-            />
-
-            <View style={styles.searchWrap}>
-              <SearchBar value={search} onChangeText={setSearch} onClear={() => setSearch('')} placeholder="Buscar ajustes..." />
+            {/* Stats Bar: horizontal scroll */}
+            <View style={styles.statsContainer}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
+                {STATS.map((stat, idx) => {
+                  const vals = [totals.total, totals.losses, totals.damages, totals.corrections];
+                  return (
+                    <View key={idx} style={styles.statCard}>
+                      <Ionicons name={stat.iconName} size={16} color={stat.iconColor} style={styles.statIcon} />
+                      <Text style={styles.statLabel}>{stat.title}</Text>
+                      <Text style={styles.statValue}>{vals[idx]}</Text>
+                      <Text style={styles.statSmall}>{stat.smallText}</Text>
+                    </View>
+                  );
+                })}
+              </ScrollView>
             </View>
 
+            {/* Search + Title row */}
+            <View style={styles.searchHeader}>
+              <Text style={styles.listTitle}>
+                Ajustes de Inventario ({adjustments.length})
+              </Text>
+            </View>
+            {/* POS-style search bar */}
+            <View style={styles.searchRow}>
+              <View style={styles.searchInput}>
+                <Ionicons name="search-outline" size={16} color="#9ca3af" style={{ marginRight: 6 }} />
+                <TextInput
+                  style={styles.searchTextInput}
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Buscar ajuste..."
+                  placeholderTextColor="#9ca3af"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {search.length > 0 && (
+                  <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                    <Ionicons name="close" size={16} color="#9ca3af" />
+                  </Pressable>
+                )}
+              </View>
+              <Pressable style={styles.iconBtn} onPress={() => setShowFilters(true)} hitSlop={6}>
+                <Ionicons name="filter-outline" size={18} color="#22C55E" />
+              </Pressable>
+              <Pressable style={styles.iconBtn} onPress={() => setShowActions(true)} hitSlop={6}>
+                <Ionicons name="add-outline" size={20} color="#22C55E" />
+              </Pressable>
+            </View>
+
+            {/* Filter chips */}
             <View style={styles.filterRow}>
               {FILTER_CHIPS.map((chip) => (
                 <Pressable
@@ -171,10 +225,54 @@ export default function AdjustmentsScreen() {
         contentContainerStyle={styles.listContent}
       />
 
+      {/* Actions Bottom Sheet */}
+      <Modal visible={showActions} transparent animationType="slide" onRequestClose={() => setShowActions(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowActions(false)} />
+        <View style={styles.sheetContent}>
+          <View style={styles.modalHandleWrap}>
+            <View style={styles.modalHandle} />
+          </View>
+          <Text style={styles.sheetTitle}>Acciones</Text>
+          <Pressable style={[styles.sheetItem, styles.sheetItemPrimary]} onPress={() => { setShowActions(false); setModalVisible(true); }}>
+            <Ionicons name="add-circle-outline" size={20} color="#22C55E" />
+            <Text style={styles.sheetItemPrimaryText}>Nuevo Ajuste</Text>
+          </Pressable>
+          <Pressable style={styles.sheetItem} onPress={() => { setShowActions(false); /* bulk */ }}>
+            <Ionicons name="cloud-upload-outline" size={20} color="#374151" />
+            <Text style={styles.sheetItemText}>Carga Masiva</Text>
+          </Pressable>
+          <Pressable style={styles.sheetItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
+            <Ionicons name="refresh-outline" size={20} color="#374151" />
+            <Text style={styles.sheetItemText}>Refrescar</Text>
+          </Pressable>
+        </View>
+      </Modal>
+
+      {/* Filter Bottom Sheet */}
+      <Modal visible={showFilters} transparent animationType="slide" onRequestClose={() => setShowFilters(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowFilters(false)} />
+        <View style={styles.sheetContent}>
+          <View style={styles.modalHandleWrap}>
+            <View style={styles.modalHandle} />
+          </View>
+          <Text style={styles.sheetTitle}>Filtros</Text>
+          <Pressable style={[styles.sheetFilterItem, activeFilter === 'all' && styles.sheetFilterActive]} onPress={() => { setActiveFilter('all'); setShowFilters(false); }}>
+            <Text style={[styles.sheetFilterText, activeFilter === 'all' && styles.sheetFilterTextActive]}>Todos los tipos</Text>
+          </Pressable>
+          {(['in', 'out', 'adjustment'] as const).map((t) => (
+            <Pressable key={t} style={[styles.sheetFilterItem, activeFilter === t && styles.sheetFilterActive]} onPress={() => { setActiveFilter(t); setShowFilters(false); }}>
+              <Text style={[styles.sheetFilterText, activeFilter === t && styles.sheetFilterTextActive]}>{ADJUSTMENT_TYPE_LABELS[t]}</Text>
+            </Pressable>
+          ))}
+        </View>
+      </Modal>
+
+      {/* FAB */}
       <Pressable style={styles.fab} onPress={() => setModalVisible(true)} hitSlop={8}>
-        <Icon name="plus" size={24} color="#fff" />
+        <Ionicons name="add" size={24} color="#fff" />
       </Pressable>
 
+      {/* Create Modal */}
       <Modal visible={modalVisible} transparent animationType="slide" onRequestClose={() => setModalVisible(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setModalVisible(false)} />
         <View style={styles.modalContent}>
@@ -188,7 +286,11 @@ export default function AdjustmentsScreen() {
               <Text style={styles.formLabel}>Tipo</Text>
               <View style={styles.typeRow}>
                 {(['in', 'out', 'adjustment'] as const).map((t) => (
-                  <Pressable key={t} onPress={() => setForm({ ...form, type: t })} style={[styles.typeChip, form.type === t ? styles.typeChipActive : styles.typeChipInactive]}>
+                  <Pressable
+                    key={t}
+                    onPress={() => setForm({ ...form, type: t })}
+                    style={[styles.typeChip, form.type === t ? styles.typeChipActive : styles.typeChipInactive]}
+                  >
                     <Text style={[styles.chipText, form.type === t ? styles.chipTextActive : styles.chipTextInactive]}>
                       {ADJUSTMENT_TYPE_LABELS[t]}
                     </Text>
@@ -197,11 +299,37 @@ export default function AdjustmentsScreen() {
               </View>
             </View>
 
-            <Input label="Producto ID" value={form.product_id} onChangeText={(t) => setForm({ ...form, product_id: t })} placeholder="ID del producto" />
-            <Input label="Descripción" value={form.description} onChangeText={(t) => setForm({ ...form, description: t })} placeholder="Descripción del ajuste" />
-            <Input label="Cantidad" value={form.quantity > 0 ? String(form.quantity) : ''} onChangeText={(t) => setForm({ ...form, quantity: parseInt(t) || 0 })} placeholder="0" keyboardType="numeric" />
-            <Input label="Motivo" value={form.reason ?? ''} onChangeText={(t) => setForm({ ...form, reason: t })} placeholder="Motivo (opcional)" />
-            <Input label="Ubicación ID" value={form.location_id ?? ''} onChangeText={(t) => setForm({ ...form, location_id: t })} placeholder="ID de ubicación (opcional)" />
+            <Input
+              label="Producto ID"
+              value={form.product_id}
+              onChangeText={(t) => setForm({ ...form, product_id: t })}
+              placeholder="ID del producto"
+            />
+            <Input
+              label="Descripción"
+              value={form.description}
+              onChangeText={(t) => setForm({ ...form, description: t })}
+              placeholder="Descripción del ajuste"
+            />
+            <Input
+              label="Cantidad"
+              value={form.quantity > 0 ? String(form.quantity) : ''}
+              onChangeText={(t) => setForm({ ...form, quantity: parseInt(t) || 0 })}
+              placeholder="0"
+              keyboardType="numeric"
+            />
+            <Input
+              label="Motivo"
+              value={form.reason ?? ''}
+              onChangeText={(t) => setForm({ ...form, reason: t })}
+              placeholder="Motivo (opcional)"
+            />
+            <Input
+              label="Ubicación ID"
+              value={form.location_id ?? ''}
+              onChangeText={(t) => setForm({ ...form, location_id: t })}
+              placeholder="ID de ubicación (opcional)"
+            />
 
             <View style={styles.modalActions}>
               <Button title="Cancelar" onPress={() => setModalVisible(false)} variant="outline" fullWidth />
@@ -216,29 +344,90 @@ export default function AdjustmentsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  statsWrap: { paddingHorizontal: spacing[4] },
-  searchWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[3] },
-  filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginBottom: spacing[3] },
+  screen: { flex: 1, backgroundColor: colorScales.gray[50] },
+
+  /* Stats: horizontal scroll */
+  statsContainer: {
+    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
+    paddingTop: spacing[3], paddingBottom: spacing[1],
+  },
+  statsScroll: { paddingHorizontal: 12, gap: 8 },
+  statCard: {
+    width: 150, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb',
+    paddingHorizontal: 10, paddingVertical: 10, gap: 1,
+  },
+  statIcon: { position: 'absolute', top: 8, right: 8 },
+  statLabel: { fontSize: 9, fontWeight: '700', color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 2, maxWidth: '85%' },
+  statValue: { fontSize: 20, fontWeight: '800', color: colorScales.gray[900], marginTop: 2 },
+  statSmall: { fontSize: 9, fontWeight: '500', color: '#059669', marginTop: 1 },
+
+  /* Search */
+  searchHeader: { paddingHorizontal: spacing[4], paddingTop: spacing[3], marginBottom: spacing[2] },
+  listTitle: { fontSize: 12, fontWeight: '700', color: colorScales.gray[600], letterSpacing: 0.3 },
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing[2],
+    paddingHorizontal: spacing[4], paddingBottom: spacing[3],
+    backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  searchInput: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.xl,
+    paddingHorizontal: spacing[3], paddingVertical: spacing[2],
+    borderWidth: 1, borderColor: colorScales.gray[200], minHeight: 40,
+  },
+  searchTextInput: {
+    flex: 1, fontSize: typography.fontSize.sm, fontFamily: typography.fontFamily,
+    color: colorScales.gray[900], padding: 0, height: '100%',
+  },
+  iconBtn: {
+    width: 40, height: 40, borderRadius: borderRadius.xl,
+    backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  /* Filters */
+  filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginTop: spacing[2], marginBottom: spacing[3] },
   chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },
   chipActive: { backgroundColor: colors.primary },
   chipInactive: { backgroundColor: colorScales.gray[200] },
   chipText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any },
   chipTextActive: { color: '#fff' },
   chipTextInactive: { color: colorScales.gray[600] },
-  cardMargin: { marginHorizontal: spacing[4], marginBottom: spacing[3] },
+
+  /* Card */
+  card: {
+    marginHorizontal: spacing[4], marginBottom: spacing[3],
+    backgroundColor: '#fff', borderRadius: 10, borderWidth: 1, borderColor: '#e5e7eb', overflow: 'hidden',
+  },
+  cardBody: { padding: 12 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
-  cardHeaderLeft: { flex: 1 },
   cardTitle: { fontSize: typography.fontSize.base, fontWeight: '600' as any, color: colorScales.gray[900] },
   cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
-  badgeRow: { flexDirection: 'column', gap: spacing[1], alignItems: 'flex-end' },
-  cardFooter: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], marginTop: spacing[2], paddingTop: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
-  footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
-  footerDate: { fontSize: typography.fontSize.xs, color: colorScales.gray[400], marginLeft: 'auto' },
+  cardBadges: { flexDirection: 'column', gap: spacing[1], alignItems: 'flex-end' },
+  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], marginTop: spacing[2], paddingTop: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
+  metaText: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
+
+  /* List */
   listContent: { paddingBottom: spacing[6] },
+
+  /* FAB */
   fab: { position: 'absolute', bottom: spacing[6], right: spacing[6], width: 56, height: 56, borderRadius: 28, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', ...shadows.lg },
+
+  /* Bottom Sheets */
+  sheetContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: spacing[8] },
+  sheetTitle: { fontSize: 14, fontWeight: '700', color: '#111827', paddingHorizontal: spacing[4], marginBottom: spacing[2] },
+  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing[4], paddingVertical: 12 },
+  sheetItemPrimary: { backgroundColor: '#f0fdf4', marginHorizontal: spacing[4], borderRadius: 10, marginBottom: 4 },
+  sheetItemText: { fontSize: 13, fontWeight: '500', color: '#374151' },
+  sheetItemPrimaryText: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
+  sheetFilterItem: { paddingHorizontal: spacing[4], paddingVertical: 12, marginHorizontal: spacing[4], borderRadius: 8, marginBottom: 2 },
+  sheetFilterActive: { backgroundColor: '#f0fdf4' },
+  sheetFilterText: { fontSize: 13, fontWeight: '500', color: '#374151' },
+  sheetFilterTextActive: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
+
+  /* Modal */
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalContent: { backgroundColor: colors.card, borderTopLeftRadius: borderRadius['2xl'], borderTopRightRadius: borderRadius['2xl'], maxHeight: '85%', paddingBottom: spacing[6] },
+  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%', paddingBottom: spacing[6] },
   modalHandleWrap: { width: '100%', alignItems: 'center', paddingTop: spacing[2], paddingBottom: spacing[4] },
   modalHandle: { width: 40, height: 4, backgroundColor: colorScales.gray[300], borderRadius: borderRadius.full },
   modalScroll: { paddingHorizontal: spacing[4] },
