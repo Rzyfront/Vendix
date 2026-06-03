@@ -16,6 +16,10 @@ export const reportsReducer = createReducer(
     reportData: null,
     reportMeta: null,
     error: null,
+    isForbidden: false,
+    isSummary: false,
+    summaryData: null,
+    currentPage: 1,
   })),
 
   on(ReportsActions.clearReport, (state) => ({
@@ -45,22 +49,33 @@ export const reportsReducer = createReducer(
     error: null,
   })),
 
-  on(ReportsActions.loadReportDataSuccess, (state, { data, meta, isSummary, summaryData }) => ({
-    ...state,
-    reportData: data,
-    reportMeta: meta || null,
-    isSummary: isSummary ?? false,
-    summaryData: summaryData ?? null,
-    loading: false,
-    currentPage: meta?.['page'] ?? meta?.['pagination']?.page ?? state.currentPage,
-    totalPages: meta?.['totalPages'] ?? meta?.['pagination']?.total_pages ?? state.totalPages,
-    totalItems: meta?.['total'] ?? meta?.['pagination']?.total ?? state.totalItems,
-  })),
+  on(ReportsActions.loadReportDataSuccess, (state, { data, meta, isSummary, summaryData }) => {
+    const metaPage = meta?.['page'] ?? meta?.['pagination']?.page;
+    const metaTotalPages = meta?.['totalPages'] ?? meta?.['pagination']?.total_pages;
+    const metaTotalItems = meta?.['total'] ?? meta?.['pagination']?.total;
 
-  on(ReportsActions.loadReportDataFailure, (state, { error }) => ({
+    // If backend doesn't return pagination meta, calculate from data length
+    const totalItems = metaTotalItems ?? (data ? data.length : 0);
+    const totalPages = metaTotalPages ?? (data && data.length > 0 ? Math.max(1, Math.ceil(totalItems / state.itemsPerPage)) : 1);
+
+    return {
+      ...state,
+      reportData: data,
+      reportMeta: meta || null,
+      isSummary: isSummary ?? false,
+      summaryData: summaryData ?? null,
+      loading: false,
+      currentPage: metaPage ?? state.currentPage,
+      totalPages,
+      totalItems,
+    };
+  }),
+
+  on(ReportsActions.loadReportDataFailure, (state, { error, isForbidden }) => ({
     ...state,
     loading: false,
     error,
+    isForbidden: isForbidden ?? false,
   })),
 
   on(ReportsActions.setPage, (state, { page }) => ({

@@ -215,8 +215,6 @@ export class FiscalScopeService {
           organization_id: params.organization_id,
           store_id: null,
           scope: 'ORGANIZATION',
-          fiscal_scope: 'ORGANIZATION',
-          is_active: true,
         },
       });
       if (existing) return existing;
@@ -229,17 +227,31 @@ export class FiscalScopeService {
         throw new BadRequestException('Organization not found');
       }
 
-      return params.client.accounting_entities.create({
-        data: {
-          organization_id: params.organization_id,
-          store_id: null,
-          scope: 'ORGANIZATION',
-          fiscal_scope: 'ORGANIZATION',
-          name: organization.name,
-          legal_name: organization.legal_name,
-          tax_id: organization.tax_id,
-        },
-      });
+      try {
+        return await params.client.accounting_entities.create({
+          data: {
+            organization_id: params.organization_id,
+            store_id: null,
+            scope: 'ORGANIZATION',
+            fiscal_scope: 'ORGANIZATION',
+            name: organization.name,
+            legal_name: organization.legal_name,
+            tax_id: organization.tax_id,
+          },
+        });
+      } catch (error) {
+        if (error?.code === 'P2002') {
+          const created = await params.client.accounting_entities.findFirst({
+            where: {
+              organization_id: params.organization_id,
+              store_id: null,
+              scope: 'ORGANIZATION',
+            },
+          });
+          if (created) return created;
+        }
+        throw error;
+      }
     }
 
     if (!params.store_id) {
@@ -251,8 +263,6 @@ export class FiscalScopeService {
         organization_id: params.organization_id,
         store_id: params.store_id,
         scope: 'STORE',
-        fiscal_scope: 'STORE',
-        is_active: true,
       },
     });
     if (existing) return existing;
@@ -283,17 +293,31 @@ export class FiscalScopeService {
       });
     }
 
-    return params.client.accounting_entities.create({
-      data: {
-        organization_id: params.organization_id,
-        store_id: store.id,
-        scope: 'STORE',
-        fiscal_scope: 'STORE',
-        name: store.name,
-        legal_name: store.legal_name || store.name,
-        tax_id: store.tax_id,
-      },
-    });
+    try {
+      return await params.client.accounting_entities.create({
+        data: {
+          organization_id: params.organization_id,
+          store_id: store.id,
+          scope: 'STORE',
+          fiscal_scope: 'STORE',
+          name: store.name,
+          legal_name: store.legal_name || store.name,
+          tax_id: store.tax_id,
+        },
+      });
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        const created = await params.client.accounting_entities.findFirst({
+          where: {
+            organization_id: params.organization_id,
+            store_id: params.store_id,
+            scope: 'STORE',
+          },
+        });
+        if (created) return created;
+      }
+      throw error;
+    }
   }
 
   private async resolveStoreIdForFiscalScope(

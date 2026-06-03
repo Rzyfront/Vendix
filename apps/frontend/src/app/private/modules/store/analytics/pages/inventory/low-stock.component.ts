@@ -1,15 +1,11 @@
 import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { RouterModule } from '@angular/router';
+import { RouterModule, ActivatedRoute } from '@angular/router';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
-import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import {
-  ResponsiveDataViewComponent,
-  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -17,6 +13,7 @@ import { DateRangeFilterComponent } from '../../components/date-range-filter/dat
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import {
@@ -32,7 +29,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     RouterModule,
     CardComponent,
     ChartComponent,
-    ResponsiveDataViewComponent,
     StatsComponent,
     IconComponent,
     DateRangeFilterComponent,
@@ -103,24 +99,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="setActiveView('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráfica
-            </button>
-            <button
-              (click)="setActiveView('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -130,7 +108,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      @if (activeView() === 'chart') {
       <!-- Chart: Stock Alert Distribution -->
       <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
         <div slot="header" class="flex flex-col">
@@ -146,42 +123,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
         ></app-chart>
         }
       </app-card>
-      }
-
-      @if (activeView() === 'table') {
-      <app-card
-        shadow="none"
-        [padding]="false"
-        overflow="hidden"
-        [showHeader]="true"
-      >
-        <div slot="header" class="flex flex-col">
-          <span class="text-sm font-bold text-[var(--color-text-primary)]">
-            Detalle de Stock Bajo
-            <span class="text-xs text-[var(--color-text-secondary)] font-normal ml-2">
-              ({{ data().length }} productos)
-            </span>
-          </span>
-        </div>
-        @if (tableLoading()) {
-          <div class="p-4 md:p-6 text-center">
-            <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-            <p class="mt-2 text-text-secondary">Cargando alertas...</p>
-          </div>
-        } @else {
-          <div class="p-4">
-            <app-responsive-data-view
-              [data]="data()"
-              [columns]="columns"
-              [cardConfig]="cardConfig"
-              [loading]="tableLoading()"
-              emptyMessage="No hay productos con stock bajo"
-              emptyIcon="check-circle"
-            ></app-responsive-data-view>
-          </div>
-        }
-      </app-card>
-      }
       </div>
 
       <!-- Quick Links -->
@@ -199,14 +140,12 @@ export class LowStockComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
 // Signals
   summaryLoading = signal(false);
-  tableLoading = signal(false);
   exporting = signal(false);
-  data = signal<StockLevelReport[]>([]);
   summary = signal<InventorySummary | null>(null);
   chartOptions = signal<EChartsOption>({});
-  activeView = signal<'chart' | 'table'>('chart');
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -219,108 +158,18 @@ export class LowStockComponent implements OnInit {
   // Computed: total alerts
   totalAlerts = computed(() => {
     const s = this.summary();
-    if (!s) return this.data().length;
+    if (!s) return 0;
     return s.low_stock_count + s.out_of_stock_count;
   });
 
-  // Columns with SPANISH badges
-  columns: TableColumn[] = [
-    {
-      key: 'image_url',
-      label: '',
-      width: '50px',
-      align: 'center',
-      priority: 1,
-      type: 'image'},
-    { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
-    { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '120px' },
-    {
-      key: 'quantity_available',
-      label: 'Disponible',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '100px'},
-    {
-      key: 'reorder_point',
-      label: 'Punto Reorden',
-      sortable: true,
-      align: 'right',
-      priority: 1,
-      width: '120px'},
-    {
-      key: 'days_of_stock',
-      label: 'Dias de Stock',
-      sortable: true,
-      align: 'right',
-      priority: 2,
-      width: '120px',
-      defaultValue: '-',
-      transform: (val: any) => `${val} dias`},
-    {
-      key: 'status',
-      label: 'Estado',
-      badge: true,
-      align: 'center',
-      priority: 1,
-      width: '100px',
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: {
-          low_stock: '#f59e0b',
-          out_of_stock: '#ef4444'}},
-      transform: (val: string) =>
-        val === 'out_of_stock'
-          ? 'Agotado'
-          : val === 'low_stock'
-            ? 'Stock Bajo'
-            : val},
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'product_name',
-    subtitleKey: 'sku',
-    avatarKey: 'image_url',
-    badgeKey: 'status',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: {
-        low_stock: '#f59e0b',
-        out_of_stock: '#ef4444'}},
-    badgeTransform: (val: string) =>
-      val === 'out_of_stock'
-        ? 'Agotado'
-        : val === 'low_stock'
-          ? 'Stock Bajo'
-          : val,
-    detailKeys: [
-      {
-        key: 'quantity_available',
-        label: 'Disponible',
-        transform: (val: any) => `${val} uds`},
-      {
-        key: 'reorder_point',
-        label: 'Reorden',
-        transform: (val: any) => `${val} uds`},
-    ]};
-
   ngOnInit(): void {
-    this.loadActiveView();
-  }
-
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    this.loadActiveView();
-  }
-
-  private loadActiveView(): void {
-    if (this.activeView() === 'chart') {
-      this.loadSummary();
-      return;
+    // Read date range from URL query params (e.g. when navigating from Reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
     }
-    this.loadAlerts();
+
+    this.loadSummary();
   }
 
   private loadSummary(): void {
@@ -337,22 +186,6 @@ export class LowStockComponent implements OnInit {
         error: () => {
           this.toastService.error('Error al cargar resumen de stock');
           this.summaryLoading.set(false);
-        }});
-  }
-
-  private loadAlerts(): void {
-    this.tableLoading.set(true);
-
-    this.analyticsService.getLowStockAlerts({ page: 1, limit: 25 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (alerts) => {
-          this.data.set(Array.isArray(alerts?.data) ? alerts.data : []);
-          this.tableLoading.set(false);
-        },
-        error: () => {
-          this.toastService.error('Error al cargar alertas de stock');
-          this.tableLoading.set(false);
         }});
   }
 
@@ -431,7 +264,7 @@ legend: {
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.loadActiveView();
+    this.loadSummary();
   }
 
   exportReport(): void {

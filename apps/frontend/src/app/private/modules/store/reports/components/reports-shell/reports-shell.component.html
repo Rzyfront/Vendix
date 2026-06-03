@@ -1,0 +1,15 @@
+<div class="analytics-shell">
+  <app-sticky-header
+    [title]="category()?.label || 'Reportes'"
+    [subtitle]="category()?.description || ''"
+    [icon]="category()?.icon || 'file-bar-chart'"
+    [tabs]="tabs()"
+    [actions]="headerActions()"
+    (actionClicked)="onActionClick($event)"
+    tabsAriaLabel="Navegacion de reportes"
+  ></app-sticky-header>
+
+  <main class="shell-content">
+    <router-outlet></router-outlet>
+  </main>
+</div>

@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -29,6 +30,7 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-abandoned-carts',
@@ -51,6 +53,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 
   summary$: Observable<AbandonedCartsSummary | null> = this.store.select(
     AbandonedCartsSelectors.selectSummary,
@@ -94,6 +97,12 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(AbandonedCartsActions.setDateRange({ dateRange: urlRange }));
+    }
 
     this.store.dispatch(AbandonedCartsActions.loadAbandonedCartsSummary());
     this.store.dispatch(AbandonedCartsActions.loadAbandonedCartsTrends());

@@ -203,7 +203,6 @@ export function getDefaultStoreSettings(): StoreSettings {
         accounting_journal_entries: true,
         accounting_fiscal_periods: true,
         accounting_chart_of_accounts: true,
-        accounting_reports: true,
         accounting_account_mappings: true,
         accounting_flows_dashboard: true,
         cartera_dashboard: true,

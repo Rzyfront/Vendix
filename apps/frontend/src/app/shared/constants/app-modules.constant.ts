@@ -337,6 +337,13 @@ export const APP_MODULES: {
       ],
     },
 
+    // Reportes
+    {
+      key: 'reports',
+      label: 'Reportes',
+      description: 'Reportes y análisis de datos del negocio',
+    },
+
     // Contabilidad (padre con hijos)
     {
       key: 'accounting',
@@ -363,11 +370,6 @@ export const APP_MODULES: {
           key: 'accounting_account_mappings',
           label: 'Mapeo de Cuentas',
           description: 'Configuraci\u00f3n de cuentas contables por flujo',
-        },
-        {
-          key: 'accounting_reports',
-          label: 'Reportes',
-          description: 'Reportes contables y financieros',
         },
         {
           key: 'accounting_flows_dashboard',

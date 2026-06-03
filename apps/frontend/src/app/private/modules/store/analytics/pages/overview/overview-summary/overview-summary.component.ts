@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -32,6 +33,11 @@ import {
   DateRangeFilterComponent
 } from '../../../components/date-range-filter/date-range-filter.component';
 import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+  StickyHeaderActionButton,
+} from '../../../../../../../shared/components/sticky-header/sticky-header.component';
+import {
   ANALYTICS_CATEGORIES,
   ANALYTICS_VIEWS,
   AnalyticsCategoryId,
@@ -43,6 +49,7 @@ import * as OverviewSelectors from '../state/overview-summary.selectors';
 
 import { EChartsOption } from 'echarts';
 import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'app-overview-summary',
@@ -60,6 +67,7 @@ import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../..
     AnalyticsCategoryChipsComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -67,6 +75,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
@@ -96,6 +106,14 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly searchTerm = signal<string>('');
 
   readonly categories = ANALYTICS_CATEGORIES;
+
+  readonly overviewTabs: StickyHeaderTab[] = [
+    { id: 'summary', label: 'Resumen General', icon: 'layout-dashboard', route: '/admin/analytics/overview' },
+  ];
+
+  readonly overviewActions: StickyHeaderActionButton[] = [
+    { id: 'view-reports', label: 'Ver Reportes', icon: 'file-text', variant: 'outline' },
+  ];
 
   private readonly categoryById = computed(() =>
     new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
@@ -150,6 +168,13 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
+    // Read date range from URL query params (e.g. when navigating from reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(OverviewActions.setDateRange({ dateRange: urlRange }));
+    }
+
     // Dispatch initial loads
     this.store.dispatch(OverviewActions.loadOverviewSummary());
     this.store.dispatch(OverviewActions.loadOverviewTrends());
@@ -189,6 +214,16 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   exportReport(): void {
+  }
+
+  goToReports(): void {
+    this.router.navigateByUrl('/admin/reports/overview/overview-summary');
+  }
+
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'view-reports') {
+      this.goToReports();
+    }
   }
 
   getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {

@@ -499,7 +499,62 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Reportes',
       icon: 'file-bar-chart',
-      route: '/admin/reports',
+      children: [
+        {
+          label: 'Resumen',
+          icon: 'circle',
+          route: '/admin/reports/overview',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Ventas',
+          icon: 'circle',
+          route: '/admin/reports/sales',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Inventario',
+          icon: 'circle',
+          route: '/admin/reports/inventory',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Productos',
+          icon: 'circle',
+          route: '/admin/reports/products',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Clientes',
+          icon: 'circle',
+          route: '/admin/reports/customers',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Compras',
+          icon: 'circle',
+          route: '/admin/reports/purchases',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Reseñas',
+          icon: 'circle',
+          route: '/admin/reports/reviews',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Financiero',
+          icon: 'circle',
+          route: '/admin/reports/financial',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Contabilidad',
+          icon: 'circle',
+          route: '/admin/reports/accounting',
+          alwaysVisible: true,
+        },
+      ],
     },
     {
       label: 'Gastos',
@@ -545,12 +600,6 @@ export class StoreAdminLayoutComponent {
           label: 'Plan de Cuentas',
           icon: 'circle',
           route: '/admin/accounting/chart-of-accounts',
-        },
-        {
-          label: 'Reportes',
-          icon: 'circle',
-          route: '/admin/reports',
-          queryParams: { category: 'accounting' },
         },
         {
           label: 'Retenciones',

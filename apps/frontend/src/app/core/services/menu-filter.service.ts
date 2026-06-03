@@ -98,7 +98,7 @@ export class MenuFilterService {
     Ventas: 'analytics_sales',
 
     // STORE_ADMIN - Reportes
-    Reportes: ['reports', 'accounting_reports'],
+    Reportes: 'reports',
 
     // Caja Registradora (submodule of Configuración)
     'Caja Registradora': 'settings_cash_registers',

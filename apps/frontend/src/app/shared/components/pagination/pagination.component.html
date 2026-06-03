@@ -3,7 +3,7 @@
   <!-- Info text (range style): "Showing X to Y of Z" -->
   @if (infoStyle() === 'range') {
   <span class="pagination-info">
-    Showing {{ rangeStart }} to {{ rangeEnd }} of {{ total() }}
+    Mostrando {{ rangeStart }} a {{ rangeEnd }} de {{ total() }}
   </span>
   }
 
@@ -49,7 +49,7 @@
   <!-- Info text (page style): "Page X of Y (Z items)" -->
   @if (infoStyle() === 'page') {
   <span class="pagination-info">
-    Page {{ currentPage() }} of {{ totalPages() }} ({{ total() }} items)
+    Página {{ currentPage() }} de {{ totalPages() }} ({{ total() }} registros)
   </span>
   }
 </nav>

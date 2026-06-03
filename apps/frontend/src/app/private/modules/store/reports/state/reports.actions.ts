@@ -21,7 +21,7 @@ export const ReportsActions = createActionGroup({
     // Load report data
     'Load Report Data': emptyProps(),
     'Load Report Data Success': props<{ data: any[]; meta?: Record<string, any>; isSummary?: boolean; summaryData?: Record<string, any> }>(),
-    'Load Report Data Failure': props<{ error: string }>(),
+    'Load Report Data Failure': props<{ error: string; isForbidden?: boolean }>(),
 
     // Export
     'Export Report': emptyProps(),

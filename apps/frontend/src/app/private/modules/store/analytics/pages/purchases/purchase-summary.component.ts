@@ -1,5 +1,6 @@
 import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -15,6 +16,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-purchase-summary',
@@ -179,6 +181,7 @@ export class PurchaseSummaryComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 
   loading = signal(true);
   exporting = signal(false);
@@ -196,6 +199,12 @@ export class PurchaseSummaryComponent implements OnInit {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
+
     this.loadData();
   }
 
