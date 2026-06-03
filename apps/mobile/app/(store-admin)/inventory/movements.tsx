@@ -1,13 +1,14 @@
 import { useState, useCallback } from 'react';
-import { View, Text, FlatList, RefreshControl, Pressable, StyleSheet } from 'react-native';
+import { View, Text, FlatList, RefreshControl, Pressable, StyleSheet, TextInput } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import type { StockMovement, MovementType } from '@/features/store/types';
 import { MOVEMENT_TYPE_LABELS, MOVEMENT_INBOUND_TYPES, MOVEMENT_OUTBOUND_TYPES } from '@/features/store/types';
 import { RecordCard } from '@/shared/components/record-card/record-card';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
+import { Ionicons } from '@expo/vector-icons';
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors } from '@/shared/theme';
 
@@ -58,7 +59,7 @@ function footerToneFor(item: StockMovement): 'success' | 'error' | 'default' {
   return 'default';
 }
 
-const MovementCard = ({ item }: { item: StockMovement }) => {
+const MovementCard = ({ item, onPress }: { item: StockMovement; onPress?: () => void }) => {
   const variant = TYPE_VARIANT[item.movement_type] ?? 'default';
   const label = MOVEMENT_TYPE_LABELS[item.movement_type] ?? item.movement_type;
   const icon = TYPE_ICON[item.movement_type] ?? 'package';
@@ -82,11 +83,13 @@ const MovementCard = ({ item }: { item: StockMovement }) => {
       footerLabel="Cantidad"
       footerValue={`${sign}${absQty}`}
       footerTone={footerToneFor(item)}
+      onPress={onPress}
     />
   );
 };
 
 export default function MovementsScreen() {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<MovementType | 'all'>('all');
 
@@ -103,16 +106,39 @@ export default function MovementsScreen() {
 
   const handleRefresh = useCallback(() => refetch(), [refetch]);
 
+  const handleProductPress = useCallback((item: StockMovement) => {
+    if (item.product_id) {
+      router.push(`/(store-admin)/inventory/stock-detail?productId=${item.product_id}` as never);
+    }
+  }, [router]);
+
   return (
     <View style={styles.container}>
       <FlatList
         data={movements}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <MovementCard item={item} />}
+        renderItem={({ item }) => <MovementCard item={item} onPress={() => handleProductPress(item)} />}
         ListHeaderComponent={
           <View>
-            <View style={styles.searchWrap}>
-              <SearchBar value={search} onChangeText={setSearch} onClear={() => setSearch('')} placeholder="Buscar movimientos..." />
+            <View style={styles.searchRow}>
+              <View style={styles.searchInput}>
+                <Ionicons name="search-outline" size={16} color="#9ca3af" style={{ marginRight: 6 }} />
+                <TextInput
+                  style={styles.searchTextInput}
+                  value={search}
+                  onChangeText={setSearch}
+                  placeholder="Buscar movimientos..."
+                  placeholderTextColor="#9ca3af"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {search.length > 0 && (
+                  <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                    <Ionicons name="close" size={16} color="#9ca3af" />
+                  </Pressable>
+                )}
+              </View>
             </View>
 
             <View style={styles.filterRow}>
@@ -143,7 +169,17 @@ export default function MovementsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  searchWrap: { marginBottom: spacing[3] },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], marginBottom: spacing[3] },
+  searchInput: {
+    flex: 1, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.xl,
+    paddingHorizontal: spacing[3], paddingVertical: spacing[2],
+    borderWidth: 1, borderColor: colorScales.gray[200], minHeight: 40,
+  },
+  searchTextInput: {
+    flex: 1, fontSize: typography.fontSize.sm, fontFamily: typography.fontFamily,
+    color: colorScales.gray[900], padding: 0, height: '100%',
+  },
   filterRow: { flexDirection: 'row', gap: spacing[2], marginBottom: spacing[3], flexWrap: 'wrap' },
   chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },
   chipActive: { backgroundColor: colors.primary },
