@@ -209,11 +209,9 @@ export default function AdjustmentsScreen() {
               </View>
               <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
                 <Ionicons name="filter-outline" size={18} color="#22C55E" />
-                <Text style={styles.iconBtnText}>Filtros</Text>
               </Pressable>
               <Pressable ref={actionsBtnRef} style={styles.iconBtn} onPress={handleShowActions} hitSlop={6}>
-                <Ionicons name="add" size={20} color="#22C55E" />
-                <Text style={styles.iconBtnText}>Acciones</Text>
+                <Ionicons name="add-outline" size={20} color="#22C55E" />
               </Pressable>
             </View>
 
@@ -398,11 +396,10 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900], padding: 0, height: '100%',
   },
   iconBtn: {
-    flexDirection: 'row', height: 40, borderRadius: borderRadius.xl,
+    width: 40, height: 40, borderRadius: borderRadius.xl,
     backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: spacing[2.5],
+    alignItems: 'center', justifyContent: 'center',
   },
-  iconBtnText: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colors.primary },
 
   /* Actions List */
   actionsList: { paddingHorizontal: spacing[4], gap: 0 },
