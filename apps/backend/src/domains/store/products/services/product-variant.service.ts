@@ -349,6 +349,14 @@ export class ProductVariantService {
       variant_removal_stock_mode: _variantRemovalStockMode,
       stock_by_location: _stockByLocation,
       variant_image_url: _variantImageUrl,
+      // ⚠️ NO sobrescribir image_id aquí. La gestión de la imagen de la
+      // variante (subir / borrar / preservar) se hace en el orquestador
+      // superior (products.service.ts) con su propio bloque atómico.
+      // Si dejamos pasar image_id, este update() lo pisa con null cuando
+      // el frontend envía `image_id: null` al subir una nueva imagen,
+      // y eso puede romper la FK si la product_images referenciada fue
+      // borrada por un flujo anterior de re-upload del producto.
+      image_id: _imageId,
       ...variantData
     } = updateVariantDto as UpdateProductVariantDto & {
       stock_by_location?: unknown;

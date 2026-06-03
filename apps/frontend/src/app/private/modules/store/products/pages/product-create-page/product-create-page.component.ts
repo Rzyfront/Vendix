@@ -1686,7 +1686,10 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí.
+    // Las imágenes de variantes son independientes de las imágenes principales
+    // del producto. Si marcamos imagesTouched, el backend borra TODAS las
+    // imágenes de variantes y del producto en su bloque de re-upload.
     this.isVariantImageModalOpen.set(false);
   }
 
@@ -1705,7 +1708,7 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí (ver onVariantImagesAdded).
     this.isVariantImageEditModalOpen.set(false);
     this.toastService.success('Imagen ajustada correctamente');
   }
@@ -1725,7 +1728,7 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí (ver onVariantImagesAdded).
     this.isVariantAiModalOpen.set(false);
     this.toastService.success('Imagen reemplazada por la versión IA');
   }
