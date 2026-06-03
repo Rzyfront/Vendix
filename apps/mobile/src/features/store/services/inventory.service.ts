@@ -17,6 +17,9 @@ import type {
   CreatePurchaseOrderDto,
   ReceivePurchaseOrderItemDto,
   Product,
+  ConsolidatedStock,
+  StockAlert,
+  SourcingSuggestion,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -124,6 +127,34 @@ export interface MovementQuery {
   end_date?: string;
   page?: number;
   limit?: number;
+}
+
+function normalizeAdjustment(raw: Record<string, any>): StockAdjustment {
+  const product = raw.products ?? raw.product ?? null;
+  const location = raw.inventory_locations ?? null;
+  return {
+    id: Number(raw.id),
+    organization_id: Number(raw.organization_id ?? 0),
+    product_id: Number(raw.product_id ?? product?.id ?? 0),
+    product_variant_id: raw.product_variant_id ?? null,
+    location_id: Number(raw.location_id ?? location?.id ?? 0),
+    batch_id: raw.batch_id ?? null,
+    adjustment_type: raw.adjustment_type as AdjustmentType,
+    quantity_before: Number(raw.quantity_before ?? raw.quantity ?? 0),
+    quantity_after: Number(raw.quantity_after ?? 0),
+    quantity_change: Number(raw.quantity_change ?? raw.quantity ?? 0),
+    reason_code: raw.reason_code ?? raw.reason ?? null,
+    description: raw.description ?? null,
+    approved_by_user_id: raw.approved_by_user_id ?? null,
+    created_by_user_id: raw.created_by_user_id ?? null,
+    approved_at: raw.approved_at ?? null,
+    created_at: typeof raw.created_at === 'string'
+      ? raw.created_at
+      : raw.created_at?.toISOString?.() ?? new Date().toISOString(),
+    products: product ? { id: Number(product.id), name: product.name, sku: product.sku ?? null } : null,
+    product_variants: raw.product_variants ?? null,
+    inventory_locations: location ? { id: Number(location.id), name: location.name } : null,
+  };
 }
 
 function normalizeMovement(raw: Record<string, any>): StockMovement {
@@ -252,12 +283,13 @@ export const InventoryService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.ADJUSTMENTS.LIST}${buildQuery(params)}`);
-    return unwrapPaginated<StockAdjustment>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+    const page = unwrapPaginated<Record<string, any>>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+    return { ...page, data: page.data.map(normalizeAdjustment) };
   },
 
   async createAdjustment(dto: CreateAdjustmentDto): Promise<StockAdjustment> {
     const res = await apiClient.post(Endpoints.STORE.INVENTORY.ADJUSTMENTS.CREATE, dto);
-    return unwrap<StockAdjustment>(res);
+    return normalizeAdjustment(unwrap<Record<string, any>>(res));
   },
 
   async getTransfers(query?: TransferQuery): Promise<PaginatedResponse<StockTransfer>> {
@@ -359,5 +391,48 @@ export const InventoryService = {
     const endpoint = Endpoints.STORE.PURCHASE_ORDERS.RECEIVE.replace(':id', String(id));
     const res = await apiClient.patch(endpoint, { items, notes });
     return unwrap<PurchaseOrder>(res);
+  },
+
+  async getPurchaseOrders(query?: { page?: number; limit?: number; search?: string; status?: string }): Promise<PaginatedResponse<PurchaseOrder>> {
+    const params: Record<string, unknown> = {
+      page: query?.page ?? 1,
+      limit: query?.limit ?? 20,
+      search: query?.search,
+      status: query?.status,
+    };
+    const res = await apiClient.get(`${Endpoints.STORE.PURCHASE_ORDERS.LIST}${buildQuery(params)}`);
+    return unwrapPaginated<PurchaseOrder>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+  },
+
+  async getPurchaseOrderById(id: number): Promise<PurchaseOrder> {
+    const endpoint = Endpoints.STORE.PURCHASE_ORDERS.GET.replace(':id', String(id));
+    const res = await apiClient.get(endpoint);
+    return unwrap<PurchaseOrder>(res);
+  },
+
+  async updatePurchaseOrder(id: number, dto: Partial<CreatePurchaseOrderDto>): Promise<PurchaseOrder> {
+    const endpoint = Endpoints.STORE.PURCHASE_ORDERS.UPDATE.replace(':id', String(id));
+    const res = await apiClient.patch(endpoint, dto);
+    return unwrap<PurchaseOrder>(res);
+  },
+
+  async getConsolidatedStock(productId: number, organizationId?: number): Promise<ConsolidatedStock> {
+    const endpoint = Endpoints.STORE.INVENTORY.CONSOLIDATED_STOCK.replace(':productId', String(productId));
+    const query = organizationId ? `?organization_id=${organizationId}` : '';
+    const res = await apiClient.get(`${endpoint}${query}`);
+    return unwrap<ConsolidatedStock>(res);
+  },
+
+  async getStockAlerts(query?: { location_id?: number; page?: number; limit?: number }): Promise<PaginatedResponse<StockAlert>> {
+    const params: Record<string, unknown> = { ...query };
+    const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.STOCK_ALERTS}${buildQuery(params)}`);
+    return unwrapPaginated<StockAlert>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+  },
+
+  async getSourcingSuggestion(productId: number, quantity: number, variantId?: number): Promise<SourcingSuggestion> {
+    const params: Record<string, unknown> = { product_id: productId, quantity };
+    if (variantId) params.product_variant_id = variantId;
+    const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.SOURCING_SUGGESTION}${buildQuery(params)}`);
+    return unwrap<SourcingSuggestion>(res);
   },
 };

@@ -1,16 +1,24 @@
 export interface StockAdjustment {
-  id: string;
-  description: string;
-  type: 'in' | 'out' | 'adjustment';
-  product_id: string;
-  product_name: string;
-  quantity: number;
-  reason?: string;
-  location_id?: string;
-  location_name?: string;
-  state: 'pending' | 'applied';
+  id: number;
+  organization_id: number;
+  product_id: number;
+  product_variant_id: number | null;
+  location_id: number;
+  batch_id: number | null;
+  adjustment_type: AdjustmentType;
+  quantity_before: number;
+  quantity_after: number;
+  quantity_change: number;
+  reason_code: string | null;
+  description: string | null;
+  approved_by_user_id: number | null;
+  created_by_user_id: number | null;
+  approved_at: string | null;
   created_at: string;
-  created_by?: string;
+  // Relations
+  products?: { id: number; name: string; sku: string | null } | null;
+  product_variants?: { id: number; sku: string; name: string | null } | null;
+  inventory_locations?: { id: number; name: string } | null;
 }
 
 export interface StockTransfer {
@@ -146,7 +154,7 @@ export interface InventoryStats {
   totalLocations: number;
 }
 
-export type AdjustmentType = 'in' | 'out' | 'adjustment';
+export type AdjustmentType = 'damage' | 'loss' | 'theft' | 'expiration' | 'count_variance' | 'manual_correction';
 export type AdjustmentState = 'pending' | 'applied';
 export type TransferState = 'pending' | 'in_transit' | 'completed' | 'cancelled';
 export type LocationType = 'warehouse' | 'store' | 'virtual';
@@ -154,9 +162,12 @@ export type SupplierState = 'active' | 'inactive';
 export type LocationState = 'active' | 'inactive';
 
 export const ADJUSTMENT_TYPE_LABELS: Record<AdjustmentType, string> = {
-  in: 'Entrada',
-  out: 'Salida',
-  adjustment: 'Ajuste',
+  damage: 'Daño',
+  loss: 'Pérdida',
+  theft: 'Robo',
+  expiration: 'Vencido',
+  count_variance: 'Conteo',
+  manual_correction: 'Corrección',
 };
 
 export const ADJUSTMENT_STATE_LABELS: Record<AdjustmentState, string> = {
@@ -199,3 +210,42 @@ export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   store: 'Tienda',
   virtual: 'Virtual',
 };
+
+export interface ConsolidatedStock {
+  product_id: number;
+  totalAvailable: number;
+  totalReserved: number;
+  totalOnHand: number;
+  stockByLocation: LocationStock[];
+  product?: { name: string; sku?: string };
+}
+
+export interface LocationStock {
+  locationId: number;
+  locationName: string;
+  available: number;
+  reserved: number;
+  onHand: number;
+  type: string;
+  lastUpdated: string;
+}
+
+export interface StockAlert {
+  product_id: number;
+  product_name: string;
+  location_id: number;
+  location_name: string;
+  current_stock: number;
+  reorder_point: number;
+  status: 'low_stock' | 'out_of_stock' | 'optimal';
+}
+
+export interface SourcingSuggestion {
+  product_id: number;
+  main_location: { id: number; name: string; available: number } | null;
+  other_locations: { id: number; name: string; available: number }[];
+  suggestion: 'available' | 'transfer' | 'purchase';
+  requested_quantity: number;
+}
+
+export type PurchaseOrderMode = 'draft' | 'create' | 'create-receive';

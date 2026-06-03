@@ -17,24 +17,19 @@ import { toastSuccess, toastError } from '@/shared/components/toast/toast.store'
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
 
-const TYPE_VARIANT: Record<AdjustmentType, 'success' | 'error' | 'info'> = {
-  in: 'success',
-  out: 'error',
-  adjustment: 'info',
-};
-
 const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
   pending: 'warning',
   applied: 'success',
 };
 
-type FilterChip = { label: string; value: AdjustmentType | 'all' };
-
-const FILTER_CHIPS: FilterChip[] = [
-  { label: 'Todas', value: 'all' },
-  { label: 'Entrada', value: 'in' },
-  { label: 'Salida', value: 'out' },
-  { label: 'Ajuste', value: 'adjustment' },
+const ADJUSTMENT_TYPE_OPTIONS: { label: string; value: AdjustmentType | 'all' }[] = [
+  { label: 'Todos los tipos', value: 'all' },
+  { label: 'Daño', value: 'damage' },
+  { label: 'Pérdida', value: 'loss' },
+  { label: 'Robo', value: 'theft' },
+  { label: 'Vencido', value: 'expiration' },
+  { label: 'Conteo', value: 'count_variance' },
+  { label: 'Corrección', value: 'manual_correction' },
 ];
 
 interface StatItem {
@@ -56,22 +51,23 @@ const STATS: StatItem[] = [
 import { Ionicons } from '@expo/vector-icons';
 
 function AdjustmentCard({ item }: { item: StockAdjustment }) {
+  const productName = item.products?.name ?? item.description ?? '';
   return (
     <View style={styles.card}>
       <View style={styles.cardBody}>
         <View style={styles.cardHeader}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{item.description}</Text>
-            <Text style={styles.cardSubtitle}>{item.product_name}</Text>
+            <Text style={styles.cardTitle} numberOfLines={1}>{item.description ?? productName}</Text>
+            <Text style={styles.cardSubtitle}>{productName}</Text>
           </View>
           <View style={styles.cardBadges}>
-            <Badge label={ADJUSTMENT_TYPE_LABELS[item.type]} variant={TYPE_VARIANT[item.type]} size="sm" />
-            <Badge label={ADJUSTMENT_STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
+            <Badge label={ADJUSTMENT_TYPE_LABELS[item.adjustment_type]} variant="info" size="sm" />
+            <Badge label={ADJUSTMENT_STATE_LABELS[item.approved_at ? 'applied' : 'pending']} variant={item.approved_at ? 'success' : 'warning'} size="sm" />
           </View>
         </View>
         <View style={styles.cardMeta}>
-          <Text style={styles.metaText}>Qty: {item.quantity}</Text>
-          {item.location_name && <Text style={styles.metaText}>{item.location_name}</Text>}
+          <Text style={styles.metaText}>Qty: {item.quantity_change}</Text>
+          {item.inventory_locations?.name && <Text style={styles.metaText}>{item.inventory_locations.name}</Text>}
           <Text style={[styles.metaText, { marginLeft: 'auto' }]}>{formatRelative(item.created_at)}</Text>
         </View>
       </View>
@@ -89,7 +85,7 @@ export default function AdjustmentsScreen() {
   const [form, setForm] = useState<CreateAdjustmentDto>({
     product_id: '',
     description: '',
-    type: 'in',
+    type: 'manual_correction',
     quantity: 0,
     reason: '',
     location_id: '',
@@ -114,7 +110,7 @@ export default function AdjustmentsScreen() {
       queryClient.invalidateQueries({ queryKey: ['adjustments'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       setModalVisible(false);
-      setForm({ product_id: '', description: '', type: 'in', quantity: 0, reason: '', location_id: '' });
+      setForm({ product_id: '', description: '', type: 'manual_correction', quantity: 0, reason: '', location_id: '' });
       toastSuccess('Ajuste creado correctamente');
     },
     onError: () => toastError('Error al crear el ajuste'),
@@ -124,9 +120,9 @@ export default function AdjustmentsScreen() {
 
   const totals = {
     total: adjustments.length,
-    losses: adjustments.filter((a) => a.type === 'out').length,
-    damages: adjustments.filter((a) => a.type === 'adjustment').length,
-    corrections: adjustments.filter((a) => a.type === 'in').length,
+    losses: adjustments.filter((a) => a.adjustment_type === 'loss').length,
+    damages: adjustments.filter((a) => a.adjustment_type === 'damage').length,
+    corrections: adjustments.filter((a) => a.adjustment_type === 'manual_correction').length,
   };
 
   const handleEndReached = useCallback(() => {
@@ -144,7 +140,7 @@ export default function AdjustmentsScreen() {
     <View style={styles.screen}>
       <FlatList
         data={adjustments}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
           <View>
@@ -199,20 +195,7 @@ export default function AdjustmentsScreen() {
               </Pressable>
             </View>
 
-            {/* Filter chips */}
-            <View style={styles.filterRow}>
-              {FILTER_CHIPS.map((chip) => (
-                <Pressable
-                  key={chip.value}
-                  onPress={() => setActiveFilter(chip.value)}
-                  style={[styles.chip, activeFilter === chip.value ? styles.chipActive : styles.chipInactive]}
-                >
-                  <Text style={[styles.chipText, activeFilter === chip.value ? styles.chipTextActive : styles.chipTextInactive]}>
-                    {chip.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+
           </View>
         }
         ListEmptyComponent={
@@ -232,19 +215,28 @@ export default function AdjustmentsScreen() {
           <View style={styles.modalHandleWrap}>
             <View style={styles.modalHandle} />
           </View>
-          <Text style={styles.sheetTitle}>Acciones</Text>
-          <Pressable style={[styles.sheetItem, styles.sheetItemPrimary]} onPress={() => { setShowActions(false); setModalVisible(true); }}>
-            <Ionicons name="add-circle-outline" size={20} color="#22C55E" />
-            <Text style={styles.sheetItemPrimaryText}>Nuevo Ajuste</Text>
-          </Pressable>
-          <Pressable style={styles.sheetItem} onPress={() => { setShowActions(false); /* bulk */ }}>
-            <Ionicons name="cloud-upload-outline" size={20} color="#374151" />
-            <Text style={styles.sheetItemText}>Carga Masiva</Text>
-          </Pressable>
-          <Pressable style={styles.sheetItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
-            <Ionicons name="refresh-outline" size={20} color="#374151" />
-            <Text style={styles.sheetItemText}>Refrescar</Text>
-          </Pressable>
+          <View style={styles.actionsList}>
+            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
+              <View style={styles.actionIconWrap}>
+                <Ionicons name="add-circle-outline" size={20} color="#22C55E" />
+              </View>
+              <Text style={styles.actionText}>Nuevo Ajuste</Text>
+            </Pressable>
+            <View style={styles.actionDivider} />
+            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); /* bulk */ }}>
+              <View style={styles.actionIconWrap}>
+                <Ionicons name="cloud-upload-outline" size={20} color="#374151" />
+              </View>
+              <Text style={styles.actionText}>Carga Masiva</Text>
+            </Pressable>
+            <View style={styles.actionDivider} />
+            <Pressable style={styles.actionItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
+              <View style={styles.actionIconWrap}>
+                <Ionicons name="refresh-outline" size={20} color="#374151" />
+              </View>
+              <Text style={styles.actionText}>Refrescar</Text>
+            </Pressable>
+          </View>
         </View>
       </Modal>
 
@@ -255,13 +247,11 @@ export default function AdjustmentsScreen() {
           <View style={styles.modalHandleWrap}>
             <View style={styles.modalHandle} />
           </View>
-          <Text style={styles.sheetTitle}>Filtros</Text>
-          <Pressable style={[styles.sheetFilterItem, activeFilter === 'all' && styles.sheetFilterActive]} onPress={() => { setActiveFilter('all'); setShowFilters(false); }}>
-            <Text style={[styles.sheetFilterText, activeFilter === 'all' && styles.sheetFilterTextActive]}>Todos los tipos</Text>
-          </Pressable>
-          {(['in', 'out', 'adjustment'] as const).map((t) => (
-            <Pressable key={t} style={[styles.sheetFilterItem, activeFilter === t && styles.sheetFilterActive]} onPress={() => { setActiveFilter(t); setShowFilters(false); }}>
-              <Text style={[styles.sheetFilterText, activeFilter === t && styles.sheetFilterTextActive]}>{ADJUSTMENT_TYPE_LABELS[t]}</Text>
+          <Text style={styles.sheetTitle}>Filtrar por tipo</Text>
+          {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
+            <Pressable key={opt.value} style={[styles.sheetFilterItem, activeFilter === opt.value && styles.sheetFilterActive]} onPress={() => { setActiveFilter(opt.value); setShowFilters(false); }}>
+              <Text style={[styles.sheetFilterText, activeFilter === opt.value && styles.sheetFilterTextActive]}>{opt.label}</Text>
+              {activeFilter === opt.value && <Ionicons name="checkmark" size={18} color="#16a34a" />}
             </Pressable>
           ))}
         </View>
@@ -285,13 +275,13 @@ export default function AdjustmentsScreen() {
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>Tipo</Text>
               <View style={styles.typeRow}>
-                {(['in', 'out', 'adjustment'] as const).map((t) => (
+                {(['damage', 'loss', 'theft', 'expiration', 'count_variance', 'manual_correction'] as const).map((t) => (
                   <Pressable
                     key={t}
                     onPress={() => setForm({ ...form, type: t })}
                     style={[styles.typeChip, form.type === t ? styles.typeChipActive : styles.typeChipInactive]}
                   >
-                    <Text style={[styles.chipText, form.type === t ? styles.chipTextActive : styles.chipTextInactive]}>
+                    <Text style={[styles.typeChipText, form.type === t ? styles.chipTextActive : styles.chipTextInactive]}>
                       {ADJUSTMENT_TYPE_LABELS[t]}
                     </Text>
                   </Pressable>
@@ -385,14 +375,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
 
-  /* Filters */
-  filterRow: { flexDirection: 'row', gap: spacing[2], paddingHorizontal: spacing[4], marginTop: spacing[2], marginBottom: spacing[3] },
-  chip: { paddingHorizontal: spacing[3], paddingVertical: 6, borderRadius: borderRadius.full },
-  chipActive: { backgroundColor: colors.primary },
-  chipInactive: { backgroundColor: colorScales.gray[200] },
-  chipText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any },
-  chipTextActive: { color: '#fff' },
-  chipTextInactive: { color: colorScales.gray[600] },
+  /* Actions List */
+  actionsList: { paddingHorizontal: spacing[4], gap: 0 },
+  actionItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], paddingVertical: spacing[3] },
+  actionIconWrap: { width: 32, height: 32, borderRadius: 8, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
+  actionText: { fontSize: typography.fontSize.base, fontWeight: '500' as any, color: colorScales.gray[900] },
+  actionDivider: { height: 1, backgroundColor: colorScales.gray[100] },
 
   /* Card */
   card: {
@@ -416,10 +404,6 @@ const styles = StyleSheet.create({
   /* Bottom Sheets */
   sheetContent: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: spacing[8] },
   sheetTitle: { fontSize: 14, fontWeight: '700', color: '#111827', paddingHorizontal: spacing[4], marginBottom: spacing[2] },
-  sheetItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing[4], paddingVertical: 12 },
-  sheetItemPrimary: { backgroundColor: '#f0fdf4', marginHorizontal: spacing[4], borderRadius: 10, marginBottom: 4 },
-  sheetItemText: { fontSize: 13, fontWeight: '500', color: '#374151' },
-  sheetItemPrimaryText: { fontSize: 13, fontWeight: '700', color: '#16a34a' },
   sheetFilterItem: { paddingHorizontal: spacing[4], paddingVertical: 12, marginHorizontal: spacing[4], borderRadius: 8, marginBottom: 2 },
   sheetFilterActive: { backgroundColor: '#f0fdf4' },
   sheetFilterText: { fontSize: 13, fontWeight: '500', color: '#374151' },
@@ -438,6 +422,9 @@ const styles = StyleSheet.create({
   typeChip: { paddingHorizontal: spacing[3], paddingVertical: 8, borderRadius: borderRadius.full },
   typeChipActive: { backgroundColor: colors.primary },
   typeChipInactive: { backgroundColor: colorScales.gray[200] },
+  typeChipText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any },
+  chipTextActive: { color: '#fff' },
+  chipTextInactive: { color: colorScales.gray[600] },
   modalActions: { flexDirection: 'row', marginTop: spacing[4] },
   actionSpacer: { width: spacing[3] },
 });
