@@ -250,6 +250,25 @@ export class ProductVariantService {
     return variant;
   }
 
+  /**
+   * Actualiza una variante existente.
+   *
+   * IMPORTANTE — contrato sobre `image_id` y `variant_image_url`:
+   * Esta función NO modifica la imagen de la variante. Esos campos
+   * (`image_id` y `variant_image_url` del DTO) son destructurados y
+   * descartados deliberadamente: la gestión completa de la imagen
+   * (subir base64, borrar el registro anterior, preservar, limpiar)
+   * la hace el orquestador `ProductsService.update()` en su bloque
+   * atómico propio (ver `products.service.ts` líneas ~1899-2011).
+   *
+   * Si llegas aquí con `image_id` o `variant_image_url` en el DTO, ambos
+   * serán ignorados sin error. Esto es intencional y evita:
+   *  - Sobrescrituras accidentales (`image_id: null` pisando FKs válidas)
+   *  - Que el endpoint standalone `PATCH /variants/:variantId` parezca
+   *    que acepta cambios de imagen cuando en realidad no los aplica.
+   * Si un cliente externo necesita cambiar la imagen de una variante,
+   * debe usar el endpoint de producto completo (`PATCH /products/:id`).
+   */
   async updateVariant(
     variantId: number,
     updateVariantDto: UpdateProductVariantDto,

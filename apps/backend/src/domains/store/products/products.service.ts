@@ -1686,38 +1686,35 @@ export class ProductsService {
 
           // Actualizar imágenes si se proporcionan
           if (image_urls !== undefined || images !== undefined) {
-            // 0. Recolectar URLs viejas SOLO de imágenes que NO están
-            //    referenciadas por variantes, para limpiar S3 después.
-            //    Las imágenes de variantes se gestionan en su propio bucle
-            //    (líneas ~1899-2011) y NO deben ser tocadas aquí.
-            const oldImages = await prisma.product_images.findMany({
-              where: {
-                product_id: id,
-                // Excluir imágenes referenciadas por alguna variante
-                NOT: {
-                  product_variants: {
-                    some: {},
-                  },
+            // Las imágenes de variantes se gestionan en su propio bucle
+            // (líneas ~1899-2011) y NO deben ser tocadas aquí. Solo
+            // recolectamos / borramos imágenes de producto que NO estén
+            // referenciadas por ninguna variante; la FK Restrict en
+            // product_variants.image_id ya garantiza que las imágenes en
+            // uso quedan protegidas.
+            const unreferencedProductImagesWhere = {
+              product_id: id,
+              NOT: {
+                product_variants: {
+                  some: {},
                 },
               },
+            } as const;
+
+            // 0. Recolectar URLs viejas (de imágenes no referenciadas) para
+            //    limpiar S3 después.
+            const oldImages = await prisma.product_images.findMany({
+              where: unreferencedProductImagesWhere,
               select: { image_url: true },
             });
             const oldS3Keys = oldImages
               .map((img) => img.image_url)
               .filter(Boolean);
 
-            // 1. Borrar SOLO las product_images que NO están referenciadas
-            //    por variantes. La FK Restrict de product_variants.image_id
-            //    ya garantiza que las imágenes en uso quedan protegidas.
+            // 1. Borrar SOLO las product_images no referenciadas por
+            //    variantes.
             await prisma.product_images.deleteMany({
-              where: {
-                product_id: id,
-                NOT: {
-                  product_variants: {
-                    some: {},
-                  },
-                },
-              },
+              where: unreferencedProductImagesWhere,
             });
 
             const finalImages: any[] = [];
