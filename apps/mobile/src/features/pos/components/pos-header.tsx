@@ -3,35 +3,32 @@ import { View, Text, Pressable, StyleSheet, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
-import { Badge } from '@/shared/components/badge/badge';
 
 interface PosHeaderProps {
   onOpenDrawer: () => void;
-  onOpenHelp: () => void;
+  onOpenSearch?: () => void;
   onOpenNotifications: () => void;
   onOpenUserMenu: () => void;
   notificationCount?: number;
   userInitials: string;
   title?: string;
-  badgeLabel?: string;
-  showBadge?: boolean;
+  breadcrumb?: string;
 }
 
 export function PosHeader({
   onOpenDrawer,
-  onOpenHelp,
+  onOpenSearch,
   onOpenNotifications,
   onOpenUserMenu,
   notificationCount = 0,
   userInitials,
   title = 'Punto de venta',
-  badgeLabel = 'Punto de venta',
-  showBadge = true,
+  breadcrumb,
 }: PosHeaderProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.header, { paddingTop: insets.top + spacing[3] }]}>
-      {/* Left: Logo + Title + Badge */}
+    <View style={[styles.header, { paddingTop: insets.top + spacing[2] }]}>
+      {/* Left: Logo + Chevron + (Breadcrumb / Title) */}
       <View style={styles.headerLeft}>
         <Pressable onPress={onOpenDrawer} hitSlop={8} style={styles.logoBox}>
           <Image
@@ -40,23 +37,26 @@ export function PosHeader({
             resizeMode="cover"
           />
         </Pressable>
+        <Icon name="chevron-right" size={16} color={colorScales.gray[300]} style={styles.separator} />
         <View style={styles.titleContainer}>
-          <Text style={styles.title}>{title}</Text>
-          {showBadge && <Badge label={badgeLabel} variant="success" size="sm" />}
+          {breadcrumb ? <Text style={styles.breadcrumb} numberOfLines={1}>{breadcrumb}</Text> : null}
+          <Text style={styles.title} numberOfLines={1}>{title}</Text>
         </View>
       </View>
 
-      {/* Right: Help + Notifications + User */}
+      {/* Right: Search + Notifications + User */}
       <View style={styles.headerRight}>
-        {/* Help Icon */}
-        <Pressable onPress={onOpenHelp} hitSlop={8} style={styles.iconButton}>
-          <Icon name="help-circle" size={20} color={colorScales.gray[500]} />
+        <Pressable
+          onPress={onOpenSearch || (() => {})}
+          hitSlop={8}
+          style={styles.iconButton}
+        >
+          <Icon name="search" size={18} color={colorScales.gray[500]} />
         </Pressable>
 
-        {/* Notifications Icon */}
         <Pressable onPress={onOpenNotifications} hitSlop={8} style={styles.iconButton}>
           <View style={styles.iconWrapper}>
-            <Icon name="bell" size={20} color={colorScales.gray[500]} />
+            <Icon name="bell" size={18} color={colorScales.gray[500]} />
             {notificationCount > 0 && (
               <View style={styles.notificationBadge}>
                 <Text style={styles.notificationBadgeText}>
@@ -67,7 +67,6 @@ export function PosHeader({
           </View>
         </Pressable>
 
-        {/* User Avatar */}
         <Pressable onPress={onOpenUserMenu} hitSlop={8} style={styles.userAvatar}>
           <Text style={styles.userInitials}>{userInitials}</Text>
           <View style={styles.userStatusDot} />
@@ -91,24 +90,36 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[3],
+    gap: spacing[1.5],
+    flex: 1,
+    minWidth: 0,
   },
   logoBox: {
-    width: 62,
-    height: 62,
-    borderRadius: borderRadius.xl,
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.lg,
     overflow: 'hidden',
   },
   logoImage: {
-    width: 62,
-    height: 62,
+    width: 36,
+    height: 36,
+  },
+  separator: {
+    marginHorizontal: 2,
   },
   titleContainer: {
     flexDirection: 'column',
     gap: 2,
+    flex: 1,
+    minWidth: 0,
+  },
+  breadcrumb: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.normal,
   },
   title: {
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
@@ -116,12 +127,11 @@ const styles = StyleSheet.create({
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[2],
-    paddingLeft: spacing[1],
+    gap: spacing[1],
   },
   iconButton: {
-    width: 40,
-    height: 40,
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -130,42 +140,43 @@ const styles = StyleSheet.create({
   },
   notificationBadge: {
     position: 'absolute',
-    top: -4,
-    right: -6,
-    minWidth: 16,
-    height: 16,
+    top: -3,
+    right: -5,
+    minWidth: 14,
+    height: 14,
     backgroundColor: colors.error,
-    borderRadius: 8,
+    borderRadius: 7,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
+    paddingHorizontal: 2,
   },
   notificationBadgeText: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: typography.fontWeight.bold as any,
     color: '#FFFFFF',
   },
+  // Avatar de usuario más pequeño y verde menta (como la web)
   userAvatar: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: colors.primary,
+    backgroundColor: colorScales.green[100],
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   userInitials: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: typography.fontWeight.bold as any,
-    color: '#FFFFFF',
+    color: colorScales.green[800],
   },
   userStatusDot: {
     position: 'absolute',
     top: -1,
     right: -1,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
     backgroundColor: '#F97316',
     borderWidth: 1.5,
     borderColor: colors.background,

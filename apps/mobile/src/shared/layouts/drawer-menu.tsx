@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
@@ -14,31 +14,34 @@ interface MenuItem {
 }
 
 const storeMenuItems: MenuItem[] = [
-  { label: 'Dashboard', icon: 'home', href: '/(store-admin)/dashboard' },
+  { label: 'Panel Principal', icon: 'home', href: '/(store-admin)/dashboard' },
   { label: 'Punto de venta', icon: 'shopping-cart', href: '/(store-admin)/pos' },
-  { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
   { label: 'Órdenes', icon: 'clipboard-list', href: '/(store-admin)/orders' },
+  { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
   {
     label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory/pop',
     children: [
       { label: 'Punto de Compra', icon: 'shopping-cart', href: '/(store-admin)/inventory/pop' },
-      { label: 'Ajustes', icon: 'sliders', href: '/(store-admin)/inventory/adjustments' },
+      { label: 'Ajustes de Stock', icon: 'sliders', href: '/(store-admin)/inventory/adjustments' },
       { label: 'Transferencias', icon: 'truck', href: '/(store-admin)/inventory/transfers' },
       { label: 'Movimientos', icon: 'activity', href: '/(store-admin)/inventory/movements' },
-      { label: 'Proveedores', icon: 'store', href: '/(store-admin)/inventory/suppliers' },
       { label: 'Ubicaciones', icon: 'warehouse', href: '/(store-admin)/inventory/locations' },
+      { label: 'Proveedores', icon: 'store', href: '/(store-admin)/inventory/suppliers' },
     ],
   },
   { label: 'Clientes', icon: 'users', href: '/(store-admin)/customers' },
+  { label: 'Tienda en línea', icon: 'shopping-bag', href: '/(store-admin)/online-store' },
+  { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
+  { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },
+  { label: 'Gastos', icon: 'receipt', href: '/(store-admin)/expenses' },
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing' },
   { label: 'Contabilidad', icon: 'calculator', href: '/(store-admin)/accounting' },
-  { label: 'Gastos', icon: 'receipt', href: '/(store-admin)/expenses' },
-  { label: 'Analíticas', icon: 'bar-chart', href: '/(store-admin)/analytics' },
+  { label: 'Ayuda', icon: 'help-circle', href: '/(store-admin)/help' },
   { label: 'Configuración', icon: 'settings', href: '/(store-admin)/settings' },
 ];
 
 const orgMenuItems: MenuItem[] = [
-  { label: 'Dashboard', icon: 'home', href: '/(org-admin)/dashboard' },
+  { label: 'Panel Principal', icon: 'home', href: '/(org-admin)/dashboard' },
   { label: 'Tiendas', icon: 'store', href: '/(org-admin)/stores' },
   { label: 'Usuarios', icon: 'users', href: '/(org-admin)/users' },
   { label: 'Roles', icon: 'shield', href: '/(org-admin)/roles' },
@@ -48,7 +51,7 @@ const orgMenuItems: MenuItem[] = [
 ];
 
 const superMenuItems: MenuItem[] = [
-  { label: 'Dashboard', icon: 'home', href: '/(super-admin)/dashboard' },
+  { label: 'Panel Principal', icon: 'home', href: '/(super-admin)/dashboard' },
   { label: 'Organizaciones', icon: 'building-2', href: '/(super-admin)/organizations' },
   { label: 'Tiendas', icon: 'store', href: '/(super-admin)/stores' },
   { label: 'Usuarios', icon: 'users', href: '/(super-admin)/users' },
@@ -70,13 +73,14 @@ interface DrawerMenuProps {
   variant?: 'store' | 'org' | 'super';
 }
 
-// Submenu tree dimensions (alineado con la versión web: línea vertical + ramas L)
-const SUBMENU_INDENT = spacing[8]; // 32 — espacio para línea vertical + L-branch
+// Submenu tree dimensions (alineado con la versión web: línea vertical + ramas L con esquina redondeada)
+const ICON_CENTER_X = spacing[2] + spacing[4] + 16; // 40px — margin(8) + padding(16) + mitad iconContainer(32/2)
+const SUBMENU_INDENT = 10; // px — ancho del L (~0.6rem = 9.6px ≈ 10px)
 const SUBMENU_LINE_WIDTH = 2;
-const SUBMENU_DOT_SIZE = 8;
-const SUBMENU_DOT_BORDER = 1.5;
-const SUBMENU_DOT_GLOW_SIZE = SUBMENU_DOT_SIZE + 8;
-const ACTIVE_GLOW_RGBA = 'rgba(34, 197, 94, 0.25)';
+const SUBMENU_L_HEIGHT = 12; // altura donde está la rama horizontal (mitad del item ~24px) — centra el conector
+const SUBMENU_DOT_SIZE = 6; // 6px — igual que la web
+const SUBMENU_DOT_BORDER_WIDTH = 1.5;
+const SUBMENU_TOP_GAP = 10; // px — espacio vertical entre el icono padre y el primer conector L
 
 export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerMenuProps) {
   const insets = useSafeAreaInsets();
@@ -87,6 +91,15 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
 
   const config = variantConfig[variant];
   const displayName = user?.store?.name || user?.organizations?.name || 'Vendix';
+  const displaySlug = user?.store?.slug || user?.organizations?.slug || '';
+  const vlinkUrl = displaySlug ? `/${displaySlug}` : '#';
+
+  const handleOpenVlink = () => {
+    if (vlinkUrl === '#') return;
+    Linking.openURL(vlinkUrl).catch(() => {
+      // Silently ignore — slug link is decorative when the URL is unreachable
+    });
+  };
 
   const handleNavigate = (href: string) => {
     onClose();
@@ -118,9 +131,18 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
             <Text style={styles.displayName} numberOfLines={1}>
               {displayName}
             </Text>
-            <Text style={styles.email}>
-              {user?.email || config.label}
-            </Text>
+            {displaySlug ? (
+              <Pressable onPress={handleOpenVlink} hitSlop={4} style={styles.slugRow}>
+                <Text style={styles.slug} numberOfLines={1}>
+                  {displaySlug}
+                </Text>
+                <Icon name="link-2" size={12} color={colorScales.gray[500]} style={styles.slugLinkIcon} />
+              </Pressable>
+            ) : (
+              <Text style={styles.slug}>
+                {user?.email || config.label}
+              </Text>
+            )}
           </View>
           <Pressable onPress={onClose} hitSlop={8} style={styles.closeBtn}>
             <Icon name="x" size={20} color={colorScales.gray[500]} />
@@ -143,7 +165,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                   onPress={() => toggleSection(item.label)}
                   style={[styles.menuItem, childIsActive && styles.menuItemActive]}
                 >
-                  <View style={[styles.menuIcon, childIsActive ? styles.menuIconActive : styles.menuIconInactive]}>
+                  <View style={styles.menuIcon}>
                     <Icon
                       name={item.icon}
                       size={18}
@@ -167,22 +189,18 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                       const isLastChild = index === item.children!.length - 1;
                       return (
                         <View key={child.href} style={styles.submenuItemWrapper}>
-                          {/* Rama en L desde la línea vertical hasta el item (mitad superior) */}
-                          <View style={styles.submenuLBranch} />
-                          {/* Continuación vertical (mitad inferior) — se omite en el último hijo */}
+                          {/* Extensión vertical superior: conecta desde el icono padre hasta el primer conector L */}
+                          {index === 0 && <View style={styles.submenuTopConnector} />}
+                          {/* Conector en L: borderLeft (vertical) + borderBottom (horizontal) */}
+                          <View style={styles.submenuLConnector} />
+                          {/* Extensión vertical inferior: continúa la línea hasta el siguiente item */}
                           {!isLastChild && <View style={styles.submenuSegmentAfter} />}
                           <Pressable
                             onPress={() => handleNavigate(child.href)}
                             style={[styles.subMenuItem, isActiveChild && styles.subMenuItemActive]}
                           >
-                            <View
-                              style={[
-                                styles.submenuDot,
-                                isActiveChild && styles.submenuDotActive,
-                              ]}
-                            >
-                              {isActiveChild && <View style={styles.submenuDotGlow} />}
-                            </View>
+                            {/* Bullet del submenú: se oculta cuando el item está activo (la pastilla verde es el indicador) */}
+                            {!isActiveChild && <View style={styles.submenuDot} />}
                             <Text
                               style={[
                                 styles.subMenuLabel,
@@ -208,7 +226,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
               onPress={() => handleNavigate(item.href)}
               style={[styles.menuItem, isParentActive && styles.menuItemActive]}
             >
-              <View style={[styles.menuIcon, isParentActive ? styles.menuIconActive : styles.menuIconInactive]}>
+              <View style={styles.menuIcon}>
                 <Icon
                   name={item.icon}
                   size={18}
@@ -276,10 +294,17 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
   },
-  email: {
+  slugRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  slug: {
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
-    marginTop: 2,
+  },
+  slugLinkIcon: {
+    marginLeft: spacing[1],
   },
   scrollContent: {
     paddingVertical: spacing[2],
@@ -304,20 +329,14 @@ const styles = StyleSheet.create({
   menuItemActive: {
     backgroundColor: colors.primary,
   },
+  // Icono: contenedor transparente 32x32 para reservar hit-area y alinear con el row (sin caja gris, como la web)
   menuIcon: {
     width: 32,
     height: 32,
-    borderRadius: borderRadius.lg,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: spacing[3],
-  },
-  // Icono activo: sin fondo propio (la pastilla del item provee el color)
-  menuIconActive: {
-    backgroundColor: 'transparent',
-  },
-  menuIconInactive: {
-    backgroundColor: colorScales.gray[50],
   },
   menuLabel: {
     fontSize: typography.fontSize.sm,
@@ -334,31 +353,48 @@ const styles = StyleSheet.create({
   // Submenú: contenedor con indentación que aloja la línea vertical y las ramas L
   submenuContainer: {
     position: 'relative',
-    marginLeft: spacing[4],
+    marginLeft: ICON_CENTER_X, // 32px — alinea línea vertical con el centro del icono padre
     paddingLeft: SUBMENU_INDENT,
     paddingRight: spacing[2],
+    // marginTop negativo: alinea el borde superior con la parte inferior del icono del menú padre
+    // (icono 18px centrado con paddingVertical 12 → borde inferior a 30px → marginTop = -(42-30) = -12)
+    marginTop: -12,
+    // Espacio vertical entre el icono padre y el primer conector L
+    paddingTop: SUBMENU_TOP_GAP,
     paddingBottom: spacing[1],
   },
   submenuItemWrapper: {
     position: 'relative',
   },
-  // Rama en L: borde izquierdo vertical + borde inferior horizontal (mitad superior del item)
-  submenuLBranch: {
+  // Conector en L: borderLeft (vertical) + borderBottom (horizontal)
+  // Equivale a `.submenu-item::before` de la web
+  submenuLConnector: {
     position: 'absolute',
     left: -SUBMENU_INDENT,
     top: 0,
     width: SUBMENU_INDENT,
-    height: '50%',
+    height: SUBMENU_L_HEIGHT,
     borderLeftWidth: SUBMENU_LINE_WIDTH,
     borderBottomWidth: SUBMENU_LINE_WIDTH,
-    borderColor: colors.primaryDark,
-    borderBottomLeftRadius: borderRadius.md,
+    borderLeftColor: colors.primaryDark,
+    borderBottomColor: colors.primaryDark,
+    borderBottomLeftRadius: 6,
+    backgroundColor: 'transparent',
   },
-  // Continuación vertical: línea verde oscuro desde la mitad hasta el fondo del item
+  // Extensión vertical desde el icono padre hasta el primer conector L
+  submenuTopConnector: {
+    position: 'absolute',
+    left: -SUBMENU_INDENT,
+    top: -SUBMENU_TOP_GAP,
+    height: SUBMENU_TOP_GAP,
+    width: SUBMENU_LINE_WIDTH,
+    backgroundColor: colors.primaryDark,
+  },
+  // Extensión vertical desde la base del L hasta el fondo del item (se omite en el último)
   submenuSegmentAfter: {
     position: 'absolute',
     left: -SUBMENU_INDENT,
-    top: '50%',
+    top: SUBMENU_L_HEIGHT,
     bottom: 0,
     width: SUBMENU_LINE_WIDTH,
     backgroundColor: colors.primaryDark,
@@ -366,7 +402,7 @@ const styles = StyleSheet.create({
   subMenuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing[2],
+    paddingVertical: spacing[1.5],
     paddingLeft: 0,
     paddingRight: spacing[3],
     marginRight: spacing[1],
@@ -376,29 +412,15 @@ const styles = StyleSheet.create({
   subMenuItemActive: {
     backgroundColor: colors.primary,
   },
-  // Bullet del submenú: anillo hueco (alineado con la web)
+  // Bullet del submenú: anillo (border, no fill) centrado en la rama horizontal del L — alineado con la web
   submenuDot: {
     width: SUBMENU_DOT_SIZE,
     height: SUBMENU_DOT_SIZE,
     borderRadius: SUBMENU_DOT_SIZE / 2,
-    borderWidth: SUBMENU_DOT_BORDER,
+    borderWidth: SUBMENU_DOT_BORDER_WIDTH,
     borderColor: colors.primaryDark,
-    backgroundColor: colors.background,
-    marginRight: spacing[3],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Bullet activo: relleno verde + glow ring
-  submenuDotActive: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
-  },
-  submenuDotGlow: {
-    position: 'absolute',
-    width: SUBMENU_DOT_GLOW_SIZE,
-    height: SUBMENU_DOT_GLOW_SIZE,
-    borderRadius: SUBMENU_DOT_GLOW_SIZE / 2,
-    backgroundColor: ACTIVE_GLOW_RGBA,
+    backgroundColor: 'transparent',
+    marginRight: spacing[2],
   },
   subMenuLabel: {
     fontSize: typography.fontSize.xs,

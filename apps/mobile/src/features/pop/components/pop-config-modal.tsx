@@ -14,7 +14,7 @@ import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
-import type { PopProduct, PopProductVariant, PopProductConfigResult, LotInfo } from '../types';
+import type { PopProduct, PopProductVariant, PopProductConfigResult, PricingType } from '../types';
 import { defaultUnitCost } from '../constants';
 
 interface PopConfigModalProps {
@@ -36,12 +36,12 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
   const [expirationDate, setExpirationDate] = useState('');
   const [showManufacturingPicker, setShowManufacturingPicker] = useState(false);
   const [showExpirationPicker, setShowExpirationPicker] = useState(false);
+  const [pricingType, setPricingType] = useState<PricingType>('unit');
 
   const [manageVariants, setManageVariants] = useState(false);
   const [manageLot, setManageLot] = useState(false);
 
   const variants = product?.product_variants || [];
-  const isWeight = product?.pricing_type === 'weight';
   const hasVariants = variants.length > 0;
 
   const tabs: { key: ConfigTab; label: string; icon: string }[] = [{ key: 'general', label: 'General', icon: 'settings-outline' }];
@@ -62,6 +62,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
       setManageLot(false);
       setShowManufacturingPicker(false);
       setShowExpirationPicker(false);
+      setPricingType(product?.pricing_type || 'unit');
     }
   }, [visible, product]);
 
@@ -84,6 +85,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
       variants: selectedVariant ? undefined : variants,
       quantity: Math.max(1, Number(quantity) || 1),
       unit_cost: Number(unitCost) || 0,
+      pricing_type: pricingType,
       lot_info: manageLot ? {
         batch_number: batchNumber.trim() || undefined,
         manufacturing_date: manufacturingDate.trim() || undefined,
@@ -95,7 +97,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
   if (!product) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
@@ -108,25 +110,50 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
             </TouchableOpacity>
           </View>
 
-              <View style={styles.tabs}>
+              {/* Tabs dinámicas — General siempre visible; Variantes/Lote aparecen al activar los toggles */}
+              <View style={styles.tabsRow}>
                 {tabs.map((t) => (
-                  <TouchableOpacity key={t.key} style={[styles.tab, tab === t.key && styles.tabActive]} onPress={() => setTab(t.key)}>
+                  <TouchableOpacity
+                    key={t.key}
+                    style={[styles.tabPill, tab === t.key && styles.tabPillActive]}
+                    onPress={() => setTab(t.key)}
+                    activeOpacity={0.7}
+                  >
                     <Ionicons name={t.icon as any} size={14} color={tab === t.key ? '#fff' : '#6b7280'} />
-                    <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
+                    <Text style={[styles.tabPillText, tab === t.key && styles.tabPillTextActive]}>{t.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
           <ScrollView style={styles.body}>
             {tab === 'general' && (
-              <View>
-                <Text style={styles.label}>Tipo de precio</Text>
+            <View>
+              {/* Card de info del producto — alineado con la web (icono + nombre + costo) */}
+              <View style={styles.productInfoCard}>
+                <View style={styles.productInfoIcon}>
+                  <Ionicons name="cube-outline" size={20} color="#374151" />
+                </View>
+                <View style={styles.productInfoText}>
+                  <Text style={styles.productInfoName} numberOfLines={1}>{product.name}</Text>
+                  <Text style={styles.productInfoCost}>Costo: ${Number(unitCost || 0).toLocaleString()}</Text>
+                </View>
+              </View>
+
+                <Text style={styles.label}>Unidad de medida</Text>
                 <View style={styles.pricingRow}>
-                  <TouchableOpacity style={[styles.pricingChip, !isWeight && styles.pricingChipActive]}>
-                    <Text style={[styles.pricingChipText, !isWeight && styles.pricingChipTextActive]}>Unidad</Text>
+                  <TouchableOpacity
+                    style={[styles.pricingChip, pricingType !== 'weight' && styles.pricingChipActive]}
+                    onPress={() => setPricingType('unit')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.pricingChipText, pricingType !== 'weight' && styles.pricingChipTextActive]}>Unidad</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.pricingChip, isWeight && styles.pricingChipActive]}>
-                    <Text style={[styles.pricingChipText, isWeight && styles.pricingChipTextActive]}>Peso</Text>
+                  <TouchableOpacity
+                    style={[styles.pricingChip, pricingType === 'weight' && styles.pricingChipActive]}
+                    onPress={() => setPricingType('weight')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.pricingChipText, pricingType === 'weight' && styles.pricingChipTextActive]}>Peso (kg)</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -194,7 +221,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
                   <Text style={styles.totalPreviewLabel}>Total:</Text>
                   <Text style={styles.totalPreviewValue}>${totalCost.toLocaleString()}</Text>
                 </View>
-              </View>
+            </View>
             )}
 
             {tab === 'variants' && (
@@ -292,8 +319,7 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
               <Text style={styles.cancelText}>Cancelar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm}>
-              <Ionicons name="cart" size={16} color="#fff" />
-              <Text style={styles.confirmText}>Agregar</Text>
+              <Text style={styles.confirmText}>Confirmar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -303,8 +329,8 @@ export default function PopConfigModal({ visible, product, onConfirm, onCancel }
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '85%' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  modal: { backgroundColor: '#fff', borderRadius: 16, width: '100%', maxWidth: 440, maxHeight: '85%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
   headerLeft: { flex: 1, marginRight: 12 },
   headerTitle: { fontSize: 16, fontWeight: '700', color: '#111827' },
@@ -315,6 +341,18 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
   tabTextActive: { color: '#fff' },
   tabIconActive: { color: '#fff' },
+  // Tabs dinámicas — fila de pills (General siempre; Variantes/Lote aparecen al activar toggles)
+  tabsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  tabPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 9999, backgroundColor: '#f3f4f6' },
+  tabPillActive: { backgroundColor: '#22C55E' },
+  tabPillText: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
+  tabPillTextActive: { color: '#fff' },
+  // Card de info del producto (alineado con la web)
+  productInfoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 10, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb', marginBottom: 16 },
+  productInfoIcon: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
+  productInfoText: { flex: 1 },
+  productInfoName: { fontSize: 14, fontWeight: '600', color: '#111827' },
+  productInfoCost: { fontSize: 12, color: '#6b7280', marginTop: 2 },
   body: { padding: 20, maxHeight: 400 },
   label: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginBottom: 8 },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: '#111827' },
@@ -325,10 +363,11 @@ const styles = StyleSheet.create({
   lotDateField: { flex: 1 },
   lotFootnote: { fontSize: 11, color: '#6b7280', marginTop: 14, lineHeight: 16 },
   pricingRow: { flexDirection: 'row', gap: 8 },
-  pricingChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', backgroundColor: '#fff' },
-  pricingChipActive: { borderColor: '#22C55E', backgroundColor: '#dcfce7' },
-  pricingChipText: { fontSize: 13, fontWeight: '600', color: '#6b7280' },
-  pricingChipTextActive: { color: '#22C55E' },
+  // Pill de "Unidad de medida" — estilo web: activo = blanco + borde + texto negro; inactivo = sin borde + texto gris
+  pricingChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: 'transparent', alignItems: 'center', backgroundColor: '#f3f4f6' },
+  pricingChipActive: { borderColor: '#111827', backgroundColor: '#fff' },
+  pricingChipText: { fontSize: 13, fontWeight: '600', color: '#9ca3af' },
+  pricingChipTextActive: { color: '#111827' },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qtyBtn: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
   qtyInput: { flex: 1, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10, fontSize: 18, fontWeight: '700', textAlign: 'center', color: '#111827' },
