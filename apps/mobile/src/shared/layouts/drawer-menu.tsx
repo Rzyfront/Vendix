@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +10,7 @@ interface MenuItem {
   label: string;
   icon: string;
   href: string;
+  children?: { label: string; icon: string; href: string }[];
 }
 
 const storeMenuItems: MenuItem[] = [
@@ -16,7 +18,17 @@ const storeMenuItems: MenuItem[] = [
   { label: 'Punto de venta', icon: 'shopping-cart', href: '/(store-admin)/pos' },
   { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
   { label: 'Órdenes', icon: 'clipboard-list', href: '/(store-admin)/orders' },
-  { label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory' },
+  {
+    label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory/pop',
+    children: [
+      { label: 'Punto de Compra', icon: 'shopping-cart', href: '/(store-admin)/inventory/pop' },
+      { label: 'Ajustes', icon: 'sliders', href: '/(store-admin)/inventory/adjustments' },
+      { label: 'Transferencias', icon: 'truck', href: '/(store-admin)/inventory/transfers' },
+      { label: 'Movimientos', icon: 'activity', href: '/(store-admin)/inventory/movements' },
+      { label: 'Proveedores', icon: 'store', href: '/(store-admin)/inventory/suppliers' },
+      { label: 'Ubicaciones', icon: 'warehouse', href: '/(store-admin)/inventory/locations' },
+    ],
+  },
   { label: 'Clientes', icon: 'users', href: '/(store-admin)/customers' },
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing' },
   { label: 'Contabilidad', icon: 'calculator', href: '/(store-admin)/accounting' },
@@ -58,11 +70,20 @@ interface DrawerMenuProps {
   variant?: 'store' | 'org' | 'super';
 }
 
+// Submenu tree dimensions (alineado con la versión web: línea vertical + ramas L)
+const SUBMENU_INDENT = spacing[8]; // 32 — espacio para línea vertical + L-branch
+const SUBMENU_LINE_WIDTH = 2;
+const SUBMENU_DOT_SIZE = 8;
+const SUBMENU_DOT_BORDER = 1.5;
+const SUBMENU_DOT_GLOW_SIZE = SUBMENU_DOT_SIZE + 8;
+const ACTIVE_GLOW_RGBA = 'rgba(34, 197, 94, 0.25)';
+
 export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerMenuProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   const config = variantConfig[variant];
   const displayName = user?.store?.name || user?.organizations?.name || 'Vendix';
@@ -72,11 +93,19 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     router.push(href as never);
   };
 
+  const toggleSection = (label: string) => {
+    setExpandedSections((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
   const handleLogout = () => {
     onClose();
     logout();
     router.replace('/(auth)/login');
   };
+
+  const isRouteActive = (href: string) => currentRoute.includes(href);
+  const hasActiveChild = (item: MenuItem) =>
+    !!item.children?.some((c) => isRouteActive(c.href));
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -101,24 +130,94 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
 
       <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {config.items.map((item) => {
-          const isActive = currentRoute.includes(item.href.split('/').pop() || '');
+          const hasChildren = !!(item.children && item.children.length > 0);
+          // Los padres con hijos nunca se marcan activos — solo el hijo activo lo hace.
+          const isParentActive = !hasChildren && isRouteActive(item.href);
+          const childIsActive = hasActiveChild(item);
+          const isExpanded = expandedSections[item.label] ?? childIsActive;
+
+          if (hasChildren) {
+            return (
+              <View key={item.label}>
+                <Pressable
+                  onPress={() => toggleSection(item.label)}
+                  style={[styles.menuItem, childIsActive && styles.menuItemActive]}
+                >
+                  <View style={[styles.menuIcon, childIsActive ? styles.menuIconActive : styles.menuIconInactive]}>
+                    <Icon
+                      name={item.icon}
+                      size={18}
+                      color={childIsActive ? colors.card : colors.text.secondary}
+                    />
+                  </View>
+                  <Text style={[styles.menuLabel, childIsActive ? styles.menuLabelActive : styles.menuLabelInactive]}>
+                    {item.label}
+                  </Text>
+                  <Icon
+                    name={isExpanded ? 'chevron-down' : 'chevron-right'}
+                    size={14}
+                    color={childIsActive ? colors.card : colorScales.gray[400]}
+                  />
+                </Pressable>
+
+                {isExpanded && (
+                  <View style={styles.submenuContainer}>
+                    {item.children!.map((child, index) => {
+                      const isActiveChild = isRouteActive(child.href);
+                      const isLastChild = index === item.children!.length - 1;
+                      return (
+                        <View key={child.href} style={styles.submenuItemWrapper}>
+                          {/* Rama en L desde la línea vertical hasta el item (mitad superior) */}
+                          <View style={styles.submenuLBranch} />
+                          {/* Continuación vertical (mitad inferior) — se omite en el último hijo */}
+                          {!isLastChild && <View style={styles.submenuSegmentAfter} />}
+                          <Pressable
+                            onPress={() => handleNavigate(child.href)}
+                            style={[styles.subMenuItem, isActiveChild && styles.subMenuItemActive]}
+                          >
+                            <View
+                              style={[
+                                styles.submenuDot,
+                                isActiveChild && styles.submenuDotActive,
+                              ]}
+                            >
+                              {isActiveChild && <View style={styles.submenuDotGlow} />}
+                            </View>
+                            <Text
+                              style={[
+                                styles.subMenuLabel,
+                                isActiveChild ? styles.subMenuLabelActive : styles.subMenuLabelInactive,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {child.label}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            );
+          }
+
           return (
             <Pressable
               key={item.href}
               onPress={() => handleNavigate(item.href)}
-              style={[styles.menuItem, isActive && styles.menuItemActive]}
+              style={[styles.menuItem, isParentActive && styles.menuItemActive]}
             >
-              <View style={[styles.menuIcon, isActive ? styles.menuIconActive : styles.menuIconInactive]}>
+              <View style={[styles.menuIcon, isParentActive ? styles.menuIconActive : styles.menuIconInactive]}>
                 <Icon
                   name={item.icon}
                   size={18}
-                  color={isActive ? colors.primary : colors.text.secondary}
+                  color={isParentActive ? colors.card : colors.text.secondary}
                 />
               </View>
-              <Text style={[styles.menuLabel, isActive ? styles.menuLabelActive : styles.menuLabelInactive]}>
+              <Text style={[styles.menuLabel, isParentActive ? styles.menuLabelActive : styles.menuLabelInactive]}>
                 {item.label}
               </Text>
-              {isActive && <View style={styles.activeDot} />}
             </Pressable>
           );
         })}
@@ -201,8 +300,9 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing[2],
     borderRadius: borderRadius.lg,
   },
+  // Item activo: pastilla verde sólida con texto blanco (alineado con la web)
   menuItemActive: {
-    backgroundColor: colorScales.green[50],
+    backgroundColor: colors.primary,
   },
   menuIcon: {
     width: 32,
@@ -212,8 +312,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: spacing[3],
   },
+  // Icono activo: sin fondo propio (la pastilla del item provee el color)
   menuIconActive: {
-    backgroundColor: colorScales.green[100],
+    backgroundColor: 'transparent',
   },
   menuIconInactive: {
     backgroundColor: colorScales.gray[50],
@@ -223,17 +324,93 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.medium,
     flex: 1,
   },
+  // Label activo: blanco
   menuLabelActive: {
-    color: colorScales.green[700],
+    color: colors.card,
   },
   menuLabelInactive: {
     color: colorScales.gray[700],
   },
-  activeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+  // Submenú: contenedor con indentación que aloja la línea vertical y las ramas L
+  submenuContainer: {
+    position: 'relative',
+    marginLeft: spacing[4],
+    paddingLeft: SUBMENU_INDENT,
+    paddingRight: spacing[2],
+    paddingBottom: spacing[1],
+  },
+  submenuItemWrapper: {
+    position: 'relative',
+  },
+  // Rama en L: borde izquierdo vertical + borde inferior horizontal (mitad superior del item)
+  submenuLBranch: {
+    position: 'absolute',
+    left: -SUBMENU_INDENT,
+    top: 0,
+    width: SUBMENU_INDENT,
+    height: '50%',
+    borderLeftWidth: SUBMENU_LINE_WIDTH,
+    borderBottomWidth: SUBMENU_LINE_WIDTH,
+    borderColor: colors.primaryDark,
+    borderBottomLeftRadius: borderRadius.md,
+  },
+  // Continuación vertical: línea verde oscuro desde la mitad hasta el fondo del item
+  submenuSegmentAfter: {
+    position: 'absolute',
+    left: -SUBMENU_INDENT,
+    top: '50%',
+    bottom: 0,
+    width: SUBMENU_LINE_WIDTH,
+    backgroundColor: colors.primaryDark,
+  },
+  subMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing[2],
+    paddingLeft: 0,
+    paddingRight: spacing[3],
+    marginRight: spacing[1],
+    marginVertical: 1,
+    borderRadius: borderRadius.lg,
+  },
+  subMenuItemActive: {
     backgroundColor: colors.primary,
+  },
+  // Bullet del submenú: anillo hueco (alineado con la web)
+  submenuDot: {
+    width: SUBMENU_DOT_SIZE,
+    height: SUBMENU_DOT_SIZE,
+    borderRadius: SUBMENU_DOT_SIZE / 2,
+    borderWidth: SUBMENU_DOT_BORDER,
+    borderColor: colors.primaryDark,
+    backgroundColor: colors.background,
+    marginRight: spacing[3],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Bullet activo: relleno verde + glow ring
+  submenuDotActive: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  submenuDotGlow: {
+    position: 'absolute',
+    width: SUBMENU_DOT_GLOW_SIZE,
+    height: SUBMENU_DOT_GLOW_SIZE,
+    borderRadius: SUBMENU_DOT_GLOW_SIZE / 2,
+    backgroundColor: ACTIVE_GLOW_RGBA,
+  },
+  subMenuLabel: {
+    fontSize: typography.fontSize.xs,
+    flex: 1,
+  },
+  subMenuLabelActive: {
+    color: colors.card,
+    fontWeight: typography.fontWeight.medium,
+  },
+  subMenuLabelInactive: {
+    color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.normal,
   },
   footer: {
     paddingHorizontal: spacing[4],

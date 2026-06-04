@@ -6,9 +6,11 @@ import { InventoryService } from '@/features/store/services/inventory.service';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
+import { Badge } from '@/shared/components/badge/badge';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { formatCurrency } from '@/shared/utils/currency';
-import { spacing, borderRadius, colorScales, typography } from '@/shared/theme';
+import { formatRelative } from '@/shared/utils/date';
+import { spacing, borderRadius, colorScales, typography, colors } from '@/shared/theme';
 
 interface QuickNavLink {
   title: string;
@@ -20,7 +22,7 @@ interface QuickNavLink {
 }
 
 const QUICK_LINKS: QuickNavLink[] = [
-  { title: 'Comprar Inventario', subtitle: 'Crear orden y recibir stock', icon: 'shopping-bag', route: 'purchase', color: colorScales.green[600], bgColor: colorScales.green[50] },
+  { title: 'Punto de Compra', subtitle: 'Planificar y recibir inventario', icon: 'shopping-cart', route: 'pop', color: colorScales.green[600], bgColor: colorScales.green[50] },
   { title: 'Ajustes de Stock', subtitle: 'Entradas, salidas y ajustes', icon: 'sliders', route: 'adjustments', color: colorScales.blue[600], bgColor: colorScales.blue[50] },
   { title: 'Transferencias', subtitle: 'Movimientos entre ubicaciones', icon: 'truck', route: 'transfers', color: colorScales.green[600], bgColor: colorScales.green[50] },
   { title: 'Movimientos', subtitle: 'Historial de movimientos', icon: 'activity', route: 'movements', color: colorScales.amber[600], bgColor: colorScales.amber[50] },
@@ -36,7 +38,14 @@ export default function InventoryScreen() {
     queryFn: () => InventoryService.getStats(),
   });
 
-  const handleRefresh = useCallback(() => refetch(), [refetch]);
+  const { data: recentOrdersResponse, isLoading: _ordersLoading } = useQuery({
+    queryKey: ['recent-orders'],
+    queryFn: () => InventoryService.getPurchaseOrders({ page: 1, limit: 5 }),
+  });
+
+  const recentOrders = recentOrdersResponse?.data ?? [];
+
+  const handleRefresh = useCallback(() => { refetch(); }, [refetch]);
 
   const handleNav = (route: string) => {
     router.push(`/(store-admin)/inventory/${route}` as never);
@@ -63,8 +72,48 @@ export default function InventoryScreen() {
                   value: formatCurrency(stats?.totalValue ?? 0),
                   icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
                 },
+                {
+                  label: 'Stock Bajo',
+                  value: (stats?.lowStock ?? 0) + (stats?.outOfStock ?? 0),
+                  icon: <Icon name="alert-triangle" size={14} color={colorScales.amber[600]} />,
+                },
+                {
+                  label: 'Órdenes Pend.',
+                  value: recentOrders.filter((o) => o.status === 'pending' || o.status === 'draft').length,
+                  icon: <Icon name="truck" size={14} color={colorScales.green[600]} />,
+                },
               ]}
             />
+
+            {recentOrders.length > 0 && (
+              <View style={styles.recentSection}>
+                <View style={styles.recentHeader}>
+                  <Text style={styles.sectionTitle}>Órdenes Recientes</Text>
+                  <Pressable onPress={() => handleNav('purchase')}>
+                    <Text style={styles.seeAll}>Ver todas</Text>
+                  </Pressable>
+                </View>
+                {recentOrders.slice(0, 3).map((order) => (
+                  <Card key={order.id} style={styles.orderCard}>
+                    <View style={styles.orderRow}>
+                      <View style={styles.orderInfo}>
+                        <Text style={styles.orderTitle} numberOfLines={1}>
+                          {order.suppliers?.name || `Orden #${order.id}`}
+                        </Text>
+                        <Text style={styles.orderMeta}>
+                          {formatCurrency(order.total_amount ?? 0)} · {formatRelative(order.created_at)}
+                        </Text>
+                      </View>
+                      <Badge
+                        label={order.status === 'draft' ? 'Borrador' : order.status === 'approved' ? 'Aprobada' : order.status === 'received' ? 'Recibida' : order.status}
+                        variant={order.status === 'received' ? 'success' : order.status === 'approved' ? 'info' : 'warning'}
+                        size="sm"
+                      />
+                    </View>
+                  </Card>
+                ))}
+              </View>
+            )}
 
             <Text style={styles.sectionTitle}>Acciones Rápidas</Text>
 
@@ -121,6 +170,44 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[4],
     paddingTop: spacing[4],
     paddingBottom: spacing[2],
+  },
+  recentSection: {
+    marginTop: spacing[2],
+  },
+  recentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingRight: spacing[4],
+  },
+  seeAll: {
+    fontSize: typography.fontSize.sm,
+    color: colors.primary,
+    fontWeight: '600' as any,
+  },
+  orderCard: {
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[2],
+  },
+  orderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: spacing[3],
+  },
+  orderInfo: {
+    flex: 1,
+    marginRight: spacing[2],
+  },
+  orderTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colorScales.gray[900],
+  },
+  orderMeta: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
   },
   navSection: {
     paddingHorizontal: spacing[4],
