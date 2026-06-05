@@ -25,7 +25,7 @@ import { IconComponent } from '../icon/icon.component';
         </div>
         <a
           class="fiscal-banner__cta"
-          routerLink="/admin/settings/fiscal/wizard"
+          routerLink="/admin/fiscal/wizard"
           [queryParams]="{ areas: pendingAreas().join(',') }"
         >
           Configurar

@@ -175,18 +175,13 @@ export const orgAdminRoutes: Routes = [
       },
       {
         path: 'settings/fiscal/wizard',
-        canActivate: [fiscalManagementGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/organization/settings/fiscal/wizard/fiscal-activation-wizard.component'
-          ).then((c) => c.OrganizationFiscalActivationWizardComponent),
+        redirectTo: '/admin/fiscal/wizard',
+        pathMatch: 'full',
       },
       {
         path: 'settings/fiscal',
-        loadComponent: () =>
-          import(
-            '../../private/modules/organization/settings/fiscal-management/fiscal-management.component'
-          ).then((c) => c.OrganizationFiscalManagementComponent),
+        redirectTo: '/admin/fiscal',
+        pathMatch: 'full',
       },
     ],
   },

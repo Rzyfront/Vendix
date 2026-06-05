@@ -501,18 +501,13 @@ export const storeAdminRoutes: Routes = [
           },
           {
             path: 'fiscal/wizard',
-            canActivate: [fiscalManagementGuard],
-            loadComponent: () =>
-              import('../../private/modules/store/settings/fiscal/wizard/fiscal-activation-wizard.component').then(
-                (c) => c.StoreFiscalActivationWizardComponent,
-              ),
+            redirectTo: '/admin/fiscal/wizard',
+            pathMatch: 'full',
           },
           {
             path: 'fiscal',
-            loadComponent: () =>
-              import('../../private/modules/store/settings/fiscal-management/fiscal-management.component').then(
-                (c) => c.StoreFiscalManagementComponent,
-              ),
+            redirectTo: '/admin/fiscal',
+            pathMatch: 'full',
           },
           {
             path: 'support',

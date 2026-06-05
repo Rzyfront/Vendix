@@ -788,7 +788,7 @@ export class StoreAdminLayoutComponent {
         {
           label: 'Manejo fiscal',
           icon: 'circle',
-          route: '/admin/settings/fiscal',
+          route: '/admin/fiscal',
         },
         {
           label: 'Dominios',

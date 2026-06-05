@@ -451,7 +451,7 @@ export class OrganizationAdminLayoutComponent {
         {
           label: 'Manejo fiscal',
           icon: 'receipt',
-          route: '/admin/settings/fiscal',
+          route: '/admin/fiscal',
         },
         {
           label: 'Métodos de Pago',

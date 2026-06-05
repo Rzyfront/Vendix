@@ -329,7 +329,7 @@ export class OrgDianConfigComponent {
 
   onActionClick(action: string): void {
     if (action === 'fiscal-settings') {
-      this.router.navigate(['/admin/settings/fiscal']);
+      this.router.navigate(['/admin/fiscal']);
     }
   }
 

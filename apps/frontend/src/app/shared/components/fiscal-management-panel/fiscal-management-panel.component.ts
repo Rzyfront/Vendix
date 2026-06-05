@@ -131,11 +131,11 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
 
               <div class="card-actions">
                 @if (stateFor(area) === 'INACTIVE') {
-                  <a class="primary-btn" [routerLink]="['/admin/settings/fiscal/wizard']" [queryParams]="{ areas: area, store_id: service.targetStoreId() }">
+                  <a class="primary-btn" [routerLink]="['/admin/fiscal/wizard']" [queryParams]="{ areas: area, store_id: service.targetStoreId() }">
                     Activar
                   </a>
                 } @else if (stateFor(area) === 'WIP') {
-                  <a class="primary-btn" [routerLink]="['/admin/settings/fiscal/wizard']" [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }">
+                  <a class="primary-btn" [routerLink]="['/admin/fiscal/wizard']" [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }">
                     Continuar
                   </a>
                 } @else if (stateFor(area) === 'ACTIVE') {
