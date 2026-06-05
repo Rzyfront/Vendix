@@ -13,6 +13,9 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillPayrollConfig,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   PayrollSettingsFormComponent,
@@ -88,17 +91,25 @@ export class FiscalPayrollConfigStepComponent implements FiscalWizardStepHost {
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}${this.service.storeQuery()}`),
-      );
-      const payload = res?.data ?? res;
-      if (payload && typeof payload === 'object') {
-        this.initial.set(payload as Partial<PayrollSettingsValue>);
-      }
-    } catch {
-      // Silent
+    // Replaces the previous N+1 GET against `/payroll/settings`. The
+    // prefill snapshot carries the full `payroll.config` object, which is
+    // what the form needs to seed initial values. The canonical PUT in
+    // submit() is still the write path.
+    const payroll = this.service.prefill()?.payroll_config;
+    if (!payroll?.enabled || !payroll.config) {
+      // No prefill, payroll not enabled, or no config object — empty form.
+      return;
     }
+    this.initial.set(this.toPayrollFormValue(payroll));
+  }
+
+  private toPayrollFormValue(
+    payroll: WizardPrefillPayrollConfig,
+  ): Partial<PayrollSettingsValue> {
+    // `defaults_year` is informational — surfaced elsewhere in the UI; the
+    // payroll form only cares about the runtime config (frequency,
+    // withholding, parafiscales, pila operator).
+    return (payroll.config as Partial<PayrollSettingsValue>) ?? null;
   }
 
   onValidity(v: boolean): void {

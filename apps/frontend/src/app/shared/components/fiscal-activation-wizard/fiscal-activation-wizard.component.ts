@@ -63,7 +63,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         title="Manejo fiscal"
         [subtitle]="areasLabel()"
         [showBackButton]="true"
-        backRoute="/admin/settings/fiscal"
+        backRoute="/admin/fiscal"
         [badgeText]="service.progressLabel()"
         badgeColor="blue"
         variant="glass"
@@ -591,9 +591,29 @@ export class FiscalActivationWizardComponent implements OnInit {
     this.service.selectedAreas.set(areas.length ? areas : ['invoicing']);
     this.service.currentStepIndex.set(0);
 
-    void this.service.loadStatus().then(() => {
-      this.service.restoreWizardFromCurrentStatus();
-    });
+    // Order matters: loadStatus populates fiscal_status + scope context,
+    // loadPrefill fetches the single aggregated snapshot used to position the
+    // cursor on the first unsatisfied step, then restoreWizardFromCurrentStatus
+    // computes the actual currentStepIndex from the union of those signals.
+    void this.initializeWizard();
+  }
+
+  /**
+   * Boots the wizard: status → prefill → restore cursor. Wrapped in a single
+   * async method so both `ngOnInit` and the store-switcher path share the
+   * exact same initialization contract (and so a future re-init trigger can
+   * call the same entry point).
+   */
+  private async initializeWizard(): Promise<void> {
+    try {
+      await this.service.loadStatus();
+      await this.service.loadPrefill();
+    } catch {
+      // loadStatus / loadPrefill already surface the error to
+      // service.error(); a partial init is non-fatal — restoreWizard will
+      // fall back to the WIP wizard's current_step when prefill is missing.
+    }
+    this.service.restoreWizardFromCurrentStatus();
   }
 
   canNavigateToStep(index: number): boolean {
@@ -631,6 +651,20 @@ export class FiscalActivationWizardComponent implements OnInit {
 
   selectStore(storeId: number): void {
     this.service.targetStoreId.set(Number(storeId));
+    // Store context changed → re-fetch the prefill (which is per-tenant) and
+    // reposition the cursor on the first unsatisfied step for the new store.
+    void this.reinitializeForStoreChange();
+  }
+
+  private async reinitializeForStoreChange(): Promise<void> {
+    try {
+      await this.service.loadStatus();
+      // force=true: the previous prefill was for a different store_id and
+      // must be discarded so the next read reflects the new tenant context.
+      await this.service.loadPrefill(true);
+    } catch {
+      // Non-fatal — see initializeWizard comment.
+    }
     this.service.restoreWizardFromCurrentStatus();
   }
 
@@ -649,7 +683,7 @@ export class FiscalActivationWizardComponent implements OnInit {
     if (!stepHost) return;
     const result = await stepHost.submit();
     if (result === null) return;
-    await this.router.navigate(['/admin/settings/fiscal']);
+    await this.router.navigate(['/admin/fiscal']);
   }
 
   currentDescription(): string {

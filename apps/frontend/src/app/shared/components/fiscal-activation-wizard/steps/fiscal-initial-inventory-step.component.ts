@@ -67,6 +67,14 @@ export class FiscalInitialInventoryStepComponent
     costing_method: 'WEIGHTED_AVERAGE',
     capture_initial_balance_later: true,
   });
+  /**
+   * True when the prefill snapshot reports existing initial inventory
+   * transactions. Surfaced in the template as a UX hint — the form itself
+   * still needs the costing_method, which is loaded from settings (see
+   * loadInitial comment) because the prefill does not carry it.
+   */
+  readonly inventoryAlreadyConfigured = signal(false);
+  readonly initialTransactions = signal(0);
 
   private readonly form =
     viewChild.required<InitialInventoryFormComponent>('form');
@@ -85,6 +93,17 @@ export class FiscalInitialInventoryStepComponent
   private async loadInitial(): Promise<void> {
     // userScope (logged-in user) routes the request, not org-level fiscal_scope.
     // TODO: surface read-only banner if STORE_ADMIN hits an org-owned config.
+    //
+    // Prefill provides the "is initial inventory already configured?" hint
+    // without a second GET. The costing_method itself still comes from
+    // settings — the prefill doesn't carry it, so this GET is NOT
+    // redundant. We keep it to seed the form's costing_method select.
+    const prefillInventory = this.service.prefill()?.initial_inventory;
+    this.inventoryAlreadyConfigured.set(
+      prefillInventory?.configured ?? false,
+    );
+    this.initialTransactions.set(prefillInventory?.initial_transactions ?? 0);
+
     const scope = this.service.userScope();
     try {
       if (scope === 'organization') {

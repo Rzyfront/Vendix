@@ -13,6 +13,9 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillDianConfig,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   DianConfigFormComponent,
@@ -88,40 +91,36 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      // For ORG_ADMIN + fiscal_scope=STORE, narrow the GET to the selected
-      // store. For fiscal_scope=ORGANIZATION the DIAN config is org-wide
-      // (store_id IS NULL on the row), so we omit ?store_id and let the
-      // backend return the org-scoped record.
-      const query = this.service.storeQuery();
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}${query}`),
-      );
-      const payload = res?.data ?? res;
-      const arr = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : null;
-      const current = arr?.find((c: any) => c?.is_default) ?? arr?.[0] ?? null;
-      if (current && typeof current === 'object') {
-        this.existingConfigId.set(
-          typeof current.id === 'number' ? current.id : null,
-        );
-        this.initial.set({
-          name: current.name ?? '',
-          nit: current.nit ?? '',
-          nit_dv: current.nit_dv ?? '',
-          nit_type: current.nit_type ?? 'NIT',
-          environment: current.environment ?? 'test',
-          software_id: current.software_id ?? '',
-          software_pin: current.software_pin ?? '',
-          test_set_id: current.test_set_id ?? '',
-        } as Partial<DianConfigValue>);
-      }
-    } catch {
-      // Silent: empty form is fine
+    // Replaces the previous N+1 GET against `/invoicing/dian-config`. The
+    // prefill snapshot already contains the active dian_config row, which
+    // is what we need to seed the form. The canonical PATCH/POST endpoints
+    // in submit() are still the write path.
+    const dian = this.service.prefill()?.dian_config;
+    if (!dian) {
+      // No prefill yet or backend reported no DIAN config — empty form.
+      return;
     }
+    this.existingConfigId.set(dian.id);
+    this.initial.set(this.toDianFormValue(dian));
+  }
+
+  private toDianFormValue(
+    dian: WizardPrefillDianConfig,
+  ): Partial<DianConfigValue> {
+    return {
+      name: dian.name ?? '',
+      nit: dian.nit ?? '',
+      nit_dv: dian.nit_dv ?? '',
+      nit_type: dian.nit_type ?? 'NIT',
+      environment: dian.environment ?? 'test',
+      // software_id / software_pin / test_set_id are intentionally left
+      // blank — they're not part of the dian_configurations row and must be
+      // re-entered / re-fetched from a deeper endpoint if needed (the
+      // certificate is uploaded separately via /upload-certificate).
+      software_id: '',
+      software_pin: '',
+      test_set_id: '',
+    } as Partial<DianConfigValue>;
   }
 
   onValidity(v: boolean): void {

@@ -13,6 +13,9 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillLegalData,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   LegalDataFormComponent,
@@ -116,19 +119,40 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.fiscalDataUrl()}${this.service.storeQuery()}`),
-      );
-      const payload = res?.data ?? res;
-      const fiscalData =
-        payload?.fiscal_data ?? payload?.settings?.fiscal_data ?? payload;
-      if (fiscalData && typeof fiscalData === 'object') {
-        this.initial.set(fiscalData as Partial<LegalDataValue>);
-      }
-    } catch {
-      // Silent: empty form is fine
+    // Replaces the previous N+1 GET against `/fiscal-data`. The prefill
+    // snapshot already contains legal_name, tax_id, nit, nit_dv and the
+    // fiscal address — exactly what the form needs to seed initial values.
+    // The fiscal_data PATCH endpoint is still the *write* path in submit().
+    const legal = this.service.prefill()?.legal_data;
+    if (!legal) {
+      // Prefill not loaded yet (component mounted before loadPrefill
+      // resolved, or prefill endpoint failed). Skip silently; the form
+      // stays empty and the user can still type.
+      return;
     }
+    this.initial.set(this.toLegalFormValue(legal));
+  }
+
+  private toLegalFormValue(
+    legal: WizardPrefillLegalData,
+  ): Partial<LegalDataValue> {
+    return {
+      legal_name: legal.legal_name ?? '',
+      tax_id: legal.tax_id ?? '',
+      nit: legal.nit ?? legal.tax_id ?? '',
+      nit_dv: legal.nit_dv ?? '',
+      fiscal_address: legal.fiscal_address
+        ? {
+            address_line1: legal.fiscal_address.address_line1 ?? '',
+            address_line2: legal.fiscal_address.address_line2 ?? '',
+            city: legal.fiscal_address.city ?? '',
+            state: legal.fiscal_address.state ?? '',
+            country: legal.fiscal_address.country ?? '',
+            postal_code: legal.fiscal_address.postal_code ?? '',
+          }
+        : undefined,
+      fiscal_regime: legal.fiscal_regime ?? undefined,
+    } as Partial<LegalDataValue>;
   }
 
   onValidity(v: boolean): void {

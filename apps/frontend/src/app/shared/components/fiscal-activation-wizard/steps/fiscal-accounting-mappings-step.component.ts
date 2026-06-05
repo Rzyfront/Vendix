@@ -127,6 +127,14 @@ export class FiscalAccountingMappingsStepComponent
 
   private async loadData(): Promise<void> {
     try {
+      // Prefill gives us the already-mapped keys (no account_id though),
+      // so we seed `existingCount` from there. We still need the canonical
+      // GETs for the full account_id mappings AND the CoA dropdown options
+      // — those are not in the prefill snapshot, so the GETs are NOT
+      // redundant. We do them in parallel to keep latency low.
+      const prefillMappings = this.service.prefill()?.accounting_mappings;
+      this.existingCount.set(prefillMappings?.total ?? 0);
+
       // Both GETs accept `?store_id=` to narrow the org-level views when a
       // specific store is selected (operating_scope=STORE or per-store
       // overrides). For consolidated org reads (no targetStoreId) the query
@@ -154,6 +162,8 @@ export class FiscalAccountingMappingsStepComponent
       mappingItems.forEach((m: any) => {
         if (m?.mapping_key) initialMap[m.mapping_key] = m.account_id ?? null;
       });
+      // Refresh the count from the actual mapping rows in case the prefill
+      // was stale (e.g. someone edited mappings between snapshots).
       this.existingCount.set(
         Object.values(initialMap).filter((value) => value != null).length,
       );
