@@ -51,6 +51,13 @@ export class OrganizationPrismaService extends BasePrismaService {
     'accounting_entry_lines',
     'fiscal_transmissions',
     'fiscal_evidences',
+    'fiscal_obligations',
+    'tax_declaration_drafts',
+    'tax_declaration_lines',
+    'fiscal_close_sessions',
+    'fiscal_close_checks',
+    'fiscal_rule_sets',
+    'fiscal_operation_events',
     'employees',
     'payroll_runs',
     'payroll_items',
@@ -83,6 +90,12 @@ export class OrganizationPrismaService extends BasePrismaService {
     // payroll_items: no organization_id; scope via payroll_run.organization_id
     payroll_items: (orgId) => ({
       payroll_run: { is: { organization_id: orgId } },
+    }),
+    tax_declaration_lines: (orgId) => ({
+      declaration: { is: { organization_id: orgId } },
+    }),
+    fiscal_close_checks: (orgId) => ({
+      close_session: { is: { organization_id: orgId } },
     }),
     // domain_settings: org isolation is dual — direct org domains have
     // organization_id set, store domains have store_id set and inherit org via
@@ -385,6 +398,34 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get fiscal_evidences() {
     return this.scoped_client.fiscal_evidences;
+  }
+
+  get fiscal_obligations() {
+    return this.scoped_client.fiscal_obligations;
+  }
+
+  get tax_declaration_drafts() {
+    return this.scoped_client.tax_declaration_drafts;
+  }
+
+  get tax_declaration_lines() {
+    return this.scoped_client.tax_declaration_lines;
+  }
+
+  get fiscal_close_sessions() {
+    return this.scoped_client.fiscal_close_sessions;
+  }
+
+  get fiscal_close_checks() {
+    return this.scoped_client.fiscal_close_checks;
+  }
+
+  get fiscal_rule_sets() {
+    return this.scoped_client.fiscal_rule_sets;
+  }
+
+  get fiscal_operation_events() {
+    return this.scoped_client.fiscal_operation_events;
   }
 
   // Accounting models

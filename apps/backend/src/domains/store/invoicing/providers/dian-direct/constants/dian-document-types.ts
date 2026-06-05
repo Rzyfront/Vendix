@@ -13,6 +13,10 @@ export const DIAN_DOCUMENT_TYPES = {
   CREDIT_NOTE: '91',
   /** Nota débito */
   DEBIT_NOTE: '92',
+  /** Documento soporte en adquisiciones a sujetos no obligados */
+  SUPPORT_DOCUMENT: '05',
+  /** Nota de ajuste al documento soporte */
+  SUPPORT_ADJUSTMENT_NOTE: '95',
 } as const;
 
 /**
@@ -34,6 +38,10 @@ export const DIAN_OPERATION_TYPES = {
   DEBIT_NOTE_NO_REF: '30',
   /** Nota débito referenciando facturas */
   DEBIT_NOTE_WITH_REF: '32',
+  /** Documento soporte: vendedor residente fiscal colombiano */
+  SUPPORT_DOCUMENT_RESIDENT_SELLER: '10',
+  /** Documento soporte: vendedor no residente fiscal colombiano */
+  SUPPORT_DOCUMENT_NON_RESIDENT_SELLER: '11',
 } as const;
 
 /**

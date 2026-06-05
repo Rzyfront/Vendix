@@ -87,6 +87,11 @@ export class StorePrismaService extends BasePrismaService {
     'withholding_concepts',
     'withholding_calculations',
     'uvt_values',
+    'fiscal_obligations',
+    'tax_declaration_drafts',
+    'fiscal_close_sessions',
+    'fiscal_rule_sets',
+    'fiscal_operation_events',
   ];
 
   private readonly fiscal_entity_models_with_store_id = [
@@ -98,6 +103,10 @@ export class StorePrismaService extends BasePrismaService {
     'payroll_runs',
     'payroll_settlements',
     'withholding_calculations',
+    'fiscal_obligations',
+    'tax_declaration_drafts',
+    'fiscal_close_sessions',
+    'fiscal_operation_events',
   ];
 
   private readonly fiscal_entity_relational_models: Record<
@@ -111,6 +120,14 @@ export class StorePrismaService extends BasePrismaService {
     payroll_items: {
       relation: 'payroll_run',
       target_model: 'payroll_runs',
+    },
+    tax_declaration_lines: {
+      relation: 'declaration',
+      target_model: 'tax_declaration_drafts',
+    },
+    fiscal_close_checks: {
+      relation: 'close_session',
+      target_model: 'fiscal_close_sessions',
     },
     consolidation_sessions: {
       relation: 'fiscal_period',
@@ -235,6 +252,13 @@ export class StorePrismaService extends BasePrismaService {
       'withholding_calculations', // Org scoped (organization_id + optional store_id)
       'withholding_concepts', // Org scoped
       'uvt_values', // Org scoped
+      'fiscal_obligations', // Fiscal entity scoped
+      'tax_declaration_drafts', // Fiscal entity scoped
+      'tax_declaration_lines', // Relational
+      'fiscal_close_sessions', // Fiscal entity scoped
+      'fiscal_close_checks', // Relational
+      'fiscal_rule_sets', // Fiscal entity scoped
+      'fiscal_operation_events', // Fiscal entity scoped
       'review_responses', // Relational
       'review_votes', // Relational
       'review_reports', // Relational
@@ -1214,6 +1238,34 @@ export class StorePrismaService extends BasePrismaService {
 
   get uvt_values() {
     return this.scoped_client.uvt_values;
+  }
+
+  get fiscal_obligations() {
+    return this.scoped_client.fiscal_obligations;
+  }
+
+  get tax_declaration_drafts() {
+    return this.scoped_client.tax_declaration_drafts;
+  }
+
+  get tax_declaration_lines() {
+    return this.scoped_client.tax_declaration_lines;
+  }
+
+  get fiscal_close_sessions() {
+    return this.scoped_client.fiscal_close_sessions;
+  }
+
+  get fiscal_close_checks() {
+    return this.scoped_client.fiscal_close_checks;
+  }
+
+  get fiscal_rule_sets() {
+    return this.scoped_client.fiscal_rule_sets;
+  }
+
+  get fiscal_operation_events() {
+    return this.scoped_client.fiscal_operation_events;
   }
 
   // Bookings models

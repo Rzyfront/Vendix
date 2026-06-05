@@ -132,6 +132,14 @@ export class MenuFilterService {
     Retenciones: 'accounting_withholding_tax',
     'Info Exógena': 'accounting_exogenous',
     'ICA Municipal': 'taxes_ica',
+    'Operación fiscal': 'fiscal_operations',
+    'Dashboard fiscal': 'fiscal_dashboard',
+    'Obligaciones fiscales': 'fiscal_obligations',
+    'Declaraciones fiscales': 'fiscal_declarations',
+    'Cierre fiscal': 'fiscal_close',
+    'Evidencias fiscales': 'fiscal_evidence',
+    'Historial fiscal': 'fiscal_history',
+    'Reglas fiscales': 'fiscal_rules',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:

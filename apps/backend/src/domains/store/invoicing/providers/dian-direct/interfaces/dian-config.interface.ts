@@ -29,6 +29,7 @@ export interface DianConfigDecrypted {
  * Issuer (emisor) data for building UBL XML.
  */
 export interface DianIssuerData {
+  document_type?: string;
   nit: string;
   nit_dv: string;
   legal_name: string;

@@ -319,6 +319,55 @@ export class OrganizationAdminLayoutComponent {
       ],
     },
     {
+      label: 'Operación fiscal',
+      icon: 'clipboard-list',
+      alwaysVisible: true,
+      children: [
+        {
+          label: 'Dashboard fiscal',
+          icon: '',
+          route: '/admin/fiscal/dashboard',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Obligaciones fiscales',
+          icon: '',
+          route: '/admin/fiscal/obligations',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Declaraciones fiscales',
+          icon: '',
+          route: '/admin/fiscal/declarations',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Cierre fiscal',
+          icon: '',
+          route: '/admin/fiscal/close',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Evidencias fiscales',
+          icon: '',
+          route: '/admin/fiscal/evidence',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Historial fiscal',
+          icon: '',
+          route: '/admin/fiscal/history',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Reglas fiscales',
+          icon: '',
+          route: '/admin/fiscal/rules',
+          alwaysVisible: true,
+        },
+      ],
+    },
+    {
       label: 'Contabilidad',
       icon: 'book-open',
       alwaysVisible: true,

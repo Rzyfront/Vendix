@@ -77,6 +77,50 @@ export const APP_MODULES: {
       label: 'N\u00f3mina',
       description: 'Gesti\u00f3n de n\u00f3mina consolidada',
     },
+    {
+      key: 'fiscal_operations',
+      label: 'Operaci\u00f3n fiscal',
+      description: 'Obligaciones, declaraciones, evidencias y cierres',
+      isParent: true,
+      children: [
+        {
+          key: 'fiscal_dashboard',
+          label: 'Dashboard fiscal',
+          description: 'Resumen de riesgos y vencimientos fiscales',
+        },
+        {
+          key: 'fiscal_obligations',
+          label: 'Obligaciones fiscales',
+          description: 'Calendario y estados de obligaciones',
+        },
+        {
+          key: 'fiscal_declarations',
+          label: 'Declaraciones fiscales',
+          description: 'Borradores trazables de declaraciones',
+        },
+        {
+          key: 'fiscal_close',
+          label: 'Cierre fiscal',
+          description: 'Checklist y control de cierre mensual',
+        },
+        {
+          key: 'fiscal_evidence',
+          label: 'Evidencias fiscales',
+          description: 'Soportes, hashes y trazabilidad documental',
+        },
+        {
+          key: 'fiscal_history',
+          label: 'Historial fiscal',
+          description:
+            'Eventos auditables por obligación, declaración y cierre',
+        },
+        {
+          key: 'fiscal_rules',
+          label: 'Reglas fiscales',
+          description: 'Reglas efectivas por a\u00f1o y entidad fiscal',
+        },
+      ],
+    },
   ],
   STORE_ADMIN: [
     // M\u00f3dulos principales (standalone - sin hijos)
@@ -447,6 +491,50 @@ export const APP_MODULES: {
           key: 'payroll_settings',
           label: 'Configuraci\u00f3n N\u00f3mina',
           description: 'Reglas y par\u00e1metros de n\u00f3mina',
+        },
+      ],
+    },
+    {
+      key: 'fiscal_operations',
+      label: 'Operaci\u00f3n fiscal',
+      description: 'Obligaciones, declaraciones, evidencias y cierres',
+      isParent: true,
+      children: [
+        {
+          key: 'fiscal_dashboard',
+          label: 'Dashboard fiscal',
+          description: 'Resumen de riesgos y vencimientos fiscales',
+        },
+        {
+          key: 'fiscal_obligations',
+          label: 'Obligaciones fiscales',
+          description: 'Calendario y estados de obligaciones',
+        },
+        {
+          key: 'fiscal_declarations',
+          label: 'Declaraciones fiscales',
+          description: 'Borradores trazables de declaraciones',
+        },
+        {
+          key: 'fiscal_close',
+          label: 'Cierre fiscal',
+          description: 'Checklist y control de cierre mensual',
+        },
+        {
+          key: 'fiscal_evidence',
+          label: 'Evidencias fiscales',
+          description: 'Soportes, hashes y trazabilidad documental',
+        },
+        {
+          key: 'fiscal_history',
+          label: 'Historial fiscal',
+          description:
+            'Eventos auditables por obligación, declaración y cierre',
+        },
+        {
+          key: 'fiscal_rules',
+          label: 'Reglas fiscales',
+          description: 'Reglas efectivas por a\u00f1o y entidad fiscal',
         },
       ],
     },

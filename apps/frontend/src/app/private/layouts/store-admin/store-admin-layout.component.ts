@@ -557,6 +557,47 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
+      label: 'Operación fiscal',
+      icon: 'clipboard-list',
+      children: [
+        {
+          label: 'Dashboard fiscal',
+          icon: 'circle',
+          route: '/admin/fiscal/dashboard',
+        },
+        {
+          label: 'Obligaciones fiscales',
+          icon: 'circle',
+          route: '/admin/fiscal/obligations',
+        },
+        {
+          label: 'Declaraciones fiscales',
+          icon: 'circle',
+          route: '/admin/fiscal/declarations',
+        },
+        {
+          label: 'Cierre fiscal',
+          icon: 'circle',
+          route: '/admin/fiscal/close',
+        },
+        {
+          label: 'Evidencias fiscales',
+          icon: 'circle',
+          route: '/admin/fiscal/evidence',
+        },
+        {
+          label: 'Historial fiscal',
+          icon: 'circle',
+          route: '/admin/fiscal/history',
+        },
+        {
+          label: 'Reglas fiscales',
+          icon: 'circle',
+          route: '/admin/fiscal/rules',
+        },
+      ],
+    },
+    {
       label: 'Gastos',
       icon: 'wallet',
       route: '/admin/expenses',

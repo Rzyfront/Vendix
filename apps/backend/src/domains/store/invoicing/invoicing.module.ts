@@ -18,6 +18,7 @@ import { InvoicePdfService } from './services/invoice-pdf.service';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-ledger.service';
 import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
+import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manua
     InvoiceRetryQueueService,
     FiscalTransmissionLedgerService,
     ManualCertificateIssuerAdapter,
+    ModuleFlowGuard,
   ],
   exports: [
     InvoicingService,

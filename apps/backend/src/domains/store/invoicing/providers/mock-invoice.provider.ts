@@ -105,6 +105,63 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     };
   }
 
+  async sendSupportDocument(
+    supportDocumentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    this.assertNonProduction();
+    this.logger.log(
+      `[MOCK] Sending support document ${supportDocumentData.invoice_number} to provider`,
+    );
+
+    const tracking_id = randomUUID();
+    const cuds = CufeCalculator.generate({
+      invoice_number: supportDocumentData.invoice_number,
+      issue_date: supportDocumentData.issue_date,
+      issue_time:
+        supportDocumentData.issue_time ||
+        new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+      total_before_tax: supportDocumentData.subtotal_amount,
+      tax_iva: supportDocumentData.tax_amount,
+      total_amount: supportDocumentData.total_amount,
+      issuer_nit: supportDocumentData.issuer_nit || '000000000',
+      customer_nit: supportDocumentData.customer_tax_id || '000000000',
+      technical_key: supportDocumentData.technical_key || 'mock-support-key',
+      environment: '2',
+    });
+
+    return {
+      success: true,
+      tracking_id,
+      cuds,
+      qr_code: CufeCalculator.generateQrUrl(cuds),
+      xml_document: `<mock-support-document>${supportDocumentData.invoice_number}</mock-support-document>`,
+      pdf_url: `https://mock-provider.example.com/support-documents/${tracking_id}.pdf`,
+      message: 'Support document accepted by mock provider',
+      provider_data: { mock: true, timestamp: new Date().toISOString() },
+    };
+  }
+
+  async sendSupportAdjustmentNote(
+    supportAdjustmentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    this.assertNonProduction();
+    this.logger.log(
+      `[MOCK] Sending support adjustment note ${supportAdjustmentData.invoice_number} to provider`,
+    );
+
+    const tracking_id = randomUUID();
+    const cuds = `mock-cuds-aj-${tracking_id.substring(0, 8)}`;
+
+    return {
+      success: true,
+      tracking_id,
+      cuds,
+      qr_code: CufeCalculator.generateQrUrl(cuds),
+      message: 'Support adjustment note accepted by mock provider',
+      provider_data: { mock: true, timestamp: new Date().toISOString() },
+    };
+  }
+
   async checkStatus(trackingId: string): Promise<StatusResponse> {
     this.assertNonProduction();
     this.logger.log(`[MOCK] Checking status for tracking ID: ${trackingId}`);

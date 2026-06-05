@@ -2886,7 +2886,7 @@ export async function seedPermissionsAndRoles(
       name: 'superadmin:subscriptions:fiscal:write',
       description: 'Configurar, probar y reintentar facturación DIAN SaaS',
       path: '/api/superadmin/subscriptions/fiscal/*',
-      method: 'POST,PATCH',
+      method: 'POST',
     },
     {
       name: 'superadmin:social_sales:config:read',
@@ -3143,6 +3143,155 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/accounting/journal-entries/:id',
       method: 'DELETE',
     },
+
+    // Fiscal Operations (Store)
+    {
+      name: 'store:fiscal:dashboard:read',
+      description: 'Leer dashboard de operación fiscal de tienda',
+      path: '/api/store/fiscal/overview',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:obligations:read',
+      description: 'Leer obligaciones fiscales de tienda',
+      path: '/api/store/fiscal/obligations',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:obligations:write',
+      description: 'Gestionar obligaciones fiscales de tienda',
+      path: '/api/store/fiscal/obligations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:declarations:read',
+      description: 'Leer borradores de declaraciones fiscales de tienda',
+      path: '/api/store/fiscal/declarations',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:declarations:write',
+      description: 'Gestionar borradores de declaraciones fiscales de tienda',
+      path: '/api/store/fiscal/declarations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:close:read',
+      description: 'Leer cierres fiscales de tienda',
+      path: '/api/store/fiscal/close-sessions',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:close:write',
+      description: 'Gestionar cierres fiscales de tienda',
+      path: '/api/store/fiscal/close-sessions/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:evidence:read',
+      description: 'Leer evidencias fiscales de tienda',
+      path: '/api/store/fiscal/evidence',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:history:read',
+      description: 'Leer historial fiscal de tienda',
+      path: '/api/store/fiscal/history',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:evidence:write',
+      description: 'Adjuntar evidencias fiscales de tienda',
+      path: '/api/store/fiscal/evidence',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:rules:read',
+      description: 'Leer reglas fiscales efectivas de tienda',
+      path: '/api/store/fiscal/rules',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:rules:write',
+      description: 'Gestionar reglas fiscales de tienda',
+      path: '/api/store/fiscal/rules',
+      method: 'POST',
+    },
+
+    // Fiscal Operations (Organization)
+    {
+      name: 'organization:fiscal:dashboard:read',
+      description: 'Leer dashboard de operación fiscal de organización',
+      path: '/api/organization/fiscal/overview',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:obligations:read',
+      description: 'Leer obligaciones fiscales de organización',
+      path: '/api/organization/fiscal/obligations',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:obligations:write',
+      description: 'Gestionar obligaciones fiscales de organización',
+      path: '/api/organization/fiscal/obligations/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:declarations:read',
+      description: 'Leer borradores de declaraciones fiscales de organización',
+      path: '/api/organization/fiscal/declarations',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:declarations:write',
+      description:
+        'Gestionar borradores de declaraciones fiscales de organización',
+      path: '/api/organization/fiscal/declarations/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:close:read',
+      description: 'Leer cierres fiscales de organización',
+      path: '/api/organization/fiscal/close-sessions',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:close:write',
+      description: 'Gestionar cierres fiscales de organización',
+      path: '/api/organization/fiscal/close-sessions/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:evidence:read',
+      description: 'Leer evidencias fiscales de organización',
+      path: '/api/organization/fiscal/evidence',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:history:read',
+      description: 'Leer historial fiscal de organización',
+      path: '/api/organization/fiscal/history',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:evidence:write',
+      description: 'Adjuntar evidencias fiscales de organización',
+      path: '/api/organization/fiscal/evidence',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:rules:read',
+      description: 'Leer reglas fiscales efectivas de organización',
+      path: '/api/organization/fiscal/rules',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:rules:write',
+      description: 'Gestionar reglas fiscales de organización',
+      path: '/api/organization/fiscal/rules',
+      method: 'POST',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
@@ -3355,6 +3504,20 @@ export async function seedPermissionsAndRoles(
       p.name === 'organization:invoicing:read' ||
       p.name === 'organization:invoicing:resolutions:read' ||
       p.name === 'organization:fiscal:supervise' ||
+      p.name === 'organization:fiscal:dashboard:read' ||
+      p.name === 'organization:fiscal:obligations:read' ||
+      p.name === 'organization:fiscal:declarations:read' ||
+      p.name === 'organization:fiscal:close:read' ||
+      p.name === 'organization:fiscal:evidence:read' ||
+      p.name === 'organization:fiscal:history:read' ||
+      p.name === 'organization:fiscal:rules:read' ||
+      p.name === 'store:fiscal:dashboard:read' ||
+      p.name === 'store:fiscal:obligations:read' ||
+      p.name === 'store:fiscal:declarations:read' ||
+      p.name === 'store:fiscal:close:read' ||
+      p.name === 'store:fiscal:evidence:read' ||
+      p.name === 'store:fiscal:history:read' ||
+      p.name === 'store:fiscal:rules:read' ||
       p.name === 'organization:withholding:read' ||
       p.name === 'organization:payroll:read' ||
       p.name === 'organization:payroll:settings:read' ||

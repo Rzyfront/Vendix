@@ -64,6 +64,89 @@ export interface FiscalStatusReadResult {
   }>;
 }
 
+export interface FiscalWizardPrefillLegalData {
+  organization_id: number;
+  legal_name: string | null;
+  tax_id: string | null;
+  nit: string | null;
+  nit_dv: string | null;
+  fiscal_address: {
+    address_line1: string | null;
+    address_line2: string | null;
+    city: string | null;
+    state: string | null;
+    country: string | null;
+    postal_code: string | null;
+  } | null;
+  fiscal_regime: string | null;
+}
+
+export interface FiscalWizardPrefillDianConfig {
+  id: number;
+  name: string;
+  nit: string;
+  nit_type: string;
+  nit_dv: string | null;
+  environment: string;
+  operation_mode: string;
+  enablement_status: string;
+  configuration_type: string;
+  is_default: boolean;
+  has_certificate: boolean;
+  certificate_expiry: string | null;
+}
+
+export interface FiscalWizardPrefillPuc {
+  exists: boolean;
+  total_accounts: number;
+  postable_accounts: number;
+}
+
+export interface FiscalWizardPrefillAccountingPeriod {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: string;
+}
+
+export interface FiscalWizardPrefillDefaultTaxes {
+  total_categories: number;
+  total_rates: number;
+  categories: Array<{ id: number; name: string; rates: number }>;
+}
+
+export interface FiscalWizardPrefillAccountingMappings {
+  total: number;
+  mapped_keys: string[];
+}
+
+export interface FiscalWizardPrefillInitialInventory {
+  configured: boolean;
+  initial_transactions: number;
+}
+
+export interface FiscalWizardPrefillPayrollConfig {
+  enabled: boolean;
+  config: Record<string, unknown> | null;
+  defaults_year: number | null;
+}
+
+export interface FiscalWizardPrefill {
+  organization_id: number;
+  store_id: number | null;
+  fiscal_scope: 'STORE' | 'ORGANIZATION';
+  legal_data: FiscalWizardPrefillLegalData | null;
+  dian_config: FiscalWizardPrefillDianConfig | null;
+  puc: FiscalWizardPrefillPuc | null;
+  accounting_period: FiscalWizardPrefillAccountingPeriod | null;
+  default_taxes: FiscalWizardPrefillDefaultTaxes | null;
+  accounting_mappings: FiscalWizardPrefillAccountingMappings | null;
+  initial_inventory: FiscalWizardPrefillInitialInventory | null;
+  payroll_config: FiscalWizardPrefillPayrollConfig | null;
+  satisfied_steps: FiscalWizardStepId[];
+}
+
 const AREAS: FiscalArea[] = ['invoicing', 'accounting', 'payroll'];
 
 export function createDefaultFiscalStatusBlock(): FiscalStatusBlock {

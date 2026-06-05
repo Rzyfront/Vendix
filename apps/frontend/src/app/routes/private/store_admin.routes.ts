@@ -386,6 +386,14 @@ export const storeAdminRoutes: Routes = [
             (m) => m.reportsRoutes,
           ),
       },
+      {
+        path: 'fiscal',
+        data: { fiscalApiScope: 'store' },
+        loadChildren: () =>
+          import('../../private/modules/fiscal-operations/fiscal-operations.routes').then(
+            (m) => m.fiscalOperationsRoutes,
+          ),
+      },
       // E-commerce Routes
       {
         path: 'ecommerce',

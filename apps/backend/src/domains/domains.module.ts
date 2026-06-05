@@ -8,6 +8,7 @@ import { UploadModule } from './upload/upload.module';
 import { EcommerceDomainModule } from './ecommerce/ecommerce.module';
 import { SupportModule } from './support/support.module';
 import { HelpCenterModule } from './help-center/help-center.module';
+import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { HelpCenterModule } from './help-center/help-center.module';
     EcommerceDomainModule,
     SupportModule,
     HelpCenterModule,
+    FiscalOperationsModule,
   ],
 })
 export class DomainsModule {}

@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   ProviderInvoiceData,
@@ -37,6 +38,28 @@ const INVOICE_INCLUDE = {
   customer: {
     select: { id: true, first_name: true, last_name: true, email: true },
   },
+  supplier: {
+    select: {
+      id: true,
+      name: true,
+      tax_id: true,
+      document_type: true,
+      tax_regime: true,
+      verification_digit: true,
+      addresses: {
+        select: {
+          address_line1: true,
+          address_line2: true,
+          city: true,
+          state_province: true,
+          country_code: true,
+          postal_code: true,
+          municipality_code: true,
+          phone_number: true,
+        },
+      },
+    },
+  },
   created_by_user: {
     select: { id: true, first_name: true, last_name: true },
   },
@@ -63,7 +86,33 @@ export class InvoiceFlowService {
     private readonly event_emitter: EventEmitter2,
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscal_ledger: FiscalTransmissionLedgerService,
+    private readonly fiscal_gate: FiscalGateService,
   ) {}
+
+  /**
+   * Defensa en profundidad del gate fiscal de FACTURACIÓN.
+   *
+   * El ModuleFlowGuard ya bloquea la entrada HTTP, pero send()/accept()
+   * también pueden ser invocados por rutas internas (reintentos en cola,
+   * futura auto-emisión desde POS) que no pasan por el controller. Solo
+   * responsables fiscales con `fiscal_status.invoicing` ACTIVE/LOCKED
+   * pueden transmitir/aceptar; fail-closed ante área inactiva.
+   */
+  private async assertInvoicingAreaActive(invoice: {
+    organization_id: number | null;
+    store_id: number | null;
+  }): Promise<void> {
+    const enabled = await this.fiscal_gate.isAreaEnabled(
+      Number(invoice.organization_id),
+      invoice.store_id != null ? Number(invoice.store_id) : null,
+      'invoicing',
+    );
+    if (!enabled) {
+      throw new ForbiddenException(
+        'Fiscal area "invoicing" is inactive for this tenant',
+      );
+    }
+  }
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -131,15 +180,57 @@ export class InvoiceFlowService {
       : 'invoicing';
   }
 
-  private assertSendImplemented(invoice_type: string): void {
-    if (
+  private isSupportDocumentType(invoice_type: string): boolean {
+    return (
       invoice_type === 'purchase_invoice' ||
       invoice_type === 'support_document' ||
       invoice_type === 'support_adjustment_note'
+    );
+  }
+
+  private assertSupportDocumentReady(invoice: any): void {
+    if (
+      invoice.invoice_type === 'purchase_invoice' ||
+      invoice.invoice_type === 'support_document' ||
+      invoice.invoice_type === 'support_adjustment_note'
+    ) {
+      if (!invoice.supplier_id || !invoice.supplier) {
+        throw new VendixHttpException(
+          ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+          'Support documents require a supplier.',
+          { invoice_id: invoice.id },
+        );
+      }
+      if (!invoice.supplier.tax_id && !invoice.customer_tax_id) {
+        throw new VendixHttpException(
+          ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+          'Support document supplier requires tax_id.',
+          { invoice_id: invoice.id, supplier_id: invoice.supplier_id },
+        );
+      }
+    }
+  }
+
+  private assertProviderSupports(provider: any, invoice_type: string): void {
+    if (
+      (invoice_type === 'purchase_invoice' ||
+        invoice_type === 'support_document') &&
+      typeof provider.sendSupportDocument !== 'function'
     ) {
       throw new VendixHttpException(
         ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
-        'Documento soporte and support adjustment require their own DIAN own-software flow and cannot be sent as invoices.',
+        'The resolved fiscal provider cannot send support documents.',
+        { invoice_type },
+      );
+    }
+
+    if (
+      invoice_type === 'support_adjustment_note' &&
+      typeof provider.sendSupportAdjustmentNote !== 'function'
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_DOCUMENT_UNSUPPORTED,
+        'The resolved fiscal provider cannot send support adjustment notes.',
         { invoice_type },
       );
     }
@@ -149,26 +240,126 @@ export class InvoiceFlowService {
     return `${value.toISOString().split('T')[1].split('.')[0]}-05:00`;
   }
 
-  private async resolveTransmissionConfigId(invoice: any): Promise<number | null> {
+  private async assertFiscalPeriodOpen(
+    accounting_entity_id: number,
+    issue_date: Date,
+    action: string,
+  ): Promise<void> {
+    const fiscal_date = new Date(
+      Date.UTC(
+        issue_date.getUTCFullYear(),
+        issue_date.getUTCMonth(),
+        issue_date.getUTCDate(),
+      ),
+    );
+    const closed = await this.prisma.fiscal_close_sessions.findFirst({
+      where: {
+        accounting_entity_id,
+        status: 'closed',
+        period_start: { lte: fiscal_date },
+        period_end: { gte: fiscal_date },
+      },
+      select: {
+        id: true,
+        period_year: true,
+        period_month: true,
+        closed_at: true,
+      },
+    });
+
+    if (!closed) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.FISCAL_ACCOUNTING_BLOCKED,
+      `Cannot ${action} fiscal document because the fiscal period is closed.`,
+      {
+        accounting_entity_id,
+        fiscal_close_session_id: closed.id,
+        period_year: closed.period_year,
+        period_month: closed.period_month,
+        issue_date: fiscal_date.toISOString().split('T')[0],
+        closed_at: closed.closed_at,
+      },
+    );
+  }
+
+  private async resolveTransmissionConfigId(
+    invoice: any,
+  ): Promise<number | null> {
     if (!invoice.accounting_entity_id) return null;
     const allowed_statuses = ['testing', 'test_set_passed', 'enabled'] as const;
-    const config = await this.prisma.withoutScope().dian_configurations.findFirst({
+    const config = await this.prisma
+      .withoutScope()
+      .dian_configurations.findFirst({
+        where: {
+          organization_id: invoice.organization_id,
+          accounting_entity_id: invoice.accounting_entity_id,
+          configuration_type: this.configurationType(invoice.invoice_type),
+          operation_mode: 'own_software',
+          enablement_status: { in: [...allowed_statuses] },
+        },
+        select: { id: true },
+        orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
+      });
+    return config?.id ?? null;
+  }
+
+  private async ensureSupportDocumentAccountsPayable(invoice: any) {
+    if (!invoice.supplier_id) return null;
+
+    const net_payable = Math.max(
+      0,
+      Number(invoice.total_amount || 0) -
+        Number(invoice.withholding_amount || 0),
+    );
+    const issue_date = invoice.issue_date
+      ? new Date(invoice.issue_date)
+      : new Date();
+    const due_date = invoice.due_date ? new Date(invoice.due_date) : issue_date;
+
+    const existing = await this.prisma.accounts_payable.findFirst({
       where: {
         organization_id: invoice.organization_id,
-        accounting_entity_id: invoice.accounting_entity_id,
-        configuration_type: this.configurationType(invoice.invoice_type),
-        operation_mode: 'own_software',
-        enablement_status: { in: [...allowed_statuses] },
+        source_type: 'support_document',
+        source_id: invoice.id,
       },
       select: { id: true },
-      orderBy: [{ is_default: 'desc' }, { created_at: 'desc' }],
     });
-    return config?.id ?? null;
+
+    const data = {
+      organization_id: invoice.organization_id,
+      store_id: invoice.store_id,
+      supplier_id: invoice.supplier_id,
+      source_type: 'support_document',
+      source_id: invoice.id,
+      document_number: invoice.invoice_number,
+      original_amount: net_payable,
+      balance: net_payable,
+      currency: invoice.currency || 'COP',
+      issue_date,
+      due_date,
+      status: net_payable > 0 ? 'open' : 'paid',
+      notes: 'Generated from accepted electronic support document',
+    };
+
+    if (existing) {
+      return this.prisma.accounts_payable.update({
+        where: { id: existing.id },
+        data,
+      });
+    }
+
+    return this.prisma.accounts_payable.create({ data });
   }
 
   async validate(id: number) {
     const invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'validated');
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'validate',
+    );
 
     // Basic validation checks
     if (!invoice.invoice_items || invoice.invoice_items.length === 0) {
@@ -190,8 +381,16 @@ export class InvoiceFlowService {
 
   async send(id: number) {
     const invoice = await this.getInvoice(id);
+    await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'sent');
-    this.assertSendImplemented(invoice.invoice_type);
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'send',
+    );
+    if (this.isSupportDocumentType(invoice.invoice_type)) {
+      this.assertSupportDocumentReady(invoice);
+    }
 
     // Build provider data from invoice
     const provider_data: ProviderInvoiceData = {
@@ -202,9 +401,12 @@ export class InvoiceFlowService {
       due_date: invoice.due_date
         ? invoice.due_date.toISOString().split('T')[0]
         : undefined,
-      customer_name: invoice.customer_name || undefined,
-      customer_tax_id: invoice.customer_tax_id || undefined,
-      customer_address: invoice.customer_address,
+      customer_name:
+        invoice.customer_name || invoice.supplier?.name || undefined,
+      customer_tax_id:
+        invoice.customer_tax_id || invoice.supplier?.tax_id || undefined,
+      customer_address:
+        invoice.customer_address || invoice.supplier?.addresses || undefined,
       subtotal_amount: invoice.subtotal_amount.toString(),
       discount_amount: invoice.discount_amount.toString(),
       tax_amount: invoice.tax_amount.toString(),
@@ -228,6 +430,8 @@ export class InvoiceFlowService {
       resolution_number: invoice.resolution?.resolution_number,
       technical_key: invoice.resolution?.technical_key || undefined,
       notes: invoice.notes || undefined,
+      customer_document_type: invoice.supplier?.document_type || undefined,
+      customer_regime: invoice.supplier?.tax_regime || undefined,
       order_reference: invoice.related_invoice?.invoice_number,
       original_invoice_number: invoice.related_invoice?.invoice_number,
       original_invoice_cufe: invoice.related_invoice?.cufe || undefined,
@@ -257,7 +461,10 @@ export class InvoiceFlowService {
     }
 
     // Resolve the correct provider for this store at runtime
-    const provider = await this.resolver.resolve();
+    const provider = await this.resolver.resolve({
+      configuration_type: this.configurationType(invoice.invoice_type),
+    });
+    this.assertProviderSupports(provider, invoice.invoice_type);
     const transmission = await this.fiscal_ledger.ensureInvoiceTransmission({
       invoice,
       provider_data,
@@ -278,6 +485,14 @@ export class InvoiceFlowService {
           );
         }
         provider_response = await provider.sendDebitNote(provider_data);
+      } else if (
+        invoice.invoice_type === 'purchase_invoice' ||
+        invoice.invoice_type === 'support_document'
+      ) {
+        provider_response = await provider.sendSupportDocument!(provider_data);
+      } else if (invoice.invoice_type === 'support_adjustment_note') {
+        provider_response =
+          await provider.sendSupportAdjustmentNote!(provider_data);
       } else {
         provider_response = await provider.sendInvoice(provider_data);
       }
@@ -383,6 +598,9 @@ export class InvoiceFlowService {
     }
 
     await this.fiscal_ledger.markAccepted(transmission.id, provider_response);
+    const is_support_document = this.isSupportDocumentType(
+      invoice.invoice_type,
+    );
 
     // Update invoice with provider response
     const updated = await this.prisma.invoices.update({
@@ -405,18 +623,29 @@ export class InvoiceFlowService {
       include: INVOICE_INCLUDE,
     });
 
-    this.event_emitter.emit('invoice.accepted', {
-      invoice_id: id,
-      invoice_number: updated.invoice_number,
-      tracking_id: provider_response.tracking_id,
-      organization_id: updated.organization_id,
-      store_id: updated.store_id,
-      accounting_entity_id: updated.accounting_entity_id,
-      subtotal_amount: Number(updated.subtotal_amount),
-      tax_amount: Number(updated.tax_amount),
-      total_amount: Number(updated.total_amount),
-      user_id: this.getContext().user_id,
-    });
+    if (is_support_document) {
+      await this.ensureSupportDocumentAccountsPayable(updated);
+    }
+
+    this.event_emitter.emit(
+      is_support_document ? 'support_document.accepted' : 'invoice.accepted',
+      {
+        invoice_id: id,
+        invoice_number: updated.invoice_number,
+        invoice_type: updated.invoice_type,
+        tracking_id: provider_response.tracking_id,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+        accounting_entity_id: updated.accounting_entity_id,
+        subtotal_amount: Number(updated.subtotal_amount),
+        discount_amount: Number(updated.discount_amount),
+        tax_amount: Number(updated.tax_amount),
+        withholding_amount: Number(updated.withholding_amount),
+        total_amount: Number(updated.total_amount),
+        supplier_id: updated.supplier_id,
+        user_id: this.getContext().user_id,
+      },
+    );
 
     this.logger.log(
       `Invoice #${id} (${updated.invoice_number}) accepted by provider`,
@@ -426,7 +655,13 @@ export class InvoiceFlowService {
 
   async accept(id: number) {
     const invoice = await this.getInvoice(id);
+    await this.assertInvoicingAreaActive(invoice);
     this.validateTransition(invoice.status, 'accepted');
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'accept',
+    );
 
     const accepted_transmission =
       await this.fiscal_ledger.findAcceptedInvoiceTransmission(invoice);
@@ -465,17 +700,31 @@ export class InvoiceFlowService {
       include: INVOICE_INCLUDE,
     });
 
-    this.event_emitter.emit('invoice.accepted', {
-      invoice_id: id,
-      invoice_number: updated.invoice_number,
-      organization_id: updated.organization_id,
-      store_id: updated.store_id,
-      accounting_entity_id: updated.accounting_entity_id,
-      subtotal_amount: Number(updated.subtotal_amount),
-      tax_amount: Number(updated.tax_amount),
-      total_amount: Number(updated.total_amount),
-      user_id: this.getContext().user_id,
-    });
+    const is_support_document = this.isSupportDocumentType(
+      updated.invoice_type,
+    );
+    if (is_support_document) {
+      await this.ensureSupportDocumentAccountsPayable(updated);
+    }
+
+    this.event_emitter.emit(
+      is_support_document ? 'support_document.accepted' : 'invoice.accepted',
+      {
+        invoice_id: id,
+        invoice_number: updated.invoice_number,
+        invoice_type: updated.invoice_type,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+        accounting_entity_id: updated.accounting_entity_id,
+        subtotal_amount: Number(updated.subtotal_amount),
+        discount_amount: Number(updated.discount_amount),
+        tax_amount: Number(updated.tax_amount),
+        withholding_amount: Number(updated.withholding_amount),
+        total_amount: Number(updated.total_amount),
+        supplier_id: updated.supplier_id,
+        user_id: this.getContext().user_id,
+      },
+    );
 
     this.logger.log(`Invoice #${id} (${updated.invoice_number}) accepted`);
     return updated;
@@ -484,6 +733,11 @@ export class InvoiceFlowService {
   async reject(id: number) {
     const invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'rejected');
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'reject',
+    );
 
     const updated = await this.prisma.invoices.update({
       where: { id },
@@ -501,6 +755,11 @@ export class InvoiceFlowService {
   async cancel(id: number) {
     const invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'cancelled');
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'cancel',
+    );
 
     const updated = await this.prisma.invoices.update({
       where: { id },
@@ -515,6 +774,11 @@ export class InvoiceFlowService {
   async void(id: number) {
     const invoice = await this.getInvoice(id);
     this.validateTransition(invoice.status, 'voided');
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'void',
+    );
 
     if (invoice.status === 'accepted') {
       throw new VendixHttpException(

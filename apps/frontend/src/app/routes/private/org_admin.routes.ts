@@ -117,6 +117,14 @@ export const orgAdminRoutes: Routes = [
             (m) => m.orgReportsRoutes,
           ),
       },
+      {
+        path: 'fiscal',
+        data: { fiscalApiScope: 'organization' },
+        loadChildren: () =>
+          import('../../private/modules/fiscal-operations/fiscal-operations.routes').then(
+            (m) => m.fiscalOperationsRoutes,
+          ),
+      },
       // Purchase Orders — ORG_ADMIN CRUD
       {
         path: 'purchase-orders',
