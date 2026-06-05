@@ -8,11 +8,10 @@ import {
   untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { map, switchMap } from 'rxjs/operators';
 import { StatsComponent } from '../../../shared/components/stats/stats.component';
-import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../shared/pipes/currency';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { formatDateOnlyUTC } from '../../../shared/utils/date.util';
@@ -28,6 +27,7 @@ import {
   TaxDeclarationLine,
 } from './interfaces/fiscal-operations.interface';
 import { FiscalOperationsService } from './services/fiscal-operations.service';
+import { FiscalOperationsHeaderActionsService } from './services/fiscal-operations-header-actions.service';
 
 type FiscalTab =
   | 'dashboard'
@@ -38,77 +38,16 @@ type FiscalTab =
   | 'history'
   | 'rules';
 
-interface FiscalNavItem {
-  tab: FiscalTab;
-  label: string;
-  route: string;
-  icon: string;
-}
-
 @Component({
   selector: 'app-fiscal-operations',
   standalone: true,
   imports: [
     CommonModule,
-    RouterLink,
     StatsComponent,
-    IconComponent,
     CurrencyPipe,
   ],
   template: `
     <section class="w-full space-y-4 pb-6">
-      <header
-        class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
-      >
-        <div>
-          <h1 class="text-xl font-semibold text-text-primary">
-            Operación fiscal
-          </h1>
-          <p class="text-sm text-text-secondary">
-            Obligaciones, borradores, evidencias y cierre por entidad fiscal.
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="btn btn-secondary btn-sm inline-flex items-center gap-2"
-            (click)="reloadCurrentTab()"
-            [disabled]="loading()"
-          >
-            <app-icon name="refresh-cw" size="16" />
-            Actualizar
-          </button>
-          <button
-            type="button"
-            class="btn btn-primary btn-sm inline-flex items-center gap-2"
-            (click)="generateCurrentMonthObligations()"
-            [disabled]="working()"
-          >
-            <app-icon name="plus-circle" size="16" />
-            Generar mes
-          </button>
-        </div>
-      </header>
-
-      <nav class="overflow-x-auto border-b border-border">
-        <div class="flex min-w-max gap-1">
-          @for (item of navItems; track item.tab) {
-            <a
-              [routerLink]="item.route"
-              class="inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm transition-colors"
-              [class.border-primary]="activeTab() === item.tab"
-              [class.text-primary]="activeTab() === item.tab"
-              [class.border-transparent]="activeTab() !== item.tab"
-              [class.text-text-secondary]="activeTab() !== item.tab"
-            >
-              <app-icon [name]="item.icon" size="16" />
-              {{ item.label }}
-            </a>
-          }
-        </div>
-      </nav>
-
       @if (errorMessage()) {
         <div
           class="rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error"
@@ -868,6 +807,7 @@ export class FiscalOperationsComponent {
   private readonly service = inject(FiscalOperationsService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
+  private readonly headerActions = inject(FiscalOperationsHeaderActionsService);
 
   private readonly routeData = toSignal(
     this.route.data.pipe(
@@ -890,51 +830,6 @@ export class FiscalOperationsComponent {
   readonly working = signal(false);
   readonly errorMessage = signal<string | null>(null);
 
-  readonly navItems: FiscalNavItem[] = [
-    {
-      tab: 'dashboard',
-      label: 'Dashboard',
-      route: '/admin/fiscal/dashboard',
-      icon: 'layout-dashboard',
-    },
-    {
-      tab: 'obligations',
-      label: 'Obligaciones',
-      route: '/admin/fiscal/obligations',
-      icon: 'calendar-days',
-    },
-    {
-      tab: 'declarations',
-      label: 'Declaraciones',
-      route: '/admin/fiscal/declarations',
-      icon: 'file-spreadsheet',
-    },
-    {
-      tab: 'close',
-      label: 'Cierre',
-      route: '/admin/fiscal/close',
-      icon: 'lock',
-    },
-    {
-      tab: 'evidence',
-      label: 'Evidencias',
-      route: '/admin/fiscal/evidence',
-      icon: 'folder-open',
-    },
-    {
-      tab: 'history',
-      label: 'Historial',
-      route: '/admin/fiscal/history',
-      icon: 'history',
-    },
-    {
-      tab: 'rules',
-      label: 'Reglas',
-      route: '/admin/fiscal/rules',
-      icon: 'book',
-    },
-  ];
-
   constructor() {
     effect(() => {
       const tab = this.activeTab();
@@ -942,6 +837,18 @@ export class FiscalOperationsComponent {
         this.loadOverview();
         this.loadTab(tab);
       });
+    });
+
+    // Expose the header actions to the FiscalCoreShell sticky-header.
+    // We capture `this` so the calls always hit the current instance.
+    this.headerActions.register('refresh', () => this.reloadCurrentTab());
+    this.headerActions.register('generate-obligations', () =>
+      this.generateCurrentMonthObligations(),
+    );
+
+    this.destroyRef.onDestroy(() => {
+      this.headerActions.unregister('refresh');
+      this.headerActions.unregister('generate-obligations');
     });
   }
 
