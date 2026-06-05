@@ -18,7 +18,7 @@ export interface StockAdjustment {
   // Relations
   products?: { id: number; name: string; sku: string | null } | null;
   product_variants?: { id: number; sku: string; name: string | null } | null;
-  inventory_locations?: { id: number; name: string } | null;
+  inventory_locations?: { id: number; name: string; store_id?: number | null } | null;
 }
 
 export interface StockTransfer {

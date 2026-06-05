@@ -6,9 +6,10 @@ import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { ProductService } from '@/features/store/services/product.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateTransferDto } from '@/features/store/services/inventory.service';
-import type { StockTransfer, TransferState, Location } from '@/features/store/types';
+import type { StockTransfer, TransferState, Location, Product } from '@/features/store/types';
 import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Badge } from '@/shared/components/badge/badge';
@@ -103,7 +104,6 @@ export default function TransfersScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [transferItems, setTransferItems] = useState<Array<{ product_id: number; quantity: number }>>([]);
   const [productSearchTerm, setProductSearchTerm] = useState('');
-  const [productSearchResults, setProductSearchResults] = useState<Array<{ id: number; name: string; sku?: string; stock: number }>>([]);
 
   // Ubicaciones reales desde el backend
   const { data: locationsData, isLoading: isLoadingLocations } = useQuery({
@@ -115,16 +115,20 @@ export default function TransfersScreen() {
     label: loc.name,
   }));
 
-  // Productos mock (alineado con adjustments.tsx)
-  const ALL_PRODUCTS: Array<{ id: number; name: string; sku?: string; stock: number; category?: string }> = [
-    { id: 101, name: 'Kit de Limpieza Soplete', sku: 'KIT-LIM-SOP', stock: 20, category: 'Kits' },
-    { id: 102, name: 'Kit de Limpieza Industrial', sku: 'KIT-LIM-IND', stock: 15, category: 'Kits' },
-    { id: 103, name: 'Camiseta Básica Blanca', sku: 'CAM-BAS-BLA', stock: 50, category: 'Ropa' },
-    { id: 104, name: 'Pantalón Jean Clásico', sku: 'PAN-JEA-CLA', stock: 30, category: 'Ropa' },
-    { id: 105, name: 'Zapatillas Deportivas', sku: 'ZAP-DEP-001', stock: 25, category: 'Calzado' },
-    { id: 106, name: 'Gorra Ajustable', sku: 'GOR-AJU-001', stock: 100, category: 'Accesorios' },
-    { id: 107, name: 'Mochila Escolar', sku: 'MOC-ESC-001', stock: 15, category: 'Accesorios' },
-  ];
+  // Productos de la tienda actual (filtrados por search)
+  // El backend ya scopea por store_id, así que NO trae productos de otras tiendas
+  const productsQuery = useQuery({
+    queryKey: ['products-search', productSearchTerm],
+    queryFn: () => ProductService.list({
+      page: 1,
+      limit: 50,
+      search: productSearchTerm.trim() || undefined,
+      include_variants: true,
+    }),
+    enabled: createStep === 2,
+    staleTime: 30_000,
+  });
+  const storeProducts: Product[] = productsQuery.data?.data ?? [];
 
   const STEPS = [
     { num: 1, label: 'UBICACIONES' },
@@ -184,7 +188,6 @@ export default function TransfersScreen() {
     setShowDestinationDropdown(false);
     setTransferItems([]);
     setProductSearchTerm('');
-    setProductSearchResults([]);
     setModalVisible(true);
   };
 
@@ -212,25 +215,18 @@ export default function TransfersScreen() {
   const locationLabel = (id: number | null) => (id ? LOCATIONS.find((l) => l.value === id)?.label : '');
 
   const searchProducts = (term: string) => {
+    // Solo actualiza el término; el useQuery refetch automáticamente
     setProductSearchTerm(term);
-    if (term.trim().length < 1) {
-      setProductSearchResults([]);
-      return;
-    }
-    const lower = term.toLowerCase().trim();
-    setProductSearchResults(
-      ALL_PRODUCTS.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(lower);
-        const skuMatch = p.sku ? p.sku.toLowerCase().includes(lower) : false;
-        return nameMatch || skuMatch;
-      }).filter((p) => !transferItems.some((ti) => ti.product_id === p.id))
-    );
   };
 
-  const addProduct = (product: { id: number; name: string }) => {
+  // Filtra los productos del backend excluyendo los ya seleccionados
+  const filteredProducts = storeProducts.filter(
+    (p) => !transferItems.some((ti) => ti.product_id === p.id)
+  );
+
+  const addProduct = (product: Product) => {
     setTransferItems([...transferItems, { product_id: product.id, quantity: 1 }]);
     setProductSearchTerm('');
-    setProductSearchResults([]);
   };
 
   const removeProduct = (productId: number) => {
@@ -474,7 +470,6 @@ export default function TransfersScreen() {
                       onPress={() => { setShowOriginDropdown(!showOriginDropdown); setShowDestinationDropdown(false); }}
                       style={styles.locationDropdownTrigger}
                     >
-                      <Icon name="warehouse" size={18} color={originLocation ? colors.primary : colorScales.gray[400]} />
                       <Text style={[styles.locationDropdownText, !originLocation && styles.locationDropdownPlaceholder, !!originLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {originLocation ? locationLabel(originLocation) : 'Seleccionar origen'}
                       </Text>
@@ -517,7 +512,6 @@ export default function TransfersScreen() {
                       onPress={() => { setShowDestinationDropdown(!showDestinationDropdown); setShowOriginDropdown(false); }}
                       style={styles.locationDropdownTrigger}
                     >
-                      <Icon name="warehouse" size={18} color={destinationLocation ? colors.primary : colorScales.gray[400]} />
                       <Text style={[styles.locationDropdownText, !destinationLocation && styles.locationDropdownPlaceholder, !!destinationLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {destinationLocation ? locationLabel(destinationLocation) : 'Seleccionar destino'}
                       </Text>
@@ -559,7 +553,6 @@ export default function TransfersScreen() {
                   <View style={styles.formGroup}>
                     <Text style={styles.formLabel}>Fecha Esperada</Text>
                     <Pressable style={styles.dateInput} onPress={() => setShowDatePicker(true)}>
-                      <Ionicons name="calendar-outline" size={16} color={colorScales.gray[500]} />
                       <Text style={[styles.dateValue, !expectedDate && styles.datePlaceholder]}>
                         {expectedDate || 'dd/mm/aaaa'}
                       </Text>
@@ -622,18 +615,26 @@ export default function TransfersScreen() {
                         </Pressable>
                       )}
                     </View>
-                    {productSearchResults.length > 0 && (
+                    {productsQuery.isFetching && (
                       <View style={styles.searchResults}>
-                        {productSearchResults.map((p) => (
+                        <Spinner size="sm" />
+                      </View>
+                    )}
+                    {!productsQuery.isFetching && productSearchTerm.length > 0 && filteredProducts.length > 0 && (
+                      <View style={styles.searchResults}>
+                        {filteredProducts.map((p) => (
                           <Pressable key={p.id} style={styles.searchResultItem} onPress={() => addProduct(p)}>
                             <View style={{ flex: 1 }}>
                               <Text style={styles.searchResultName} numberOfLines={1}>{p.name}</Text>
                               <Text style={styles.searchResultSku}>SKU: {p.sku ?? 'N/A'}</Text>
                             </View>
-                            <Text style={styles.searchResultStock}>Stock: {p.stock}</Text>
+                            <Text style={styles.searchResultStock}>Stock: {p.stock_quantity ?? 0}</Text>
                           </Pressable>
                         ))}
                       </View>
+                    )}
+                    {!productsQuery.isFetching && productSearchTerm.length > 0 && filteredProducts.length === 0 && (
+                      <Text style={styles.noResultsText}>No se encontraron productos</Text>
                     )}
                   </View>
 
@@ -641,7 +642,7 @@ export default function TransfersScreen() {
                     <View style={styles.formGroup}>
                       <Text style={styles.formLabel}>Productos seleccionados ({transferItems.length})</Text>
                       {transferItems.map((item) => {
-                        const product = ALL_PRODUCTS.find((p) => p.id === item.product_id);
+                        const product = storeProducts.find((p) => p.id === item.product_id);
                         return (
                           <View key={item.product_id} style={styles.selectedProductCard}>
                             <View style={styles.selectedProductHeader}>
@@ -999,6 +1000,7 @@ const styles = StyleSheet.create({
   searchResultName: { fontSize: 12, fontWeight: '500' as any, color: colorScales.gray[900] },
   searchResultSku: { fontSize: 10, color: colorScales.gray[500], marginTop: 2 },
   searchResultStock: { fontSize: 11, fontWeight: '600' as any, color: colorScales.gray[700] },
+  noResultsText: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], textAlign: 'center', paddingVertical: spacing[3] },
   selectedProductCard: { backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], padding: spacing[2.5], gap: 4 },
   selectedProductHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
   selectedProductName: { flex: 1, fontSize: 13, fontWeight: '700' as any, color: colorScales.gray[900] },

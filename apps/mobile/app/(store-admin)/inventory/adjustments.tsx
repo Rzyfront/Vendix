@@ -9,6 +9,7 @@ import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
 import type { StockAdjustment, AdjustmentType, AdjustmentState, Location } from '@/features/store/types';
 import { ADJUSTMENT_TYPE_LABELS, ADJUSTMENT_STATE_LABELS } from '@/features/store/types';
+import { useTenantStore } from '@/core/store/tenant.store';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
@@ -105,6 +106,7 @@ function AdjustmentCard({ item }: { item: StockAdjustment }) {
 
 export default function AdjustmentsScreen() {
   const queryClient = useQueryClient();
+  const currentStoreId = useTenantStore((s) => s.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
@@ -206,11 +208,20 @@ export default function AdjustmentsScreen() {
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
 
+  // Filtro client-side por tienda actual: el backend aún no acota por store_id en
+  // /store/inventory/adjustments (solo por organization_id), así que descartamos
+  // cualquier ajuste cuya ubicación pertenezca a otra tienda.
+  const storeAdjustments = currentStoreId
+    ? adjustments.filter(
+        (a) => a.inventory_locations?.store_id === Number(currentStoreId),
+      )
+    : adjustments;
+
   const totals = {
-    total: adjustments.length,
-    losses: adjustments.filter((a) => a.adjustment_type === 'loss').length,
-    damages: adjustments.filter((a) => a.adjustment_type === 'damage').length,
-    corrections: adjustments.filter((a) => a.adjustment_type === 'manual_correction').length,
+    total: storeAdjustments.length,
+    losses: storeAdjustments.filter((a) => a.adjustment_type === 'loss').length,
+    damages: storeAdjustments.filter((a) => a.adjustment_type === 'damage').length,
+    corrections: storeAdjustments.filter((a) => a.adjustment_type === 'manual_correction').length,
   };
 
   const handleEndReached = useCallback(() => {
@@ -317,7 +328,7 @@ export default function AdjustmentsScreen() {
       {/* Card contenedor: título + búsqueda + cards de ajustes (con margen y border radius) */}
       <View style={styles.cardContainer}>
       <FlatList
-        data={adjustments}
+        data={storeAdjustments}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
@@ -325,7 +336,7 @@ export default function AdjustmentsScreen() {
             {/* Search + Title row */}
             <View style={styles.searchHeader}>
               <Text style={styles.listTitle}>
-                Ajustes de Inventario ({adjustments.length})
+                Ajustes de Inventario ({storeAdjustments.length})
               </Text>
             </View>
             {/* POS-style search bar — fondo transparente para integrarse con el card */}
