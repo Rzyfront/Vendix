@@ -10,6 +10,8 @@ interface EmptyStateProps extends ViewProps {
   description?: string;
   actionLabel?: string;
   onAction?: () => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: () => void;
   style?: ViewStyle;
 }
 
@@ -40,6 +42,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing[6],
     maxWidth: 320,
   },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
 });
 
 export function EmptyState({
@@ -48,6 +56,8 @@ export function EmptyState({
   description,
   actionLabel,
   onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
   style,
   ...props
 }: EmptyStateProps) {
@@ -70,14 +80,26 @@ export function EmptyState({
           {description}
         </Text>
       )}
-      {actionLabel && onAction && (
-        <Button
-          title={actionLabel}
-          onPress={onAction}
-          variant="primary"
-          size="md"
-        />
-      )}
+      {(actionLabel && onAction) || (secondaryActionLabel && onSecondaryAction) ? (
+        <View style={styles.actionsRow}>
+          {actionLabel && onAction && (
+            <Button
+              title={actionLabel}
+              onPress={onAction}
+              variant="primary"
+              size="md"
+            />
+          )}
+          {secondaryActionLabel && onSecondaryAction && (
+            <Button
+              title={secondaryActionLabel}
+              onPress={onSecondaryAction}
+              variant="outline"
+              size="md"
+            />
+          )}
+        </View>
+      ) : null}
     </View>
   );
 }

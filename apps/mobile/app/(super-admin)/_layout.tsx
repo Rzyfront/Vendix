@@ -52,6 +52,6 @@ export default function SuperAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F9FAFB',
   },
 });

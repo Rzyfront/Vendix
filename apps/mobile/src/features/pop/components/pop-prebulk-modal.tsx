@@ -8,7 +8,8 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
+import { colors } from '@/shared/theme/colors';
 import type { PreBulkData } from '../types';
 
 interface PopPrebulkModalProps {
@@ -58,23 +59,26 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
   const isValid = name.trim().length > 0 && code.trim().length > 0;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <View style={styles.headerText}>
-              <Text style={styles.title}>Agregar Producto Nuevo</Text>
-              <Text style={styles.subtitle}>Se creará en tu catálogo al confirmar la orden</Text>
+            <View style={styles.headerTitle}>
+              <Icon name="info" size={22} color={colors.primary} />
+              <View style={styles.headerText}>
+                <Text style={styles.title}>Agregar Producto Nuevo</Text>
+                <Text style={styles.subtitle}>Se creará en tu catálogo al confirmar la orden</Text>
+              </View>
             </View>
             <TouchableOpacity onPress={onCancel} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#6b7280" />
+              <Icon name="x" size={22} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
             {/* Info banner */}
             <View style={styles.infoBanner}>
-              <Ionicons name="information-circle" size={18} color="#2563eb" />
+              <Icon name="info" size={18} color="#2563eb" />
               <View style={styles.infoBannerText}>
                 <Text style={styles.infoBannerTitle}>Producto nuevo</Text>
                 <Text style={styles.infoBannerDesc}>
@@ -155,7 +159,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
             {/* Total preview */}
             <View style={styles.totalPreview}>
               <View style={styles.totalPreviewLeft}>
-                <Ionicons name="calculator-outline" size={16} color="#6b7280" />
+                <Icon name="calculator" size={16} color="#6b7280" />
                 <Text style={styles.totalPreviewLabel}>Total estimado</Text>
               </View>
               <Text style={styles.totalPreviewValue}>${totalPreview.toLocaleString()}</Text>
@@ -167,7 +171,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
             <Text style={styles.label}>Cantidad</Text>
             <View style={styles.qtyRow}>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => setQuantity(String(Math.max(1, Number(quantity) - 1)))}>
-                <Ionicons name="remove" size={20} color="#374151" />
+                <Icon name="minus" size={20} color="#374151" />
               </TouchableOpacity>
               <TextInput
                 style={styles.qtyInput}
@@ -176,7 +180,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
                 keyboardType="numeric"
               />
               <TouchableOpacity style={styles.qtyBtn} onPress={() => setQuantity(String(Number(quantity) + 1))}>
-                <Ionicons name="add" size={20} color="#374151" />
+                <Icon name="plus" size={20} color="#374151" />
               </TouchableOpacity>
             </View>
 
@@ -201,7 +205,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
               onPress={handleConfirm}
               disabled={!isValid}
             >
-              <Ionicons name="cart" size={16} color="#fff" />
+              <Icon name="shopping-cart" size={16} color="#fff" />
               <Text style={styles.confirmText}>Agregar al carrito</Text>
             </TouchableOpacity>
           </View>
@@ -212,10 +216,11 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '90%' },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  modal: { backgroundColor: '#fff', borderRadius: 16, width: '100%', maxWidth: 480, maxHeight: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  headerText: { flex: 1, marginRight: 12 },
+  headerTitle: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flex: 1, marginRight: 12 },
+  headerText: { flex: 1 },
   closeBtn: { padding: 4 },
   title: { fontSize: 16, fontWeight: '700', color: '#111827' },
   subtitle: { fontSize: 11, color: '#6b7280', marginTop: 2 },
@@ -230,7 +235,7 @@ const styles = StyleSheet.create({
   required: { color: '#ef4444' },
   input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#111827', backgroundColor: '#fff' },
   textArea: { minHeight: 60, textAlignVertical: 'top' },
-  row2: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  row2: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4 },
   row2Field: { flex: 1 },
   priceInputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10, backgroundColor: '#fff' },
   pricePrefix: { fontSize: 15, fontWeight: '600', color: '#6b7280', marginRight: 4 },
@@ -246,6 +251,7 @@ const styles = StyleSheet.create({
   cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', backgroundColor: '#fff' },
   cancelText: { fontSize: 14, fontWeight: '700', color: '#374151' },
   confirmBtn: { flex: 1, flexDirection: 'row', paddingVertical: 12, borderRadius: 12, backgroundColor: '#22C55E', alignItems: 'center', justifyContent: 'center', gap: 6, shadowColor: '#22C55E', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4 },
-  confirmBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 },
+  // Disabled: verde opaco (no gris) — como la web cuando faltan datos obligatorios
+  confirmBtnDisabled: { backgroundColor: 'rgba(34,197,94,0.4)', shadowOpacity: 0, opacity: 0.6 },
   confirmText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });

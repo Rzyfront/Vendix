@@ -10,3 +10,5 @@ export * from './expense.types';
 export * from './analytics.types';
 export * from './accounting.types';
 export * from './settings.types';
+export * from './review.types';
+export * from './data-collection.types';

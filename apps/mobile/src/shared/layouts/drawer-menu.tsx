@@ -29,7 +29,14 @@ const storeMenuItems: MenuItem[] = [
       { label: 'Proveedores', icon: 'store', href: '/(store-admin)/inventory/suppliers' },
     ],
   },
-  { label: 'Clientes', icon: 'users', href: '/(store-admin)/customers' },
+  {
+    label: 'Clientes', icon: 'users', href: '/(store-admin)/customers',
+    children: [
+      { label: 'Todos los Clientes', icon: 'users', href: '/(store-admin)/customers' },
+      { label: 'Reseñas', icon: 'star', href: '/(store-admin)/customers/reviews' },
+      { label: 'Recolección de Datos', icon: 'clipboard-list', href: '/(store-admin)/customers/data-collection/fields' },
+    ],
+  },
   { label: 'Tienda en línea', icon: 'shopping-bag', href: '/(store-admin)/online-store' },
   { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
   { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },

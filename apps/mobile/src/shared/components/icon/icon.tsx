@@ -80,6 +80,12 @@ import {
   Circle,
   PackageCheck,
   PackagePlus,
+  ScanLine,
+  CheckSquare,
+  Square,
+  CheckCircle,
+  Flag,
+  Star,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -164,6 +170,12 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   circle: Circle,
   'package-check': PackageCheck,
   'package-plus': PackagePlus,
+  'scan-line': ScanLine,
+  'check-square': CheckSquare,
+  square: Square,
+  'check-circle': CheckCircle,
+  flag: Flag,
+  star: Star,
 };
 
 interface IconProps {

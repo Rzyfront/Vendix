@@ -89,6 +89,6 @@ export default function StoreAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#F9FAFB',
   },
 });

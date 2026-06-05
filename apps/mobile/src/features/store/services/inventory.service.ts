@@ -208,13 +208,17 @@ export interface LocationQuery {
   limit?: number;
 }
 
-export interface CreateAdjustmentDto {
-  product_id: string;
-  description: string;
+export interface CreateAdjustmentItem {
+  product_id: number;
   type: AdjustmentType;
-  quantity: number;
-  reason?: string;
-  location_id?: string;
+  quantity_after: number;
+  reason_code?: string;
+  description?: string;
+}
+
+export interface CreateAdjustmentDto {
+  location_id: number;
+  items: CreateAdjustmentItem[];
 }
 
 export interface CreateTransferDto {

@@ -1,61 +1,69 @@
 import { type ReactNode } from 'react';
 import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
 import { colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import { Card } from '../card/card';
 import { Icon } from '../icon/icon';
 
 interface StatsCardProps extends ViewProps {
   label: string;
   value: string | number;
   icon?: ReactNode | string;
+  description?: string;
+  iconBg?: string;
+  iconColor?: string;
   trend?: { value: number; positive: boolean };
   style?: ViewStyle;
 }
 
 const styles = StyleSheet.create({
-  cardContent: {
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[3],
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing[2],
+  card: {
+    width: 150,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 1,
   },
   label: {
-    flex: 1,
-    fontSize: typography.fontSize.xs,
-    fontFamily: typography.fontFamily,
+    fontSize: 9,
+    fontWeight: '700',
     color: colorScales.gray[500],
-    fontWeight: '500',
-    letterSpacing: 0.2,
-  },
-  iconContainer: {
-    width: 26,
-    height: 26,
-    borderRadius: borderRadius.full,
-    backgroundColor: colorScales.green[50],
-    alignItems: 'center',
-    justifyContent: 'center',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    marginTop: 2,
+    maxWidth: '85%',
   },
   value: {
-    fontSize: typography.fontSize.lg,
-    fontFamily: typography.fontFamily,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: colorScales.gray[900],
-    marginTop: spacing[1.5],
-    lineHeight: 22,
+    marginTop: 2,
+  },
+  description: {
+    fontSize: 9,
+    fontWeight: '500',
+    color: '#059669',
+    marginTop: 1,
+  },
+  iconContainer: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   trendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing[0.5],
+    marginTop: 1,
     flexWrap: 'nowrap',
   },
   trendText: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: typography.fontFamily,
+    fontSize: 9,
     fontWeight: '600',
   },
   trendPositive: {
@@ -65,8 +73,7 @@ const styles = StyleSheet.create({
     color: colorScales.red[600],
   },
   trendLabel: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: typography.fontFamily,
+    fontSize: 9,
     color: colorScales.gray[400],
     marginLeft: spacing[1],
     flexShrink: 1,
@@ -77,51 +84,55 @@ export function StatsCard({
   label,
   value,
   icon,
+  description,
+  iconBg = '#dbeafe',
+  iconColor = '#2563eb',
   trend,
   style,
   ...props
 }: StatsCardProps) {
   const iconContent =
     typeof icon === 'string'
-      ? <Icon name={icon} size={14} color={colorScales.green[600]} />
+      ? <Icon name={icon} size={12} color={iconColor} />
       : icon;
 
   return (
-    <Card style={style} {...props}>
-      <View style={styles.cardContent}>
-        <View style={styles.topRow}>
-          <Text style={styles.label} numberOfLines={1} ellipsizeMode="tail">
-            {label}
-          </Text>
-          {iconContent && (
-            <View style={styles.iconContainer}>
-              {iconContent}
-            </View>
-          )}
+    <View style={[styles.card, style]} {...props}>
+      {iconContent && (
+        <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
+          {iconContent}
         </View>
-        <Text
-          style={styles.value}
-          numberOfLines={1}
-          adjustsFontSizeToFit
-          minimumFontScale={0.7}
-        >
-          {value}
+      )}
+      <Text style={styles.label} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text
+        style={styles.value}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+      >
+        {value}
+      </Text>
+      {description && (
+        <Text style={styles.description} numberOfLines={1}>
+          {description}
         </Text>
-        {trend && (
-          <View style={styles.trendRow}>
-            <Text
-              style={[styles.trendText, trend.positive ? styles.trendPositive : styles.trendNegative]}
-              numberOfLines={1}
-            >
-              {trend.positive ? '+' : ''}
-              {trend.value}%
-            </Text>
-            <Text style={styles.trendLabel} numberOfLines={1}>
-              vs anterior
-            </Text>
-          </View>
-        )}
-      </View>
-    </Card>
+      )}
+      {trend && (
+        <View style={styles.trendRow}>
+          <Text
+            style={[styles.trendText, trend.positive ? styles.trendPositive : styles.trendNegative]}
+            numberOfLines={1}
+          >
+            {trend.positive ? '+' : ''}
+            {trend.value}%
+          </Text>
+          <Text style={styles.trendLabel} numberOfLines={1}>
+            vs mes pasado
+          </Text>
+        </View>
+      )}
+    </View>
   );
 }

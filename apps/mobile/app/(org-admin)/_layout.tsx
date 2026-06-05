@@ -51,6 +51,6 @@ export default function OrgAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F9FAFB',
   },
 });

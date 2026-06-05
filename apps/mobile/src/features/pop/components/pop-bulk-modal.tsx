@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Modal, ScrollView, StyleSheet, ActivityIndicator, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
+import { colors } from '@/shared/theme/colors';
 import * as DocumentPicker from 'expo-document-picker';
 import * as XLSX from 'xlsx';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 interface ImportedItem {
@@ -166,17 +167,20 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <View style={styles.overlay}>
         <View style={styles.modal}>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitle}>
-              <Ionicons name="cloud-upload-outline" size={22} color="#22C55E" />
-              <Text style={styles.title}>Carga Masiva al Pedido</Text>
+              <Icon name="upload" size={22} color={colors.primary} />
+              <View style={styles.headerText}>
+                <Text style={styles.title}>Carga Masiva al Pedido</Text>
+                <Text style={styles.subtitle}>Importa productos desde un archivo Excel al pedido de compra</Text>
+              </View>
             </View>
             <TouchableOpacity onPress={handleClose}>
-              <Ionicons name="close" size={22} color="#6b7280" />
+              <Icon name="x" size={22} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
@@ -187,7 +191,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                 <View style={styles.stepItem}>
                   <View style={[styles.stepCircle, idx <= currentStep && styles.stepCircleActive, idx < currentStep && styles.stepCircleDone]}>
                     {idx < currentStep ? (
-                      <Ionicons name="checkmark" size={12} color="#fff" />
+                      <Icon name="check" size={12} color="#fff" />
                     ) : (
                       <Text style={[styles.stepNumber, idx === currentStep && styles.stepNumberActive]}>{idx + 1}</Text>
                     )}
@@ -205,7 +209,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
               <View style={styles.stepContainer}>
                 {/* Info banner */}
                 <View style={styles.infoBanner}>
-                  <Ionicons name="information-circle" size={16} color="#2563eb" />
+                  <Icon name="info" size={16} color="#2563eb" />
                   <View style={styles.infoBannerText}>
                     <Text style={styles.infoBannerTitle}>Prepara tu archivo</Text>
                     <Text style={styles.infoBannerDesc}>
@@ -214,38 +218,40 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                   </View>
                 </View>
 
-                {/* Template download cards */}
+                {/* Template download cards — stacked vertical (como la web en mobile) */}
                 <Text style={styles.sectionLabel}>1. Descarga una plantilla</Text>
                 <View style={styles.templateRow}>
                   <TouchableOpacity style={styles.templateCard} onPress={() => downloadTemplate('quick')} activeOpacity={0.7}>
                     <View style={[styles.templateIconWrap, { backgroundColor: '#e0e7ff' }]}>
-                      <Ionicons name="checkmark-circle" size={18} color="#4f46e5" />
+                      <Icon name="check-circle" size={16} color="#4f46e5" />
                     </View>
                     <View style={styles.templateText}>
                       <Text style={[styles.templateTitle, { color: '#1e1b4b' }]}>Plantilla Rápida</Text>
-                      <Text style={[styles.templateDesc, { color: '#4338ca' }]}>Solo campos indispensables</Text>
-                    </View>
-                    <View style={[styles.downloadBtn, { backgroundColor: '#e0e7ff' }]}>
-                      <Ionicons name="download-outline" size={14} color="#4f46e5" />
+                      <Text style={[styles.templateDesc, { color: '#4338ca' }]}>Solo campos indispensables: Nombre, SKU, Tipo, Precio Venta, Precio Compra y Cantidad Inicial</Text>
+                      <View style={styles.downloadLabel}>
+                        <Icon name="download" size={12} color="#4f46e5" />
+                        <Text style={[styles.downloadLabelText, { color: '#4f46e5' }]}>DESCARGAR EXCEL</Text>
+                      </View>
                     </View>
                   </TouchableOpacity>
-                  <TouchableOpacity style={[styles.templateCard, { borderColor: '#bbf7d0' }]} onPress={() => downloadTemplate('complete')} activeOpacity={0.7}>
+                  <TouchableOpacity style={[styles.templateCard, { borderColor: '#bbf7d0', backgroundColor: '#f0fdf4' }]} onPress={() => downloadTemplate('complete')} activeOpacity={0.7}>
                     <View style={[styles.templateIconWrap, { backgroundColor: '#dcfce7' }]}>
-                      <Ionicons name="document-text" size={18} color="#16a34a" />
+                      <Icon name="file-text" size={16} color="#16a34a" />
                     </View>
                     <View style={styles.templateText}>
                       <Text style={[styles.templateTitle, { color: '#14532d' }]}>Plantilla Completa</Text>
-                      <Text style={[styles.templateDesc, { color: '#16a34a' }]}>Todos los datos disponibles</Text>
-                    </View>
-                    <View style={[styles.downloadBtn, { backgroundColor: '#dcfce7' }]}>
-                      <Ionicons name="download-outline" size={14} color="#16a34a" />
+                      <Text style={[styles.templateDesc, { color: '#16a34a' }]}>Todos los datos: Bodega, Marca, Categorías, Peso, Ofertas, etc.</Text>
+                      <View style={styles.downloadLabel}>
+                        <Icon name="download" size={12} color="#16a34a" />
+                        <Text style={[styles.downloadLabelText, { color: '#16a34a' }]}>DESCARGAR EXCEL</Text>
+                      </View>
                     </View>
                   </TouchableOpacity>
                 </View>
 
                 {/* Warning banner */}
                 <View style={styles.warningBanner}>
-                  <Ionicons name="alert-triangle" size={14} color="#d97706" />
+                  <Icon name="alert-triangle" size={14} color="#d97706" />
                   <Text style={styles.warningText}>
                     <Text style={{ fontWeight: '600' }}>Importante:</Text> Los productos nuevos no existentes en el catálogo se crearán automáticamente al confirmar la orden.
                   </Text>
@@ -256,13 +262,13 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                 <TouchableOpacity style={styles.dropZone} onPress={handlePickFile} activeOpacity={0.7}>
                   {selectedFile ? (
                     <>
-                      <Ionicons name="document-text-outline" size={36} color="#22C55E" />
+                      <Icon name="file-spreadsheet" size={36} color="#22C55E" />
                       <Text style={styles.fileName}>{selectedFile.name}</Text>
                       <Text style={styles.fileSize}>{formatFileSize(selectedFile.size)}</Text>
                     </>
                   ) : (
                     <>
-                      <Ionicons name="cloud-upload-outline" size={36} color="#9ca3af" />
+                      <Icon name="upload-cloud" size={36} color="#9ca3af" />
                       <Text style={styles.dropTitle}>Arrastra tu archivo Excel aquí</Text>
                       <Text style={styles.dropDesc}>o haz clic para seleccionar · .xlsx, .xls, .csv · Máximo 5 MB</Text>
                     </>
@@ -334,13 +340,13 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                             <View style={styles.issuesList}>
                               {item.warnings.map((w, wi) => (
                                 <View key={wi} style={styles.issueRow}>
-                                  <Ionicons name="alert-triangle" size={12} color="#d97706" />
+                                  <Icon name="alert-triangle" size={12} color="#d97706" />
                                   <Text style={styles.issueWarning}>{w}</Text>
                                 </View>
                               ))}
                               {item.errors.map((e, ei) => (
                                 <View key={ei} style={styles.issueRow}>
-                                  <Ionicons name="close-circle" size={12} color="#dc2626" />
+                                  <Icon name="x-circle" size={12} color="#dc2626" />
                                   <Text style={styles.issueError}>{e}</Text>
                                 </View>
                               ))}
@@ -359,7 +365,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
               <View style={styles.stepContainer}>
                 {/* Success banner */}
                 <View style={styles.successBanner}>
-                  <Ionicons name="checkmark-circle" size={24} color="#16a34a" />
+                  <Icon name="check-circle" size={24} color="#16a34a" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.successTitle}>Productos importados al pedido</Text>
                     <Text style={styles.successDesc}>
@@ -370,7 +376,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
 
                 {/* Catalog notice */}
                 <View style={styles.catalogNotice}>
-                  <Ionicons name="cube-outline" size={20} color="#16a34a" />
+                  <Icon name="package" size={20} color="#16a34a" />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.catalogTitle}>Productos nuevos serán creados en el catálogo</Text>
                     <Text style={styles.catalogDesc}>
@@ -382,7 +388,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                 {/* Imported items summary */}
                 <View style={styles.importSummary}>
                   <View style={styles.importHeader}>
-                    <Ionicons name="list-outline" size={16} color="#374151" />
+                    <Icon name="list" size={16} color="#374151" />
                     <Text style={styles.importHeaderText}>Productos Importados</Text>
                   </View>
                   <ScrollView style={styles.importList} nestedScrollEnabled>
@@ -411,7 +417,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                 </TouchableOpacity>
                 {selectedFile && (
                   <TouchableOpacity style={styles.primaryBtn} onPress={handleAnalyzeFile}>
-                    <Ionicons name="search-outline" size={16} color="#fff" />
+                    <Icon name="search" size={16} color="#fff" />
                     <Text style={styles.primaryBtnText}>Analizar Archivo</Text>
                   </TouchableOpacity>
                 )}
@@ -420,7 +426,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
             {(currentStep === 1 && !isProcessing) && (
               <>
                 <TouchableOpacity style={styles.cancelBtn} onPress={() => setCurrentStep(0)}>
-                  <Ionicons name="arrow-back" size={16} color="#374151" />
+                  <Icon name="arrow-left" size={16} color="#374151" />
                   <Text style={styles.cancelText}>Atrás</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.cancelBtn} onPress={handleClose}>
@@ -428,7 +434,7 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
                 </TouchableOpacity>
                 {analysisResult && totalValid > 0 && (
                   <TouchableOpacity style={styles.primaryBtn} onPress={handleConfirmImport}>
-                    <Ionicons name="cube-outline" size={16} color="#fff" />
+                    <Icon name="shopping-cart" size={16} color="#fff" />
                     <Text style={styles.primaryBtnText}>Agregar al pedido ({totalValid})</Text>
                   </TouchableOpacity>
                 )}
@@ -447,11 +453,13 @@ export default function PopBulkModal({ visible, onClose, onDataLoaded }: PopBulk
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '92%' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  headerTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  modal: { backgroundColor: '#fff', borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '92%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
+  header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
+  headerTitle: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flex: 1, marginRight: 12 },
+  headerText: { flex: 1 },
   title: { fontSize: 16, fontWeight: '700', color: '#111827' },
+  subtitle: { fontSize: 12, color: '#6b7280', marginTop: 2 },
 
   // Steps
   stepsRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#f9fafb', borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
@@ -479,14 +487,16 @@ const styles = StyleSheet.create({
 
   sectionLabel: { fontSize: 11, fontWeight: '600', color: '#374151', marginTop: 2 },
 
-  // Template cards
-  templateRow: { flexDirection: 'row', gap: 8 },
-  templateCard: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#c7d2fe', backgroundColor: '#eef2ff', borderRadius: 8, padding: 10 },
-  templateIconWrap: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  templateText: { flex: 1 },
-  templateTitle: { fontSize: 10, fontWeight: '700' },
-  templateDesc: { fontSize: 8, marginTop: 1 },
-  downloadBtn: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  // Template cards — stacked vertical (como la web en mobile, grid-cols-1)
+  templateRow: { flexDirection: 'column', gap: 8 },
+  templateCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: '#c7d2fe', backgroundColor: '#eef2ff', borderRadius: 8, padding: 12 },
+  templateIconWrap: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  templateText: { flex: 1, minWidth: 0 },
+  templateTitle: { fontSize: 12, fontWeight: '700' },
+  templateDesc: { fontSize: 10, marginTop: 2, lineHeight: 14 },
+  downloadLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  downloadLabelText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  downloadBtn: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
 
   // Warning banner
   warningBanner: { flexDirection: 'row', gap: 8, backgroundColor: '#fffbeb', borderRadius: 8, borderWidth: 1, borderColor: '#fde68a', padding: 10, alignItems: 'flex-start' },

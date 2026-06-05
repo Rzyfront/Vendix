@@ -83,7 +83,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[3],
-    backgroundColor: colors.background,
+    backgroundColor: 'transparent',
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[100],
   },
