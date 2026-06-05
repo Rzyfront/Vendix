@@ -33,6 +33,7 @@ import type {
 import type { ScanResult } from '../../../src/features/pop/components/pop-invoice-scanner';
 import { InventoryService } from '../../../src/features/store/services/inventory.service';
 import { ProductService } from '../../../src/features/store/services/product.service';
+import { borderRadius, colorScales, colors } from '../../../src/shared/theme';
 
 const LOCATION_TYPE_LABELS: Record<string, string> = {
   warehouse: 'Almacen / Bodega',
@@ -550,22 +551,24 @@ export default function PopScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f9fafb' },
+  // Fondo de la app — mismo gris que customers.tsx
+  container: { flex: 1, backgroundColor: colorScales.gray[50] },
   scrollArea: { flex: 1 },
   scrollContent: { paddingBottom: 70 },
-  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f9fafb' },
-  loadingText: { marginTop: 12, fontSize: 15, color: '#6b7280' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
+  loadingText: { marginTop: 12, fontSize: 15, color: colorScales.gray[500] },
+  // Modal — mismo overlay y card que customers.tsx
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  modalContent: { backgroundColor: '#fff', borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111827' },
+  modalContent: { backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], width: '100%', maxWidth: 520, maxHeight: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: colorScales.gray[200] },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: colorScales.gray[900] },
   modalForm: { maxHeight: 400 },
   modalFormContent: { paddingHorizontal: 20, paddingVertical: 16 },
-  formLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6, marginTop: 12 },
-  formInput: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#111827', backgroundColor: '#fff' },
-  modalFooter: { flexDirection: 'row', gap: 12, padding: 20, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center' },
-  cancelText: { fontSize: 15, fontWeight: '600', color: '#374151' },
-  confirmBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, backgroundColor: '#22C55E', alignItems: 'center' },
-  confirmText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  formLabel: { fontSize: 13, fontWeight: '600', color: colorScales.gray[700], marginBottom: 6, marginTop: 12 },
+  formInput: { borderWidth: 1, borderColor: colorScales.gray[300], borderRadius: borderRadius.lg, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: colorScales.gray[900], backgroundColor: colors.background },
+  modalFooter: { flexDirection: 'row', gap: 12, padding: 20, borderTopWidth: 1, borderTopColor: colorScales.gray[200] },
+  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[300], alignItems: 'center', backgroundColor: colors.background },
+  cancelText: { fontSize: 15, fontWeight: '600', color: colorScales.gray[700] },
+  confirmBtn: { flex: 1, paddingVertical: 14, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center' },
+  confirmText: { fontSize: 15, fontWeight: '700', color: colors.background },
 });

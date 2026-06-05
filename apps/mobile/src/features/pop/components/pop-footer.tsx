@@ -26,13 +26,17 @@ export default function PopFooter({
   isLoading,
 }: PopFooterProps) {
   const insets = useSafeAreaInsets();
+  // Estado "vacío" — alinea con la web: los botones del cart se ven opacos hasta
+  // que se agregue al menos un producto a la orden de compra.
+  const isEmpty = itemCount === 0;
+  const isDisabled = isEmpty || isLoading;
 
   return (
     <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 8) + 10 }]}>
       {/* Row 1: Cart Summary + View Order Button */}
       <View style={styles.summaryRow}>
         <View style={styles.cartSummary}>
-          <View style={styles.cartIconWrapper}>
+          <View style={[styles.cartIconWrapper, isEmpty && styles.cartIconWrapperDisabled]}>
             <Icon name="shopping-bag" size={20} color="#FFFFFF" />
             {itemCount > 0 && (
               <View style={styles.cartBadge}>
@@ -49,9 +53,9 @@ export default function PopFooter({
         </View>
 
         <Pressable
-          style={styles.viewOrderBtn}
+          style={[styles.viewOrderBtn, isEmpty && styles.btnOpaque]}
           onPress={onOpenCart}
-          disabled={itemCount === 0}
+          disabled={isEmpty}
         >
           <Text style={styles.viewOrderText}>Ver orden</Text>
           <Icon name="chevron-up" size={16} color={colorScales.gray[500]} />
@@ -61,17 +65,17 @@ export default function PopFooter({
       {/* Row 2: Borrador + Crear */}
       <View style={styles.actionsRow}>
         <Pressable
-          style={[styles.actionBtn, styles.draftBtn]}
+          style={[styles.actionBtn, styles.draftBtn, isDisabled && styles.btnOpaque]}
           onPress={onSaveDraft}
-          disabled={itemCount === 0 || isLoading}
+          disabled={isDisabled}
         >
           <Icon name="save" size={16} color={colorScales.gray[700]} />
           <Text style={styles.draftText}>Borrador</Text>
         </Pressable>
         <Pressable
-          style={[styles.actionBtn, styles.createBtn]}
+          style={[styles.actionBtn, styles.createBtn, isDisabled && styles.btnOpaque]}
           onPress={onCreateOrder}
-          disabled={itemCount === 0 || isLoading}
+          disabled={isDisabled}
         >
           <Icon name="file-plus" size={16} color="#FFFFFF" />
           <Text style={styles.createText}>Crear</Text>
@@ -80,9 +84,9 @@ export default function PopFooter({
 
       {/* Row 3: Crear + Recibir (full-width, green) */}
       <Pressable
-        style={[styles.actionBtn, styles.receiveBtn, styles.receiveBtnFull]}
+        style={[styles.actionBtn, styles.receiveBtn, styles.receiveBtnFull, isDisabled && styles.btnOpaque]}
         onPress={onCreateAndReceive}
-        disabled={itemCount === 0 || isLoading}
+        disabled={isDisabled}
       >
         <Icon name="package-check" size={18} color="#FFFFFF" />
         <Text style={styles.receiveText}>Crear + Recibir</Text>
@@ -92,18 +96,19 @@ export default function PopFooter({
 }
 
 const styles = StyleSheet.create({
+  // Contenedor del footer — mismo estilo de card que customers.tsx
   footer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
     zIndex: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    backgroundColor: colors.background,
     borderTopWidth: 1,
     borderTopColor: colorScales.gray[200],
-    paddingHorizontal: 12,
-    paddingTop: 10,
-    gap: 10,
+    paddingHorizontal: spacing[3],
+    paddingTop: spacing[2.5],
+    gap: spacing[2.5],
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -2 },
     shadowOpacity: 0.1,
@@ -123,6 +128,11 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
+  // Estado "opaco": el botón mantiene su color original y solo baja la opacidad
+  // (alineado con la web — los botones del cart se ven deshabilitados sin perder su tono)
+  btnOpaque: {
+    opacity: 0.45,
+  },
   cartIconWrapper: {
     position: 'relative',
     flexShrink: 0,
@@ -132,6 +142,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  cartIconWrapperDisabled: {
+    // Mantiene el verde primario, solo baja la opacidad
+    opacity: 0.45,
   },
   cartBadge: {
     position: 'absolute',
@@ -219,12 +233,12 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   receiveBtn: {
-    backgroundColor: '#22C55E',
+    backgroundColor: colors.primary,
   },
   receiveBtnFull: {
     width: '100%',
     height: 46,
-    shadowColor: '#22C55E',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,

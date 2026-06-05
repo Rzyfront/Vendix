@@ -9,14 +9,13 @@ import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
 import type { StockAdjustment, AdjustmentType, AdjustmentState, Location } from '@/features/store/types';
 import { ADJUSTMENT_TYPE_LABELS, ADJUSTMENT_STATE_LABELS } from '@/features/store/types';
-import { Badge } from '@/shared/components/badge/badge';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { Icon } from '@/shared/components/icon/icon';
-import { formatRelative } from '@/shared/utils/date';
+import { formatDate } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
 
 const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
@@ -50,27 +49,54 @@ const STATS: StatItem[] = [
   { title: 'Correcciones', value: 0, smallText: 'Ajustes de inventario', iconName: 'create-outline', bgColor: '#dcfce7', iconColor: '#16a34a' },
 ];
 
+// (Los colores de las stat cards usan hex legacy para el badge/icono del header — no son parte de los contenedores)
+
 import { Ionicons } from '@expo/vector-icons';
 
 function AdjustmentCard({ item }: { item: StockAdjustment }) {
-  const productName = item.products?.name ?? item.description ?? '';
+  // Fallbacks seguros para evitar "[object Object]" si el backend devuelve un objeto en campos string
+  const productName =
+    typeof item.products?.name === 'string'
+      ? item.products.name
+      : typeof item.description === 'string'
+      ? item.description
+      : 'Producto sin nombre';
+  const locationName =
+    typeof item.inventory_locations?.name === 'string'
+      ? item.inventory_locations.name
+      : 'Sin ubicación';
+  const typeLabel = ADJUSTMENT_TYPE_LABELS[item.adjustment_type] ?? 'Ajuste';
+  const dateLabel = formatDate(item.created_at);
   return (
     <View style={styles.card}>
       <View style={styles.cardBody}>
+        {/* Fila 1: Título + badge de tipo (alineado con la web) */}
         <View style={styles.cardHeader}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle} numberOfLines={1}>{item.description ?? productName}</Text>
-            <Text style={styles.cardSubtitle}>{productName}</Text>
-          </View>
-          <View style={styles.cardBadges}>
-            <Badge label={ADJUSTMENT_TYPE_LABELS[item.adjustment_type]} variant="info" size="sm" />
-            <Badge label={ADJUSTMENT_STATE_LABELS[item.approved_at ? 'applied' : 'pending']} variant={item.approved_at ? 'success' : 'warning'} size="sm" />
+          <Text style={styles.cardTitle} numberOfLines={1}>{productName}</Text>
+          <View style={styles.cardBadge}>
+            <Text style={styles.cardBadgeText}>{typeLabel}</Text>
           </View>
         </View>
-        <View style={styles.cardMeta}>
-          <Text style={styles.metaText}>Qty: {item.quantity_change}</Text>
-          {item.inventory_locations?.name && <Text style={styles.metaText}>{item.inventory_locations.name}</Text>}
-          <Text style={[styles.metaText, { marginLeft: 'auto' }]}>{formatRelative(item.created_at)}</Text>
+
+        {/* Fila 2: Grid 2 columnas — FECHA | UBICACIÓN (como la web) */}
+        <View style={styles.cardGrid}>
+          <View style={styles.cardGridItem}>
+            <Text style={styles.cardGridLabel}>FECHA</Text>
+            <Text style={styles.cardGridValue}>{dateLabel}</Text>
+          </View>
+          <View style={styles.cardGridItem}>
+            <Text style={styles.cardGridLabel}>UBICACIÓN</Text>
+            <Text style={styles.cardGridValue} numberOfLines={1}>{locationName}</Text>
+          </View>
+        </View>
+
+        {/* Fila 3: Footer con CAMBIO + pin (como la web) */}
+        <View style={styles.cardFooter}>
+          <View style={styles.cardFooterLeft}>
+            <Text style={styles.cardFooterLabel}>CAMBIO</Text>
+            <Text style={styles.cardFooterValue}>{Number(item.quantity_change ?? 0)}</Text>
+          </View>
+          <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
         </View>
       </View>
     </View>
@@ -271,60 +297,62 @@ export default function AdjustmentsScreen() {
 
   return (
     <View style={styles.screen}>
+      {/* Stats: ancho completo de la pantalla (fuera del card) */}
+      <View style={styles.statsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
+          {STATS.map((stat, idx) => {
+            const vals = [totals.total, totals.losses, totals.damages, totals.corrections];
+            return (
+              <View key={idx} style={styles.statCard}>
+                <Ionicons name={stat.iconName} size={16} color={stat.iconColor} style={styles.statIcon} />
+                <Text style={styles.statLabel}>{stat.title}</Text>
+                <Text style={styles.statValue}>{vals[idx]}</Text>
+                <Text style={styles.statSmall}>{stat.smallText}</Text>
+              </View>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* Card contenedor: título + búsqueda + cards de ajustes (con margen y border radius) */}
+      <View style={styles.cardContainer}>
       <FlatList
         data={adjustments}
         keyExtractor={(item) => String(item.id)}
         renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
           <View>
-            {/* Stats Bar: horizontal scroll */}
-            <View style={styles.statsContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
-                {STATS.map((stat, idx) => {
-                  const vals = [totals.total, totals.losses, totals.damages, totals.corrections];
-                  return (
-                    <View key={idx} style={styles.statCard}>
-                      <Ionicons name={stat.iconName} size={16} color={stat.iconColor} style={styles.statIcon} />
-                      <Text style={styles.statLabel}>{stat.title}</Text>
-                      <Text style={styles.statValue}>{vals[idx]}</Text>
-                      <Text style={styles.statSmall}>{stat.smallText}</Text>
-                    </View>
-                  );
-                })}
-              </ScrollView>
-            </View>
-
             {/* Search + Title row */}
             <View style={styles.searchHeader}>
               <Text style={styles.listTitle}>
                 Ajustes de Inventario ({adjustments.length})
               </Text>
             </View>
-            {/* POS-style search bar */}
+            {/* POS-style search bar — fondo transparente para integrarse con el card */}
             <View style={styles.searchRow}>
               <View style={styles.searchInput}>
-                <Ionicons name="search-outline" size={16} color="#9ca3af" style={{ marginRight: 6 }} />
+                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={{ marginRight: 6 }} />
                 <TextInput
                   style={styles.searchTextInput}
                   value={search}
                   onChangeText={setSearch}
                   placeholder="Buscar ajuste..."
-                  placeholderTextColor="#9ca3af"
+                  placeholderTextColor={colorScales.gray[400]}
                   autoCapitalize="none"
                   autoCorrect={false}
                   returnKeyType="search"
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Ionicons name="close" size={16} color="#9ca3af" />
+                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
                   </Pressable>
                 )}
               </View>
               <Pressable ref={actionsBtnRef} style={styles.iconBtn} onPress={handleShowActions} hitSlop={6}>
-                <Icon name="plus" size={20} color="#22C55E" />
+                <Icon name="plus" size={20} color={colors.primary} />
               </Pressable>
               <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
-                <Icon name="filter" size={18} color="#22C55E" />
+                <Icon name="filter" size={18} color={colors.primary} />
               </Pressable>
             </View>
 
@@ -351,6 +379,7 @@ export default function AdjustmentsScreen() {
         onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
+      </View>
 
       {/* Actions Dropdown */}
       <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
@@ -360,21 +389,21 @@ export default function AdjustmentsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color="#22C55E" />
+                <Ionicons name="add-outline" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); /* bulk */ }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="cloud-upload-outline" size={18} color="#6b7280" />
+                <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Carga Masiva</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color="#6b7280" />
+                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
@@ -396,7 +425,7 @@ export default function AdjustmentsScreen() {
                 <Text style={styles.dropdownSelectText}>
                   {ADJUSTMENT_TYPE_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
                 </Text>
-                <Ionicons name="chevron-down" size={14} color="#6b7280" />
+                <Ionicons name="chevron-down" size={14} color={colorScales.gray[500]} />
               </Pressable>
             </View>
             <View style={styles.dropdownDivider} />
@@ -405,7 +434,7 @@ export default function AdjustmentsScreen() {
                 {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
                   <Pressable key={opt.value} style={[styles.dropdownOption, activeFilter === opt.value && styles.dropdownOptionActive]} onPress={() => { setActiveFilter(opt.value); setShowTypeOptions(false); setShowFilters(false); }}>
                     <Text style={[styles.dropdownOptionText, activeFilter === opt.value && styles.dropdownOptionTextActive]}>{opt.label}</Text>
-                    {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color="#22C55E" />}
+                    {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
                   </Pressable>
                 ))}
               </View>
@@ -448,7 +477,7 @@ export default function AdjustmentsScreen() {
                     <View style={styles.stepItem}>
                       <View style={[styles.stepCircle, isActive && styles.stepCircleActive, isDone && styles.stepCircleDone]}>
                         {isDone ? (
-                          <Icon name="check" size={12} color="#fff" />
+                          <Icon name="check" size={12} color={colors.background} />
                         ) : (
                           <Text style={[styles.stepNum, isActive && styles.stepNumActive]}>{s.num}</Text>
                         )}
@@ -697,8 +726,8 @@ export default function AdjustmentsScreen() {
                   <View style={styles.summaryCard}>
                     <View style={styles.summaryRow}>
                       <Text style={styles.summaryLabel}>Tipo</Text>
-                      <View style={[styles.typeBadge, { backgroundColor: form.type === 'manual_correction' ? '#dcfce7' : '#fef3c7' }]}>
-                        <Text style={[styles.typeBadgeText, { color: form.type === 'manual_correction' ? '#16a34a' : '#d97706' }]}>
+                      <View style={[styles.typeBadge, { backgroundColor: form.type === 'manual_correction' ? colorScales.green[50] : colorScales.amber[50] }]}>
+                        <Text style={[styles.typeBadgeText, { color: form.type === 'manual_correction' ? colors.primary : colorScales.amber[700] }]}>
                           {ADJUSTMENT_TYPE_LABELS[form.type]}
                         </Text>
                       </View>
@@ -737,7 +766,7 @@ export default function AdjustmentsScreen() {
                     onPress={() => setConfirmCreate(!confirmCreate)}
                   >
                     <View style={[styles.checkbox, confirmCreate && styles.checkboxChecked]}>
-                      {confirmCreate && <Icon name="check" size={12} color="#fff" />}
+                      {confirmCreate && <Icon name="check" size={12} color={colors.background} />}
                     </View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.confirmCheckboxLabel}>Confirmar creación de ajuste</Text>
@@ -847,33 +876,50 @@ export default function AdjustmentsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
 
-  /* Stats: horizontal scroll */
+  /* Card contenedor principal — margen lateral + bottom + border radius + fondo blanco (alineado con la web) */
+  cardContainer: {
+    flex: 1,
+    marginHorizontal: spacing[3],
+    marginBottom: spacing[3],
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+
+  /* Stats: horizontal scroll — ancho completo, fondo transparente (gris de la pantalla) */
   statsContainer: {
-    backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
+    backgroundColor: 'transparent',
     paddingTop: spacing[3], paddingBottom: spacing[2.5],
   },
-  statsScroll: { paddingHorizontal: spacing[3], gap: 8 },
+  statsScroll: { paddingHorizontal: spacing[3], gap: spacing[2] },
   statCard: {
-    width: 150, backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#e5e7eb',
-    paddingHorizontal: 10, paddingVertical: 10, gap: 1,
+    width: 150, backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[2.5], paddingVertical: spacing[2.5], gap: 1,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
   },
-  statIcon: { position: 'absolute', top: 8, right: 8 },
-  statLabel: { fontSize: 9, fontWeight: '700', color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase', marginTop: 2, maxWidth: '85%' },
-  statValue: { fontSize: 20, fontWeight: '800', color: colorScales.gray[900], marginTop: 2 },
-  statSmall: { fontSize: 9, fontWeight: '500', color: '#059669', marginTop: 1 },
+  statIcon: { position: 'absolute', top: spacing[2], right: spacing[2] },
+  statLabel: { fontSize: 9, fontWeight: '700' as any, color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase' as any, marginTop: 2, maxWidth: '85%' },
+  statValue: { fontSize: 20, fontWeight: '800' as any, color: colorScales.gray[900], marginTop: 2 },
+  statSmall: { fontSize: 9, fontWeight: '500' as any, color: colors.primary, marginTop: 1 },
 
-  /* Search */
+  /* Search — fondo transparente para integrarse con el card (mismo color que el fondo del card) */
   searchHeader: { paddingHorizontal: spacing[4], paddingTop: spacing[3], marginBottom: spacing[4] },
-  listTitle: { fontSize: 12, fontWeight: '700', color: colorScales.gray[600], letterSpacing: 0.3 },
+  listTitle: { fontSize: 12, fontWeight: '700' as any, color: colorScales.gray[600], letterSpacing: 0.3 },
   searchRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing[2],
     paddingHorizontal: spacing[4], paddingBottom: spacing[3],
-    backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+    backgroundColor: 'transparent', borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
   },
   searchInput: {
     flex: 1, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.xl,
+    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.lg,
     paddingHorizontal: spacing[3], paddingVertical: spacing[2],
     borderWidth: 1, borderColor: colorScales.gray[200], minHeight: 40,
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
@@ -883,7 +929,7 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900], padding: 0, height: '100%',
   },
   iconBtn: {
-    width: 40, height: 40, borderRadius: borderRadius.xl,
+    width: 40, height: 40, borderRadius: borderRadius.lg,
     backgroundColor: colors.background, borderWidth: 1.5, borderColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
@@ -896,19 +942,92 @@ const styles = StyleSheet.create({
   actionText: { fontSize: typography.fontSize.base, fontWeight: '500' as any, color: colorScales.gray[900] },
   actionDivider: { height: 1, backgroundColor: colorScales.gray[100] },
 
-  /* Card */
+  /* Card — alineado con la web: título + badge, grid 2 cols (FECHA/UBICACIÓN), footer (CAMBIO + pin) */
   card: {
-    marginHorizontal: spacing[4], marginBottom: spacing[3],
-    backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#e5e7eb', overflow: 'hidden',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
+    marginHorizontal: spacing[3],
+    marginBottom: spacing[3],
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
-  cardBody: { padding: 12 },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
-  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '600' as any, color: colorScales.gray[900] },
-  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
-  cardBadges: { flexDirection: 'column', gap: spacing[1], alignItems: 'flex-end' },
-  cardMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], marginTop: spacing[2], paddingTop: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
-  metaText: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
+  cardBody: { padding: spacing[4] },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginBottom: spacing[3],
+  },
+  cardTitle: {
+    flex: 1,
+    fontSize: typography.fontSize.base,
+    fontWeight: '700' as any,
+    color: colorScales.gray[900],
+  },
+  // Pill de tipo (Conteo, Daño, Pérdida, etc.) — estilo web
+  cardBadge: {
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: 3,
+    borderRadius: borderRadius.full,
+    backgroundColor: colorScales.blue[50],
+    borderWidth: 1,
+    borderColor: colorScales.blue[100],
+  },
+  cardBadgeText: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.blue[700],
+    textTransform: 'uppercase' as any,
+    letterSpacing: 0.3,
+  },
+  // Grid 2 columnas: FECHA | UBICACIÓN
+  cardGrid: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginBottom: spacing[3],
+  },
+  cardGridItem: { flex: 1, gap: 2 },
+  cardGridLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase' as any,
+    letterSpacing: 0.5,
+  },
+  cardGridValue: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colorScales.gray[900],
+  },
+  // Footer: CAMBIO (izquierda) + pin (derecha), separados por línea superior
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  cardFooterLeft: { gap: 2 },
+  cardFooterLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase' as any,
+    letterSpacing: 0.5,
+  },
+  cardFooterValue: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: '800' as any,
+    color: colorScales.gray[900],
+  },
 
   /* List */
   listContent: { paddingBottom: spacing[6] },
@@ -918,31 +1037,35 @@ const styles = StyleSheet.create({
   dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
   dropdownArrow: {
     width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
-    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#fff',
+    borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.background,
     marginRight: 14, marginBottom: -1,
   },
   dropdown: {
-    backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: colorScales.gray[200],
+    backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200],
     minWidth: 200, ...shadows.lg,
   },
-  dropdownTitle: { fontSize: 12, fontWeight: '700', color: colorScales.gray[500], paddingVertical: spacing[2], paddingHorizontal: spacing[3], letterSpacing: 0.3, textTransform: 'uppercase' as any },
+  dropdownTitle: { fontSize: 12, fontWeight: '700' as any, color: colorScales.gray[500], paddingVertical: spacing[2], paddingHorizontal: spacing[3], letterSpacing: 0.3, textTransform: 'uppercase' as any },
   dropdownDivider: { height: 1, backgroundColor: colorScales.gray[100] },
   dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], paddingVertical: spacing[2.5], paddingHorizontal: spacing[3] },
   dropdownIconWrap: { width: 28, height: 28, borderRadius: 6, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
   dropdownItemText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
-  dropdownItemPrimary: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
+  dropdownItemPrimary: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colors.primary },
   dropdownFilterRow: { paddingVertical: spacing[2], paddingHorizontal: spacing[3], gap: spacing[1] },
   dropdownFilterLabel: { fontSize: 11, fontWeight: '600' as any, color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase' as any },
   dropdownSelectBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, paddingHorizontal: spacing[2], borderRadius: 6, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colorScales.gray[50], marginTop: 4 },
   dropdownSelectText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[800] },
   dropdownOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[2], paddingHorizontal: spacing[3] },
-  dropdownOptionActive: { backgroundColor: '#f0fdf4' },
+  dropdownOptionActive: { backgroundColor: colorScales.green[50] },
   dropdownOptionText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
-  dropdownOptionTextActive: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: '#16a34a' },
+  dropdownOptionTextActive: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colors.primary },
 
   /* Create Modal — centered dialog + wizard (alineado con la web) */
   createModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
-  createModal: { backgroundColor: '#fff', borderRadius: 16, width: '100%', maxWidth: 520, maxHeight: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8 },
+  createModal: {
+    backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 520, maxHeight: '90%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
   createHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', paddingHorizontal: spacing[4], paddingVertical: spacing[3.5], borderBottomWidth: 1, borderBottomColor: colorScales.gray[200] },
   createHeaderTitle: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2], flex: 1, marginRight: spacing[3] },
   createHeaderText: { flex: 1 },
@@ -956,7 +1079,7 @@ const styles = StyleSheet.create({
   stepCircleActive: { backgroundColor: colors.primary },
   stepCircleDone: { backgroundColor: colors.primary },
   stepNum: { fontSize: 11, fontWeight: '700' as any, color: colorScales.gray[500] },
-  stepNumActive: { color: '#fff' },
+  stepNumActive: { color: colors.background },
   stepLabel: { fontSize: 10, fontWeight: '600' as any, color: colorScales.gray[500], letterSpacing: 0.5 },
   stepLabelActive: { color: colors.primary },
   stepLine: { flex: 1, height: 2, backgroundColor: colorScales.gray[200], marginHorizontal: 6, marginBottom: 16 },
@@ -972,17 +1095,17 @@ const styles = StyleSheet.create({
 
   /* Type grid 3x2 con iconos (como la web) */
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  typeGridItem: { width: '31%', flexDirection: 'column', alignItems: 'center', paddingVertical: spacing[2], paddingHorizontal: 4, borderRadius: 8, borderWidth: 1, backgroundColor: '#fff' },
-  typeGridItemActive: { borderColor: colors.primary, backgroundColor: 'rgba(34,197,94,0.10)' },
+  typeGridItem: { width: '31%', flexDirection: 'column', alignItems: 'center', paddingVertical: spacing[2], paddingHorizontal: 4, borderRadius: 8, borderWidth: 1, backgroundColor: colors.background },
+  typeGridItemActive: { borderColor: colors.primary, backgroundColor: colorScales.green[50] },
   typeGridItemInactive: { borderColor: colorScales.gray[200] },
   typeGridText: { fontSize: 10, fontWeight: '600' as any, marginTop: 4, textAlign: 'center' },
   typeGridTextActive: { color: colors.primary },
   typeGridTextInactive: { color: colorScales.gray[500] },
 
   /* Confirm step */
-  confirmBanner: { flexDirection: 'row', gap: spacing[2], backgroundColor: '#eff6ff', borderRadius: 8, borderWidth: 1, borderColor: '#bfdbfe', padding: spacing[2.5], alignItems: 'flex-start' },
-  confirmBannerTitle: { fontSize: 12, fontWeight: '700' as any, color: '#1e40af' },
-  confirmBannerDesc: { fontSize: 11, color: '#1e3a8a', marginTop: 2, lineHeight: 15 },
+  confirmBanner: { flexDirection: 'row', gap: spacing[2], backgroundColor: colorScales.blue[50], borderRadius: 8, borderWidth: 1, borderColor: colorScales.blue[200], padding: spacing[2.5], alignItems: 'flex-start' },
+  confirmBannerTitle: { fontSize: 12, fontWeight: '700' as any, color: colorScales.blue[800] },
+  confirmBannerDesc: { fontSize: 11, color: colorScales.blue[900], marginTop: 2, lineHeight: 15 },
 
   summaryCard: { backgroundColor: colorScales.gray[50], borderRadius: 10, borderWidth: 1, borderColor: colorScales.gray[200], padding: spacing[3], gap: spacing[2] },
   summaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
@@ -993,8 +1116,11 @@ const styles = StyleSheet.create({
   typeBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   typeBadgeText: { fontSize: 10, fontWeight: '700' as any, textTransform: 'uppercase' as any },
 
-  confirmCheckboxRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2.5], padding: spacing[3], backgroundColor: 'rgba(245,158,11,0.05)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(245,158,11,0.20)' },
-  checkbox: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, borderColor: colorScales.gray[300], backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  confirmCheckboxRow: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2.5], padding: spacing[3],
+    backgroundColor: colorScales.amber[50], borderRadius: 10, borderWidth: 1, borderColor: colorScales.amber[200],
+  },
+  checkbox: { width: 16, height: 16, borderRadius: 4, borderWidth: 1.5, borderColor: colorScales.gray[300], backgroundColor: colors.background, alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   checkboxChecked: { backgroundColor: colors.primary, borderColor: colors.primary },
   confirmCheckboxLabel: { fontSize: 13, fontWeight: '600' as any, color: colorScales.gray[900] },
   confirmCheckboxDesc: { fontSize: 11, color: colorScales.gray[500], marginTop: 2, lineHeight: 15 },
@@ -1009,28 +1135,28 @@ const styles = StyleSheet.create({
   locationDropdownTrigger: {
     flexDirection: 'row', alignItems: 'center', gap: spacing[2],
     paddingVertical: spacing[3], paddingHorizontal: spacing[3],
-    borderRadius: 10, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: '#fff',
+    borderRadius: 10, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colors.background,
   },
   locationDropdownText: { flex: 1, fontSize: 14, fontWeight: '500' as any, color: colorScales.gray[900] },
   locationDropdownPlaceholder: { color: colorScales.gray[400], fontWeight: '400' as any },
   locationDropdownTextSelected: { fontWeight: '600' as any, color: colors.primary },
   locationDropdownList: {
     marginTop: 4, borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: 10,
-    backgroundColor: '#fff', overflow: 'hidden',
+    backgroundColor: colors.background, overflow: 'hidden',
   },
   locationDropdownOption: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: spacing[3], paddingHorizontal: spacing[3],
     borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
   },
-  locationDropdownOptionActive: { backgroundColor: 'rgba(34,197,94,0.05)' },
+  locationDropdownOptionActive: { backgroundColor: colorScales.green[50] },
   locationDropdownOptionText: { fontSize: 14, color: colorScales.gray[700] },
   locationDropdownOptionTextActive: { fontWeight: '600' as any, color: colors.primary },
   locationDropdownLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: spacing[4] },
   locationDropdownLoadingText: { fontSize: 12, color: colorScales.gray[500] },
   locationSelectedCard: {
-    backgroundColor: 'rgba(34,197,94,0.05)', borderRadius: 10, borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.20)', padding: spacing[3], alignItems: 'center', gap: 4,
+    backgroundColor: colorScales.green[50], borderRadius: 10, borderWidth: 1,
+    borderColor: colorScales.green[200], padding: spacing[3], alignItems: 'center', gap: 4,
   },
   locationSelectedLabel: { fontSize: 11, color: colorScales.gray[500] },
   locationSelectedName: { fontSize: 16, fontWeight: '700' as any, color: colors.primary },
@@ -1047,12 +1173,12 @@ const styles = StyleSheet.create({
   searchBox: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: 8,
-    paddingHorizontal: spacing[2.5], paddingVertical: spacing[2], backgroundColor: '#fff',
+    paddingHorizontal: spacing[2.5], paddingVertical: spacing[2], backgroundColor: colors.background,
   },
   searchInputWizard: { flex: 1, fontSize: 13, color: colorScales.gray[900], padding: 0 },
   searchResults: {
     marginTop: 6, borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: 8,
-    maxHeight: 180, backgroundColor: '#fff',
+    maxHeight: 180, backgroundColor: colors.background,
   },
   searchResultItem: {
     flexDirection: 'row', alignItems: 'center', paddingVertical: spacing[2], paddingHorizontal: spacing[3],
@@ -1064,7 +1190,7 @@ const styles = StyleSheet.create({
 
   /* Selected product card (después de seleccionar) */
   selectedProductCard: {
-    backgroundColor: '#fff', borderRadius: 10, borderWidth: 1,
+    backgroundColor: colors.background, borderRadius: 10, borderWidth: 1,
     borderColor: colorScales.gray[200], padding: spacing[2.5], gap: 4,
   },
   selectedProductHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
@@ -1074,7 +1200,7 @@ const styles = StyleSheet.create({
   productEmptyState: {
     alignItems: 'center', paddingVertical: spacing[5], gap: 4,
     borderWidth: 1, borderColor: colorScales.gray[200], borderStyle: 'dashed', borderRadius: 10,
-    backgroundColor: '#fff',
+    backgroundColor: colors.background,
   },
   productEmptyText: { fontSize: 12, color: colorScales.gray[500] },
 
@@ -1083,7 +1209,7 @@ const styles = StyleSheet.create({
   qtyInput: {
     borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: 8,
     paddingHorizontal: spacing[2.5], paddingVertical: spacing[2], fontSize: 14,
-    fontWeight: '600' as any, color: colorScales.gray[900], backgroundColor: '#fff', textAlign: 'center',
+    fontWeight: '600' as any, color: colorScales.gray[900], backgroundColor: colors.background, textAlign: 'center',
   },
   qtyPreview: { alignItems: 'center', paddingBottom: 4 },
   qtyPreviewLabel: { fontSize: 10, color: colorScales.gray[500], textTransform: 'uppercase' as any, fontWeight: '600' as any, marginBottom: 2 },
@@ -1101,8 +1227,8 @@ const styles = StyleSheet.create({
   locationInfoName: { fontSize: 14, fontWeight: '600' as any, color: colorScales.gray[900] },
 
   totalCard: {
-    backgroundColor: 'rgba(34,197,94,0.05)', borderRadius: 10, borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.20)', padding: spacing[3], alignItems: 'center', gap: 4,
+    backgroundColor: colorScales.green[50], borderRadius: 10, borderWidth: 1,
+    borderColor: colorScales.green[200], padding: spacing[3], alignItems: 'center', gap: 4,
   },
   totalCardLabel: { fontSize: 12, color: colorScales.gray[500] },
   totalCardValue: { fontSize: 24, fontWeight: '800' as any, color: colors.primary },
