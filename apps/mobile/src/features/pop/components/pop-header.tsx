@@ -7,11 +7,14 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
+  Animated,
 } from 'react-native';
 import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
+import { colors, colorScales } from '@/shared/theme/colors';
 import type { PopSupplier, PopLocation, ShippingMethod } from '../types';
 import { SHIPPING_METHOD_LABELS } from '../constants';
 
@@ -38,7 +41,6 @@ interface PopHeaderProps {
   onQuickAddSupplier?: () => void;
   onQuickAddLocation?: () => void;
   title?: string;
-  subtitle?: string;
   badge?: string;
   icon?: string;
 }
@@ -66,9 +68,8 @@ export default function PopHeader({
   onQuickAddSupplier,
   onQuickAddLocation,
   title = 'POP',
-  subtitle = 'Punto de Compra',
-  badge,
-  icon = 'bag-handle',
+  badge = 'Compra',
+  icon = 'shopping-bag',
 }: PopHeaderProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
@@ -83,6 +84,9 @@ export default function PopHeader({
   const supplierSelectorRef = useRef<View>(null);
   const locationSelectorRef = useRef<View>(null);
   const containerRef = useRef<View>(null);
+
+  const flashAnim = useRef(new Animated.Value(0)).current;
+  const isFlashing = useRef(false);
 
   const measureSupplier = () => {
     containerRef.current?.measureInWindow((_cx, cy) => {
@@ -104,6 +108,23 @@ export default function PopHeader({
       setShowSettings(true);
     }
   }, [settingsOpenProp]);
+
+  useEffect(() => {
+    if (showConfigWarning && !isFlashing.current) {
+      isFlashing.current = true;
+      flashAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+      ]).start(() => {
+        isFlashing.current = false;
+      });
+    }
+  }, [showConfigWarning, flashAnim]);
 
   const toggleSettings = () => {
     const next = !showSettings;
@@ -137,9 +158,7 @@ export default function PopHeader({
     <View ref={containerRef} style={styles.container}>
       <View style={styles.topRow}>
         <View style={styles.titleRow}>
-          <View style={styles.titleIcon}>
-            <Ionicons name={icon as any} size={20} color="#22C55E" />
-          </View>
+          <Icon name={icon} size={20} color={colorScales.gray[400]} />
           <View style={styles.titleBlock}>
             <View style={styles.titleBadgeRow}>
               <Text style={styles.title}>{title}</Text>
@@ -149,7 +168,6 @@ export default function PopHeader({
                 </View>
               )}
             </View>
-            <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.settingsToggle} onPress={toggleSettings}>
@@ -189,7 +207,28 @@ export default function PopHeader({
 
       {showSettings && (
         <View style={styles.settingsPanel}>
-          <View style={[styles.fieldsRow, showConfigWarning && styles.configWarning]}>
+          <Animated.View style={[styles.fieldsRow, {
+            backgroundColor: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['transparent', '#fffbeb'],
+            }),
+            borderWidth: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 2],
+            }),
+            borderColor: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['transparent', '#f59e0b'],
+            }),
+            padding: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 6],
+            }),
+            borderRadius: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+          }]}>
             <View style={styles.fieldWrapper}>
               <Text style={styles.label}>Proveedor <Text style={styles.required}>*</Text></Text>
               <View style={styles.fieldRow}>
@@ -222,7 +261,7 @@ export default function PopHeader({
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </Animated.View>
 
           <View style={styles.fieldsRow}>
             <View style={styles.field}>
@@ -308,12 +347,11 @@ const styles = StyleSheet.create({
   container: { backgroundColor: '#fff', borderTopLeftRadius: 12, borderTopRightRadius: 12 },
   topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  titleIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center' },
   titleBlock: {},
   titleBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { fontSize: 16, fontWeight: '800', color: '#111827' },
-  badge: { backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { fontSize: 10, fontWeight: '700', color: '#22C55E' },
+  badge: { backgroundColor: 'rgba(34, 197, 94, 0.1)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  badgeText: { fontSize: 10, fontWeight: '700', color: colors.primary },
   subtitle: { fontSize: 11, color: '#6b7280', fontWeight: '500', marginTop: 1 },
   settingsToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff' },
   settingsToggleText: { fontSize: 12, fontWeight: '600', color: '#374151' },
@@ -328,7 +366,6 @@ const styles = StyleSheet.create({
   pillTextDate: { color: '#d97706' },
   settingsPanel: { paddingHorizontal: 16, paddingBottom: 12 },
   fieldsRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  configWarning: { backgroundColor: '#fffbeb', borderWidth: 2, borderColor: '#f59e0b', padding: 6, borderRadius: 8 },
   fieldWrapper: { flex: 1 },
   field: { flex: 1 },
   fieldRow: { flexDirection: 'row', gap: 6 },

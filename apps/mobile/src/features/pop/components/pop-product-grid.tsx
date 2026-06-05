@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import type { PopProduct } from '../types';
 import PopActionsDropdown from './pop-actions-dropdown';
+import { Icon } from '@/shared/components/icon/icon';
+import { colors, colorScales } from '@/shared/theme/colors';
 
 interface PopProductGridProps {
   products: PopProduct[];
@@ -20,6 +22,7 @@ interface PopProductGridProps {
   onScanInvoice: () => void;
   onNewProduct: () => void;
   onBulkUpload: () => void;
+  locationName?: string;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -34,6 +37,7 @@ export default function PopProductGrid({
   onScanInvoice,
   onNewProduct,
   onBulkUpload,
+  locationName,
 }: PopProductGridProps) {
   const [search, setSearch] = useState('');
 
@@ -142,9 +146,12 @@ export default function PopProductGrid({
             onBulkUpload={onBulkUpload}
           />
         </View>
-        <Text style={styles.productCount}>
-          {filtered.length} producto{filtered.length !== 1 ? 's' : ''} disponible{filtered.length !== 1 ? 's' : ''}
-        </Text>
+        {locationName ? (
+          <View style={styles.warehouseBadge}>
+            <Icon name="warehouse" size={14} color="#059669" />
+            <Text style={styles.warehouseBadgeText} numberOfLines={1}>{locationName}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Product grid */}
@@ -181,7 +188,8 @@ const styles = StyleSheet.create({
   searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 8, paddingHorizontal: 10, height: 36 },
   searchIcon: { marginRight: 6 },
   searchInput: { flex: 1, fontSize: 13, color: '#111827', paddingVertical: 0 },
-  productCount: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
+  warehouseBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, backgroundColor: 'rgba(5,150,105,0.1)', borderRadius: 20, alignSelf: 'flex-start' },
+  warehouseBadgeText: { fontSize: 11, fontWeight: '600', color: '#059669', maxWidth: 120 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP, padding: 12, paddingBottom: 24 },
   card: {
     width: CARD_WIDTH,

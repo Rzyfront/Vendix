@@ -14,6 +14,7 @@ import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { Icon } from '@/shared/components/icon/icon';
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
 
@@ -208,10 +209,10 @@ export default function AdjustmentsScreen() {
                 )}
               </View>
               <Pressable ref={actionsBtnRef} style={styles.iconBtn} onPress={handleShowActions} hitSlop={6}>
-                <Ionicons name="add-outline" size={20} color="#22C55E" />
+                <Icon name="plus" size={20} color="#22C55E" />
               </Pressable>
               <Pressable ref={filterBtnRef} style={styles.iconBtn} onPress={handleShowFilters} hitSlop={6}>
-                <Ionicons name="filter-outline" size={18} color="#22C55E" />
+                <Icon name="filter" size={18} color="#22C55E" />
               </Pressable>
             </View>
 

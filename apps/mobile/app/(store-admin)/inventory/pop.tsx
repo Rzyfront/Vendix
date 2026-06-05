@@ -96,6 +96,8 @@ export default function PopScreen() {
   const [showBulk, setShowBulk] = useState(false);
   const [targetAction, setTargetAction] = useState<'draft' | 'create' | 'create-receive'>('create');
   const [headerSettingsOpen, setHeaderSettingsOpen] = useState(false);
+  const [showConfigWarning, setShowConfigWarning] = useState(false);
+  const configWarningRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   const [showSupplierCreate, setShowSupplierCreate] = useState(false);
@@ -211,12 +213,13 @@ export default function PopScreen() {
   }, [selectedProduct, cart]);
 
   const executeOrder = useCallback(async (action: 'draft' | 'create' | 'create-receive') => {
-    if (!cart.cart.supplierId) {
-      Alert.alert('Error', 'Selecciona un proveedor antes de crear la orden.');
-      return;
-    }
-    if (!cart.cart.locationId) {
-      Alert.alert('Error', 'Selecciona una bodega antes de crear la orden.');
+    if (!cart.cart.supplierId || !cart.cart.locationId) {
+      setHeaderSettingsOpen(true);
+      setShowConfigWarning(true);
+      setTimeout(() => scrollRef.current?.scrollTo({ y: 0, animated: true }), 100);
+      if (configWarningRef.current) clearTimeout(configWarningRef.current);
+      configWarningRef.current = setTimeout(() => setShowConfigWarning(false), 3000);
+      setShowConfirm(false);
       return;
     }
     setIsCreating(true);
@@ -391,6 +394,7 @@ export default function PopScreen() {
           suppliers={suppliers}
           locations={locations}
           settingsOpen={headerSettingsOpen}
+          showConfigWarning={showConfigWarning}
           onSettingsOpenChange={setHeaderSettingsOpen}
           onSupplierChange={cart.setSupplier}
           onLocationChange={cart.setLocation}
@@ -410,6 +414,7 @@ export default function PopScreen() {
           onScanInvoice={() => setShowScanner(true)}
           onNewProduct={() => setShowPrebulk(true)}
           onBulkUpload={() => setShowBulk(true)}
+          locationName={cart.cart.locationName}
         />
       </ScrollView>
 
@@ -417,6 +422,9 @@ export default function PopScreen() {
         summary={cart.summary}
         itemCount={cart.itemCount}
         onOpenCart={() => setShowCartModal(true)}
+        onSaveDraft={handleSaveDraft}
+        onCreateOrder={handleCreateOrder}
+        onCreateAndReceive={handleCreateAndReceive}
         isLoading={isCreating}
       />
 

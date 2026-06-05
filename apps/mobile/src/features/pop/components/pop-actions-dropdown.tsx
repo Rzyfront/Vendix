@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
 
 interface PopActionsDropdownProps {
   onScanInvoice: () => void;
@@ -25,9 +26,7 @@ export default function PopActionsDropdown({
   return (
     <View ref={triggerRef}>
       <TouchableOpacity style={styles.trigger} onPress={() => setVisible(true)}>
-        <Ionicons name="cube-outline" size={16} color="#374151" />
-        <Text style={styles.triggerText}>Acciones</Text>
-        <Ionicons name="chevron-down" size={14} color="#6b7280" />
+        <Icon name="package-plus" size={20} color="#22C55E" />
       </TouchableOpacity>
 
       <Modal visible={visible} transparent animationType="fade" onRequestClose={() => setVisible(false)}>
@@ -57,18 +56,15 @@ export default function PopActionsDropdown({
 
 const styles = StyleSheet.create({
   trigger: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: '#fff',
+    width: 40,
     height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#22C55E',
   },
-  triggerText: { fontSize: 13, fontWeight: '600', color: '#374151' },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' },
   menu: { backgroundColor: '#fff', borderRadius: 12, width: 280, maxWidth: '90%', shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 16, elevation: 12 },
   menuHeader: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
