@@ -23,7 +23,6 @@ import {
   StepsLineComponent,
   StepsLineItem,
 } from '../steps-line/steps-line.component';
-import { IconComponent } from '../icon/icon.component';
 import { FiscalWizardStepHost } from './wizard-step.contract';
 import { FiscalAreaSelectionStepComponent } from './steps/fiscal-area-selection-step.component';
 import { FiscalLegalDataStepComponent } from './steps/fiscal-legal-data-step.component';
@@ -45,7 +44,6 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
     RouterModule,
     StickyHeaderComponent,
     StepsLineComponent,
-    IconComponent,
     FiscalAreaSelectionStepComponent,
     FiscalLegalDataStepComponent,
     FiscalDianConfigStepComponent,
@@ -93,7 +91,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
           </div>
         }
 
-        <div class="mobile-step-tabs">
+        <div class="wizard-shell">
           <app-steps-line
             class="step-stepper"
             aria-label="Pasos de activación fiscal"
@@ -104,32 +102,6 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
             [clickable]="true"
             (stepClicked)="goToStep($event)"
           ></app-steps-line>
-        </div>
-
-        <div class="wizard-shell">
-          <aside class="step-list" aria-label="Pasos de activación fiscal">
-            @for (step of service.stepSequence(); track step; let i = $index) {
-              <button
-                type="button"
-                class="step-pill"
-                [class.step-pill--active]="i === service.currentStepIndex()"
-                [class.step-pill--done]="
-                  i !== service.currentStepIndex() && isStepDone(step)
-                "
-                [disabled]="!canNavigateToStep(i)"
-                (click)="goToStep(i)"
-              >
-                <span class="step-index" aria-hidden="true">
-                  @if (i !== service.currentStepIndex() && isStepDone(step)) {
-                    <app-icon name="check" [size]="13"></app-icon>
-                  } @else if (i !== service.currentStepIndex()) {
-                    {{ i + 1 }}
-                  }
-                </span>
-                <span class="step-label">{{ stepLabels[step] }}</span>
-              </button>
-            }
-          </aside>
 
           <article class="step-card">
             <div class="step-heading">
@@ -258,113 +230,18 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         font-size: 0.84rem;
       }
 
-      /* Mobile (default): only the top horizontal stepper is visible.
-         Desktop (md+): the top stepper is hidden and a vertical step-list
-         takes the left column. */
-      .mobile-step-tabs {
-        display: block;
-        margin-bottom: 0.85rem;
-      }
-
-      /* Default shell: single column (just the step-card). On desktop we
-         promote the shell to a 2-column grid with the step-list on the
-         left and the step-card on the right. */
+      /* Single-column shell: the step stepper sits on top, the step card
+         below. The aside sidebar was replaced by a horizontal icon stepper
+         so the same nav serves mobile and desktop. */
       .wizard-shell {
-        display: grid;
-        grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
         gap: 1rem;
       }
 
-      /* Vertical step-list — hidden on mobile, becomes a scrollable
-         sidebar on desktop. */
-      .step-list {
-        display: none;
-        flex-direction: column;
-        gap: 0.45rem;
-        max-height: calc(100vh - 12rem);
-        overflow-y: auto;
-        padding-right: 0.25rem;
-      }
-
-      .step-pill {
-        min-height: 2.6rem;
-        display: flex;
-        align-items: center;
-        gap: 0.55rem;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--text-secondary, #475569);
-        padding: 0.55rem 0.7rem;
-        text-align: left;
-        font-size: 0.82rem;
-        font-weight: 650;
-        cursor: pointer;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .step-pill:hover:not(:disabled):not(.step-pill--active) {
-        background: var(--surface-muted, #f1f5f9);
-        color: var(--text-primary, #0f172a);
-      }
-
-      .step-pill:disabled {
-        cursor: default;
-        opacity: 0.55;
-      }
-
-      .step-index {
-        flex: 0 0 auto;
-        display: grid;
-        place-items: center;
-        width: 1.45rem;
-        height: 1.45rem;
-        border-radius: 999px;
-        background: var(--surface-muted, #f1f5f9);
-        color: var(--text-secondary, #475569);
-        font-size: 0.72rem;
-        font-weight: 800;
-        line-height: 1;
-      }
-
-      .step-pill--active {
-        background: var(--primary-color, #2563eb);
-        color: #ffffff;
-        border-color: var(--primary-color, #2563eb);
-        font-weight: 700;
-        /* hide the index circle when active — the label alone identifies
-           the current step. The grid gap collapses to 0 so the label
-           centers without a leading number. */
-        gap: 0;
-        justify-content: center;
-        text-align: center;
-        box-shadow: 0 6px 16px
-          color-mix(in srgb, var(--primary-color, #2563eb) 25%, transparent);
-      }
-
-      .step-pill--active .step-index {
-        display: none;
-      }
-
-      .step-pill--done .step-index {
-        background: color-mix(
-          in srgb,
-          var(--success-color, #16a34a) 14%,
-          #ffffff
-        );
-        color: var(--success-color, #166534);
-      }
-
-      .step-label {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      /* Frame the horizontal stepper with a divider so it reads as the
-         wizard's progress header on mobile. */
+      /* The step stepper is the shared <app-steps-line> connector component;
+         it owns its own internal layout. We only frame it with a divider so
+         it reads as the wizard's progress header. */
       .step-stepper {
         display: block;
         border-bottom: 1px solid var(--border-color, #e5e7eb);
@@ -573,20 +450,6 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       @media (min-width: 768px) {
         .wizard-content {
           padding: 1.25rem 0 2rem;
-        }
-
-        /* On desktop, swap the mobile top stepper for the vertical
-           step-list and turn the shell into a 2-column grid. */
-        .mobile-step-tabs {
-          display: none;
-        }
-
-        .wizard-shell {
-          grid-template-columns: 240px minmax(0, 1fr);
-        }
-
-        .step-list {
-          display: flex;
         }
       }
     `,
