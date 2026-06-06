@@ -35,12 +35,22 @@ const STATE_VARIANT: Record<string, 'success' | 'default'> = {
 };
 
 const STATE_LABELS: Record<string, string> = {
-  active: 'Activa',
-  inactive: 'Inactiva',
+  true: 'Activa',
+  false: 'Inactiva',
 };
 
-function LocationCard({ item, onPress }: { item: Location; onPress: () => void }) {
-  const isActive = item.state === 'active';
+function LocationCard({
+  item,
+  onPress,
+  onToggleActive,
+  onMoreActions,
+}: {
+  item: Location;
+  onPress: () => void;
+  onToggleActive: (item: Location) => void;
+  onMoreActions: (ref: View, item: Location) => void;
+}) {
+  const isActive = !!item.is_active;
   const typeLabel = LOCATION_TYPE_LABELS[item.type] ?? item.type;
   const typeColor =
     item.type === 'warehouse'
@@ -48,17 +58,15 @@ function LocationCard({ item, onPress }: { item: Location; onPress: () => void }
       : item.type === 'store'
       ? { icon: colorScales.amber[600] }
       : { icon: colorScales.gray[500] };
+  const moreBtnRef = useRef<View>(null);
 
   return (
     <View style={styles.locationCard}>
-      {/* Fila 1: Ícono + (nombre + código + tipo/estado) + badge de estado */}
       <View style={styles.cardTopRow}>
-        {/* Ícono a la izquierda */}
         <View style={styles.cardMedia}>
           <Icon name="map-pin" size={24} color={typeColor.icon} />
         </View>
 
-        {/* Centro: nombre + código + grid tipo/estado */}
         <View style={styles.cardCenter}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
           {item.code ? <Text style={styles.cardCode}>{item.code}</Text> : null}
@@ -77,7 +85,6 @@ function LocationCard({ item, onPress }: { item: Location; onPress: () => void }
           </View>
         </View>
 
-        {/* Badge de estado arriba a la derecha */}
         <View style={[styles.cardStatusBadge, { backgroundColor: isActive ? colorScales.green[50] : colorScales.gray[100] }]}>
           <Text style={[styles.cardStatusBadgeText, { color: isActive ? colorScales.green[700] : colorScales.gray[500] }]}>
             {isActive ? 'Activo' : 'Inactivo'}
@@ -85,18 +92,32 @@ function LocationCard({ item, onPress }: { item: Location; onPress: () => void }
         </View>
       </View>
 
-      {/* Fila 2 (footer): TIPO grande + acciones */}
       <View style={styles.cardFooter}>
         <View style={styles.cardFooterLeft}>
           <Text style={styles.cardGridLabel}>TIPO</Text>
           <Text style={styles.cardFooterValue}>{typeLabel}</Text>
         </View>
         <View style={styles.cardActions}>
-          <Pressable onPress={onPress} hitSlop={6} style={styles.cardActionBtn}>
-            <Icon name="edit-2" size={16} color={colors.primary} />
+          {/* Botón 1: check-circle (marcar como principal / toggle activo) */}
+          <Pressable
+            onPress={() => onToggleActive(item)}
+            hitSlop={6}
+            style={[styles.cardActionCheck, { backgroundColor: isActive ? colorScales.green[100] : colorScales.gray[100] }]}
+          >
+            <Icon name="check-circle" size={16} color={isActive ? colorScales.green[700] : colorScales.gray[400]} />
           </Pressable>
-          <Pressable onPress={onPress} hitSlop={6} style={styles.cardActionBtn}>
-            <Icon name="more-horizontal" size={16} color={colorScales.gray[500]} />
+          {/* Botón 2: pencil azul (editar) */}
+          <Pressable onPress={onPress} hitSlop={6} style={styles.cardActionEdit}>
+            <Icon name="edit" size={16} color={colorScales.blue[600]} />
+          </Pressable>
+          {/* Botón 3: 3 puntos gris (más opciones → popup con Eliminar) */}
+          <Pressable
+            ref={moreBtnRef}
+            onPress={() => onMoreActions(moreBtnRef.current as View, item)}
+            hitSlop={6}
+            style={styles.cardActionMore}
+          >
+            <Ionicons name="ellipsis-horizontal" size={16} color={colorScales.gray[500]} />
           </Pressable>
         </View>
       </View>
@@ -104,7 +125,7 @@ function LocationCard({ item, onPress }: { item: Location; onPress: () => void }
   );
 }
 
-const emptyForm: CreateLocationDto & { is_active?: boolean; is_principal?: boolean } = {
+const emptyForm: CreateLocationDto & { is_principal?: boolean } = {
   name: '', code: '', type: 'warehouse', address: '', is_active: true, is_principal: false,
 };
 
@@ -202,6 +223,55 @@ export default function LocationsScreen() {
     },
   });
 
+  // Toggle rápido activo/inactivo desde la card
+  const toggleStateMutation = useMutation({
+    mutationFn: ({ id, is_active }: { id: string; is_active: boolean }) =>
+      InventoryService.updateLocation(id, { is_active }),
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
+      toastSuccess(vars.is_active ? 'Ubicación activada' : 'Ubicación desactivada');
+    },
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Error al cambiar el estado';
+      toastError(typeof message === 'string' ? message : 'Error al cambiar el estado');
+    },
+  });
+
+  // Eliminar ubicación
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => InventoryService.deleteLocation(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['locations'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      toastSuccess('Ubicación eliminada correctamente');
+    },
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Error al eliminar la ubicación';
+      toastError(typeof message === 'string' ? message : 'Error al eliminar la ubicación');
+    },
+  });
+
+  // Estado del popup "más opciones" por card
+  const [cardMoreAnchor, setCardMoreAnchor] = useState<{ top: number; right: number; item: Location } | null>(null);
+
+  // Toggle estado desde la card
+  const handleToggleActive = useCallback((item: Location) => {
+    toggleStateMutation.mutate({ id: item.id, is_active: !item.is_active });
+  }, [toggleStateMutation]);
+
+  // Mostrar popup "más opciones" (Eliminar) — mide posición del botón
+  const handleMoreActions = useCallback((ref: View, item: Location) => {
+    ref.measureInWindow((x, y, w, h) => {
+      setCardMoreAnchor({ top: y + h + 6, right: screenW - x - w, item });
+    });
+  }, [screenW]);
+
+  // Confirmar eliminar
+  const handleDelete = useCallback((item: Location) => {
+    setCardMoreAnchor(null);
+    deleteMutation.mutate(item.id);
+  }, [deleteMutation]);
+
   const allLocations = data?.pages.flatMap((p) => p.data) ?? [];
 
   // Filtro client-side por tipo (la LocationQuery no soporta type en este momento)
@@ -235,7 +305,7 @@ export default function LocationsScreen() {
       code: location.code,
       type: location.type,
       address: location.address,
-      is_active: location.state === 'active',
+      is_active: !!location.is_active,
       is_principal: false,
     });
     setModalVisible(true);
@@ -246,12 +316,13 @@ export default function LocationsScreen() {
       toastError('Nombre y código son obligatorios');
       return;
     }
-    // Solo enviar campos que el DTO espera (filtrar is_active / is_principal)
+    // Solo enviar campos que el DTO espera (filtrar is_principal)
     const dto: CreateLocationDto = {
       name: form.name.trim(),
       code: form.code.trim(),
       type: form.type,
       address: (form.address ?? '').trim() || undefined,
+      is_active: !!form.is_active,
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, dto });
@@ -316,7 +387,14 @@ export default function LocationsScreen() {
         <FlatList
           data={locations}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => <LocationCard item={item} onPress={() => handleEdit(item)} />}
+          renderItem={({ item }) => (
+            <LocationCard
+              item={item}
+              onPress={() => handleEdit(item)}
+              onToggleActive={handleToggleActive}
+              onMoreActions={handleMoreActions}
+            />
+          )}
           ListHeaderComponent={
             <View>
               <View style={styles.titleRow}>
@@ -387,6 +465,27 @@ export default function LocationsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Popup "más opciones" por card (Eliminar) */}
+      {cardMoreAnchor && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setCardMoreAnchor(null)}>
+          <Pressable style={styles.dropdownBackdrop} onPress={() => setCardMoreAnchor(null)} />
+          <View style={[styles.dropdownPositioner, { top: cardMoreAnchor.top, right: cardMoreAnchor.right }]}>
+            <View style={[styles.dropdownArrow, { marginRight: 14 }]} />
+            <View style={styles.dropdown}>
+              <Pressable
+                style={styles.dropdownItem}
+                onPress={() => handleDelete(cardMoreAnchor.item)}
+              >
+                <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.red[50] }]}>
+                  <Ionicons name="trash" size={18} color={colorScales.red[600]} />
+                </View>
+                <Text style={styles.dropdownItemDanger}>Eliminar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Dropdown de filtro por tipo — estilo web (popup con Filtros + Tipo + dropdown) */}
       <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => { setShowFilters(false); setShowFilterTypeList(false); }}>
@@ -761,7 +860,11 @@ const styles = StyleSheet.create({
   cardFooterLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
   cardFooterValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any, color: colorScales.gray[900] },
   cardActions: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  cardActionCheck: { width: 36, height: 36, borderRadius: borderRadius.md, alignItems: 'center', justifyContent: 'center' },
+  cardActionEdit: { width: 36, height: 36, borderRadius: borderRadius.md, backgroundColor: colorScales.blue[50], alignItems: 'center', justifyContent: 'center' },
+  cardActionMore: { width: 36, height: 36, borderRadius: borderRadius.md, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
   cardActionBtn: { width: 36, height: 36, borderRadius: borderRadius.md, backgroundColor: colorScales.green[100], alignItems: 'center', justifyContent: 'center' },
+  dropdownItemDanger: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colorScales.red[600] },
 
   /* Dropdown de acciones */
   dropdownBackdrop: { flex: 1 },
