@@ -4,8 +4,12 @@ import { GlobalPrismaService as PrismaService } from '../../prisma/services/glob
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { EmailService } from '../../email/email.service';
+import { EmailBrandingService } from '../../email/services/email-branding.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { OnboardingService } from '../organization/onboarding/onboarding.service';
+import { DefaultPanelUIService } from '../../common/services/default-panel-ui.service';
+import { S3Service } from '../../common/services/s3.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   ConflictException,
   BadRequestException,
@@ -94,6 +98,17 @@ describe('AuthService - Owner Registration Flow', () => {
     getUserOnboardingStatus: jest.fn(),
   };
 
+  // AuthService also injects these (added over time); registerOwner only calls
+  // defaultPanelUIService.generatePanelUI, the rest are provided for DI only.
+  const mockDefaultPanelUIService = {
+    generatePanelUI: jest
+      .fn()
+      .mockResolvedValue({ panel_ui: {}, preferences: {} }),
+  };
+  const mockEmailBrandingService = {};
+  const mockS3Service = {};
+  const mockEventEmitter = { emit: jest.fn() };
+
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -104,6 +119,16 @@ describe('AuthService - Owner Registration Flow', () => {
         { provide: EmailService, useValue: mockEmailService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: OnboardingService, useValue: mockOnboardingService },
+        {
+          provide: DefaultPanelUIService,
+          useValue: mockDefaultPanelUIService,
+        },
+        {
+          provide: EmailBrandingService,
+          useValue: mockEmailBrandingService,
+        },
+        { provide: S3Service, useValue: mockS3Service },
+        { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
 
@@ -155,7 +180,7 @@ describe('AuthService - Owner Registration Flow', () => {
           {
             roles: {
               name: 'owner',
-              role_permissions: { permissions: [] },
+              role_permissions: [],
             },
           },
         ],
@@ -221,12 +246,18 @@ describe('AuthService - Owner Registration Flow', () => {
       expect(mockPrismaService.organizations.findUnique).toHaveBeenCalledWith({
         where: { slug: 'test-organization' },
       });
+      // Registration happens before the user picks store-vs-organization, so the
+      // org is created in the safest, upgradeable scope: SINGLE_STORE/STORE/STORE.
+      // (`selectAppType` later locks the final scope.)
       expect(mockPrismaService.organizations.create).toHaveBeenCalledWith({
         data: {
           name: validOwnerData.organization_name,
           slug: 'test-organization',
           email: validOwnerData.email,
           state: 'draft',
+          account_type: 'SINGLE_STORE',
+          operating_scope: 'STORE',
+          fiscal_scope: 'STORE',
         },
       });
       expect(mockEmailService.sendVerificationEmail).toHaveBeenCalledWith(
@@ -334,7 +365,7 @@ describe('AuthService - Owner Registration Flow', () => {
           {
             roles: {
               name: 'owner',
-              role_permissions: { permissions: [] },
+              role_permissions: [],
             },
           },
         ],

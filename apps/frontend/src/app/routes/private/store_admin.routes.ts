@@ -601,27 +601,14 @@ export const storeAdminRoutes: Routes = [
             (m) => m.payrollRoutes,
           ),
       },
-      // Legal / Tax Routes
-      {
-        path: 'accounting/withholding-tax',
-        loadChildren: () =>
-          import('../../private/modules/store/withholding-tax/withholding-tax.routes').then(
-            (m) => m.withholdingTaxRoutes,
-          ),
-      },
-      {
-        path: 'accounting/exogenous',
-        loadChildren: () =>
-          import('../../private/modules/store/exogenous/exogenous.routes').then(
-            (m) => m.exogenousRoutes,
-          ),
-      },
+      // Legal / Tax Routes — withholding-tax, exogenous and ica are now nested
+      // under the accounting module (see accounting.routes.ts) so they share
+      // its persistent sticky-header. Old /admin/taxes/ica deep-links redirect
+      // to the new canonical /admin/accounting/ica path.
       {
         path: 'taxes/ica',
-        loadChildren: () =>
-          import('../../private/modules/store/taxes/ica/ica.routes').then(
-            (m) => m.icaRoutes,
-          ),
+        redirectTo: 'accounting/ica',
+        pathMatch: 'full',
       },
       // Price Tiers (Precios y Tarifas)
       {

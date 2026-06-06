@@ -96,7 +96,7 @@ export function StoreUpsertForm({ mode, storeId }: StoreUpsertFormProps) {
 
   useEffect(() => {
     if (existingStore) {
-      const address = existingStore.primary_address || '';
+      const address = (existingStore as any).primary_address || '';
       setForm({
         name: existingStore.name || '',
         store_code: existingStore.store_code || '',
@@ -147,7 +147,7 @@ export function StoreUpsertForm({ mode, storeId }: StoreUpsertFormProps) {
   };
 
   const createMutation = useMutation({
-    mutationFn: (data: CreateStoreDto) => OrgStoreService.create(data),
+    mutationFn: (data: CreateStoreDto) => OrgStoreService.create(data as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['org-stores'] });
       queryClient.invalidateQueries({ queryKey: ['org-stores-stats'] });
@@ -161,7 +161,7 @@ export function StoreUpsertForm({ mode, storeId }: StoreUpsertFormProps) {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: UpdateStoreDto) => OrgStoreService.update(storeId!, data),
+    mutationFn: (data: UpdateStoreDto) => OrgStoreService.update(storeId!, data as any),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['org-stores'] });
       queryClient.invalidateQueries({ queryKey: ['org-stores-stats'] });

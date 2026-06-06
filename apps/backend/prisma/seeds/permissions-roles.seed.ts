@@ -2984,6 +2984,86 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/withholding-tax',
       method: 'POST',
     },
+
+    // ──── Organization Exógena (DIAN) — CRUD parity twin ────
+    {
+      name: 'organization:exogenous:read',
+      description: 'Leer reportes de información exógena a nivel organización',
+      path: '/api/organization/exogenous/reports',
+      method: 'GET',
+    },
+    {
+      name: 'organization:exogenous:write',
+      description: 'Generar reportes de información exógena a nivel organización',
+      path: '/api/organization/exogenous/reports/generate',
+      method: 'POST',
+    },
+    {
+      name: 'organization:exogenous:submit',
+      description: 'Marcar reportes de exógena como presentados a nivel organización',
+      path: '/api/organization/exogenous/reports/:id/submit',
+      method: 'POST',
+    },
+
+    // ──── Organization ICA municipal — CRUD parity twin ────
+    {
+      name: 'organization:taxes:ica:read',
+      description: 'Leer tarifas/resoluciones ICA a nivel organización',
+      path: '/api/organization/taxes/ica/rates',
+      method: 'GET',
+    },
+    {
+      name: 'organization:taxes:ica:report',
+      description: 'Generar reporte ICA consolidado a nivel organización',
+      path: '/api/organization/taxes/ica/report',
+      method: 'GET',
+    },
+
+    // ──── Organization Accounts Receivable (Cartera CxC) — CRUD parity twin ────
+    {
+      name: 'organization:accounts_receivable:read',
+      description: 'Leer cartera por cobrar consolidada a nivel organización',
+      path: '/api/organization/accounts-receivable',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounts_receivable:payment',
+      description: 'Registrar pagos de cartera por cobrar a nivel organización',
+      path: '/api/organization/accounts-receivable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_receivable:write_off',
+      description: 'Castigar (write-off) cartera por cobrar a nivel organización',
+      path: '/api/organization/accounts-receivable/:id/write-off',
+      method: 'POST',
+    },
+
+    // ──── Organization Accounts Payable (Cartera CxP) — CRUD parity twin ────
+    {
+      name: 'organization:accounts_payable:read',
+      description: 'Leer cartera por pagar consolidada a nivel organización',
+      path: '/api/organization/accounts-payable',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounts_payable:payment',
+      description: 'Registrar pagos de cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_payable:export',
+      description: 'Exportar lote bancario de cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/batch-export',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_payable:write_off',
+      description: 'Castigar (write-off) cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/:id/write-off',
+      method: 'POST',
+    },
     {
       name: 'organization:payroll:read',
       description: 'Leer nómina a nivel organización',

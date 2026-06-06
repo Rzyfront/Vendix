@@ -181,11 +181,25 @@ export class OnboardingWizardService {
     if (user.organization_id) {
       const organization = await this.prismaService.organizations.findUnique({
         where: { id: user.organization_id },
-        select: { account_type: true, operating_scope: true, fiscal_scope: true },
+        select: {
+          account_type: true,
+          operating_scope: true,
+          fiscal_scope: true,
+          onboarding: true,
+        },
       });
+
+      // The "manual review" downgrade guard only applies to organizations that
+      // ALREADY finished onboarding (they may hold committed fiscal/operational
+      // data). While still onboarding (`onboarding=false`) the user is choosing
+      // their path for the first time and may freely switch — including going
+      // back in the welcome step to re-pick — so scope changes are allowed and
+      // `selectAppType` is the single source of truth for the final scope.
+      const onboardingComplete = organization?.onboarding === true;
 
       if (
         organization &&
+        onboardingComplete &&
         selectAppTypeDto.app_type !== 'ORG_ADMIN' &&
         (organization.account_type === 'MULTI_STORE_ORG' ||
           organization.operating_scope === 'ORGANIZATION')
@@ -374,6 +388,16 @@ export class OnboardingWizardService {
       include: { addresses: { where: { type: 'billing' } } },
     });
 
+    // Scope is locked by `selectAppType` (the single source of truth). This
+    // endpoint belongs exclusively to the ORGANIZATION flow; a SINGLE_STORE /
+    // STORE-scoped account must never reach it. Reject instead of silently
+    // flipping the org to consolidated mode.
+    if (organization && organization.operating_scope !== 'ORGANIZATION') {
+      throw new BadRequestException(
+        'setupOrganization is only available for organization-scoped accounts. Select the organization path first.',
+      );
+    }
+
     if (organization) {
       const isSameOrgData =
         organization.name === setupOrgDto.name &&
@@ -422,8 +446,12 @@ export class OnboardingWizardService {
           phone: setupOrgDto.phone,
           website: setupOrgDto.website,
           tax_id: setupOrgDto.tax_id,
-          account_type: 'MULTI_STORE_ORG', // Ensure multi-store for organization flow
-          operating_scope: 'ORGANIZATION' as any,
+          // account_type / operating_scope are intentionally NOT written here.
+          // `selectAppType` is the single source of truth for scope and already
+          // locked it to MULTI_STORE_ORG / ORGANIZATION before this step (the
+          // guard above enforces it). Re-writing them here created a second,
+          // fragile source of truth that could silently override the user's
+          // choice — removed.
           updated_at: new Date(),
         },
       });

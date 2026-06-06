@@ -39,6 +39,53 @@ export const orgAccountingRoutes: Routes = [
             (c) => c.OrgAccountMappingsComponent,
           ),
       },
+      {
+        path: 'cartera',
+        loadComponent: () =>
+          import('./pages/cartera-dashboard/cartera-dashboard.component').then(
+            (c) => c.OrgCarteraDashboardComponent,
+          ),
+      },
+      {
+        path: 'receivables',
+        loadComponent: () =>
+          import('./pages/receivables/receivables.component').then(
+            (c) => c.OrgReceivablesComponent,
+          ),
+      },
+      {
+        path: 'payables',
+        loadComponent: () =>
+          import('./pages/payables/payables.component').then(
+            (c) => c.OrgPayablesComponent,
+          ),
+      },
+      {
+        path: 'aging',
+        loadComponent: () =>
+          import('./pages/aging/aging.component').then(
+            (c) => c.OrgAgingComponent,
+          ),
+      },
+      {
+        path: 'withholding-tax',
+        loadComponent: () =>
+          import('./fiscal/withholding-tax/withholding-tax.component').then(
+            (c) => c.OrgWithholdingTaxComponent,
+          ),
+      },
+      {
+        path: 'exogenous',
+        loadComponent: () =>
+          import('./fiscal/exogenous/exogenous.component').then(
+            (c) => c.OrgExogenousComponent,
+          ),
+      },
+      {
+        path: 'ica',
+        loadComponent: () =>
+          import('./fiscal/ica/ica.component').then((c) => c.OrgIcaComponent),
+      },
     ],
   },
 ];

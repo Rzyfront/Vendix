@@ -557,166 +557,50 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
-      label: 'Operación fiscal',
-      icon: 'clipboard-list',
-      children: [
-        {
-          label: 'Dashboard fiscal',
-          icon: 'circle',
-          route: '/admin/fiscal/dashboard',
-        },
-        {
-          label: 'Obligaciones fiscales',
-          icon: 'circle',
-          route: '/admin/fiscal/obligations',
-        },
-        {
-          label: 'Declaraciones fiscales',
-          icon: 'circle',
-          route: '/admin/fiscal/declarations',
-        },
-        {
-          label: 'Cierre fiscal',
-          icon: 'circle',
-          route: '/admin/fiscal/close',
-        },
-        {
-          label: 'Evidencias fiscales',
-          icon: 'circle',
-          route: '/admin/fiscal/evidence',
-        },
-        {
-          label: 'Historial fiscal',
-          icon: 'circle',
-          route: '/admin/fiscal/history',
-        },
-        {
-          label: 'Reglas fiscales',
-          icon: 'circle',
-          route: '/admin/fiscal/rules',
-        },
-      ],
-    },
-    {
       label: 'Gastos',
       icon: 'wallet',
       route: '/admin/expenses',
     },
     {
-      label: 'Facturación',
-      icon: 'file-text',
+      // Fiscal umbrella — one sidebar group consolidating every fiscal surface
+      // for stores that OWN their fiscal scope. Each child is a leaf whose
+      // module renders its own sub-sections as internal sticky-header tabs
+      // (invoicing/accounting/payroll shells + the fiscal compliance hub).
+      // The whole group hides when the ORGANIZATION owns fiscal
+      // (requiredFiscalScope: 'STORE'). When fiscal is NOT yet activated, only
+      // "Operación fiscal" stays visible (no requiresFiscalArea) so the owner
+      // can always reach the activation wizard; the operational modules appear
+      // once their area reaches ACTIVE/LOCKED.
+      label: 'Fiscal',
+      icon: 'landmark',
+      requiredFiscalScope: 'STORE',
       children: [
         {
-          label: 'Facturas',
-          icon: 'receipt',
-          route: '/admin/invoicing/invoices',
+          label: 'Operación fiscal',
+          icon: 'clipboard-list',
+          route: '/admin/fiscal',
+          requiredFiscalScope: 'STORE',
         },
         {
-          label: 'Resoluciones',
-          icon: 'file-check',
-          route: '/admin/invoicing/resolutions',
+          label: 'Facturación',
+          icon: 'file-text',
+          route: '/admin/invoicing',
+          requiredFiscalScope: 'STORE',
+          requiresFiscalArea: 'invoicing',
         },
         {
-          label: 'Configuración DIAN',
-          icon: 'shield',
-          route: '/admin/invoicing/dian-config',
-        },
-      ],
-    },
-    {
-      label: 'Contabilidad',
-      icon: 'book-open',
-      children: [
-        {
-          label: 'Asientos Contables',
-          icon: 'circle',
-          route: '/admin/accounting/journal-entries',
+          label: 'Contabilidad',
+          icon: 'book-open',
+          route: '/admin/accounting',
+          requiredFiscalScope: 'STORE',
+          requiresFiscalArea: 'accounting',
         },
         {
-          label: 'Periodos Fiscales',
-          icon: 'circle',
-          route: '/admin/accounting/fiscal-periods',
-        },
-        {
-          label: 'Plan de Cuentas',
-          icon: 'circle',
-          route: '/admin/accounting/chart-of-accounts',
-        },
-        {
-          label: 'Retenciones',
-          icon: 'circle',
-          route: '/admin/accounting/withholding-tax',
-        },
-        {
-          label: 'Info Exógena',
-          icon: 'circle',
-          route: '/admin/accounting/exogenous',
-        },
-        {
-          label: 'ICA Municipal',
-          icon: 'circle',
-          route: '/admin/taxes/ica',
-        },
-        {
-          label: 'Mapeo de Cuentas',
-          icon: 'circle',
-          route: '/admin/accounting/account-mappings',
-        },
-        {
-          label: 'Flujos Contables',
-          icon: 'circle',
-          route: '/admin/accounting/flows',
-        },
-        {
-          label: 'Cartera',
-          icon: 'circle',
-          route: '/admin/accounting/cartera',
-        },
-        {
-          label: 'Cuentas por Cobrar',
-          icon: 'circle',
-          route: '/admin/accounting/receivables',
-        },
-        {
-          label: 'Cuentas por Pagar',
-          icon: 'circle',
-          route: '/admin/accounting/payables',
-        },
-        {
-          label: 'Cartera por Vencimiento',
-          icon: 'circle',
-          route: '/admin/accounting/aging',
-        },
-      ],
-    },
-    {
-      label: 'Nómina',
-      icon: 'banknote',
-      children: [
-        {
-          label: 'Empleados',
-          icon: 'circle',
-          route: '/admin/payroll/employees',
-        },
-        {
-          label: 'Períodos de Nómina',
-          icon: 'circle',
-          route: '/admin/payroll/runs',
-        },
-        {
-          label: 'Liquidaciones',
-          icon: 'circle',
-          route: '/admin/payroll/settlements',
-        },
-        {
-          label: 'Adelantos',
-          icon: 'circle',
-          route: '/admin/payroll/advances',
-        },
-        {
-          label: 'Configuración Nómina',
-          icon: 'circle',
-          route: '/admin/payroll/settings',
+          label: 'Nómina',
+          icon: 'banknote',
+          route: '/admin/payroll',
+          requiredFiscalScope: 'STORE',
+          requiresFiscalArea: 'payroll',
         },
       ],
     },
@@ -784,11 +668,6 @@ export class StoreAdminLayoutComponent {
           label: 'Seguridad',
           icon: 'circle',
           route: '/admin/settings/security',
-        },
-        {
-          label: 'Manejo fiscal',
-          icon: 'circle',
-          route: '/admin/fiscal',
         },
         {
           label: 'Dominios',
