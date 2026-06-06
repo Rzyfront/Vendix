@@ -56,7 +56,7 @@ export interface AccountMappingsValue {
           Asigne una cuenta del PUC a cada operación contable.
         </p>
         <app-button variant="outline" size="sm" (clicked)="applyDefaultsClicked.emit()">
-          <app-icon name="zap" [size]="14"></app-icon>
+          <app-icon slot="icon" name="zap" [size]="14"></app-icon>
           Aplicar defaults
         </app-button>
       </div>

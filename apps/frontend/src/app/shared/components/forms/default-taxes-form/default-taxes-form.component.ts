@@ -141,13 +141,13 @@ const DEFAULT_TAXES: TaxRow[] = [
                 size="sm"
                 (clicked)="removeTax(i)"
               >
-                <app-icon name="trash-2" [size]="14"></app-icon>
+                <app-icon slot="icon" name="trash-2" [size]="14"></app-icon>
               </app-button>
             </div>
           }
 
           <app-button variant="outline" size="sm" (clicked)="addTax()">
-            <app-icon name="plus" [size]="14"></app-icon>
+            <app-icon slot="icon" name="plus" [size]="14"></app-icon>
             Agregar impuesto
           </app-button>
         </div>

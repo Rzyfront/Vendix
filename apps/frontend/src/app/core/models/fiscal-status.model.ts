@@ -83,6 +83,25 @@ export const FISCAL_STEP_LABELS: Record<FiscalWizardStepId, string> = {
   validation: 'Validación',
 };
 
+/**
+ * Icon per wizard step, used by the top stepper navigation. Every value must
+ * be a registered name in `icons.registry.ts` (verified: layers, file-text,
+ * building-2, list-checks, calendar-days, percent, link-2, package, users,
+ * shield-check). The active step shows icon + label; the rest show icon only.
+ */
+export const FISCAL_STEP_ICONS: Record<FiscalWizardStepId, string> = {
+  area_selection: 'layers',
+  legal_data: 'file-text',
+  dian_config: 'building-2',
+  puc: 'list-checks',
+  accounting_period: 'calendar-days',
+  default_taxes: 'percent',
+  accounting_mappings: 'link-2',
+  initial_inventory: 'package',
+  payroll_config: 'users',
+  validation: 'shield-check',
+};
+
 export const REQUIRED_STEPS_BY_AREA: Record<FiscalArea, FiscalWizardStepId[]> =
   {
     invoicing: ['legal_data', 'dian_config', 'default_taxes', 'validation'],

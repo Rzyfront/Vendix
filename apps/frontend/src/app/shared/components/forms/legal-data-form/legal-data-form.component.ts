@@ -41,6 +41,7 @@ export interface LegalDataValue {
   department: string;
   city: string;
   tax_responsibilities: string[];
+  tax_scheme: string;
 }
 
 interface LegalDataControls {
@@ -56,6 +57,7 @@ interface LegalDataControls {
   department: FormControl<string>;
   city: FormControl<string>;
   tax_responsibilities: FormControl<string[]>;
+  tax_scheme: FormControl<string>;
 }
 
 const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
@@ -133,6 +135,14 @@ const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
           placeholder="Seleccione régimen"
         ></app-selector>
       </div>
+
+      <app-selector
+        label="Esquema tributario (DIAN)"
+        formControlName="tax_scheme"
+        [options]="taxSchemeOptions"
+        placeholder="Seleccione esquema"
+        helpText="Código de responsabilidad principal del emisor (TaxLevelCode)"
+      ></app-selector>
 
       <app-input
         label="Código CIIU (Actividad económica)"
@@ -253,6 +263,7 @@ export class LegalDataFormComponent {
         validators: [Validators.required],
       }),
       tax_responsibilities: new FormControl<string[]>([], { nonNullable: true }),
+      tax_scheme: new FormControl('', { nonNullable: true }),
     },
     { validators: nitDvValidator },
   );
@@ -278,6 +289,10 @@ export class LegalDataFormComponent {
     { value: 'SIMPLIFICADO', label: 'Simplificado' },
     { value: 'GRAN_CONTRIBUYENTE', label: 'Gran Contribuyente' },
   ];
+
+  readonly taxSchemeOptions: SelectorOption[] = TAX_RESPONSIBILITY_CODES.map(
+    (r) => ({ value: r.code, label: r.label }),
+  );
 
   constructor() {
     // Prefill from initial value
