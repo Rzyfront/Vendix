@@ -311,6 +311,17 @@ export class ProductsController {
     }
   }
 
+  /**
+   * PATCH /api/store/products/variants/:variantId
+   *
+   * Actualiza una variante individual (SKU, precio, stock, atributos, etc).
+   *
+   * IMPORTANTE: este endpoint NO acepta cambios de imagen. Los campos
+   * `image_id` y `variant_image_url` del DTO son ignorados silenciosamente
+   * — la gestión de la imagen de variante la hace exclusivamente el
+   * orquestador de producto completo (`PATCH /products/:id`). Ver el
+   * JSDoc de `ProductVariantService.updateVariant` para más detalle.
+   */
   @Patch('variants/:variantId')
   @Permissions('store:products:update')
   async updateVariant(
