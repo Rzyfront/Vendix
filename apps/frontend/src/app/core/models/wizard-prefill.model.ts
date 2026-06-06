@@ -26,6 +26,9 @@ export interface WizardPrefillLegalData {
     postal_code: string | null;
   } | null;
   fiscal_regime: string | null;
+  ciiu: string | null;
+  tax_responsibilities: string[] | null;
+  tax_scheme: string | null;
 }
 
 export interface WizardPrefillDianConfig {
@@ -71,6 +74,12 @@ export interface WizardPrefillAccountingMappings {
 export interface WizardPrefillInitialInventory {
   configured: boolean;
   initial_transactions: number;
+  /**
+   * Raw configured costing method from `settings.inventory.costing_method`
+   * (`weighted_average`/`cpp`/`fifo`); `null` when unset. Scope-aware on the
+   * backend. The step maps it to the form's CostingMethod enum.
+   */
+  costing_method: string | null;
 }
 
 export interface WizardPrefillPayrollConfig {

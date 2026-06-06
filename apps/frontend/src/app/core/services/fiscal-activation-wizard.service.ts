@@ -13,6 +13,17 @@ import {
   fiscalAreaHasPendingSignal,
 } from '../models/fiscal-status.model';
 import { WizardPrefill } from '../models/wizard-prefill.model';
+import { parseApiError } from '../utils/parse-api-error';
+
+/**
+ * Server-side confirmation, per area, of which wizard steps the backend
+ * considers still missing when `finalize()` rejects with
+ * `FISCAL_STATUS_INCOMPLETE`. Mirrors `details.missing_steps`
+ * (`Record<FiscalArea, FiscalWizardStepId[]>`).
+ */
+export type FinalizeMissingSteps = Partial<
+  Record<FiscalArea, FiscalWizardStepId[]>
+>;
 
 @Injectable({
   providedIn: 'root',
@@ -40,6 +51,15 @@ export class FiscalActivationWizardService {
    */
   readonly prefill = signal<WizardPrefill | null>(null);
   readonly prefillLoading = signal(false);
+
+  /**
+   * Populated only when the last `finalize()` failed with
+   * `FISCAL_STATUS_INCOMPLETE`. Lets the validation step highlight the exact
+   * rows the backend still rejects (server-side confirmation, layered on top
+   * of the prefill/satisfied-driven rows). Reset to `{}` on every finalize
+   * attempt so stale highlights never linger.
+   */
+  readonly finalizeMissingSteps = signal<FinalizeMissingSteps>({});
 
   /**
    * Scope of the **logged-in user**, used to decide which API surface to hit
@@ -262,6 +282,19 @@ export class FiscalActivationWizardService {
     this.currentStepIndex.set(sequence.length - 1);
   }
 
+  /**
+   * Public cursor setter used by the validation step's "Volver a {paso}" CTA.
+   * Resolves the step's position inside the current `stepSequence()` and only
+   * moves the cursor when the step actually belongs to the sequence, so an
+   * out-of-scope step id is a safe no-op.
+   */
+  goToStep(step: FiscalWizardStepId): void {
+    const index = this.stepSequence().indexOf(step);
+    if (index >= 0) {
+      this.currentStepIndex.set(index);
+    }
+  }
+
   async startWizard(areas: FiscalArea[]): Promise<FiscalStatusReadResult> {
     const selected = Array.from(new Set(areas));
     this.selectedAreas.set(selected);
@@ -320,6 +353,7 @@ export class FiscalActivationWizardService {
   async finalize(): Promise<FiscalStatusReadResult> {
     this.submitting.set(true);
     this.error.set(null);
+    this.finalizeMissingSteps.set({});
     try {
       const area = this.selectedAreas()[0] ?? 'invoicing';
       const result = await firstValueFrom(
@@ -333,7 +367,23 @@ export class FiscalActivationWizardService {
       this.authFacade.patchFiscalStatus(data.fiscal_status);
       return data;
     } catch (error: any) {
-      this.error.set(this.messageFromError(error));
+      // FISCAL_STATUS_INCOMPLETE carries `details.missing_steps` — capture it
+      // so the validation step can surface server-side confirmation of the
+      // exact pending steps, then set a clear, non-generic banner message.
+      const parsed = parseApiError(error);
+      if (parsed.errorCode === 'FISCAL_STATUS_INCOMPLETE') {
+        const missing = parsed.details?.missing_steps;
+        this.finalizeMissingSteps.set(
+          missing && typeof missing === 'object'
+            ? (missing as FinalizeMissingSteps)
+            : {},
+        );
+        this.error.set(
+          'No se puede activar: faltan pasos por completar.',
+        );
+      } else {
+        this.error.set(this.messageFromError(error));
+      }
       throw error;
     } finally {
       this.submitting.set(false);

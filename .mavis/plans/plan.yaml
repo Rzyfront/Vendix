@@ -1,0 +1,314 @@
+version: 1
+plan:
+  name: 'Completar activación fiscal: shell, wizard prefill y spec del gate'
+  max_concurrency: 3
+  max_consecutive_failures: 2
+  max_cycles: 8
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  # =====================================================================
+  # Track A — Shell contenedor + capa activación conmutable + redirects
+  # =====================================================================
+  - id: shell-activacion
+    title: 'FiscalCoreShell + capa activación + redirects /admin/settings/fiscal*'
+    prompt: |
+      OBJETIVO: Convertir `/admin/fiscal` en un SHELL ÚNICO que muestra
+      automáticamente la capa correcta según `fiscal_status`:
+      - Todas las áreas INACTIVE → capa ACTIVACIÓN (panel + CTA al wizard)
+      - Alguna área ACTIVE/LOCKED → capa OPERACIÓN (los 7 tabs actuales)
+
+      CONTEXTO QUE NECESITAS LEER PRIMERO (no asumas, lee):
+      - apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.routes.ts (rutas hijas, 7 tabs)
+      - apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.component.ts (componente actual, 1540 líneas; tiene su propio <header> 60-92 y <nav> 94-110 que se duplicarán con el shell)
+      - apps/frontend/src/app/shared/components/sticky-header/sticky-header.component.ts (tabs `route` + actions API, ya existe)
+      - apps/frontend/src/app/core/store/auth/auth.facade.ts (expone `fiscalStatus = toSignal(...)`)
+      - apps/frontend/src/app/core/models/fiscal-status.model.ts (FiscalStatusBlock, REQUIRED_STEPS_BY_AREA, fiscalAreaHasPendingSignal)
+      - apps/frontend/src/app/shared/components/fiscal-management-panel/fiscal-management-panel.component.ts (capa activación a reutilizar)
+      - apps/frontend/src/app/shared/components/fiscal-activation-wizard/fiscal-activation-wizard.component.ts (línea 66: backRoute="/admin/settings/fiscal" — cambiar)
+      - apps/frontend/src/app/core/guards/fiscal-management.guard.ts (línea 30: navigateByUrl('/admin/settings/fiscal') — cambiar)
+      - apps/frontend/src/app/routes/private/store_admin.routes.ts (líneas 503-516: rutas viejas /admin/settings/fiscal/wizard y /admin/settings/fiscal)
+      - apps/frontend/src/app/routes/private/org_admin.routes.ts (líneas 170-188: equivalente org)
+
+      ENTREGABLES (todos deben quedar commiteados en dev):
+
+      1) CREAR `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-core-shell.component.ts`:
+         - Standalone component (Angular 20 zoneless, signals)
+         - Inputs via `input()`; outputs via `output()`
+         - Inyecta `AuthFacade` para leer `fiscalStatus()` reactivamente
+         - Calcula `readonly showActivation = computed(() => this.allAreasInactive())` donde `allAreasInactive` consulta el estado de las 3 áreas (invoicing, accounting, payroll) — si todas en `INACTIVE` (o sin estado materializado en absoluto), muestra activación; si alguna en `ACTIVE`/`LOCKED`, muestra operación
+         - Layout: `<app-sticky-header [title]="..." [tabs]="..." [actions]="..." [activeTab]="..." (actionClicked)="..." (tabChanged)="...">` + `<router-outlet>` debajo
+         - Tabs del sticky-header vienen de un `computed()` que mapea las 7 rutas actuales (dashboard, obligations, declarations, close, evidence, history, rules) usando `StickyHeaderTab` con `route` apuntando a las rutas correctas
+         - Acciones del sticky-header: "Actualizar" (id: 'refresh') y "Generar mes" (id: 'generate-obligations') — el componente padre (operations) los maneja via `(actionClicked)`
+         - Sub-componentes: cuando `showActivation() === true`, renderiza `<app-fiscal-management-panel>` + un CTA accesible (botón primario ≥44px, focus visible, aria-label) que navega a `/admin/fiscal/wizard`
+         - El sticky-header debe tener `showBackButton="true"` con `backRoute="/admin"` (vuelve al admin root, no a un lugar fiscal)
+         - Usa CommonModule, RouterLink, RouterOutlet, StickyHeaderComponent, FiscalManagementPanelComponent, IconComponent
+
+      2) MODIFICAR `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.routes.ts`:
+         - Estructura: la ruta `path: ''` (pathMatch full) → redirect a 'dashboard'
+         - `path: ''` con children: `loadComponent: () => FiscalCoreShellComponent` y dentro, las 7 rutas hijas actuales (`dashboard`, `obligations`, `declarations`, `close`, `evidence`, `history`, `rules`) que cargan `FiscalOperationsComponent` con `data: { tab }`
+         - Añadir `path: 'wizard'` con `canActivate: [fiscalManagementGuard]` que carga el wizard actual
+         - Añadir `path: 'activation'` para una vista dedicada de activación (puede reusar el mismo panel por ahora)
+         - Todas las rutas hijas con `path: ''` deben tener el shell como padre; usa `children:` en el path '' que carga el shell
+
+      3) MODIFICAR `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.component.ts`:
+         - QUITAR las líneas 60-92 (`<header>`) completo
+         - QUITAR las líneas 94-110 (`<nav>` de tabs) completo
+         - QUITAR `navItems: FiscalNavItem[]` (893-936) ya no se usa
+         - DEJAR la lógica `activeTab` (872-879) intacta — sigue derivando de route data
+         - DEJAR los 7 bloques de contenido (dashboard/obligations/etc.) intactos
+         - DEJAR `reloadCurrentTab()` y `generateCurrentMonthObligations()` intactos
+         - El shell expone `[actions]` y captura `(actionClicked)`; el componente `FiscalOperationsComponent` NO necesita cambios funcionales porque los datos son por tab, no por header
+         - Si necesitas exponer los handlers al shell, hazlo via `output()` o via un `service` compartido (preferible: usa un service `FiscalOperationsHeaderActionsService` que el shell inyecta para llamar a `reloadCurrentTab` y `generateCurrentMonthObligations` cuando recibe los action ids)
+
+      4) MODIFICAR `apps/frontend/src/app/routes/private/store_admin.routes.ts`:
+         - Líneas 503-509 (ruta vieja `fiscal/wizard`): REEMPLAZAR por `redirectTo: '/admin/fiscal/wizard'`, pathMatch: 'full'
+         - Líneas 510-516 (ruta vieja `fiscal` → management component): REEMPLAZAR por `redirectTo: '/admin/fiscal'`, pathMatch: 'full'
+         - El bloque padre `path: 'fiscal'` (líneas 390-396) ya está bien — ese ES el shell
+
+      5) MODIFICAR `apps/frontend/src/app/routes/private/org_admin.routes.ts`:
+         - Aplicar el mismo patrón: redirects equivalentes para `settings/fiscal` y `settings/fiscal/wizard` → `/admin/fiscal` y `/admin/fiscal/wizard`
+         - Verifica si hay además `settings/fiscal-scope` y `settings/fiscal-management`; si existen, también redirigir a las rutas nuevas o dejarlas si siguen siendo válidas (pregunta al usuario solo si dudas genuinas; para `fiscal-scope` y `fiscal-management` lo más probable es mantenerlas y solo redirigir `fiscal` y `fiscal/wizard`)
+
+      6) MODIFICAR `apps/frontend/src/app/core/guards/fiscal-management.guard.ts`:
+         - Línea 30: `router.navigateByUrl('/admin/settings/fiscal')` → cambiar a `router.navigateByUrl('/admin/fiscal')`
+
+      7) MODIFICAR `apps/frontend/src/app/shared/components/fiscal-activation-wizard/fiscal-activation-wizard.component.ts`:
+         - Línea 66: `backRoute="/admin/settings/fiscal"` → `backRoute="/admin/fiscal"`
+
+      8) MODIFICAR `apps/frontend/src/app/shared/components/fiscal-management-panel/fiscal-management-panel.component.ts`:
+         - Buscar todos los `routerLink` o `navigate` que apunten a `/admin/settings/fiscal/wizard` y cambiarlos a `/admin/fiscal/wizard`
+         - El plan dice líneas 134-140 — verifica el rango real con grep antes de editar
+
+      VERIFICACIÓN OBLIGATORIA antes de cerrar:
+      - `npm run build:prod -w apps/frontend` debe terminar con exit 0
+      - `npm run zoneless:audit -w apps/frontend` no debe reportar hallazgos nuevos
+      - `npx tsc --noEmit -p apps/frontend/tsconfig.app.json` exit 0 (si existe ese tsconfig; si no, el build ya cubre tipos)
+      - Confirma con grep que NO queda ninguna referencia a `/admin/settings/fiscal/wizard` o `/admin/settings/fiscal` en código de runtime (componentes, servicios, guards, rutas). Las menciones en CHANGELOG, comentarios históricos o tests no cuentan.
+
+      COMMITS:
+      - Un commit por bloque lógico: (a) shell + routes, (b) refactor operations component, (c) redirects + guard + backRoute + panel links
+      - Mensajes con prefijo `feat(fiscal):` siguiendo el estilo del commit previo
+      - Reporta los SHAs al final
+
+      REPORTAR AL FINAL:
+      - Lista de archivos modificados/creados
+      - SHAs de los commits
+      - Output completo de `npm run build:prod -w apps/frontend` (últimas 30 líneas)
+      - Output completo de `npm run zoneless:audit` (debe decir "no findings" o equivalente)
+      - Confirmación de que no quedó ninguna referencia rota
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      VERIFICACIÓN INDEPENDIENTE — no leas el diff del productor, rederiva:
+
+      1) Lee `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-core-shell.component.ts` (DEBE existir). Verifica:
+         - Standalone component, usa `app-sticky-header` con tabs y actions
+         - Inyecta `AuthFacade` y lee `fiscalStatus()` reactivamente
+         - Decide capa por estado de las 3 áreas
+         - Cuando `showActivation()`, renderiza `app-fiscal-management-panel`
+         - Cuando NO, renderiza `<router-outlet>` con los 7 tabs
+
+      2) Lee `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.routes.ts`. Verifica:
+         - Estructura: shell como padre de los 7 tabs + wizard + activation
+         - `path: ''` redirect a 'dashboard'
+
+      3) Lee `apps/frontend/src/app/private/modules/fiscal-operations/fiscal-operations.component.ts`. Verifica:
+         - Las líneas que antes eran `<header>` (60-92) y `<nav>` (94-110) están ELIMINADAS
+         - El componente ya no declara `navItems`
+         - `activeTab` y la lógica de carga por tab siguen intactas
+
+      4) Ejecuta `cd apps/frontend && npm run build:prod` desde la raíz del repo. DEBE terminar exit 0. Captura las últimas 30 líneas.
+
+      5) Ejecuta `cd apps/frontend && npm run zoneless:audit` o el script equivalente. NO debe haber hallazgos nuevos.
+
+      6) Ejecuta estos greps (todos deben dar 0 resultados en código de runtime):
+         - `grep -rn "/admin/settings/fiscal" apps/frontend/src/app --include="*.ts" --include="*.html"`
+         - `grep -rn "/admin/settings/fiscal" apps/frontend/src/app/routes`
+
+      7) Verifica accesibilidad básica del shell:
+         - El CTA del activation layer debe tener `aria-label` o texto visible
+         - El sticky-header debe mantener el foco visible
+         - Botones con altura ≥44px (clase Tailwind o CSS inline)
+
+      8) Reporta PASS/FAIL por cada uno de los 7 puntos. Si algún FAIL, da el path exacto del archivo y la línea.
+    timeout_ms: 1800000
+
+  # =====================================================================
+  # Track B — Wizard prefill en frontend
+  # =====================================================================
+  - id: wizard-prefill
+    title: 'prefill signal + loadPrefill + salto automático a primer paso no satisfecho'
+    prompt: |
+      OBJETIVO: Que el wizard de activación fiscal arranque en el primer paso
+      NO satisfecho y prellene cada paso con datos existentes, usando UN SOLO
+      request HTTP (en lugar de los 8 GET N+1 actuales).
+
+      CONTEXTO QUE NECESITAS LEER PRIMERO (no asumas, lee):
+      - apps/frontend/src/app/core/services/fiscal-activation-wizard.service.ts (servicio actual, ya tiene restoreWizardFromCurrentStatus línea 124-140, lastStatus, selectedAreas, stepSequence)
+      - apps/frontend/src/app/core/models/fiscal-status.model.ts (buildFiscalWizardSequence, REQUIRED_STEPS_BY_AREA, fiscalAreaHasPendingSignal)
+      - apps/frontend/src/app/shared/components/fiscal-activation-wizard/fiscal-activation-wizard.component.ts (cómo invoca restoreWizardFromCurrentStatus en líneas 595, 634)
+      - apps/backend/src/domains/store/settings/fiscal-status.controller.ts (endpoint ya existe: GET /store/settings/fiscal-status/wizard-prefill → fiscalStatus.buildWizardPrefill)
+      - apps/backend/src/common/services/fiscal-status.service.ts (línea 120: método buildWizardPrefill; busca qué campos devuelve buscando `satisfied_steps` o el método completo)
+      - apps/frontend/src/app/shared/components/fiscal-activation-wizard/ (los step-components dentro — busca los que hacen GET individuales: dian-config-step, fiscal-period-step, default-taxes-step, etc.)
+
+      ENTREGABLES:
+
+      1) MODIFICAR `apps/frontend/src/app/core/services/fiscal-activation-wizard.service.ts`:
+         - Añadir `readonly prefill = signal<WizardPrefill | null>(null)` con tipo `WizardPrefill` que tenga al menos: `legal_data`, `dian_config`, `puc`, `accounting_period`, `default_taxes`, `accounting_mappings`, `initial_inventory`, `payroll_config`, `satisfied_steps: FiscalWizardStepId[]`
+         - Añadir `async loadPrefill(): Promise<WizardPrefill>` que:
+           a) Llama `GET ${this.baseUrl()}/wizard-prefill` (usar el mismo baseUrl que ya existe)
+           b) Si `this.requiresTargetStore()` (computed existente), añade `?store_id=${this.targetStoreId()}` a la URL
+           c) Guarda resultado en `this.prefill.set(data)`
+           d) Devuelve `data`
+         - MODIFICAR `restoreWizardFromCurrentStatus()`:
+           a) Si `this.prefill()` es null, primero llama `loadPrefill()`
+           b) Combina `satisfied_steps` del prefill + `completedSteps()` computed (línea 89-91) + `fiscalAreaHasPendingSignal()` para identificar pasos ya cubiertos
+           c) Posiciona `currentStepIndex` en el primer paso de `stepSequence()` que NO esté en el conjunto satisfecho
+           d) Si TODOS los pasos están satisfechos, `currentStepIndex` queda en el último paso (mostrará "finalizar")
+         - Añadir computed `readonly effectiveSatisfiedSteps = computed(() => { /* unión de prefill.satisfied_steps + completedSteps() + fiscalAreaHasPendingSignal() */ })`
+         - Define el interface `WizardPrefill` en un archivo `apps/frontend/src/app/core/models/wizard-prefill.model.ts` (nuevo) o al tope del servicio si es pequeño
+
+      2) MODIFICAR `apps/frontend/src/app/shared/components/fiscal-activation-wizard/fiscal-activation-wizard.component.ts`:
+         - En el `ngOnInit` o el effect que llama `restoreWizardFromCurrentStatus` (línea 595 y 634), ASEGURAR que primero se llama `service.loadPrefill()` y luego `restoreWizardFromCurrentStatus()`. Si ya hay una llamada, refactorízala para que el orden sea loadPrefill → restoreWizardFromCurrentStatus
+         - Si el step-component de wizard hace su propio `GET` separado para datos preexistentes, REEMPLAZAR por una lectura de `service.prefill()` (signal) — busca los `*.step.ts` dentro de `fiscal-activation-wizard/` que llamen `http.get` para dian-config, fiscal-periods, etc.
+
+      3) Si encuentras step-components que hacen GETs redundantes (`*dian-config-step*`, `*period-step*`, `*taxes-step*`, `*mappings-step*`, `*inventory-step*`, `*payroll-step*`, `*legal-step*`), refactorízalos para que lean `service.prefill()?.dian_config` (o el campo que corresponda) en vez de hacer su propio HTTP.
+
+      4) NO toques el endpoint backend — ya existe y ya devuelve lo necesario. Tu trabajo es solo consumirlo bien desde el frontend.
+
+      VERIFICACIÓN OBLIGATORIA:
+      - `npm run build:prod -w apps/frontend` exit 0
+      - `npm run zoneless:audit` sin hallazgos nuevos
+      - Si hay specs del servicio, ejecútalos: `npm run test -w apps/frontend -- --runInBand` (puede que no haya specs aún — si no, omite este paso)
+      - Confirma con `grep -rn "http.get.*dian-config\|http.get.*fiscal-period\|http.get.*default-taxes" apps/frontend/src/app/shared/components/fiscal-activation-wizard` que ya no hay GETs redundantes por step
+
+      COMMITS:
+      - Un commit por bloque: (a) prefill signal/loadPrefill en servicio, (b) integración en wizard component + step-components
+
+      REPORTAR AL FINAL:
+      - Archivos modificados/creados con líneas clave
+      - SHAs
+      - Output de build:prod (últimas 20 líneas)
+      - Output de zoneless:audit
+      - Lista de step-components refactorizados para usar prefill() en vez de GET
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      VERIFICACIÓN INDEPENDIENTE — no leas el diff, rederiva:
+
+      1) Lee `apps/frontend/src/app/core/services/fiscal-activation-wizard.service.ts`. Verifica:
+         - Existe `prefill = signal(...)` (o equivalente reactivo)
+         - Existe `async loadPrefill()` que llama al endpoint correcto
+         - `restoreWizardFromCurrentStatus()` carga prefill si es null, y posiciona `currentStepIndex` en el primer paso no satisfecho
+         - Existe el interface/tipo `WizardPrefill` con al menos `satisfied_steps: FiscalWizardStepId[]`
+
+      2) Haz una inspección manual del Network en el dev server:
+         - Levanta `npm run start -w apps/frontend` o usa el docker `vendix_frontend` que ya está corriendo
+         - Abre el wizard en un tenant que ya tenga `dian_config` y `fiscal_periods` (puedes usar `prisma studio` para verificar el backfill)
+         - En Network, debe haber UN SOLO `GET .../wizard-prefill` y NINGÚN `GET .../dian-config` o `GET .../fiscal-period` separado por el wizard
+         - Captura la lista de URLs llamadas por el wizard
+
+      3) Ejecuta `npm run build:prod -w apps/frontend` desde la raíz. Exit 0. Captura las últimas 20 líneas.
+
+      4) Ejecuta `npm run zoneless:audit` o equivalente. Sin hallazgos nuevos.
+
+      5) Reporta PASS/FAIL con detalles.
+    timeout_ms: 1800000
+
+  # =====================================================================
+  # Track C — Backend spec test del FiscalGateService
+  # =====================================================================
+  - id: fiscal-gate-spec
+    title: 'spec test de FiscalGateService cubriendo la matriz de estados'
+    prompt: |
+      OBJETIVO: Crear `apps/backend/src/common/services/fiscal-gate.service.spec.ts`
+      que cubra la matriz completa de casos del gate. Es la verificación
+      pendiente del paso 2 del plan original.
+
+      CONTEXTO QUE NECESITAS LEER PRIMERO:
+      - apps/backend/src/common/services/fiscal-gate.service.ts (169 líneas, fuente de verdad)
+      - apps/backend/src/common/services/fiscal-status-resolver.service.ts (interfaz getStatusBlock; necesita ser mockeable)
+      - apps/backend/src/common/services/fiscal-scope.service.spec.ts (referencia de estilo — usa el MISMO estilo de mocking)
+      - apps/backend/src/common/interfaces/fiscal-status.interface.ts (FiscalArea, FiscalStatusBlock, FiscalStatusState)
+      - apps/backend/src/prisma/services/global-prisma.service.ts (también mockeable)
+
+      ENTREGABLES:
+
+      CREAR `apps/backend/src/common/services/fiscal-gate.service.spec.ts` con
+      la siguiente matriz de tests (cada uno como `it('...')` separado):
+
+      GRUPO A — isAreaEnabled (state materializado):
+        A1. fiscal_status.invoicing.state === 'ACTIVE' → true
+        A2. fiscal_status.invoicing.state === 'LOCKED' → true
+        A3. fiscal_status.invoicing.state === 'INACTIVE' → false
+        A4. fiscal_status.invoicing.state === 'WIP' → false
+        A5. fiscal_status.accounting.state === 'ACTIVE' → true
+        A6. fiscal_status.payroll.state === 'ACTIVE' → true
+        A7. area sin clave en fiscal_status (undefined) → false
+
+      GRUPO B — isAreaEnabled (fallback legacy, source_exists=false):
+        B1. module_flows[area].enabled === true → true
+        B2. module_flows[area].enabled === false → false
+        B3. module_flows[area] ausente (legacy sin module_flows) → true
+        B4. module_flows presente, area accounting sin `accounting` key pero con `accounting_flows` → true
+        B5. module_flows presente, area sin entry → false
+        B6. resolved_store_id null (scope ORGANIZATION) → true (leniente)
+
+      GRUPO C — isSubflowEnabled (AND jerárquico):
+        C1. accounting=ACTIVE + module_flows.accounting.payments === undefined → true (default)
+        C2. accounting=ACTIVE + module_flows.accounting.payments === false → false
+        C3. accounting=ACTIVE + module_flows.accounting.payments === true → true
+        C4. accounting=INACTIVE + module_flows.accounting.payments === true → false (maestro corta)
+        C5. invoicing=ACTIVE → isSubflowEnabled('invoice.accepted') → true
+        C6. payroll=ACTIVE → isSubflowEnabled('payroll.approved') → true
+        C7. subflow desconocido (ej. 'foo') → resuelve a area 'accounting' por default
+
+      GRUPO D — fail-closed:
+        D1. resolver.getStatusBlock lanza excepción → isAreaEnabled devuelve false
+        D2. resolver.getStatusBlock lanza excepción → isSubflowEnabled devuelve false
+        D3. isAreaEnabled con store_id null (ORGANIZATION) → maneja correctamente
+
+      GRUPO E — cache/invalidación (opcional, solo si es trivial):
+        E1. dos llamadas seguidas con mismo org/area → segunda usa cache (no es crítico para el gate, omite si complica)
+
+      ESTILO:
+      - Usa el mismo patrón de mocking que `fiscal-scope.service.spec.ts` (jest mocks de los services inyectados)
+      - Mockea `FiscalStatusResolverService.getStatusBlock` para devolver `fiscal_status` y `source_exists` controlados por test
+      - Mockea `GlobalPrismaService.withoutScope().store_settings.findUnique` para los tests de legacy fallback
+      - Agrupa con `describe('FiscalGateService')` y sub-`describe` por grupo
+      - Si encuentras alguna complicación con tipos, importa los tipos desde `@common/interfaces/fiscal-status.interface`
+
+      VERIFICACIÓN OBLIGATORIA:
+      - `cd apps/backend && npx jest --runInBand src/common/services/fiscal-gate.service.spec.ts` exit 0
+      - Todos los tests verde
+      - `npm run build -w apps/backend` exit 0
+
+      COMMIT:
+      - Un solo commit: `test(fiscal): add FiscalGateService spec covering state matrix`
+      - Reporta el SHA
+
+      REPORTAR AL FINAL:
+      - Número total de tests
+      - Output del run de jest
+      - SHA del commit
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      VERIFICACIÓN INDEPENDIENTE — rederiva, no leas solo:
+
+      1) Lee `apps/backend/src/common/services/fiscal-gate.service.spec.ts` (DEBE existir). Verifica que cubre AL MENOS:
+         - Estado ACTIVE, LOCKED, INACTIVE, WIP para isAreaEnabled
+         - Fallback legacy con module_flows presente, ausente, con enabled=true/false
+         - AND jerárquico (área activa + subflow false = false; área inactiva = false siempre)
+         - Fail-closed ante excepción del resolver
+
+      2) Ejecuta `cd apps/backend && npx jest --runInBand --testPathPattern=fiscal-gate.service.spec 2>&1 | tail -30`. DEBE pasar todos los tests. Captura el output.
+
+      3) Ejecuta `cd apps/backend && npm run build 2>&1 | tail -10`. DEBE exit 0.
+
+      4) Compara el estilo con `apps/backend/src/common/services/fiscal-scope.service.spec.ts` — debe ser consistente (jest, mocks con `jest.spyOn` o `useValue`).
+
+      5) Reporta PASS/FAIL con el número de tests pasados.
+    timeout_ms: 1500000

@@ -18,6 +18,10 @@ export interface FiscalDataSettings {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // DIAN issuer tax scheme code ('O-13' Gran Contribuyente, 'O-15'
+  // Autorretenedor, 'R-99-PN', etc.). Currently hardcoded in the DIAN
+  // provider; captured here for the pending provider-wiring follow-up.
+  tax_scheme?: string;
 }
 
 // ============================================================================

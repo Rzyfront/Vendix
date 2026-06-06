@@ -2326,6 +2326,11 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Fiscal status permission denied',
   },
+  FISCAL_STATUS_INCOMPLETE: {
+    code: 'FISCAL_STATUS_INCOMPLETE',
+    httpStatus: 409,
+    devMessage: 'Fiscal area cannot be activated with incomplete required steps',
+  },
 
   // Multi-tarifa (Price Tiers)
   PRICE_TIER_FIND_001: {

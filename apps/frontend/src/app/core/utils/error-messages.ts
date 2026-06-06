@@ -452,6 +452,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   DIAN_ENABLEMENT_001: 'Faltan requisitos para habilitar DIAN en produccion.',
   FISCAL_CONFIG_INCOMPLETE:
     'La configuracion fiscal de esta entidad esta incompleta.',
+  FISCAL_STATUS_INCOMPLETE:
+    'No se puede activar: faltan pasos por completar. Revisa los datos marcados como pendientes.',
   FISCAL_SCOPE_INVALID:
     'La operacion no corresponde a la entidad fiscal actual.',
   FISCAL_IDEMPOTENCY_CONFLICT:

@@ -88,7 +88,9 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         }
 
         @if (service.error()) {
-          <div class="error-banner">{{ service.error() }}</div>
+          <div class="error-banner" role="alert" aria-live="assertive">
+            {{ service.error() }}
+          </div>
         }
 
         <div class="mobile-step-tabs">
@@ -622,7 +624,9 @@ export class FiscalActivationWizardComponent implements OnInit {
   }
 
   isStepDone(step: FiscalWizardStepId): boolean {
-    return this.service.completedSteps().includes(step);
+    // Steps satisfied by prefill (existing tenant data) must show the ✓, not
+    // only steps the user explicitly completed inside the wizard.
+    return this.service.effectiveSatisfiedSteps().includes(step);
   }
 
   isLastStep(): boolean {

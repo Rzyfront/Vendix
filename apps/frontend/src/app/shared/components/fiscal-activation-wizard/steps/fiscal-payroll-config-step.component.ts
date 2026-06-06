@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
   viewChild,
@@ -22,6 +23,7 @@ import {
   PayrollSettingsValue,
 } from '../../forms/payroll-settings-form/payroll-settings-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
 @Component({
   selector: 'app-fiscal-payroll-config-step',
@@ -59,6 +61,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 export class FiscalPayrollConfigStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'payroll_config';
   readonly valid = signal(true);
@@ -119,7 +122,10 @@ export class FiscalPayrollConfigStepComponent implements FiscalWizardStepHost {
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     const form = this.form();
     form.markAllTouched();
-    if (!this.valid()) return null;
+    if (!this.valid()) {
+      focusFirstInvalid(this.host);
+      return null;
+    }
 
     this.submitting.set(true);
     this.localError.set(null);

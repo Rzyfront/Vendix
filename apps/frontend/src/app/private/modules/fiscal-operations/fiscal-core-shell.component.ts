@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
+import { ActivatedRoute, NavigationEnd, Router, RouterOutlet } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs/operators';
 
@@ -19,7 +19,6 @@ import {
   StickyHeaderComponent,
   StickyHeaderTab,
 } from '../../../shared/components/sticky-header/sticky-header.component';
-import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { FiscalOperationsHeaderActionsService } from './services/fiscal-operations-header-actions.service';
 
 type FiscalTabId =
@@ -106,56 +105,44 @@ const TAB_DEFINITIONS: TabDefinition[] = [
   imports: [
     CommonModule,
     RouterOutlet,
-    RouterLink,
     StickyHeaderComponent,
     FiscalManagementPanelComponent,
-    IconComponent,
   ],
   template: `
     <section class="fiscal-shell">
-      <app-sticky-header
-        title="Manejo fiscal"
-        [subtitle]="headerSubtitle()"
-        icon="settings"
-        variant="glass"
-        [showBackButton]="true"
-        backRoute="/admin"
-        [actions]="showActivation() ? [] : headerActions()"
-        [tabs]="showActivation() ? [] : stickyHeaderTabs()"
-        [activeTab]="activeTabId()"
-        tabsAriaLabel="Secciones fiscales"
-        (actionClicked)="onActionClicked($event)"
-        (tabChanged)="onTabChanged($event)"
-      ></app-sticky-header>
-
-      <div class="fiscal-shell__body">
-        @if (showActivation()) {
-          <div class="fiscal-shell__activation">
-            <div class="activation-cta">
-              <app-icon name="shield-check" size="22" class="activation-cta__icon" />
-              <div class="activation-cta__copy">
-                <h2>Activa tus áreas fiscales</h2>
-                <p>
-                  Aún no tienes áreas fiscales en operación. Configúralas para
-                  empezar a manejar facturación, contabilidad o nómina.
-                </p>
-              </div>
-              <a
-                class="activation-cta__button"
-                routerLink="/admin/fiscal/wizard"
-                aria-label="Iniciar activación fiscal"
-              >
-                <app-icon name="sparkles" size="18" />
-                <span>Iniciar activación</span>
-              </a>
-            </div>
-
-            <app-fiscal-management-panel />
-          </div>
-        } @else {
+      @if (onChildActivationRoute()) {
+        <!-- Wizard / panel de activación: traen su propio app-sticky-header,
+             así que el shell solo presta el outlet (evita header duplicado). -->
+        <div class="fiscal-shell__body">
           <router-outlet />
-        }
-      </div>
+        </div>
+      } @else if (showActivation()) {
+        <!-- Sin áreas fiscales activas: el panel de manejo fiscal es el
+             empty-state guiado (sus tarjetas por área ya enlazan al wizard).
+             Va directo al slot, SIN wrapper con padding/CTA encima, para que
+             su app-sticky-header quede pegado a la parte superior del slot. -->
+        <app-fiscal-management-panel />
+      } @else {
+        <!-- Capa OPERACIÓN: el shell es dueño del sticky-header con tabs. -->
+        <app-sticky-header
+          title="Operación fiscal"
+          subtitle="Operación fiscal"
+          icon="settings"
+          variant="glass"
+          [showBackButton]="true"
+          backRoute="/admin"
+          [actions]="headerActions()"
+          [tabs]="stickyHeaderTabs()"
+          [activeTab]="activeTabId()"
+          tabsAriaLabel="Secciones fiscales"
+          (actionClicked)="onActionClicked($event)"
+          (tabChanged)="onTabChanged($event)"
+        ></app-sticky-header>
+
+        <div class="fiscal-shell__body">
+          <router-outlet />
+        </div>
+      }
     </section>
   `,
   styles: [
@@ -175,95 +162,6 @@ const TAB_DEFINITIONS: TabDefinition[] = [
 
       .fiscal-shell__body {
         width: 100%;
-      }
-
-      .fiscal-shell__activation {
-        width: min(1120px, 100%);
-        margin: 0 auto;
-        padding: 0 0 2rem;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
-      }
-
-      .activation-cta {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        flex-wrap: wrap;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 0.6rem;
-        background: var(--surface-color, #ffffff);
-        padding: 1rem 1.25rem;
-      }
-
-      .activation-cta__icon {
-        flex: 0 0 auto;
-        color: var(--primary-color, #2563eb);
-        background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent);
-        width: 2.5rem;
-        height: 2.5rem;
-        border-radius: 0.5rem;
-        display: grid;
-        place-items: center;
-      }
-
-      .activation-cta__copy {
-        flex: 1 1 18rem;
-        min-width: 0;
-      }
-
-      .activation-cta__copy h2 {
-        margin: 0;
-        font-size: 1.05rem;
-        color: var(--text-primary, #111827);
-      }
-
-      .activation-cta__copy p {
-        margin: 0.25rem 0 0;
-        font-size: 0.9rem;
-        color: var(--text-secondary, #4b5563);
-        line-height: 1.35rem;
-      }
-
-      .activation-cta__button {
-        min-height: 2.75rem;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.55rem 1.1rem;
-        border-radius: 0.5rem;
-        border: 1px solid var(--primary-color, #2563eb);
-        background: var(--primary-color, #2563eb);
-        color: #ffffff;
-        font-weight: 700;
-        font-size: 0.92rem;
-        text-decoration: none;
-        cursor: pointer;
-        transition: transform 0.12s ease, box-shadow 0.12s ease;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
-      }
-
-      .activation-cta__button:hover {
-        box-shadow: 0 4px 14px color-mix(in srgb, var(--primary-color, #2563eb) 30%, transparent);
-        transform: translateY(-1px);
-      }
-
-      .activation-cta__button:focus-visible {
-        outline: 2px solid var(--primary-color, #2563eb);
-        outline-offset: 2px;
-      }
-
-      @media (max-width: 640px) {
-        .activation-cta {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-
-        .activation-cta__button {
-          width: 100%;
-          justify-content: center;
-        }
       }
     `,
   ],
@@ -294,12 +192,6 @@ export class FiscalCoreShellComponent {
       (area) => status[area]?.state !== 'ACTIVE' && status[area]?.state !== 'LOCKED',
     );
   });
-
-  readonly headerSubtitle = computed<string>(() =>
-    this.showActivation()
-      ? 'Configuración inicial'
-      : 'Operación fiscal',
-  );
 
   readonly stickyHeaderTabs = computed<StickyHeaderTab[]>(() =>
     TAB_DEFINITIONS.map((tab) => ({
@@ -354,6 +246,22 @@ export class FiscalCoreShellComponent {
       (tab) => url === tab.route || url.startsWith(`${tab.route}/`),
     );
     return match?.id ?? 'dashboard';
+  });
+
+  /**
+   * `true` when the active child route is the wizard or the dedicated
+   * activation panel. Those views own their `app-sticky-header`, so the
+   * shell must yield the `<router-outlet>` instead of rendering its own
+   * activation/operation chrome — otherwise navigating to `/wizard`
+   * while no area is active would keep showing the inline activation
+   * panel (the "clicking does nothing" bug) and stack two headers.
+   */
+  readonly onChildActivationRoute = computed<boolean>(() => {
+    const url = this.currentUrl();
+    return (
+      url.startsWith('/admin/fiscal/wizard') ||
+      url.startsWith('/admin/fiscal/activation')
+    );
   });
 
   constructor() {

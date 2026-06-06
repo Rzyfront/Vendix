@@ -20,7 +20,16 @@ import { FiscalStatusResolverService } from './fiscal-status-resolver.service';
 import {
   buildFiscalWizardSequence,
   FISCAL_STATUS_STEP_ORDER,
+  REQUIRED_STEPS_BY_FISCAL_AREA,
 } from './fiscal-status.wizard-config';
+
+/**
+ * Wizard steps that are not data-backed (UI-only gates), excluded when
+ * verifying real-data completeness for an area.
+ */
+const NON_DATA_STEPS: ReadonlySet<FiscalWizardStepId> = new Set<
+  FiscalWizardStepId
+>(['validation', 'area_selection']);
 
 const FISCAL_AREAS: FiscalArea[] = ['invoicing', 'accounting', 'payroll'];
 
@@ -133,79 +142,92 @@ export class FiscalStatusService {
     const store_id = resolved.store_id;
     const fiscal_scope = resolved.fiscal_scope;
 
-    const satisfied = new Set<FiscalWizardStepId>();
+    const sources = await this.readWizardSources(
+      client,
+      organization_id,
+      store_id,
+      fiscal_scope,
+    );
+    const satisfied = this.deriveSatisfiedSteps(sources);
 
+    return {
+      organization_id,
+      store_id,
+      fiscal_scope,
+      legal_data: sources.legal_data,
+      dian_config: sources.dian_config,
+      puc: sources.puc,
+      accounting_period: sources.accounting_period,
+      default_taxes: sources.default_taxes,
+      accounting_mappings: sources.accounting_mappings,
+      initial_inventory: sources.initial_inventory,
+      payroll_config: sources.payroll_config,
+      satisfied_steps: FISCAL_STATUS_STEP_ORDER.filter((step) =>
+        satisfied.has(step),
+      ),
+    };
+  }
+
+  /**
+   * Reads every wizard data source in one read-only pass. Each source is read
+   * defensively (a missing/unresolvable source yields `null`), mirroring the
+   * tolerance documented on {@link buildWizardPrefill}.
+   */
+  private async readWizardSources(
+    client: any,
+    organization_id: number,
+    store_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
+  ): Promise<{
+    legal_data: FiscalWizardPrefill['legal_data'];
+    dian_config: FiscalWizardPrefill['dian_config'];
+    puc: FiscalWizardPrefill['puc'];
+    accounting_period: FiscalWizardPrefill['accounting_period'];
+    default_taxes: FiscalWizardPrefill['default_taxes'];
+    accounting_mappings: FiscalWizardPrefill['accounting_mappings'];
+    initial_inventory: FiscalWizardPrefill['initial_inventory'];
+    payroll_config: FiscalWizardPrefill['payroll_config'];
+  }> {
     const legal_data = await this.readLegalData(
       client,
       organization_id,
       store_id,
+      fiscal_scope,
     );
-    if (legal_data && (legal_data.nit || legal_data.legal_name)) {
-      satisfied.add('legal_data');
-    }
-
     const dian_config = await this.readDianConfig(
       client,
       organization_id,
       store_id,
     );
-    if (dian_config) {
-      satisfied.add('dian_config');
-    }
-
     const puc = await this.readPuc(client, organization_id);
-    if (puc && puc.exists) {
-      satisfied.add('puc');
-    }
-
     const accounting_period = await this.readAccountingPeriod(
       client,
       organization_id,
     );
-    if (accounting_period) {
-      satisfied.add('accounting_period');
-    }
-
     const default_taxes = await this.readDefaultTaxes(
       client,
       organization_id,
       store_id,
     );
-    if (default_taxes && default_taxes.total_categories > 0) {
-      satisfied.add('default_taxes');
-    }
-
     const accounting_mappings = await this.readAccountingMappings(
       client,
       organization_id,
       store_id,
     );
-    if (accounting_mappings && accounting_mappings.total > 0) {
-      satisfied.add('accounting_mappings');
-    }
-
     const initial_inventory = await this.readInitialInventory(
       client,
       organization_id,
+      store_id,
+      fiscal_scope,
     );
-    if (initial_inventory && initial_inventory.configured) {
-      satisfied.add('initial_inventory');
-    }
-
     const payroll_config = await this.readPayrollConfig(
       client,
       organization_id,
       store_id,
       fiscal_scope,
     );
-    if (payroll_config && payroll_config.enabled) {
-      satisfied.add('payroll_config');
-    }
 
     return {
-      organization_id,
-      store_id,
-      fiscal_scope,
       legal_data,
       dian_config,
       puc,
@@ -214,22 +236,150 @@ export class FiscalStatusService {
       accounting_mappings,
       initial_inventory,
       payroll_config,
-      satisfied_steps: FISCAL_STATUS_STEP_ORDER.filter((step) =>
-        satisfied.has(step),
-      ),
     };
+  }
+
+  /**
+   * Pure rule that decides which wizard steps count as *satisfied* (i.e. have
+   * real, complete backing data — not merely present). Single source of truth
+   * for both {@link buildWizardPrefill} and {@link computeSatisfiedSteps} so the
+   * completeness contract cannot diverge between the prefill endpoint and the
+   * activation guard.
+   */
+  private deriveSatisfiedSteps(sources: {
+    legal_data: FiscalWizardPrefill['legal_data'];
+    dian_config: FiscalWizardPrefill['dian_config'];
+    puc: FiscalWizardPrefill['puc'];
+    accounting_period: FiscalWizardPrefill['accounting_period'];
+    default_taxes: FiscalWizardPrefill['default_taxes'];
+    accounting_mappings: FiscalWizardPrefill['accounting_mappings'];
+    initial_inventory: FiscalWizardPrefill['initial_inventory'];
+    payroll_config: FiscalWizardPrefill['payroll_config'];
+  }): Set<FiscalWizardStepId> {
+    const satisfied = new Set<FiscalWizardStepId>();
+
+    // legal_data: requires the fiscal NIT, its verification digit (DV) and the
+    // tax regime. Without a tax regime the legal/tax identity is incomplete for
+    // DIAN purposes, so legal_data is NOT satisfied.
+    if (
+      sources.legal_data &&
+      sources.legal_data.nit &&
+      sources.legal_data.nit_dv &&
+      sources.legal_data.fiscal_regime
+    ) {
+      satisfied.add('legal_data');
+    }
+
+    // dian_config: requires an uploaded certificate that is still valid (not
+    // expired). `has_certificate` is derived from `certificate_s3_key`.
+    if (
+      sources.dian_config &&
+      sources.dian_config.has_certificate &&
+      sources.dian_config.certificate_expiry &&
+      new Date(sources.dian_config.certificate_expiry).getTime() > Date.now()
+    ) {
+      satisfied.add('dian_config');
+    }
+
+    if (sources.puc && sources.puc.exists) {
+      satisfied.add('puc');
+    }
+
+    if (sources.accounting_period) {
+      satisfied.add('accounting_period');
+    }
+
+    if (sources.default_taxes && sources.default_taxes.total_categories > 0) {
+      satisfied.add('default_taxes');
+    }
+
+    if (sources.accounting_mappings && sources.accounting_mappings.total > 0) {
+      satisfied.add('accounting_mappings');
+    }
+
+    if (sources.initial_inventory && sources.initial_inventory.configured) {
+      satisfied.add('initial_inventory');
+    }
+
+    if (sources.payroll_config && sources.payroll_config.enabled === true) {
+      satisfied.add('payroll_config');
+    }
+
+    return satisfied;
+  }
+
+  /**
+   * Computes the set of *satisfied* (data-complete) wizard steps for a tenant.
+   * Resolves the same scope/sources as {@link buildWizardPrefill} and applies
+   * the shared {@link deriveSatisfiedSteps} rule. Used by
+   * {@link finalizeActivation} to reject activating areas with incomplete data.
+   */
+  private async computeSatisfiedSteps(
+    client: any,
+    organization_id: number,
+    store_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
+  ): Promise<Set<FiscalWizardStepId>> {
+    const sources = await this.readWizardSources(
+      client,
+      organization_id,
+      store_id,
+      fiscal_scope,
+    );
+    return this.deriveSatisfiedSteps(sources);
   }
 
   private async readLegalData(
     client: any,
     organization_id: number,
     store_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
   ): Promise<FiscalWizardPrefill['legal_data']> {
     const organization = await client.organizations.findUnique({
       where: { id: organization_id },
       select: { id: true, legal_name: true, tax_id: true },
     });
     if (!organization) return null;
+
+    // Fiscal data (regime, CIIU, responsibilities, person type) lives in the
+    // settings JSON, scope-aware: organization_settings when fiscal_scope is
+    // ORGANIZATION, store_settings (by store_id) when STORE. Mirrors the
+    // pattern used by `readPayrollConfig`.
+    const settingsRow =
+      fiscal_scope === 'ORGANIZATION'
+        ? await client.organization_settings.findUnique({
+            where: { organization_id },
+            select: { settings: true },
+          })
+        : store_id
+          ? await client.store_settings.findUnique({
+              where: { store_id },
+              select: { settings: true },
+            })
+          : null;
+
+    const settings = (settingsRow?.settings as any) || {};
+    const fiscalData =
+      settings.fiscal_data && typeof settings.fiscal_data === 'object'
+        ? (settings.fiscal_data as Record<string, unknown>)
+        : null;
+
+    const fiscal_regime =
+      typeof fiscalData?.tax_regime === 'string' ? fiscalData.tax_regime : null;
+    const ciiu =
+      typeof fiscalData?.ciiu === 'string' ? fiscalData.ciiu : null;
+    const tax_responsibilities =
+      Array.isArray(fiscalData?.tax_responsibilities) &&
+      fiscalData.tax_responsibilities.every(
+        (item: unknown) => typeof item === 'string',
+      )
+        ? (fiscalData.tax_responsibilities as string[])
+        : null;
+    // tax_scheme is the DIAN issuer code (O-13/O-15/R-99-PN…), distinct from
+    // person_type (NATURAL/JURIDICA). Read it directly; null until the
+    // provider-wiring follow-up captures/consumes it.
+    const tax_scheme =
+      typeof fiscalData?.tax_scheme === 'string' ? fiscalData.tax_scheme : null;
 
     // Fiscal NIT/DV are owned by DIAN configuration (per accounting entity).
     const dian = await client.dian_configurations.findFirst({
@@ -270,7 +420,10 @@ export class FiscalStatusService {
             postal_code: address.postal_code ?? null,
           }
         : null,
-      fiscal_regime: null,
+      fiscal_regime,
+      ciiu,
+      tax_responsibilities,
+      tax_scheme,
     };
   }
 
@@ -420,13 +573,45 @@ export class FiscalStatusService {
   private async readInitialInventory(
     client: any,
     organization_id: number,
+    store_id: number | null,
+    fiscal_scope: 'STORE' | 'ORGANIZATION',
   ): Promise<FiscalWizardPrefill['initial_inventory']> {
     const initial_transactions = await client.inventory_transactions.count({
       where: { organization_id, type: 'initial' },
     });
+
+    // Costing method lives in the settings JSON, scope-aware:
+    // organization_settings when fiscal_scope is ORGANIZATION, store_settings
+    // (by store_id) when STORE. Mirrors the pattern used by
+    // `readPayrollConfig`. Returns the raw settings value
+    // (`weighted_average`/`cpp`/`fifo`) so the frontend maps it to its enum.
+    const settingsRow =
+      fiscal_scope === 'ORGANIZATION'
+        ? await client.organization_settings.findUnique({
+            where: { organization_id },
+            select: { settings: true },
+          })
+        : store_id
+          ? await client.store_settings.findUnique({
+              where: { store_id },
+              select: { settings: true },
+            })
+          : null;
+
+    const settings = (settingsRow?.settings as any) || {};
+    const inventory =
+      settings.inventory && typeof settings.inventory === 'object'
+        ? (settings.inventory as Record<string, unknown>)
+        : null;
+    const costing_method =
+      typeof inventory?.costing_method === 'string'
+        ? inventory.costing_method
+        : null;
+
     return {
       configured: initial_transactions > 0,
       initial_transactions,
+      costing_method,
     };
   }
 
@@ -610,6 +795,53 @@ export class FiscalStatusService {
     changed_by_user_id?: number | null;
   }) {
     const now = new Date().toISOString();
+
+    // Resolve scope + areas BEFORE mutating so we can verify real-data
+    // completeness and reject the activation with a structured error listing the
+    // missing steps. LOCKED areas are skipped (legacy continuity, see below).
+    const client = this.globalPrisma.withoutScope();
+    const resolved = await this.resolver.getStatusBlock(
+      params.organization_id,
+      params.store_id,
+    );
+    const targetAreas = params.selected_areas?.length
+      ? this.normalizeAreas(params.selected_areas)
+      : this.getWizardAreas(resolved.fiscal_status);
+    if (targetAreas.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_STATUS_INVALID_TRANSITION,
+        'No fiscal areas selected for activation',
+      );
+    }
+
+    const satisfied = await this.computeSatisfiedSteps(
+      client,
+      params.organization_id,
+      resolved.store_id,
+      resolved.fiscal_scope,
+    );
+
+    const missing_steps: Record<string, string[]> = {};
+    for (const area of targetAreas) {
+      // LOCKED areas keep legacy continuity: not validated, not re-activated.
+      if (resolved.fiscal_status[area].state === 'LOCKED') continue;
+      const required = REQUIRED_STEPS_BY_FISCAL_AREA[area].filter(
+        (step) => !NON_DATA_STEPS.has(step),
+      );
+      const missing = required.filter((step) => !satisfied.has(step));
+      if (missing.length > 0) {
+        missing_steps[area] = missing;
+      }
+    }
+
+    if (Object.keys(missing_steps).length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_STATUS_INCOMPLETE,
+        'Cannot activate fiscal area(s) with incomplete required steps',
+        { missing_steps },
+      );
+    }
+
     return this.mutate(
       params.organization_id,
       params.store_id,

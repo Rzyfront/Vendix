@@ -85,63 +85,44 @@ export class FiscalInitialInventoryStepComponent
       const scope = this.service.userScope();
       if (scope && !this.loaded) {
         this.loaded = true;
-        void this.loadInitial();
+        this.loadInitial();
       }
     });
   }
 
-  private async loadInitial(): Promise<void> {
-    // userScope (logged-in user) routes the request, not org-level fiscal_scope.
+  private loadInitial(): void {
+    // userScope (logged-in user) routes the write request, not org-level
+    // fiscal_scope.
     // TODO: surface read-only banner if STORE_ADMIN hits an org-owned config.
     //
-    // Prefill provides the "is initial inventory already configured?" hint
-    // without a second GET. The costing_method itself still comes from
-    // settings — the prefill doesn't carry it, so this GET is NOT
-    // redundant. We keep it to seed the form's costing_method select.
+    // The unified prefill snapshot now carries both the "is initial inventory
+    // already configured?" hint AND the configured costing_method (read
+    // scope-aware on the backend). No step-owned GETs are needed anymore.
     const prefillInventory = this.service.prefill()?.initial_inventory;
     this.inventoryAlreadyConfigured.set(
       prefillInventory?.configured ?? false,
     );
     this.initialTransactions.set(prefillInventory?.initial_transactions ?? 0);
 
-    const scope = this.service.userScope();
-    try {
-      if (scope === 'organization') {
-        const res: any = await firstValueFrom(
-          this.http.get(`${environment.apiUrl}/organization/settings/inventory`),
-        );
-        const payload = res?.data ?? res;
-        const method = payload?.costing_method;
-        if (method === 'fifo')
-          this.initial.set({
-            costing_method: 'FIFO',
-            capture_initial_balance_later: true,
-          });
-        else if (method === 'weighted_average')
-          this.initial.set({
-            costing_method: 'WEIGHTED_AVERAGE',
-            capture_initial_balance_later: true,
-          });
-      } else {
-        const res: any = await firstValueFrom(
-          this.http.get(`${environment.apiUrl}/store/settings`),
-        );
-        const payload = res?.data ?? res;
-        const method = payload?.settings?.inventory?.costing_method;
-        if (method === 'fifo')
-          this.initial.set({
-            costing_method: 'FIFO',
-            capture_initial_balance_later: true,
-          });
-        else if (method === 'cpp')
-          this.initial.set({
-            costing_method: 'WEIGHTED_AVERAGE',
-            capture_initial_balance_later: true,
-          });
-      }
-    } catch {
-      // Silent
-    }
+    const method = this.mapPrefillCostingMethod(
+      prefillInventory?.costing_method ?? null,
+    );
+    this.initial.set({
+      costing_method: method,
+      capture_initial_balance_later: true,
+    });
+  }
+
+  /**
+   * Maps the raw `settings.inventory.costing_method` value carried by the
+   * prefill to the form's CostingMethod enum. Store settings use `cpp`, org
+   * settings use `weighted_average`; both map to WEIGHTED_AVERAGE. Unknown or
+   * absent values fall back to the form default (WEIGHTED_AVERAGE).
+   */
+  private mapPrefillCostingMethod(raw: string | null): CostingMethod {
+    if (raw === 'fifo') return 'FIFO';
+    if (raw === 'weighted_average' || raw === 'cpp') return 'WEIGHTED_AVERAGE';
+    return 'WEIGHTED_AVERAGE';
   }
 
   onValidity(v: boolean): void {

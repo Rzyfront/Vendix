@@ -78,7 +78,14 @@ export interface FiscalWizardPrefillLegalData {
     country: string | null;
     postal_code: string | null;
   } | null;
+  /** Tax regime, mapped from `store_settings.fiscal_data.tax_regime`. */
   fiscal_regime: string | null;
+  /** CIIU economic activity code, from `fiscal_data.ciiu`. */
+  ciiu: string | null;
+  /** DIAN tax responsibilities (responsabilidades), from `fiscal_data.tax_responsibilities`. */
+  tax_responsibilities: string[] | null;
+  /** Tax scheme (person type NATURAL/JURIDICA), from `fiscal_data.person_type`. */
+  tax_scheme: string | null;
 }
 
 export interface FiscalWizardPrefillDianConfig {
@@ -124,6 +131,13 @@ export interface FiscalWizardPrefillAccountingMappings {
 export interface FiscalWizardPrefillInitialInventory {
   configured: boolean;
   initial_transactions: number;
+  /**
+   * Configured inventory costing method, read scope-aware from
+   * `settings.inventory.costing_method` (organization_settings when
+   * fiscal_scope is ORGANIZATION, store_settings by store_id when STORE).
+   * Raw settings value (`weighted_average`/`cpp`/`fifo`); `null` when unset.
+   */
+  costing_method: string | null;
 }
 
 export interface FiscalWizardPrefillPayrollConfig {

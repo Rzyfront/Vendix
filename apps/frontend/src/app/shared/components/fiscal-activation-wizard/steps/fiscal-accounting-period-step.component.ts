@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
   viewChild,
@@ -22,6 +23,7 @@ import {
   FiscalPeriodValue,
 } from '../../forms/fiscal-period-form/fiscal-period-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
 @Component({
   selector: 'app-fiscal-accounting-period-step',
@@ -61,6 +63,7 @@ export class FiscalAccountingPeriodStepComponent
 {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'accounting_period';
   readonly valid = signal(false);
@@ -135,7 +138,10 @@ export class FiscalAccountingPeriodStepComponent
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     const form = this.form();
     form.markAllTouched();
-    if (!this.valid()) return null;
+    if (!this.valid()) {
+      focusFirstInvalid(this.host);
+      return null;
+    }
 
     this.submitting.set(true);
     this.localError.set(null);

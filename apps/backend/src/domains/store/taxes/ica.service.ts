@@ -43,7 +43,11 @@ export class IcaService {
     });
 
     const settings = store_settings?.settings as Record<string, any> | null;
-    const ciiu_code: string | null = settings?.ica?.ciiu_code || null;
+    // Canonical CIIU lives in fiscal_data.ciiu (written by the fiscal wizard's
+    // legal-data step and the settings panel). Fall back to the legacy
+    // ica.ciiu_code key for stores configured before the keys were unified.
+    const ciiu_code: string | null =
+      settings?.fiscal_data?.ciiu || settings?.ica?.ciiu_code || null;
 
     // 3. Query ica_municipal_rates with ciiu_code
     const now = new Date();

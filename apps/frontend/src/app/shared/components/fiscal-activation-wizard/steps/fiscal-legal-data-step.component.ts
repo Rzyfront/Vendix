@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
   viewChild,
@@ -20,8 +21,10 @@ import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   LegalDataFormComponent,
   LegalDataValue,
+  TaxRegime,
 } from '../../forms/legal-data-form/legal-data-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
 @Component({
   selector: 'app-fiscal-legal-data-step',
@@ -75,6 +78,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'legal_data';
   readonly valid = signal(false);
@@ -136,7 +140,21 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
   private toLegalFormValue(
     legal: WizardPrefillLegalData,
   ): Partial<LegalDataValue> {
+    // Prefill's `fiscal_regime` is sourced from `fiscal_data.tax_regime`, so
+    // it already carries the form's TaxRegime enum. Only seed the control when
+    // it's a valid value — otherwise leave the form default ('COMUN') intact.
+    const VALID_REGIMES: TaxRegime[] = [
+      'COMUN',
+      'SIMPLIFICADO',
+      'GRAN_CONTRIBUYENTE',
+    ];
+    const tax_regime =
+      legal.fiscal_regime &&
+      VALID_REGIMES.includes(legal.fiscal_regime as TaxRegime)
+        ? (legal.fiscal_regime as TaxRegime)
+        : undefined;
     return {
+      ...(tax_regime ? { tax_regime } : {}),
       legal_name: legal.legal_name ?? '',
       tax_id: legal.tax_id ?? '',
       nit: legal.nit ?? legal.tax_id ?? '',
@@ -151,7 +169,8 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
             postal_code: legal.fiscal_address.postal_code ?? '',
           }
         : undefined,
-      fiscal_regime: legal.fiscal_regime ?? undefined,
+      ciiu: legal.ciiu ?? '',
+      tax_responsibilities: legal.tax_responsibilities ?? [],
     } as Partial<LegalDataValue>;
   }
 
@@ -178,7 +197,10 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
 
     const form = this.form();
     form.markAllTouched();
-    if (!this.valid()) return null;
+    if (!this.valid()) {
+      focusFirstInvalid(this.host);
+      return null;
+    }
 
     this.submitting.set(true);
     this.localError.set(null);
@@ -198,6 +220,9 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
       const ref = {
         scope: scope === 'organization' ? 'ORGANIZATION' : 'STORE',
         nit: value.nit,
+        // Carried so the DIAN step (3) can inherit the fiscal identity the
+        // user just entered here, instead of asking for it again.
+        nit_dv: value.nit_dv,
         legal_name: value.legal_name,
         completed_at: new Date().toISOString(),
       };
