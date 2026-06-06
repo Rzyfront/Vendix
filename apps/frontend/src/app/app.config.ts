@@ -17,6 +17,7 @@ import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
 import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
+import { cacheBustingInterceptor } from './core/interceptors/cache-busting.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
 import { authReducer, AuthEffects } from './core/store/auth';
@@ -81,8 +82,13 @@ export const appConfig: ApplicationConfig = {
       withFetch(),
       // Order matters: auth runs first (handles 401 + token refresh) and
       // the paywall interceptor runs last so it can react to the final
-      // 402/403 response after retries.
-      withInterceptors([authInterceptorFn, subscriptionPaywallInterceptor]),
+      // 402/403 response after retries. cacheBusting runs after auth to
+      // avoid stripping the Authorization header on cache-bust clones.
+      withInterceptors([
+        authInterceptorFn,
+        cacheBustingInterceptor,
+        subscriptionPaywallInterceptor,
+      ]),
     ),
 
     // NgRx Store Configuration
