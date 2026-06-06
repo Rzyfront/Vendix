@@ -14,13 +14,15 @@ import { FiscalActivationWizardService } from '../../../core/services/fiscal-act
 import {
   FISCAL_AREAS,
   FISCAL_AREA_LABELS,
-  FISCAL_STEP_ICONS,
   FISCAL_STEP_LABELS,
   FiscalArea,
   FiscalWizardStepId,
 } from '../../../core/models/fiscal-status.model';
 import { StickyHeaderComponent } from '../sticky-header/sticky-header.component';
-import { IconComponent } from '../icon/icon.component';
+import {
+  StepsLineComponent,
+  StepsLineItem,
+} from '../steps-line/steps-line.component';
 import { FiscalWizardStepHost } from './wizard-step.contract';
 import { FiscalAreaSelectionStepComponent } from './steps/fiscal-area-selection-step.component';
 import { FiscalLegalDataStepComponent } from './steps/fiscal-legal-data-step.component';
@@ -41,7 +43,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
     FormsModule,
     RouterModule,
     StickyHeaderComponent,
-    IconComponent,
+    StepsLineComponent,
     FiscalAreaSelectionStepComponent,
     FiscalLegalDataStepComponent,
     FiscalDianConfigStepComponent,
@@ -90,34 +92,16 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         }
 
         <div class="wizard-shell">
-          <nav class="step-stepper" aria-label="Pasos de activación fiscal">
-            @for (step of service.stepSequence(); track step; let i = $index) {
-              <button
-                type="button"
-                class="step-node"
-                [class.step-node--active]="i === service.currentStepIndex()"
-                [class.step-node--done]="isStepDone(step)"
-                [disabled]="!canNavigateToStep(i)"
-                [attr.aria-current]="
-                  i === service.currentStepIndex() ? 'step' : null
-                "
-                [attr.aria-label]="stepLabels[step]"
-                [title]="stepLabels[step]"
-                (click)="goToStep(i)"
-              >
-                <span class="step-node__icon">
-                  @if (isStepDone(step) && i !== service.currentStepIndex()) {
-                    <app-icon name="check" [size]="16"></app-icon>
-                  } @else {
-                    <app-icon [name]="stepIcons[step]" [size]="16"></app-icon>
-                  }
-                </span>
-                @if (i === service.currentStepIndex()) {
-                  <span class="step-node__label">{{ stepLabels[step] }}</span>
-                }
-              </button>
-            }
-          </nav>
+          <app-steps-line
+            class="step-stepper"
+            aria-label="Pasos de activación fiscal"
+            [steps]="wizardSteps()"
+            [currentStep]="service.currentStepIndex()"
+            orientation="horizontal"
+            size="md"
+            [clickable]="true"
+            (stepClicked)="goToStep($event)"
+          ></app-steps-line>
 
           <article class="step-card">
             <div class="step-heading">
@@ -255,80 +239,13 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         gap: 1rem;
       }
 
-      /* Top stepper: a horizontally scrollable row of icon nodes. Only the
-         active node expands to show its text label; the rest are icon-only
-         (44px touch target). Done nodes swap their icon for a check. */
+      /* The step stepper is the shared <app-steps-line> connector component;
+         it owns its own internal layout. We only frame it with a divider so
+         it reads as the wizard's progress header. */
       .step-stepper {
-        display: flex;
-        align-items: center;
-        gap: 0.4rem;
-        overflow-x: auto;
-        padding-bottom: 0.3rem;
-        margin-bottom: 0.25rem;
-        scrollbar-width: thin;
-        -webkit-overflow-scrolling: touch;
-      }
-
-      .step-node {
-        flex: 0 0 auto;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.45rem;
-        min-height: 2.75rem;
-        min-width: 2.75rem;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 999px;
-        background: var(--surface-color, #ffffff);
-        color: var(--text-secondary, #475569);
-        padding: 0 0.7rem;
-        cursor: pointer;
-        transition: background 0.15s ease, color 0.15s ease,
-          border-color 0.15s ease, box-shadow 0.15s ease;
-      }
-
-      .step-node:disabled {
-        cursor: default;
-        opacity: 0.55;
-      }
-
-      .step-node:focus-visible {
-        outline: 2px solid var(--primary-color, #2563eb);
-        outline-offset: 2px;
-      }
-
-      .step-node__icon {
-        flex: 0 0 auto;
-        display: inline-flex;
-        align-items: center;
-      }
-
-      .step-node__label {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 0.85rem;
-        font-weight: 800;
-      }
-
-      /* Done (but not active): green accent on the ring + check icon. */
-      .step-node--done:not(.step-node--active) {
-        border-color: color-mix(
-          in srgb,
-          var(--success-color, #16a34a) 45%,
-          var(--border-color, #e5e7eb)
-        );
-        color: var(--success-color, #166534);
-      }
-
-      /* Active: solid primary pill that expands with the step label. */
-      .step-node--active {
-        border-color: var(--primary-color, #2563eb);
-        background: var(--primary-color, #2563eb);
-        color: #ffffff;
-        box-shadow: 0 4px 14px
-          color-mix(in srgb, var(--primary-color, #2563eb) 28%, transparent);
+        display: block;
+        border-bottom: 1px solid var(--border-color, #e5e7eb);
+        padding-bottom: 0.25rem;
       }
 
       .validation-state {
@@ -534,11 +451,6 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         .wizard-content {
           padding: 1.25rem 0 2rem;
         }
-
-        .step-stepper {
-          flex-wrap: wrap;
-          overflow-x: visible;
-        }
       }
     `,
   ],
@@ -553,7 +465,13 @@ export class FiscalActivationWizardComponent implements OnInit {
   readonly areas = FISCAL_AREAS;
   readonly areaLabels = FISCAL_AREA_LABELS;
   readonly stepLabels = FISCAL_STEP_LABELS;
-  readonly stepIcons = FISCAL_STEP_ICONS;
+
+  /** Steps fed to the shared <app-steps-line> connector stepper. */
+  readonly wizardSteps = computed<StepsLineItem[]>(() =>
+    this.service
+      .stepSequence()
+      .map((step) => ({ label: this.stepLabels[step] })),
+  );
 
   readonly currentTitle = computed(() => {
     const step = this.service.currentStep();
