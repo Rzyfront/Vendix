@@ -153,7 +153,7 @@ function normalizeAdjustment(raw: Record<string, any>): StockAdjustment {
       : raw.created_at?.toISOString?.() ?? new Date().toISOString(),
     products: product ? { id: Number(product.id), name: product.name, sku: product.sku ?? null } : null,
     product_variants: raw.product_variants ?? null,
-    inventory_locations: location ? { id: Number(location.id), name: location.name } : null,
+    inventory_locations: location ? { id: Number(location.id), name: location.name, store_id: location.store_id != null ? Number(location.store_id) : null } : null,
   };
 }
 
@@ -208,13 +208,17 @@ export interface LocationQuery {
   limit?: number;
 }
 
-export interface CreateAdjustmentDto {
-  product_id: string;
-  description: string;
+export interface CreateAdjustmentItem {
+  product_id: number;
   type: AdjustmentType;
-  quantity: number;
-  reason?: string;
-  location_id?: string;
+  quantity_after: number;
+  reason_code?: string;
+  description?: string;
+}
+
+export interface CreateAdjustmentDto {
+  location_id: number;
+  items: CreateAdjustmentItem[];
 }
 
 export interface CreateTransferDto {

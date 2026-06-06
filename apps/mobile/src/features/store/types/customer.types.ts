@@ -29,10 +29,10 @@ export interface CustomerWithWallet extends Customer {
 }
 
 export interface CustomerStats {
-  total: number;
-  active: number;
-  newThisMonth: number;
-  totalRevenue: number;
+  total_customers: number;
+  active_customers: number;
+  new_customers_this_month: number;
+  total_revenue: number;
 }
 
 export interface CustomerQuery {

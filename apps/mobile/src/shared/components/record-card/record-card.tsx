@@ -167,11 +167,16 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.995 }],
   },
   card: {
-    borderRadius: borderRadius.md,
+    borderRadius: 14,
     backgroundColor: colors.background,
     borderColor: colorScales.gray[200],
+    borderWidth: 1,
     overflow: 'hidden',
-    ...shadows.sm,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   header: {
     flexDirection: 'row',

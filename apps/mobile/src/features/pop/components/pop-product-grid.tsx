@@ -12,6 +12,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import type { PopProduct } from '../types';
 import PopActionsDropdown from './pop-actions-dropdown';
+import { Icon } from '@/shared/components/icon/icon';
+import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 interface PopProductGridProps {
   products: PopProduct[];
@@ -20,6 +22,7 @@ interface PopProductGridProps {
   onScanInvoice: () => void;
   onNewProduct: () => void;
   onBulkUpload: () => void;
+  locationName?: string;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -34,6 +37,7 @@ export default function PopProductGrid({
   onScanInvoice,
   onNewProduct,
   onBulkUpload,
+  locationName,
 }: PopProductGridProps) {
   const [search, setSearch] = useState('');
 
@@ -142,9 +146,12 @@ export default function PopProductGrid({
             onBulkUpload={onBulkUpload}
           />
         </View>
-        <Text style={styles.productCount}>
-          {filtered.length} producto{filtered.length !== 1 ? 's' : ''} disponible{filtered.length !== 1 ? 's' : ''}
-        </Text>
+        {locationName ? (
+          <View style={styles.warehouseBadge}>
+            <Icon name="warehouse" size={14} color="#059669" />
+            <Text style={styles.warehouseBadgeText} numberOfLines={1}>{locationName}</Text>
+          </View>
+        ) : null}
       </View>
 
       {/* Product grid */}
@@ -171,50 +178,89 @@ export default function PopProductGrid({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' },
-  stickyHeader: {
-    paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8,
-    borderBottomWidth: 1, borderBottomColor: '#e5e7eb',
-    backgroundColor: 'rgba(255,255,255,0.92)',
+  // Contenedor principal — mismo estilo de card que customers.tsx
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    ...shadows.sm,
   },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  searchBox: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#f3f4f6', borderRadius: 8, paddingHorizontal: 10, height: 36 },
-  searchIcon: { marginRight: 6 },
-  searchInput: { flex: 1, fontSize: 13, color: '#111827', paddingVertical: 0 },
-  productCount: { fontSize: 11, color: '#6b7280', fontWeight: '600' },
+  stickyHeader: {
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[200],
+    backgroundColor: colors.background,
+  },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  searchBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    height: 44,
+  },
+  searchIcon: { marginRight: spacing[2] },
+  searchInput: {
+    flex: 1,
+    color: colorScales.gray[900],
+    fontSize: typography.fontSize.base,
+    fontFamily: typography.fontFamily,
+    paddingVertical: 0,
+  },
+  warehouseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[1],
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.full,
+    alignSelf: 'flex-start',
+    marginTop: spacing[2],
+    borderWidth: 1,
+    borderColor: colorScales.green[100],
+  },
+  warehouseBadgeText: { fontSize: 11, fontWeight: '600', color: colorScales.green[700], maxWidth: 120 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP, padding: 12, paddingBottom: 24 },
   card: {
     width: CARD_WIDTH,
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    marginBottom: 8,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing[2],
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: colorScales.gray[200],
     overflow: 'hidden',
+    ...shadows.sm,
   },
-  imageWrap: { aspectRatio: 1, backgroundColor: 'linear-gradient(135deg, #f9fafb, #f3f4f6)', position: 'relative' },
+  imageWrap: { aspectRatio: 1, backgroundColor: colorScales.gray[100], position: 'relative' },
   image: { width: '100%', height: '100%', resizeMode: 'cover' },
-  imagePlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f3f4f6' },
-  stockBadge: { position: 'absolute', top: 6, right: 6, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, borderWidth: 1 },
-  stockBgSuccess: { backgroundColor: '#d1fae5', borderColor: '#a7f3d0' },
-  stockBgWarning: { backgroundColor: '#fef3c7', borderColor: '#fde68a' },
-  stockBgError: { backgroundColor: '#fee2e2', borderColor: '#fecaca' },
+  imagePlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[100] },
+  stockBadge: { position: 'absolute', top: 6, right: 6, paddingHorizontal: 6, paddingVertical: 2, borderRadius: borderRadius.md, borderWidth: 1 },
+  stockBgSuccess: { backgroundColor: colorScales.green[50], borderColor: colorScales.green[200] },
+  stockBgWarning: { backgroundColor: colorScales.amber[50], borderColor: colorScales.amber[200] },
+  stockBgError: { backgroundColor: colorScales.red[50], borderColor: colorScales.red[200] },
   stockBadgeText: { fontSize: 10, fontWeight: '800' },
-  stockTextSuccess: { color: '#065f46' },
-  stockTextWarning: { color: '#92400e' },
-  stockTextError: { color: '#dc2626' },
-  cardBody: { padding: 10 },
-  productName: { fontSize: 12, fontWeight: '600', color: '#111827', minHeight: 30, lineHeight: 15 },
+  stockTextSuccess: { color: colorScales.green[800] },
+  stockTextWarning: { color: colorScales.amber[800] },
+  stockTextError: { color: colorScales.red[700] },
+  cardBody: { padding: spacing[2.5] },
+  productName: { fontSize: 12, fontWeight: '600', color: colorScales.gray[900], minHeight: 30, lineHeight: 15 },
   skuRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2, marginBottom: 6 },
-  sku: { fontSize: 10, color: '#6b7280', fontFamily: 'monospace', flex: 1 },
-  pesoBadge: { backgroundColor: '#eff6ff', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 },
-  pesoBadgeText: { fontSize: 9, fontWeight: '700', color: '#2563eb' },
+  sku: { fontSize: 10, color: colorScales.gray[500], fontFamily: 'monospace', flex: 1 },
+  pesoBadge: { backgroundColor: colorScales.blue[50], paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 },
+  pesoBadgeText: { fontSize: 9, fontWeight: '700', color: colorScales.blue[700] },
   cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  price: { fontSize: 13, fontWeight: '700', color: '#059669' },
-  addBtn: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center' },
+  price: { fontSize: 13, fontWeight: '700', color: colorScales.green[700] },
+  addBtn: { width: 24, height: 24, borderRadius: 12, backgroundColor: colorScales.green[100], alignItems: 'center', justifyContent: 'center' },
   centerState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 60 },
-  centerText: { fontSize: 13, color: '#6b7280', marginTop: 8 },
-  emptyIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  centerTitle: { fontSize: 15, fontWeight: '700', color: '#111827', marginBottom: 6 },
-  centerHint: { fontSize: 13, color: '#6b7280' },
+  centerText: { fontSize: 13, color: colorScales.gray[500], marginTop: spacing[2] },
+  emptyIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center', marginBottom: spacing[3] },
+  centerTitle: { fontSize: 15, fontWeight: '700', color: colorScales.gray[900], marginBottom: spacing[1.5] },
+  centerHint: { fontSize: 13, color: colorScales.gray[500] },
 });

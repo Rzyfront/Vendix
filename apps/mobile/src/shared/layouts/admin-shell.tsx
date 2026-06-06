@@ -16,12 +16,13 @@ import { ToastContainer } from '@/shared/components/toast/toast';
 interface AdminShellProps {
   children: ReactNode;
   title?: string;
+  breadcrumb?: string;
   variant?: 'store' | 'org' | 'super';
 }
 
-export function AdminShell({ children, title = 'Vendix', variant = 'store' }: AdminShellProps) {
+export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [showHelpSearch, setShowHelpSearch] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const insets = useSafeAreaInsets();
@@ -47,27 +48,18 @@ export function AdminShell({ children, title = 'Vendix', variant = 'store' }: Ad
     <View style={styles.container}>
       <PosHeader
         onOpenDrawer={openDrawer}
-        onOpenHelp={() => setShowHelpSearch(true)}
+        onOpenSearch={() => setShowSearch(true)}
         onOpenNotifications={() => setShowNotifications(true)}
         onOpenUserMenu={() => setShowUserMenu(true)}
         notificationCount={unreadCount}
         userInitials={userInitials}
         title={title}
-        showBadge={variant === 'store'}
-        badgeLabel={variant === 'store' ? 'Punto de venta' : undefined}
+        breadcrumb={breadcrumb}
       />
 
       <View style={styles.flex}>
         {children}
       </View>
-
-      <HelpSearchModal
-        visible={showHelpSearch}
-        onClose={() => setShowHelpSearch(false)}
-        onSelectArticle={(article) => {
-          // No toast on mobile for global help
-        }}
-      />
 
       <NotificationsModal
         visible={showNotifications}
@@ -78,6 +70,14 @@ export function AdminShell({ children, title = 'Vendix', variant = 'store' }: Ad
         onNavigate={(route) => {
           setShowNotifications(false);
           router.push(route as never);
+        }}
+      />
+
+      <HelpSearchModal
+        visible={showSearch}
+        onClose={() => setShowSearch(false)}
+        onSelectArticle={() => {
+          // No toast on mobile for global help
         }}
       />
 

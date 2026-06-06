@@ -7,11 +7,14 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
+  Animated,
 } from 'react-native';
 import DateTimePicker, {
   DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
+import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 import type { PopSupplier, PopLocation, ShippingMethod } from '../types';
 import { SHIPPING_METHOD_LABELS } from '../constants';
 
@@ -38,7 +41,6 @@ interface PopHeaderProps {
   onQuickAddSupplier?: () => void;
   onQuickAddLocation?: () => void;
   title?: string;
-  subtitle?: string;
   badge?: string;
   icon?: string;
 }
@@ -66,9 +68,8 @@ export default function PopHeader({
   onQuickAddSupplier,
   onQuickAddLocation,
   title = 'POP',
-  subtitle = 'Punto de Compra',
-  badge,
-  icon = 'bag-handle',
+  badge = 'Compra',
+  icon = 'shopping-bag',
 }: PopHeaderProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
@@ -83,6 +84,9 @@ export default function PopHeader({
   const supplierSelectorRef = useRef<View>(null);
   const locationSelectorRef = useRef<View>(null);
   const containerRef = useRef<View>(null);
+
+  const flashAnim = useRef(new Animated.Value(0)).current;
+  const isFlashing = useRef(false);
 
   const measureSupplier = () => {
     containerRef.current?.measureInWindow((_cx, cy) => {
@@ -104,6 +108,23 @@ export default function PopHeader({
       setShowSettings(true);
     }
   }, [settingsOpenProp]);
+
+  useEffect(() => {
+    if (showConfigWarning && !isFlashing.current) {
+      isFlashing.current = true;
+      flashAnim.setValue(0);
+      Animated.sequence([
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 1, duration: 150, useNativeDriver: false }),
+        Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: false }),
+      ]).start(() => {
+        isFlashing.current = false;
+      });
+    }
+  }, [showConfigWarning, flashAnim]);
 
   const toggleSettings = () => {
     const next = !showSettings;
@@ -137,9 +158,7 @@ export default function PopHeader({
     <View ref={containerRef} style={styles.container}>
       <View style={styles.topRow}>
         <View style={styles.titleRow}>
-          <View style={styles.titleIcon}>
-            <Ionicons name={icon as any} size={20} color="#22C55E" />
-          </View>
+          <Icon name={icon} size={20} color={colorScales.gray[400]} />
           <View style={styles.titleBlock}>
             <View style={styles.titleBadgeRow}>
               <Text style={styles.title}>{title}</Text>
@@ -149,7 +168,6 @@ export default function PopHeader({
                 </View>
               )}
             </View>
-            <Text style={styles.subtitle}>{subtitle}</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.settingsToggle} onPress={toggleSettings}>
@@ -189,7 +207,28 @@ export default function PopHeader({
 
       {showSettings && (
         <View style={styles.settingsPanel}>
-          <View style={[styles.fieldsRow, showConfigWarning && styles.configWarning]}>
+          <Animated.View style={[styles.fieldsRow, {
+            backgroundColor: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['transparent', '#fffbeb'],
+            }),
+            borderWidth: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 2],
+            }),
+            borderColor: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['transparent', '#f59e0b'],
+            }),
+            padding: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 6],
+            }),
+            borderRadius: flashAnim.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 8],
+            }),
+          }]}>
             <View style={styles.fieldWrapper}>
               <Text style={styles.label}>Proveedor <Text style={styles.required}>*</Text></Text>
               <View style={styles.fieldRow}>
@@ -222,7 +261,7 @@ export default function PopHeader({
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </Animated.View>
 
           <View style={styles.fieldsRow}>
             <View style={styles.field}>
@@ -305,46 +344,116 @@ export default function PopHeader({
 }
 
 const styles = StyleSheet.create({
-  container: { backgroundColor: '#fff', borderTopLeftRadius: 12, borderTopRightRadius: 12 },
-  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  // Contenedor principal del header — mismo estilo de card que customers.tsx
+  container: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: borderRadius.lg,
+    borderTopRightRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderBottomWidth: 0,
+    ...shadows.sm,
+  },
+  topRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing[4], paddingVertical: spacing[3] },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  titleIcon: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center' },
   titleBlock: {},
   titleBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  title: { fontSize: 16, fontWeight: '800', color: '#111827' },
-  badge: { backgroundColor: '#dcfce7', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  badgeText: { fontSize: 10, fontWeight: '700', color: '#22C55E' },
-  subtitle: { fontSize: 11, color: '#6b7280', fontWeight: '500', marginTop: 1 },
-  settingsToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', backgroundColor: '#fff' },
-  settingsToggleText: { fontSize: 12, fontWeight: '600', color: '#374151' },
-  pillsRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 16, paddingBottom: 10, flexWrap: 'wrap' },
-  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
-  pillSupplier: { backgroundColor: '#dcfce7' },
-  pillLocation: { backgroundColor: '#d1fae5' },
-  pillDate: { backgroundColor: '#fef3c7' },
+  title: { fontSize: 16, fontWeight: '800', color: colorScales.gray[900] },
+  badge: {
+    backgroundColor: colorScales.green[50],
+    borderWidth: 1,
+    borderColor: colorScales.green[100],
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.md,
+  },
+  badgeText: { fontSize: 10, fontWeight: '700', color: colors.primary },
+  subtitle: { fontSize: 11, color: colorScales.gray[500], fontWeight: '500', marginTop: 1 },
+  // Toggle de ajustes — mismo estilo de botón que customers.tsx
+  settingsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.background,
+    ...shadows.sm,
+  },
+  settingsToggleText: { fontSize: 12, fontWeight: '600', color: colorScales.gray[700] },
+  pillsRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: spacing[4], paddingBottom: 10, flexWrap: 'wrap' },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: borderRadius.full },
+  pillSupplier: { backgroundColor: colorScales.green[50] },
+  pillLocation: { backgroundColor: colorScales.green[50] },
+  pillDate: { backgroundColor: colorScales.amber[50] },
   pillText: { fontSize: 11, fontWeight: '600' },
-  pillTextSupplier: { color: '#22C55E' },
-  pillTextLocation: { color: '#059669' },
-  pillTextDate: { color: '#d97706' },
-  settingsPanel: { paddingHorizontal: 16, paddingBottom: 12 },
+  pillTextSupplier: { color: colors.primary },
+  pillTextLocation: { color: colorScales.green[700] },
+  pillTextDate: { color: colorScales.amber[700] },
+  settingsPanel: { paddingHorizontal: spacing[4], paddingBottom: spacing[3] },
   fieldsRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  configWarning: { backgroundColor: '#fffbeb', borderWidth: 2, borderColor: '#f59e0b', padding: 6, borderRadius: 8 },
   fieldWrapper: { flex: 1 },
   field: { flex: 1 },
   fieldRow: { flexDirection: 'row', gap: 6 },
-  label: { fontSize: 11, fontWeight: '700', color: '#6b7280', marginBottom: 6, paddingLeft: 2 },
-  required: { color: '#ef4444' },
-  selector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#fff', height: 38 },
-  dateInput: { flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: '#fff', height: 38 },
-  dateValue: { fontSize: 13, color: '#111827', flex: 1 },
-  datePlaceholder: { fontSize: 13, color: '#9ca3af', flex: 1 },
-  quickAddBtn: { width: 38, height: 38, borderRadius: 8, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  label: { fontSize: 11, fontWeight: '700', color: colorScales.gray[500], marginBottom: 6, paddingLeft: 2 },
+  required: { color: colors.error },
+  // Selectores / inputs — mismo estilo de input que customers.tsx
+  selector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: 8,
+    backgroundColor: colors.background,
+    height: 38,
+  },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: 8,
+    backgroundColor: colors.background,
+    height: 38,
+  },
+  dateValue: { fontSize: 13, color: colorScales.gray[900], flex: 1 },
+  datePlaceholder: { fontSize: 13, color: colorScales.gray[400], flex: 1 },
+  quickAddBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
   selectorWrapper: { flex: 1 },
-  value: { fontSize: 13, color: '#111827', flex: 1, marginRight: 4 },
-  placeholder: { fontSize: 13, color: '#9ca3af', flex: 1, marginRight: 4 },
+  value: { fontSize: 13, color: colorScales.gray[900], flex: 1, marginRight: 4 },
+  placeholder: { fontSize: 13, color: colorScales.gray[400], flex: 1, marginRight: 4 },
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 },
   dropdownOverlay: { position: 'absolute', zIndex: 10000, elevation: 30 },
-  dropdownScroll: { maxHeight: 150, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, backgroundColor: '#fff', marginTop: 2, elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
-  dropdownItem: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  dropdownText: { fontSize: 13, color: '#374151' },
+  dropdownScroll: {
+    maxHeight: 150,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    marginTop: 2,
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  dropdownItem: { paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colorScales.gray[100] },
+  dropdownText: { fontSize: 13, color: colorScales.gray[700] },
 });

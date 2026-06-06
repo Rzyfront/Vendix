@@ -8,7 +8,8 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Icon } from '@/shared/components/icon/icon';
+import { borderRadius, colorScales, colors } from '@/shared/theme';
 import type { PreBulkData } from '../types';
 
 interface PopPrebulkModalProps {
@@ -58,23 +59,26 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
   const isValid = name.trim().length > 0 && code.trim().length > 0;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
       <View style={styles.overlay}>
         <View style={styles.modal}>
           <View style={styles.header}>
-            <View style={styles.headerText}>
-              <Text style={styles.title}>Agregar Producto Nuevo</Text>
-              <Text style={styles.subtitle}>Se creará en tu catálogo al confirmar la orden</Text>
+            <View style={styles.headerTitle}>
+              <Icon name="info" size={22} color={colors.primary} />
+              <View style={styles.headerText}>
+                <Text style={styles.title}>Agregar Producto Nuevo</Text>
+                <Text style={styles.subtitle}>Se creará en tu catálogo al confirmar la orden</Text>
+              </View>
             </View>
             <TouchableOpacity onPress={onCancel} style={styles.closeBtn}>
-              <Ionicons name="close" size={22} color="#6b7280" />
+              <Icon name="x" size={22} color="#6b7280" />
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
             {/* Info banner */}
             <View style={styles.infoBanner}>
-              <Ionicons name="information-circle" size={18} color="#2563eb" />
+              <Icon name="info" size={18} color="#2563eb" />
               <View style={styles.infoBannerText}>
                 <Text style={styles.infoBannerTitle}>Producto nuevo</Text>
                 <Text style={styles.infoBannerDesc}>
@@ -155,7 +159,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
             {/* Total preview */}
             <View style={styles.totalPreview}>
               <View style={styles.totalPreviewLeft}>
-                <Ionicons name="calculator-outline" size={16} color="#6b7280" />
+                <Icon name="calculator" size={16} color="#6b7280" />
                 <Text style={styles.totalPreviewLabel}>Total estimado</Text>
               </View>
               <Text style={styles.totalPreviewValue}>${totalPreview.toLocaleString()}</Text>
@@ -167,7 +171,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
             <Text style={styles.label}>Cantidad</Text>
             <View style={styles.qtyRow}>
               <TouchableOpacity style={styles.qtyBtn} onPress={() => setQuantity(String(Math.max(1, Number(quantity) - 1)))}>
-                <Ionicons name="remove" size={20} color="#374151" />
+                <Icon name="minus" size={20} color="#374151" />
               </TouchableOpacity>
               <TextInput
                 style={styles.qtyInput}
@@ -176,7 +180,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
                 keyboardType="numeric"
               />
               <TouchableOpacity style={styles.qtyBtn} onPress={() => setQuantity(String(Number(quantity) + 1))}>
-                <Ionicons name="add" size={20} color="#374151" />
+                <Icon name="plus" size={20} color="#374151" />
               </TouchableOpacity>
             </View>
 
@@ -201,7 +205,7 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
               onPress={handleConfirm}
               disabled={!isValid}
             >
-              <Ionicons name="cart" size={16} color="#fff" />
+              <Icon name="shopping-cart" size={16} color="#fff" />
               <Text style={styles.confirmText}>Agregar al carrito</Text>
             </TouchableOpacity>
           </View>
@@ -212,40 +216,56 @@ export default function PopPrebulkModal({ visible, onConfirm, onCancel }: PopPre
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, maxHeight: '90%' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' },
-  headerText: { flex: 1, marginRight: 12 },
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  // Contenedor del modal — mismo estilo de card que customers.tsx
+  modal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: '100%',
+    maxWidth: 480,
+    maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colorScales.gray[200] },
+  headerTitle: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, flex: 1, marginRight: 12 },
+  headerText: { flex: 1 },
   closeBtn: { padding: 4 },
-  title: { fontSize: 16, fontWeight: '700', color: '#111827' },
-  subtitle: { fontSize: 11, color: '#6b7280', marginTop: 2 },
+  title: { fontSize: 16, fontWeight: '700', color: colorScales.gray[900] },
+  subtitle: { fontSize: 11, color: colorScales.gray[500], marginTop: 2 },
   body: { paddingHorizontal: 16, maxHeight: 420 },
   bodyContent: { paddingTop: 16, paddingBottom: 24 },
-  infoBanner: { flexDirection: 'row', gap: 10, backgroundColor: '#eff6ff', borderRadius: 10, borderWidth: 1, borderColor: '#bfdbfe', padding: 12, marginBottom: 16, alignItems: 'flex-start' },
+  infoBanner: { flexDirection: 'row', gap: 10, backgroundColor: colorScales.blue[50], borderRadius: 10, borderWidth: 1, borderColor: colorScales.blue[200], padding: 12, marginBottom: 16, alignItems: 'flex-start' },
   infoBannerText: { flex: 1 },
-  infoBannerTitle: { fontSize: 12, fontWeight: '700', color: '#1e40af' },
-  infoBannerDesc: { fontSize: 11, color: '#1e3a8a', marginTop: 2, lineHeight: 15 },
-  sectionTitle: { fontSize: 10, fontWeight: '700', color: '#6b7280', letterSpacing: 0.5, marginBottom: 10, marginTop: 6 },
-  label: { fontSize: 12, fontWeight: '600', color: '#374151', marginBottom: 6 },
-  required: { color: '#ef4444' },
-  input: { borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#111827', backgroundColor: '#fff' },
+  infoBannerTitle: { fontSize: 12, fontWeight: '700', color: colorScales.blue[800] },
+  infoBannerDesc: { fontSize: 11, color: colorScales.blue[900], marginTop: 2, lineHeight: 15 },
+  sectionTitle: { fontSize: 10, fontWeight: '700', color: colorScales.gray[500], letterSpacing: 0.5, marginBottom: 10, marginTop: 6 },
+  label: { fontSize: 12, fontWeight: '600', color: colorScales.gray[700], marginBottom: 6 },
+  required: { color: colors.error },
+  input: { borderWidth: 1, borderColor: colorScales.gray[300], borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: colorScales.gray[900], backgroundColor: colors.background },
   textArea: { minHeight: 60, textAlignVertical: 'top' },
-  row2: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  row2: { flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 4 },
   row2Field: { flex: 1 },
-  priceInputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 10, backgroundColor: '#fff' },
-  pricePrefix: { fontSize: 15, fontWeight: '600', color: '#6b7280', marginRight: 4 },
-  priceInput: { flex: 1, fontSize: 15, fontWeight: '600', paddingVertical: 9, color: '#111827' },
-  totalPreview: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9fafb', borderRadius: 8, borderWidth: 1, borderColor: '#e5e7eb', paddingHorizontal: 14, paddingVertical: 12, marginVertical: 12 },
+  priceInputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colorScales.gray[300], borderRadius: 8, paddingHorizontal: 10, backgroundColor: colors.background },
+  pricePrefix: { fontSize: 15, fontWeight: '600', color: colorScales.gray[500], marginRight: 4 },
+  priceInput: { flex: 1, fontSize: 15, fontWeight: '600', paddingVertical: 9, color: colorScales.gray[900] },
+  totalPreview: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colorScales.gray[50], borderRadius: 8, borderWidth: 1, borderColor: colorScales.gray[200], paddingHorizontal: 14, paddingVertical: 12, marginVertical: 12 },
   totalPreviewLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  totalPreviewLabel: { fontSize: 12, color: '#6b7280' },
-  totalPreviewValue: { fontSize: 18, fontWeight: '800', color: '#059669' },
+  totalPreviewLabel: { fontSize: 12, color: colorScales.gray[500] },
+  totalPreviewValue: { fontSize: 18, fontWeight: '800', color: colorScales.green[700] },
   qtyRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  qtyBtn: { width: 40, height: 40, borderRadius: 8, backgroundColor: '#f3f4f6', alignItems: 'center', justifyContent: 'center' },
-  qtyInput: { flex: 1, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 9, fontSize: 16, fontWeight: '700', textAlign: 'center', color: '#111827' },
-  footer: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: '#e5e7eb', backgroundColor: '#f9fafb' },
-  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1, borderColor: '#d1d5db', alignItems: 'center', backgroundColor: '#fff' },
-  cancelText: { fontSize: 14, fontWeight: '700', color: '#374151' },
-  confirmBtn: { flex: 1, flexDirection: 'row', paddingVertical: 12, borderRadius: 12, backgroundColor: '#22C55E', alignItems: 'center', justifyContent: 'center', gap: 6, shadowColor: '#22C55E', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4 },
-  confirmBtnDisabled: { backgroundColor: '#9ca3af', shadowOpacity: 0 },
-  confirmText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  qtyBtn: { width: 40, height: 40, borderRadius: 8, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
+  qtyInput: { flex: 1, borderWidth: 1, borderColor: colorScales.gray[300], borderRadius: 8, paddingHorizontal: 16, paddingVertical: 9, fontSize: 16, fontWeight: '700', textAlign: 'center', color: colorScales.gray[900] },
+  footer: { flexDirection: 'row', gap: 12, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50] },
+  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[300], alignItems: 'center', backgroundColor: colors.background },
+  cancelText: { fontSize: 14, fontWeight: '700', color: colorScales.gray[700] },
+  confirmBtn: { flex: 1, flexDirection: 'row', paddingVertical: 12, borderRadius: borderRadius.lg, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center', gap: 6, shadowColor: colors.primary, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4 },
+  // Disabled: verde opaco (no gris) — como la web cuando faltan datos obligatorios
+  confirmBtnDisabled: { backgroundColor: 'rgba(34,197,94,0.4)', shadowOpacity: 0, opacity: 0.6 },
+  confirmText: { fontSize: 14, fontWeight: '700', color: colors.background },
 });

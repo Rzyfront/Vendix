@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,19 +6,21 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
   Image,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import { AuthService } from '@/core/auth/auth.service';
 import { isValidEmail } from '@/core/utils/validators';
-import { colors, spacing, borderRadius, typography } from '@/shared/theme';
+import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
 import { Input } from '@/shared/components/input/input';
 import { Icon } from '@/shared/components/icon/icon';
 
+const CREDENTIALS_KEY = 'saved_credentials';
+
 const styles = {
   screen: { flex: 1, backgroundColor: colors.background },
-  scrollContent: { flexGrow: 1, justifyContent: 'center' as const, paddingHorizontal: 32, paddingVertical: 48 },
+  inner: { flex: 1, justifyContent: 'center' as const, paddingHorizontal: 32 },
   logoContainer: { alignItems: 'center' as const, marginBottom: 32 },
   brandText: { fontSize: 20, fontWeight: '600' as const, color: colors.text.primary },
   titleContainer: { alignItems: 'center' as const, marginBottom: 24 },
@@ -27,6 +29,8 @@ const styles = {
   card: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, padding: 24, gap: 20 },
   errorBox: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 12 },
   errorText: { fontSize: 14, color: colors.error, textAlign: 'center' as const },
+  checkboxRow: { flexDirection: 'row' as const, alignItems: 'center' as const, gap: 8 },
+  checkboxLabel: { fontSize: 13, color: colors.text.secondary },
   button: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center' as const, justifyContent: 'center' as const },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { fontSize: 14, fontWeight: '600' as const, color: '#FFFFFF' },
@@ -37,8 +41,6 @@ const styles = {
   registerRow: { flexDirection: 'row' as const, justifyContent: 'center' as const, marginTop: 16 },
   registerText: { fontSize: 13, color: colors.text.secondary },
   registerLinkText: { fontSize: 13, fontWeight: '600' as const, color: colors.primary },
-  footer: { alignItems: 'center' as const, marginTop: 32, gap: 4 },
-  footerText: { fontSize: 12, color: colors.text.muted },
 };
 
 export default function LoginScreen() {
@@ -47,8 +49,35 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberCredentials, setRememberCredentials] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await SecureStore.getItemAsync(CREDENTIALS_KEY);
+        if (saved) {
+          const creds = JSON.parse(saved);
+          setVlink(creds.vlink || '');
+          setEmail(creds.email || '');
+          setPassword(creds.password || '');
+          setRememberCredentials(true);
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const persistCredentials = useCallback(async () => {
+    if (rememberCredentials) {
+      await SecureStore.setItemAsync(
+        CREDENTIALS_KEY,
+        JSON.stringify({ vlink, email, password }),
+      );
+    } else {
+      await SecureStore.deleteItemAsync(CREDENTIALS_KEY);
+    }
+  }, [rememberCredentials, vlink, email, password]);
 
   const handleLogin = async () => {
     setError(null);
@@ -66,6 +95,7 @@ export default function LoginScreen() {
     }
     setIsLoading(true);
     try {
+      await persistCredentials();
       const response = await AuthService.login({
         email,
         password,
@@ -94,10 +124,7 @@ export default function LoginScreen() {
       style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <View style={styles.inner}>
         {/* Logo */}
         <View style={styles.logoContainer}>
           <Image
@@ -155,6 +182,19 @@ export default function LoginScreen() {
           />
 
           <TouchableOpacity
+            style={styles.checkboxRow}
+            onPress={() => setRememberCredentials(!rememberCredentials)}
+            activeOpacity={0.7}
+          >
+            <Icon
+              name={rememberCredentials ? 'check-square' : 'square'}
+              size={18}
+              color={rememberCredentials ? colors.primary : colorScales.gray[400]}
+            />
+            <Text style={styles.checkboxLabel}>Recordar credenciales</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleLogin}
             disabled={isLoading}
@@ -194,13 +234,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </Link>
         </View>
-
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Acceso a Vendix Platform</Text>
-          <Text style={styles.footerText}>Powered by Vendix</Text>
-        </View>
-      </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
