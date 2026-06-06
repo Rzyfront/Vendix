@@ -109,7 +109,7 @@ import { User, UserState } from '../interfaces/user.interface';
             (clicked)="edit.emit(user())"
             title="Editar usuario"
           >
-            <app-icon name="edit" [size]="16"></app-icon>
+            <app-icon slot="icon" name="edit" [size]="16"></app-icon>
           </app-button>
 
           <app-button
@@ -127,7 +127,7 @@ import { User, UserState } from '../interfaces/user.interface';
                 : 'Reactivar usuario'
             "
           >
-            <app-icon name="archive" [size]="16"></app-icon>
+            <app-icon slot="icon" name="archive" [size]="16"></app-icon>
           </app-button>
 
           <app-button
@@ -137,7 +137,7 @@ import { User, UserState } from '../interfaces/user.interface';
             class="text-red-600 hover:text-red-700"
             title="Eliminar usuario"
           >
-            <app-icon name="trash-2" [size]="16"></app-icon>
+            <app-icon slot="icon" name="trash-2" [size]="16"></app-icon>
           </app-button>
         </div>
 

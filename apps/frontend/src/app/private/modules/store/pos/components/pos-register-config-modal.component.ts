@@ -104,7 +104,7 @@ import {
             (clicked)="onSave()"
             [disabled]="!configForm.valid"
           >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
+            <app-icon name="save" [size]="16" slot="icon" ></app-icon>
             Guardar Configuración
           </app-button>
         </div>

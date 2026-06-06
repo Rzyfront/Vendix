@@ -252,7 +252,7 @@ import type { StepsLineItem } from '../../../../../../../shared/components';
               <app-button
                 variant="outline" size="sm"
                 (clicked)="onDownloadPdf()" [loading]="downloadLoading()">
-                <app-icon name="download" [size]="14"></app-icon>
+                <app-icon slot="icon" name="download" [size]="14"></app-icon>
                 <span class="ml-1">PDF</span>
               </app-button>
             }

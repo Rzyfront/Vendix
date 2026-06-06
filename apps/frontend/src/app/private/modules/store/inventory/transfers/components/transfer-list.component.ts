@@ -107,7 +107,7 @@ import { StockTransfer, TransferStatus } from '../interfaces';
                   variant="primary"
                   (clicked)="onActionClick('create')"
                 >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                   Nueva Transferencia
                 </app-button>
               </div>

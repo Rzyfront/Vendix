@@ -1,0 +1,184 @@
+version: 1
+plan:
+  name: 'Correcciones UX del wizard de activación fiscal (6 anotaciones del usuario)'
+  max_concurrency: 2
+  max_consecutive_failures: 2
+  max_cycles: 6
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+tasks:
+  # =====================================================================
+  # Track A — Convenciones visuales + conmutación de errores
+  # =====================================================================
+  - id: wizard-visual-fixes
+    title: 'icon-slot en app-button, step-list vertical y toast de paso ya hecho'
+    prompt: |
+      CONTEXTO IMPORTANTE: el usuario probó el wizard en
+      https://vendix.com/admin/fiscal/wizard?areas=invoicing,accounting,payroll
+      y dejó 4 anotaciones de problemas visuales/de flujo. Lee los archivos
+      relevantes PRIMERO, no asumas la causa raíz:
+
+      - apps/frontend/src/app/shared/components/button/button.component.ts (línea 50: el componente tiene `<ng-content select="[slot=icon]">` — los iconos deben ir con `slot="icon"`, no sueltos)
+      - apps/frontend/src/app/shared/components/forms/default-taxes-form/default-taxes-form.component.ts (líneas 144 y 149-152: el `app-icon` se usa SIN slot="icon" — bug)
+      - apps/frontend/src/app/shared/components/forms/account-mappings-form/ (busca el botón "Aplicar defaults" — mismo bug)
+      - apps/frontend/src/app/shared/components/fiscal-activation-wizard/fiscal-activation-wizard.component.ts (líneas 106-127: la step-list está escondida en mobile, en desktop es un aside horizontal. La anotación 3 dice que debería ir vertical arriba con iconos para los completados y solo texto para el activo)
+      - apps/frontend/src/app/shared/components/fiscal-activation-wizard/steps/fiscal-accounting-mappings-step.component.ts (líneas 213-272: cuando el step es readOnlyForStore y existingCount > 0, hoy llama commitStep y avanza. El usuario dice que cuando da continuar en un paso que YA fue hecho, sale un error "Ocurrio un error. Intente de nuevo." — debe notificar en TOAST que ya está configurado y avanzar)
+
+      ENTREGABLES (3 fixes):
+
+      1) ANOTACIONES 1 y 2 — Convencion de iconos en app-button:
+         - Corrige TODOS los `app-button` que tengan un `<app-icon>` directo dentro sin `slot="icon"`. El patrón correcto es:
+           <app-button variant="outline" size="sm" (clicked)="addTax()">
+             <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+             Agregar impuesto
+           </app-button>
+         - Busca en TODO el repo: `grep -rln '<app-icon' apps/frontend/src/app | xargs grep -l '<app-button'` o equivalente; lista todos los archivos y corrige los que estén mal.
+         - Adicionalmente, en el slot de icono del app-button, el icono debe tener margin-right o padding-left para separarse del texto si no lo tiene ya. Verifica que se ve bien en outline + outline-border.
+         - IMPORTANTE: no toques usos correctos de app-icon FUERA de app-button (por ejemplo iconos en sticky-header, iconos sueltos en step-list, etc.)
+
+      2) ANOTACIÓN 3 — Step list vertical:
+         - Cambia el layout del wizard de 1 columna a 2 columnas en desktop:
+           - Móvil (default): step-list OCULTA — solo se ven los mobile-step-tabs arriba (esto ya funciona)
+           - Desktop (md+): step-list VISIBLE en columna IZQUIERDA, vertical, con scroll independiente si hay muchos pasos
+         - Cada step-pill debe mostrar:
+           - Ícono `check` verde (success-color) si está completado (ya lo hace)
+           - Número en círculo si NO está completado (ya lo hace)
+           - Label a la derecha
+           - Cuando está ACTIVO, el label es el texto (no mostrar número) y el fondo es el primary color
+         - El grid actual `grid-template-columns: 1fr` debe cambiar a `grid-template-columns: 1fr` en mobile y `grid-template-columns: 240px 1fr` o similar en md+.
+         - El step-list debe tener un max-height con overflow-y: auto para que haga scroll si los pasos no caben en pantalla
+         - El sticky-header sigue siendo el mismo
+
+      3) ANOTACIÓN 4 — Toast de paso ya configurado:
+         - En fiscal-accounting-mappings-step.component.ts: cuando el usuario hace clic en "Continuar" y el step ya está configurado (existingCount > 0 en readOnlyForStore, o cuando el endpoint ya tiene los mapeos), debe:
+           a) Llamar ToastService.info('Este paso ya está configurado. Avanzando al siguiente paso.') (o similar, en español)
+           b) Llamar service.commitStep para marcar como completado y avanzar
+           c) NO mostrar el error local "La configuración fiscal heredada..."
+         - Revisa si el ToastService está inyectado en este step component; si no, inyectalo. El patrón está en otros steps del mismo wizard.
+         - Si hay una situación donde el endpoint devuelva 409 o "ya existe" en lugar de éxito, también debe manejarlo con toast en lugar de error.
+
+      VERIFICACIÓN OBLIGATORIA:
+      - `npm run build:prod -w apps/frontend` exit 0
+      - `npm run zoneless:audit` sin hallazgos nuevos
+      - grep que confirme 0 instancias de `<app-button ...><app-icon` sin `slot="icon"`:
+        `grep -rn '<app-button' apps/frontend/src/app | grep -A1 'app-button' | grep 'app-icon' | grep -v 'slot="icon"'` debe dar 0 (o muy pocos en casos intencionales justificados)
+      - Captura screenshot con Playwright del wizard en /admin/fiscal/wizard mostrando:
+        a) Step list vertical visible en desktop (≥768px)
+        b) Icono "plus" bien posicionado dentro del botón "Agregar impuesto" (no encima del texto)
+
+      COMMITS:
+      - 3 commits separados, uno por anotación:
+        - fix(fiscal-wizard): use slot="icon" for app-icon inside app-button
+        - feat(fiscal-wizard): render step-list vertical in desktop layout
+        - fix(fiscal-wizard): notify via toast when step is already configured
+      - Mensajes con prefijo coherente con los commits anteriores
+
+      REPORTAR AL FINAL:
+      - Lista de archivos modificados
+      - SHAs de los 3 commits
+      - Output de build:prod (últimas 15 líneas)
+      - Output de zoneless:audit
+      - Confirmación de cada uno de los 3 fixes con el path del archivo y la línea clave
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      VERIFICACIÓN INDEPENDIENTE — no leas el diff, rederiva:
+
+      1) FIJA 1 (slot=icon): Ejecuta `grep -rn '<app-button' apps/frontend/src/app/shared/components/forms apps/frontend/src/app/shared/components/fiscal-activation-wizard | grep -B1 'app-icon'`. Todo `<app-icon>` que esté dentro de `<app-button>` debe tener `slot="icon"`. Si hay 0 errores → PASS; si hay algún `<app-icon>` dentro de `<app-button>` sin `slot="icon"` → FAIL con la línea exacta.
+
+      2) FIJA 2 (step-list vertical): Lee `fiscal-activation-wizard.component.ts` CSS. Verifica:
+         - En mobile (`@media max-width 767px` o default) `.step-list { display: none }`
+         - En desktop (`@media min-width 768px` o `md:`) `.step-list { display: block }` o `flex`
+         - El grid `.wizard-shell` cambia de `1fr` a `240px 1fr` o equivalente en desktop
+         - Cada `.step-pill` muestra el icono check si está done, número si no
+
+         Si quieres ir más allá, abre Playwright y carga `/admin/fiscal/wizard?areas=invoicing,accounting,payroll` en viewport 1280x800, captura screenshot, y verifica visualmente que la step-list aparece a la izquierda en vertical.
+
+      3) FIJA 3 (toast de paso ya hecho): Lee `fiscal-accounting-mappings-step.component.ts` y verifica que el submit() en el path de readOnlyForStore llama ToastService.info antes de commitStep. Si ToastService no estaba inyectado, ahora lo está.
+
+      4) Ejecuta `npm run build:prod -w apps/frontend` exit 0 y `npm run zoneless:audit` sin hallazgos nuevos.
+
+      5) Reporta PASS/FAIL por cada una de las 3 fijas con la línea exacta del código verificado.
+    timeout_ms: 1800000
+
+  # =====================================================================
+  # Track B — UX del selector de costeo y del paso de payroll
+  # =====================================================================
+  - id: wizard-ux-audit
+    title: 'expandir ayuda del selector FIFO + auditoría UX del paso payroll'
+    prompt: |
+      CONTEXTO: el usuario probó el wizard y dejó 2 anotaciones sobre UX
+      de selectores. Lee primero:
+
+      - apps/frontend/src/app/shared/components/forms/initial-inventory-form/initial-inventory-form.component.ts (líneas 23, 43-51, 86, 94-95: el CostingMethod ya tiene tooltip breve; el selector ofrece FIFO / WEIGHTED_AVERAGE / STANDARD. Anotación 5 pide explicación explícita con ejemplos por cada opción ACTIVA, sin quitar la breve general)
+      - apps/frontend/src/app/shared/components/forms/payroll-settings-form/payroll-settings-form.component.ts (199 líneas; anotación 6 pide auditar qué le falta al paso payroll para ser más profesional, completo y fácil de usar)
+
+      ENTREGABLES (2 fixes):
+
+      1) ANOTACIÓN 5 — Selector FIFO con explicación explícita:
+         - En initial-inventory-form.component.ts, el selector de costing_method debe:
+           a) Mantener la lista de opciones actual (FIFO, Promedio ponderado, Estándar) con su label breve
+           b) Cuando el usuario SELECCIONA una opción (formControlName="costing_method" cambia), mostrar debajo del selector un panel/cards con explicación DETALLADA + EJEMPLO concreto de la opción activa
+           c) Las opciones NO seleccionadas NO necesitan panel — solo un tooltip o un texto breve en cada `<option>` del select
+           d) El panel debe ser accesible: `role="region"` con `aria-label` o `aria-live="polite"`
+         - Contenido sugerido por opción:
+           * FIFO: "Vende primero las unidades más antiguas. Ejemplo: si compraste 10 unidades a $100 (lote 1) y luego 10 a $120 (lote 2), al vender 8, se valoran al costo del lote 1 ($100). Útil para perecederos."
+           * Promedio ponderado: "Calcula el costo promedio de cada producto después de cada compra. Ejemplo: con 10 unidades a $100 y 10 a $120, el costo promedio queda en $110. Simple y estable."
+           * Estándar: "Usa un costo fijo predefinido por producto. Útil cuando hay tarifas pactadas con proveedores; las variaciones reales se llevan a una cuenta de diferencias."
+         - Si ya existe un tooltip con explicación breve, NO lo elimines — solo AGREGA el panel de expansión para la opción activa.
+
+      2) ANOTACIÓN 6 — Auditoría UX del paso payroll:
+         - Lee el archivo payroll-settings-form.component.ts completo (199 líneas).
+         - Identifica QUÉ CAMPOS tiene el form y CUÁLES le faltan para que el usuario configure su nómina de manera profesional, completa y fácil de usar. Sugerencias a considerar (no las implementes todas, solo las que tengan sentido en el modelo actual):
+           a) ¿Hay campo de periodicidad de pago (quincenal/mensual/semanal)? ¿Está claro?
+           b) ¿Hay configuración de retenciones (Retención en la fuente)? ¿Está bien explicada?
+           c) ¿Hay configuración de seguridad social (EPS, AFP, ARL)? ¿Explica cómo se elige la entidad?
+           d) ¿Hay configuración de parafiscales (SENA, ICBF, Caja de Compensación)? ¿Tiene ejemplos?
+           e) ¿Hay campo de fondo de cesantías y/o porcentaje?
+           f) ¿Hay campo de operador PILA? Si el usuario ya tiene uno configurado, ¿se precarga?
+           g) ¿Hay un preview o resumen que muestre "Con la config actual, tu liquidación de ejemplo sería: ..."?
+           h) ¿Hay links de ayuda o tooltips a normatividad colombiana?
+           i) ¿Hay validaciones útiles (ej. porcentaje de retención entre 0 y 100)?
+         - IMPLEMENTA al menos 3 mejoras concretas de la lista que SÍ puedas hacer sin tocar el backend (mejoras de UI, validaciones, tooltips, prefills, placeholders, secciones colapsables, etc.).
+         - Si el form ya tiene muchos campos, considera agruparlos en secciones (Pago, Retenciones, Seguridad social, Parafiscales, Operador PILA) con fieldset/legend o cards.
+         - Si faltan campos críticos del modelo PayrollSettingsValue que no se exponen, expónlos.
+         - El form está en un wizard de ACTIVACIÓN: el usuario debe poder completarlo sin ambigüedades.
+
+      VERIFICACIÓN OBLIGATORIA:
+      - `npm run build:prod -w apps/frontend` exit 0
+      - `npm run zoneless:audit` sin hallazgos nuevos
+      - Para el selector FIFO: abre Playwright en /admin/fiscal/wizard?areas=invoicing,accounting,payroll, navega al paso "Inventario inicial", cambia el selector a FIFO, captura screenshot del panel explicativo que aparece debajo.
+
+      COMMITS:
+      - 2 commits separados:
+        - feat(fiscal-wizard): expand costing-method selector with active-option help
+        - feat(fiscal-wizard): improve payroll-config step UX ([lista de mejoras])
+      - Mensajes con prefijo coherente con los commits anteriores
+
+      REPORTAR AL FINAL:
+      - Lista de archivos modificados
+      - SHAs
+      - Output de build:prod (últimas 15 líneas)
+      - Lista de las 3+ mejoras concretas de payroll que implementaste (con justificación)
+      - Screenshot del selector FIFO mostrando el panel de la opción activa
+    assigned_to: coder
+    verified_by: verifier
+    verify_prompt: |
+      VERIFICACIÓN INDEPENDIENTE — rederiva, no leas solo el diff:
+
+      1) FIJA 5 (FIFO selector help): Lee initial-inventory-form.component.ts. Verifica:
+         - Existe un panel/region que muestra explicación detallada de la opción ACTIVA del costing_method
+         - Cada opción (FIFO, Promedio ponderado, Estándar) tiene un ejemplo concreto
+         - El tooltip/label breve de las opciones NO fue eliminado
+         - El panel tiene accesibilidad (aria-label, aria-live, o role)
+         - Si puedes, abre Playwright y captura screenshot para confirmar visualmente
+
+      2) FIJA 6 (payroll UX): Lee payroll-settings-form.component.ts. Verifica que se implementaron al menos 3 mejoras de UX. Las mejoras deben ser NO-triviales: tooltips explicativos, secciones agrupadas, validaciones, prefills, placeholders informativos, o campos adicionales que ya estén en el modelo PayrollSettingsValue pero no se exponían.
+
+      3) Ejecuta `npm run build:prod -w apps/frontend` exit 0.
+
+      4) Ejecuta `npm run zoneless:audit` sin hallazgos nuevos.
+
+      5) Reporta PASS/FAIL por cada una de las 2 fijas con la línea exacta del código verificado.
+    timeout_ms: 1800000

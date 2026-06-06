@@ -59,7 +59,7 @@ import { InputComponent, SelectorComponent, ButtonComponent, IconComponent } fro
       }
 
       <app-button variant="outline" size="sm" (clicked)="addItem()">
-        <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+        <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
         Agregar ciclo
       </app-button>
     </div>

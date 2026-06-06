@@ -431,7 +431,7 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
             [disabled]="domainForm.invalid || isSubmitting()"
             [loading]="isSubmitting()"
             >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
             Crear Dominio
           </app-button>
         </div>

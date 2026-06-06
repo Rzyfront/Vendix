@@ -5,7 +5,7 @@
     <h3>Excepciones y Dias Especiales</h3>
   </div>
   <app-button variant="outline" size="sm" (clicked)="showForm.set(!showForm())">
-    <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14" slot="icon"/>
+    <app-icon [name]="showForm() ? 'x' : 'plus'" [size]="14" slot="icon" />
     {{ showForm() ? 'Cancelar' : 'Agregar' }}
   </app-button>
 </div>
@@ -82,7 +82,7 @@
           <span class="exception-reason">{{ ex.reason }}</span>
         }
         <app-button variant="ghost" size="xsm" (clicked)="deleteException(ex.id)" aria-label="Eliminar excepcion">
-          <app-icon name="trash-2" [size]="14" slot="icon"/>
+          <app-icon name="trash-2" [size]="14" slot="icon" />
         </app-button>
       </div>
     }

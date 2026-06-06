@@ -113,7 +113,7 @@ import type { BusinessHours } from '../../../../../core/models/store-settings.in
             >Cerrar</app-button
           >
           <app-button variant="primary" size="sm" (clicked)="onGoToSettings()">
-            <app-icon name="settings" [size]="16" slot="icon"></app-icon>
+            <app-icon name="settings" [size]="16" slot="icon" ></app-icon>
             Configurar Horarios
           </app-button>
         </div>

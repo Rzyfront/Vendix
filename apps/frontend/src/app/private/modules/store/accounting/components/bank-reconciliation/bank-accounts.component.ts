@@ -102,7 +102,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                 size="sm"
                 (clicked)="openImportModal()"
               >
-                <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+                <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Importar</span>
               </app-button>
               <app-button
@@ -110,7 +110,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                 size="sm"
                 (clicked)="navigateToReconciliations()"
               >
-                <app-icon name="git-merge" [size]="16" slot="icon"></app-icon>
+                <app-icon name="git-merge" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Conciliaciones</span>
               </app-button>
               <app-button
@@ -118,7 +118,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                 size="sm"
                 (clicked)="openCreateModal()"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Nueva Cuenta</span>
                 <span class="sm:hidden">Nueva</span>
               </app-button>

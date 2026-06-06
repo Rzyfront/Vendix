@@ -115,7 +115,7 @@ import { ReviewStepComponent } from './review-step.component';
               variant="outline"
               (clicked)="wizardService.previousStep()"
             >
-              <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
+              <app-icon name="arrow-left" [size]="16" slot="icon" ></app-icon>
               Anterior
             </app-button>
           } @else {
@@ -130,7 +130,7 @@ import { ReviewStepComponent } from './review-step.component';
               [disabled]="!wizardService.canProceed()"
             >
               Siguiente
-              <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+              <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
             </app-button>
           } @else if (!isCreated()) {
             <div class="relative flex items-center">

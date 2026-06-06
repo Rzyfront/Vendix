@@ -171,6 +171,7 @@ export class FiscalLegalDataStepComponent implements FiscalWizardStepHost {
         : undefined,
       ciiu: legal.ciiu ?? '',
       tax_responsibilities: legal.tax_responsibilities ?? [],
+      tax_scheme: legal.tax_scheme ?? '',
     } as Partial<LegalDataValue>;
   }
 

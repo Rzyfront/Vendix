@@ -71,17 +71,17 @@ interface PayoutBatchDetail {
             <div class="flex flex-wrap gap-2">
               @if (b.state === 'pending' || b.state === 'draft') {
                 <app-button variant="success" size="sm" (clicked)="approve(b.id)">
-                  <app-icon name="check" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="check" [size]="16" slot="icon" ></app-icon>
                   Aprobar
                 </app-button>
                 <app-button variant="danger" size="sm" (clicked)="reject(b.id)">
-                  <app-icon name="x" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="x" [size]="16" slot="icon" ></app-icon>
                   Rechazar
                 </app-button>
               }
               @if (b.state === 'approved' || b.state === 'sent') {
                 <app-button variant="primary" size="sm" (clicked)="markAsPaid(b.id)">
-                  <app-icon name="banknote" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="banknote" [size]="16" slot="icon" ></app-icon>
                   Marcar pagado
                 </app-button>
               }

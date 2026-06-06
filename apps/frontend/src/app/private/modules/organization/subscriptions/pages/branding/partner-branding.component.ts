@@ -42,7 +42,7 @@ interface BrandingConfig {
           <p class="text-sm text-text-secondary">Personaliza la experiencia de tus clientes</p>
         </div>
         <app-button variant="primary" [loading]="saving()" (clicked)="saveBranding()">
-          <app-icon name="save" [size]="16" slot="icon"></app-icon>
+          <app-icon name="save" [size]="16" slot="icon" ></app-icon>
           Guardar Cambios
         </app-button>
       </div>

@@ -50,7 +50,7 @@ import { EventDetailModalComponent } from '../../components/event-detail-modal.c
             (searchChange)="onSubscriptionIdChange($event)"
           />
           <app-button variant="primary" size="sm" (clicked)="loadEvents()">
-            <app-icon name="search" [size]="16" slot="icon"></app-icon>
+            <app-icon name="search" [size]="16" slot="icon" ></app-icon>
             Buscar
           </app-button>
         </form>

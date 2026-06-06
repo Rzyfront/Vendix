@@ -220,14 +220,14 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
 
           @if (transfer()?.status === 'draft') {
             <app-button variant="primary" (clicked)="approveTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold">
-              <app-icon name="check" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="check" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Aprobar
             </app-button>
           }
 
           @if (transfer()?.status === 'in_transit' && !isCompleting) {
             <app-button variant="primary" (clicked)="startCompleting()" customClasses="!rounded-xl font-bold">
-              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Recibir
             </app-button>
           }
@@ -238,7 +238,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               (clicked)="confirmingReception = true"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
-              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Confirmar Recepcion
             </app-button>
           }
@@ -250,7 +250,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               [loading]="isProcessing()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
-              <app-icon name="alert-triangle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="alert-triangle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Si, Aplicar Movimientos
             </app-button>
           }
@@ -258,7 +258,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
           @if (transfer()?.status === 'draft' || transfer()?.status === 'in_transit') {
             @if (!isCompleting) {
               <app-button variant="outline" (clicked)="cancelTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5">
-                <app-icon name="x-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+                <app-icon name="x-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
                 Cancelar
               </app-button>
             }

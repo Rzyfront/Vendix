@@ -50,6 +50,18 @@ export interface SetupUserData {
   country_code?: string;
 }
 
+/**
+ * Optional nested fiscal payload accepted by the onboarding setup endpoints.
+ * Every field is optional; the object is only sent when the user fills it in.
+ */
+export interface OnboardingFiscalData {
+  legal_name?: string;
+  nit?: string;
+  nit_dv?: string;
+  nit_type?: string;
+  tax_regime?: string;
+}
+
 export interface SetupOrganizationData {
   name: string;
   description?: string;
@@ -64,6 +76,7 @@ export interface SetupOrganizationData {
   state_province?: string;
   postal_code?: string;
   country_code?: string;
+  fiscal_data?: OnboardingFiscalData;
 }
 
 export interface SetupStoreData {
@@ -78,6 +91,7 @@ export interface SetupStoreData {
   state_province?: string;
   postal_code?: string;
   country_code?: string;
+  fiscal_data?: OnboardingFiscalData;
 }
 
 export interface SetupAppConfigData {

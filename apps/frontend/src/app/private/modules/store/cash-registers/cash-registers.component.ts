@@ -368,7 +368,7 @@ import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler
             (clicked)="onSaveRegister()"
             [disabled]="!register_form.valid || is_saving_register()"
           >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
+            <app-icon name="save" [size]="16" slot="icon" ></app-icon>
             @if (is_saving_register()) {
               Guardando...
             } @else {

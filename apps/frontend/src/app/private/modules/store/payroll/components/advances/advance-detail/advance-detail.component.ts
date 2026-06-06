@@ -320,7 +320,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                   [disabled]="paymentForm.invalid || paymentLoading"
                   [loading]="paymentLoading"
                   >
-                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
                   Registrar Pago
                 </app-button>
               </form>
@@ -340,7 +340,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     (clicked)="onApprove()"
                     [loading]="actionLoading"
                     >
-                    <app-icon name="check-circle" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="check-circle" [size]="16" slot="icon" ></app-icon>
                     Aprobar Adelanto
                   </app-button>
                   <app-button
@@ -349,7 +349,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     (clicked)="onReject()"
                     [loading]="actionLoading"
                     >
-                    <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="x-circle" [size]="16" slot="icon" ></app-icon>
                     Rechazar
                   </app-button>
                 }
@@ -361,7 +361,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     (clicked)="onCancel()"
                     [loading]="actionLoading"
                     >
-                    <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="x-circle" [size]="16" slot="icon" ></app-icon>
                     Cancelar Adelanto
                   </app-button>
                 }

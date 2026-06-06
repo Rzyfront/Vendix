@@ -136,7 +136,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           (clicked)="onOpen()"
           [disabled]="!form.valid || submitting() || loading()"
         >
-          <app-icon name="unlock" [size]="16" slot="icon"></app-icon>
+          <app-icon name="unlock" [size]="16" slot="icon" ></app-icon>
           @if (submitting()) {
             Abriendo...
           } @else {

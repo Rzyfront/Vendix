@@ -59,7 +59,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 [loading]="loading()"
                 class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
               >
-                <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                <app-icon name="trash-2" [size]="14" slot="icon" ></app-icon>
                 Vaciar
               </app-button>
             }
@@ -143,7 +143,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   [disabled]="actionState.loading || actionState.isEmpty"
                   customClasses="!h-10 !font-semibold"
                 >
-                  <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
+                  <app-icon name="file-text" [size]="18" slot="icon" ></app-icon>
                   Crear orden
                 </app-button>
                 <!-- Primary CTA: Create and Receive (bottom, full width) -->

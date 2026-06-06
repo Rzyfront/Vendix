@@ -96,6 +96,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [step]="step()"
           [min]="min()"
           [max]="max()"
+          [attr.maxlength]="resolvedMaxLength()"
           [class]="inputClasses"
           [style]="customInputStyle()"
           (input)="onInput($event)"
@@ -240,6 +241,7 @@ export class InputComponent implements ControlValueAccessor {
   readonly step = input<string>();
   readonly min = input<string | number>();
   readonly max = input<string | number>();
+  readonly maxlength = input<number | null>(null);
 
   // Nuevos inputs para personalización de estilos
   readonly customInputStyle = input('');
@@ -558,6 +560,15 @@ export class InputComponent implements ControlValueAccessor {
     if (!this.isDisabled()) {
       this.showPassword.set(!this.showPassword());
     }
+  }
+
+  /**
+   * Native `maxlength` attribute (number of characters). The form
+   * typically also enforces this server-side and with a Validators
+   * binding, so this is just a belt-and-suspenders UX guard.
+   */
+  resolvedMaxLength(): number | null {
+    return this.maxlength();
   }
 
   // =========================================================================

@@ -53,7 +53,7 @@ import {
               (searchChange)="onSearch($event)"
             ></app-inputsearch>
             <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
               <span class="hidden sm:inline">Nuevo Override</span>
             </app-button>
           </div>

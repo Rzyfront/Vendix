@@ -98,7 +98,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 [disabled]="committing()"
                 (clicked)="confirmCheckout()"
               >
-                <app-icon name="check" [size]="16" slot="icon"></app-icon>
+                <app-icon name="check" [size]="16" slot="icon" ></app-icon>
                 Activar plan gratuito
               </app-button>
             </div>
@@ -157,7 +157,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
                 [disabled]="committing()"
                 (clicked)="confirmCheckout()"
               >
-                <app-icon name="check" [size]="16" slot="icon"></app-icon>
+                <app-icon name="check" [size]="16" slot="icon" ></app-icon>
                 Confirmar cambio
               </app-button>
             </div>
@@ -427,7 +427,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
                   [fullWidth]="true"
                   (clicked)="confirmCheckout()"
                 >
-                  <app-icon name="check" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="check" [size]="16" slot="icon" ></app-icon>
                   {{ confirmCtaLabel() }}
                 </app-button>
                 <app-button variant="ghost" [fullWidth]="true" (clicked)="goBack()">Cancelar</app-button>
@@ -520,7 +520,7 @@ const COUPON_REASON_COPY: Record<string, string> = {
             <div class="flex flex-col sm:flex-row gap-3 justify-center">
               <app-button variant="ghost" (clicked)="goBack()">Volver</app-button>
               <app-button variant="primary" (clicked)="retry()">
-                <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+                <app-icon name="refresh-cw" [size]="16" slot="icon" ></app-icon>
                 Reintentar
               </app-button>
             </div>

@@ -106,7 +106,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
                 ></app-selector>
                 <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
                   customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
-                  <app-icon name="plus" size="20"></app-icon>
+                  <app-icon slot="icon" name="plus" size="20"></app-icon>
                 </app-button>
               </div>
               <app-selector

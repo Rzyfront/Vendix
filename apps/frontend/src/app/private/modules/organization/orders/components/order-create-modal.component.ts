@@ -236,7 +236,7 @@ import {
               (clicked)="addItem()"
               [disabled]="items.length >= 10"
             >
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
               Add Item
             </app-button>
           </div>
@@ -583,7 +583,7 @@ import {
 
       <div slot="footer" class="flex justify-end space-x-3">
         <app-button variant="outline" (clicked)="onCancel()">
-          <app-icon name="close" [size]="16" slot="icon"></app-icon>
+          <app-icon name="close" [size]="16" slot="icon" ></app-icon>
           Cancel
         </app-button>
 
@@ -593,7 +593,7 @@ import {
           [disabled]="!orderForm.valid || isSubmitting()"
           [loading]="isSubmitting()"
         >
-          <app-icon name="cart" [size]="16" slot="icon"></app-icon>
+          <app-icon name="cart" [size]="16" slot="icon" ></app-icon>
           Create Order
         </app-button>
       </div>

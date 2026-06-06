@@ -4,8 +4,11 @@ import {
   IsEmail,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { WizardFiscalDataDto } from './wizard-fiscal-data.dto';
 
 export class SetupOrganizationWizardDto {
   @ApiProperty({
@@ -63,8 +66,8 @@ export class SetupOrganizationWizardDto {
   website?: string;
 
   @ApiPropertyOptional({
-    example: 'RFC123456789',
-    description: 'Tax identification number',
+    example: '900123456',
+    description: 'Tax identification number (NIT in Colombia)',
   })
   @IsOptional()
   @IsString()
@@ -118,11 +121,24 @@ export class SetupOrganizationWizardDto {
   postal_code?: string;
 
   @ApiPropertyOptional({
-    example: 'MX',
+    example: 'CO',
     description: 'Country code (ISO 3166-1 alpha-2)',
   })
   @IsOptional()
   @IsString()
   @MaxLength(2)
   country_code?: string;
+
+  @ApiPropertyOptional({
+    type: WizardFiscalDataDto,
+    description:
+      'OPTIONAL fiscal identity. When provided, it is persisted to ' +
+      'settings.fiscal_data of the correct scope (organization for consolidated ' +
+      'ORG flow) and marks the has_fiscal_identity detector signal without ' +
+      'activating the fiscal gate.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WizardFiscalDataDto)
+  fiscal_data?: WizardFiscalDataDto;
 }

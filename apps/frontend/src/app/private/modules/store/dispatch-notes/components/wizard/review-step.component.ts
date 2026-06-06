@@ -202,7 +202,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
               Crear otra
             </app-button>
             <app-button variant="primary" size="sm" (clicked)="printNote.emit(createdNote()!)">
-              <app-icon name="printer" [size]="14" slot="icon"></app-icon>
+              <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
               Imprimir
             </app-button>
           </div>

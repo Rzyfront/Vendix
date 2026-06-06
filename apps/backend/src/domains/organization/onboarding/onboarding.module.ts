@@ -12,6 +12,7 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
 import { OrgInventoryModule } from '../inventory/inventory.module';
 import { SettingsModule } from '../../store/settings/settings.module';
+import { SettingsModule as OrgSettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SettingsModule } from '../../store/settings/settings.module';
     EmailModule,
     OrgInventoryModule,
     SettingsModule,
+    OrgSettingsModule,
   ],
   controllers: [OnboardingController, OnboardingWizardController],
   providers: [

@@ -242,7 +242,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
         <div>
           @if (currentStep() > 1) {
             <app-button variant="outline" type="button" (clicked)="goToStep(currentStep() - 1)" customClasses="!rounded-xl">
-              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Atrás
             </app-button>
           }
@@ -265,7 +265,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
               Continuar
-              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon"></app-icon>
+              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon" ></app-icon>
             </app-button>
           } @else {
             <app-button
@@ -276,7 +276,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
               [disabled]="submitting()"
               customClasses="!rounded-xl font-bold"
             >
-              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Guardar
             </app-button>
             @if (confirmApprove() && !confirmPay()) {
@@ -288,7 +288,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
                 [disabled]="submitting()"
                 customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
               >
-                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
                 Guardar y Aprobar
               </app-button>
             }
@@ -301,7 +301,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
                 [disabled]="submitting()"
                 customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
               >
-                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+                <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
                 Guardar y Pagar
               </app-button>
             }

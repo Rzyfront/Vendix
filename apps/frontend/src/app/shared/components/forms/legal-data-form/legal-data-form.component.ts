@@ -23,6 +23,11 @@ import {
   SelectorOption,
 } from '../../selector/selector.component';
 import { computeNitDv, nitDvValidator } from '../../../utils/nit.util';
+import {
+  CountryService,
+  Department,
+  City,
+} from '../../../../services/country.service';
 
 export type PersonType = 'NATURAL' | 'JURIDICA';
 export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
@@ -41,6 +46,7 @@ export interface LegalDataValue {
   department: string;
   city: string;
   tax_responsibilities: string[];
+  tax_scheme: string;
 }
 
 interface LegalDataControls {
@@ -56,6 +62,7 @@ interface LegalDataControls {
   department: FormControl<string>;
   city: FormControl<string>;
   tax_responsibilities: FormControl<string[]>;
+  tax_scheme: FormControl<string>;
 }
 
 const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
@@ -67,55 +74,68 @@ const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
   { code: 'R-99-PJ', label: 'R-99-PJ - No aplica - Persona jurídica' },
 ];
 
+/** Document types that carry a DIAN verification digit (DV). Only NIT does. */
+const DV_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>(['NIT']);
+
+/** Document types whose number can be alphanumeric (passport, foreign IDs). */
+const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
+  'PP',
+  'CE',
+  'NIT_EXTRANJERIA',
+]);
+
 @Component({
   selector: 'app-legal-data-form',
   standalone: true,
   imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
   template: `
     <form [formGroup]="form" class="space-y-4">
+      <!--
+        Document identity. Type FIRST (it governs whether a DV applies and
+        whether the number must be numeric), then the number, then the DV
+        which only shows for NIT. (annotations A3/A4)
+      -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="md:col-span-2">
-          <app-input
-            label="NIT / Documento"
-            formControlName="nit"
-            [required]="true"
-            placeholder="Ej: 900123456"
-            (inputChange)="onNitChange($event)"
-          ></app-input>
-        </div>
-        <app-input
-          label="Dígito de verificación"
-          formControlName="nit_dv"
-          [required]="true"
-          [suffixIcon]="true"
-          placeholder="DV"
-          [helperText]="dvHint()"
-        ></app-input>
-      </div>
-
-      @if (form.errors?.['nitDv']) {
-        <p class="text-xs text-[var(--color-destructive)] -mt-2">
-          El dígito de verificación no coincide con el NIT.
-        </p>
-      }
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="md:col-span-2">
-          <app-input
-            label="Razón social"
-            formControlName="legal_name"
-            [required]="true"
-            placeholder="Ej: Comercializadora ABC S.A.S."
-          ></app-input>
-        </div>
         <app-selector
-          label="Tipo documento"
+          label="Tipo de documento"
           formControlName="nit_type"
           [options]="nitTypeOptions"
           [required]="true"
           placeholder="Seleccione tipo"
         ></app-selector>
+        <div [ngClass]="requiresDv() ? '' : 'md:col-span-2'">
+          <app-input
+            [label]="documentNumberLabel()"
+            formControlName="nit"
+            [required]="true"
+            [placeholder]="documentNumberPlaceholder()"
+            (inputChange)="onNitChange($event)"
+          ></app-input>
+        </div>
+        @if (requiresDv()) {
+          <app-input
+            label="Dígito de verificación"
+            formControlName="nit_dv"
+            [required]="true"
+            [suffixIcon]="true"
+            placeholder="DV"
+            [helperText]="dvHint()"
+          ></app-input>
+        }
       </div>
+
+      @if (requiresDv() && form.errors?.['nitDv']) {
+        <p class="text-xs text-[var(--color-destructive)] -mt-2">
+          El dígito de verificación no coincide con el NIT.
+        </p>
+      }
+
+      <app-input
+        label="Razón social"
+        formControlName="legal_name"
+        [required]="true"
+        placeholder="Ej: Comercializadora ABC S.A.S."
+      ></app-input>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-selector
@@ -134,6 +154,20 @@ const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
         ></app-selector>
       </div>
 
+      <!--
+        A5: the "principal responsibility" is the single TaxLevelCode that
+        DIAN reads from THIS issuer on every invoice. It is distinct from the
+        full RUT list below — help text spells the difference out so the two
+        controls no longer read as duplicates. (annotations A5/A6)
+      -->
+      <app-selector
+        label="Responsabilidad principal del emisor (DIAN)"
+        formControlName="tax_scheme"
+        [options]="taxSchemeOptions"
+        placeholder="Seleccione la principal"
+        helpText="Código TaxLevelCode que viaja en TUS facturas como emisor. Debe ser una de las responsabilidades marcadas más abajo."
+      ></app-selector>
+
       <app-input
         label="Código CIIU (Actividad económica)"
         formControlName="ciiu"
@@ -148,32 +182,61 @@ const TAX_RESPONSIBILITY_CODES: { code: string; label: string }[] = [
         placeholder="Ej: Calle 100 # 15 - 20"
       ></app-input>
 
+      <!--
+        A7: country -> department -> city catalog. For Colombia the
+        department/city selectors are fed from the api-colombia catalog via
+        CountryService; other countries fall back to free text.
+      -->
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <app-selector
           label="País"
           formControlName="country"
-          [options]="countryOptions()"
+          [options]="countryOptions"
           [required]="true"
           placeholder="Seleccione país"
         ></app-selector>
-        <app-input
-          label="Departamento"
-          formControlName="department"
-          [required]="true"
-          placeholder="Ej: Cundinamarca"
-        ></app-input>
-        <app-input
-          label="Ciudad / Municipio"
-          formControlName="city"
-          [required]="true"
-          placeholder="Ej: Bogotá"
-        ></app-input>
+
+        @if (isColombia()) {
+          <app-selector
+            label="Departamento"
+            formControlName="department"
+            [options]="departmentOptions()"
+            [required]="true"
+            [placeholder]="
+              loadingDepartments() ? 'Cargando...' : 'Seleccione departamento'
+            "
+          ></app-selector>
+          <app-selector
+            label="Ciudad / Municipio"
+            formControlName="city"
+            [options]="cityOptions()"
+            [required]="true"
+            [placeholder]="cityPlaceholder()"
+          ></app-selector>
+        } @else {
+          <app-input
+            label="Departamento / Estado"
+            formControlName="department"
+            [required]="true"
+            placeholder="Ej: Cundinamarca"
+          ></app-input>
+          <app-input
+            label="Ciudad / Municipio"
+            formControlName="city"
+            [required]="true"
+            placeholder="Ej: Bogotá"
+          ></app-input>
+        }
       </div>
 
       <fieldset class="space-y-2">
-        <legend class="text-sm font-medium text-text-primary mb-2">
-          Responsabilidades tributarias
+        <legend class="text-sm font-medium text-text-primary">
+          Responsabilidades tributarias (RUT)
         </legend>
+        <p class="text-xs text-text-secondary mb-2">
+          Marca todas las responsabilidades registradas en tu RUT. La principal
+          (la de arriba) debe estar entre las marcadas.
+        </p>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
           @for (resp of taxResponsibilities; track resp.code) {
             <label
@@ -198,24 +261,53 @@ export class LegalDataFormComponent {
   // ── Inputs / Outputs ──────────────────────────────────────
   readonly initialValue = input<Partial<LegalDataValue> | null>(null);
   readonly disabled = input<boolean>(false);
-  readonly countries = input<SelectorOption[]>([
-    { value: 'CO', label: 'Colombia' },
-    { value: 'MX', label: 'México' },
-    { value: 'EC', label: 'Ecuador' },
-    { value: 'PE', label: 'Perú' },
-    { value: 'AR', label: 'Argentina' },
-    { value: 'CL', label: 'Chile' },
-  ]);
 
   readonly valueChange = output<LegalDataValue>();
   readonly validityChange = output<boolean>();
 
+  // ── Services ──────────────────────────────────────────────
+  private readonly countryService = inject(CountryService);
+  private readonly destroyRef = inject(DestroyRef);
+
   // ── State ─────────────────────────────────────────────────
   readonly valid = signal(false);
-  readonly countryOptions = computed(() => this.countries());
   readonly dvHint = signal<string>('');
 
-  private readonly destroyRef = inject(DestroyRef);
+  /** Mirrors of form controls that drive reactive template branches. */
+  private readonly selectedNitType = signal<NitType>('NIT');
+  private readonly selectedCountry = signal<string>('CO');
+  private readonly selectedDepartment = signal<string>('');
+
+  /** Colombia catalog state (api-colombia via CountryService). */
+  private readonly departments = signal<Department[]>([]);
+  private readonly cities = signal<City[]>([]);
+  readonly loadingDepartments = signal(false);
+  readonly loadingCities = signal(false);
+
+  readonly requiresDv = computed(() => DV_DOCUMENT_TYPES.has(this.selectedNitType()));
+  readonly isColombia = computed(() => this.selectedCountry() === 'CO');
+  readonly documentNumberLabel = computed(() =>
+    this.selectedNitType() === 'NIT' ? 'NIT' : 'Número de documento',
+  );
+  readonly documentNumberPlaceholder = computed(() =>
+    this.selectedNitType() === 'NIT' ? 'Ej: 900123456' : 'Ej: 1020304050',
+  );
+
+  readonly countryOptions: SelectorOption[] = this.countryService
+    .getCountries()
+    .map((c) => ({ value: c.code, label: c.name }));
+
+  readonly departmentOptions = computed<SelectorOption[]>(() =>
+    this.departments().map((d) => ({ value: d.name, label: d.name })),
+  );
+  readonly cityOptions = computed<SelectorOption[]>(() =>
+    this.cities().map((c) => ({ value: c.name, label: c.name })),
+  );
+  readonly cityPlaceholder = computed(() => {
+    if (this.loadingCities()) return 'Cargando...';
+    if (!this.selectedDepartment()) return 'Seleccione departamento primero';
+    return 'Seleccione ciudad';
+  });
 
   // ── Typed form ────────────────────────────────────────────
   readonly form: FormGroup<LegalDataControls> = new FormGroup<LegalDataControls>(
@@ -253,6 +345,7 @@ export class LegalDataFormComponent {
         validators: [Validators.required],
       }),
       tax_responsibilities: new FormControl<string[]>([], { nonNullable: true }),
+      tax_scheme: new FormControl('', { nonNullable: true }),
     },
     { validators: nitDvValidator },
   );
@@ -279,14 +372,44 @@ export class LegalDataFormComponent {
     { value: 'GRAN_CONTRIBUYENTE', label: 'Gran Contribuyente' },
   ];
 
+  readonly taxSchemeOptions: SelectorOption[] = TAX_RESPONSIBILITY_CODES.map(
+    (r) => ({ value: r.code, label: r.label }),
+  );
+
+  /** Single in-flight departments fetch shared across init + prefill paths. */
+  private departmentsPromise: Promise<void> | null = null;
+
   constructor() {
-    // Prefill from initial value
+    // Default country is CO, so load its department catalog eagerly. The
+    // prefill path reuses the same promise (no double fetch).
+    if (this.form.controls.country.value === 'CO') {
+      void this.ensureDepartments();
+    }
+
+    // Prefill from initial value: patch silently, then sync the derived
+    // signals (DV visibility, country branch) and load the Colombia catalog
+    // so the pre-existing department/city resolve to selectable options.
     effect(() => {
       const v = this.initialValue();
-      if (v) {
-        this.form.patchValue(v, { emitEvent: false });
-        this.emitCurrent();
+      if (!v) return;
+      this.form.patchValue(v, { emitEvent: false });
+
+      const type = this.form.controls.nit_type.value;
+      this.selectedNitType.set(type);
+      this.applyDocumentTypeRules(type);
+
+      const country = this.form.controls.country.value;
+      this.selectedCountry.set(country);
+      if (country === 'CO') {
+        const dept = this.form.controls.department.value;
+        void this.ensureDepartments().then(() => {
+          if (dept) {
+            this.selectedDepartment.set(dept);
+            void this.loadCities(dept);
+          }
+        });
       }
+      this.emitCurrent();
     });
 
     // Disabled state
@@ -295,10 +418,40 @@ export class LegalDataFormComponent {
       else this.form.enable({ emitEvent: false });
     });
 
-    // Emit on every form change
+    // React to user edits: document type drives DV/number validators;
+    // country drives the Colombia catalog; department drives the city list.
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.emitCurrent());
+      .subscribe(() => {
+        const type = this.form.controls.nit_type.value;
+        if (type !== this.selectedNitType()) {
+          this.selectedNitType.set(type);
+          this.applyDocumentTypeRules(type);
+        }
+
+        const country = this.form.controls.country.value;
+        if (country !== this.selectedCountry()) {
+          this.selectedCountry.set(country);
+          // Country changed → previous department/city are stale.
+          this.form.controls.department.setValue('', { emitEvent: false });
+          this.form.controls.city.setValue('', { emitEvent: false });
+          this.selectedDepartment.set('');
+          this.cities.set([]);
+          if (country === 'CO') void this.ensureDepartments();
+          else this.departments.set([]);
+        }
+
+        const dept = this.form.controls.department.value;
+        if (this.selectedCountry() === 'CO' && dept !== this.selectedDepartment()) {
+          this.selectedDepartment.set(dept);
+          // Department changed → reset the city and reload its options.
+          this.form.controls.city.setValue('', { emitEvent: false });
+          if (dept) void this.loadCities(dept);
+          else this.cities.set([]);
+        }
+
+        this.emitCurrent();
+      });
   }
 
   // ── Public API for parent ─────────────────────────────────
@@ -312,6 +465,10 @@ export class LegalDataFormComponent {
 
   // ── Template helpers ──────────────────────────────────────
   onNitChange(nit: string): void {
+    if (this.selectedNitType() !== 'NIT') {
+      this.dvHint.set('');
+      return;
+    }
     const expected = computeNitDv(nit);
     this.dvHint.set(expected ? `DV sugerido: ${expected}` : '');
   }
@@ -327,6 +484,66 @@ export class LegalDataFormComponent {
       ? Array.from(new Set([...current, code]))
       : current.filter((c) => c !== code);
     this.form.controls.tax_responsibilities.setValue(next);
+  }
+
+  // ── Internal ──────────────────────────────────────────────
+  /**
+   * Adjusts the number/DV validators for the chosen document type. Only NIT
+   * carries a verification digit; passports / foreign IDs may be alphanumeric.
+   */
+  private applyDocumentTypeRules(type: NitType): void {
+    const num = this.form.controls.nit;
+    const dv = this.form.controls.nit_dv;
+
+    num.setValidators(
+      ALPHANUMERIC_DOCUMENT_TYPES.has(type)
+        ? [Validators.required]
+        : [Validators.required, Validators.pattern(/^\d+$/)],
+    );
+    num.updateValueAndValidity({ emitEvent: false });
+
+    if (DV_DOCUMENT_TYPES.has(type)) {
+      dv.setValidators([Validators.required, Validators.pattern(/^\d$/)]);
+    } else {
+      dv.clearValidators();
+      dv.setValue('', { emitEvent: false });
+      this.dvHint.set('');
+    }
+    dv.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private ensureDepartments(): Promise<void> {
+    if (!this.departmentsPromise) {
+      this.departmentsPromise = this.loadDepartments();
+    }
+    return this.departmentsPromise;
+  }
+
+  private async loadDepartments(): Promise<void> {
+    this.loadingDepartments.set(true);
+    try {
+      const list = await this.countryService.getDepartments();
+      this.departments.set(
+        [...list].sort((a, b) => a.name.localeCompare(b.name)),
+      );
+    } finally {
+      this.loadingDepartments.set(false);
+    }
+  }
+
+  private async loadCities(departmentName: string): Promise<void> {
+    const dept = this.departments().find((d) => d.name === departmentName);
+    if (!dept) {
+      this.cities.set([]);
+      return;
+    }
+    this.loadingCities.set(true);
+    try {
+      const list = await this.countryService.getCitiesByDepartment(dept.id);
+      this.cities.set([...list].sort((a, b) => a.name.localeCompare(b.name)));
+    } finally {
+      this.loadingCities.set(false);
+    }
   }
 
   private emitCurrent(): void {

@@ -163,7 +163,7 @@ const PENDING_PROVISIONING_STATUSES = new Set([
                 Aún no tienes dominios configurados para tu tienda.
               </p>
               <app-button variant="primary" (clicked)="openCreateModal()">
-                <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
+                <app-icon slot="icon" name="plus" [size]="16" class="mr-2"></app-icon>
                 Crear primer dominio
               </app-button>
             </div>

@@ -111,7 +111,7 @@ interface AccountStats {
                 size="sm"
                 (clicked)="openCreateModal()"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Nueva Cuenta</span>
                 <span class="sm:hidden">Nueva</span>
               </app-button>

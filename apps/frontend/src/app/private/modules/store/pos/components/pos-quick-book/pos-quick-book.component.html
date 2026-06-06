@@ -239,7 +239,7 @@
     <div class="modal-footer">
       @if (currentStep() > 1) {
         <app-button variant="outline" size="sm" (clicked)="goToStep(currentStep() - 1)">
-          <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
+          <app-icon name="arrow-left" [size]="14" slot="icon" ></app-icon>
           Atrás
         </app-button>
       } @else {
@@ -257,7 +257,7 @@
             <app-spinner size="sm" color="white"></app-spinner>
           } @else {
             <ng-container ngProjectAs="[slot=icon]">
-              <app-icon name="check" [size]="14" slot="icon"></app-icon>
+              <app-icon name="check" [size]="14" slot="icon" ></app-icon>
             </ng-container>
           }
           @if (!submitting()) {

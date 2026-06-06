@@ -62,18 +62,18 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
             </div>
             <div class="flex items-center gap-2">
               <app-button variant="outline" size="sm" (clicked)="runAutoMatch()" [disabled]="autoMatching() || reconciliation()!.status === 'completed'">
-                <app-icon name="zap" [size]="16" slot="icon"></app-icon>
+                <app-icon name="zap" [size]="16" slot="icon" ></app-icon>
                 {{ autoMatching() ? 'Procesando...' : 'Auto-Match' }}
               </app-button>
               @if (selectedBankTx() && selectedEntry()) {
                 <app-button variant="primary" size="sm" (clicked)="createManualMatch()" [disabled]="reconciliation()!.status === 'completed'">
-                  <app-icon name="link" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="link" [size]="16" slot="icon" ></app-icon>
                   Conciliar Manual
                 </app-button>
               }
               @if (reconciliation()!.status !== 'completed') {
                 <app-button variant="primary" size="sm" (clicked)="completeReconciliation()" [disabled]="reconciliation()!.difference !== 0">
-                  <app-icon name="check-circle" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="check-circle" [size]="16" slot="icon" ></app-icon>
                   <span class="hidden sm:inline">Completar</span>
                 </app-button>
               }
