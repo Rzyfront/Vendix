@@ -6,11 +6,12 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { colors } from '@/shared/theme';
 
 const routeTitles: Record<string, string> = {
-  dashboard: 'Dashboard',
+  dashboard: 'Panel Principal',
   pos: 'Punto de Venta',
   products: 'Productos',
   orders: 'Órdenes',
   inventory: 'Inventario',
+  pop: 'Punto de Compra',
   purchase: 'Comprar Inventario',
   adjustments: 'Ajustes de Stock',
   transfers: 'Transferencias',
@@ -23,6 +24,34 @@ const routeTitles: Record<string, string> = {
   expenses: 'Gastos',
   analytics: 'Analíticas',
   settings: 'Configuración',
+  online_store: 'Tienda en línea',
+  marketing: 'Marketing',
+  help: 'Ayuda',
+};
+
+// Categoría padre para el breadcrumb (se renderiza como "Categoría / Título" encima del título)
+const routeBreadcrumbCategory: Record<string, string> = {
+  dashboard: 'Panel Administrativo',
+  pos: 'Tienda',
+  products: 'Tienda',
+  orders: 'Tienda',
+  inventory: 'Tienda',
+  pop: 'Inventario',
+  purchase: 'Inventario',
+  adjustments: 'Inventario',
+  transfers: 'Inventario',
+  movements: 'Inventario',
+  suppliers: 'Inventario',
+  locations: 'Inventario',
+  customers: 'Tienda',
+  invoicing: 'Tienda',
+  accounting: 'Tienda',
+  expenses: 'Tienda',
+  analytics: 'Tienda',
+  online_store: 'Tienda',
+  marketing: 'Tienda',
+  settings: 'Tienda',
+  help: 'Tienda',
 };
 
 export default function StoreAdminLayout() {
@@ -47,9 +76,11 @@ export default function StoreAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
+  const category = routeBreadcrumbCategory[currentSegment];
+  const breadcrumb = category ? `${category} / ${title}` : undefined;
 
   return (
-    <AdminShell title={title} variant="store">
+    <AdminShell title={title} breadcrumb={breadcrumb} variant="store">
       <Slot />
     </AdminShell>
   );
@@ -58,6 +89,6 @@ export default function StoreAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#F9FAFB',
   },
 });

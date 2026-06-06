@@ -4,6 +4,8 @@ export { DashboardService, AnalyticsService } from './dashboard.service';
 export { AnalyticsDetailService } from './analytics.service';
 export { CustomerService } from './customer.service';
 export { InventoryService } from './inventory.service';
+export { ReviewService } from './review.service';
+export { DataCollectionService } from './data-collection.service';
 export type {
   AdjustmentQuery,
   TransferQuery,

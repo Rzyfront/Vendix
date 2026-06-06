@@ -15,6 +15,9 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
 };
 
+// Breadcrumb = sección padre (sin rutas hijas con padre en super-admin actualmente)
+const routeBreadcrumbs: Record<string, string> = {};
+
 export default function SuperAdminLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -37,9 +40,10 @@ export default function SuperAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
+  const breadcrumb = routeBreadcrumbs[currentSegment];
 
   return (
-    <AdminShell title={title} variant="super">
+    <AdminShell title={title} breadcrumb={breadcrumb} variant="super">
       <Slot />
     </AdminShell>
   );
@@ -48,6 +52,6 @@ export default function SuperAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F9FAFB',
   },
 });

@@ -1,9 +1,8 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { CustomerService } from '@/features/store/services/customer.service';
-import { getNextPageParam } from '@/core/api/pagination';
 import { useTenantStore } from '@/core/store/tenant.store';
 import type { Customer, CustomerState, CustomerStats } from '@/features/store/types';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
@@ -59,6 +58,7 @@ const CustomerCard = ({ customer, onPress }: { customer: Customer; onPress: () =
       footerValue={formatCurrency(customer.total_spent ?? 0)}
       footerTone="success"
       onPress={onPress}
+      style={{ marginHorizontal: spacing[4] }}
     />
   );
 };
@@ -66,38 +66,11 @@ const CustomerCard = ({ customer, onPress }: { customer: Customer; onPress: () =
 const CustomerStatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
   <StatsGrid
     items={[
-      { label: 'Total Clientes', value: String(stats?.total ?? 0), icon: 'users' },
-      { label: 'Ingresos', value: formatCurrency(stats?.totalRevenue ?? 0), icon: 'dollar-sign' },
+      { label: 'Total Clientes', value: String(stats?.total_customers ?? 0), icon: 'users', trend: { value: 12, positive: true } },
+      { label: 'Activos', value: String(stats?.active_customers ?? 0), icon: 'user-check', trend: { value: 5, positive: true } },
+      { label: 'Nuevos (este mes)', value: String(stats?.new_customers_this_month ?? 0), icon: 'user-plus', trend: { value: 8, positive: true } },
+      { label: 'Ingresos', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign', trend: { value: 15, positive: true } },
     ]}
-  />
-);
-
-const FilterChips = ({
-  activeFilter,
-  onSelect,
-}: {
-  activeFilter?: CustomerState;
-  onSelect: (value?: CustomerState) => void;
-}) => (
-  <FlatList
-    horizontal
-    showsHorizontalScrollIndicator={false}
-    data={STATE_FILTERS}
-    keyExtractor={(item) => item.label}
-    contentContainerStyle={styles.filterList}
-    renderItem={({ item }) => {
-      const isActive = item.value === activeFilter;
-      return (
-        <Pressable
-          onPress={() => onSelect(item.value)}
-          style={[styles.filterChip, isActive ? styles.filterChipActive : styles.filterChipInactive]}
-        >
-          <Text style={isActive ? styles.filterTextActive : styles.filterTextInactive}>
-            {item.label}
-          </Text>
-        </Pressable>
-      );
-    }}
   />
 );
 
@@ -105,6 +78,8 @@ export default function CustomersScreen() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<CustomerState | undefined>();
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [page, setPage] = useState(1);
   const storeId = useTenantStore((s) => s.storeId);
 
   const { data: stats } = useQuery({
@@ -114,38 +89,30 @@ export default function CustomersScreen() {
   });
 
   const {
-    data,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
+    data: pageData,
     isLoading: customersLoading,
     isError,
     refetch,
     isRefetching,
-  } = useInfiniteQuery({
-    queryKey: ['customers', search, stateFilter],
-    queryFn: ({ pageParam = 1 }) =>
+  } = useQuery({
+    queryKey: ['customers', search, stateFilter, page],
+    queryFn: () =>
       CustomerService.list({
-        page: pageParam,
-        limit: 20,
+        page,
+        limit: 10,
         search: search || undefined,
         state: stateFilter,
       }),
-    getNextPageParam,
-    initialPageParam: 1,
   });
 
-  const customers = data?.pages.flatMap((page) => page.data) ?? [];
+  const customers = pageData?.data ?? [];
+  const pagination = pageData?.pagination;
+  const totalPages = pagination?.totalPages ?? 1;
 
   const handleSearch = useCallback((text: string) => {
     setSearch(text);
+    setPage(1);
   }, []);
-
-  const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const renderCustomer = useCallback(
     ({ item }: { item: Customer }) => (
@@ -157,12 +124,22 @@ export default function CustomersScreen() {
     [router],
   );
 
-  const renderFooter = useCallback(() => {
-    if (!isFetchingNextPage) return null;
-    return <Spinner />;
-  }, [isFetchingNextPage]);
+  const paginationRange = useMemo(() => {
+    const range: (number | 'dots')[] = [];
+    const delta = 1;
+    const left = Math.max(2, page - delta);
+    const right = Math.min(totalPages - 1, page + delta);
 
-  if (customersLoading && !data) {
+    range.push(1);
+    if (left > 2) range.push('dots');
+    for (let i = left; i <= right; i++) range.push(i);
+    if (right < totalPages - 1) range.push('dots');
+    if (totalPages > 1) range.push(totalPages);
+
+    return range;
+  }, [page, totalPages]);
+
+  if (customersLoading && !pageData) {
     return (
       <View style={styles.loader}>
         <Spinner />
@@ -170,7 +147,7 @@ export default function CustomersScreen() {
     );
   }
 
-  if (isError && !data) {
+  if (isError && !pageData) {
     return (
       <View style={styles.root}>
         <EmptyState
@@ -192,17 +169,55 @@ export default function CustomersScreen() {
         renderItem={renderCustomer}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
-          <View>
+          <View style={styles.headerSection}>
             <CustomerStatsGrid stats={stats} />
-            <View style={styles.searchWrap}>
+            <Text style={styles.title}>Todos los Clientes ({pagination?.total ?? 0})</Text>
+            <View style={styles.searchRow}>
               <SearchBar
                 value={search}
                 onChangeText={handleSearch}
                 onClear={() => handleSearch('')}
                 placeholder="Buscar clientes..."
+                style={styles.searchBar}
               />
+              <Pressable
+                onPress={() => router.push('/(store-admin)/customers/create' as never)}
+                style={styles.searchActionBtn}
+              >
+                <Icon name="plus" size={18} color={colors.primary} />
+              </Pressable>
+              <Pressable
+                onPress={() => setShowFilterDropdown((p) => !p)}
+                style={styles.searchFilterBtn}
+              >
+                <Icon name="filter" size={18} color={colors.primary} />
+              </Pressable>
             </View>
-            <FilterChips activeFilter={stateFilter} onSelect={setStateFilter} />
+            {showFilterDropdown && (
+              <View style={styles.filterDropdown}>
+                {STATE_FILTERS.map((f) => (
+                  <Pressable
+                    key={f.label}
+                    onPress={() => {
+                      setStateFilter(f.value);
+                      setShowFilterDropdown(false);
+                      setPage(1);
+                    }}
+                    style={[
+                      styles.filterOption,
+                      f.value === stateFilter && styles.filterOptionActive,
+                    ]}
+                  >
+                    <Icon
+                      name="check"
+                      size={14}
+                      color={f.value === stateFilter ? colors.primary : 'transparent'}
+                    />
+                    <Text style={styles.filterOptionText}>{f.label}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
           </View>
         }
         ListEmptyComponent={
@@ -214,10 +229,42 @@ export default function CustomersScreen() {
             icon="users"
           />
         }
-        ListFooterComponent={renderFooter}
+        ListFooterComponent={
+          totalPages > 1 ? (
+            <View style={styles.pagination}>
+              <Pressable
+                onPress={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                style={[styles.pageBtn, page <= 1 && styles.pageBtnDisabled]}
+              >
+                <Icon name="chevron-left" size={16} color={page <= 1 ? colorScales.gray[300] : colorScales.gray[600]} />
+              </Pressable>
+              {paginationRange.map((item, idx) =>
+                item === 'dots' ? (
+                  <Text key={`dots-${idx}`} style={styles.pageDots}>...</Text>
+                ) : (
+                  <Pressable
+                    key={item}
+                    onPress={() => setPage(item)}
+                    style={[styles.pageNumBtn, page === item && styles.pageNumBtnActive]}
+                  >
+                    <Text style={[styles.pageNumText, page === item && styles.pageNumTextActive]}>
+                      {item}
+                    </Text>
+                  </Pressable>
+                ),
+              )}
+              <Pressable
+                onPress={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                style={[styles.pageBtn, page >= totalPages && styles.pageBtnDisabled]}
+              >
+                <Icon name="chevron-right" size={16} color={page >= totalPages ? colorScales.gray[300] : colorScales.gray[600]} />
+              </Pressable>
+            </View>
+          ) : null
+        }
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
-        onEndReached={handleEndReached}
-        onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
 
@@ -236,47 +283,96 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colorScales.gray[50],
   },
+  headerSection: {
+    backgroundColor: 'transparent',
+  },
   loader: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colorScales.gray[50],
   },
-  searchWrap: {
-    marginBottom: spacing[3],
-  },
-  filterList: {
-    paddingBottom: spacing[4],
-    gap: spacing[2],
-  },
-  filterChip: {
-    minHeight: 36,
+  title: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    marginBottom: spacing[4],
+    marginTop: spacing[2],
     paddingHorizontal: spacing[4],
-    borderRadius: borderRadius.full,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    marginBottom: spacing[5],
+    paddingHorizontal: spacing[4],
+  },
+  searchBar: {
+    flex: 1,
+    height: 44,
+    backgroundColor: colors.background,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  searchActionBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-  },
-  filterChipActive: {
-    backgroundColor: colors.primary,
     borderColor: colors.primary,
-  },
-  filterChipInactive: {
     backgroundColor: colors.background,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  searchFilterBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  filterDropdown: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
     borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing[3],
+    ...shadows.md,
   },
-  filterTextActive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.background,
+  filterOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
   },
-  filterTextInactive: {
+  filterOptionActive: {
+    backgroundColor: colorScales.gray[50],
+  },
+  filterOptionText: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[700],
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[800],
   },
   listContent: {
-    paddingHorizontal: spacing[4],
     paddingBottom: spacing[24],
   },
   separator: {
@@ -293,5 +389,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.lg,
+  },
+  pagination: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[1],
+    paddingVertical: spacing[4],
+  },
+  pageBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  pageBtnDisabled: {
+    opacity: 0.4,
+  },
+  pageNumBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  pageNumBtnActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  pageNumText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[700],
+  },
+  pageNumTextActive: {
+    color: colors.background,
+  },
+  pageDots: {
+    width: 36,
+    textAlign: 'center',
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[400],
   },
 });

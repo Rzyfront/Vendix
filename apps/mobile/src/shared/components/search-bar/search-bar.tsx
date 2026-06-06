@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { View, TextInput, Pressable, Text, StyleSheet, type ViewStyle, type TextInputProps } from 'react-native';
+import { View, TextInput, Pressable, StyleSheet, type ViewStyle, type TextInputProps } from 'react-native';
 import { colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { Icon } from '@/shared/components/icon/icon';
 
 interface SearchBarProps extends Omit<TextInputProps, 'style' | 'onChangeText'> {
   onChangeText?: (value: string) => void;
@@ -20,9 +21,7 @@ const styles = StyleSheet.create({
     height: 44,
   },
   searchIcon: {
-    color: colorScales.gray[400],
     marginRight: spacing[2],
-    fontSize: 18,
   },
   textInput: {
     flex: 1,
@@ -32,8 +31,7 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   clearButton: {
-    color: colorScales.gray[400],
-    fontSize: 18,
+    padding: spacing[1],
   },
 });
 
@@ -104,7 +102,9 @@ export function SearchBar({
 
   return (
     <View style={[styles.container, style]}>
-      <Text style={styles.searchIcon}>🔍</Text>
+      <View style={styles.searchIcon}>
+        <Icon name="search" size={16} color={colorScales.gray[400]} />
+      </View>
       <TextInput
         style={styles.textInput}
         value={localValue}
@@ -118,8 +118,8 @@ export function SearchBar({
         {...props}
       />
       {localValue.length > 0 && (
-        <Pressable onPress={handleClear} hitSlop={8}>
-          <Text style={styles.clearButton}>×</Text>
+        <Pressable onPress={handleClear} hitSlop={8} style={styles.clearButton}>
+          <Icon name="x" size={16} color={colorScales.gray[400]} />
         </Pressable>
       )}
     </View>

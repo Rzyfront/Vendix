@@ -1,4 +1,4 @@
-import { View } from 'react-native';
+import { View, StyleProp, ViewStyle } from 'react-native';
 import {
   ShoppingCart,
   KeyRound,
@@ -72,6 +72,20 @@ import {
   Maximize2,
   Minimize2,
   Info,
+  Megaphone,
+  ChartLine,
+  BookOpen,
+  Banknote,
+  Link2,
+  Circle,
+  PackageCheck,
+  PackagePlus,
+  ScanLine,
+  CheckSquare,
+  Square,
+  CheckCircle,
+  Flag,
+  Star,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -148,18 +162,33 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'maximize-2': Maximize2,
   'minimize-2': Minimize2,
   info: Info,
+  megaphone: Megaphone,
+  'chart-line': ChartLine,
+  'book-open': BookOpen,
+  banknote: Banknote,
+  'link-2': Link2,
+  circle: Circle,
+  'package-check': PackageCheck,
+  'package-plus': PackagePlus,
+  'scan-line': ScanLine,
+  'check-square': CheckSquare,
+  square: Square,
+  'check-circle': CheckCircle,
+  flag: Flag,
+  star: Star,
 };
 
 interface IconProps {
   name: string;
   size?: number;
   color?: string;
+  style?: StyleProp<ViewStyle>;
 }
 
-export function Icon({ name, size = 24, color = colors.text.primary }: IconProps) {
+export function Icon({ name, size = 24, color = colors.text.primary, style }: IconProps) {
   const LucideIcon = iconMap[name];
   if (!LucideIcon) {
-    return <View style={{ width: size, height: size }} />;
+    return <View style={[{ width: size, height: size }, style]} />;
   }
-  return <LucideIcon size={size} color={color} strokeWidth={2} />;
+  return <LucideIcon size={size} color={color} strokeWidth={2} style={style} />;
 }
