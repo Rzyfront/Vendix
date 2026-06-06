@@ -122,7 +122,7 @@ interface AssetStats {
                 size="sm"
                 (clicked)="openCategoriesModal()"
               >
-                <app-icon name="tag" [size]="16" slot="icon"></app-icon>
+                <app-icon name="tag" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Categorias</span>
               </app-button>
 
@@ -144,7 +144,7 @@ interface AssetStats {
                 size="sm"
                 (clicked)="openCreateModal()"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Nuevo Activo</span>
                 <span class="sm:hidden">Nuevo</span>
               </app-button>

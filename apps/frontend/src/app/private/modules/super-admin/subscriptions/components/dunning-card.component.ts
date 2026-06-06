@@ -45,7 +45,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 
       <div class="flex gap-2">
         <app-button variant="outline" size="sm" class="flex-1" (clicked)="retryPayment.emit(subscription())">
-          <app-icon name="refresh" [size]="14" slot="icon"></app-icon>
+          <app-icon name="refresh" [size]="14" slot="icon" ></app-icon>
           Retry
         </app-button>
         <app-button variant="ghost" size="sm" class="flex-1" (clicked)="viewDetails.emit(subscription())">

@@ -36,6 +36,12 @@ export interface FiscalDetectorSignals {
   b2b_invoices?: boolean;
   legal_person?: boolean;
   active_employees?: boolean;
+  /**
+   * True once the org/store has captured a fiscal identity (e.g. through the
+   * onboarding wizard `fiscal_data` step). Pure detection signal: it never
+   * activates the fiscal gate by itself — `state` stays untouched.
+   */
+  has_fiscal_identity?: boolean;
   score?: number;
   evaluated_at?: string;
 }

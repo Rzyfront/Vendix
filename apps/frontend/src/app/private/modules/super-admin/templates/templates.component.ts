@@ -95,7 +95,7 @@ import './templates.component.css';
                   [disabled]="isLoading()"
                   title="Refresh"
                 >
-                  <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="refresh" [size]="16" slot="icon" ></app-icon>
                 </app-button>
                 <app-button
                   variant="primary"
@@ -103,7 +103,7 @@ import './templates.component.css';
                   (clicked)="openCreateTemplateModal()"
                   title="New Template"
                 >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                   <span class="hidden sm:inline">New Template</span>
                 </app-button>
               </div>

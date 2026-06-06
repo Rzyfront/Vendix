@@ -201,7 +201,7 @@ import {
             @if (canCreate()) {
               <div class="mt-6">
                 <app-button variant="primary" (clicked)="openCreateModal()">
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                   Nuevo proveedor
                 </app-button>
               </div>

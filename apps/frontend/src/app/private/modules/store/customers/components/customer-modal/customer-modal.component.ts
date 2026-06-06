@@ -76,9 +76,10 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
         <!-- Phone -->
         <app-input
           formControlName="phone"
-          label="Teléfono"
+          label="Teléfono *"
           type="tel"
           placeholder="+57 300 000 0000"
+          [required]="true"
           [error]="getFieldError('phone')"
           (blur)="onFieldBlur('phone')"
           customWrapperClass="mt-0"
@@ -165,7 +166,7 @@ export class CustomerModalComponent {
       email: ['', [Validators.required, Validators.email]],
       first_name: ['', [Validators.required, Validators.minLength(2)]],
       last_name: ['', [Validators.required, Validators.minLength(2)]],
-      phone: [''],
+      phone: ['', [Validators.required, Validators.minLength(7)]],
       document_type: [''],
       document_number: [''],
     });
@@ -260,6 +261,8 @@ export class CustomerModalComponent {
           return 'El nombre es obligatorio';
         case 'last_name':
           return 'El apellido es obligatorio';
+        case 'phone':
+          return 'El teléfono es obligatorio';
         default:
           return 'Este campo es obligatorio';
       }
@@ -275,6 +278,8 @@ export class CustomerModalComponent {
           return 'El nombre debe tener al menos 2 caracteres';
         case 'last_name':
           return 'El apellido debe tener al menos 2 caracteres';
+        case 'phone':
+          return 'El teléfono debe tener al menos 7 caracteres';
         default:
           return `Debe tener al menos ${errors['minlength'].requiredLength} caracteres`;
       }

@@ -136,7 +136,7 @@
               Antes de cancelar, considera explorar opciones más económicas.
             </p>
             <app-button variant="primary" size="sm" (clicked)="goToPlansAndClose()">
-              <app-icon name="arrow-right" [size]="14" slot="icon"></app-icon>
+              <app-icon name="arrow-right" [size]="14" slot="icon" ></app-icon>
               Ver planes
             </app-button>
           </div>
@@ -364,7 +364,7 @@
     <div>
       @if (step() > 1) {
         <app-button variant="ghost" (clicked)="goBack()" [disabled]="loading()">
-          <app-icon name="chevron-left" [size]="16" slot="icon"></app-icon>
+          <app-icon name="chevron-left" [size]="16" slot="icon" ></app-icon>
           Atrás
         </app-button>
       }
@@ -382,7 +382,7 @@
           (clicked)="goToStep2()"
         >
           Continuar
-          <app-icon name="chevron-right" [size]="16" slot="icon"></app-icon>
+          <app-icon name="chevron-right" [size]="16" slot="icon" ></app-icon>
         </app-button>
       }
 
@@ -392,7 +392,7 @@
         </app-button>
         <app-button variant="outline-danger" (clicked)="goToStep3()">
           Continuar con la cancelación
-          <app-icon name="chevron-right" [size]="16" slot="icon"></app-icon>
+          <app-icon name="chevron-right" [size]="16" slot="icon" ></app-icon>
         </app-button>
       }
 
@@ -406,7 +406,7 @@
           [loading]="loading()"
           (clicked)="confirm()"
         >
-          <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+          <app-icon name="x-circle" [size]="16" slot="icon" ></app-icon>
           Cancelar suscripción
         </app-button>
       }

@@ -5,8 +5,11 @@ import {
   IsNumber,
   MaxLength,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { WizardFiscalDataDto } from './wizard-fiscal-data.dto';
 
 export enum StoreType {
   PHYSICAL = 'physical',
@@ -43,7 +46,7 @@ export class SetupStoreWizardDto {
   store_type?: StoreType;
 
   @ApiPropertyOptional({
-    example: 'America/Mexico_City',
+    example: 'America/Bogota',
     description: 'Store timezone',
   })
   @IsOptional()
@@ -88,7 +91,7 @@ export class SetupStoreWizardDto {
   address_line2?: string;
 
   @ApiPropertyOptional({
-    example: 'Ciudad de México',
+    example: 'Bogotá',
     description: 'City',
   })
   @IsOptional()
@@ -97,7 +100,7 @@ export class SetupStoreWizardDto {
   city?: string;
 
   @ApiPropertyOptional({
-    example: 'CDMX',
+    example: 'Cundinamarca',
     description: 'State or province',
   })
   @IsOptional()
@@ -115,11 +118,23 @@ export class SetupStoreWizardDto {
   postal_code?: string;
 
   @ApiPropertyOptional({
-    example: 'MX',
+    example: 'CO',
     description: 'Country code (ISO 3166-1 alpha-2)',
   })
   @IsOptional()
   @IsString()
   @MaxLength(2)
   country_code?: string;
+
+  @ApiPropertyOptional({
+    type: WizardFiscalDataDto,
+    description:
+      'OPTIONAL fiscal identity. When provided, it is persisted to ' +
+      'settings.fiscal_data of the store scope (fiscal_scope=STORE) and marks ' +
+      'the has_fiscal_identity detector signal without activating the fiscal gate.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WizardFiscalDataDto)
+  fiscal_data?: WizardFiscalDataDto;
 }

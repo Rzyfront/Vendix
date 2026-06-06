@@ -386,7 +386,7 @@
           (clicked)="onPrintInvoice()"
           [disabled]="isLoading()"
           >
-          <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+          <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
           Imprimir factura
         </app-button>
         <app-button
@@ -395,7 +395,7 @@
           (clicked)="onPrintPackingSlip()"
           [disabled]="isLoading()"
           >
-          <app-icon name="package" [size]="16" slot="icon"></app-icon>
+          <app-icon name="package" [size]="16" slot="icon" ></app-icon>
           Albarán de embalaje
         </app-button>
       </div>
@@ -408,7 +408,7 @@
             (clicked)="onCancelOrder()"
             [disabled]="isLoading()"
             >
-            <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+            <app-icon name="x-circle" [size]="16" slot="icon" ></app-icon>
             Cancelar pedido
           </app-button>
         }
@@ -420,7 +420,7 @@
             (clicked)="onRefundOrder()"
             [disabled]="isLoading()"
             >
-            <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+            <app-icon name="refresh-cw" [size]="16" slot="icon" ></app-icon>
             Orden de reembolso
           </app-button>
         }
@@ -432,7 +432,7 @@
             (clicked)="openDispatchModal()"
             [disabled]="isLoading()"
             >
-            <app-icon name="truck" [size]="16" slot="icon"></app-icon>
+            <app-icon name="truck" [size]="16" slot="icon" ></app-icon>
             Despachar Orden
           </app-button>
         }
@@ -443,7 +443,7 @@
           (clicked)="onUpdateOrder()"
           [disabled]="isLoading() || isUpdating() || updateForm.invalid"
           >
-          <app-icon name="save" [size]="16" slot="icon"></app-icon>
+          <app-icon name="save" [size]="16" slot="icon" ></app-icon>
           {{ isUpdating() ? "Updating..." : "Update Order" }}
         </app-button>
       </div>
@@ -508,7 +508,7 @@
         (clicked)="onDispatchOrder()"
         [disabled]="isDispatching()"
         >
-        <app-icon name="truck" [size]="16" slot="icon"></app-icon>
+        <app-icon name="truck" [size]="16" slot="icon" ></app-icon>
         {{ isDispatching() ? 'Despachando...' : 'Confirmar Despacho' }}
       </app-button>
     </div>

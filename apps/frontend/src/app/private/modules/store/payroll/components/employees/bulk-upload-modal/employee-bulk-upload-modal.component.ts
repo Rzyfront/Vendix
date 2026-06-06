@@ -863,7 +863,7 @@ import {
           >
           <app-button variant="primary" (clicked)="skipIntro()">
             Continuar
-            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+            <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
           </app-button>
         }
         <!-- Step 0 -->
@@ -877,7 +877,7 @@ import {
               (clicked)="analyzeFile()"
               [disabled]="isAnalyzing()"
             >
-              <app-icon name="search" [size]="16" slot="icon"></app-icon>
+              <app-icon name="search" [size]="16" slot="icon" ></app-icon>
               Analizar Archivo
             </app-button>
           }
@@ -892,7 +892,7 @@ import {
           >
           @if (analysisResult()  && canProceed()) {
             <app-button variant="primary" (clicked)="proceedWithUpload()">
-              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Cargar {{ loadableCount() }} Empleados
             </app-button>
           }

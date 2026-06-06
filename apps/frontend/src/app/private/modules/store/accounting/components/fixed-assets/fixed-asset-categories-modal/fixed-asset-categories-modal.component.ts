@@ -132,7 +132,7 @@ import {
         <div class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
           @if (!show_form) {
             <app-button variant="primary" size="sm" (clicked)="showCreateForm()">
-              <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
               Nueva Categoria
             </app-button>
           } @else {

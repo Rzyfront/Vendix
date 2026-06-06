@@ -61,7 +61,7 @@ import {
                 class="flex-1 md:w-48"
               ></app-selector>
               <app-button variant="outline" size="sm" (clicked)="loadReport()">
-                <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                <app-icon name="refresh-cw" [size]="14" slot="icon" ></app-icon>
               </app-button>
             </div>
           </div>

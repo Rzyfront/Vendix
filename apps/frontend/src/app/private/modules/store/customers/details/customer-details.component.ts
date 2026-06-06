@@ -512,7 +512,7 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
                                           size="sm"
                                           (clicked)="showHistoryFilters.set(!showHistoryFilters())"
                                           >
-                                          <app-icon name="filter" [size]="14"></app-icon>
+                                          <app-icon slot="icon" name="filter" [size]="14"></app-icon>
                                           Filtros
                                         </app-button>
                                       </div>

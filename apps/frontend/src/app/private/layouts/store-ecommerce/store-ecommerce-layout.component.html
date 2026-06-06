@@ -139,7 +139,7 @@
                     <app-quantity-control [value]="item.quantity" [min]="1" [size]="'sm'"
                       (valueChange)="updateCartQuantity(item, $event)"></app-quantity-control>
                     <app-button variant="ghost" size="xsm" class="remove-btn" (clicked)="removeCartItem(item)">
-                      <app-icon name="trash-2" [size]="14"></app-icon>
+                      <app-icon slot="icon" name="trash-2" [size]="14"></app-icon>
                     </app-button>
                   </div>
                 </div>

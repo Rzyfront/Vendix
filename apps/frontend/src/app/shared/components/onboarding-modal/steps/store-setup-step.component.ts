@@ -3,6 +3,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent, InputComponent, SelectorComponent } from '../../index';
+import { ExpandableCardComponent } from '../../expandable-card/expandable-card.component';
+import {
+  OnboardingFiscalSectionComponent,
+  OnboardingFiscalValue,
+} from '../components/onboarding-fiscal-section/onboarding-fiscal-section.component';
 import {
   CountryService,
   Country,
@@ -20,7 +25,9 @@ import { CurrencyService } from '../../../../services/currency.service';
     ReactiveFormsModule,
     IconComponent,
     InputComponent,
-    SelectorComponent
+    SelectorComponent,
+    ExpandableCardComponent,
+    OnboardingFiscalSectionComponent
 ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
@@ -375,6 +382,28 @@ import { CurrencyService } from '../../../../services/currency.service';
           grid-template-columns: repeat(4, 1fr);
         }
       }
+
+      /* ========================================
+         FISCAL CARD (expandable, optional)
+         ======================================== */
+
+      .fiscal-card {
+        display: block;
+        margin-top: 1.5rem;
+      }
+
+      .fiscal-card-header {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .fiscal-card-titles {
+        display: flex;
+        align-items: baseline;
+        gap: 0.375rem;
+        min-width: 0;
+      }
     `,
   ],
   template: `
@@ -634,6 +663,30 @@ import { CurrencyService } from '../../../../services/currency.service';
               </div>
             }
           </div>
+
+          <!-- Fiscal Information Section (STORE flow only, optional, collapsed) -->
+          @if (businessType() === 'STORE') {
+            <app-expandable-card class="fiscal-card">
+              <div slot="header" class="fiscal-card-header">
+                <div class="section-icon">
+                  <app-icon
+                    name="file-text"
+                    size="18"
+                    class="section-icon-element"
+                  ></app-icon>
+                </div>
+                <div class="fiscal-card-titles">
+                  <h3 class="section-title">Información fiscal</h3>
+                  <span class="field-optional">opcional</span>
+                </div>
+              </div>
+              <app-onboarding-fiscal-section
+                [initialValue]="fiscalInitialValue()"
+                (valueChange)="fiscalValueChange.emit($event)"
+                (validityChange)="fiscalValidityChange.emit($event)"
+              ></app-onboarding-fiscal-section>
+            </app-expandable-card>
+          }
         </form>
       </div>
     </div>
@@ -642,9 +695,18 @@ import { CurrencyService } from '../../../../services/currency.service';
 export class StoreSetupStepComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   readonly formGroup = input<any>(null);
+  /** Drives whether the optional fiscal section is rendered (STORE flow only). */
+  readonly businessType = input<'STORE' | 'ORGANIZATION' | null>(null);
+  /** Prefill value for the collapsible fiscal section. */
+  readonly fiscalInitialValue = input<Partial<OnboardingFiscalValue> | null>(
+    null,
+  );
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
   readonly previousStep = output<void>();
+  /** Emits the fiscal section value on every change so the modal can build the payload. */
+  readonly fiscalValueChange = output<Partial<OnboardingFiscalValue>>();
+  readonly fiscalValidityChange = output<boolean>();
 
   private readonly countryService = inject(CountryService);
   private readonly currencyService = inject(CurrencyService);

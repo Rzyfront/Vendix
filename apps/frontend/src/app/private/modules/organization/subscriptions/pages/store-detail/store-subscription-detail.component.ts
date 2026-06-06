@@ -27,15 +27,15 @@ import { StoreSubscription } from '../../interfaces/org-subscription.interface';
         </div>
         <div class="flex gap-2">
           <app-button variant="ghost" size="sm" (clicked)="viewInvoices()">
-            <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
+            <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             Facturas
           </app-button>
           <app-button variant="ghost" size="sm" (clicked)="viewPaymentMethods()">
-            <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+            <app-icon name="credit-card" [size]="16" slot="icon" ></app-icon>
             Métodos
           </app-button>
           <app-button variant="primary" size="sm" (clicked)="openChangePlan()">
-            <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+            <app-icon name="refresh-cw" [size]="16" slot="icon" ></app-icon>
             Cambiar Plan
           </app-button>
         </div>

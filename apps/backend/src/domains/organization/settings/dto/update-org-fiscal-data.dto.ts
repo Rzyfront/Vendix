@@ -131,4 +131,15 @@ export class UpdateOrgFiscalDataDto {
   @IsString({ each: true })
   @MaxLength(32, { each: true })
   tax_responsibilities?: string[];
+
+  @ApiPropertyOptional({
+    example: 'O-15',
+    maxLength: 32,
+    description:
+      'Código DIAN del esquema tributario del emisor (TaxLevelCode): O-13, O-15, R-99-PN…',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(32)
+  tax_scheme?: string;
 }

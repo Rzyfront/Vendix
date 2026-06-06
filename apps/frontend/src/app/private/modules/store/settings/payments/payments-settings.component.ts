@@ -346,7 +346,7 @@ import {
               </div>
               <div class="cfg-test-btn">
                 <app-button variant="outline" size="sm" [loading]="wompiTestLoading" (clicked)="testWompiConnection()">
-                  <app-icon name="plug" [size]="13" slot="icon"></app-icon>
+                  <app-icon name="plug" [size]="13" slot="icon" ></app-icon>
                   Probar
                 </app-button>
               </div>

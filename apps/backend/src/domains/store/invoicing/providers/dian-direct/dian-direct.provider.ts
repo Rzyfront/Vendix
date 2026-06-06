@@ -917,6 +917,22 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   }
 
   /**
+   * Maps the store/organization fiscal tax regime to its DIAN code.
+   * '48' = responsable de IVA; '49' = no responsable de IVA.
+   */
+  private static mapTaxRegimeToDianCode(regime?: string): string {
+    switch (regime) {
+      case 'COMUN':
+      case 'GRAN_CONTRIBUYENTE':
+        return '48';
+      case 'SIMPLIFICADO':
+        return '49';
+      default:
+        return '48';
+    }
+  }
+
+  /**
    * Loads issuer data from the fiscal accounting entity.
    */
   private async loadIssuerData(
@@ -943,6 +959,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
                 orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
                 take: 1,
               },
+              organization_settings: true,
             },
           },
           store: {
@@ -951,6 +968,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
                 orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
                 take: 1,
               },
+              store_settings: true,
             },
           },
         },
@@ -968,6 +986,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       entity.fiscal_scope === 'STORE'
         ? store?.addresses?.[0]
         : organization.addresses?.[0];
+
+    const settings =
+      entity.fiscal_scope === 'STORE'
+        ? store?.store_settings?.settings
+        : organization?.organization_settings?.settings;
+    // Defensive access: settings is a Prisma Json column (untyped at runtime),
+    // so we cast to `any` only to read the optional fiscal_data sub-object.
+    const fiscalData = (settings as any)?.fiscal_data ?? {};
 
     if (!address?.municipality_code) {
       throw new Error(
@@ -998,8 +1024,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       postal_code: address.postal_code || undefined,
       phone: address.phone_number || organization.phone || undefined,
       email: organization.email,
-      tax_regime: '48', // Default: Responsable IVA
-      tax_scheme: 'O-15', // Default: Autorretenedor
+      tax_regime: DianDirectProvider.mapTaxRegimeToDianCode(
+        fiscalData?.tax_regime,
+      ),
+      tax_scheme:
+        typeof fiscalData?.tax_scheme === 'string' && fiscalData.tax_scheme
+          ? fiscalData.tax_scheme
+          : 'O-15',
     };
   }
 

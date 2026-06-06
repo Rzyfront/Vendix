@@ -818,7 +818,7 @@ interface AnalysisResult {
           >
           <app-button variant="primary" (clicked)="skipIntro()">
             Continuar
-            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+            <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
           </app-button>
         }
         @if (!showingIntro() && currentStep() === 0) {
@@ -827,7 +827,7 @@ interface AnalysisResult {
           >
           @if (selectedFile()) {
             <app-button variant="primary" (clicked)="analyzeFile()">
-              <app-icon name="search" [size]="16" slot="icon"></app-icon>
+              <app-icon name="search" [size]="16" slot="icon" ></app-icon>
               Analizar Archivo
             </app-button>
           }
@@ -839,7 +839,7 @@ interface AnalysisResult {
           >
           @if (analysisResult() && totalValidItems() > 0) {
             <app-button variant="primary" (clicked)="confirmImport()">
-              <app-icon name="package-plus" [size]="16" slot="icon"></app-icon>
+              <app-icon name="package-plus" [size]="16" slot="icon" ></app-icon>
               Crear catálogo + ingresar mercancía ({{ totalValidItems() }})
             </app-button>
           }

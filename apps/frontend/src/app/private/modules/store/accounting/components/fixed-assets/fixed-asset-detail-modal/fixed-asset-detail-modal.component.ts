@@ -218,11 +218,11 @@ import {
               @if (!show_dispose_form) {
                 <div class="flex gap-3">
                   <app-button variant="outline" size="sm" (clicked)="onRetire()">
-                    <app-icon name="power" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="power" [size]="14" slot="icon" ></app-icon>
                     Retirar Activo
                   </app-button>
                   <app-button variant="outline" size="sm" (clicked)="show_dispose_form = true">
-                    <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="trash-2" [size]="14" slot="icon" ></app-icon>
                     Dar de Baja
                   </app-button>
                 </div>

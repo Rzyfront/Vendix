@@ -1709,7 +1709,7 @@ export class PosPaymentInterfaceComponent {
 
   private createCustomerForm(): FormGroup {
     return this.fb.group({
-      email: ['', [Validators.required, Validators.email]],
+      email: ['', [Validators.email]],
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: [''],

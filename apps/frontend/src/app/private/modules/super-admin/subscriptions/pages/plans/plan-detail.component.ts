@@ -45,7 +45,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
             size="sm"
             (clicked)="router.navigate(['/super-admin/subscriptions/plans', plan()!.id, 'edit'])"
           >
-            <app-icon name="edit" [size]="16" slot="icon"></app-icon>
+            <app-icon name="edit" [size]="16" slot="icon" ></app-icon>
             Editar
           </app-button>
         </div>

@@ -113,7 +113,7 @@ interface BulkUploadResult {
                 (clicked)="downloadTemplate()"
               >
                 <div class="flex items-center gap-2">
-                  <app-icon name="download" [size]="16"></app-icon>
+                  <app-icon slot="icon" name="download" [size]="16"></app-icon>
                   <span>Descargar plantilla</span>
                 </div>
               </app-button>

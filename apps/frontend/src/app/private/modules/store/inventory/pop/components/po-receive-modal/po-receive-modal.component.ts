@@ -100,7 +100,7 @@ interface ReceiveLineItem {
           (clicked)="receiveAll()"
           [disabled]="saving() || !hasPendingItems()"
         >
-          <app-icon name="check-check" [size]="14" slot="icon"></app-icon>
+          <app-icon name="check-check" [size]="14" slot="icon" ></app-icon>
           Recibir Todo
         </app-button>
         <div class="flex gap-2 justify-end">

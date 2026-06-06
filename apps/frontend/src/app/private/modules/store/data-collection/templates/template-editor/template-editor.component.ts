@@ -273,12 +273,12 @@ interface Selection {
                   />
                 </div>
                 <app-button variant="ghost" size="sm" (clicked)="addTab()">
-                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
                   Pestaña
                 </app-button>
                 @if (formData().tabs.length > 0) {
                   <app-button variant="ghost" size="sm" (clicked)="removeTab(activeTabIndex())">
-                    <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="trash-2" [size]="14" slot="icon" ></app-icon>
                   </app-button>
                 }
               </div>
@@ -313,7 +313,7 @@ interface Selection {
 
             <!-- Add Section Button -->
             <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
               Agregar Sección
             </app-button>
           </div>
@@ -404,7 +404,7 @@ interface Selection {
                               getProductName(pid)
                             }}</span>
                             <app-button variant="ghost" size="xsm" (clicked)="removeProduct(pid)">
-                              <app-icon name="x" [size]="10" slot="icon"></app-icon>
+                              <app-icon name="x" [size]="10" slot="icon" ></app-icon>
                             </app-button>
                           </div>
                         }
@@ -681,7 +681,7 @@ interface Selection {
                         (click)="$event.stopPropagation()"
                         (clicked)="isChild ? removeFieldFromChildSection(parentIndex, si, fi) : removeFieldFromSection(si, fi)"
                       >
-                        <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                        <app-icon name="x" [size]="12" slot="icon" ></app-icon>
                       </app-button>
                     </div>
                   }
@@ -731,7 +731,7 @@ interface Selection {
                 }
 
                 <app-button variant="ghost" size="sm" (clicked)="addChildSection(si)">
-                  <app-icon name="plus" [size]="12" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="12" slot="icon" ></app-icon>
                   Subsección
                 </app-button>
               }

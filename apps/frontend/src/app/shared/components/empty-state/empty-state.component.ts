@@ -53,7 +53,7 @@ import { IconComponent } from '../icon/icon.component';
               size="sm"
               (clicked)="refreshClick.emit()"
             >
-              <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+              <app-icon name="refresh-cw" [size]="16" slot="icon" ></app-icon>
               Actualizar
             </app-button>
           }
@@ -63,7 +63,7 @@ import { IconComponent } from '../icon/icon.component';
               size="sm"
               (clicked)="clearFiltersClick.emit()"
             >
-              <app-icon name="x" [size]="16" slot="icon"></app-icon>
+              <app-icon name="x" [size]="16" slot="icon" ></app-icon>
               Limpiar Filtros
             </app-button>
           }

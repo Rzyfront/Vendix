@@ -136,7 +136,7 @@ const NIT_TYPES: StoreFiscalNitType[] = [
           [loading]="disabled()"
           [showTextWhileLoading]="true"
         >
-          <app-icon name="save" [size]="15" slot="icon"></app-icon>
+          <app-icon name="save" [size]="15" slot="icon" ></app-icon>
           Guardar
         </app-button>
       </div>

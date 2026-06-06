@@ -163,7 +163,7 @@ export interface LayawayConfigResult {
             [disabled]="!isValid() || isSaving()"
             [loading]="isSaving()"
           >
-            <app-icon name="calendar" [size]="16" slot="icon"></app-icon>
+            <app-icon name="calendar" [size]="16" slot="icon" ></app-icon>
             Crear Plan Separé
           </app-button>
         </div>

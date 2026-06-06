@@ -4,10 +4,10 @@
       Hoy
     </app-button>
     <app-button variant="ghost" size="sm" (click)="navigate.emit('prev')">
-      <app-icon name="chevron-left" [size]="16"></app-icon>
+      <app-icon slot="icon" name="chevron-left" [size]="16"></app-icon>
     </app-button>
     <app-button variant="ghost" size="sm" (click)="navigate.emit('next')">
-      <app-icon name="chevron-right" [size]="16"></app-icon>
+      <app-icon slot="icon" name="chevron-right" [size]="16"></app-icon>
     </app-button>
     <span class="date-label">{{ dateLabel() }}</span>
   </div>

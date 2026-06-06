@@ -189,7 +189,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   [loading]="lookupLoading()"
                   [disabled]="!documentLookupQuery || documentLookupQuery.length < 5"
                   >
-                  <app-icon name="search" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="search" [size]="16" slot="icon" ></app-icon>
                   Buscar
                 </app-button>
               </div>
@@ -219,7 +219,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     No se encontró cliente con este documento
                   </p>
                   <app-button variant="outline" size="sm" (clicked)="createFromLookup()">
-                    <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
                     Crear con este documento
                   </app-button>
                 </div>
@@ -297,7 +297,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   size="sm"
                   (clicked)="switchToCreateMode()"
                   >
-                  <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
                   Crear Nuevo Cliente
                 </app-button>
               </div>
@@ -315,7 +315,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   size="sm"
                   (clicked)="switchToCreateMode()"
                   >
-                  <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="user-plus" [size]="16" slot="icon" ></app-icon>
                   Crear Cliente Rápido
                 </app-button>
               </div>
@@ -333,7 +333,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   size="sm"
                   (clicked)="switchToSearchMode()"
                   >
-                  <app-icon name="arrow-left" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="arrow-left" [size]="16" slot="icon" ></app-icon>
                   Volver a buscar
                 </app-button>
               </div>
@@ -376,10 +376,11 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               <!-- Phone -->
               <app-input
                 formControlName="phone"
-                label="Teléfono"
+                label="Teléfono *"
                 placeholder="+54 9 11 1234-5678"
                 type="tel"
                 [size]="'md'"
+                [required]="true"
                 [error]="getFieldError('phone')"
                 (blur)="onFieldBlur('phone')"
                 >
@@ -428,7 +429,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                     <img [src]="qr.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
                     <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ qr.url }}</p>
                     <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-3">
-                      <app-icon name="printer" [size]="14" slot="icon"></app-icon>
+                      <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
                       Imprimir QR
                     </app-button>
                   </div>
@@ -495,7 +496,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   <img [src]="qr2.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
                   <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ qr2.url }}</p>
                   <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-2">
-                    <app-icon name="printer" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
                     Imprimir QR
                   </app-button>
                 </details>
@@ -520,7 +521,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             [loading]="loading()"
             [disabled]="!customerForm.valid || loading()"
             >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
+            <app-icon name="save" [size]="16" slot="icon" ></app-icon>
             Crear Cliente
           </app-button>
         </div>
@@ -629,7 +630,7 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       email: ['', [Validators.required, Validators.email]],
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
-      phone: [''],
+      phone: ['', [Validators.required, Validators.minLength(7)]],
       documentType: [''],
       documentNumber: ['', [Validators.required]] });
   }
@@ -733,7 +734,18 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
     const field = this.customerForm.get(fieldName);
     if (field && field.errors && field.touched) {
       if (field.errors['required']) {
-        return 'Este campo es requerido';
+        switch (fieldName) {
+          case 'phone':
+            return 'El teléfono es requerido';
+          case 'email':
+            return 'El correo es requerido';
+          case 'firstName':
+            return 'El nombre es requerido';
+          case 'lastName':
+            return 'El apellido es requerido';
+          default:
+            return 'Este campo es requerido';
+        }
       }
       if (field.errors['email']) {
         return 'Email inválido';

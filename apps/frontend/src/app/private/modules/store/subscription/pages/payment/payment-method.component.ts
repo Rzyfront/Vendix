@@ -145,7 +145,7 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
                             [disabled]="mutating()"
                             (clicked)="setDefault(method)"
                           >
-                            <app-icon name="star" [size]="14" slot="icon"></app-icon>
+                            <app-icon name="star" [size]="14" slot="icon" ></app-icon>
                             Predeterminado
                           </app-button>
                         }
@@ -155,7 +155,7 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
                           [disabled]="mutating()"
                           (clicked)="removeMethod(method)"
                         >
-                          <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                          <app-icon name="trash-2" [size]="14" slot="icon" ></app-icon>
                           Eliminar
                         </app-button>
                       </div>
@@ -182,7 +182,7 @@ import { PaymentMethod } from '../../interfaces/store-subscription.interface';
                 </p>
               </div>
               <app-button variant="outline" (clicked)="goToPanel()">
-                <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+                <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
                 Ir al panel de suscripción
               </app-button>
             </div>

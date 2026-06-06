@@ -456,7 +456,7 @@ import {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           <app-button variant="primary" (clicked)="skipIntro()">
             Continuar
-            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
+            <app-icon name="arrow-right" [size]="16" slot="icon" ></app-icon>
           </app-button>
         }
         <!-- Step 0 -->
@@ -464,7 +464,7 @@ import {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           @if (selectedFile()) {
             <app-button variant="primary" (clicked)="analyzeFile()" [disabled]="isAnalyzing()">
-              <app-icon name="search" [size]="16" slot="icon"></app-icon>
+              <app-icon name="search" [size]="16" slot="icon" ></app-icon>
               Analizar Archivo
             </app-button>
           }
@@ -475,7 +475,7 @@ import {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           @if (analysisResult() && canProceed()) {
             <app-button variant="primary" (clicked)="proceedWithUpload()">
-              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Proceder con Carga ({{ totalImagesToUpload() }} imágenes)
             </app-button>
           }

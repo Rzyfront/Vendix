@@ -114,7 +114,7 @@ import {
                 size="sm"
                 (clicked)="openCreateModal()"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                 <span class="hidden sm:inline">Nueva Conciliacion</span>
                 <span class="sm:hidden">Nueva</span>
               </app-button>
@@ -322,7 +322,7 @@ import {
             (clicked)="createReconciliation()"
             [disabled]="creating()"
           >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
             Crear
           </app-button>
         </div>

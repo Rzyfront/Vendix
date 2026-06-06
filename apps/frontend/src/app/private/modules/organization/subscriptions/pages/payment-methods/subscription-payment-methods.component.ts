@@ -63,7 +63,7 @@ import { StorePaymentMethod } from '../../../../store/settings/payments/interfac
 
       <div class="flex justify-end">
         <app-button variant="primary" size="sm" (clicked)="addPaymentMethod()">
-          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+          <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
           Agregar Método
         </app-button>
       </div>

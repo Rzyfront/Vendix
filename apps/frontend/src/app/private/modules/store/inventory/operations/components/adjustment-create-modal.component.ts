@@ -429,7 +429,7 @@ import {
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 !w-full !justify-center !py-3.5 !text-base"
           >
             Continuar
-            <app-icon name="arrow-right" [size]="16" class="ml-2" slot="icon"></app-icon>
+            <app-icon name="arrow-right" [size]="16" class="ml-2" slot="icon" ></app-icon>
           </app-button>
         } @else if (confirmCreate) {
           <app-button
@@ -440,7 +440,7 @@ import {
             [disabled]="isSubmitting() || hasMissingType()"
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
           >
-            <app-icon name="check-circle" [size]="18" class="mr-2" slot="icon"></app-icon>
+            <app-icon name="check-circle" [size]="18" class="mr-2" slot="icon" ></app-icon>
             Crear y Aplicar
           </app-button>
         } @else {
@@ -452,7 +452,7 @@ import {
             [disabled]="isSubmitting() || hasMissingType()"
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
           >
-            <app-icon name="file-text" [size]="18" class="mr-2" slot="icon"></app-icon>
+            <app-icon name="file-text" [size]="18" class="mr-2" slot="icon" ></app-icon>
             Guardar Borrador
           </app-button>
         }

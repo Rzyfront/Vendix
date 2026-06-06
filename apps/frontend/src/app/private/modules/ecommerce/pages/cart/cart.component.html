@@ -73,7 +73,7 @@
               (clicked)="removeItem(item)"
               title="Eliminar"
             >
-              <app-icon name="trash-2" [size]="18"></app-icon>
+              <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>
             </app-button>
           </div>
         }
@@ -122,7 +122,7 @@
               (clicked)="whatsappCheckout()"
             >
               <div class="flex items-center justify-center gap-2">
-                <app-icon name="message-circle" [size]="18"></app-icon>
+                <app-icon slot="icon" name="message-circle" [size]="18"></app-icon>
                 Comprar por WhatsApp
               </div>
             </app-button>

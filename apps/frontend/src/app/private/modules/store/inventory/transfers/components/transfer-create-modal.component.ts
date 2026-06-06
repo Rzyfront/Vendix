@@ -349,7 +349,7 @@ interface TransferItem {
         <div>
           @if (currentStep > 1) {
             <app-button variant="outline" type="button" (clicked)="goToStep(currentStep - 1)" customClasses="!rounded-xl">
-              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Atras
             </app-button>
           }
@@ -367,7 +367,7 @@ interface TransferItem {
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
               Continuar
-              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon"></app-icon>
+              <app-icon name="arrow-right" [size]="14" class="ml-1.5" slot="icon" ></app-icon>
             </app-button>
           } @else {
             <app-button
@@ -378,7 +378,7 @@ interface TransferItem {
               [disabled]="isSubmitting() || hasNegativeProjection()"
               customClasses="!rounded-xl font-bold"
             >
-              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Guardar Borrador
             </app-button>
             <app-button
@@ -389,7 +389,7 @@ interface TransferItem {
               [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
-              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
+              <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Crear y Aplicar
             </app-button>
           }

@@ -257,7 +257,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
             } @else if (canProcess) {
               @if (quickProcessEnabled()) {
                 <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading()">
-                  <app-icon name="zap" [size]="16" class="mr-1"></app-icon>
+                  <app-icon slot="icon" name="zap" [size]="16" class="mr-1"></app-icon>
                   Procesar Completo
                 </app-button>
               } @else {

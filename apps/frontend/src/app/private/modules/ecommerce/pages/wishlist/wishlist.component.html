@@ -87,7 +87,7 @@
                 [disabled]="item.product.stock_quantity === 0"
                 title="Agregar al carrito"
               >
-                <app-icon name="shopping-cart" [size]="16"></app-icon>
+                <app-icon slot="icon" name="shopping-cart" [size]="16"></app-icon>
               </app-button>
               <app-button
                 variant="ghost"
@@ -95,7 +95,7 @@
                 (clicked)="removeFromWishlist(item.product_id)"
                 title="Eliminar de favoritos"
               >
-                <app-icon name="trash-2" [size]="18"></app-icon>
+                <app-icon slot="icon" name="trash-2" [size]="18"></app-icon>
               </app-button>
             </div>
           </div>

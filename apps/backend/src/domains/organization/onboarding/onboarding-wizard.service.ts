@@ -25,6 +25,11 @@ import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helpe
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 import { SettingsService } from '../../store/settings/settings.service';
+import { SettingsService as OrgSettingsService } from '../settings/settings.service';
+import {
+  normalizeFiscalStatusBlock,
+  type FiscalStatusBlock,
+} from '@common/interfaces/fiscal-status.interface';
 
 interface WizardValidation {
   isValid: boolean;
@@ -46,6 +51,7 @@ export class OnboardingWizardService {
     private readonly subscriptionTrialService: SubscriptionTrialService,
     private readonly orgLocationsService: OrgLocationsService,
     private readonly settingsService: SettingsService,
+    private readonly orgSettingsService: OrgSettingsService,
   ) {}
 
   /**
@@ -497,6 +503,27 @@ export class OnboardingWizardService {
       }
     }
 
+    // OPTIONAL fiscal_data — consolidated ORG flow ⇒ persist at ORGANIZATION
+    // scope (no store_id). Failures here must NOT leave the org half-set, so we
+    // surface a clear error after the org/address writes have already committed
+    // (they are independent statements, not a single tx, mirroring the existing
+    // flow which already commits org + address separately).
+    if (setupOrgDto.fiscal_data) {
+      try {
+        await this.persistWizardFiscalData(
+          user.organization_id,
+          setupOrgDto.fiscal_data as Record<string, unknown>,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `setupOrganization: persistWizardFiscalData failed for org=${user.organization_id}: ${err?.message ?? err}`,
+        );
+        throw new BadRequestException(
+          'La organización se guardó, pero no se pudo registrar la información fiscal opcional. Inténtalo de nuevo desde la configuración fiscal.',
+        );
+      }
+    }
+
     return updatedOrg;
   }
 
@@ -720,6 +747,27 @@ export class OnboardingWizardService {
       );
     }
 
+    // OPTIONAL fiscal_data — STORE flow ⇒ persist at STORE scope (store_id).
+    // Runs AFTER the atomic store bootstrap commits so a fiscal_data failure
+    // never rolls back the store/trial/settings. The store stays fully created;
+    // we surface a clear error so the wizard can retry the fiscal step.
+    if (setupStoreDto.fiscal_data) {
+      try {
+        await this.persistWizardFiscalData(
+          organization_id,
+          setupStoreDto.fiscal_data as Record<string, unknown>,
+          storeId,
+        );
+      } catch (err: any) {
+        this.logger.error(
+          `setupStore: persistWizardFiscalData failed for store=${storeId}: ${err?.message ?? err}`,
+        );
+        throw new BadRequestException(
+          'La tienda se creó, pero no se pudo registrar la información fiscal opcional. Inténtalo de nuevo desde la configuración fiscal.',
+        );
+      }
+    }
+
     // Final fetch AFTER the transaction so the response reflects all
     // committed side-effects (default_location_id, address, settings).
     return this.prismaService.stores.findUnique({
@@ -729,6 +777,98 @@ export class OnboardingWizardService {
         store_settings: true,
       },
     });
+  }
+
+  /**
+   * Persist OPTIONAL wizard fiscal_data into `settings.fiscal_data` of the
+   * correct scope and flip the `has_fiscal_identity` detector signal — WITHOUT
+   * activating the fiscal gate (fiscal_status.state stays untouched).
+   *
+   * Scope resolution is delegated to the organization `SettingsService`:
+   *   - fiscal_scope=ORGANIZATION → call with no store_id → organization_settings.
+   *   - fiscal_scope=STORE       → call with store_id      → store_settings.
+   *
+   * `organization_id`/`user_id` are read by `SettingsService` from the active
+   * request context (same context the wizard already relies on).
+   *
+   * @param store_id Pass the created store id ONLY for the STORE flow. Leave
+   *   undefined for the consolidated ORG flow.
+   */
+  private async persistWizardFiscalData(
+    organizationId: number,
+    fiscalData: Record<string, unknown>,
+    store_id?: number,
+  ): Promise<void> {
+    // 1) Deep-merge fiscal_data into the resolved scope (reuses scope + audit).
+    await this.orgSettingsService.updateFiscalData(fiscalData, store_id);
+
+    // 2) Flip the has_fiscal_identity detector signal on the SAME scope.
+    //    Minimal read-modify-write over the existing fiscal_status block; never
+    //    touches `state`/`activated_at` so the strict fiscal gate is unaffected.
+    if (typeof store_id === 'number') {
+      const existing = await this.prismaService
+        .withoutScope()
+        .store_settings.findUnique({
+          where: { store_id },
+          select: { settings: true },
+        });
+      const settings =
+        (existing?.settings as Record<string, unknown> | null) ?? {};
+      const nextSettings = this.withFiscalIdentitySignal(settings);
+      await this.prismaService.withoutScope().store_settings.update({
+        where: { store_id },
+        data: { settings: nextSettings as any, updated_at: new Date() },
+      });
+    } else {
+      const existing = await this.prismaService.organization_settings.findFirst({
+        where: { organization_id: organizationId },
+        select: { id: true, settings: true },
+      });
+      const settings =
+        (existing?.settings as Record<string, unknown> | null) ?? {};
+      const nextSettings = this.withFiscalIdentitySignal(settings);
+      if (existing) {
+        await this.prismaService.organization_settings.update({
+          where: { id: existing.id },
+          data: { settings: nextSettings as any, updated_at: new Date() },
+        });
+      } else {
+        await this.prismaService.organization_settings.create({
+          data: {
+            organization_id: organizationId,
+            settings: nextSettings as any,
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * Returns a shallow copy of a settings JSON with
+   * `fiscal_status.<area>.detector_signals.has_fiscal_identity = true` for
+   * every fiscal area, normalizing the block so missing keys default safely.
+   * `state` and `activated_at` are preserved as-is.
+   */
+  private withFiscalIdentitySignal(
+    settings: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const block: FiscalStatusBlock = normalizeFiscalStatusBlock(
+      (settings as any)?.fiscal_status,
+    );
+    (Object.keys(block) as Array<keyof FiscalStatusBlock>).forEach((area) => {
+      block[area] = {
+        ...block[area],
+        detector_signals: {
+          ...block[area].detector_signals,
+          has_fiscal_identity: true,
+        },
+        updated_at: new Date().toISOString(),
+      };
+    });
+    return {
+      ...settings,
+      fiscal_status: block,
+    };
   }
 
   /**
