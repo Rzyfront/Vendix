@@ -7,6 +7,23 @@ import { FormStyleVariant } from '../../types/form.types';
 export type QuantityControlSize = 'sm' | 'md' | 'lg';
 
 /**
+ * Payload of the `valueClamped` event.
+ * Emitted when the user's input was constrained to the min or max value.
+ */
+export interface QuantityClampEvent {
+  /** The value the user typed (pre-clamp). */
+  attempted: number;
+  /**
+   * The cap the value was clamped to:
+   * - For `reason: 'max'`, this is the `max` input (the cap).
+   * - For `reason: 'min'`, this is the `min` input (the floor, e.g. 1).
+   */
+  max: number;
+  /** Why the clamp was applied. */
+  reason: 'max' | 'min';
+}
+
+/**
  * Reusable quantity control component with +/- buttons and editable input
  * Matches the exact styling from the original POS/POP cart implementations
  */
@@ -108,6 +125,17 @@ export class QuantityControlComponent {
   readonly styleVariant = input<FormStyleVariant>('modern');
 
   readonly valueChange = output<number>();
+
+  /**
+   * Emitted when the user's input was clamped to the min or max constraint.
+   * Parents can use this to surface a warning (e.g. stock cap) without
+   * having to re-validate the value themselves.
+   *
+   * - `attempted`: the value the user typed (pre-clamp).
+   * - `max`: the cap the value was clamped to (the `min` value when reason is 'min').
+   * - `reason`: 'max' if the user typed above max, 'min' if below min.
+   */
+  readonly valueClamped = output<QuantityClampEvent>();
 
   displayValue = 1;
 
@@ -266,12 +294,27 @@ export class QuantityControlComponent {
    */
   private commitValue(): void {
     let constrainedValue = this.displayValue;
+    let clamp: QuantityClampEvent | null = null;
 
     const max = this.max();
     if (this.displayValue < this.min()) {
       constrainedValue = this.min();
+      clamp = {
+        attempted: this.displayValue,
+        max: constrainedValue,
+        reason: 'min',
+      };
     } else if (max !== null && this.displayValue > max) {
       constrainedValue = max;
+      clamp = {
+        attempted: this.displayValue,
+        max,
+        reason: 'max',
+      };
+    }
+
+    if (clamp) {
+      this.valueClamped.emit(clamp);
     }
 
     // Only emit if value actually changed
