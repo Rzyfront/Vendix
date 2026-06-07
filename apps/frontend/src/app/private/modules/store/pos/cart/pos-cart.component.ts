@@ -21,6 +21,8 @@ import {
 } from '../../../../../shared/components';
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { showStockCapToast } from './utils/stock-toast';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { PosScaleService } from '../services/pos-scale.service';
 import { PosApiService } from '../services/pos-api.service';
@@ -501,6 +503,7 @@ import {
                         [editable]="true"
                         [size]="'sm'"
                         (valueChange)="updateQuantity(item.id, $event)"
+                        (valueClamped)="onQuantityClamped(item, $event)"
                       ></app-quantity-control>
                     }
                   </div>
@@ -1108,6 +1111,18 @@ private cartService = inject(PosCartService);
             error.message || 'Error al actualizar cantidad',
           );
         } });
+  }
+
+  /**
+   * Manejador del evento `valueClamped` del `quantity-control`.
+   * Se dispara cuando el usuario teclea una cantidad fuera del rango
+   * permitido (mayor al stock o menor al mínimo). Solo el cap superior
+   * (max) nos interesa aquí — el cap inferior ya está manejado por
+   * `updateQuantity` cuando la cantidad es <= 0.
+   */
+  onQuantityClamped(item: CartItem, event: QuantityClampEvent): void {
+    if (event.reason !== 'max') return;
+    showStockCapToast(this.toastService, item, event.max);
   }
 
   getRequiredStockPerUnit(item: CartItem): number {
