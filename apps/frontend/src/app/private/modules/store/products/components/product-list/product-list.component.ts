@@ -72,6 +72,7 @@ export class ProductListComponent {
   readonly toggleState = output<Product>();
   readonly bulkUpload = output<void>();
   readonly bulkImageUpload = output<void>();
+  readonly downloadCurrentProducts = output<void>();
   readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
   readonly pageChange = output<number>();
 
@@ -135,6 +136,11 @@ export class ProductListComponent {
     },
     { label: 'Carga Masiva', icon: 'upload-cloud', action: 'bulk-upload' },
     { label: 'Carga de Imágenes', icon: 'image', action: 'bulk-image-upload' },
+    {
+      label: 'Descargar Plantilla con Productos Actuales',
+      icon: 'file-spreadsheet',
+      action: 'download-current-products',
+    },
   ];
 
   // Table configuration
@@ -389,6 +395,9 @@ export class ProductListComponent {
         break;
       case 'bulk-image-upload':
         this.bulkImageUpload.emit();
+        break;
+      case 'download-current-products':
+        this.downloadCurrentProducts.emit();
         break;
     }
   }

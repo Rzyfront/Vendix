@@ -447,6 +447,19 @@ export class ProductsService {
       .pipe(catchError(this.handleError));
   }
 
+  /**
+   * Descarga un XLSX con los productos actuales de la tienda, en el mismo
+   * formato de la plantilla de Carga Masiva + 3 columnas informativas
+   * (Precio Compra, Cantidad Actual, Tiene Imagen).
+   */
+  exportCurrentProducts(): Observable<Blob> {
+    return this.http
+      .get(`${this.apiUrl}/store/products/bulk/export`, {
+        responseType: 'blob',
+      })
+      .pipe(catchError(this.handleError));
+  }
+
   uploadBulkProducts(file: File): Observable<any> {
     const formData = new FormData();
     formData.append('file', file);
