@@ -24,7 +24,7 @@ async function bootstrap() {
   );
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
-  // Disable HTTP caching on private API endpoints.
+  // Deshabilita la cache HTTP en endpoints privados de la API.
   // Bug fix: el backend emitía ETag (Express por defecto) pero NO Cache-Control,
   // lo que permitía al browser cachear GETs a /api/*. Al re-abrir un producto
   // recién editado, el browser servía la respuesta vieja y los cambios no se
@@ -158,13 +158,13 @@ async function bootstrap() {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
-      'Content-Type',
-      'Authorization',
       'Accept',
-      'Origin',
-      'X-Requested-With',
+      'Authorization',
       'Cache-Control',
+      'Content-Type',
+      'Origin',
       'Pragma',
+      'X-Requested-With',
       'x-store-id',
     ],
     exposedHeaders: ['Authorization', 'Cache-Control', 'Pragma'],
