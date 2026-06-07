@@ -163,9 +163,11 @@ async function bootstrap() {
       'Accept',
       'Origin',
       'X-Requested-With',
+      'Cache-Control',
+      'Pragma',
       'x-store-id',
     ],
-    exposedHeaders: ['Authorization'],
+    exposedHeaders: ['Authorization', 'Cache-Control', 'Pragma'],
   });
 
   // Swagger configuration (disabled in development to save memory and avoid SWC metadata issues)
