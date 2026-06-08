@@ -54,6 +54,7 @@ import { PosOrderConfirmationComponent } from './components/pos-order-confirmati
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
+import { confirmStockCappedLines } from './cart/utils/stock-confirmation';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
@@ -1345,11 +1346,28 @@ export class PosComponent {
       });
   }
 
-  onCheckout(): void {
+  async onCheckout(): Promise<void> {
     if (!this.cartState() || this.isEmpty) return;
 
     if (this.isEditMode()) {
       this.updateExistingOrder();
+      return;
+    }
+
+    // Validar stock antes de abrir la pantalla de pago. Si el cliente
+    // rechaza alguna línea clamp'eada, NO se abre la pantalla de cobro.
+    const stockConfirmation = await confirmStockCappedLines(
+      this.cartService,
+      this.dialogService,
+      this.toastService,
+    );
+
+    if (!stockConfirmation.canProceed) {
+      this.toastService.warning(
+        stockConfirmation.removedCount === 1
+          ? `Se quitó ${stockConfirmation.removedNames[0]} del carrito`
+          : `Se quitaron ${stockConfirmation.removedCount} productos del carrito`,
+      );
       return;
     }
 
