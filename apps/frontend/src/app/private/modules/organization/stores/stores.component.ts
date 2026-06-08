@@ -678,7 +678,12 @@ openCreateStoreModal(): void {
       city: storeData.city,
       country: storeData.country,
       is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL};
+      store_type: storeData.store_type || StoreType.PHYSICAL,
+      // Brand assets: the modal stores the S3 key returned by the upload
+      // endpoint in `logoUrl`. Persist it as `logo_url` so the store actually
+      // keeps the uploaded logo.
+      logo_url: storeData.logoUrl,
+    };
 
     this.storesService
       .updateStore(this.selectedStore()!.id, updateData)

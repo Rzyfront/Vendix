@@ -23,8 +23,6 @@ export class BulkProductAnalysisItemDto {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number;
-  package_consumes_multiple_stock?: boolean;
   action: 'create' | 'update';
   existing_product_id?: number;
   status: 'ready' | 'warning' | 'error';

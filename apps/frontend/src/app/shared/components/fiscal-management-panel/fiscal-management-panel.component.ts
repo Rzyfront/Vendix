@@ -129,7 +129,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
           <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-identity-title">
             <header class="flex items-start gap-3">
               <span
-                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-sm font-bold text-white"
+                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
               >
                 1
               </span>
@@ -172,7 +172,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
         <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-areas-title">
           <header class="flex items-start gap-3">
             <span
-              class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary text-sm font-bold text-white"
+              class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
             >
               {{ showFiscalIdentitySection() ? '2' : '1' }}
             </span>
@@ -192,7 +192,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                 <div class="flex h-full flex-col gap-3">
                   <div class="flex items-center justify-between gap-3">
                     <span
-                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10 text-primary-600"
                     >
                       <app-icon [name]="iconFor(area)" [size]="19" />
                     </span>
@@ -224,7 +224,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                   <div class="mt-auto flex items-center justify-between gap-3">
                     @if (stateFor(area) === 'INACTIVE') {
                       <a
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary/90"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
                         [routerLink]="['/admin/fiscal/wizard']"
                         [queryParams]="{ areas: area, store_id: service.targetStoreId() }"
                       >
@@ -232,7 +232,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                       </a>
                     } @else if (stateFor(area) === 'WIP') {
                       <a
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-primary px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary/90"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
                         [routerLink]="['/admin/fiscal/wizard']"
                         [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }"
                       >
@@ -240,7 +240,7 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
                       </a>
                     } @else if (stateFor(area) === 'ACTIVE') {
                       <button
-                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary bg-surface px-3 py-2 text-sm font-bold text-primary transition-colors hover:bg-primary/5"
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-surface px-3 py-2 text-sm font-bold text-primary-600 transition-colors hover:bg-primary-600/5"
                         type="button"
                         (click)="deactivate(area)"
                       >

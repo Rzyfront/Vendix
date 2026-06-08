@@ -23,8 +23,6 @@ export interface BulkProductAnalysisItem {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number;
-  package_consumes_multiple_stock?: boolean;
   service_duration_minutes?: number;
   service_modality?: string;
   service_pricing_type?: string;

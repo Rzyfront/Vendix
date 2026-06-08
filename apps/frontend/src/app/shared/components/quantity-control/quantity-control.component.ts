@@ -32,6 +32,7 @@ export interface QuantityClampEvent {
   standalone: true,
   imports: [IconComponent, FormsModule],
   template: `
+    <div class="qc-wrapper">
     <div
       [class]="containerClasses"
       >
@@ -88,6 +89,12 @@ export interface QuantityClampEvent {
         <app-icon [name]="'plus'" [size]="iconSize"></app-icon>
       </button>
     </div>
+      @if (packSize() > 1) {
+        <span class="qc-pack-hint" [title]="'Empaque de ' + packSize() + ' unidades'">
+          = {{ displayValue * packSize() }} u. (×{{ packSize() }})
+        </span>
+      }
+    </div>
     `,
   styles: [
     `
@@ -95,6 +102,24 @@ export interface QuantityClampEvent {
       display: inline-flex;
       min-width: 0;
       max-width: 100%;
+    }
+
+    .qc-wrapper {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 2px;
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .qc-pack-hint {
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1;
+      text-align: center;
+      color: var(--color-text-secondary);
+      white-space: nowrap;
     }
 
     /* Remove number input spin buttons */
@@ -114,7 +139,16 @@ export class QuantityControlComponent {
   readonly value = input(1);
   readonly min = input(1);
   readonly max = input<number | null>(null);
+  /**
+   * Stock units per package. When > 1 the counter still steps by 1 (it counts
+   * PACKAGES), and a small unit-equivalence hint is shown beneath the control.
+   */
   readonly unitsPerPackage = input<number | null>(null);
+  /** Normalized pack size (>= 1); collapses to 1 for null/<=1 values. */
+  readonly packSize = computed(() => {
+    const v = Number(this.unitsPerPackage() ?? 1);
+    return Number.isFinite(v) && v > 1 ? v : 1;
+  });
   readonly step = input(1);
   readonly editable = input(true);
   readonly disabled = input(false);

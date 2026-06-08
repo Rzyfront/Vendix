@@ -17,6 +17,8 @@ export interface WizardPrefillLegalData {
   tax_id: string | null;
   nit: string | null;
   nit_dv: string | null;
+  /** Document type ('NIT'/'CC'/'CE'/...) from DIAN config or `fiscal_data.nit_type`. */
+  nit_type: string | null;
   fiscal_address: {
     address_line1: string | null;
     address_line2: string | null;
@@ -29,6 +31,8 @@ export interface WizardPrefillLegalData {
   ciiu: string | null;
   tax_responsibilities: string[] | null;
   tax_scheme: string | null;
+  /** Person type ('NATURAL'/'JURIDICA') from `fiscal_data.person_type`. */
+  person_type: string | null;
 }
 
 export interface WizardPrefillDianConfig {

@@ -42,8 +42,8 @@ export interface PurchaseOrderItemRequest {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number;
-  package_consumes_multiple_stock?: boolean;
+  // Packaging is tier-owned now (price tier / per-product override), not a
+  // product field. Removed from the purchase-order item request.
   base_price?: number;
   profit_margin?: number;
   is_on_sale?: boolean;
@@ -115,8 +115,6 @@ export function cartToPurchaseOrderRequest(
         requestItem.is_featured = item.prebulk_data.is_featured;
         requestItem.allow_pos_price_override = item.prebulk_data.allow_pos_price_override;
         requestItem.has_multiple_price_tiers = item.prebulk_data.has_multiple_price_tiers;
-        requestItem.units_per_package = item.prebulk_data.units_per_package;
-        requestItem.package_consumes_multiple_stock = item.prebulk_data.package_consumes_multiple_stock;
         requestItem.base_price = item.prebulk_data.base_price;
         requestItem.profit_margin = item.prebulk_data.profit_margin;
         requestItem.is_on_sale = item.prebulk_data.is_on_sale;

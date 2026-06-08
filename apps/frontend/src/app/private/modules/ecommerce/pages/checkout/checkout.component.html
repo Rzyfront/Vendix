@@ -231,9 +231,9 @@
             @if (!cartHasOnlyServices) {
               <h2>Opciones de Envio</h2>
             }
-            @if (!cartHasOnlyServices && shipping_options.length > 0) {
+            @if (!cartHasOnlyServices && shipping_options().length > 0) {
               <div class="payment-list" style="margin-bottom: 2rem">
-                @for (option of shipping_options; track option.id) {
+                @for (option of shipping_options(); track option.id) {
                   <div
                     class="payment-card"
                     [class.selected]="selected_shipping_option_id === option.id"
@@ -451,7 +451,12 @@
               variant="primary"
               (clicked)="placeOrder()"
               [loading]="is_submitting() || wompiWidgetLoading()"
-              [disabled]="is_submitting() || wompiWidgetLoading()"
+              [disabled]="is_submitting() || wompiWidgetLoading() || !canConfirmOrder()"
+              [title]="
+                !cartHasOnlyServices && shipping_options().length === 0
+                  ? 'No hay opciones de envío para esta ubicación'
+                  : null
+              "
             >
               @if (!is_submitting() && !wompiWidgetLoading()) {
                 <app-icon

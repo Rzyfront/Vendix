@@ -7,10 +7,13 @@ import {
   signal,
 } from '@angular/core';
 import {
+  AbstractControl,
   FormBuilder,
   FormControl,
   FormGroup,
   ReactiveFormsModule,
+  ValidationErrors,
+  ValidatorFn,
   Validators,
 } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -45,8 +48,28 @@ interface PriceTierFormControls {
   discount_percentage: FormControl<number | null>;
   is_active: FormControl<boolean>;
   is_default: FormControl<boolean>;
-  is_package_unit: FormControl<boolean>;
+  /**
+   * Optional packaging quantity. When >= 2 the tier sells by package/box and
+   * the backend DERIVES `is_package_unit = (units_per_package ?? 0) >= 2`.
+   * Empty/null => sells by single unit.
+   */
+  units_per_package: FormControl<number | null>;
   sort_order: FormControl<number | null>;
+}
+
+/**
+ * Optional integer validator. Passes when the control is empty (optional) or
+ * holds an integer value; fails for fractional/non-numeric values.
+ */
+function optionalIntegerValidator(): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const value = control.value;
+    if (value === null || value === undefined || value === '') {
+      return null;
+    }
+    const numeric = Number(value);
+    return Number.isInteger(numeric) ? null : { integer: true };
+  };
 }
 
 @Component({
@@ -93,7 +116,9 @@ export class PriceTierFormPageComponent implements OnInit {
       }),
       is_active: this.fb.nonNullable.control(true),
       is_default: this.fb.nonNullable.control(false),
-      is_package_unit: this.fb.nonNullable.control(false),
+      units_per_package: new FormControl<number | null>(null, {
+        validators: [Validators.min(2), optionalIntegerValidator()],
+      }),
       sort_order: new FormControl<number | null>(0, {
         validators: [Validators.min(0)],
       }),
@@ -172,7 +197,8 @@ export class PriceTierFormPageComponent implements OnInit {
           : Number(tier.discount_percentage),
       is_active: tier.is_active,
       is_default: tier.is_default,
-      is_package_unit: tier.is_package_unit,
+      units_per_package:
+        tier.units_per_package == null ? null : Number(tier.units_per_package),
       sort_order: tier.sort_order ?? 0,
     });
   }
@@ -197,6 +223,17 @@ export class PriceTierFormPageComponent implements OnInit {
     }
 
     const raw = this.form.getRawValue();
+
+    // Packaging quantity drives the backend-derived `is_package_unit`.
+    // Only a valid integer >= 2 means "sells by package"; anything else
+    // (empty / < 2) means "sells by single unit".
+    const unitsPerPackage =
+      raw.units_per_package == null ? null : Number(raw.units_per_package);
+    const hasPackaging =
+      unitsPerPackage != null &&
+      Number.isInteger(unitsPerPackage) &&
+      unitsPerPackage >= 2;
+
     const payload: CreatePriceTierDto = {
       name: raw.name.trim(),
       code: raw.code?.trim() ? raw.code.trim() : undefined,
@@ -205,15 +242,22 @@ export class PriceTierFormPageComponent implements OnInit {
         raw.discount_percentage == null ? 0 : Number(raw.discount_percentage),
       is_active: raw.is_active,
       is_default: raw.is_default,
-      is_package_unit: raw.is_package_unit,
+      // On create: only send packaging when present (omit otherwise).
+      units_per_package: hasPackaging ? unitsPerPackage : undefined,
       sort_order: raw.sort_order == null ? 0 : Number(raw.sort_order),
     };
 
     this.isSubmitting.set(true);
 
     const currentId = this.tierId();
+    // On edit: always send packaging explicitly so clearing the field resets
+    // the tier back to single-unit (null) instead of leaving a stale value.
+    const updatePayload: UpdatePriceTierDto = {
+      ...payload,
+      units_per_package: hasPackaging ? unitsPerPackage : null,
+    };
     const request$ = currentId
-      ? this.priceTiersService.update(currentId, payload as UpdatePriceTierDto)
+      ? this.priceTiersService.update(currentId, updatePayload)
       : this.priceTiersService.create(payload);
 
     request$
@@ -246,6 +290,7 @@ export class PriceTierFormPageComponent implements OnInit {
     if (!control || !control.touched || !control.errors) return '';
     if (control.errors['required']) return 'Este campo es requerido';
     if (control.errors['maxlength']) return 'Texto demasiado largo';
+    if (control.errors['integer']) return 'Debe ser un número entero';
     if (control.errors['min']) return `Mínimo ${control.errors['min'].min}`;
     if (control.errors['max']) return `Máximo ${control.errors['max'].max}`;
     return '';

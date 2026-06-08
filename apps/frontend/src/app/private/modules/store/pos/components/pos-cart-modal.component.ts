@@ -154,8 +154,8 @@ import {
                           [title]="'Tarifa aplicada: ' + item.applied_price_tier_name"
                         >{{ item.applied_price_tier_name }}</span>
                       }
-                      @if (item.is_package_unit && item.units_per_package) {
-                        <span class="item-package-badge">× {{ item.units_per_package }} unid/empaque</span>
+                      @if (isPackageLine(item)) {
+                        <span class="item-package-badge" [title]="'Empaque de ' + item.units_per_package + ' unidades'">Caja ×{{ item.units_per_package }}</span>
                       }
                     </div>
                     @if (canShowTierSelector(item)) {
@@ -184,16 +184,23 @@ import {
                         <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
                       </div>
                     } @else {
-                      <app-quantity-control
-                        [value]="item.quantity"
-                        [min]="1"
-                        [max]="getQuantityMax(item)"
-                        [unitsPerPackage]="getRequiredStockPerUnit(item)"
-                        [editable]="true"
-                        [size]="'sm'"
-                        (valueChange)="onQuantityChange(item.id, $event)"
-                        (valueClamped)="onQuantityClamped(item, $event)"
-                      ></app-quantity-control>
+                      <div class="qty-with-packages">
+                        <app-quantity-control
+                          [value]="item.quantity"
+                          [min]="1"
+                          [max]="getQuantityMax(item)"
+                          [unitsPerPackage]="getRequiredStockPerUnit(item)"
+                          [editable]="true"
+                          [size]="'sm'"
+                          (valueChange)="onQuantityChange(item.id, $event)"
+                          (valueClamped)="onQuantityClamped(item, $event)"
+                        ></app-quantity-control>
+                        @if (isPackageLine(item)) {
+                          <span class="package-count-label">
+                            {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+                          </span>
+                        }
+                      </div>
                     }
                     <div class="item-price-action">
                       <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
@@ -601,6 +608,20 @@ import {
         border: 1px solid rgba(59, 130, 246, 0.2);
       }
 
+      .qty-with-packages {
+        display: inline-flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .package-count-label {
+        font-size: 10px;
+        font-weight: 500;
+        line-height: 1;
+        color: rgb(29, 78, 216);
+      }
+
       .weight-value {
         font-size: 13px;
         font-weight: 700;
@@ -968,16 +989,22 @@ export class PosCartModalComponent {
       });
   }
 
+  /**
+   * Stock units consumed per cart unit. Packaging is tier-owned: when the
+   * applied tier resolves a pack size > 1, the cart `quantity` counts PACKAGES
+   * and each package consumes `units_per_package` stock units.
+   */
   getRequiredStockPerUnit(item: CartItem): number {
-    if (
-      item.is_package_unit &&
-      item.product.package_consumes_multiple_stock === true &&
-      item.units_per_package
-    ) {
+    if (item.is_package_unit && item.units_per_package) {
       const units = Number(item.units_per_package);
       return Number.isFinite(units) && units > 1 ? units : 1;
     }
     return 1;
+  }
+
+  /** True when this line is sold by package (tier pack size > 1). */
+  isPackageLine(item: CartItem): boolean {
+    return !!item.is_package_unit && Number(item.units_per_package ?? 0) > 1;
   }
 
   getQuantityMax(item: CartItem): number {

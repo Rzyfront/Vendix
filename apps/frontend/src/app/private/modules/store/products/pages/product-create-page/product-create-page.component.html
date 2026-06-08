@@ -404,234 +404,192 @@
                 </span>
               </div>
             } @else if (priceTierRows().length > 0) {
-              <!-- Tier assignments + overrides table -->
-              <!-- MOBILE: card list -->
-              <div class="md:hidden space-y-3">
+              <!-- Step 1: pick which tiers apply (search + chips, like Promociones) -->
+              <app-multi-selector
+                label="Tarifas aplicables"
+                [options]="priceTierSelectorOptions()"
+                [ngModel]="selectedPriceTierIds()"
+                [ngModelOptions]="{ standalone: true }"
+                (valueChange)="onPriceTiersChange($event)"
+                placeholder="Buscar y seleccionar tarifas..."
+                tooltipText="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
+              ></app-multi-selector>
+
+              <!-- Available tiers preview -->
+              <div class="flex flex-wrap items-center gap-1.5">
+                <span class="text-xs text-gray-400"
+                  >Tarifas disponibles:</span
+                >
                 @for (row of priceTierRows(); track row.tier.id) {
-                  <div
-                    class="rounded-lg border border-gray-200 p-3 space-y-2"
-                    [class.opacity-60]="!row.enabled"
+                  <app-badge
+                    [variant]="row.enabled ? 'primary' : 'neutral'"
+                    size="sm"
+                    >{{ row.tier.name }}</app-badge
                   >
-                    <div class="flex items-center justify-between">
-                      <div class="flex flex-col">
-                        <span class="text-sm font-semibold text-gray-900">{{
-                          row.tier.name
-                        }}</span>
-                        @if (row.tier.discount_percentage) {
-                          <span class="text-xs text-gray-500"
-                            >Descuento por defecto:
-                            {{ row.tier.discount_percentage }}%</span
-                          >
-                        }
-                      </div>
-                      <div class="flex items-center gap-2">
-                        @if (row.tier.is_default) {
-                          <app-badge variant="primary" size="sm"
-                            >Por defecto</app-badge
-                          >
-                        }
-                        <label
-                          class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-700"
-                        >
-                          <input
-                            type="checkbox"
-                            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                            [checked]="row.enabled"
-                            (change)="
-                              toggleTierAssignment(
-                                row.tier.id,
-                                $any($event.target).checked
-                              )
-                            "
-                          />
-                          Activa
-                        </label>
-                      </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1">
-                      <span class="text-xs font-medium text-gray-600"
-                        >Precio override</span
-                      >
-                      <app-input
-                        [currency]="true"
-                        prefix="$"
-                        placeholder="Usar % de la tarifa"
-                        [ngModel]="row.override_price"
-                        [ngModelOptions]="{ standalone: true }"
-                        [disabled]="!row.enabled"
-                        (ngModelChange)="
-                          updateTierOverridePrice(row.tier.id, $event)
-                        "
-                        customWrapperClass="!mt-0"
-                      ></app-input>
-                    </div>
-
-                    <div class="flex items-center justify-between text-xs">
-                      <span class="text-gray-500">
-                        @if (!row.enabled) {
-                          <span class="font-semibold text-gray-500"
-                            >No habilitada</span
-                          >
-                        } @else if (
-                          row.override_price === null ||
-                          row.override_price === undefined
-                        ) {
-                          Resultante:
-                          <span class="font-semibold text-gray-700">{{
-                            getTierFallbackPrice(row.tier) | currency
-                          }}</span>
-                        } @else {
-                          <span class="text-primary-600 font-semibold"
-                            >Override activo</span
-                          >
-                        }
-                      </span>
-                      @if (
-                        row.override_price !== null &&
-                        row.override_price !== undefined &&
-                        row.enabled
-                      ) {
-                        <button
-                          type="button"
-                          (click)="clearTierOverride(row.tier.id)"
-                          class="text-rose-600 hover:text-rose-700 font-medium"
-                        >
-                          Limpiar
-                        </button>
-                      }
-                    </div>
-                  </div>
                 }
               </div>
 
-              <!-- DESKTOP: table -->
-              <div class="hidden md:block overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="text-left border-b border-gray-200">
-                      <th
-                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-24"
-                      >
-                        Activa
-                      </th>
-                      <th
-                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider"
-                      >
-                        Tarifa
-                      </th>
-                      <th
-                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-48"
-                      >
-                        Precio Override
-                      </th>
-                      <th
-                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider"
-                      >
-                        Resultante
-                      </th>
-                      <th
-                        class="py-2 px-3 font-semibold text-gray-600 uppercase text-xs tracking-wider w-28 text-right"
-                      >
-                        Acciones
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (row of priceTierRows(); track row.tier.id) {
-                      <tr
-                        class="border-b border-gray-100 last:border-b-0 align-middle"
-                        [class.opacity-60]="!row.enabled"
-                      >
-                        <td class="py-2 px-3">
-                          <input
-                            type="checkbox"
-                            class="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                            [checked]="row.enabled"
-                            (change)="
-                              toggleTierAssignment(
-                                row.tier.id,
-                                $any($event.target).checked
-                              )
-                            "
-                          />
-                        </td>
-                        <td class="py-2 px-3">
-                          <div class="flex items-center gap-2">
-                            <span class="font-medium text-gray-900">{{
-                              row.tier.name
-                            }}</span>
-                            @if (row.tier.is_default) {
-                              <app-badge variant="primary" size="sm"
-                                >Por defecto</app-badge
-                              >
-                            }
-                            @if (row.tier.is_package_unit) {
-                              <app-badge variant="info" size="sm"
-                                >Empaque</app-badge
-                              >
-                            }
-                          </div>
-                          @if (row.tier.discount_percentage) {
-                            <div class="text-xs text-gray-500 mt-0.5">
-                              {{ row.tier.discount_percentage }}% sobre base
-                            </div>
-                          }
-                        </td>
-                        <td class="py-2 px-3">
-                          <app-input
-                            [currency]="true"
-                            prefix="$"
-                            placeholder="Usar % tarifa"
-                            [ngModel]="row.override_price"
-                            [ngModelOptions]="{ standalone: true }"
-                            [disabled]="!row.enabled"
-                            (ngModelChange)="
-                              updateTierOverridePrice(row.tier.id, $event)
-                            "
-                            customWrapperClass="!mt-0"
-                          ></app-input>
-                        </td>
-                        <td class="py-2 px-3 text-gray-700">
-                          @if (!row.enabled) {
-                            <span class="font-medium text-gray-500"
-                              >No habilitada</span
+              <!-- Step 2: configurable rows for SELECTED tiers only -->
+              @if (selectedPriceTierRows().length === 0) {
+                <div
+                  class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm text-gray-600 flex items-start gap-2"
+                >
+                  <app-icon
+                    name="info"
+                    size="16"
+                    class="text-gray-500 shrink-0 mt-0.5"
+                  ></app-icon>
+                  <span>
+                    Selecciona al menos una tarifa arriba para configurar su
+                    precio, margen y cantidad por empaque.
+                  </span>
+                </div>
+              } @else {
+                <div class="space-y-3">
+                  @for (row of selectedPriceTierRows(); track row.tier.id) {
+                    <div
+                      class="rounded-lg border border-gray-200 p-3 md:p-4 space-y-3"
+                    >
+                      <!-- Header -->
+                      <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="text-sm font-semibold text-gray-900">{{
+                            row.tier.name
+                          }}</span>
+                          @if (row.tier.is_default) {
+                            <app-badge variant="primary" size="sm"
+                              >Por defecto</app-badge
                             >
-                          } @else if (
+                          }
+                          @if (getRowPackSize(row) > 1) {
+                            <app-badge variant="info" size="sm"
+                              >Empaque x{{ getRowPackSize(row) }}</app-badge
+                            >
+                          }
+                          @if (row.tier.discount_percentage) {
+                            <span class="text-xs text-gray-500"
+                              >{{ row.tier.discount_percentage }}% sobre
+                              base</span
+                            >
+                          }
+                        </div>
+                        <button
+                          type="button"
+                          (click)="toggleTierAssignment(row.tier.id, false)"
+                          class="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-rose-600 font-medium shrink-0"
+                          aria-label="Quitar tarifa"
+                        >
+                          <app-icon name="x" size="14"></app-icon>
+                          Quitar
+                        </button>
+                      </div>
+
+                      <!-- Inputs grid: price ↔ margin (bidirectional) + units -->
+                      <div
+                        class="grid grid-cols-1 sm:grid-cols-3 gap-x-3 md:gap-x-4 gap-y-3"
+                      >
+                        <!-- Price (whole-package override). Empty => tier default -->
+                        <app-input
+                          label="Precio"
+                          [currency]="true"
+                          [placeholder]="
+                            (getTierFallbackPrice(row) | currency) || 'Precio'
+                          "
+                          [ngModel]="row.override_price"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="
+                            updateTierOverridePrice(row.tier.id, $event)
+                          "
+                          [tooltipText]="
+                            getRowPackSize(row) > 1
+                              ? 'Precio del empaque completo. Vacío usa el precio por defecto de la tarifa.'
+                              : 'Precio para esta tarifa. Vacío usa el precio por defecto de la tarifa.'
+                          "
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+
+                        <!-- Margin (bidirectional with price) -->
+                        <app-input
+                          label="Margen (%)"
+                          type="number"
+                          [ngModel]="getRowMargin(row)"
+                          [ngModelOptions]="{ standalone: true }"
+                          [disabled]="costPriceIsZero"
+                          (ngModelChange)="
+                            updateTierOverrideMargin(row.tier.id, $event)
+                          "
+                          [tooltipText]="
+                            getRowPackSize(row) > 1
+                              ? 'Margen sobre el costo del empaque (costo unitario × cantidad). Editar margen recalcula el precio del empaque y viceversa.'
+                              : 'Margen sobre el costo. Editar margen recalcula el precio y viceversa.'
+                          "
+                          [error]="
+                            costPriceIsZero
+                              ? 'Define el costo del producto para calcular el margen'
+                              : ''
+                          "
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+
+                        <!-- Units per package override (this product) -->
+                        <app-input
+                          label="Cantidad x empaque"
+                          type="number"
+                          [min]="2"
+                          [placeholder]="
+                            row.tier.units_per_package
+                              ? ('Tarifa: ' + row.tier.units_per_package)
+                              : 'Sin empaque'
+                          "
+                          [ngModel]="row.override_units_per_package"
+                          [ngModelOptions]="{ standalone: true }"
+                          (ngModelChange)="
+                            updateTierOverrideUnits(row.tier.id, $event)
+                          "
+                          tooltipText="Sobrescribe las unidades por empaque de la tarifa solo para este producto. Vacío hereda el valor de la tarifa. Mínimo 2."
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                      </div>
+
+                      <!-- Footer: resultant + clear -->
+                      <div
+                        class="flex items-center justify-between text-xs gap-2"
+                      >
+                        <span class="text-gray-500">
+                          @if (
                             row.override_price === null ||
                             row.override_price === undefined
                           ) {
-                            <span class="font-medium">{{
-                              getTierFallbackPrice(row.tier) | currency
+                            Precio resultante:
+                            <span class="font-semibold text-gray-700">{{
+                              getTierFallbackPrice(row) | currency
                             }}</span>
-                            <div class="text-xs text-gray-400">(calculado)</div>
+                            <span class="text-gray-400">(calculado)</span>
                           } @else {
-                            <span class="font-medium text-primary-600"
-                              >Override</span
+                            <span class="text-primary-600 font-semibold"
+                              >Precio personalizado:
+                              {{ row.override_price | currency }}</span
                             >
                           }
-                        </td>
-                        <td class="py-2 px-3 text-right">
-                          @if (
-                            row.override_price !== null &&
-                            row.override_price !== undefined &&
-                            row.enabled
-                          ) {
-                            <button
-                              type="button"
-                              (click)="clearTierOverride(row.tier.id)"
-                              class="inline-flex items-center gap-1 text-xs text-rose-600 hover:text-rose-700 font-medium"
-                            >
-                              <app-icon name="x-circle" size="14"></app-icon>
-                              Limpiar
-                            </button>
-                          }
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
+                        </span>
+                        @if (
+                          row.override_price !== null &&
+                          row.override_price !== undefined
+                        ) {
+                          <button
+                            type="button"
+                            (click)="clearTierOverride(row.tier.id)"
+                            class="inline-flex items-center gap-1 text-rose-600 hover:text-rose-700 font-medium shrink-0"
+                          >
+                            <app-icon name="x-circle" size="14"></app-icon>
+                            Limpiar precio
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
 
               <!-- MVP note: per-variant overrides deferred -->
               @if (hasVariants) {
@@ -651,52 +609,6 @@
               }
             }
           }
-        </section>
-
-        <!-- ─── Empaque / Unit of Measure (Phase 4) ────────────────── -->
-        <section
-          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
-        >
-          <div class="flex items-center gap-2">
-            <app-icon
-              name="package"
-              size="18"
-              class="text-primary-600"
-            ></app-icon>
-            <h2 class="text-base font-bold text-gray-900">
-              Empaque (opcional)
-            </h2>
-          </div>
-
-          <p class="text-xs text-gray-500">
-            Define unidades por empaque para vender por caja, paquete o bulto.
-            Ej: si la caja contiene 12 unidades, vender 1 caja descuenta 12 del
-            stock.
-          </p>
-
-          <div
-            class="grid grid-cols-1 sm:grid-cols-2 gap-x-3 md:gap-x-4 gap-y-4"
-          >
-            <app-input
-              label="Unidades por empaque"
-              type="number"
-              formControlName="units_per_package"
-              placeholder="Ej: 12"
-              tooltipText="Cuántas unidades individuales contiene un empaque (caja, paquete, bulto). Debe ser 2 o más."
-              [error]="getErrorMessage('units_per_package')"
-              customWrapperClass="!mt-0"
-            ></app-input>
-
-            <div class="flex items-end">
-              <app-setting-toggle
-                class="flex-1"
-                formControlName="package_consumes_multiple_stock"
-                label="Vender por empaque descuenta múltiples unidades del stock"
-                description="Si está activo, vender 1 empaque resta 'unidades por empaque' del inventario."
-                (changed)="onPackageConsumesMultipleStockToggle($event)"
-              ></app-setting-toggle>
-            </div>
-          </div>
         </section>
 
         <!-- MOBILE: Images Section (visible only on mobile, after pricing) -->

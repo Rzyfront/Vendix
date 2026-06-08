@@ -124,8 +124,8 @@ export interface PreBulkData {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number;
-  package_consumes_multiple_stock?: boolean;
+  // Packaging (units-per-package) is no longer a product field — it lives on
+  // the price tier / per-product tier override. Removed from POP prebulk data.
   base_price?: number;
   profit_margin?: number;
   brand_id?: number | string;

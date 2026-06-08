@@ -67,13 +67,17 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
           <li>Contenido generado por usuarios</li>
         </ul>
 
-        <h2>6. Modificaciones</h2>
+        <h2 id="pagos-y-reembolsos">6. Pagos y Reembolsos</h2>
+        <p>El acceso a los planes y funcionalidades de pago de Vendix se factura por adelanto según el ciclo de facturación seleccionado (mensual o anual). Al contratar un plan, usted autoriza a Vendix a cobrar de forma recurrente el valor correspondiente a través del método de pago registrado, hasta que la suscripción sea cancelada.</p>
+        <p>Las suscripciones a la plataforma Vendix no son reembolsables. La cancelación de una suscripción detiene las renovaciones futuras, pero no genera reembolso total ni parcial por el período ya pagado; el servicio permanecerá activo hasta el final del ciclo de facturación en curso. Esta política de no-reembolso aplica salvo que la ley colombiana disponga lo contrario o exista un acuerdo escrito en sentido distinto.</p>
+
+        <h2>7. Modificaciones</h2>
         <p>Vendix se reserva el derecho de modificar estos términos en cualquier momento. Los usuarios serán notificados de cambios significativos.</p>
 
-        <h2>7. Terminación</h2>
+        <h2>8. Terminación</h2>
         <p>Vendix puede suspender o terminar cuentas que violen estos términos.</p>
 
-        <h2>8. Ley Aplicable</h2>
+        <h2>9. Ley Aplicable</h2>
         <p>Estos términos se rigen por las leyes de Colombia. Cualquier controversia estará sujeta a los tribunales competentes.</p>
 
         <p><em>Para más información, contacte a legal@vendix.com</em></p>
@@ -328,10 +332,57 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
     description: 'Política de envíos estándar para todas las tiendas',
   });
 
+  const cookiesPolicy = await systemUpsert({
+    document_type: 'COOKIES_POLICY',
+    title: 'Política de Cookies de Vendix',
+    version: '1.0-cookies',
+    content: `
+        <h1>Política de Cookies de Vendix</h1>
+        <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
+
+        <h2>1. ¿Qué son las Cookies?</h2>
+        <p>Las cookies son pequeños archivos de texto que los sitios web almacenan en su dispositivo (computador, teléfono o tableta) cuando los visita. Permiten que la plataforma recuerde información sobre su visita, facilitando su uso y mejorando su experiencia.</p>
+
+        <h2>2. Tipos de Cookies que Usamos</h2>
+        <p>En Vendix utilizamos distintos tipos de cookies según su finalidad:</p>
+        <ul>
+          <li><strong>Cookies de sesión:</strong> mantienen su sesión activa mientras navega y se eliminan al cerrar el navegador.</li>
+          <li><strong>Cookies de preferencias:</strong> recuerdan sus configuraciones, como idioma, moneda y preferencias de visualización.</li>
+          <li><strong>Cookies analíticas:</strong> nos ayudan a entender cómo se usa la plataforma de forma agregada y anónima para mejorar nuestros servicios.</li>
+        </ul>
+
+        <h2>3. Cookies de Sesión</h2>
+        <p>Estas cookies son esenciales para el funcionamiento de la plataforma. Permiten autenticarlo, mantener su sesión iniciada y proteger su cuenta. Sin ellas, no es posible ofrecer las funcionalidades básicas del servicio.</p>
+
+        <h2>4. Cookies de Preferencias</h2>
+        <p>Estas cookies almacenan las decisiones que usted toma, como el idioma seleccionado o la región, de modo que no tenga que volver a configurarlas en cada visita. Mejoran la comodidad de uso pero no son estrictamente indispensables.</p>
+
+        <h2>5. Cookies Analíticas</h2>
+        <p>Utilizamos cookies analíticas para recopilar información sobre el uso de la plataforma, tales como páginas visitadas y tiempo de navegación. Esta información se trata de forma agregada y nos permite identificar mejoras y detectar problemas técnicos.</p>
+
+        <h2>6. Gestión y Configuración de Cookies</h2>
+        <p>Usted puede gestionar o desactivar las cookies en cualquier momento desde la configuración de su navegador. Tenga en cuenta que deshabilitar ciertas cookies, especialmente las de sesión, puede afectar el funcionamiento de la plataforma e impedir el acceso a algunas funcionalidades.</p>
+
+        <h2>7. Cookies de Terceros</h2>
+        <p>Algunos servicios integrados en Vendix, como proveedores de analítica o pasarelas de pago, pueden establecer sus propias cookies. Estas cookies se rigen por las políticas de privacidad de dichos terceros, sobre las cuales recomendamos informarse.</p>
+
+        <h2>8. Cambios en esta Política</h2>
+        <p>Nos reservamos el derecho de actualizar esta Política de Cookies para reflejar cambios técnicos, legales o en nuestros servicios. Le notificaremos cambios significativos a través de la plataforma.</p>
+
+        <h2>9. Contacto</h2>
+        <p>Para preguntas sobre el uso de cookies, contacte a: privacy@vendix.com</p>
+      `,
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Política de uso de cookies y tecnologías similares de la plataforma Vendix',
+  });
+
   console.log('✅ Legal documents seeded successfully');
   console.log(`   - ${termsOfService.title} v${termsOfService.version}`);
   console.log(`   - ${privacyPolicy.title} v${privacyPolicy.version}`);
   console.log(`   - ${merchantAgreement.title} v${merchantAgreement.version}`);
   console.log(`   - ${refundPolicy.title} v${refundPolicy.version}`);
   console.log(`   - ${shippingPolicy.title} v${shippingPolicy.version}`);
+  console.log(`   - ${cookiesPolicy.title} v${cookiesPolicy.version}`);
 }

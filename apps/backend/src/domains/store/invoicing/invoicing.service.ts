@@ -502,6 +502,14 @@ export class InvoicingService {
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
+        // "Empaque por tarifa" snapshot propagated from the order line so the
+        // invoice mirrors the order PDF (tier label + packaging units consumed).
+        applied_price_tier_name:
+          item.applied_price_tier_name_snapshot ?? null,
+        stock_units_consumed:
+          typeof item.stock_units_consumed === 'number'
+            ? item.stock_units_consumed
+            : null,
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
@@ -518,6 +526,8 @@ export class InvoicingService {
               discount_amount: new Prisma.Decimal(0),
               tax_amount: new Prisma.Decimal(0),
               total_amount: new Prisma.Decimal(shippingCost),
+              applied_price_tier_name: null,
+              stock_units_consumed: null,
             },
           ]
         : productItems;

@@ -42,8 +42,7 @@ interface AnalyzedItem {
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number;
-  package_consumes_multiple_stock?: boolean;
+  // Packaging (units-per-package) is tier-owned now, not a product field.
   weight: number;
   is_on_sale?: boolean;
   sale_price?: number;
@@ -320,8 +319,8 @@ interface AnalysisResult {
                       Plantilla Completa
                     </p>
                     <p class="text-[10px] text-green-600 truncate">
-                      Compra + catálogo: Marca, impuestos, ecommerce, POS,
-                      listas y empaques.
+                      Compra + catálogo: Marca, impuestos, ecommerce, POS y
+                      listas de precio.
                     </p>
                     <div
                       class="flex items-center text-[10px] font-bold text-green-600 group-hover:text-green-800 mt-1"
@@ -1028,8 +1027,6 @@ export class PopBulkDataModalComponent {
             'Destacado',
             'Permite Cambiar Precio POS',
             'Usa Listas de Precio',
-            'Unidades por Empaque',
-            'Empaque Descuenta Múltiples Unidades',
             'Peso',
             'En Oferta',
             'Precio Oferta',
@@ -1067,8 +1064,6 @@ export class PopBulkDataModalComponent {
               Destacado: 'sí',
               'Permite Cambiar Precio POS': 'no',
               'Usa Listas de Precio': 'no',
-              'Unidades por Empaque': '',
-              'Empaque Descuenta Múltiples Unidades': 'no',
               Peso: 0.8,
               'En Oferta': 'no',
               'Precio Oferta': 0,
@@ -1091,8 +1086,6 @@ export class PopBulkDataModalComponent {
               Destacado: 'no',
               'Permite Cambiar Precio POS': 'no',
               'Usa Listas de Precio': 'no',
-              'Unidades por Empaque': 6,
-              'Empaque Descuenta Múltiples Unidades': 'sí',
               Peso: 1.05,
               'En Oferta': 'no',
               'Precio Oferta': 0,
@@ -1412,17 +1405,6 @@ export class PopBulkDataModalComponent {
             priceTiersRaw === undefined
               ? undefined
               : this.parseBoolean(priceTiersRaw, false);
-          const units_per_package = this.parseOptionalNumber(
-            read('Unidades por Empaque', 'units_per_package'),
-          );
-          const packageConsumesRaw = read(
-            'Empaque Descuenta Múltiples Unidades',
-            'package_consumes_multiple_stock',
-          );
-          const package_consumes_multiple_stock =
-            packageConsumesRaw === undefined
-              ? undefined
-              : this.parseBoolean(packageConsumesRaw, false);
           const weight = this.parseNumber(read('Peso', 'weight'));
           const onSaleRaw = read('En Oferta', 'is_on_sale');
           const is_on_sale =
@@ -1452,13 +1434,6 @@ export class PopBulkDataModalComponent {
           }
           if (isNaN(cost) || cost <= 0) {
             warnings.push('Precio de compra no especificado');
-          }
-          if (
-            units_per_package !== undefined &&
-            units_per_package > 0 &&
-            units_per_package < 2
-          ) {
-            warnings.push('Unidades por empaque debe ser 2 o mayor');
           }
           if (is_on_sale && (sale_price ?? 0) <= 0) {
             warnings.push('Producto en oferta sin precio de oferta');
@@ -1492,8 +1467,6 @@ export class PopBulkDataModalComponent {
             is_featured,
             allow_pos_price_override,
             has_multiple_price_tiers,
-            units_per_package,
-            package_consumes_multiple_stock,
             weight: isNaN(weight) ? 0 : weight,
             is_on_sale,
             sale_price,

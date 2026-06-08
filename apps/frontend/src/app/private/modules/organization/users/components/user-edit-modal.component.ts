@@ -11,11 +11,14 @@ import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  FileUploadDropzoneComponent,
+  IconComponent,
+  ImageSourceModalComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
+import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 
 @Component({
@@ -26,7 +29,8 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
     InputComponent,
     ButtonComponent,
     ModalComponent,
-    FileUploadDropzoneComponent,
+    IconComponent,
+    ImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -140,11 +144,51 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             <label class="block text-sm font-medium text-[var(--color-text-primary)]">
               Avatar
             </label>
-            <app-file-upload-dropzone
-              [accept]="'image/*'"
-              (fileSelected)="onAvatarUploaded($event)"
-              (fileRemoved)="onAvatarRemoved()"
-            ></app-file-upload-dropzone>
+            <div class="flex items-center gap-4">
+              <div
+                class="relative w-16 h-16 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
+                (click)="openAvatarModal()"
+              >
+                @if (avatarPreview()) {
+                  <img
+                    [src]="avatarPreview()"
+                    alt="Avatar"
+                    class="w-full h-full object-contain"
+                  />
+                } @else {
+                  <div
+                    class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600"
+                  >
+                    <app-icon name="user" [size]="24"></app-icon>
+                  </div>
+                }
+                <div
+                  class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                  <app-icon name="camera" [size]="18" class="text-white"></app-icon>
+                </div>
+              </div>
+              <div class="flex flex-col gap-1">
+                <button
+                  type="button"
+                  class="text-primary-600 hover:text-primary-700 text-sm font-medium text-left"
+                  (click)="openAvatarModal()"
+                  [disabled]="uploadingAvatar() || isUpdating()"
+                >
+                  {{ uploadingAvatar() ? 'Subiendo...' : (avatarPreview() ? 'Cambiar foto' : 'Subir foto') }}
+                </button>
+                @if (avatarPreview()) {
+                  <button
+                    type="button"
+                    class="text-red-500 hover:text-red-600 text-xs font-medium text-left"
+                    (click)="onAvatarRemoved()"
+                    [disabled]="uploadingAvatar() || isUpdating()"
+                  >
+                    Eliminar foto
+                  </button>
+                }
+              </div>
+            </div>
           </div>
 
           <!-- User Info -->
@@ -202,6 +246,13 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
         </form>
       }
 
+      <app-image-source-modal
+        [(isOpen)]="avatarModalOpen"
+        [singleImage]="true"
+        [headerTitle]="'Foto de perfil'"
+        (imagesAdded)="onAvatarImages($event)"
+      ></app-image-source-modal>
+
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
           variant="outline"
@@ -234,6 +285,7 @@ export class UserEditModalComponent implements OnInit {
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
   private toastService = inject(ToastService);
+  private imageUploadService = inject(ImageUploadService);
 
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
@@ -242,7 +294,9 @@ export class UserEditModalComponent implements OnInit {
 
   userForm!: FormGroup;
   readonly isUpdating = signal(false);
-  readonly avatarUrl = signal<string | null>(null);
+  readonly avatarPreview = signal<string | null>(null);
+  readonly uploadingAvatar = signal(false);
+  readonly avatarModalOpen = signal(false);
   UserState = UserState;
 
   ngOnInit(): void {
@@ -293,15 +347,45 @@ export class UserEditModalComponent implements OnInit {
         state: user.state,
         avatar_url: user.avatar_url || '',
       });
-      this.avatarUrl.set(user.avatar_url || null);
+      // `user.avatar_url` arrives signed from the backend → use it for preview only.
+      this.avatarPreview.set(user.avatar_url || null);
     }
   }
 
-  onAvatarUploaded(file: File): void {
-    this.userForm.patchValue({ avatar_url: file.name });
+  openAvatarModal(): void {
+    if (this.uploadingAvatar() || this.isUpdating()) return;
+    this.avatarModalOpen.set(true);
+  }
+
+  onAvatarImages(dataUrls: string[]): void {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
+
+    // Optimistic local preview while uploading
+    this.avatarPreview.set(dataUrl);
+
+    const file = dataUrlToFile(dataUrl, `avatar-${Date.now()}.jpg`);
+
+    this.uploadingAvatar.set(true);
+    this.imageUploadService
+      .uploadFile(file, 'avatars')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          // Persist the real S3 key (not file.name) on the form control.
+          this.userForm.patchValue({ avatar_url: result.key });
+          this.avatarPreview.set(result.url);
+          this.uploadingAvatar.set(false);
+        },
+        error: (error: unknown) => {
+          this.uploadingAvatar.set(false);
+          this.toastService.error(extractApiErrorMessage(error));
+        },
+      });
   }
 
   onAvatarRemoved(): void {
+    this.avatarPreview.set(null);
     this.userForm.patchValue({ avatar_url: '' });
   }
 

@@ -79,14 +79,6 @@ export class PurchaseOrdersService {
           ? 'weight'
           : 'unit';
 
-      const parseOptionalNumber = (value: unknown): number | undefined => {
-        if (value === undefined || value === null || value === '') {
-          return undefined;
-        }
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
-      };
-
       const normalizeTaxCategoryIds = (value: unknown): number[] | undefined => {
         if (value === undefined || value === null || value === '') {
           return undefined;
@@ -161,13 +153,6 @@ export class PurchaseOrdersService {
           const hasMultiplePriceTiers = normalizeBool(
             (item as any).has_multiple_price_tiers,
             false,
-          );
-          const packageConsumesMultipleStock = normalizeBool(
-            (item as any).package_consumes_multiple_stock,
-            false,
-          );
-          const unitsPerPackage = parseOptionalNumber(
-            (item as any).units_per_package,
           );
           const requestedTaxCategoryIds = normalizeTaxCategoryIds(
             (item as any).tax_category_ids,
@@ -336,13 +321,6 @@ export class PurchaseOrdersService {
               productUpdateData.has_multiple_price_tiers =
                 hasMultiplePriceTiers;
             }
-            if (unitsPerPackage !== undefined) {
-              productUpdateData.units_per_package = unitsPerPackage;
-            }
-            if ((item as any).package_consumes_multiple_stock !== undefined) {
-              productUpdateData.package_consumes_multiple_stock =
-                packageConsumesMultipleStock;
-            }
 
             if (hasCategoryNames) {
               productUpdateData.product_categories = {
@@ -387,8 +365,6 @@ export class PurchaseOrdersService {
                 is_featured: isFeatured,
                 allow_pos_price_override: allowPosPriceOverride,
                 has_multiple_price_tiers: hasMultiplePriceTiers,
-                units_per_package: unitsPerPackage,
-                package_consumes_multiple_stock: packageConsumesMultipleStock,
                 is_on_sale: isOnSale,
                 sale_price: item.sale_price || 0,
                 brand_id: brandId,

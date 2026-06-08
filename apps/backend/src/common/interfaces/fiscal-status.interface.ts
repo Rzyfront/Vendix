@@ -76,6 +76,8 @@ export interface FiscalWizardPrefillLegalData {
   tax_id: string | null;
   nit: string | null;
   nit_dv: string | null;
+  /** Document type (NIT/CC/CE/…), DIAN config if present else `fiscal_data.nit_type`. */
+  nit_type: string | null;
   fiscal_address: {
     address_line1: string | null;
     address_line2: string | null;
@@ -90,8 +92,10 @@ export interface FiscalWizardPrefillLegalData {
   ciiu: string | null;
   /** DIAN tax responsibilities (responsabilidades), from `fiscal_data.tax_responsibilities`. */
   tax_responsibilities: string[] | null;
-  /** Tax scheme (person type NATURAL/JURIDICA), from `fiscal_data.person_type`. */
+  /** DIAN issuer tax scheme code (TaxLevelCode: O-13/O-15/R-99-PN…), from `fiscal_data.tax_scheme`. */
   tax_scheme: string | null;
+  /** Person type NATURAL/JURIDICA, from `fiscal_data.person_type`. */
+  person_type: string | null;
 }
 
 export interface FiscalWizardPrefillDianConfig {

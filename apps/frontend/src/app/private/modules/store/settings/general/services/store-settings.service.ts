@@ -26,6 +26,7 @@ export interface StoreFiscalData {
   nit?: string | null;
   nit_dv?: string | null;
   nit_type?: StoreFiscalNitType | null;
+  person_type?: 'NATURAL' | 'JURIDICA' | null;
   [key: string]: unknown;
 }
 

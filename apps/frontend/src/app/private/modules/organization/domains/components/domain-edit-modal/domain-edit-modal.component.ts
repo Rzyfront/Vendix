@@ -43,6 +43,7 @@ import {
   ModalComponent,
   ButtonComponent,
   IconComponent,
+  ImageSourceModalComponent,
   SelectorComponent,
   ToggleComponent,
   InputComponent,
@@ -53,6 +54,11 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/index';
 import { DnsInstructionsComponent } from '../dns-instructions/dns-instructions.component';
+import { ImageUploadService } from '../../../../../../shared/services';
+import { dataUrlToFile } from '../../../../../../shared/utils';
+import { firstValueFrom } from 'rxjs';
+
+type DomainAssetField = 'logo_url' | 'favicon';
 
 type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'integrations' | 'security' | 'performance';
 
@@ -80,6 +86,7 @@ interface TabConfig {
     ScrollableTabsComponent,
     SpinnerComponent,
     DnsInstructionsComponent,
+    ImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -121,16 +128,50 @@ interface TabConfig {
                   label="Nombre de la tienda"
                   placeholder="Mi Tienda"
                 />
-                <app-input
-                  formControlName="logo_url"
-                  label="URL del Logo"
-                  placeholder="https://ejemplo.com/logo.png"
-                />
-                <app-input
-                  formControlName="favicon"
-                  label="URL del Favicon"
-                  placeholder="https://ejemplo.com/favicon.ico"
-                />
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="domain-asset">
+                  <label class="domain-asset__label">Logo</label>
+                  <div class="domain-asset__row">
+                    <div class="domain-asset__preview">
+                      @if (logoPreview()) {
+                        <img [src]="logoPreview()!" alt="Logo" />
+                      } @else {
+                        <app-icon name="image" [size]="20" />
+                      }
+                    </div>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="uploadingAsset()"
+                      (clicked)="openAssetModal('logo_url')"
+                    >
+                      <app-icon name="upload" [size]="14" slot="icon" />
+                      {{ logoPreview() ? 'Cambiar' : 'Subir' }}
+                    </app-button>
+                  </div>
+                </div>
+                <div class="domain-asset">
+                  <label class="domain-asset__label">Favicon</label>
+                  <div class="domain-asset__row">
+                    <div class="domain-asset__preview">
+                      @if (faviconPreview()) {
+                        <img [src]="faviconPreview()!" alt="Favicon" />
+                      } @else {
+                        <app-icon name="feather" [size]="20" />
+                      }
+                    </div>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="uploadingAsset()"
+                      (clicked)="openAssetModal('favicon')"
+                    >
+                      <app-icon name="upload" [size]="14" slot="icon" />
+                      {{ faviconPreview() ? 'Cambiar' : 'Subir' }}
+                    </app-button>
+                  </div>
+                </div>
               </div>
               <div class="grid grid-cols-3 gap-4">
                 <app-input
@@ -526,10 +567,52 @@ interface TabConfig {
         </div>
       </div>
     </app-modal>
+
+    <app-image-source-modal
+      [(isOpen)]="assetModalOpen"
+      [singleImage]="true"
+      [headerTitle]="assetModalTitle()"
+      (imagesAdded)="onDomainAssetImages($event)"
+    />
   `,
   styles: [`
     :host {
       display: block;
+    }
+
+    .domain-asset__label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--color-text-primary);
+    }
+
+    .domain-asset__row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .domain-asset__preview {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 1px dashed var(--color-border);
+      border-radius: 10px;
+      color: var(--color-text-muted);
+      background: var(--color-surface);
+    }
+
+    .domain-asset__preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 6px;
     }
   `],
 })
@@ -551,6 +634,20 @@ export class DomainEditModalComponent implements OnInit, OnChanges {
 
   readonly activeTab = signal<ConfigTabId>('branding');
   readonly isRenewingSsl = signal(false);
+
+  readonly assetModalOpen = signal(false);
+  readonly activeAssetField = signal<DomainAssetField | null>(null);
+  readonly uploadingAsset = signal(false);
+  readonly logoPreview = signal<string | null>(null);
+  readonly faviconPreview = signal<string | null>(null);
+  readonly assetModalTitle = computed<string | null>(() => {
+    const field = this.activeAssetField();
+    if (field === 'logo_url') return 'Logo';
+    if (field === 'favicon') return 'Favicon';
+    return null;
+  });
+
+  private readonly imageUploadService = inject(ImageUploadService);
 
   readonly tabs: ScrollableTab[] = [
     { id: 'branding', label: 'Branding', icon: 'palette' },
@@ -739,6 +836,9 @@ export class DomainEditModalComponent implements OnInit, OnChanges {
       accent_color: config.branding?.accent_color || '#28a745',
     });
 
+    this.logoPreview.set(this.resolvePreview(config.branding?.logo_url));
+    this.faviconPreview.set(this.resolvePreview(config.branding?.favicon));
+
     this.seoForm.patchValue({
       title: config.seo?.title || '',
       description: config.seo?.description || '',
@@ -815,6 +915,42 @@ export class DomainEditModalComponent implements OnInit, OnChanges {
 
   onTabChange(tabId: string): void {
     this.activeTab.set(tabId as ConfigTabId);
+  }
+
+  openAssetModal(field: DomainAssetField): void {
+    this.activeAssetField.set(field);
+    this.assetModalOpen.set(true);
+  }
+
+  async onDomainAssetImages(dataUrls: string[]): Promise<void> {
+    const dataUrl = dataUrls[0];
+    const field = this.activeAssetField();
+    if (!dataUrl || !field) return;
+
+    const label = field === 'logo_url' ? 'logo' : 'favicon';
+    const file = dataUrlToFile(dataUrl, `${label}.jpg`);
+
+    this.uploadingAsset.set(true);
+    try {
+      const result = await firstValueFrom(
+        this.imageUploadService.uploadFile(file, 'logos'),
+      );
+      this.brandingForm.get(field)?.setValue(result.key);
+      this.brandingForm.get(field)?.markAsDirty();
+      if (field === 'logo_url') {
+        this.logoPreview.set(result.url);
+      } else {
+        this.faviconPreview.set(result.url);
+      }
+    } finally {
+      this.uploadingAsset.set(false);
+      this.activeAssetField.set(null);
+    }
+  }
+
+  private resolvePreview(value: string | null | undefined): string | null {
+    if (!value) return null;
+    return /^https?:\/\//i.test(value) ? value : null;
   }
 
   onModalChange(isOpen: boolean): void {

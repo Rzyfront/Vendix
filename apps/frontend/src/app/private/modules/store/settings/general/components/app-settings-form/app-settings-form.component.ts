@@ -5,6 +5,7 @@ import {
   inject,
   input,
   output,
+  signal,
 } from '@angular/core';
 
 import {
@@ -17,6 +18,8 @@ import { AppSettings } from '../../../../../../../core/models/store-settings.int
 import { IconComponent } from '../../../../../../../shared/components/index';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
+import { ImageSourceModalComponent } from '../../../../../../../shared/components/image-source-modal/image-source-modal.component';
+import { dataUrlToFile } from '../../../../../../../shared/utils/data-url.util';
 import { LucideAngularModule } from 'lucide-angular';
 
 @Component({
@@ -26,6 +29,7 @@ import { LucideAngularModule } from 'lucide-angular';
     ReactiveFormsModule,
     IconComponent,
     ButtonComponent,
+    ImageSourceModalComponent,
     LucideAngularModule,
   ],
   templateUrl: './app-settings-form.component.html',
@@ -47,8 +51,9 @@ export class AppSettingsForm implements OnDestroy {
   faviconPreview: string | null = null;
   private logoBlobUrl: string | null = null;
   private faviconBlobUrl: string | null = null;
-  private logoInputRef: HTMLInputElement | null = null;
-  private faviconInputRef: HTMLInputElement | null = null;
+
+  readonly logoModalOpen = signal(false);
+  readonly faviconModalOpen = signal(false);
 
   private toastService = inject(ToastService);
 
@@ -129,40 +134,29 @@ export class AppSettingsForm implements OnDestroy {
     this.onFieldChange();
   }
 
-  // --- Logo file upload ---
-  triggerLogoInput(): void {
-    if (!this.logoInputRef) {
-      this.logoInputRef = document.createElement('input');
-      this.logoInputRef.type = 'file';
-      this.logoInputRef.accept = 'image/*';
-      this.logoInputRef.addEventListener('change', (e) =>
-        this.onLogoFileSelect(e),
-      );
-    }
-    this.logoInputRef.click();
+  // --- Logo upload (via app-image-source-modal) ---
+  openLogoModal(): void {
+    this.logoModalOpen.set(true);
   }
 
-  onLogoFileSelect(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-    if (!files || files.length === 0) return;
+  onLogoImages(dataUrls: string[]): void {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
 
-    const file = files[0];
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
-      return;
-    }
+    const file = dataUrlToFile(dataUrl, `logo-${Date.now()}.jpg`);
     if (file.size > 2 * 1024 * 1024) {
       this.toastService.warning('El logo excede el tamaño máximo de 2MB');
       return;
     }
 
-    if (this.logoBlobUrl) URL.revokeObjectURL(this.logoBlobUrl);
-    this.logoBlobUrl = URL.createObjectURL(file);
-    this.logoPreview = this.logoBlobUrl;
-    this.pendingLogoUpload.emit({ file, preview: this.logoBlobUrl });
+    if (this.logoBlobUrl) {
+      URL.revokeObjectURL(this.logoBlobUrl);
+      this.logoBlobUrl = null;
+    }
+    // El data URL recortado es propio y persistente: úsalo como preview.
+    this.logoPreview = dataUrl;
+    this.pendingLogoUpload.emit({ file, preview: dataUrl });
     this.onFieldChange();
-    input.value = '';
   }
 
   removeLogo(): void {
@@ -176,40 +170,28 @@ export class AppSettingsForm implements OnDestroy {
     this.onFieldChange();
   }
 
-  // --- Favicon file upload ---
-  triggerFaviconInput(): void {
-    if (!this.faviconInputRef) {
-      this.faviconInputRef = document.createElement('input');
-      this.faviconInputRef.type = 'file';
-      this.faviconInputRef.accept = 'image/*';
-      this.faviconInputRef.addEventListener('change', (e) =>
-        this.onFaviconFileSelect(e),
-      );
-    }
-    this.faviconInputRef.click();
+  // --- Favicon upload (via app-image-source-modal) ---
+  openFaviconModal(): void {
+    this.faviconModalOpen.set(true);
   }
 
-  onFaviconFileSelect(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-    if (!files || files.length === 0) return;
+  onFaviconImages(dataUrls: string[]): void {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
 
-    const file = files[0];
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
-      return;
-    }
+    const file = dataUrlToFile(dataUrl, `favicon-${Date.now()}.jpg`);
     if (file.size > 1 * 1024 * 1024) {
       this.toastService.warning('El favicon excede el tamaño máximo de 1MB');
       return;
     }
 
-    if (this.faviconBlobUrl) URL.revokeObjectURL(this.faviconBlobUrl);
-    this.faviconBlobUrl = URL.createObjectURL(file);
-    this.faviconPreview = this.faviconBlobUrl;
-    this.pendingFaviconUpload.emit({ file, preview: this.faviconBlobUrl });
+    if (this.faviconBlobUrl) {
+      URL.revokeObjectURL(this.faviconBlobUrl);
+      this.faviconBlobUrl = null;
+    }
+    this.faviconPreview = dataUrl;
+    this.pendingFaviconUpload.emit({ file, preview: dataUrl });
     this.onFieldChange();
-    input.value = '';
   }
 
   removeFavicon(): void {

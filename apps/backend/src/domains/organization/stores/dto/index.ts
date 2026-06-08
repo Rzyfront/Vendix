@@ -3,7 +3,6 @@ import {
   IsEmail,
   IsOptional,
   IsEnum,
-  IsUrl,
   MaxLength,
   MinLength,
   IsInt,
@@ -52,7 +51,7 @@ export class CreateStoreDto {
   store_code?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   logo_url?: string;
 
   @IsOptional()
@@ -125,7 +124,7 @@ export class UpdateStoreDto {
   store_code?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
   logo_url?: string;
 
   @IsOptional()

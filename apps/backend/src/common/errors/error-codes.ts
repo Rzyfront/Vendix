@@ -1945,6 +1945,28 @@ export const ErrorCodes = {
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 
+  // RUT Scanner (fiscal identity extraction)
+  RUT_SCAN_AI_FAIL: {
+    code: 'RUT_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI RUT document extraction failed',
+  },
+  RUT_SCAN_PARSE_FAIL: {
+    code: 'RUT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI RUT response as valid JSON',
+  },
+  RUT_SCAN_NO_FILE: {
+    code: 'RUT_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No RUT file provided',
+  },
+  RUT_SCAN_INVALID_FILE: {
+    code: 'RUT_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+
   // Monitoring
   MON_CW_001: {
     code: 'MON_CW_001',
@@ -2410,6 +2432,13 @@ export const ErrorCodes = {
     code: 'HELP_IMAGE_TOO_LARGE',
     httpStatus: 400,
     devMessage: 'Image file must be smaller than 10MB',
+  },
+
+  // Legal (public)
+  LEGAL_DOCUMENT_TYPE_INVALID: {
+    code: 'LEGAL_DOCUMENT_TYPE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Unsupported legal document type',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

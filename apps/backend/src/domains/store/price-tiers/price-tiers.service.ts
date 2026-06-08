@@ -38,6 +38,15 @@ export class PriceTiersService {
       throw new VendixHttpException(ErrorCodes.PRICE_TIER_DUP_001);
     }
 
+    // Packaging quantity owns the package flag: a tier is a package unit
+    // whenever units_per_package >= 2. Falls back to the explicit flag when
+    // no quantity is provided.
+    const unitsPerPackage = dto.units_per_package ?? null;
+    const isPackageUnit =
+      unitsPerPackage != null
+        ? unitsPerPackage >= 2
+        : (dto.is_package_unit ?? false);
+
     try {
       const created = await this.prisma.price_tiers.create({
         data: {
@@ -48,7 +57,8 @@ export class PriceTiersService {
           discount_percentage: dto.discount_percentage ?? 0,
           is_active: dto.is_active ?? true,
           is_default: dto.is_default ?? false,
-          is_package_unit: dto.is_package_unit ?? false,
+          is_package_unit: isPackageUnit,
+          units_per_package: unitsPerPackage,
           sort_order: dto.sort_order ?? 0,
           updated_at: new Date(),
         },
@@ -142,12 +152,19 @@ export class PriceTiersService {
       }),
       ...(dto.is_active !== undefined && { is_active: dto.is_active }),
       ...(dto.is_default !== undefined && { is_default: dto.is_default }),
-      ...(dto.is_package_unit !== undefined && {
-        is_package_unit: dto.is_package_unit,
-      }),
       ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
       updated_at: new Date(),
     };
+
+    // Packaging quantity owns the package flag. When units_per_package is
+    // provided we persist it AND derive is_package_unit = (qty >= 2) so the
+    // two stay consistent. Otherwise fall back to the explicit flag if sent.
+    if (dto.units_per_package !== undefined) {
+      data.units_per_package = dto.units_per_package;
+      data.is_package_unit = (dto.units_per_package ?? 0) >= 2;
+    } else if (dto.is_package_unit !== undefined) {
+      data.is_package_unit = dto.is_package_unit;
+    }
 
     const updated = await this.prisma.price_tiers.update({
       where: { id },
@@ -204,6 +221,7 @@ export class PriceTiersService {
             is_active: true,
             is_default: true,
             is_package_unit: true,
+            units_per_package: true,
           },
         },
         variant: {
@@ -248,11 +266,17 @@ export class PriceTiersService {
         },
       });
 
+    // An override row may carry a price-only, a quantity-only, or both.
+    // override_price is the price of the WHOLE PACKAGE; nullable.
+    const overridePrice = dto.override_price ?? null;
+    const overrideUnitsPerPackage = dto.override_units_per_package ?? null;
+
     if (existing) {
       return this.prisma.product_price_tier_overrides.update({
         where: { id: existing.id },
         data: {
-          override_price: dto.override_price,
+          override_price: overridePrice,
+          override_units_per_package: overrideUnitsPerPackage,
           updated_at: new Date(),
         },
       });
@@ -263,7 +287,8 @@ export class PriceTiersService {
         product_id: productId,
         variant_id: variantId,
         price_tier_id: tierId,
-        override_price: dto.override_price,
+        override_price: overridePrice,
+        override_units_per_package: overrideUnitsPerPackage,
         updated_at: new Date(),
       },
     });

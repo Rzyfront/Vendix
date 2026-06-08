@@ -68,6 +68,10 @@ export interface InvoiceItem {
   tax_amount: number;
   total_amount: number;
   tax_rate?: number;
+  // "Empaque por tarifa" snapshot — applied price tier label and the real
+  // stock units consumed when packaging expands the sold quantity.
+  applied_price_tier_name?: string | null;
+  stock_units_consumed?: number | null;
 }
 
 export interface InvoiceTax {

@@ -41,7 +41,9 @@ import {
   SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  ImageSourceModalComponent,
 } from '../../../../shared/components';
+import { dataUrlToFile } from '../../../../shared/utils';
 import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../../shared/components/tour/services/tour.service';
 import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/ecommerce-tour.config';
@@ -133,6 +135,7 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     FooterSettingsFormComponent,
     StoreShareModalComponent,
     TourModalComponent,
+    ImageSourceModalComponent,
   ],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
@@ -257,10 +260,14 @@ export class EcommerceComponent {
   readonly faviconPreview = signal<string | null>(null);
   faviconKey: string | null = null;
 
-  // File input reference
-  fileInputRef: HTMLInputElement | null = null;
-  logoInputRef: HTMLInputElement | null = null;
-  faviconInputRef: HTMLInputElement | null = null;
+  // Image source modal state (slider multi / logo single / favicon single)
+  readonly MAX_SLIDER_IMAGES = 5;
+  readonly sliderModalOpen = signal(false);
+  readonly logoModalOpen = signal(false);
+  readonly faviconModalOpen = signal(false);
+  readonly sliderRemainingSlots = computed(() =>
+    Math.max(0, this.MAX_SLIDER_IMAGES - this.sliderImages().length),
+  );
 
   // Store info for auto-fill
   storeName = 'Mi Tienda';
@@ -820,75 +827,43 @@ export class EcommerceComponent {
   }
 
   /**
-   * Trigger file input for slider image upload
+   * Open the shared image-source modal to add slider images (multi).
    */
-  triggerFileInput(): void {
+  openSliderModal(): void {
     if (this.isUploadingImage()) return;
-    if (this.sliderImages().length >= 5) {
-      this.toastService.warning('Máximo 5 imágenes permitidas');
+    if (this.sliderRemainingSlots() <= 0) {
+      this.toastService.warning(
+        `Máximo ${this.MAX_SLIDER_IMAGES} imágenes permitidas`,
+      );
       return;
     }
-
-    // Create or reuse file input
-    if (!this.fileInputRef) {
-      this.fileInputRef = document.createElement('input');
-      this.fileInputRef.type = 'file';
-      this.fileInputRef.accept = 'image/*';
-      this.fileInputRef.multiple = true;
-      this.fileInputRef.addEventListener('change', (e) =>
-        this.onSliderImageUpload(e),
-      );
-    }
-    this.fileInputRef.click();
+    this.sliderModalOpen.set(true);
   }
 
   /**
-   * Handle slider image upload
+   * Handle cropped slider data URLs emitted by the shared modal.
+   * Each data URL is converted to a File and uploaded via uploadSliderImage,
+   * persisting the returned S3 key into the slider photos array.
    */
-  onSliderImageUpload(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
-
-    if (!files || files.length === 0) return;
-
-    const available_slots = 5 - this.sliderImages().length;
+  onSliderImagesAdded(dataUrls: string[]): void {
+    const available_slots = this.sliderRemainingSlots();
     if (available_slots <= 0) {
-      this.toastService.warning('Máximo 5 imágenes permitidas');
-      input.value = '';
-      return;
-    }
-
-    // Filter valid image files and cap to available slots
-    const valid_files: File[] = [];
-    for (
-      let i = 0;
-      i < files.length && valid_files.length < available_slots;
-      i++
-    ) {
-      const file = files[i];
-      if (!file.type.startsWith('image/')) continue;
-      if (file.size > 5 * 1024 * 1024) continue;
-      valid_files.push(file);
-    }
-
-    if (valid_files.length === 0) {
       this.toastService.warning(
-        'No se encontraron imágenes válidas (PNG, JPG, WebP - máx 5MB)',
+        `Máximo ${this.MAX_SLIDER_IMAGES} imágenes permitidas`,
       );
-      input.value = '';
       return;
     }
 
-    if (files.length > available_slots) {
-      this.toastService.info(
-        `Se subirán ${valid_files.length} de ${files.length} imágenes (máximo 5 en total)`,
-      );
-    }
+    const files = dataUrls
+      .slice(0, available_slots)
+      .map((dataUrl, idx) => dataUrlToFile(dataUrl, `slider-${Date.now()}-${idx}.jpg`));
+
+    if (files.length === 0) return;
 
     this.isUploadingImage.set(true);
-    let pending_uploads = valid_files.length;
+    let pending_uploads = files.length;
 
-    for (const file of valid_files) {
+    for (const file of files) {
       // Create placeholder with uploading state
       const placeholder: SliderImage = { url: '', uploading: true };
       this.sliderImages.update((arr) => [...arr, placeholder]);
@@ -919,9 +894,9 @@ export class EcommerceComponent {
               this.isUploadingImage.set(false);
               this.updateSliderPhotosForm();
               this.toastService.success(
-                valid_files.length === 1
+                files.length === 1
                   ? 'Imagen subida exitosamente'
-                  : `${valid_files.length} imágenes subidas exitosamente`,
+                  : `${files.length} imágenes subidas exitosamente`,
               );
             }
           },
@@ -943,8 +918,6 @@ export class EcommerceComponent {
           },
         });
     }
-
-    input.value = '';
   }
 
   /**
@@ -1107,39 +1080,23 @@ export class EcommerceComponent {
   }
 
   /**
-   * Trigger file input for logo upload
+   * Open the shared image-source modal to set the store logo (single).
    */
-  triggerLogoInput(): void {
+  openLogoModal(): void {
     if (this.isUploadingLogo()) return;
-
-    if (!this.logoInputRef) {
-      this.logoInputRef = document.createElement('input');
-      this.logoInputRef.type = 'file';
-      this.logoInputRef.accept = 'image/*';
-      this.logoInputRef.addEventListener('change', (e) => this.onLogoUpload(e));
-    }
-    this.logoInputRef.click();
+    this.logoModalOpen.set(true);
   }
 
   /**
-   * Handle logo upload
+   * Handle the cropped logo data URL emitted by the shared modal.
+   * Converts it to a File, uploads via uploadSliderImage and persists the
+   * returned S3 key into inicio.logo_url.
    */
-  onLogoUpload(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
+  onLogoImageAdded(dataUrls: string[]): void {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
 
-    if (!files || files.length === 0) return;
-    const file = files[0];
-
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
-      return;
-    }
-
-    if (file.size > 2 * 1024 * 1024) {
-      this.toastService.warning('El logo excede el tamaño máximo de 2MB');
-      return;
-    }
+    const file = dataUrlToFile(dataUrl, `logo-${Date.now()}.jpg`);
 
     this.isUploadingLogo.set(true);
 
@@ -1165,8 +1122,6 @@ export class EcommerceComponent {
           this.toastService.error('Error al subir el logo: ' + error.message);
         },
       });
-
-    input.value = '';
   }
 
   /**
@@ -1182,36 +1137,24 @@ export class EcommerceComponent {
     }
   }
 
-  triggerFaviconInput(): void {
+  /**
+   * Open the shared image-source modal to set the store favicon (single).
+   */
+  openFaviconModal(): void {
     if (this.isUploadingFavicon()) return;
-
-    if (!this.faviconInputRef) {
-      this.faviconInputRef = document.createElement('input');
-      this.faviconInputRef.type = 'file';
-      this.faviconInputRef.accept = 'image/*';
-      this.faviconInputRef.addEventListener('change', (e) =>
-        this.onFaviconUpload(e),
-      );
-    }
-    this.faviconInputRef.click();
+    this.faviconModalOpen.set(true);
   }
 
-  onFaviconUpload(event: Event): void {
-    const input = event.target as HTMLInputElement;
-    const files = input.files;
+  /**
+   * Handle the cropped favicon data URL emitted by the shared modal.
+   * Converts it to a File, uploads via uploadSliderImage and persists the
+   * returned S3 key into inicio.favicon_url.
+   */
+  onFaviconImageAdded(dataUrls: string[]): void {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
 
-    if (!files || files.length === 0) return;
-    const file = files[0];
-
-    if (!file.type.startsWith('image/')) {
-      this.toastService.warning('Solo se permiten archivos de imagen');
-      return;
-    }
-
-    if (file.size > 1 * 1024 * 1024) {
-      this.toastService.warning('El favicon excede el tamaño máximo de 1MB');
-      return;
-    }
+    const file = dataUrlToFile(dataUrl, `favicon-${Date.now()}.jpg`);
 
     this.isUploadingFavicon.set(true);
 
@@ -1239,8 +1182,6 @@ export class EcommerceComponent {
           );
         },
       });
-
-    input.value = '';
   }
 
   removeFavicon(): void {

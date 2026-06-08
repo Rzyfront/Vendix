@@ -1,5 +1,6 @@
 import { Component, inject, DestroyRef, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
 
 // Services
@@ -99,6 +100,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
         (toggleState)="onToggleProductState($event)"
         (bulkUpload)="openBulkUploadModal()"
         (bulkImageUpload)="openBulkImageUploadModal()"
+        (downloadCurrentProducts)="onDownloadCurrentProducts()"
         (pageChange)="changePage($event)"
       ></app-product-list>
 
@@ -166,6 +168,9 @@ export class ProductsComponent {
   isBulkUploadModalOpen = false;
   isBulkImageUploadModalOpen = false;
   isCreatingProduct = false;
+
+  // Estado de descarga de plantilla
+  readonly isExporting = signal(false);
 
   constructor() {
     // Asegurar que la moneda esté cargada
@@ -336,9 +341,15 @@ export class ProductsComponent {
       .updateProduct(product.id, { state: nextState } as UpdateProductDto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (updatedProduct) => {
+          // Actualización optimista del signal local con la respuesta del
+          // backend (que ya trae el producto completo vía findOne). Esto evita
+          // depender de loadProducts() que puede devolver datos cacheados por
+          // el browser (bug fixeado con Cache-Control: no-store + interceptor).
+          this.products.update((list) =>
+            list.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)),
+          );
           this.toastService.success(`Producto ${verb} correctamente`);
-          this.loadProducts();
           this.loadStats();
         },
         error: (error: any) => {
@@ -391,6 +402,46 @@ export class ProductsComponent {
   onBulkImageUploadComplete(): void {
     this.isBulkImageUploadModalOpen = false;
     this.loadProducts();
+  }
+
+  // Descargar Plantilla con Productos Actuales
+  async onDownloadCurrentProducts(): Promise<void> {
+    if (this.isExporting()) return;
+    this.isExporting.set(true);
+    try {
+      const blob = await firstValueFrom(
+        this.productsService.exportCurrentProducts(),
+      );
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      const dateStr = new Date().toISOString().split('T')[0];
+      link.download = `productos_actuales_${dateStr}.xlsx`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+      this.notifyDownloadResult(true);
+    } catch (err) {
+      this.notifyDownloadResult(false, err);
+    } finally {
+      this.isExporting.set(false);
+    }
+  }
+
+  /**
+   * Feedback de usuario para la descarga de la plantilla.
+   * Decidí qué mensajes mostrar y cómo extraer el mensaje real del error.
+   * Pista: this.toastService expone .success() / .warning() / .error(msg, title?, duration?).
+   * Para errores: extractApiErrorMessage(err) devuelve el mensaje legible del backend.
+   */
+  private notifyDownloadResult(success: boolean, err?: unknown): void {
+    if (success) {
+      this.toastService.success('Plantilla con productos descargada');
+      return;
+    }
+    const message =
+      extractApiErrorMessage(err) ||
+      'Error al descargar la plantilla de productos';
+    this.toastService.error(message, 'Error al exportar');
   }
   // Helpers
   getGrowthPercentage(val: number): string {

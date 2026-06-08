@@ -64,7 +64,7 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     id: 'close',
     label: 'Cierre',
     shortLabel: 'Cierre',
-    icon: 'lock',
+    icon: 'check-square',
     route: '/admin/fiscal/close',
   },
   {
@@ -78,14 +78,14 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     id: 'history',
     label: 'Historial',
     shortLabel: 'Hist.',
-    icon: 'history',
+    icon: 'clipboard-list',
     route: '/admin/fiscal/history',
   },
   {
     id: 'rules',
     label: 'Reglas',
     shortLabel: 'Reglas',
-    icon: 'book',
+    icon: 'file-text',
     route: '/admin/fiscal/rules',
   },
 ];
@@ -127,7 +127,7 @@ const TAB_DEFINITIONS: TabDefinition[] = [
         <app-sticky-header
           title="Operación fiscal"
           subtitle="Operación fiscal"
-          icon="settings"
+          icon="file-check"
           variant="glass"
           [showBackButton]="true"
           backRoute="/admin"

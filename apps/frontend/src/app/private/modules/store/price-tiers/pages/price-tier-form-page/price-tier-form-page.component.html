@@ -107,6 +107,19 @@
             El descuento (0 a 100) se aplica sobre el precio base del producto
             cuando no hay un precio específico definido para esta tarifa.
           </p>
+
+          <div class="mt-3">
+            <app-input
+              label="Unidades por empaque (opcional)"
+              formControlName="units_per_package"
+              type="number"
+              [min]="2"
+              step="1"
+              placeholder="Ej: 6"
+              helperText="Si la tarifa vende por caja/bulto, indica cuántas unidades trae (ej. 6). Déjalo vacío para vender por unidad."
+              [error]="getError('units_per_package')"
+            />
+          </div>
         </app-card>
 
         <!-- Estado y opciones (full-width) -->
@@ -120,7 +133,7 @@
             </p>
           </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <app-setting-toggle
               formControlName="is_active"
               label="Tarifa activa"
@@ -130,11 +143,6 @@
               formControlName="is_default"
               label="Tarifa por defecto"
               description="Se selecciona automáticamente al crear ventas, órdenes y cotizaciones."
-            />
-            <app-setting-toggle
-              formControlName="is_package_unit"
-              label="Unidad de paquete"
-              description="Aplica para tarifas que venden por paquete o caja (consume múltiples unidades de stock)."
             />
           </div>
         </app-card>

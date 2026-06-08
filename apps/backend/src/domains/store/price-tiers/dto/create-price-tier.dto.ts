@@ -15,9 +15,11 @@ import { Transform, Type } from 'class-transformer';
  *
  * - `discount_percentage` is the percent (0-100) applied over base_price when
  *   the product does not have an explicit `product_price_tier_overrides` row.
- * - `is_package_unit` flags the tier as a package/bulk unit. When combined
- *   with `products.package_consumes_multiple_stock = true`, selling 1 unit
- *   under this tier consumes `units_per_package` from `stock_levels`.
+ * - `units_per_package` is the packaging quantity owned by the tier (e.g. 6
+ *   for "Caja x6"). Optional; minimum 2 when present. The service derives
+ *   `is_package_unit = (units_per_package ?? 0) >= 2` so the flag stays
+ *   consistent. A product can override this quantity per tier via
+ *   `product_price_tier_overrides.override_units_per_package`.
  */
 export class CreatePriceTierDto {
   @IsString()
@@ -60,6 +62,12 @@ export class CreatePriceTierDto {
     typeof value === 'string' ? value === 'true' : value,
   )
   is_package_unit?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  units_per_package?: number;
 
   @IsOptional()
   @Type(() => Number)

@@ -4,6 +4,8 @@ import { SettingsService } from './settings.service';
 import { OperatingScopeController } from './operating-scope.controller';
 import { FiscalScopeController } from './fiscal-scope.controller';
 import { FiscalStatusController } from './fiscal-status.controller';
+import { RutScannerController } from './rut-scanner.controller';
+import { RutScannerService } from '../../store/settings/rut-scanner.service';
 import { OperatingScopeMigrationService } from '@common/services/operating-scope-migration.service';
 import { FiscalScopeMigrationService } from '@common/services/fiscal-scope-migration.service';
 import { FiscalStatusService } from '@common/services/fiscal-status.service';
@@ -41,6 +43,7 @@ import { FiscalScopeEventsListener } from './fiscal-scope-events.listener';
     OperatingScopeController,
     FiscalScopeController,
     FiscalStatusController,
+    RutScannerController,
   ],
   providers: [
     SettingsService,
@@ -48,6 +51,7 @@ import { FiscalScopeEventsListener } from './fiscal-scope-events.listener';
     FiscalScopeMigrationService,
     FiscalStatusService,
     FiscalScopeEventsListener,
+    RutScannerService,
   ],
   exports: [
     SettingsService,

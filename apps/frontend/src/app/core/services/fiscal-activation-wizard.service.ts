@@ -365,6 +365,9 @@ export class FiscalActivationWizardService {
       const data = this.unwrap<FiscalStatusReadResult>(result);
       this.lastStatus.set(data);
       this.authFacade.patchFiscalStatus(data.fiscal_status);
+      // Activation succeeded: the legal-data draft is now committed server-side,
+      // so the local UX draft is stale and must be dropped for this context.
+      this.clearWizardDraft();
       return data;
     } catch (error: any) {
       // FISCAL_STATUS_INCOMPLETE carries `details.missing_steps` — capture it
@@ -399,6 +402,9 @@ export class FiscalActivationWizardService {
     const data = this.unwrap<FiscalStatusReadResult>(result);
     this.lastStatus.set(data);
     this.authFacade.patchFiscalStatus(data.fiscal_status);
+    // Deactivating the area resets the wizard — discard the local form draft so
+    // a future re-activation starts from prefill, not from a stale draft.
+    this.clearWizardDraft();
     return data;
   }
 
@@ -438,6 +444,57 @@ export class FiscalActivationWizardService {
   storeQuery(prefix: '?' | '&' = '?'): string {
     const context = this.storeContext();
     return context.store_id ? `${prefix}store_id=${context.store_id}` : '';
+  }
+
+  // ── Wizard form draft (localStorage) ──────────────────────
+  /**
+   * Per-context localStorage key for the in-progress legal-data form draft.
+   * Keyed by {@link fiscalContextKey} so the draft for a STORE context never
+   * leaks into an ORGANIZATION context (or another target store). The draft is
+   * a best-effort UX convenience (survives an accidental reload / navigation),
+   * NOT a source of truth — the canonical write path is still the fiscal-data
+   * PATCH in the legal-data step.
+   */
+  private draftKey(): string {
+    return `vendix:fiscal-wizard-draft:${this.fiscalContextKey()}`;
+  }
+
+  /** Persist the current legal-data form value for the active fiscal context. */
+  saveWizardDraft(value: Record<string, unknown>): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(this.draftKey(), JSON.stringify(value));
+    } catch {
+      // Quota / serialization failures are non-fatal: the draft is optional.
+    }
+  }
+
+  /**
+   * Read back a previously saved draft for the active fiscal context. Returns
+   * `null` when there is no draft, when storage is unavailable, or when the
+   * stored payload is corrupt (in which case the bad entry is cleared).
+   */
+  hydrateWizardDraft<T = Record<string, unknown>>(): T | null {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(this.draftKey());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? (parsed as T) : null;
+    } catch {
+      this.clearWizardDraft();
+      return null;
+    }
+  }
+
+  /** Drop the saved draft for the active fiscal context. */
+  clearWizardDraft(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.removeItem(this.draftKey());
+    } catch {
+      // Ignore: nothing actionable if removal fails.
+    }
   }
 
   private unwrap<T>(response: unknown): T {

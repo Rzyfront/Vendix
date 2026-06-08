@@ -32,6 +32,7 @@ import {
 import { Brand, CreateBrandDto, UpdateBrandDto } from '../../../interfaces';
 import { BrandsService } from '../../../services/brands.service';
 import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
+import { dataUrlToFile } from '../../../../../../../shared/utils';
 
 @Component({
   selector: 'app-brand-form-modal',
@@ -303,10 +304,7 @@ export class BrandFormModalComponent {
 
     this.isUploadingLogo.set(true);
     try {
-      const file = await this.dataUrlToFile(
-        dataUrl,
-        `brand-logo-${Date.now()}.jpg`,
-      );
+      const file = dataUrlToFile(dataUrl, `brand-logo-${Date.now()}.jpg`);
       const result = await firstValueFrom(
         this.brandsService
           .uploadBrandLogo(file)
@@ -328,17 +326,5 @@ export class BrandFormModalComponent {
     this.form.patchValue({ logo_url: '' });
     this.logoPreviewUrl.set(null);
     this.form.markAsDirty();
-  }
-
-  private async dataUrlToFile(
-    dataUrl: string,
-    fileName: string,
-  ): Promise<File> {
-    const response = await fetch(dataUrl);
-    if (!response.ok) {
-      throw new Error('No se pudo preparar la imagen');
-    }
-    const blob = await response.blob();
-    return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
   }
 }

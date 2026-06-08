@@ -130,10 +130,13 @@ export class PriceTiersListPageComponent implements OnInit {
       transform: (value: boolean) => (value ? 'Sí' : 'No'),
     },
     {
-      key: 'is_package_unit',
-      label: 'Unidad Paquete',
+      key: 'units_per_package',
+      label: 'Empaque',
       priority: 3,
-      transform: (value: boolean) => (value ? 'Sí' : 'No'),
+      transform: (value: number | string | null) => {
+        const units = value == null ? 0 : Number(value);
+        return Number.isFinite(units) && units >= 2 ? `Caja x${units}` : '—';
+      },
     },
     {
       key: 'sort_order',
@@ -184,6 +187,17 @@ export class PriceTiersListPageComponent implements OnInit {
           v == null ? '0%' : `${Number(v)}%`,
       },
       { key: 'sort_order', label: 'Orden', icon: 'arrow-up-down' },
+      {
+        key: 'units_per_package',
+        label: 'Empaque',
+        icon: 'box',
+        transform: (v: number | string | null) => {
+          const units = v == null ? 0 : Number(v);
+          return Number.isFinite(units) && units >= 2
+            ? `Caja x${units}`
+            : 'Por unidad';
+        },
+      },
     ],
   };
 

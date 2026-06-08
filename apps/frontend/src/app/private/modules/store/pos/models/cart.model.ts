@@ -27,10 +27,15 @@ export interface CartItem {
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
   is_weight_product?: boolean;
-  // Multi-tarifa (Phase 5)
+  // Multi-tarifa (Phase 5) + Empaque por tarifa.
   applied_price_tier_id?: number | null;
   applied_price_tier_name?: string | null;
+  // `is_package_unit` is true when the applied tier resolves a pack size > 1.
   is_package_unit?: boolean;
+  // Resolved pack size for the applied tier (packaging cascade:
+  // override_units_per_package ?? tier.units_per_package). When > 1 the cart
+  // `quantity` counts PACKAGES; stock consumed = quantity * units_per_package
+  // and `unitPrice`/`finalPrice` are WHOLE-PACKAGE prices.
   units_per_package?: number | null;
 }
 

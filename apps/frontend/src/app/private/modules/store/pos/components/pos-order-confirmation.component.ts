@@ -112,9 +112,10 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
 	                        Tarifa: {{ item.appliedPriceTierName }}
 	                      </span>
 	                    }
-	                    @if (item.isPackageUnit && item.unitsPerPackage) {
+	                    @if (item.isPackageUnit && item.unitsPerPackage > 1) {
 	                      <span class="mt-1 inline-flex w-fit rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-	                        x {{ item.unitsPerPackage }} unid/empaque
+	                        {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+	                        = {{ item.quantity * item.unitsPerPackage }} unid (Caja ×{{ item.unitsPerPackage }})
 	                      </span>
 	                    }
 	                  </div>

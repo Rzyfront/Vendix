@@ -1020,9 +1020,6 @@ export class ProductsService {
             // Multi-tarifa / empaque (fase 5) — POS necesita el flag para
             // decidir si renderiza el selector de tarifa por línea.
             has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
-            units_per_package: (product as any).units_per_package,
-            package_consumes_multiple_stock: (product as any)
-              .package_consumes_multiple_stock,
             enabled_price_tier_ids:
               (product as any).product_price_tier_assignments?.map(
                 (assignment: any) => assignment.price_tier_id,
@@ -1188,9 +1185,6 @@ export class ProductsService {
           // la grid del admin y POS conozcan el flag sin tener que hacer
           // findOne adicional.
           has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
-          units_per_package: (product as any).units_per_package,
-          package_consumes_multiple_stock: (product as any)
-            .package_consumes_multiple_stock,
           enabled_price_tier_ids:
             (product as any).product_price_tier_assignments?.map(
               (assignment: any) => assignment.price_tier_id,
@@ -1394,9 +1388,6 @@ export class ProductsService {
       preconsultation_template_id: product.preconsultation_template_id,
       // Multi-tarifa / empaque (fase 5)
       has_multiple_price_tiers: (product as any).has_multiple_price_tiers,
-      units_per_package: (product as any).units_per_package,
-      package_consumes_multiple_stock: (product as any)
-        .package_consumes_multiple_stock,
       enabled_price_tier_ids:
         (product as any).product_price_tier_assignments?.map(
           (assignment: any) => assignment.price_tier_id,

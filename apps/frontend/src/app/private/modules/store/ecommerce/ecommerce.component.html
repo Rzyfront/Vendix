@@ -139,7 +139,7 @@
                           variant="outline"
                           size="sm"
                           [loading]="isUploadingLogo()"
-                          (clicked)="triggerLogoInput()"
+                          (clicked)="openLogoModal()"
                         >
                           <app-icon
                             name="upload"
@@ -198,7 +198,7 @@
                           variant="outline"
                           size="sm"
                           [loading]="isUploadingFavicon()"
-                          (clicked)="triggerFaviconInput()"
+                          (clicked)="openFaviconModal()"
                         >
                           <app-icon
                             name="upload"
@@ -896,7 +896,7 @@
                   @if (sliderImages().length < 5 && !isUploadingImage()) {
                     <div
                       class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
-                      (click)="triggerFileInput()"
+                      (click)="openSliderModal()"
                     >
                       <app-icon name="upload" class="text-2xl"></app-icon>
                       <span class="text-[10px] mt-1">Subir</span>
@@ -1134,5 +1134,33 @@
       [tourConfig]="ecommerceTourConfig"
     >
     </app-tour-modal>
+  }
+
+  @defer (when sliderModalOpen()) {
+    <app-image-source-modal
+      [(isOpen)]="sliderModalOpen"
+      [singleImage]="false"
+      [remainingSlots]="sliderRemainingSlots()"
+      headerTitle="Imágenes del slider"
+      (imagesAdded)="onSliderImagesAdded($event)"
+    ></app-image-source-modal>
+  }
+
+  @defer (when logoModalOpen()) {
+    <app-image-source-modal
+      [(isOpen)]="logoModalOpen"
+      [singleImage]="true"
+      headerTitle="Logo"
+      (imagesAdded)="onLogoImageAdded($event)"
+    ></app-image-source-modal>
+  }
+
+  @defer (when faviconModalOpen()) {
+    <app-image-source-modal
+      [(isOpen)]="faviconModalOpen"
+      [singleImage]="true"
+      headerTitle="Favicon"
+      (imagesAdded)="onFaviconImageAdded($event)"
+    ></app-image-source-modal>
   }
 </div>
