@@ -9,7 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, debounceTime, distinctUntilChanged, filter } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -31,6 +31,7 @@ import {
 } from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
+import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import {
   CatalogService,
   EcommerceProduct,
@@ -145,6 +146,24 @@ export class CheckoutComponent implements OnInit {
   readonly requiresPaymentInstructions = computed(() => {
     const t = this.selectedPaymentMethodObj()?.type;
     return t === 'bank_transfer' || t === 'voucher';
+  });
+
+  /**
+   * Disables the "Confirmar Pedido" button when the order cannot be placed
+   * in a valid state. For physical-item carts the user must have a shipping
+   * method selected; when no shipping options come back from the calculator
+   * (e.g. the tenant has no shipping zone configured for the picked city),
+   * we block the button so the user does not hit a 400 from the backend.
+   */
+  readonly canConfirmOrder = computed(() => {
+    if (this.is_submitting() || this.wompiWidgetLoading()) return false;
+    if (!this.cartHasOnlyServices) {
+      // Carrito tiene ítems físicos: necesita método de envío seleccionado
+      // y al menos una opción de la zona correspondiente.
+      if (this.shipping_options().length === 0) return false;
+      if (this.selected_shipping_method_id == null) return false;
+    }
+    return true;
   });
 
   // Flag to prevent cart-empty redirect after successful checkout
@@ -353,6 +372,20 @@ export class CheckoutComponent implements OnInit {
       }
     });
 
+    // Re-fetch shipping options when the user picks a new city. The
+    // `nextStep` flow still calls loadShippingOptions on Address→Payment,
+    // but this lets the "no options" state show up in real time without
+    // requiring the user to advance steps. The 300ms debounce coalesces
+    // rapid clicks on the city dropdown.
+    cityControl?.valueChanges
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        filter(() => !this.cartHasOnlyServices && this.address_form.valid),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => this.loadShippingOptions());
+
     // Load departments for default country
     this.loadDepartments();
   }
@@ -501,7 +534,7 @@ export class CheckoutComponent implements OnInit {
   }
 
   // Shipping
-  shipping_options: any[] = [];
+  readonly shipping_options = signal<any[]>([]);
   selected_shipping_method_id: number | null = null;
   selected_shipping_option_id: number | null = null;
   selected_shipping_method_type: string | null = null;
@@ -556,7 +589,7 @@ export class CheckoutComponent implements OnInit {
     this.is_loading.set(true);
     this.cart_service.getShippingEstimates(address).subscribe({
       next: (options) => {
-        this.shipping_options = options;
+        this.shipping_options.set(options);
         if (options.length > 0) {
           // Default select first or cheapest?
           // Select first
@@ -734,7 +767,7 @@ export class CheckoutComponent implements OnInit {
       // Check shipping selection (only for physical items)
       if (
         !this.cartHasOnlyServices &&
-        this.shipping_options.length > 0 &&
+        this.shipping_options().length > 0 &&
         !this.selected_shipping_method_id
       ) {
         this.error_message.set('Por favor selecciona un método de envío');
@@ -980,7 +1013,7 @@ export class CheckoutComponent implements OnInit {
                 },
                 error: (err) => {
                   this.wompiWidgetLoading.set(false);
-                  const msg = this.extractErrorMessage(err);
+                  const msg = extractApiErrorMessage(err);
                   this.error_message.set(msg);
                   this.toast.error(msg, 'Error al preparar pago');
                 },
@@ -989,7 +1022,7 @@ export class CheckoutComponent implements OnInit {
         },
         error: (err) => {
           this.wompiWidgetLoading.set(false);
-          const msg = this.extractErrorMessage(err);
+          const msg = extractApiErrorMessage(err);
           this.error_message.set(msg);
           this.toast.error(msg, 'Error al procesar el pedido');
         },
@@ -1022,7 +1055,7 @@ export class CheckoutComponent implements OnInit {
       },
       error: (err) => {
         this.is_submitting.set(false);
-        const msg = this.extractErrorMessage(err);
+        const msg = extractApiErrorMessage(err);
         this.error_message.set(msg);
         this.toast.error(msg, 'Error al procesar el pedido');
       },
@@ -1143,13 +1176,6 @@ export class CheckoutComponent implements OnInit {
         'Error',
       );
     }
-  }
-
-  private extractErrorMessage(err: any): string {
-    const msg = err?.error?.message;
-    if (typeof msg === 'string') return msg;
-    if (msg?.message) return msg.message;
-    return 'Ocurrió un error inesperado';
   }
 
   goToCart(): void {
