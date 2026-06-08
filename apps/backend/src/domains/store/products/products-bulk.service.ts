@@ -829,13 +829,13 @@ export class ProductsBulkService {
   }
 
   /**
-   * Genera la plantilla de carga masiva en formato Excel (.xlsx)
+   * Devuelve los encabezados en Español de la plantilla de productos físicos.
+   * Reutilizado por `generateExcelTemplate` y `exportCurrentProductsAsTemplate`
+   * para garantizar que el archivo exportado sea 100% compatible con la
+   * carga masiva (round-trip: editar + re-cargar funciona sin cambios).
    */
-  async generateExcelTemplate(
-    type: BulkExcelTemplateRequest = 'products',
-  ): Promise<Buffer> {
-    const templateType = type;
-    const productHeaders = [
+  getProductTemplateHeaders(): string[] {
+    return [
       'Nombre',
       'SKU',
       'Tipo',
@@ -855,6 +855,16 @@ export class ProductsBulkService {
       'En Oferta',
       'Precio Oferta',
     ];
+  }
+
+  /**
+   * Genera la plantilla de carga masiva en formato Excel (.xlsx)
+   */
+  async generateExcelTemplate(
+    type: BulkExcelTemplateRequest = 'products',
+  ): Promise<Buffer> {
+    const templateType = type;
+    const productHeaders = this.getProductTemplateHeaders();
     const serviceHeaders = [
       'Nombre',
       'SKU',
@@ -1059,6 +1069,147 @@ export class ProductsBulkService {
         ? 'Plantilla Servicios'
         : 'Plantilla Productos',
     );
+
+    return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  }
+
+  /**
+   * Genera un XLSX con los productos actuales de la tienda, usando los mismos
+   * encabezados de la plantilla de Carga Masiva + 3 columnas informativas
+   * (Precio Compra, Cantidad Actual, Tiene Imagen).
+   *
+   * El archivo es round-trip compatible con `generateExcelTemplate('products')`:
+   * las 20 columnas editables pueden modificarse y re-cargarse con el flujo
+   * existente. Las 3 columnas informativas son ignoradas por el parser al
+   * re-cargar (no existen en `HEADER_MAP`).
+   *
+   * Implementa cursor pagination interna en chunks de 500 para evitar cargar
+   * catálogos grandes en memoria de golpe.
+   */
+  async exportCurrentProductsAsTemplate(): Promise<Buffer> {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+
+    const baseHeaders = this.getProductTemplateHeaders();
+    const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
+    const headers = [...baseHeaders, ...extraHeaders];
+
+    const rows: Record<string, any>[] = [];
+    const CHUNK_SIZE = 500;
+    let cursor: number | undefined = undefined;
+
+    // Iteración con cursor por `id` para evitar drift en catálogos grandes
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const products = await this.prisma.products.findMany({
+        where: { store_id: storeId },
+        orderBy: { id: 'asc' },
+        take: CHUNK_SIZE,
+        ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
+        include: {
+          brands: { select: { name: true } },
+          product_categories: {
+            include: { categories: { select: { name: true } } },
+          },
+          product_tax_assignments: {
+            select: { tax_category_id: true },
+          },
+          product_images: { where: { is_main: true }, take: 1 },
+          product_variants: { select: { id: true } },
+          stock_levels: {
+            select: {
+              product_variant_id: true,
+              quantity_available: true,
+            },
+          },
+        },
+      });
+
+      if (products.length === 0) break;
+
+      for (const p of products) {
+        const hasVariants = (p.product_variants?.length ?? 0) > 0;
+        const stockLevelsForTotals = hasVariants
+          ? (p.stock_levels ?? []).filter(
+              (sl) => sl.product_variant_id !== null,
+            )
+          : p.stock_levels ?? [];
+        const totalStock = stockLevelsForTotals.reduce(
+          (sum, sl) => sum + (sl.quantity_available ?? 0),
+          0,
+        );
+        const hasImage = (p.product_images?.length ?? 0) > 0;
+
+        rows.push({
+          Nombre: p.name,
+          SKU: p.sku ?? '',
+          Tipo: p.product_type === 'service' ? 'servicio' : 'físico',
+          Estado:
+            p.state === 'active'
+              ? 'activo'
+              : p.state === 'inactive'
+                ? 'inactivo'
+                : 'archivado',
+          'Controla Inventario': p.track_inventory ? 'sí' : 'no',
+          'Precio Venta': p.base_price ? Number(p.base_price) : 0,
+          Descripción: p.description ?? '',
+          Marca: p.brands?.name ?? '',
+          Categorías:
+            p.product_categories
+              ?.map((pc) => pc.categories?.name)
+              .filter(Boolean)
+              .join(', ') ?? '',
+          'Impuestos IDs':
+            p.product_tax_assignments
+              ?.map((a) => a.tax_category_id)
+              .filter(Boolean)
+              .join(', ') ?? '',
+          'Tipo Precio': p.pricing_type === 'weight' ? 'peso' : 'unidad',
+          'Disponible Ecommerce': p.available_for_ecommerce ? 'sí' : 'no',
+          Destacado: p.is_featured ? 'sí' : 'no',
+          'Permite Cambiar Precio POS': p.allow_pos_price_override ? 'sí' : 'no',
+          'Usa Listas de Precio': (p as any).has_multiple_price_tiers
+            ? 'sí'
+            : 'no',
+          'Unidades por Empaque':
+            (p as any).units_per_package !== null &&
+            (p as any).units_per_package !== undefined
+              ? Number((p as any).units_per_package)
+              : '',
+          'Empaque Descuenta Múltiples Unidades': (
+            p as any
+          ).package_consumes_multiple_stock
+            ? 'sí'
+            : 'no',
+          Peso: p.weight ? Number(p.weight) : '',
+          'En Oferta': p.is_on_sale ? 'sí' : 'no',
+          'Precio Oferta': p.sale_price ? Number(p.sale_price) : 0,
+          'Precio Compra': p.cost_price ? Number(p.cost_price) : '',
+          'Cantidad Actual': totalStock,
+          'Tiene Imagen': hasImage ? 'sí' : 'no',
+        });
+      }
+
+      if (products.length < CHUNK_SIZE) break;
+      cursor = products[products.length - 1].id;
+    }
+
+    // Si la tienda no tiene productos, igual devolver una hoja con los headers
+    // (fila vacía) para que el usuario vea la estructura esperada.
+    const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [], {
+      header: headers,
+    });
+
+    const colWidths = headers.map((h) => ({
+      wch: Math.max(h.length + 5, 20),
+    }));
+    ws['!cols'] = colWidths;
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Productos Actuales');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   }

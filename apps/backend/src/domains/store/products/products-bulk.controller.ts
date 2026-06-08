@@ -109,6 +109,35 @@ export class ProductsBulkController {
   }
 
   /**
+   * Descarga un XLSX con los productos actuales de la tienda, en el mismo
+   * formato de la plantilla de Carga Masiva + 3 columnas informativas.
+   * Pensado para auditoría rápida y para que el cliente edite y re-cargue.
+   */
+  @Get('export')
+  @Permissions('store:products:read')
+  async exportCurrentProducts(@Res() res: Response) {
+    try {
+      const buffer =
+        await this.productsBulkService.exportCurrentProductsAsTemplate();
+      const filename = `productos_actuales_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      res.set({
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': buffer.length,
+      });
+
+      res.end(buffer);
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: { message: error.message },
+      });
+    }
+  }
+
+  /**
    * Carga masiva desde archivo Excel/CSV
    */
   @Post('upload/file')
