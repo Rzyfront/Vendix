@@ -37,6 +37,7 @@ import {
 import { CategoriesService } from '../../../services/categories.service';
 import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
 import { dataUrlToFile } from '../../../../../../../shared/utils';
+import { extractApiErrorMessage } from '../../../../../../../core/utils';
 
 @Component({
   selector: 'app-category-form-modal',
@@ -334,8 +335,8 @@ export class CategoryFormModalComponent {
       this.imageDirty.set(true);
       this.form.markAsDirty();
       this.toastService.success('Imagen cargada correctamente');
-    } catch {
-      this.toastService.error('No pudimos cargar la imagen de la categoría');
+    } catch (error) {
+      this.toastService.error(extractApiErrorMessage(error));
     } finally {
       this.isUploadingImage.set(false);
     }

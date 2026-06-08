@@ -23,6 +23,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Controller('store/categories')
 @UseGuards(PermissionsGuard)
@@ -38,103 +39,66 @@ export class CategoriesController {
     @Body() createCategoryDto: CreateCategoryDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.categoriesService.create(
-        createCategoryDto,
-        req.user,
-      );
-      return this.responseService.created(
-        result,
-        'Categoría creada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al crear la categoría',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.categoriesService.create(
+      createCategoryDto,
+      req.user,
+    );
+    return this.responseService.created(
+      result,
+      'Categoría creada exitosamente',
+    );
   }
 
   @Get()
   @Permissions('store:categories:read')
   async findAll(@Query() query: CategoryQueryDto) {
-    try {
-      const result = await this.categoriesService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Categorías obtenidas exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
+    const result = await this.categoriesService.findAll(query);
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
         'Categorías obtenidas exitosamente',
       );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener las categorías',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
     }
+    return this.responseService.success(
+      result,
+      'Categorías obtenidas exitosamente',
+    );
   }
 
   @Get('search')
   @Permissions('store:categories:read')
   async search(@Query() query: CategoryQueryDto) {
-    try {
-      const result = await this.categoriesService.findAll({
-        ...query,
-        search: query.search || '',
-      });
-      return this.responseService.success(
-        result.data || result,
-        'Búsqueda de categorías completada',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error en la búsqueda de categorías',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.categoriesService.findAll({
+      ...query,
+      search: query.search || '',
+    });
+    return this.responseService.success(
+      result.data || result,
+      'Búsqueda de categorías completada',
+    );
   }
 
   @Post('upload-image')
   @Permissions('store:categories:update')
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(@UploadedFile() file: Express.Multer.File) {
-    try {
-      if (!file) {
-        return this.responseService.error(
-          'No se proporcionó archivo',
-          'File is required',
-        );
-      }
-
-      if (!file.mimetype.startsWith('image/')) {
-        return this.responseService.error(
-          'Tipo de archivo inválido',
-          'Only image files are allowed',
-        );
-      }
-
-      const result = await this.categoriesService.uploadCategoryImage(
-        file.buffer,
-        `category-${Date.now()}.webp`,
-      );
-
-      return this.responseService.created(result, 'Imagen subida exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al subir la imagen',
-        error.message,
-      );
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_REQUIRED_001);
     }
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_TYPE_001);
+    }
+
+    const result = await this.categoriesService.uploadCategoryImage(
+      file.buffer,
+      `category-${Date.now()}.webp`,
+    );
+
+    return this.responseService.created(result, 'Imagen subida exitosamente');
   }
 
   @Get(':id')
@@ -143,21 +107,13 @@ export class CategoriesController {
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    try {
-      const result = await this.categoriesService.findOne(id, {
-        includeInactive: includeInactive === 'true',
-      });
-      return this.responseService.success(
-        result,
-        'Categoría obtenida exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al obtener la categoría',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.categoriesService.findOne(id, {
+      includeInactive: includeInactive === 'true',
+    });
+    return this.responseService.success(
+      result,
+      'Categoría obtenida exitosamente',
+    );
   }
 
   @Patch(':id')
@@ -167,23 +123,15 @@ export class CategoriesController {
     @Body() updateCategoryDto: UpdateCategoryDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.categoriesService.update(
-        id,
-        updateCategoryDto,
-        req.user,
-      );
-      return this.responseService.updated(
-        result,
-        'Categoría actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la categoría',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.categoriesService.update(
+      id,
+      updateCategoryDto,
+      req.user,
+    );
+    return this.responseService.updated(
+      result,
+      'Categoría actualizada exitosamente',
+    );
   }
 
   @Put(':id')
@@ -193,23 +141,15 @@ export class CategoriesController {
     @Body() updateCategoryDto: UpdateCategoryDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const result = await this.categoriesService.update(
-        id,
-        updateCategoryDto,
-        req.user,
-      );
-      return this.responseService.updated(
-        result,
-        'Categoría actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al actualizar la categoría',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    const result = await this.categoriesService.update(
+      id,
+      updateCategoryDto,
+      req.user,
+    );
+    return this.responseService.updated(
+      result,
+      'Categoría actualizada exitosamente',
+    );
   }
 
   @Delete(':id')

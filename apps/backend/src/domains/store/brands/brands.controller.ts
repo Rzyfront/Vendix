@@ -22,6 +22,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Controller('store/brands')
 @UseGuards(PermissionsGuard)
@@ -37,38 +38,27 @@ export class BrandsController {
     @Body() createBrandDto: CreateBrandDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const brand = await this.brandsService.create(createBrandDto, req.user);
-      return this.responseService.created(brand, 'Marca creada exitosamente');
-    } catch (error) {
-      return this.responseService.error('Error al crear marca', error.message);
-    }
+    const brand = await this.brandsService.create(createBrandDto, req.user);
+    return this.responseService.created(brand, 'Marca creada exitosamente');
   }
 
   @Get()
   @Permissions('store:brands:read')
   async findAll(@Query() query: BrandQueryDto) {
-    try {
-      const result = await this.brandsService.findAll(query);
+    const result = await this.brandsService.findAll(query);
 
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Marcas obtenidas exitosamente',
-        );
-      } else {
-        return this.responseService.success(
-          result,
-          'Marcas obtenidas exitosamente',
-        );
-      }
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener marcas',
-        error.message,
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
+        'Marcas obtenidas exitosamente',
+      );
+    } else {
+      return this.responseService.success(
+        result,
+        'Marcas obtenidas exitosamente',
       );
     }
   }
@@ -79,27 +69,20 @@ export class BrandsController {
     @Param('storeId', ParseIntPipe) storeId: number,
     @Query() query: BrandQueryDto,
   ) {
-    try {
-      const result = await this.brandsService.findByStore(storeId, query);
+    const result = await this.brandsService.findByStore(storeId, query);
 
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Marcas de la tienda obtenidas exitosamente',
-        );
-      } else {
-        return this.responseService.success(
-          result,
-          'Marcas de la tienda obtenidas exitosamente',
-        );
-      }
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener marcas de la tienda',
-        error.message,
+    if (result.data && result.meta) {
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
+        'Marcas de la tienda obtenidas exitosamente',
+      );
+    } else {
+      return this.responseService.success(
+        result,
+        'Marcas de la tienda obtenidas exitosamente',
       );
     }
   }
@@ -108,33 +91,20 @@ export class BrandsController {
   @Permissions('store:brands:update')
   @UseInterceptors(FileInterceptor('file'))
   async uploadLogo(@UploadedFile() file: Express.Multer.File) {
-    try {
-      if (!file) {
-        return this.responseService.error(
-          'No se proporcionó archivo',
-          'File is required',
-        );
-      }
-
-      if (!file.mimetype.startsWith('image/')) {
-        return this.responseService.error(
-          'Tipo de archivo inválido',
-          'Only image files are allowed',
-        );
-      }
-
-      const result = await this.brandsService.uploadBrandLogo(
-        file.buffer,
-        `brand-${Date.now()}.webp`,
-      );
-
-      return this.responseService.created(result, 'Logo subido exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al subir el logo',
-        error.message,
-      );
+    if (!file) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_REQUIRED_001);
     }
+
+    if (!file.mimetype.startsWith('image/')) {
+      throw new VendixHttpException(ErrorCodes.MEDIA_FILE_TYPE_001);
+    }
+
+    const result = await this.brandsService.uploadBrandLogo(
+      file.buffer,
+      `brand-${Date.now()}.webp`,
+    );
+
+    return this.responseService.created(result, 'Logo subido exitosamente');
   }
 
   @Get(':id')
@@ -143,17 +113,10 @@ export class BrandsController {
     @Param('id', ParseIntPipe) id: number,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    try {
-      const brand = await this.brandsService.findOne(id, {
-        includeInactive: includeInactive === 'true',
-      });
-      return this.responseService.success(brand, 'Marca obtenida exitosamente');
-    } catch (error) {
-      return this.responseService.error(
-        'Error al obtener marca',
-        error.message,
-      );
-    }
+    const brand = await this.brandsService.findOne(id, {
+      includeInactive: includeInactive === 'true',
+    });
+    return this.responseService.success(brand, 'Marca obtenida exitosamente');
   }
 
   @Patch(':id')
@@ -163,22 +126,11 @@ export class BrandsController {
     @Body() updateBrandDto: UpdateBrandDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    try {
-      const brand = await this.brandsService.update(
-        id,
-        updateBrandDto,
-        req.user,
-      );
-      return this.responseService.updated(
-        brand,
-        'Marca actualizada exitosamente',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        'Error al actualizar marca',
-        error.message,
-      );
-    }
+    const brand = await this.brandsService.update(id, updateBrandDto, req.user);
+    return this.responseService.updated(
+      brand,
+      'Marca actualizada exitosamente',
+    );
   }
 
   @Delete(':id')

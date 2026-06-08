@@ -17,6 +17,14 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Esta categoría tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta categoría.',
   BRAND_DELETE_HAS_PRODUCTS:
     'Esta marca tiene productos asignados. Elimínala con la opción de desligar para conservar los productos sin esta marca.',
+  CAT_NAME_EXISTS_001: 'Ya existe una categoría con ese nombre.',
+  BRAND_NAME_EXISTS_001: 'Ya existe una marca con ese nombre.',
+
+  // Media uploads (shared)
+  MEDIA_FILE_REQUIRED_001: 'Debes seleccionar un archivo.',
+  MEDIA_FILE_TYPE_001:
+    'Tipo de archivo no permitido. Usa una imagen válida (JPEG, PNG o WebP).',
+  MEDIA_UPLOAD_FAILED_001: 'No pudimos subir el archivo. Intenta de nuevo.',
 
   // Help Center
   HELP_ARTICLE_NOT_FOUND: 'El artículo no fue encontrado.',

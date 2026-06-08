@@ -33,6 +33,7 @@ import { Brand, CreateBrandDto, UpdateBrandDto } from '../../../interfaces';
 import { BrandsService } from '../../../services/brands.service';
 import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
 import { dataUrlToFile } from '../../../../../../../shared/utils';
+import { extractApiErrorMessage } from '../../../../../../../core/utils';
 
 @Component({
   selector: 'app-brand-form-modal',
@@ -330,8 +331,8 @@ export class BrandFormModalComponent {
       this.logoDirty.set(true);
       this.form.markAsDirty();
       this.toastService.success('Logo cargado correctamente');
-    } catch {
-      this.toastService.error('No pudimos cargar el logo de la marca');
+    } catch (error) {
+      this.toastService.error(extractApiErrorMessage(error));
     } finally {
       this.isUploadingLogo.set(false);
     }

@@ -1,8 +1,6 @@
 import {
   Injectable,
   NotFoundException,
-  ConflictException,
-  BadRequestException,
   InternalServerErrorException,
   ForbiddenException,
 } from '@nestjs/common';
@@ -61,10 +59,18 @@ export class CategoriesService {
       categoryData.is_featured = createCategoryDto.is_featured;
     }
 
-    const category = await this.prisma.categories.create({
-      data: categoryData,
-      include: { stores: true },
-    });
+    let category;
+    try {
+      category = await this.prisma.categories.create({
+        data: categoryData,
+        include: { stores: true },
+      });
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        throw new VendixHttpException(ErrorCodes.CAT_NAME_EXISTS_001);
+      }
+      throw error;
+    }
 
     return {
       ...category,
@@ -178,11 +184,19 @@ export class CategoriesService {
     //   updateData.store_id = updateCategoryDto.store_id;
     // }
 
-    const updated = await this.prisma.categories.update({
-      where: { id },
-      data: updateData,
-      include: { stores: true },
-    });
+    let updated;
+    try {
+      updated = await this.prisma.categories.update({
+        where: { id },
+        data: updateData,
+        include: { stores: true },
+      });
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        throw new VendixHttpException(ErrorCodes.CAT_NAME_EXISTS_001);
+      }
+      throw error;
+    }
 
     return {
       ...updated,
@@ -235,7 +249,7 @@ export class CategoriesService {
     });
 
     if (!store || !store.organizations) {
-      throw new BadRequestException('Store or organization not found');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const timestamp = Date.now();
@@ -245,17 +259,23 @@ export class CategoriesService {
       store,
     );
     const key = `${basePath}/${timestamp}-${cleanFilename}`;
-    const result = await this.s3Service.uploadImage(file, key, {
-      generateThumbnail: true,
-      context: ImageContext.CATEGORY,
-    });
-    const signedUrl = await this.s3Service.getPresignedUrl(result.key);
 
-    return {
-      key: result.key,
-      url: signedUrl,
-      thumbKey: result.thumbKey,
-    };
+    try {
+      const result = await this.s3Service.uploadImage(file, key, {
+        generateThumbnail: true,
+        context: ImageContext.CATEGORY,
+      });
+      const signedUrl = await this.s3Service.getPresignedUrl(result.key);
+
+      return {
+        key: result.key,
+        url: signedUrl,
+        thumbKey: result.thumbKey,
+      };
+    } catch (error) {
+      if (error instanceof VendixHttpException) throw error;
+      throw new VendixHttpException(ErrorCodes.MEDIA_UPLOAD_FAILED_001);
+    }
   }
 
   private async validateUniqueSlug(
@@ -266,7 +286,6 @@ export class CategoriesService {
     const where: any = { slug };
     if (excludeId) where.id = { not: excludeId };
     const existing = await this.prisma.categories.findFirst({ where });
-    if (existing)
-      throw new ConflictException('Category slug already exists in this store');
+    if (existing) throw new VendixHttpException(ErrorCodes.CAT_NAME_EXISTS_001);
   }
 }

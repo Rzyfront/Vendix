@@ -870,6 +870,33 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Brand has assigned products',
   },
+  CAT_NAME_EXISTS_001: {
+    code: 'CAT_NAME_EXISTS_001',
+    httpStatus: 409,
+    devMessage: 'Category name/slug already exists in this store',
+  },
+  BRAND_NAME_EXISTS_001: {
+    code: 'BRAND_NAME_EXISTS_001',
+    httpStatus: 409,
+    devMessage: 'Brand name/slug already exists in this store',
+  },
+
+  // Media uploads (shared)
+  MEDIA_FILE_REQUIRED_001: {
+    code: 'MEDIA_FILE_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'File is required',
+  },
+  MEDIA_FILE_TYPE_001: {
+    code: 'MEDIA_FILE_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'Only image files are allowed',
+  },
+  MEDIA_UPLOAD_FAILED_001: {
+    code: 'MEDIA_UPLOAD_FAILED_001',
+    httpStatus: 400,
+    devMessage: 'Error uploading file',
+  },
 
   // Refunds
   REF_FIND_001: {

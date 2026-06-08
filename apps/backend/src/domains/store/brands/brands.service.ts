@@ -1,9 +1,4 @@
-import {
-  Injectable,
-  NotFoundException,
-  ConflictException,
-  BadRequestException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { S3Service } from '@common/services/s3.service';
@@ -66,8 +61,11 @@ export class BrandsService {
         logo_url: await this.s3Service.signUrl(brand.logo_url),
       };
     } catch (error) {
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
       if (error.code === 'P2002') {
-        throw new ConflictException('Brand name already exists in this store');
+        throw new VendixHttpException(ErrorCodes.BRAND_NAME_EXISTS_001);
       }
       throw error;
     }
@@ -206,8 +204,11 @@ export class BrandsService {
         logo_url: await this.s3Service.signUrl(updated.logo_url),
       };
     } catch (error) {
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
       if (error.code === 'P2002') {
-        throw new ConflictException('Brand name already exists in this store');
+        throw new VendixHttpException(ErrorCodes.BRAND_NAME_EXISTS_001);
       }
       throw error;
     }
@@ -260,7 +261,7 @@ export class BrandsService {
     });
 
     if (!store || !store.organizations) {
-      throw new BadRequestException('Store or organization not found');
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
     const timestamp = Date.now();
@@ -270,17 +271,25 @@ export class BrandsService {
       store,
     );
     const key = `${basePath}/${timestamp}-${cleanFilename}`;
-    const result = await this.s3Service.uploadImage(file, key, {
-      generateThumbnail: true,
-      context: ImageContext.LOGO,
-    });
-    const signedUrl = await this.s3Service.getPresignedUrl(result.key);
 
-    return {
-      key: result.key,
-      url: signedUrl,
-      thumbKey: result.thumbKey,
-    };
+    try {
+      const result = await this.s3Service.uploadImage(file, key, {
+        generateThumbnail: true,
+        context: ImageContext.LOGO,
+      });
+      const signedUrl = await this.s3Service.getPresignedUrl(result.key);
+
+      return {
+        key: result.key,
+        url: signedUrl,
+        thumbKey: result.thumbKey,
+      };
+    } catch (error) {
+      if (error instanceof VendixHttpException) {
+        throw error;
+      }
+      throw new VendixHttpException(ErrorCodes.MEDIA_UPLOAD_FAILED_001);
+    }
   }
 
   private async validateUniqueName(name: string, excludeId?: number) {
@@ -291,7 +300,7 @@ export class BrandsService {
 
     const existing = await this.prisma.brands.findFirst({ where });
     if (existing) {
-      throw new ConflictException('Brand name already exists in this store');
+      throw new VendixHttpException(ErrorCodes.BRAND_NAME_EXISTS_001);
     }
   }
 }
