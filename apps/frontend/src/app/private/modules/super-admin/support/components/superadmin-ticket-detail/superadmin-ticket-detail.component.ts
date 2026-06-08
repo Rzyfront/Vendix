@@ -183,7 +183,7 @@ import {
                   Si tienes más preguntas o necesitas asistencia adicional, no dudes en contactar a soporte.
                 </p>
                 <app-button variant="outline" size="sm">
-                  <app-icon name="help-circle" [size]="16" slot="icon"></app-icon>
+                  <app-icon name="help-circle" [size]="16" slot="icon" ></app-icon>
                   Contactar Soporte
                 </app-button>
               </div>
@@ -210,7 +210,7 @@ import {
                   [loading]="sendingComment()"
                   size="sm"
                   >
-                  <app-icon name="send" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="send" [size]="14" slot="icon" ></app-icon>
                   Enviar
                 </app-button>
               </div>

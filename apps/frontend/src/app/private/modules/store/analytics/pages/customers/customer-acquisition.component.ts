@@ -1,5 +1,6 @@
 import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -24,6 +25,7 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-customer-acquisition',
@@ -45,6 +47,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
+  private readonly route = inject(ActivatedRoute);
 
   newCustomers$: Observable<number> = this.store.select(
     AcquisitionSelectors.selectNewCustomers,
@@ -99,6 +102,12 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   readonly customersViews: AnalyticsView[] = getViewsByCategory('customers');
 
   ngOnInit(): void {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(AcquisitionActions.setDateRange({ dateRange: urlRange }));
+    }
+
     this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
     this.store.dispatch(AcquisitionActions.loadAcquisitionTrends());
     this.store.dispatch(AcquisitionActions.loadAcquisitionChannels());

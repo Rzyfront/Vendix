@@ -11,6 +11,7 @@ import {
   AlertBannerComponent,
   ButtonComponent,
   IconComponent,
+  ImageSourceModalComponent,
   InputComponent,
   ScrollableTabsComponent,
   SpinnerComponent,
@@ -21,6 +22,7 @@ import type {
   StickyHeaderActionButton,
   StickyHeaderBadgeColor,
 } from '../../../../../shared/components';
+import { dataUrlToFile } from '../../../../../shared/utils';
 import { OrganizationSettingsService } from '../services/organization-settings.service';
 import {
   OrganizationBranding,
@@ -74,6 +76,7 @@ class BrandingAssetUploadError {
     AlertBannerComponent,
     ButtonComponent,
     IconComponent,
+    ImageSourceModalComponent,
     InputComponent,
     ScrollableTabsComponent,
     SpinnerComponent,
@@ -236,13 +239,6 @@ class BrandingAssetUploadError {
                 />
 
                 <div class="asset-card">
-                  <input
-                    #logoInput
-                    type="file"
-                    accept="image/*"
-                    class="asset-card__input"
-                    (change)="onBrandAssetSelected('logo_url', $event)"
-                  />
                   <div class="asset-card__preview asset-card__preview--logo">
                     @if (logoPreview()) {
                       <img [src]="logoPreview()!" alt="Logo" />
@@ -261,7 +257,7 @@ class BrandingAssetUploadError {
                         variant="outline"
                         size="sm"
                         [disabled]="saving()"
-                        (clicked)="logoInput.click()"
+                        (clicked)="openBrandModal('logo_url')"
                       >
                         <app-icon name="upload" size="14" slot="icon" />
                         {{ logoPreview() ? 'Cambiar' : 'Subir' }}
@@ -282,13 +278,6 @@ class BrandingAssetUploadError {
                 </div>
 
                 <div class="asset-card">
-                  <input
-                    #faviconInput
-                    type="file"
-                    accept="image/*"
-                    class="asset-card__input"
-                    (change)="onBrandAssetSelected('favicon_url', $event)"
-                  />
                   <div class="asset-card__preview asset-card__preview--favicon">
                     @if (faviconPreview()) {
                       <img [src]="faviconPreview()!" alt="Favicon" />
@@ -307,7 +296,7 @@ class BrandingAssetUploadError {
                         variant="outline"
                         size="sm"
                         [disabled]="saving()"
-                        (clicked)="faviconInput.click()"
+                        (clicked)="openBrandModal('favicon_url')"
                       >
                         <app-icon name="upload" size="14" slot="icon" />
                         {{ faviconPreview() ? 'Cambiar' : 'Subir' }}
@@ -375,6 +364,13 @@ class BrandingAssetUploadError {
           </section>
         </form>
       }
+
+      <app-image-source-modal
+        [(isOpen)]="brandModalOpen"
+        [singleImage]="true"
+        [headerTitle]="brandModalTitle()"
+        (imagesAdded)="onBrandImages($event)"
+      />
     </div>
   `,
   styles: [
@@ -847,6 +843,14 @@ export class ApplicationComponent {
   readonly faviconPreview = signal<string | null>(null);
   readonly pendingLogoUpload = signal<PendingBrandAssetUpload | null>(null);
   readonly pendingFaviconUpload = signal<PendingBrandAssetUpload | null>(null);
+  readonly brandModalOpen = signal(false);
+  readonly activeBrandField = signal<BrandingAssetControlName | null>(null);
+  readonly brandModalTitle = computed<string | null>(() => {
+    const field = this.activeBrandField();
+    if (field === 'logo_url') return 'Logo';
+    if (field === 'favicon_url') return 'Favicon';
+    return null;
+  });
 
   readonly form = new FormGroup<BrandingFormControls>({
     name: new FormControl('', {
@@ -962,51 +966,50 @@ export class ApplicationComponent {
     }
   }
 
-  onBrandAssetSelected(
-    controlName: BrandingAssetControlName,
-    event: Event,
-  ): void {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
+  openBrandModal(controlName: BrandingAssetControlName): void {
+    this.activeBrandField.set(controlName);
+    this.brandModalOpen.set(true);
+  }
 
-    if (!file.type.startsWith('image/')) {
-      this.notifyWarning(
-        'Solo se permiten archivos de imagen.',
-        'Archivo inválido',
-      );
-      return;
-    }
+  async onBrandImages(dataUrls: string[]): Promise<void> {
+    const dataUrl = dataUrls[0];
+    const controlName = this.activeBrandField();
+    if (!dataUrl || !controlName) return;
 
-    const maxSize = controlName === 'logo_url' ? 2 * 1024 * 1024 : 1024 * 1024;
     const label = controlName === 'logo_url' ? 'logo' : 'favicon';
-    if (file.size > maxSize) {
-      this.notifyWarning(
-        `El ${label} excede el tamaño máximo de ${maxSize / 1024 / 1024}MB.`,
-        'Archivo demasiado grande',
-      );
-      return;
-    }
-
-    this.revokeBrandAssetPreview(controlName);
-    const preview = URL.createObjectURL(file);
-    const pendingUpload = { file, preview };
-
-    if (controlName === 'logo_url') {
-      this.logoPreview.set(preview);
-      this.pendingLogoUpload.set(pendingUpload);
-    } else {
-      this.faviconPreview.set(preview);
-      this.pendingFaviconUpload.set(pendingUpload);
-    }
+    const file = dataUrlToFile(dataUrl, `${label}.jpg`);
 
     this.error.set(null);
-    this.form.markAsDirty();
-    this.hasUnsavedChanges.set(true);
-    this.toastService.info(
-      `${label.charAt(0).toUpperCase()}${label.slice(1)} listo para guardar.`,
-    );
+    this.uploadingAssets.set(true);
+
+    try {
+      const result = await this.uploadBrandAsset(label, file);
+      this.revokeBrandAssetPreview(controlName);
+      if (controlName === 'logo_url') {
+        this.logoPreview.set(result.url);
+      } else {
+        this.faviconPreview.set(result.url);
+      }
+      this.control(controlName).setValue(result.key);
+      this.control(controlName).markAsDirty();
+      this.form.markAsDirty();
+      this.hasUnsavedChanges.set(true);
+      this.toastService.info(
+        `${label.charAt(0).toUpperCase()}${label.slice(1)} actualizado. Guarda para confirmar los cambios.`,
+      );
+    } catch (error) {
+      const uploadError =
+        error instanceof BrandingAssetUploadError ? error : null;
+      const source = uploadError?.cause ?? error;
+      this.notifyError(
+        source,
+        `No se pudo subir el ${label}.`,
+        `Error al subir ${label}`,
+      );
+    } finally {
+      this.uploadingAssets.set(false);
+      this.activeBrandField.set(null);
+    }
   }
 
   removeBrandAsset(controlName: BrandingAssetControlName): void {
@@ -1098,7 +1101,7 @@ export class ApplicationComponent {
   private async uploadBrandAsset(
     label: 'logo' | 'favicon',
     file: File,
-  ): Promise<{ key: string }> {
+  ): Promise<{ key: string; url: string }> {
     try {
       return await firstValueFrom(
         label === 'logo'

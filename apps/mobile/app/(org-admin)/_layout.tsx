@@ -14,6 +14,9 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
 };
 
+// Breadcrumb = sección padre (sin rutas hijas con padre en org-admin actualmente, pero se deja para futuro)
+const routeBreadcrumbs: Record<string, string> = {};
+
 export default function OrgAdminLayout() {
   const router = useRouter();
   const pathname = usePathname();
@@ -36,9 +39,10 @@ export default function OrgAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
+  const breadcrumb = routeBreadcrumbs[currentSegment];
 
   return (
-    <AdminShell title={title} variant="org">
+    <AdminShell title={title} breadcrumb={breadcrumb} variant="org">
       <Slot />
     </AdminShell>
   );
@@ -47,6 +51,6 @@ export default function OrgAdminLayout() {
 const styles = StyleSheet.create({
   loader: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F9FAFB',
   },
 });

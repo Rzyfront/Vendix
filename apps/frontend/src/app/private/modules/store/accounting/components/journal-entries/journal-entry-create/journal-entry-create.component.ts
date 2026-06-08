@@ -87,7 +87,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             <div class="flex items-center justify-between mb-3">
               <h3 class="text-sm font-semibold text-text-primary">Líneas del Asiento</h3>
               <app-button variant="outline" size="sm" (clicked)="addLine()">
-                <app-icon name="plus" [size]="14"></app-icon>
+                <app-icon slot="icon" name="plus" [size]="14"></app-icon>
                 Añadir Línea
               </app-button>
             </div>

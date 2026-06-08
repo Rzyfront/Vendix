@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { Observable, of } from 'rxjs';
+import { firstValueFrom, Observable, of } from 'rxjs';
 import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { PriceTier, ProductPriceTierOverride } from '../interfaces';
 import { PriceTiersService } from './price-tiers.service';
@@ -82,9 +82,7 @@ export class PriceTierCacheService {
    * to the cart so the selector is responsive when the user opens it.
    */
   prefetchProductOverrides(productId: number): void {
-    this.getProductOverrides(productId)
-      .pipe(tap(() => void 0))
-      .subscribe();
+    void firstValueFrom(this.getProductOverrides(productId).pipe(tap(() => void 0)));
   }
 
   /** Drop all cached entries — call after admin mutations on tiers/overrides. */

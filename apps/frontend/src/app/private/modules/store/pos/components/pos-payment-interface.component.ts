@@ -51,6 +51,7 @@ import {
 import { CartState } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { StoreSettingsFacade } from '../../../../../core/store/store-settings/store-settings.facade';
+import type { BusinessHours } from '../../../../../core/models/store-settings.interface';
 
 interface PaymentState {
   selectedMethod: PaymentMethod | null;
@@ -1520,7 +1521,7 @@ export class PosPaymentInterfaceComponent {
   readonly showOnscreenKeypad = computed(
     () => this.settingsFacade.pos()?.show_onscreen_keypad !== false,
   );
-  readonly businessHours = computed<Record<string, { open: string; close: string }>>(
+  readonly businessHours = computed<Record<string, BusinessHours>>(
     () => (this.settingsFacade.pos()?.business_hours as any) ?? {},
   );
   readonly defaultPaymentForm = computed<'contado' | 'credito'>(
@@ -1711,7 +1712,7 @@ export class PosPaymentInterfaceComponent {
 
   private createCustomerForm(): FormGroup {
     return this.fb.group({
-      email: ['', [Validators.required, Validators.email]],
+      email: ['', [Validators.email]],
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: [''],
@@ -1773,11 +1774,23 @@ export class PosPaymentInterfaceComponent {
       return true;
     }
 
-    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+    const currentTime = now.getHours() * 60 + now.getMinutes();
+
+    // Custom mode: multiple blocks
+    if (todayHours.blocks && todayHours.blocks.length > 0) {
+      for (const block of todayHours.blocks) {
+        if (block.open === 'closed' || block.close === 'closed') continue;
+        const [oH, oM] = block.open.split(':').map(Number);
+        const [cH, cM] = block.close.split(':').map(Number);
+        if (currentTime >= oH * 60 + oM && currentTime <= cH * 60 + cM) return true;
+      }
       return false;
     }
 
-    const currentTime = now.getHours() * 60 + now.getMinutes();
+    // Continuous mode
+    if (todayHours.open === 'closed' || todayHours.close === 'closed') {
+      return false;
+    }
 
     const [openHour, openMinute] = todayHours.open.split(':').map(Number);
     const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);

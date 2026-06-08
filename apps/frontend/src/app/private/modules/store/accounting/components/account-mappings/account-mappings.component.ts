@@ -1,12 +1,17 @@
-import {Component, inject, signal, effect, untracked,
-  DestroyRef} from '@angular/core';
+import {
+  Component,
+  inject,
+  signal,
+  effect,
+  untracked,
+  DestroyRef,
+} from '@angular/core';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
-import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { of, catchError } from 'rxjs';
-
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { environment } from '../../../../../../../environments/environment';
@@ -15,21 +20,25 @@ import { AppType } from '../../../../../../core/models/environment.enum';
 
 import {
   AccountMapping,
-  ChartAccount} from '../../interfaces/accounting.interface';
+  ChartAccount,
+} from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,
   selectAccountMappingsLoading,
-  selectLeafAccounts} from '../../state/selectors/accounting.selectors';
+  selectLeafAccounts,
+} from '../../state/selectors/accounting.selectors';
 import {
   loadAccountMappings,
   saveAccountMappings,
   resetAccountMappings,
-  loadAccounts} from '../../state/actions/accounting.actions';
+  loadAccounts,
+} from '../../state/actions/accounting.actions';
 import {
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
-  IconComponent} from '../../../../../../shared/components/index';
+  IconComponent,
+} from '../../../../../../shared/components/index';
 
 interface MappingGroup {
   key: string;
@@ -68,6 +77,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'refund.completed.vat_payable': 'IVA por Pagar (Reversa Devolucion)',
   'purchase_order.received.inventory': 'Inventario (Entrada)',
   'purchase_order.received.accounts_payable': 'Proveedores',
+  'support_document.accepted.expense': 'Compra/Gasto Soportado',
+  'support_document.accepted.vat_deductible': 'IVA Descontable',
+  'support_document.accepted.withholding_payable': 'Retenciones por Pagar',
+  'support_document.accepted.accounts_payable': 'Proveedor Documento Soporte',
   'inventory.adjusted.inventory': 'Inventario (Ajuste)',
   'inventory.adjusted.shrinkage': 'Faltantes de Inventario',
   'credit_sale.created.accounts_receivable':
@@ -123,10 +136,12 @@ const MAPPING_LABELS: Record<string, string> = {
   'ar.write_off.bad_debt': 'Deudas Incobrables',
   'ar.write_off.accounts_receivable': 'Cuentas por Cobrar (Castigo)',
   // Nomina por Departamento
-  'payroll.approved.payroll_expense.administrative': 'Gastos Personal (Administrativo)',
+  'payroll.approved.payroll_expense.administrative':
+    'Gastos Personal (Administrativo)',
   'payroll.approved.payroll_expense.operational': 'Gastos Personal (Operativo)',
   'payroll.approved.payroll_expense.sales': 'Gastos Personal (Ventas)',
-  'payroll.approved.social_security.administrative': 'Seg. Social (Administrativo)',
+  'payroll.approved.social_security.administrative':
+    'Seg. Social (Administrativo)',
   'payroll.approved.social_security.operational': 'Seg. Social (Operativo)',
   'payroll.approved.social_security.sales': 'Seg. Social (Ventas)',
   // Nómina individual — gastos (débitos)
@@ -143,7 +158,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'payroll.approved.compensation_fund_expense': 'Caja Compensacion (Gasto)',
   // Nómina individual — pasivos provisiones (créditos)
   'payroll.approved.liability_severance': 'Cesantias por Pagar',
-  'payroll.approved.liability_severance_interest': 'Intereses Cesantias por Pagar',
+  'payroll.approved.liability_severance_interest':
+    'Intereses Cesantias por Pagar',
   'payroll.approved.liability_vacation': 'Vacaciones por Pagar',
   'payroll.approved.liability_bonus': 'Prima de Servicios por Pagar',
   // Nómina individual — aportes patronales por pagar (créditos)
@@ -173,11 +189,14 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
-  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)',
+  'stock_transfer.completed.inventory_destination':
+    'Inventario (Tienda Destino)',
   'intercompany_transfer.shipped.receivable': 'CxC Intercompany',
   'intercompany_transfer.shipped.inventory': 'Inventario Enviado Intercompany',
-  'intercompany_transfer.received.inventory': 'Inventario Recibido Intercompany',
-  'intercompany_transfer.received.payable': 'CxP Intercompany'};
+  'intercompany_transfer.received.inventory':
+    'Inventario Recibido Intercompany',
+  'intercompany_transfer.received.payable': 'CxP Intercompany',
+};
 
 const GROUP_DEFINITIONS: Array<{
   key: string;
@@ -189,27 +208,32 @@ const GROUP_DEFINITIONS: Array<{
     key: 'invoicing',
     label: 'Facturacion',
     icon: 'file-text',
-    prefixes: ['invoice.validated.']},
+    prefixes: ['invoice.validated.'],
+  },
   {
     key: 'payments',
     label: 'Pagos',
     icon: 'credit-card',
-    prefixes: ['payment.received.']},
+    prefixes: ['payment.received.'],
+  },
   {
     key: 'expenses',
     label: 'Gastos',
     icon: 'trending-down',
-    prefixes: ['expense.approved.', 'expense.paid.']},
+    prefixes: ['expense.approved.', 'expense.paid.'],
+  },
   {
     key: 'payroll',
     label: 'Nomina',
     icon: 'users',
-    prefixes: ['payroll.approved.', 'payroll.paid.']},
+    prefixes: ['payroll.approved.', 'payroll.paid.'],
+  },
   {
     key: 'credit_sales',
     label: 'Ventas a Credito',
     icon: 'file-plus',
-    prefixes: ['credit_sale.created.']},
+    prefixes: ['credit_sale.created.'],
+  },
   {
     key: 'inventory',
     label: 'Inventario',
@@ -218,64 +242,81 @@ const GROUP_DEFINITIONS: Array<{
       'order.completed.',
       'refund.completed.',
       'purchase_order.received.',
+      'support_document.accepted.',
       'purchase_order.payment.',
       'inventory.adjusted.',
-    ]},
+    ],
+  },
   {
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',
-    prefixes: ['layaway.payment.', 'layaway.completed.']},
+    prefixes: ['layaway.payment.', 'layaway.completed.'],
+  },
   {
     key: 'fixed_assets',
     label: 'Activos Fijos',
     icon: 'hard-drive',
-    prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.']},
+    prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.'],
+  },
   {
     key: 'withholding',
     label: 'Retencion en la Fuente',
     icon: 'percent',
-    prefixes: ['withholding.applied.']},
+    prefixes: ['withholding.applied.'],
+  },
   {
     key: 'settlements',
     label: 'Liquidaciones',
     icon: 'user-minus',
-    prefixes: ['settlement.paid.']},
+    prefixes: ['settlement.paid.'],
+  },
   {
     key: 'wallet',
     label: 'Wallet / Monedero',
     icon: 'wallet',
-    prefixes: ['wallet.topup.', 'wallet.debit.']},
+    prefixes: ['wallet.topup.', 'wallet.debit.'],
+  },
   {
     key: 'accounts_payable',
     label: 'Cuentas por Pagar',
     icon: 'file-output',
-    prefixes: ['ap.payment.', 'ap.write_off.']},
+    prefixes: ['ap.payment.', 'ap.write_off.'],
+  },
   {
     key: 'accounts_receivable',
     label: 'Cuentas por Cobrar (Castigos)',
     icon: 'file-input',
-    prefixes: ['ar.write_off.']},
+    prefixes: ['ar.write_off.'],
+  },
   {
     key: 'installments',
     label: 'Cuotas de Credito',
     icon: 'calendar-check',
-    prefixes: ['installment_payment.received.']},
+    prefixes: ['installment_payment.received.'],
+  },
   {
     key: 'stock_transfers',
     label: 'Transferencias de Stock',
     icon: 'repeat',
-    prefixes: ['stock_transfer.completed.', 'intercompany_transfer.']},
+    prefixes: ['stock_transfer.completed.', 'intercompany_transfer.'],
+  },
   {
     key: 'commissions',
     label: 'Comisiones',
     icon: 'award',
-    prefixes: ['commission.calculated.']},
+    prefixes: ['commission.calculated.'],
+  },
   {
     key: 'cash_register',
     label: 'Caja Registradora',
     icon: 'calculator',
-    prefixes: ['cash_register.opened.', 'cash_register.closed.', 'cash_register.movement.']},
+    prefixes: [
+      'cash_register.opened.',
+      'cash_register.closed.',
+      'cash_register.movement.',
+    ],
+  },
 ];
 
 const GROUP_FLOW_MAP: Record<string, string> = {
@@ -295,7 +336,8 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   installments: 'installments',
   stock_transfers: 'stock_transfers',
   commissions: 'commissions',
-  cash_register: 'cash_register'};
+  cash_register: 'cash_register',
+};
 
 @Component({
   selector: 'vendix-account-mappings',
@@ -308,22 +350,21 @@ const GROUP_FLOW_MAP: Record<string, string> = {
     NgClass,
   ],
   templateUrl: './account-mappings.component.html',
-  styleUrls: ['./account-mappings.component.scss']})
+  styleUrls: ['./account-mappings.component.scss'],
+})
 export class AccountMappingsComponent {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
   private tenantFacade = inject(TenantFacade);
-// State signals
-  readonly loading = toSignal(
-    this.store.select(selectAccountMappingsLoading),
-    { initialValue: false }
-  );
-  readonly leaf_accounts = toSignal(
-    this.store.select(selectLeafAccounts),
-    { initialValue: [] as ChartAccount[] }
-  );
+  // State signals
+  readonly loading = toSignal(this.store.select(selectAccountMappingsLoading), {
+    initialValue: false,
+  });
+  readonly leaf_accounts = toSignal(this.store.select(selectLeafAccounts), {
+    initialValue: [] as ChartAccount[],
+  });
 
   // Local state
   readonly mapping_groups = signal<MappingGroup[]>([]);
@@ -343,7 +384,7 @@ export class AccountMappingsComponent {
       .subscribe((mappings) => {
         this.mapping_groups.set(this.buildGroups(mappings));
         this.has_custom_mappings.set(
-          mappings.some((m) => m.source !== 'default')
+          mappings.some((m) => m.source !== 'default'),
         );
         this.changed_mappings.set(new Map());
         this.has_changes.set(false);
@@ -393,7 +434,7 @@ export class AccountMappingsComponent {
         return null;
     }
   }
-getLabel(mapping_key: string): string {
+  getLabel(mapping_key: string): string {
     return MAPPING_LABELS[mapping_key] || mapping_key;
   }
 
@@ -401,7 +442,8 @@ getLabel(mapping_key: string): string {
     const labels: Record<string, string> = {
       default: 'Default',
       organization: 'Organizacion',
-      store: 'Tienda'};
+      store: 'Tienda',
+    };
     return labels[source] || source;
   }
 
@@ -430,7 +472,8 @@ getLabel(mapping_key: string): string {
     const mappings = Array.from(this.changed_mappings().entries()).map(
       ([mapping_key, account_id]) => ({
         mapping_key,
-        account_id}),
+        account_id,
+      }),
     );
     this.store.dispatch(saveAccountMappings({ mappings }));
   }
@@ -457,7 +500,9 @@ getLabel(mapping_key: string): string {
     const env = this.tenantFacade.currentEnvironment();
     const endpoint = env ? this.getSettingsEndpoint(env) : null;
     if (!endpoint) {
-      this.toast.error('No se puede actualizar la configuración en este contexto');
+      this.toast.error(
+        'No se puede actualizar la configuración en este contexto',
+      );
       return;
     }
     const new_value = !this.isFlowEnabled(group_key);
@@ -465,7 +510,8 @@ getLabel(mapping_key: string): string {
     this.flow_toggles.set(updatedToggles);
     this.http
       .patch(`${environment.apiUrl}${endpoint}`, {
-        module_flows: { accounting: { [flow_key]: new_value } }})
+        module_flows: { accounting: { [flow_key]: new_value } },
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
@@ -473,18 +519,18 @@ getLabel(mapping_key: string): string {
           this.toast.success(
             `Flujo "${group?.label || group_key}" ${
               new_value ? 'activado' : 'desactivado'
-            }`
+            }`,
           );
         },
         error: () => {
           const revertedToggles = {
             ...this.flow_toggles(),
-            [flow_key]: !new_value};
+            [flow_key]: !new_value,
+          };
           this.flow_toggles.set(revertedToggles);
-          this.toast.error(
-            'Error al actualizar la configuracion del flujo'
-          );
-        }});
+          this.toast.error('Error al actualizar la configuracion del flujo');
+        },
+      });
   }
 
   private buildGroups(mappings: AccountMapping[]): MappingGroup[] {
@@ -492,6 +538,7 @@ getLabel(mapping_key: string): string {
       ...def,
       mappings: mappings.filter((m) =>
         def.prefixes.some((prefix) => m.mapping_key.startsWith(prefix)),
-      )})).filter((g) => g.mappings.length > 0);
+      ),
+    })).filter((g) => g.mappings.length > 0);
   }
 }

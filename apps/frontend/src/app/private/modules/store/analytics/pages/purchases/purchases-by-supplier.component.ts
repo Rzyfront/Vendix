@@ -1,31 +1,31 @@
-import { Component, DestroyRef, OnInit, computed, effect, inject, signal, viewChild, TemplateRef } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute } from '@angular/router';
 import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { TableComponent, TableColumn } from '../../../../../../shared/components/table/table.component';
-import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { AnalyticsService, PurchasesBySupplier } from '../../services/analytics.service';
 import { EChartsOption } from 'echarts';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 @Component({
   selector: 'vendix-purchases-by-supplier',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, TableComponent, CurrencyPipe, DateRangeFilterComponent, ExportButtonComponent],
+  imports: [CommonModule, RouterModule, CardComponent, ChartComponent, StatsComponent, IconComponent, DateRangeFilterComponent, ExportButtonComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4" style="display:block;width:100%">
       <!-- Stats Cards -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Proveedores"
-          [value]="activeData().length"
+          [value]="chartData().length"
           smallText=" proveedores"
           iconName="truck"
           iconBgColor="bg-blue-100"
@@ -76,24 +76,6 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
           ></vendix-date-range-filter>
-          <div class="flex rounded-lg border border-border overflow-hidden">
-            <button
-              (click)="setActiveView('chart')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'chart' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="bar-chart-2" [size]="16"></app-icon>
-              Gráficas
-            </button>
-            <button
-              (click)="setActiveView('table')"
-              class="flex items-center gap-1.5 px-3 py-1.5 text-sm transition-colors"
-              [class]="activeView() === 'table' ? 'bg-black text-white' : 'bg-surface text-text-secondary hover:bg-background'"
-            >
-              <app-icon name="table" [size]="16"></app-icon>
-              Tabla
-            </button>
-          </div>
           <vendix-export-button
             [loading]="exporting()"
             (export)="exportReport()"
@@ -103,14 +85,13 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 
       <!-- Content Grid -->
       <div class="grid grid-cols-1 gap-6">
-      @if (activeLoading()) {
+      @if (chartLoading()) {
         <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
       } @else {
 
-        @if (activeView() === 'chart') {
         <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
           <div slot="header" class="flex flex-col">
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Gasto por Proveedor</span>
@@ -119,159 +100,45 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
             <app-chart [options]="chartOptions()" size="large"></app-chart>
           </div>
         </app-card>
-        }
-
-        @if (activeView() === 'table') {
-        <app-card shadow="none" [responsivePadding]="true">
-          <app-table [data]="tableData()" [columns]="tableColumns" [loading]="tableLoading()">
-          </app-table>
-        </app-card>
-        }
       }
       </div>
     </div>
 
-    <ng-template #supplierCell let-row>
-      <div class="flex items-center gap-2">
-        <app-icon name="truck" [size]="16" class="text-text-tertiary"></app-icon>
-        <span class="font-medium">{{ row.supplier_name }}</span>
-      </div>
-    </ng-template>
-
-    <ng-template #orderCountCell let-row>
-      <span class="badge bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">{{ row.order_count }} órdenes</span>
-    </ng-template>
-
-    <ng-template #totalSpentCell let-row>
-      <span class="font-semibold text-text-primary">{{ row.total_spent | currency }}</span>
-    </ng-template>
-
-    <ng-template #pendingOrdersCell let-row>
-      @if (row.pending_orders > 0) {
-        <span class="badge bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs">{{ row.pending_orders }} pendientes</span>
-      } @else {
-        <span class="badge bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Sin pendientes</span>
-      }
-    </ng-template>
-
-    <ng-template #lastOrderDateCell let-row>
-      @if (row.last_order_date) {
-        {{ row.last_order_date | date:'shortDate' }}
-      } @else {
-        <span class="text-text-tertiary">Sin órdenes</span>
-      }
-    </ng-template>
   `,
 })
 export class PurchasesBySupplierComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
-
-  readonly supplierTemplate = viewChild<TemplateRef<any>>('supplierCell');
-  readonly orderCountTemplate = viewChild<TemplateRef<any>>('orderCountCell');
-  readonly totalSpentTemplate = viewChild<TemplateRef<any>>('totalSpentCell');
-  readonly pendingOrdersTemplate = viewChild<TemplateRef<any>>('pendingOrdersCell');
-  readonly lastOrderDateTemplate = viewChild<TemplateRef<any>>('lastOrderDateCell');
+  private readonly route = inject(ActivatedRoute);
 
   chartLoading = signal(false);
-  tableLoading = signal(false);
   chartData = signal<PurchasesBySupplier[]>([]);
-  tableData = signal<PurchasesBySupplier[]>([]);
   chartOptions = signal<EChartsOption>({});
-  activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
   private chartQueryKey = signal<string | null>(null);
-  private tableQueryKey = signal<string | null>(null);
-  readonly activeData = computed(() =>
-    this.activeView() === 'chart' ? this.chartData() : this.tableData(),
-  );
-  readonly activeLoading = computed(() =>
-    this.activeView() === 'chart' ? this.chartLoading() : this.tableLoading(),
-  );
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'
   });
-  tableColumns: TableColumn[] = [
-    { key: 'supplier_name', label: 'Proveedor' },
-    { key: 'order_count', label: 'Órdenes' },
-    { key: 'total_spent', label: 'Total Gastado' },
-    { key: 'pending_orders', label: 'Estado' },
-    { key: 'last_order_date', label: 'Última Orden' },
-  ];
-
-  constructor() {
-    effect(() => {
-      const supplierTpl = this.supplierTemplate();
-      const orderCountTpl = this.orderCountTemplate();
-      const totalSpentTpl = this.totalSpentTemplate();
-      const pendingTpl = this.pendingOrdersTemplate();
-      const lastOrderTpl = this.lastOrderDateTemplate();
-
-      this.tableColumns = this.tableColumns.map(col => {
-        if (col.key === 'supplier_name' && supplierTpl) {
-          return { ...col, template: supplierTpl };
-        }
-        if (col.key === 'order_count' && orderCountTpl) {
-          return { ...col, template: orderCountTpl };
-        }
-        if (col.key === 'total_spent' && totalSpentTpl) {
-          return { ...col, template: totalSpentTpl };
-        }
-        if (col.key === 'pending_orders' && pendingTpl) {
-          return { ...col, template: pendingTpl };
-        }
-        if (col.key === 'last_order_date' && lastOrderTpl) {
-          return { ...col, template: lastOrderTpl };
-        }
-        return col;
-      });
-    });
-  }
 
   ngOnInit(): void {
-    this.loadActiveView();
-  }
-
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    this.loadActiveView();
-  }
-
-  private loadActiveView(): void {
-    if (this.activeView() === 'chart') {
-      this.loadChartData();
-      return;
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.chartQueryKey.set(null);
     }
-    this.loadTableData();
-  }
-
-  private buildQuery(mode: 'chart' | 'table') {
-    return {
-      date_range: this.dateRange(),
-      limit: mode === 'chart' ? 10 : 25,
-      ...(mode === 'table' && { page: 1 }),
-    };
-  }
-
-  private buildQueryKey(mode: 'chart' | 'table'): string {
-    return JSON.stringify({ mode, query: this.buildQuery(mode) });
-  }
-
-  private invalidateModeData(): void {
-    this.chartQueryKey.set(null);
-    this.tableQueryKey.set(null);
+    this.loadChartData();
   }
 
   private loadChartData(): void {
-    const queryKey = this.buildQueryKey('chart');
+    const queryKey = JSON.stringify({ query: this.buildQuery() });
     if (this.chartQueryKey() === queryKey) return;
 
     this.chartLoading.set(true);
 
     this.analyticsService
-      .getPurchasesBySupplier(this.buildQuery('chart'))
+      .getPurchasesBySupplier(this.buildQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
       next: (response) => {
@@ -289,26 +156,11 @@ export class PurchasesBySupplierComponent implements OnInit {
       });
   }
 
-  private loadTableData(): void {
-    const queryKey = this.buildQueryKey('table');
-    if (this.tableQueryKey() === queryKey) return;
-
-    this.tableLoading.set(true);
-
-    this.analyticsService
-      .getPurchasesBySupplier(this.buildQuery('table'))
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-      next: (response) => {
-        this.tableData.set(this.extractRows(response));
-        this.tableQueryKey.set(queryKey);
-        this.tableLoading.set(false);
-      },
-      error: () => {
-        this.tableData.set([]);
-        this.tableLoading.set(false);
-      }
-      });
+  private buildQuery() {
+    return {
+      date_range: this.dateRange(),
+      limit: 10,
+    };
   }
 
   private extractRows(response: any): PurchasesBySupplier[] {
@@ -375,17 +227,17 @@ legend: {
   }
 
   getTotalOrders(): number {
-    return this.activeData().reduce((sum, s) => sum + (s.order_count || 0), 0);
+    return this.chartData().reduce((sum, s) => sum + (s.order_count || 0), 0);
   }
 
   getTotalSpent(): string {
-    const total = this.activeData().reduce((sum, s) => sum + (s.total_spent || 0), 0);
+    const total = this.chartData().reduce((sum, s) => sum + (s.total_spent || 0), 0);
     return '$' + total.toLocaleString('es-CO', { maximumFractionDigits: 0 });
   }
 
   getTopSupplier(): string {
-    if (!this.activeData().length) return '-';
-    const top = [...this.activeData()].sort((a, b) => b.total_spent - a.total_spent)[0];
+    if (!this.chartData().length) return '-';
+    const top = [...this.chartData()].sort((a, b) => b.total_spent - a.total_spent)[0];
     return top?.supplier_name?.substring(0, 15) || '-';
   }
 
@@ -412,7 +264,7 @@ legend: {
 
   onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
-    this.invalidateModeData();
-    this.loadActiveView();
+    this.chartQueryKey.set(null);
+    this.loadChartData();
   }
 }

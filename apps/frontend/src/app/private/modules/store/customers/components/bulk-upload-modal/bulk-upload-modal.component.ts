@@ -270,7 +270,7 @@ import {
               (clicked)="goToStep(0)"
               [disabled]="isUploading()"
             >
-              <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
+              <app-icon name="arrow-left" [size]="14" slot="icon" ></app-icon>
               Atrás
             </app-button>
           }
@@ -290,7 +290,7 @@ import {
               [disabled]="isUploading()"
               [loading]="isUploading()"
             >
-              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Cargar {{ parsedData()!.length }} Clientes
             </app-button>
           }

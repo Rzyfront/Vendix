@@ -32,6 +32,8 @@ import {
 import { Brand, CreateBrandDto, UpdateBrandDto } from '../../../interfaces';
 import { BrandsService } from '../../../services/brands.service';
 import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
+import { dataUrlToFile } from '../../../../../../../shared/utils';
+import { extractApiErrorMessage } from '../../../../../../../core/utils';
 
 @Component({
   selector: 'app-brand-form-modal',
@@ -189,6 +191,12 @@ export class BrandFormModalComponent {
   readonly logoPreviewUrl = signal<string | null>(null);
   readonly isUploadingLogo = signal(false);
   readonly isLogoSourceModalOpen = signal(false);
+  // True solo si el usuario subió/quitó logo en esta sesión de edición.
+  // Evita re-enviar la URL firmada de display en el payload (key efímera) y que
+  // una URL presigned > maxLength(500) invalide el form. Espejo del patrón en
+  // category-form-modal (preventivo: marcas no firma thumbnail, pero comparte la
+  // fragilidad de mezclar valor de display y valor de persistencia).
+  private readonly logoDirty = signal(false);
 
   form: FormGroup;
   private readonly brandsService = inject(BrandsService);
@@ -205,6 +213,7 @@ export class BrandFormModalComponent {
       } else if (open && !current) {
         this.form.reset({ state: true, is_featured: false });
         this.logoPreviewUrl.set(null);
+        this.logoDirty.set(false);
       }
     });
   }
@@ -232,11 +241,13 @@ export class BrandFormModalComponent {
       name: brand.name,
       slug: brand.slug || '',
       description: brand.description || '',
-      logo_url: brand.logo_url || '',
+      // El control solo lleva la KEY de S3, nunca la URL firmada de display.
+      logo_url: '',
       state: brand.state !== 'inactive',
       is_featured: !!brand.is_featured,
     });
     this.logoPreviewUrl.set(brand.logo_url || null);
+    this.logoDirty.set(false);
   }
 
   getError(field: string): string {
@@ -279,9 +290,14 @@ export class BrandFormModalComponent {
       name: value.name,
       slug: value.slug ? value.slug : undefined,
       description: value.description ? value.description : undefined,
-      logo_url: value.logo_url ? value.logo_url : this.brand() ? '' : undefined,
       state: value.state ? 'active' : 'inactive',
     };
+
+    // Solo enviar logo_url cuando el usuario lo cambió en esta sesión.
+    // Sin cambios → se omite (backend preserva). Quitado → '' limpia.
+    if (this.logoDirty()) {
+      payload.logo_url = (value.logo_url ?? '').trim();
+    }
 
     const nextFeatured = !!value.is_featured;
     const currentFeatured = !!this.brand()?.is_featured;
@@ -303,10 +319,7 @@ export class BrandFormModalComponent {
 
     this.isUploadingLogo.set(true);
     try {
-      const file = await this.dataUrlToFile(
-        dataUrl,
-        `brand-logo-${Date.now()}.jpg`,
-      );
+      const file = dataUrlToFile(dataUrl, `brand-logo-${Date.now()}.jpg`);
       const result = await firstValueFrom(
         this.brandsService
           .uploadBrandLogo(file)
@@ -315,10 +328,11 @@ export class BrandFormModalComponent {
 
       this.form.patchValue({ logo_url: result.key });
       this.logoPreviewUrl.set(result.url);
+      this.logoDirty.set(true);
       this.form.markAsDirty();
       this.toastService.success('Logo cargado correctamente');
-    } catch {
-      this.toastService.error('No pudimos cargar el logo de la marca');
+    } catch (error) {
+      this.toastService.error(extractApiErrorMessage(error));
     } finally {
       this.isUploadingLogo.set(false);
     }
@@ -327,18 +341,7 @@ export class BrandFormModalComponent {
   removeLogo(): void {
     this.form.patchValue({ logo_url: '' });
     this.logoPreviewUrl.set(null);
+    this.logoDirty.set(true);
     this.form.markAsDirty();
-  }
-
-  private async dataUrlToFile(
-    dataUrl: string,
-    fileName: string,
-  ): Promise<File> {
-    const response = await fetch(dataUrl);
-    if (!response.ok) {
-      throw new Error('No se pudo preparar la imagen');
-    }
-    const blob = await response.blob();
-    return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
   }
 }

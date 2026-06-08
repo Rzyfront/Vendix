@@ -47,17 +47,11 @@ export class MovementsController {
   async findAll(@Query() query: MovementQueryDto) {
     try {
       const result = await this.movementsService.findAll(query);
-      if (result.data && result.meta) {
-        return this.responseService.paginated(
-          result.data,
-          result.meta.total,
-          result.meta.page,
-          result.meta.limit,
-          'Movimientos de inventario obtenidos exitosamente',
-        );
-      }
-      return this.responseService.success(
-        result,
+      return this.responseService.paginated(
+        result.data,
+        result.meta.total,
+        result.meta.page,
+        result.meta.limit,
         'Movimientos de inventario obtenidos exitosamente',
       );
     } catch (error) {

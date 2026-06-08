@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { certificateNitMatches } from '../dian-config/certificates/nit-match.util';
 
 type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
 type ReadinessDocumentType =
@@ -88,6 +89,7 @@ export class FiscalProductionReadinessService {
     test_set_id: string | null;
     last_test_result: unknown;
     nit?: string | null;
+    nit_dv?: string | null;
     accounting_entity_id?: number | null;
   }): void {
     const missing: string[] = [];
@@ -125,7 +127,11 @@ export class FiscalProductionReadinessService {
       missing.push('certificate_nit');
     } else if (
       config.nit &&
-      this.onlyDigits(config.certificate_nit) !== this.onlyDigits(config.nit)
+      !certificateNitMatches({
+        certificateTaxId: config.certificate_nit,
+        nit: config.nit,
+        dv: config.nit_dv,
+      })
     ) {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
         dian_configuration_id: config.id,

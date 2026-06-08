@@ -4,6 +4,7 @@ import {
   CertificateIssuerAdapter,
   CertificateValidationResult,
 } from './certificate-issuer.interface';
+import { certificateNitMatches, normalizeNitDigits } from './nit-match.util';
 
 @Injectable()
 export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter {
@@ -13,6 +14,7 @@ export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter 
     p12_buffer: Buffer;
     password: string;
     expected_tax_id?: string | null;
+    expected_dv?: string | null;
   }): Promise<CertificateValidationResult> {
     try {
       const forge = require('node-forge');
@@ -34,7 +36,7 @@ export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter 
       }
 
       const result = this.result(forge, cert, true);
-      const expectedTaxId = this.onlyDigits(params.expected_tax_id);
+      const expectedTaxId = normalizeNitDigits(params.expected_tax_id);
       if (expectedTaxId && !result.tax_id) {
         return {
           ...result,
@@ -42,7 +44,15 @@ export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter 
           error: 'Certificate tax identifier could not be verified',
         };
       }
-      if (expectedTaxId && result.tax_id && result.tax_id !== expectedTaxId) {
+      if (
+        expectedTaxId &&
+        result.tax_id &&
+        !certificateNitMatches({
+          certificateTaxId: result.tax_id,
+          nit: params.expected_tax_id,
+          dv: params.expected_dv,
+        })
+      ) {
         return {
           ...result,
           valid: false,
@@ -79,7 +89,7 @@ export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter 
       expires: cert.validity?.notAfter,
       serial_number: cert.serialNumber,
       fingerprint,
-      tax_id: this.extractTaxId(subject),
+      tax_id: this.extractTaxId(cert, subject),
       error,
     };
   }
@@ -93,9 +103,26 @@ export class ManualCertificateIssuerAdapter implements CertificateIssuerAdapter 
       .join(', ');
   }
 
-  private extractTaxId(value?: string): string | undefined {
-    if (!value) return undefined;
-    const matches = value.match(/\d{6,12}/g);
+  /**
+   * Extracts the entity NIT from the certificate. DIAN "persona jurídica"
+   * certificates carry the NIT (often with the DV appended) in the
+   * `serialNumber` subject attribute (OID 2.5.4.5); that is preferred over a
+   * blind digit scan, which could otherwise grab the legal representative's
+   * cédula or an OID value. Falls back to the first 6–12 digit run in the
+   * subject text when `serialNumber` has no usable digits.
+   */
+  private extractTaxId(cert: any, subject?: string): string | undefined {
+    const serialAttr = (cert?.subject?.attributes ?? []).find(
+      (attr: Record<string, any>) =>
+        attr.shortName === 'serialNumber' ||
+        attr.name === 'serialNumber' ||
+        attr.type === '2.5.4.5',
+    );
+    const fromSerial = this.onlyDigits(serialAttr?.value);
+    if (fromSerial && fromSerial.length >= 6) return fromSerial;
+
+    if (!subject) return undefined;
+    const matches = subject.match(/\d{6,12}/g);
     return matches?.map((item) => this.onlyDigits(item)).find(Boolean);
   }
 

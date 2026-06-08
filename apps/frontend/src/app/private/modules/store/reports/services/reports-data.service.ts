@@ -71,6 +71,14 @@ export class ReportsDataService {
       params = params.set('limit', String(options.limit));
     }
 
+    // Invalidate previous cache entries for this report (different date ranges)
+    const reportPrefix = `${report.id}-`;
+    for (const key of reportsCache.keys()) {
+      if (key.startsWith(reportPrefix)) {
+        reportsCache.delete(key);
+      }
+    }
+
     const cacheKey = `${report.id}-${dataEndpoint}-${JSON.stringify(options)}`;
     return this.withCache(cacheKey, () =>
       this.http.get<any>(url, { params }).pipe(

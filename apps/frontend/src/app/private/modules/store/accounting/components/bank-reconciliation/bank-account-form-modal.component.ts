@@ -93,7 +93,7 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
       <div slot="footer" class="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4">
         <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
         <app-button variant="primary" (clicked)="onSave()" [disabled]="saving()">
-          <app-icon name="save" [size]="16" slot="icon"></app-icon>
+          <app-icon name="save" [size]="16" slot="icon" ></app-icon>
           {{ editAccount() ? 'Guardar Cambios' : 'Crear Cuenta' }}
         </app-button>
       </div>

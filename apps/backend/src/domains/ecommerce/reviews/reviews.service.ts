@@ -207,7 +207,12 @@ export class EcommerceReviewsService {
       select: { first_name: true, last_name: true },
     });
 
-    // Create review (store_id auto-injected by EcommercePrismaService)
+    // Create review (store_id auto-injected by EcommercePrismaService).
+    // `state` se omite a propósito: el @default(pending) del schema Prisma
+    // se aplica, así la reseña queda pendiente de moderación y NO aparece
+    // públicamente hasta que el owner la apruebe desde /admin/customers/reviews.
+    // (Antes se forzaba state='approved' aquí, lo cual saltaba la moderación
+    // y rompía el flujo de aprobación manual del admin.)
     const review = await this.prisma.reviews.create({
       data: {
         product_id: dto.product_id,
@@ -216,7 +221,6 @@ export class EcommerceReviewsService {
         title: dto.title,
         comment: dto.comment,
         verified_purchase: true,
-        state: 'approved',
       },
     });
 

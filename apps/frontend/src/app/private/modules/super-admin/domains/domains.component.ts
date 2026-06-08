@@ -132,7 +132,7 @@ import './domains.component.css';
                 size="sm"
                 (clicked)="openCreateDomainModal()"
               >
-                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                 Crear Primer Dominio
               </app-button>
             </div>

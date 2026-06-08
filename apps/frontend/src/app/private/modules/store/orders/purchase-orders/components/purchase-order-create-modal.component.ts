@@ -88,7 +88,7 @@ import { InventoryService } from '../../../inventory/services';
             <div class="flex justify-between items-center mb-4">
               <h3 class="text-md font-semibold text-text-primary">Productos</h3>
               <app-button type="button" variant="secondary" size="sm" (clicked)="addItem()">
-                <app-icon name="plus" [size]="14" class="mr-1"></app-icon>
+                <app-icon slot="icon" name="plus" [size]="14" class="mr-1"></app-icon>
                 Agregar Producto
               </app-button>
             </div>
@@ -136,7 +136,7 @@ import { InventoryService } from '../../../inventory/services';
                     (clicked)="removeItem(i)"
                     [disabled]="items.length === 1"
                     >
-                    <app-icon name="trash-2" [size]="16" class="text-red-500"></app-icon>
+                    <app-icon slot="icon" name="trash-2" [size]="16" class="text-red-500"></app-icon>
                   </app-button>
                 </div>
               }

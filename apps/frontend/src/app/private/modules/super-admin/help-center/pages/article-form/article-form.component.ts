@@ -14,12 +14,13 @@ import {
 } from '../../../../../../shared/components/selector/selector.component';
 import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-import { FileUploadDropzoneComponent } from '../../../../../../shared/components/file-upload-dropzone/file-upload-dropzone.component';
 import { MarkdownEditorComponent } from '../../../../../../shared/components/markdown-editor/markdown-editor.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { ImageSourceModalComponent } from '../../../../../../shared/components/image-source-modal/image-source-modal.component';
+import { dataUrlToFile } from '../../../../../../shared/utils/data-url.util';
 
 @Component({
   selector: 'app-article-form',
@@ -30,12 +31,12 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
     TextareaComponent,
     SelectorComponent,
     ToggleComponent,
-    FileUploadDropzoneComponent,
     MarkdownEditorComponent,
     IconComponent,
     StickyHeaderComponent,
     ButtonComponent,
-    ModalComponent
+    ModalComponent,
+    ImageSourceModalComponent
 ],
   template: `
     <div class="flex flex-col gap-4 md:gap-6">
@@ -106,7 +107,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
                 ></app-selector>
                 <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
                   customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
-                  <app-icon name="plus" size="20"></app-icon>
+                  <app-icon slot="icon" name="plus" size="20"></app-icon>
                 </app-button>
               </div>
               <app-selector
@@ -128,19 +129,56 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
               <app-icon name="image" size="18" class="text-primary-600"></app-icon>
               <h2 class="text-base font-bold text-gray-900">Imagen de portada</h2>
             </div>
-            <app-file-upload-dropzone
-              label="Subir imagen de portada"
-              helperText="JPG, PNG o WebP"
-              accept="image/*"
-              icon="image"
-              (fileSelected)="onCoverImageSelected($event)"
-              (fileRemoved)="onCoverImageRemoved()"
-            ></app-file-upload-dropzone>
-            @if (existingCoverUrl() && !coverFile()) {
-              <div class="mt-3">
-                <img [src]="existingCoverUrl()" alt="Cover" class="max-h-32 rounded-lg border border-border object-contain" />
+            <div class="flex flex-col gap-3">
+              @if (coverPreviewUrl()) {
+                <div class="relative w-fit">
+                  <img
+                    [src]="coverPreviewUrl()"
+                    alt="Portada"
+                    class="max-h-40 rounded-lg border border-gray-200 object-contain"
+                  />
+                </div>
+              } @else {
+                <div
+                  class="flex flex-col items-center justify-center gap-2 py-8 px-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 text-center"
+                >
+                  <app-icon name="image" size="28" class="text-gray-400"></app-icon>
+                  <p class="text-sm text-gray-500">Sin imagen de portada</p>
+                </div>
+              }
+              <div class="flex items-center gap-2">
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  [loading]="coverUploading()"
+                  [disabled]="coverUploading()"
+                  (clicked)="coverModalOpen.set(true)"
+                >
+                  <app-icon slot="icon" name="image" size="16"></app-icon>
+                  {{ coverPreviewUrl() ? 'Cambiar portada' : 'Subir portada' }}
+                </app-button>
+                @if (coverPreviewUrl()) {
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    [disabled]="coverUploading()"
+                    (clicked)="onCoverImageRemoved()"
+                  >
+                    <app-icon slot="icon" name="trash-2" size="16"></app-icon>
+                    Quitar
+                  </app-button>
+                }
               </div>
-            }
+            </div>
+
+            <app-image-source-modal
+              [(isOpen)]="coverModalOpen"
+              [singleImage]="true"
+              headerTitle="Portada"
+              (imagesAdded)="onCoverImages($event)"
+            ></app-image-source-modal>
           </section>
           <!-- Section 4: Content -->
           <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
@@ -240,8 +278,12 @@ export class ArticleFormComponent implements OnInit {
   loadingArticle = signal(false);
   submitting = signal(false);
   contentValue = signal('');
-  existingCoverUrl = signal<string | null>(null);
-  coverFile = signal<File | null>(null);
+  /** S3 key persisted into `cover_image_url`. */
+  coverImageKey = signal<string | null>(null);
+  /** Signed/display URL used only for the preview <img>. */
+  coverPreviewUrl = signal<string | null>(null);
+  coverModalOpen = signal(false);
+  coverUploading = signal(false);
   categoryOptions = signal<SelectorOption[]>([]);
   formValid = signal(false);
 
@@ -357,7 +399,10 @@ export class ArticleFormComponent implements OnInit {
         });
         this.contentValue.set(article.content);
         if (article.cover_image_url) {
-          this.existingCoverUrl.set(article.cover_image_url);
+          // Backend returns a signed URL on read. Use it for the preview and
+          // resubmit it untouched on update (backend re-extracts the S3 key).
+          this.coverImageKey.set(article.cover_image_url);
+          this.coverPreviewUrl.set(article.cover_image_url);
         }
         this.loadingArticle.set(false);
       },
@@ -378,25 +423,31 @@ export class ArticleFormComponent implements OnInit {
     }
   }
 
-  onCoverImageSelected(file: File) {
-    this.coverFile.set(file);
-    // Upload immediately
+  onCoverImages(dataUrls: string[]) {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
+
+    const file = dataUrlToFile(dataUrl, `cover-${Date.now()}.jpg`);
+    this.coverUploading.set(true);
     this.service.uploadImage(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
-        this.existingCoverUrl.set(result.url);
+        // Persist the S3 key; show the signed URL in the preview.
+        this.coverImageKey.set(result.key);
+        this.coverPreviewUrl.set(result.url);
+        this.coverUploading.set(false);
       },
       error: (err) => {
         const parsed = parseApiError(err);
         console.error('Error uploading cover image', parsed.devMessage ?? err);
         this.toast.error(parsed.errorCode ? parsed.userMessage : 'Error al subir la imagen de portada');
-        this.coverFile.set(null);
+        this.coverUploading.set(false);
       },
     });
   }
 
   onCoverImageRemoved() {
-    this.coverFile.set(null);
-    this.existingCoverUrl.set(null);
+    this.coverImageKey.set(null);
+    this.coverPreviewUrl.set(null);
   }
 
   onSubmit() {
@@ -425,7 +476,7 @@ export class ArticleFormComponent implements OnInit {
       category_id: formValue.category_id,
       module: formValue.module || undefined,
       tags,
-      cover_image_url: this.existingCoverUrl() || undefined,
+      cover_image_url: this.coverImageKey() || undefined,
       is_featured: formValue.is_featured,
       sort_order: formValue.sort_order || 0,
     };

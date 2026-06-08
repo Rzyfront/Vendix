@@ -183,7 +183,7 @@ import { InventoryService } from "../../services/inventory.service";
                     customClasses="!px-2 flex items-center justify-center"
                     (clicked)="openSupplierModal.emit()"
                     >
-                    <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+                    <app-icon name="plus" [size]="18" slot="icon" ></app-icon>
                   </app-button>
                   <app-tooltip position="top" size="sm" color="ai" content="Nuevo Proveedor"
                     [visible]="hoveredTooltip() === 'supplier'"
@@ -218,7 +218,7 @@ import { InventoryService } from "../../services/inventory.service";
                     customClasses="!px-2 flex items-center justify-center"
                     (clicked)="openWarehouseModal.emit()"
                     >
-                    <app-icon name="plus" [size]="18" slot="icon"></app-icon>
+                    <app-icon name="plus" [size]="18" slot="icon" ></app-icon>
                   </app-button>
                   <app-tooltip position="top" size="sm" color="ai" content="Nueva Bodega"
                     [visible]="hoveredTooltip() === 'warehouse'"
@@ -309,7 +309,7 @@ import { InventoryService } from "../../services/inventory.service";
                           customClasses="!px-2 flex items-center justify-center"
                           (clicked)="openSupplierModal.emit()"
                           >
-                          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                          <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                         </app-button>
                       </div>
                     </div>
@@ -332,7 +332,7 @@ import { InventoryService } from "../../services/inventory.service";
                           customClasses="!px-2 flex items-center justify-center"
                           (clicked)="openWarehouseModal.emit()"
                           >
-                          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                          <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
                         </app-button>
                       </div>
                     </div>

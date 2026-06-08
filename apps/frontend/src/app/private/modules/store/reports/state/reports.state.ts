@@ -14,13 +14,14 @@ export interface ReportsState {
   loading: boolean;
   exporting: boolean;
   error: string | null;
+  isForbidden: boolean;
   currentPage: number;
   totalPages: number;
   totalItems: number;
   itemsPerPage: number;
 }
 
-function getDefaultDateRange(): DateRangeFilter {
+export function getDefaultDateRange(): DateRangeFilter {
   const now = new Date();
   const start = new Date(now.getFullYear(), now.getMonth(), 1);
   return {
@@ -42,8 +43,9 @@ export const initialReportsState: ReportsState = {
   loading: false,
   exporting: false,
   error: null,
+  isForbidden: false,
   currentPage: 1,
   totalPages: 1,
   totalItems: 0,
-  itemsPerPage: 25,
+  itemsPerPage: 10,
 };

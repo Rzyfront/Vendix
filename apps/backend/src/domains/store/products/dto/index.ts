@@ -267,19 +267,6 @@ export class CreateProductDto {
   has_multiple_price_tiers?: boolean;
 
   @IsOptional()
-  @IsInt()
-  @Type(() => Number)
-  @Min(2, {
-    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
-  })
-  units_per_package?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  package_consumes_multiple_stock?: boolean;
-
-  @IsOptional()
   @IsArray()
   @IsInt({ each: true })
   enabled_price_tier_ids?: number[];
@@ -538,19 +525,6 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
-
-  @IsOptional()
-  @IsInt()
-  @Type(() => Number)
-  @Min(2, {
-    message: 'Las unidades por empaque deben ser mayores o iguales a 2',
-  })
-  units_per_package?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  @Type(() => Boolean)
-  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsArray()
@@ -1363,15 +1337,6 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   has_multiple_price_tiers?: boolean;
-
-  @IsOptional()
-  @IsNumber()
-  @Min(2, { message: 'Units per package must be at least 2' })
-  units_per_package?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  package_consumes_multiple_stock?: boolean;
 
   @IsOptional()
   @IsArray()

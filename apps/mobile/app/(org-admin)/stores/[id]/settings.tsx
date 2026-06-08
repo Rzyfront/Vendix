@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -34,13 +34,14 @@ export default function StoreSettingsScreen() {
   const [currency, setCurrency] = useState('COP');
   const [lowStockThreshold, setLowStockThreshold] = useState('10');
 
-  useState(() => {
+  useEffect(() => {
     if (settings) {
-      setTimezone(settings.timezone || 'America/Bogota');
-      setCurrency(settings.currency || 'COP');
-      setLowStockThreshold(String(settings.low_stock_threshold ?? 10));
+      const s = settings as any;
+      setTimezone(s.timezone || 'America/Bogota');
+      setCurrency(s.currency || 'COP');
+      setLowStockThreshold(String(s.low_stock_threshold ?? 10));
     }
-  });
+  }, [settings]);
 
   const updateMutation = useMutation({
     mutationFn: (data: any) => OrgStoreService.updateSettings(storeId, { settings: data }),

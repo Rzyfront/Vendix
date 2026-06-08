@@ -26,7 +26,7 @@ export class SubscriptionManualPaymentService {
       recordedByUserId: number;
     },
   ): Promise<void> {
-    return this.prisma.$transaction(async (tx: any) => {
+    const result = await this.prisma.$transaction(async (tx: any) => {
       const invoice = await tx.subscription_invoices.findUnique({
         where: { id: invoiceId },
         include: { store_subscription: true },
@@ -47,7 +47,7 @@ export class SubscriptionManualPaymentService {
         ? paidAmount.minus(invoiceTotal)
         : DECIMAL_ZERO;
 
-      await tx.subscription_payments.create({
+      const payment = await tx.subscription_payments.create({
         data: {
           invoice_id: invoiceId,
           state: 'succeeded',
@@ -134,7 +134,29 @@ export class SubscriptionManualPaymentService {
           } as Prisma.InputJsonValue,
         },
       });
+
+      return {
+        paymentId: payment.id,
+        subscriptionId: invoice.store_subscription_id,
+        storeId: invoice.store_id,
+      };
     });
+
+    try {
+      this.eventEmitter.emit('subscription.payment.succeeded', {
+        invoiceId,
+        paymentId: result.paymentId,
+        subscriptionId: result.subscriptionId,
+        storeId: result.storeId,
+        source: 'manual_payment',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `subscription.payment.succeeded emit failed for manual payment invoice ${invoiceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   async getInvoiceForManualPayment(invoiceId: number): Promise<{

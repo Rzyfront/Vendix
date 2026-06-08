@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
   viewChild,
@@ -13,12 +14,16 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillDianConfig,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   DianConfigFormComponent,
   DianConfigValue,
 } from '../../forms/dian-config-form/dian-config-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
 @Component({
   selector: 'app-fiscal-dian-config-step',
@@ -56,6 +61,7 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
 export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'dian_config';
   readonly valid = signal(false);
@@ -88,40 +94,74 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      // For ORG_ADMIN + fiscal_scope=STORE, narrow the GET to the selected
-      // store. For fiscal_scope=ORGANIZATION the DIAN config is org-wide
-      // (store_id IS NULL on the row), so we omit ?store_id and let the
-      // backend return the org-scoped record.
-      const query = this.service.storeQuery();
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}${query}`),
-      );
-      const payload = res?.data ?? res;
-      const arr = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : null;
-      const current = arr?.find((c: any) => c?.is_default) ?? arr?.[0] ?? null;
-      if (current && typeof current === 'object') {
-        this.existingConfigId.set(
-          typeof current.id === 'number' ? current.id : null,
-        );
-        this.initial.set({
-          name: current.name ?? '',
-          nit: current.nit ?? '',
-          nit_dv: current.nit_dv ?? '',
-          nit_type: current.nit_type ?? 'NIT',
-          environment: current.environment ?? 'test',
-          software_id: current.software_id ?? '',
-          software_pin: current.software_pin ?? '',
-          test_set_id: current.test_set_id ?? '',
-        } as Partial<DianConfigValue>);
-      }
-    } catch {
-      // Silent: empty form is fine
+    // Replaces the previous N+1 GET against `/invoicing/dian-config`. The
+    // prefill snapshot already contains the active dian_config row, which
+    // is what we need to seed the form. The canonical PATCH/POST endpoints
+    // in submit() are still the write path.
+    const dian = this.service.prefill()?.dian_config;
+    if (dian) {
+      this.existingConfigId.set(dian.id);
+      this.initial.set(this.toDianFormValue(dian));
+      return;
     }
+    // First-time activation: there's no dian_config row yet, so the snapshot
+    // is empty. Rather than show a blank form, inherit the fiscal identity
+    // (NIT, DV, business name) the user already entered in the Legal Data
+    // step. The in-session step ref is the freshest source; fall back to the
+    // (possibly stale) prefill legal_data snapshot.
+    const seeded = this.seedFromLegalData();
+    if (seeded) {
+      this.initial.set(seeded);
+    }
+  }
+
+  /**
+   * Builds an initial DIAN form value from the identity fields shared with
+   * the Legal Data step, so they aren't re-typed. Returns null when nothing
+   * useful is available yet (form stays empty and editable).
+   */
+  private seedFromLegalData(): Partial<DianConfigValue> | null {
+    const legalRef = this.service.stepRefs()?.['legal_data'] as
+      | { nit?: string; nit_dv?: string; legal_name?: string }
+      | undefined;
+    const legalPrefill = this.service.prefill()?.legal_data;
+
+    const nit = legalRef?.nit ?? legalPrefill?.nit ?? '';
+    const nit_dv = legalRef?.nit_dv ?? legalPrefill?.nit_dv ?? '';
+    const name = legalRef?.legal_name ?? legalPrefill?.legal_name ?? '';
+
+    if (!nit && !nit_dv && !name) {
+      return null;
+    }
+    return {
+      name,
+      nit,
+      nit_dv,
+      nit_type: 'NIT',
+      environment: 'test',
+      software_id: '',
+      software_pin: '',
+      test_set_id: '',
+    } as Partial<DianConfigValue>;
+  }
+
+  private toDianFormValue(
+    dian: WizardPrefillDianConfig,
+  ): Partial<DianConfigValue> {
+    return {
+      name: dian.name ?? '',
+      nit: dian.nit ?? '',
+      nit_dv: dian.nit_dv ?? '',
+      nit_type: dian.nit_type ?? 'NIT',
+      environment: dian.environment ?? 'test',
+      // software_id / software_pin / test_set_id are intentionally left
+      // blank — they're not part of the dian_configurations row and must be
+      // re-entered / re-fetched from a deeper endpoint if needed (the
+      // certificate is uploaded separately via /upload-certificate).
+      software_id: '',
+      software_pin: '',
+      test_set_id: '',
+    } as Partial<DianConfigValue>;
   }
 
   onValidity(v: boolean): void {
@@ -131,7 +171,10 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     const form = this.form();
     form.markAllTouched();
-    if (!this.valid()) return null;
+    if (!this.valid()) {
+      focusFirstInvalid(this.host);
+      return null;
+    }
 
     this.submitting.set(true);
     this.localError.set(null);

@@ -20,6 +20,7 @@ import {
 // Services
 import { CategoriesService } from '../../services';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { extractApiErrorMessage } from '../../../../../../core/utils';
 
 // Interfaces
 import {
@@ -213,7 +214,7 @@ export class CategoriesPageComponent implements OnInit {
           this.isLoading.set(false);
         },
         error: (error) => {
-          this.toastService.error(error || 'Error al cargar categorías');
+          this.toastService.error(extractApiErrorMessage(error));
           this.isLoading.set(false);
         },
       });
@@ -309,7 +310,7 @@ export class CategoriesPageComponent implements OnInit {
             this.loadCategories();
           },
           error: (error) => {
-            this.toastService.error(error || 'Error al actualizar categoría');
+            this.toastService.error(extractApiErrorMessage(error));
             this.isSubmitting.set(false);
           },
         });
@@ -325,7 +326,7 @@ export class CategoriesPageComponent implements OnInit {
             this.loadCategories();
           },
           error: (error) => {
-            this.toastService.error(error || 'Error al crear categoría');
+            this.toastService.error(extractApiErrorMessage(error));
             this.isSubmitting.set(false);
           },
         });
@@ -350,7 +351,8 @@ export class CategoriesPageComponent implements OnInit {
           this.loadCategories();
         },
         error: (error) => {
-          this.toastService.error(error || 'Error al cambiar estado');
+          this.toastService.error(extractApiErrorMessage(error));
+          this.loadCategories();
         },
       });
   }
@@ -372,9 +374,8 @@ export class CategoriesPageComponent implements OnInit {
           this.loadCategories();
         },
         error: (error) => {
-          this.toastService.error(
-            error || 'Error al cambiar destacado de la categoría',
-          );
+          this.toastService.error(extractApiErrorMessage(error));
+          this.loadCategories();
         },
       });
   }
@@ -423,9 +424,7 @@ export class CategoriesPageComponent implements OnInit {
               });
             return;
           }
-          this.toastService.error(
-            error?.error?.message || 'Error al eliminar categoría',
-          );
+          this.toastService.error(extractApiErrorMessage(error));
         },
       });
   }

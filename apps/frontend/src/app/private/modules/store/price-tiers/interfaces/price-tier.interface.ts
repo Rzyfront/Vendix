@@ -11,8 +11,9 @@
 /**
  * A store-scoped price tier (e.g. "Retail", "Wholesale", "Distributor").
  * `discount_percentage` applies over `base_price` when no per-product override
- * exists. `is_package_unit` flags package/bulk tiers that consume multiple
- * stock units when combined with `products.package_consumes_multiple_stock`.
+ * exists. `is_package_unit` flags package/bulk tiers; `units_per_package`
+ * carries how many stock units a package consumes (packaging cascade), with an
+ * optional per-product/per-variant `override_units_per_package`.
  */
 export interface PriceTier {
   id: number;
@@ -24,6 +25,12 @@ export interface PriceTier {
   is_active: boolean;
   is_default: boolean;
   is_package_unit: boolean;
+  /**
+   * Units per package for this tier (packaging cascade source). Packaging now
+   * lives on the tier (with an optional per-product/per-variant override),
+   * not on the product. See packaging.util.ts.
+   */
+  units_per_package?: number | null;
   sort_order: number;
   created_at: string | Date;
   updated_at: string | Date;
@@ -39,7 +46,13 @@ export interface ProductPriceTierOverride {
   product_id: number;
   variant_id?: number | null;
   price_tier_id: number;
-  override_price: number;
+  /**
+   * Whole-package override price. `null` => use the tier discount rule.
+   * When set (`> 0`) it is the price of the ENTIRE package.
+   */
+  override_price: number | null;
+  /** Per-product/per-variant override of units-per-package (packaging cascade). */
+  override_units_per_package?: number | null;
   created_at: string | Date;
   updated_at: string | Date;
 
@@ -55,6 +68,11 @@ export interface CreatePriceTierDto {
   is_active?: boolean;
   is_default?: boolean;
   is_package_unit?: boolean;
+  /**
+   * Units per package carried by this tier (packaging cascade). `null` is
+   * accepted on update to explicitly clear packaging (back to single-unit).
+   */
+  units_per_package?: number | null;
   sort_order?: number;
 }
 
@@ -72,5 +90,11 @@ export interface PriceTierQuery {
 export interface UpsertProductPriceTierOverrideDto {
   /** Omit/undefined => override applies to base product. */
   variant_id?: number;
-  override_price: number;
+  /**
+   * Whole-package override price. Optional — omit to use the tier discount
+   * rule while still overriding units-per-package.
+   */
+  override_price?: number;
+  /** Per-product/per-variant override of units-per-package (packaging cascade). */
+  override_units_per_package?: number;
 }

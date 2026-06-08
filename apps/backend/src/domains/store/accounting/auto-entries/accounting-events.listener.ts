@@ -1,10 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
+import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AutoEntryService, AutoEntryLine } from './auto-entry.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
-import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 
 @Injectable()
 export class AccountingEventsListener {
@@ -13,8 +11,7 @@ export class AccountingEventsListener {
   constructor(
     private readonly auto_entry_service: AutoEntryService,
     private readonly account_mapping_service: AccountMappingService,
-    private readonly prisma: StorePrismaService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly fiscal_gate: FiscalGateService,
   ) {}
 
   /**
@@ -46,43 +43,36 @@ export class AccountingEventsListener {
     };
   }
 
+  /**
+   * Gate de generación automática. Delega en FiscalGateService (fuente única
+   * compartida con ModuleFlowGuard): el maestro `fiscal_status.<area>` decide,
+   * `module_flows.accounting.<subflow>` refina. Resuelve la organización desde
+   * el store cuando el evento no la trae; fail-closed si no se puede resolver
+   * (default ESTRICTO: sin responsabilidad fiscal activa, no se generan asientos).
+   *
+   * `flow_key` es un subflow (payments, inventory, invoicing, payroll, …); el
+   * gate lo mapea a su área fiscal gobernante vía SUBFLOW_TO_AREA.
+   */
   private async isFlowEnabled(
     store_id: number | undefined,
     flow_key: string,
+    organization_id?: number,
   ): Promise<boolean> {
-    if (!store_id) return true;
-
-    const cacheKey = `acctflows:${store_id}`;
-    let accounting_flows: any = await this.cache.get<any>(cacheKey);
-
-    if (!accounting_flows) {
-      try {
-        const settings = await this.prisma
-          .withoutScope()
-          .store_settings.findUnique({
-            where: { store_id },
-            select: { settings: true },
-          });
-        const s = (settings?.settings as any) || {};
-        accounting_flows =
-          s.module_flows?.accounting ||
-          (s.accounting_flows
-            ? { enabled: true, ...s.accounting_flows }
-            : { enabled: true });
-        await this.cache.set(cacheKey, accounting_flows, 300_000);
-      } catch {
-        return true;
-      }
-    }
-
-    if (accounting_flows.enabled === false) return false;
-    return accounting_flows[flow_key] !== false;
+    const org_id =
+      organization_id ?? (store_id ? await this.resolveOrgId(store_id) : 0);
+    if (!org_id) return false;
+    return this.fiscal_gate.isSubflowEnabled(
+      org_id,
+      store_id ?? null,
+      flow_key,
+    );
   }
 
   @OnEvent('invoice.accepted')
   async handleInvoiceAccepted(event: {
     invoice_id: number;
     invoice_number: string;
+    invoice_type?: string;
     organization_id: number;
     store_id?: number;
     accounting_entity_id?: number;
@@ -109,6 +99,47 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for invoice.accepted #${event.invoice_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('support_document.accepted')
+  async handleSupportDocumentAccepted(event: {
+    invoice_id: number;
+    invoice_number: string;
+    invoice_type?: string;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    subtotal_amount: number;
+    discount_amount?: number;
+    tax_amount: number;
+    withholding_amount?: number;
+    total_amount: number;
+    supplier_id?: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
+      await this.auto_entry_service.onSupportDocumentAccepted({
+        invoice_id: event.invoice_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        subtotal: Number(event.subtotal_amount),
+        discount_amount: Number(event.discount_amount || 0),
+        tax_amount: Number(event.tax_amount || 0),
+        withholding_amount: Number(event.withholding_amount || 0),
+        total: Number(event.total_amount),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for support_document.accepted #${event.invoice_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for support_document.accepted #${event.invoice_id}: ${error.message}`,
         error.stack,
       );
     }

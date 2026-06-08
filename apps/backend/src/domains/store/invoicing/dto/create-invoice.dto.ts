@@ -93,6 +93,11 @@ export class CreateInvoiceDto {
   supplier_id?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  related_invoice_id?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   customer_name?: string;
@@ -121,6 +126,11 @@ export class CreateInvoiceDto {
   @IsNumber()
   @Type(() => Number)
   resolution_id?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  withholding_amount?: number;
 
   @IsOptional()
   @IsString()

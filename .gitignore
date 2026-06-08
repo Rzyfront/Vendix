@@ -35,3 +35,5 @@ vendix-production-key.pem
 *_PRODUCTION_INFO.md
 MIGRATION_COMPLETE.md
 GITHUB_SECRET_INSTRUCTIONS.txt
+# Linear dev cache (UUIDs, no secrets — but per-dev)
+.linear/config.json

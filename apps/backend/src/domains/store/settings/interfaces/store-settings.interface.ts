@@ -18,6 +18,10 @@ export interface FiscalDataSettings {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // DIAN issuer tax scheme code ('O-13' Gran Contribuyente, 'O-15'
+  // Autorretenedor, 'R-99-PN', etc.). Currently hardcoded in the DIAN
+  // provider; captured here for the pending provider-wiring follow-up.
+  tax_scheme?: string;
 }
 
 // ============================================================================
@@ -400,6 +404,7 @@ export interface PosSettings {
   allow_anonymous_sales: boolean;
   anonymous_sales_as_default: boolean;
   business_hours: Record<string, BusinessHours>;
+  schedule_mode?: 'continuous' | 'custom';
   enable_schedule_validation: boolean;
   offline_mode_enabled: boolean;
   auto_print_receipt: boolean;
@@ -437,9 +442,15 @@ export interface ReceiptsSettings {
   receipt_footer: string;
 }
 
+export interface BusinessHoursBlock {
+  open: string;
+  close: string;
+}
+
 export interface BusinessHours {
   open: string;
   close: string;
+  blocks?: BusinessHoursBlock[];
 }
 
 // ============================================================================

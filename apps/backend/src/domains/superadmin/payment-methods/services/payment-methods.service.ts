@@ -34,12 +34,46 @@ export class PaymentMethodsService {
     });
   }
 
-  async findAll() {
-    const methods = await this.globalPrisma.system_payment_methods.findMany({
-      orderBy: { name: 'asc' },
-    });
+  async findAll(query: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    type?: string;
+    is_active?: boolean;
+  } = {}) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const skip = (page - 1) * limit;
 
-    return Promise.all(
+    const where: any = {};
+    if (query.type) {
+      where.type = query.type;
+    }
+    if (query.is_active !== undefined) {
+      where.is_active = query.is_active;
+    }
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' as const } },
+        { display_name: { contains: query.search, mode: 'insensitive' as const } },
+        { provider: { contains: query.search, mode: 'insensitive' as const } },
+      ];
+    }
+
+    const [methods, total] = await Promise.all([
+      this.globalPrisma.system_payment_methods.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip,
+        take: limit,
+        include: {
+          _count: { select: { store_payment_methods: true } },
+        },
+      }),
+      this.globalPrisma.system_payment_methods.count({ where }),
+    ]);
+
+    const data = await Promise.all(
       methods.map(async (method) => ({
         ...method,
         logo_url: method.logo_url
@@ -47,6 +81,16 @@ export class PaymentMethodsService {
           : null,
       })),
     );
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
+      },
+    };
   }
 
   async findOne(id: number) {

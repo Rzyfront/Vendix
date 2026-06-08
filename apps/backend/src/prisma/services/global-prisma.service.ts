@@ -428,6 +428,14 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.accounting_entries;
   }
 
+  get accounting_entry_lines() {
+    return this.baseClient.accounting_entry_lines;
+  }
+
+  get fiscal_periods() {
+    return this.baseClient.fiscal_periods;
+  }
+
   get employees() {
     return this.baseClient.employees;
   }
@@ -454,6 +462,50 @@ export class GlobalPrismaService extends BasePrismaService {
 
   get fiscal_evidences() {
     return this.baseClient.fiscal_evidences;
+  }
+
+  get fiscal_obligations() {
+    return this.baseClient.fiscal_obligations;
+  }
+
+  get tax_declaration_drafts() {
+    return this.baseClient.tax_declaration_drafts;
+  }
+
+  get tax_declaration_lines() {
+    return this.baseClient.tax_declaration_lines;
+  }
+
+  get fiscal_close_sessions() {
+    return this.baseClient.fiscal_close_sessions;
+  }
+
+  get fiscal_close_checks() {
+    return this.baseClient.fiscal_close_checks;
+  }
+
+  get fiscal_rule_sets() {
+    return this.baseClient.fiscal_rule_sets;
+  }
+
+  get fiscal_operation_events() {
+    return this.baseClient.fiscal_operation_events;
+  }
+
+  get bank_reconciliations() {
+    return this.baseClient.bank_reconciliations;
+  }
+
+  get inventory_valuation_snapshots() {
+    return this.baseClient.inventory_valuation_snapshots;
+  }
+
+  get withholding_calculations() {
+    return this.baseClient.withholding_calculations;
+  }
+
+  get exogenous_reports() {
+    return this.baseClient.exogenous_reports;
   }
 
   // ICA Municipal Rates (global - no scoping)

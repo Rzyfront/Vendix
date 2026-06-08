@@ -81,7 +81,7 @@ interface TabForm {
       @if (template(); as t) {
         <div slot="header-end">
           <app-button variant="outline" size="sm" (clicked)="openAdvancedEditor(t.id)">
-            <app-icon name="settings-2" [size]="14" slot="icon"></app-icon>
+            <app-icon name="settings-2" [size]="14" slot="icon" ></app-icon>
             Editor Avanzado
           </app-button>
         </div>
@@ -167,7 +167,7 @@ interface TabForm {
                 >
                   <span class="font-medium">{{ getProductName(pid) }}</span>
                   <app-button variant="ghost" size="xsm" (clicked)="removeProduct(pid)">
-                    <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                    <app-icon name="x" [size]="12" slot="icon" ></app-icon>
                   </app-button>
                 </div>
               }
@@ -208,17 +208,17 @@ interface TabForm {
                   class="flex-1"
                 />
                 <app-button variant="ghost" size="sm" (clicked)="addTab()">
-                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
                   Nueva Pestana
                 </app-button>
                 <app-button variant="ghost" size="sm" (clicked)="removeTab(activeTabIndex)">
-                  <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="trash-2" [size]="14" slot="icon" ></app-icon>
                 </app-button>
               </div>
             } @else {
               <div class="flex justify-end mt-2">
                 <app-button variant="ghost" size="sm" (clicked)="addTab()">
-                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
                   Nueva Pestana
                 </app-button>
               </div>
@@ -240,7 +240,7 @@ interface TabForm {
           </h4>
           @if (activeSections.length > 0) {
             <app-button variant="outline" size="sm" (clicked)="addSection()">
-              <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="14" slot="icon" ></app-icon>
               Agregar Seccion
             </app-button>
           }
@@ -364,7 +364,7 @@ interface TabForm {
                     />
                   </div>
                   <app-button variant="ghost" size="xsm" (clicked)="isChild ? removeFieldFromChildSection(parentIndex, si, fi) : removeFieldFromSection(si, fi)">
-                    <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                    <app-icon name="x" [size]="12" slot="icon" ></app-icon>
                   </app-button>
                 </div>
               }
@@ -409,7 +409,7 @@ interface TabForm {
             }
 
             <app-button variant="ghost" size="sm" (clicked)="addChildSection(si)">
-              <app-icon name="plus" [size]="12" slot="icon"></app-icon>
+              <app-icon name="plus" [size]="12" slot="icon" ></app-icon>
               Subseccion
             </app-button>
           }

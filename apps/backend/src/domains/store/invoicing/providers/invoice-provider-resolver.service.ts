@@ -35,8 +35,11 @@ export class InvoiceProviderResolver {
    * Resolves the appropriate provider based on the fiscal entity's DIAN configuration.
    * Falls back to MockInvoiceProvider only outside production.
    */
-  async resolve(): Promise<InvoiceProviderAdapter> {
+  async resolve(params?: {
+    configuration_type?: 'invoicing' | 'support_document' | 'payroll';
+  }): Promise<InvoiceProviderAdapter> {
     const context = RequestContextService.getContext();
+    const configuration_type = params?.configuration_type ?? 'invoicing';
 
     if (!context?.organization_id) {
       if (this.isProductionRuntime()) {
@@ -68,7 +71,7 @@ export class InvoiceProviderResolver {
         organization_id: context.organization_id,
         store_id: context.store_id ?? null,
         accounting_entity_id,
-        configuration_type: 'invoicing',
+        configuration_type,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -86,6 +89,7 @@ export class InvoiceProviderResolver {
             organization_id: context.organization_id,
             store_id: context.store_id,
             accounting_entity_id,
+            configuration_type,
           },
         );
       }
@@ -93,7 +97,7 @@ export class InvoiceProviderResolver {
 
     if (dian_config) {
       this.logger.debug(
-        `Fiscal entity ${accounting_entity_id} has DIAN own-software config (environment: ${dian_config.environment}, status: ${dian_config.enablement_status})`,
+        `Fiscal entity ${accounting_entity_id} has DIAN own-software ${configuration_type} config (environment: ${dian_config.environment}, status: ${dian_config.enablement_status})`,
       );
       return this.dian_provider;
     }
@@ -106,6 +110,7 @@ export class InvoiceProviderResolver {
           organization_id: context.organization_id,
           store_id: context.store_id,
           accounting_entity_id,
+          configuration_type,
         },
       );
     }

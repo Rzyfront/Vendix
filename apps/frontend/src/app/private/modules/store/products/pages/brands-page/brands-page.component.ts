@@ -21,6 +21,9 @@ import {
 import { BrandsService } from '../../services/brands.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
+// Utils
+import { extractApiErrorMessage } from '../../../../../../core/utils';
+
 // Interfaces
 import {
   Brand,
@@ -214,7 +217,7 @@ export class BrandsPageComponent implements OnInit {
           this.is_loading.set(false);
         },
         error: (error) => {
-          this.toastService.error(error?.message || 'Error al cargar marcas');
+          this.toastService.error(extractApiErrorMessage(error));
           this.is_loading.set(false);
         },
       });
@@ -311,9 +314,7 @@ export class BrandsPageComponent implements OnInit {
             this.loadBrands();
           },
           error: (error) => {
-            this.toastService.error(
-              error?.message || 'Error al actualizar la marca',
-            );
+            this.toastService.error(extractApiErrorMessage(error));
             this.is_submitting.set(false);
           },
         });
@@ -333,9 +334,7 @@ export class BrandsPageComponent implements OnInit {
             this.loadBrands();
           },
           error: (error) => {
-            this.toastService.error(
-              error?.message || 'Error al crear la marca',
-            );
+            this.toastService.error(extractApiErrorMessage(error));
             this.is_submitting.set(false);
           },
         });
@@ -359,9 +358,9 @@ export class BrandsPageComponent implements OnInit {
           this.loadBrands();
         },
         error: (error) => {
-          this.toastService.error(
-            error?.message || 'Error al cambiar el estado de la marca',
-          );
+          this.toastService.error(extractApiErrorMessage(error));
+          // Re-sync UI with server state (mirror the success path's reload).
+          this.loadBrands();
         },
       });
   }
@@ -382,9 +381,9 @@ export class BrandsPageComponent implements OnInit {
           this.loadBrands();
         },
         error: (error) => {
-          this.toastService.error(
-            error?.message || 'Error al cambiar destacado de la marca',
-          );
+          this.toastService.error(extractApiErrorMessage(error));
+          // Re-sync UI with server state (mirror the success path's reload).
+          this.loadBrands();
         },
       });
   }
@@ -433,9 +432,7 @@ export class BrandsPageComponent implements OnInit {
               });
             return;
           }
-          this.toastService.error(
-            error?.error?.message || 'Error al eliminar la marca',
-          );
+          this.toastService.error(extractApiErrorMessage(error));
         },
       });
   }

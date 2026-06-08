@@ -14,7 +14,7 @@
         >
           <div class="flex-1 min-w-0">
             <h2 class="text-lg font-semibold text-text-primary">
-              Orders ({{ orders().length }})
+              Orders ({{ totalItems() }})
             </h2>
           </div>
 
@@ -104,6 +104,15 @@
             (sort)="onTableSort($event)"
             (rowClick)="viewOrderDetails($event)"
           ></app-responsive-data-view>
+        </div>
+        <div class="mt-4 flex justify-center">
+          <app-pagination
+            [currentPage]="filters().page"
+            [totalPages]="totalPages()"
+            [total]="totalItems()"
+            [limit]="filters().limit"
+            (pageChange)="onPageChange($event)"
+          />
         </div>
       }
     </div>

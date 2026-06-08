@@ -39,44 +39,43 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
     title: 'Términos y Condiciones de Uso de Vendix',
     version: '1.0',
     content: `
-        <h1>Términos y Condiciones de Uso de Vendix</h1>
-        <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
+Última actualización: ${new Date().toLocaleDateString('es-CO')}
 
-        <h2>1. Aceptación de los Términos</h2>
-        <p>Al acceder y usar la plataforma Vendix, usted acepta y se obliga a cumplir estos términos. Si no está de acuerdo con estos términos, no debe usar la plataforma.</p>
+## Aceptación de los Términos
+Al acceder y usar la plataforma Vendix, usted acepta y se obliga a cumplir estos términos. Si no está de acuerdo con estos términos, no debe usar la plataforma.
 
-        <h2>2. Descripción del Servicio</h2>
-        <p>Vendix es una plataforma de gestión comercial que proporciona herramientas para administración de tiendas, ventas, inventario y operaciones empresariales.</p>
+## Descripción del Servicio
+Vendix es una plataforma de gestión comercial que proporciona herramientas para administración de tiendas, ventas, inventario y operaciones empresariales.
 
-        <h2>3. Obligaciones del Usuario</h2>
-        <ul>
-          <li>Mantener la confidencialidad de las credenciales de acceso</li>
-          <li>Proporcionar información veraz y actualizada</li>
-          <li>Utilizar la plataforma solamente para fines legítimos</li>
-          <li>Responsabilizarse por el contenido que publique</li>
-        </ul>
+## Obligaciones del Usuario
+- Mantener la confidencialidad de las credenciales de acceso
+- Proporcionar información veraz y actualizada
+- Utilizar la plataforma solamente para fines legítimos
+- Responsabilizarse por el contenido que publique
 
-        <h2>4. Propiedad Intelectual</h2>
-        <p>Todo el contenido, marcas, logos y materiales de Vendix son propiedad exclusiva de Vendix o de sus licenciantes.</p>
+## Propiedad Intelectual
+Todo el contenido, marcas, logos y materiales de Vendix son propiedad exclusiva de Vendix o de sus licenciantes.
 
-        <h2>5. Limitación de Responsabilidad</h2>
-        <p>Vendix no se hace responsable por:</p>
-        <ul>
-          <li>Daños indirectos o consecuentes del uso del servicio</li>
-          <li>Interrupciones del servicio por causas técnicas</li>
-          <li>Contenido generado por usuarios</li>
-        </ul>
+## Limitación de Responsabilidad
+Vendix no se hace responsable por:
+- Daños indirectos o consecuentes del uso del servicio
+- Interrupciones del servicio por causas técnicas
+- Contenido generado por usuarios
 
-        <h2>6. Modificaciones</h2>
-        <p>Vendix se reserva el derecho de modificar estos términos en cualquier momento. Los usuarios serán notificados de cambios significativos.</p>
+## Pagos y Reembolsos
+El acceso a los planes y funcionalidades de pago de Vendix se factura por adelantado según el ciclo de facturación seleccionado (mensual o anual). Al contratar un plan, usted autoriza a Vendix a cobrar de forma recurrente el valor correspondiente a través del método de pago registrado, hasta que la suscripción sea cancelada.
+Las suscripciones a la plataforma Vendix no son reembolsables. La cancelación de una suscripción detiene las renovaciones futuras, pero no genera reembolso total ni parcial por el período ya pagado; el servicio permanecerá activo hasta el final del ciclo de facturación en curso. Esta política de no-reembolso aplica salvo que la ley colombiana disponga lo contrario o exista un acuerdo escrito en sentido distinto.
 
-        <h2>7. Terminación</h2>
-        <p>Vendix puede suspender o terminar cuentas que violen estos términos.</p>
+## Modificaciones
+Vendix se reserva el derecho de modificar estos términos en cualquier momento. Los usuarios serán notificados de cambios significativos.
 
-        <h2>8. Ley Aplicable</h2>
-        <p>Estos términos se rigen por las leyes de Colombia. Cualquier controversia estará sujeta a los tribunales competentes.</p>
+## Terminación
+Vendix puede suspender o terminar cuentas que violen estos términos.
 
-        <p><em>Para más información, contacte a legal@vendix.com</em></p>
+## Ley Aplicable
+Estos términos se rigen por las leyes de Colombia. Cualquier controversia estará sujeta a los tribunales competentes.
+
+Para más información, contacte a legal@vendix.com
       `,
     effective_date: new Date(),
     is_active: true,
@@ -89,76 +88,61 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
     title: 'Política de Privacidad de Vendix',
     version: '1.0-privacy',
     content: `
-        <h1>Política de Privacidad de Vendix</h1>
-        <p>Última actualización: ${new Date().toLocaleDateString('es-CO')}</p>
+Última actualización: ${new Date().toLocaleDateString('es-CO')}
 
-        <h2>1. Información que Recopilamos</h2>
-        <p>Vendix recopila la siguiente información personal:</p>
-        <ul>
-          <li>Datos de registro (nombre, email, teléfono)</li>
-          <li>Información de perfil y preferencias</li>
-          <li>Datos de uso de la plataforma</li>
-          <li>Información de pagos (cuando aplica)</li>
-        </ul>
+## Información que Recopilamos
+Vendix recopila la siguiente información personal:
+- Datos de registro (nombre, email, teléfono)
+- Información de perfil y preferencias
+- Datos de uso de la plataforma
+- Información de pagos (cuando aplica)
 
-        <h2>2. Cómo Usamos su Información</h2>
-        <p>Utilizamos su información para:</p>
-        <ul>
-          <li>Proporcionar y mejorar nuestros servicios</li>
-          <li>Procesar transacciones y pagos</li>
-          <li>Enviar notificaciones y comunicaciones</li>
-          <li>Analizar patrones de uso</li>
-          <li>Cumplir obligaciones legales</li>
-        </ul>
+## Cómo Usamos su Información
+Utilizamos su información para:
+- Proporcionar y mejorar nuestros servicios
+- Procesar transacciones y pagos
+- Enviar notificaciones y comunicaciones
+- Analizar patrones de uso
+- Cumplir obligaciones legales
 
-        <h2>3. Compartición de Información</h2>
-        <p>No vendemos su información personal a terceros. Podemos compartir datos con:</p>
-        <ul>
-          <li>Proveedores de servicios necesarios para operar la plataforma</li>
-          <li>Autoridades gubernamentales cuando sea requerido</li>
-          <li>Socios de crédito y procesamiento de pagos</li>
-        </ul>
+## Compartición de Información
+No vendemos su información personal a terceros. Podemos compartir datos con:
+- Proveedores de servicios necesarios para operar la plataforma
+- Autoridades gubernamentales cuando sea requerido
+- Socios de crédito y procesamiento de pagos
 
-        <h2>4. Seguridad de Datos</h2>
-        <p>Implementamos medidas de seguridad incluyendo:</p>
-        <ul>
-          <li>Encriptación de datos en tránsito y en reposo</li>
-          <li>Control de acceso con autenticación requerida</li>
-          <li>Monitoreo continuo de actividades sospechosas</li>
-          <li>Auditoría de accesos y modificaciones</li>
-        </ul>
+## Seguridad de Datos
+Implementamos medidas de seguridad incluyendo:
+- Encriptación de datos en tránsito y en reposo
+- Control de acceso con autenticación requerida
+- Monitoreo continuo de actividades sospechosas
+- Auditoría de accesos y modificaciones
 
-        <h2>5. Sus Derechos</h2>
-        <p>Usted tiene derecho a:</p>
-        <ul>
-          <li>Acceder a sus datos personales</li>
-          <li>Solicitar corrección o eliminación</li>
-          <li>Revocar consentimientos</li>
-          <li>Exportar su información</li>
-          <li>Oponerse al procesamiento de datos</li>
-        </ul>
+## Sus Derechos
+Usted tiene derecho a:
+- Acceder a sus datos personales
+- Solicitar corrección o eliminación
+- Revocar consentimientos
+- Exportar su información
+- Oponerse al procesamiento de datos
 
-        <h2>6. Retención de Datos</h2>
-        <p>Mantenemos su información solo el tiempo necesario para:</p>
-        <ul>
-          <li>Proporcionar los servicios contratados</li>
-          <li>Cumplir requisitos legales y contables</li>
-          <li>Resolver disputas y defensas legales</li>
-        </ul>
+## Retención de Datos
+Mantenemos su información solo el tiempo necesario para:
+- Proporcionar los servicios contratados
+- Cumplir requisitos legales y contables
+- Resolver disputas y defensas legales
 
-        <h2>7. Cookies y Tecnologías Similares</h2>
-        <p>Utilizamos cookies y tecnologías similares para:</p>
-        <ul>
-          <li>Mantener su sesión activa</li>
-          <li>Recordar sus preferencias</li>
-          <li>Analizar el uso de la plataforma</li>
-        </ul>
+## Cookies y Tecnologías Similares
+Utilizamos cookies y tecnologías similares para:
+- Mantener su sesión activa
+- Recordar sus preferencias
+- Analizar el uso de la plataforma
 
-        <h2>8. Contacto</h2>
-        <p>Para preguntas sobre privacidad, contacte a: privacy@vendix.com</p>
+## Contacto
+Para preguntas sobre privacidad, contacte a: privacy@vendix.com
 
-        <h2>9. Cambios en esta Política</h2>
-        <p>Nos reservamos el derecho de actualizar esta política. Le notificaremos cambios significativos.</p>
+## Cambios en esta Política
+Nos reservamos el derecho de actualizar esta política. Le notificaremos cambios significativos.
       `,
     effective_date: new Date(),
     is_active: true,
@@ -328,10 +312,54 @@ export async function seedLegalDocuments(prisma: PrismaClient) {
     description: 'Política de envíos estándar para todas las tiendas',
   });
 
+  const cookiesPolicy = await systemUpsert({
+    document_type: 'COOKIES_POLICY',
+    title: 'Política de Cookies de Vendix',
+    version: '1.0-cookies',
+    content: `
+Última actualización: ${new Date().toLocaleDateString('es-CO')}
+
+## ¿Qué son las Cookies?
+Las cookies son pequeños archivos de texto que los sitios web almacenan en su dispositivo (computador, teléfono o tableta) cuando los visita. Permiten que la plataforma recuerde información sobre su visita, facilitando su uso y mejorando su experiencia.
+
+## Tipos de Cookies que Usamos
+En Vendix utilizamos distintos tipos de cookies según su finalidad:
+- **Cookies de sesión:** mantienen su sesión activa mientras navega y se eliminan al cerrar el navegador.
+- **Cookies de preferencias:** recuerdan sus configuraciones, como idioma, moneda y preferencias de visualización.
+- **Cookies analíticas:** nos ayudan a entender cómo se usa la plataforma de forma agregada y anónima para mejorar nuestros servicios.
+
+## Cookies de Sesión
+Estas cookies son esenciales para el funcionamiento de la plataforma. Permiten autenticarlo, mantener su sesión iniciada y proteger su cuenta. Sin ellas, no es posible ofrecer las funcionalidades básicas del servicio.
+
+## Cookies de Preferencias
+Estas cookies almacenan las decisiones que usted toma, como el idioma seleccionado o la región, de modo que no tenga que volver a configurarlas en cada visita. Mejoran la comodidad de uso pero no son estrictamente indispensables.
+
+## Cookies Analíticas
+Utilizamos cookies analíticas para recopilar información sobre el uso de la plataforma, tales como páginas visitadas y tiempo de navegación. Esta información se trata de forma agregada y nos permite identificar mejoras y detectar problemas técnicos.
+
+## Gestión y Configuración de Cookies
+Usted puede gestionar o desactivar las cookies en cualquier momento desde la configuración de su navegador. Tenga en cuenta que deshabilitar ciertas cookies, especialmente las de sesión, puede afectar el funcionamiento de la plataforma e impedir el acceso a algunas funcionalidades.
+
+## Cookies de Terceros
+Algunos servicios integrados en Vendix, como proveedores de analítica o pasarelas de pago, pueden establecer sus propias cookies. Estas cookies se rigen por las políticas de privacidad de dichos terceros, sobre las cuales recomendamos informarse.
+
+## Cambios en esta Política
+Nos reservamos el derecho de actualizar esta Política de Cookies para reflejar cambios técnicos, legales o en nuestros servicios. Le notificaremos cambios significativos a través de la plataforma.
+
+## Contacto
+Para preguntas sobre el uso de cookies, contacte a: privacy@vendix.com
+      `,
+    effective_date: new Date(),
+    is_active: true,
+    is_system: true,
+    description: 'Política de uso de cookies y tecnologías similares de la plataforma Vendix',
+  });
+
   console.log('✅ Legal documents seeded successfully');
   console.log(`   - ${termsOfService.title} v${termsOfService.version}`);
   console.log(`   - ${privacyPolicy.title} v${privacyPolicy.version}`);
   console.log(`   - ${merchantAgreement.title} v${merchantAgreement.version}`);
   console.log(`   - ${refundPolicy.title} v${refundPolicy.version}`);
   console.log(`   - ${shippingPolicy.title} v${shippingPolicy.version}`);
+  console.log(`   - ${cookiesPolicy.title} v${cookiesPolicy.version}`);
 }

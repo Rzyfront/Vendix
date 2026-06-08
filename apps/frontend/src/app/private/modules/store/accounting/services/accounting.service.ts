@@ -20,6 +20,7 @@ import {
   AccountMapping,
   AccountingListResponse,
   ApiResponse,
+  PaginatedApiResponse,
   FixedAsset,
   FixedAssetCategory,
   DepreciationEntry,
@@ -337,7 +338,7 @@ export class AccountingService {
   }
 
   // ── Budgets ───────────────────────────────────────────────────────
-  getBudgets(query?: Record<string, any>): Observable<ApiResponse<Budget[]>> {
+  getBudgets(query?: Record<string, any>): Observable<PaginatedApiResponse<Budget>> {
     const params: Record<string, any> = {};
     if (query) {
       for (const [key, value] of Object.entries(query)) {
@@ -346,7 +347,7 @@ export class AccountingService {
         }
       }
     }
-    return this.http.get<ApiResponse<Budget[]>>(
+    return this.http.get<PaginatedApiResponse<Budget>>(
       this.getApiUrl('budgets'),
       { params },
     );
@@ -486,9 +487,16 @@ export class AccountingService {
     );
   }
 
-  getIntercompanyTransactions(session_id: number): Observable<ApiResponse<IntercompanyTransaction[]>> {
-    return this.http.get<ApiResponse<IntercompanyTransaction[]>>(
+  getIntercompanyTransactions(
+    session_id: number,
+    query: { page?: number; limit?: number } = {},
+  ): Observable<PaginatedApiResponse<IntercompanyTransaction>> {
+    let params = new HttpParams();
+    if (query.page != null) params = params.set('page', String(query.page));
+    if (query.limit != null) params = params.set('limit', String(query.limit));
+    return this.http.get<PaginatedApiResponse<IntercompanyTransaction>>(
       this.getApiUrl(`consolidation/sessions/${session_id}/intercompany`),
+      { params },
     );
   }
 

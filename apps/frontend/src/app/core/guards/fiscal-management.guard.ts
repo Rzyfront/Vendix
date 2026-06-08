@@ -27,6 +27,6 @@ export const fiscalManagementGuard: CanActivateFn = () => {
   }
 
   toast.info(DENIED_MESSAGE);
-  router.navigateByUrl('/admin/settings/fiscal');
+  router.navigateByUrl('/admin/fiscal');
   return false;
 };

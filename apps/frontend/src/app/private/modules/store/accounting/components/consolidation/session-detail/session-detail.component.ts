@@ -31,6 +31,7 @@ import {
   IconComponent,
   ScrollableTabsComponent,
   ResponsiveDataViewComponent,
+  PaginationComponent,
   ToastService,
   TableColumn,
   TableAction,
@@ -56,6 +57,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     IconComponent,
     ScrollableTabsComponent,
     ResponsiveDataViewComponent,
+    PaginationComponent,
     DatePipe,
   ],
   templateUrl: './session-detail.component.html',
@@ -78,9 +80,19 @@ private route = inject(ActivatedRoute);
   ic_transactions = signal<IntercompanyTransaction[]>([]);
   ic_loading = signal(false);
   auto_eliminate_loading = signal(false);
+  readonly ic_filters = signal({ page: 1, limit: 25 });
+  readonly ic_totalItems = signal(0);
+  readonly ic_totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.ic_totalItems() / this.ic_filters().limit)),
+  );
 
   // Adjustments
   adjustments = signal<ConsolidationAdjustment[]>([]);
+  readonly adj_filters = signal({ page: 1, limit: 25 });
+  readonly adj_totalItems = signal(0);
+  readonly adj_totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.adj_totalItems() / this.adj_filters().limit)),
+  );
   adj_loading = signal(false);
   adj_submitting = signal(false);
   // ✅ Migrated to signal for two-way binding (Section 9 — antipatrón variables planas)
@@ -313,12 +325,19 @@ private route = inject(ActivatedRoute);
   private loadICTransactions(session_id: number): void {
     this.ic_loading.set(true);
     this.accounting_service
-      .getIntercompanyTransactions(session_id)
+      .getIntercompanyTransactions(session_id, {
+        page: this.ic_filters().page,
+        limit: this.ic_filters().limit,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const txns = res.data || [];
           this.ic_transactions.set(txns);
+          this.ic_totalItems.set(
+            (res as unknown as { meta?: { total?: number } }).meta?.total ??
+              txns.length,
+          );
           this.ic_loading.set(false);
 
           // Extract unique stores from IC transactions for drill-down filter
@@ -330,6 +349,13 @@ private route = inject(ActivatedRoute);
           this.stores.set(Array.from(store_map.values()));
         },
         error: () => this.ic_loading.set(false)});
+  }
+
+  onICPageChange(page: number): void {
+    const id = this.session()?.id;
+    if (!id) return;
+    this.ic_filters.update((f) => ({ ...f, page }));
+    this.loadICTransactions(id);
   }
 
   private loadAdjustments(session_id: number): void {

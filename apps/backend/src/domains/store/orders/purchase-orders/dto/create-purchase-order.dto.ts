@@ -131,17 +131,6 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   has_multiple_price_tiers?: any;
 
-  @ApiProperty({ description: 'Units per package (for new products)' })
-  @IsNumber()
-  @IsOptional()
-  units_per_package?: number;
-
-  @ApiProperty({
-    description: 'Package consumes multiple stock units (for new products)',
-  })
-  @IsOptional()
-  package_consumes_multiple_stock?: any;
-
   @ApiProperty({ description: 'Base Price (for new products)' })
   @IsNumber()
   @IsOptional()

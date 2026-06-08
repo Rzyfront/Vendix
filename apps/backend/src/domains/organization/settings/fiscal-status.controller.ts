@@ -39,6 +39,20 @@ export class FiscalStatusController {
     return this.response.success(data);
   }
 
+  @Get('wizard-prefill')
+  @Permissions('organization:settings:fiscal_status:read')
+  @ApiOperation({
+    summary:
+      'Aggregate existing tenant data to prefill the fiscal activation wizard',
+  })
+  async wizardPrefill(@Query('store_id') storeId?: string) {
+    const data = await this.fiscalStatus.buildWizardPrefill({
+      organization_id: this.requireOrganizationId(),
+      store_id: storeId ? Number(storeId) : null,
+    });
+    return this.response.success(data);
+  }
+
   @Post(':area/start-wizard')
   @Permissions('organization:settings:fiscal_status:write')
   @ApiOperation({

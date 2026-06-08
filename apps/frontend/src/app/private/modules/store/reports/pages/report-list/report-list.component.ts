@@ -8,7 +8,15 @@ import { ReportCategoryChipsComponent } from '../../components/report-category-c
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { ReportCategoryId, ReportDefinition } from '../../interfaces/report.interface';
-import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById } from '../../config/report-registry';
+import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById, getReportById } from '../../config/report-registry';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+
+/** Categories that require a fiscal module to be active. */
+const MODULE_GATED_CATEGORIES: Record<string, string> = {
+  accounting: 'accounting',
+  payroll: 'payroll',
+};
 
 @Component({
   selector: 'vendix-report-list',
@@ -27,6 +35,8 @@ export class ReportListComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private destroyRef = inject(DestroyRef);
+  private authFacade = inject(AuthFacade);
+  private toast = inject(ToastService);
 
   searchTerm = signal('');
   activeCategory = signal<ReportCategoryId | null>(null);
@@ -34,14 +44,22 @@ export class ReportListComponent {
   categories = REPORT_CATEGORIES;
   allReports = REPORT_DEFINITIONS;
 
+  /** Categories visible to the current user (module-gated ones hidden when inactive). */
+  visibleCategories = computed(() =>
+    this.categories.filter(c => {
+      const moduleKey = MODULE_GATED_CATEGORIES[c.id];
+      return !moduleKey || this.authFacade.isModuleVisible(moduleKey);
+    }),
+  );
+
   filteredGroups = computed(() => {
     const search = this.searchTerm().toLowerCase().trim();
     const category = this.activeCategory();
 
-    // Filter categories to show
+    // Filter categories to show (only visible ones)
     const categoriesToShow = category
-      ? this.categories.filter(c => c.id === category)
-      : this.categories;
+      ? this.visibleCategories().filter(c => c.id === category)
+      : this.visibleCategories();
 
     return categoriesToShow
       .map(cat => {

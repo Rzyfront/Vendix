@@ -1,6 +1,6 @@
 import { ActivityIndicator, StyleSheet, View, type ViewProps, type ViewStyle } from 'react-native';
 
-type SpinnerSize = 'sm' | 'md' | 'lg';
+type SpinnerSize = 'sm' | 'md' | 'lg' | 'large';
 
 interface SpinnerProps extends ViewProps {
   size?: SpinnerSize;
@@ -12,6 +12,7 @@ const sizeMap: Record<SpinnerSize, 'small' | 'large'> = {
   sm: 'small',
   md: 'small',
   lg: 'large',
+  large: 'large',
 };
 
 const styles = StyleSheet.create({

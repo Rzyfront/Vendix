@@ -267,10 +267,14 @@ export function createInventoryTools(
         if (args.start_date) query.start_date = args.start_date;
         if (args.end_date) query.end_date = args.end_date;
 
-        const results = await services.movementsService.findAll(query);
-
         const limit = Math.min(Number(args.limit) || 20, 50);
-        const formatted = results.slice(0, limit).map((m: any) => ({
+        const paginated = await services.movementsService.findAll({
+          ...query,
+          page: 1,
+          limit,
+        });
+        const results = paginated.data;
+        const formatted = results.map((m: any) => ({
           id: m.id,
           product: m.products?.name,
           sku: m.products?.sku,

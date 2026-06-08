@@ -21,6 +21,7 @@ import {
   MappingKeyDef,
 } from '../../forms/account-mappings-form/account-mappings-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { ToastService } from '../../toast/toast.service';
 
 // Canonical mapping keys (mirrors DEFAULT_ACCOUNT_MAPPINGS in the backend).
 const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
@@ -83,6 +84,7 @@ export class FiscalAccountingMappingsStepComponent
 {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly toast = inject(ToastService);
 
   readonly stepId: FiscalWizardStepId = 'accounting_mappings';
   readonly valid = signal(true);
@@ -127,6 +129,14 @@ export class FiscalAccountingMappingsStepComponent
 
   private async loadData(): Promise<void> {
     try {
+      // Prefill gives us the already-mapped keys (no account_id though),
+      // so we seed `existingCount` from there. We still need the canonical
+      // GETs for the full account_id mappings AND the CoA dropdown options
+      // — those are not in the prefill snapshot, so the GETs are NOT
+      // redundant. We do them in parallel to keep latency low.
+      const prefillMappings = this.service.prefill()?.accounting_mappings;
+      this.existingCount.set(prefillMappings?.total ?? 0);
+
       // Both GETs accept `?store_id=` to narrow the org-level views when a
       // specific store is selected (operating_scope=STORE or per-store
       // overrides). For consolidated org reads (no targetStoreId) the query
@@ -154,6 +164,8 @@ export class FiscalAccountingMappingsStepComponent
       mappingItems.forEach((m: any) => {
         if (m?.mapping_key) initialMap[m.mapping_key] = m.account_id ?? null;
       });
+      // Refresh the count from the actual mapping rows in case the prefill
+      // was stale (e.g. someone edited mappings between snapshots).
       this.existingCount.set(
         Object.values(initialMap).filter((value) => value != null).length,
       );
@@ -215,6 +227,11 @@ export class FiscalAccountingMappingsStepComponent
         this.submitting.set(false);
         return null;
       }
+      // The step is already configured (inherited from org-level config).
+      // Notify the user via toast and advance without re-saving.
+      this.toast.info(
+        'Este paso ya está configurado. Avanzando al siguiente paso.',
+      );
       const ref = {
         count: this.existingCount(),
         inherited: true,
@@ -224,6 +241,31 @@ export class FiscalAccountingMappingsStepComponent
       this.submitting.set(false);
       return { ref };
     }
+
+    // Non-readOnly path: detect "already configured" before re-PUTing.
+    // The form may have been seeded from the prefill / loadData() so the
+    // user clicks "Continuar" on data that is already persisted server-side.
+    // In that case, skip the PUT, notify, and advance.
+    const seeded = form.getValue();
+    const seededCount = Object.values(seeded.mappings).filter(
+      (v) => v !== null && v !== undefined,
+    ).length;
+    if (this.existingCount() > 0 && seededCount > 0) {
+      this.toast.info(
+        'Este paso ya está configurado. Avanzando al siguiente paso.',
+      );
+      const ref = {
+        count: seededCount,
+        completed_at: new Date().toISOString(),
+      };
+      try {
+        await this.service.commitStep(this.stepId, ref);
+      } finally {
+        this.submitting.set(false);
+      }
+      return { ref };
+    }
+
     try {
       const value = form.getValue();
       const mappings = Object.entries(value.mappings)
@@ -255,7 +297,31 @@ export class FiscalAccountingMappingsStepComponent
       await this.service.commitStep(this.stepId, ref);
       return { ref };
     } catch (e) {
-      this.localError.set(parseApiError(e).userMessage);
+      // 409 / "ya existe" — the endpoint is idempotent or the row was
+      // created out-of-band. Treat as "already configured" instead of
+      // a hard error so the user can advance.
+      const parsed = parseApiError(e);
+      const isAlreadyExists =
+        parsed.errorCode === 'CONFLICT' ||
+        parsed.errorCode === 'ALREADY_EXISTS' ||
+        (parsed.devMessage ?? '').toLowerCase().includes('ya existe') ||
+        (parsed.devMessage ?? '').toLowerCase().includes('already exists');
+      if (isAlreadyExists) {
+        this.toast.info(
+          'Este paso ya está configurado. Avanzando al siguiente paso.',
+        );
+        const ref = {
+          count: this.existingCount() || seededCount,
+          completed_at: new Date().toISOString(),
+        };
+        try {
+          await this.service.commitStep(this.stepId, ref);
+        } finally {
+          this.submitting.set(false);
+        }
+        return { ref };
+      }
+      this.localError.set(parsed.userMessage);
       return null;
     } finally {
       this.submitting.set(false);

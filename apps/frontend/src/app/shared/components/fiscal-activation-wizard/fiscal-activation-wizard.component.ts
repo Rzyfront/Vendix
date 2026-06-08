@@ -18,12 +18,12 @@ import {
   FiscalArea,
   FiscalWizardStepId,
 } from '../../../core/models/fiscal-status.model';
-import {
-  ScrollableTab,
-  ScrollableTabsComponent,
-} from '../scrollable-tabs/scrollable-tabs.component';
 import { StickyHeaderComponent } from '../sticky-header/sticky-header.component';
-import { IconComponent } from '../icon/icon.component';
+import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import {
+  StepsLineComponent,
+  StepsLineItem,
+} from '../steps-line/steps-line.component';
 import { FiscalWizardStepHost } from './wizard-step.contract';
 import { FiscalAreaSelectionStepComponent } from './steps/fiscal-area-selection-step.component';
 import { FiscalLegalDataStepComponent } from './steps/fiscal-legal-data-step.component';
@@ -43,9 +43,9 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
     CommonModule,
     FormsModule,
     RouterModule,
-    ScrollableTabsComponent,
     StickyHeaderComponent,
-    IconComponent,
+    AlertBannerComponent,
+    StepsLineComponent,
     FiscalAreaSelectionStepComponent,
     FiscalLegalDataStepComponent,
     FiscalDianConfigStepComponent,
@@ -63,7 +63,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         title="Manejo fiscal"
         [subtitle]="areasLabel()"
         [showBackButton]="true"
-        backRoute="/admin/settings/fiscal"
+        backRoute="/admin/fiscal"
         [badgeText]="service.progressLabel()"
         badgeColor="blue"
         variant="glass"
@@ -88,41 +88,36 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         }
 
         @if (service.error()) {
-          <div class="error-banner">{{ service.error() }}</div>
+          <div class="error-banner" role="alert" aria-live="assertive">
+            {{ service.error() }}
+          </div>
         }
 
-        <div class="mobile-step-tabs">
-          <app-scrollable-tabs
-            [tabs]="stepTabs()"
-            [activeTab]="activeStepTab()"
-            size="sm"
-            ariaLabel="Pasos de activación fiscal"
-            (tabChange)="goToStepById($event)"
-          ></app-scrollable-tabs>
-        </div>
+        <app-alert-banner variant="info" icon="landmark" class="wizard-banner">
+          @if (service.fiscalDataOwner() === 'organization') {
+            El manejo fiscal habilita facturación, contabilidad e impuestos para
+            tu negocio. La configuración fiscal es <strong>única para toda la
+            organización</strong>: el NIT, las cuentas y la habilitación DIAN se
+            comparten en todas tus tiendas.
+          } @else {
+            El manejo fiscal habilita facturación, contabilidad e impuestos para
+            tu negocio. La configuración fiscal se define
+            <strong>por cada tienda</strong>, con su propio NIT, cuentas y
+            habilitación DIAN.
+          }
+        </app-alert-banner>
 
         <div class="wizard-shell">
-          <aside class="step-list" aria-label="Pasos de activación fiscal">
-            @for (step of service.stepSequence(); track step; let i = $index) {
-              <button
-                type="button"
-                class="step-pill"
-                [class.step-pill--active]="i === service.currentStepIndex()"
-                [class.step-pill--done]="isStepDone(step)"
-                [disabled]="!canNavigateToStep(i)"
-                (click)="goToStep(i)"
-              >
-                <span class="step-index">
-                  @if (isStepDone(step)) {
-                    <app-icon name="check" [size]="13"></app-icon>
-                  } @else {
-                    {{ i + 1 }}
-                  }
-                </span>
-                <span class="step-label">{{ stepLabels[step] }}</span>
-              </button>
-            }
-          </aside>
+          <app-steps-line
+            class="step-stepper"
+            aria-label="Pasos de activación fiscal"
+            [steps]="wizardSteps()"
+            [currentStep]="service.currentStepIndex()"
+            orientation="horizontal"
+            size="md"
+            [clickable]="true"
+            (stepClicked)="goToStep($event)"
+          ></app-steps-line>
 
           <article class="step-card">
             <div class="step-heading">
@@ -139,6 +134,15 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
                 <app-fiscal-area-selection-step #step />
               }
               @case ('legal_data') {
+                <app-alert-banner
+                  variant="info"
+                  icon="scan-line"
+                  class="wizard-banner"
+                >
+                  Acelera esta configuración escaneando tu RUT: leemos el
+                  documento y completamos automáticamente NIT, razón social,
+                  régimen y responsabilidades fiscales por ti.
+                </app-alert-banner>
                 <app-fiscal-legal-data-step #step />
               }
               @case ('dian_config') {
@@ -226,11 +230,6 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         padding: 1rem 0 2rem;
       }
 
-      .mobile-step-tabs {
-        display: block;
-        margin-bottom: 0.85rem;
-      }
-
       .store-switcher {
         display: flex;
         align-items: center;
@@ -256,37 +255,32 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         font-size: 0.84rem;
       }
 
+      /* Single-column shell: the step stepper sits on top, the step card
+         below. The aside sidebar was replaced by a horizontal icon stepper
+         so the same nav serves mobile and desktop. */
       .wizard-shell {
-        display: grid;
-        grid-template-columns: 1fr;
+        display: flex;
+        flex-direction: column;
         gap: 1rem;
       }
 
-      .step-list {
-        display: none;
+      /* Contextual explainer banners (scope + RUT scan). Block so the shared
+         <app-alert-banner> spans the column; spacing separates it from the
+         stepper / step content that follows. */
+      .wizard-banner {
+        display: block;
+        margin-bottom: 1rem;
       }
 
-      .step-pill {
-        min-height: 2.75rem;
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--text-secondary, #475569);
-        padding: 0.65rem;
-        text-align: left;
-        font-weight: 650;
-        cursor: pointer;
+      /* The step stepper is the shared <app-steps-line> connector component;
+         it owns its own internal layout. We only frame it with a divider so
+         it reads as the wizard's progress header. */
+      .step-stepper {
+        display: block;
+        border-bottom: 1px solid var(--border-color, #e5e7eb);
+        padding-bottom: 0.25rem;
       }
 
-      .step-pill:disabled {
-        cursor: default;
-        opacity: 0.55;
-      }
-
-      .step-index,
       .validation-state {
         flex: 0 0 auto;
         display: grid;
@@ -294,34 +288,14 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         width: 1.45rem;
         height: 1.45rem;
         border-radius: 999px;
-        background: var(--surface-muted, #f1f5f9);
-        color: var(--text-secondary, #475569);
-        font-size: 0.72rem;
-        font-weight: 800;
-      }
-
-      .step-label {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      .step-pill--active {
-        border-color: var(--primary-color, #2563eb);
-        color: var(--primary-color, #2563eb);
-        box-shadow: 0 0 0 3px
-          color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
-      }
-
-      .step-pill--done .step-index,
-      .validation-state {
         background: color-mix(
           in srgb,
           var(--success-color, #16a34a) 14%,
           #ffffff
         );
         color: var(--success-color, #166534);
+        font-size: 0.72rem;
+        font-weight: 800;
       }
 
       .step-card {
@@ -506,23 +480,9 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         }
       }
 
-      @media (min-width: 921px) {
+      @media (min-width: 768px) {
         .wizard-content {
           padding: 1.25rem 0 2rem;
-        }
-
-        .mobile-step-tabs {
-          display: none;
-        }
-
-        .wizard-shell {
-          grid-template-columns: 17rem minmax(0, 1fr);
-        }
-
-        .step-list {
-          display: flex;
-          flex-direction: column;
-          gap: 0.45rem;
         }
       }
     `,
@@ -539,6 +499,13 @@ export class FiscalActivationWizardComponent implements OnInit {
   readonly areaLabels = FISCAL_AREA_LABELS;
   readonly stepLabels = FISCAL_STEP_LABELS;
 
+  /** Steps fed to the shared <app-steps-line> connector stepper. */
+  readonly wizardSteps = computed<StepsLineItem[]>(() =>
+    this.service
+      .stepSequence()
+      .map((step) => ({ label: this.stepLabels[step] })),
+  );
+
   readonly currentTitle = computed(() => {
     const step = this.service.currentStep();
     return step ? this.stepLabels[step] : 'Activación fiscal';
@@ -550,15 +517,6 @@ export class FiscalActivationWizardComponent implements OnInit {
       .map((area) => this.areaLabels[area]);
     return labels.length ? labels.join(' · ') : 'Selecciona áreas fiscales';
   });
-
-  readonly stepTabs = computed<ScrollableTab[]>(() =>
-    this.service.stepSequence().map((step, index) => ({
-      id: step,
-      label: `${index + 1}. ${this.stepLabels[step]}`,
-    })),
-  );
-
-  readonly activeStepTab = computed(() => this.service.currentStep() ?? '');
 
   readonly storeStatuses = computed(
     () => this.service.lastStatus()?.store_statuses ?? [],
@@ -591,9 +549,29 @@ export class FiscalActivationWizardComponent implements OnInit {
     this.service.selectedAreas.set(areas.length ? areas : ['invoicing']);
     this.service.currentStepIndex.set(0);
 
-    void this.service.loadStatus().then(() => {
-      this.service.restoreWizardFromCurrentStatus();
-    });
+    // Order matters: loadStatus populates fiscal_status + scope context,
+    // loadPrefill fetches the single aggregated snapshot used to position the
+    // cursor on the first unsatisfied step, then restoreWizardFromCurrentStatus
+    // computes the actual currentStepIndex from the union of those signals.
+    void this.initializeWizard();
+  }
+
+  /**
+   * Boots the wizard: status → prefill → restore cursor. Wrapped in a single
+   * async method so both `ngOnInit` and the store-switcher path share the
+   * exact same initialization contract (and so a future re-init trigger can
+   * call the same entry point).
+   */
+  private async initializeWizard(): Promise<void> {
+    try {
+      await this.service.loadStatus();
+      await this.service.loadPrefill();
+    } catch {
+      // loadStatus / loadPrefill already surface the error to
+      // service.error(); a partial init is non-fatal — restoreWizard will
+      // fall back to the WIP wizard's current_step when prefill is missing.
+    }
+    this.service.restoreWizardFromCurrentStatus();
   }
 
   canNavigateToStep(index: number): boolean {
@@ -602,7 +580,9 @@ export class FiscalActivationWizardComponent implements OnInit {
   }
 
   isStepDone(step: FiscalWizardStepId): boolean {
-    return this.service.completedSteps().includes(step);
+    // Steps satisfied by prefill (existing tenant data) must show the ✓, not
+    // only steps the user explicitly completed inside the wizard.
+    return this.service.effectiveSatisfiedSteps().includes(step);
   }
 
   isLastStep(): boolean {
@@ -616,21 +596,26 @@ export class FiscalActivationWizardComponent implements OnInit {
     this.service.currentStepIndex.set(index);
   }
 
-  goToStepById(stepId: string): void {
-    const index = this.service
-      .stepSequence()
-      .indexOf(stepId as FiscalWizardStepId);
-    if (index >= 0) {
-      this.goToStep(index);
-    }
-  }
-
   back(): void {
     this.service.currentStepIndex.update((index) => Math.max(index - 1, 0));
   }
 
   selectStore(storeId: number): void {
     this.service.targetStoreId.set(Number(storeId));
+    // Store context changed → re-fetch the prefill (which is per-tenant) and
+    // reposition the cursor on the first unsatisfied step for the new store.
+    void this.reinitializeForStoreChange();
+  }
+
+  private async reinitializeForStoreChange(): Promise<void> {
+    try {
+      await this.service.loadStatus();
+      // force=true: the previous prefill was for a different store_id and
+      // must be discarded so the next read reflects the new tenant context.
+      await this.service.loadPrefill(true);
+    } catch {
+      // Non-fatal — see initializeWizard comment.
+    }
     this.service.restoreWizardFromCurrentStatus();
   }
 
@@ -649,7 +634,7 @@ export class FiscalActivationWizardComponent implements OnInit {
     if (!stepHost) return;
     const result = await stepHost.submit();
     if (result === null) return;
-    await this.router.navigate(['/admin/settings/fiscal']);
+    await this.router.navigate(['/admin/fiscal']);
   }
 
   currentDescription(): string {

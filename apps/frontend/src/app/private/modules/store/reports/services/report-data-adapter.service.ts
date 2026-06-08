@@ -22,6 +22,18 @@ export class ReportDataAdapterService {
     if (report.id === 'profit-loss') {
       return this.adaptProfitLoss(rawData);
     }
+    if (report.id === 'balance-sheet') {
+      return this.adaptBalanceSheet(rawData);
+    }
+    if (report.id === 'income-statement') {
+      return this.adaptIncomeStatement(rawData);
+    }
+    if (report.id === 'customer-summary') {
+      return this.adaptCustomerSummary(rawData);
+    }
+    if (report.id === 'aging-report') {
+      return this.adaptAgingReport(rawData);
+    }
     if (report.id === 'accounts-payable-aging') {
       return this.adaptAccountsPayableAging(rawData);
     }
@@ -121,12 +133,12 @@ export class ReportDataAdapterService {
   private adaptSummary(normalized: NormalizedResponse): ReportAdaptedData {
     const rawSummary = normalized.data[0] || {};
 
-    // For reports like expense-summary that have both summary fields and a nested array
-    // (e.g., category_breakdown), extract the array as tabular data
+    // For reports with a nested array (e.g., category_breakdown), use that as tabular data.
+    // Otherwise keep the normalized data rows for the table.
     const arrayKey = Object.keys(rawSummary).find(
       k => Array.isArray(rawSummary[k])
     );
-    const tableData = arrayKey ? rawSummary[arrayKey] : [];
+    const tableData = arrayKey ? rawSummary[arrayKey] : normalized.data;
 
     // Build summaryData from non-array, non-object primitives
     const summaryData: Record<string, any> = {};
@@ -161,12 +173,77 @@ export class ReportDataAdapterService {
       mappedRows = this.ensureRowId(mappedRows, trackKey);
     }
 
-    return { data: mappedRows, meta: normalized.meta };
+    let summaryData = this.extractSummaryFromMeta(normalized);
+    if (!summaryData || Object.keys(summaryData).length === 0) {
+      summaryData = this.computeSummaryFromRows(mappedRows, report);
+    }
+
+    return { data: mappedRows, meta: normalized.meta, summaryData };
   }
 
   private adaptNested(normalized: NormalizedResponse): ReportAdaptedData {
-    // Specialized components (balance-sheet, aging) handle their own rendering
-    return { data: normalized.data, meta: normalized.meta };
+    let summaryData = this.extractSummaryFromMeta(normalized);
+    if (!summaryData || Object.keys(summaryData).length === 0) {
+      summaryData = this.computeSummaryFromRows(normalized.data);
+    }
+    return { data: normalized.data, meta: normalized.meta, summaryData };
+  }
+
+  /**
+   * Extracts summaryData from the normalized meta object.
+   * Backend often sends aggregated values alongside list data:
+   *   { data: [...], meta: { total_sales: 500, order_count: 30 } }
+   *   { data: [...], meta: { totals: { total_sales: 500 } } }
+   *   { data: [...], total_sales: 500, order_count: 30 }
+   */
+  private extractSummaryFromMeta(normalized: NormalizedResponse): Record<string, any> | undefined {
+    const meta = normalized.meta;
+    if (!meta || typeof meta !== 'object') return undefined;
+
+    const summaryData: Record<string, any> = {};
+
+    // Check for nested totals/summary in meta (e.g., meta.totals, meta.summary)
+    const nestedKeys = ['totals', 'summary', 'stats', 'aggregates'];
+    for (const nk of nestedKeys) {
+      if (meta[nk] && typeof meta[nk] === 'object' && !Array.isArray(meta[nk])) {
+        Object.assign(summaryData, meta[nk]);
+      }
+    }
+
+    // Also extract primitive values directly from meta
+    for (const [key, value] of Object.entries(meta)) {
+      if (!Array.isArray(value) && typeof value !== 'object') {
+        summaryData[key] = value;
+      }
+    }
+
+    return Object.keys(summaryData).length > 0 ? summaryData : undefined;
+  }
+
+  /**
+   * Computes summaryData from data rows when the backend doesn't provide
+   * aggregate totals in the meta. Sums all numeric fields from the rows
+   * and adds a `_count` for row-count based stats.
+   */
+  private computeSummaryFromRows(rows: any[], report?: ReportDefinition): Record<string, any> | undefined {
+    if (!rows || rows.length === 0) return undefined;
+
+    const summaryData: Record<string, any> = { _count: rows.length };
+
+    const numericKeys = new Set<string>();
+    for (const row of rows) {
+      for (const [key, value] of Object.entries(row)) {
+        if (typeof value === 'number' && !key.startsWith('_')) {
+          numericKeys.add(key);
+        }
+      }
+    }
+
+    for (const key of numericKeys) {
+      summaryData[key] = rows.reduce((sum, row) => sum + (Number(row[key]) || 0), 0);
+    }
+
+    return Object.keys(summaryData).length > 1 ? summaryData : undefined;
   }
 
   /**
@@ -245,7 +322,14 @@ export class ReportDataAdapterService {
       rows.push({ section: 'Resultado Final', concept: 'Utilidad Neta', amount: Number(d.bottom_line.net_profit || 0), is_total: true, percentage: d.bottom_line.net_margin });
     }
 
-    return { data: rows, meta: undefined };
+    const summaryData: Record<string, any> = {
+      gross_revenue: Number(d.revenue?.gross_revenue || 0),
+      cogs: Number(d.costs?.cost_of_goods_sold || 0),
+      net_profit: Number(d.bottom_line?.net_profit || 0),
+      net_margin: d.bottom_line?.net_margin ?? 0,
+    };
+
+    return { data: rows, meta: undefined, summaryData };
   }
 
   /**
@@ -281,5 +365,132 @@ export class ReportDataAdapterService {
       collected_this_month: Number(d.collected_this_month || 0),
     };
     return { data: [], isSummary: true, summaryData, meta: undefined };
+  }
+
+  private adaptBalanceSheet(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const rows: any[] = [];
+
+    const addSection = (section: string, accounts: any[], total: number) => {
+      for (const a of accounts) {
+        rows.push({
+          section,
+          account_code: a.account_code || '',
+          account_name: a.account_name || '',
+          balance: Number(a.balance || 0),
+        });
+      }
+      rows.push({ section, account_code: '', account_name: `Total ${section}`, balance: Number(total || 0), is_total: true });
+    };
+
+    if (d.assets) addSection('Activos', d.assets.accounts || [], d.assets.total || 0);
+    if (d.liabilities) addSection('Pasivos', d.liabilities.accounts || [], d.liabilities.total || 0);
+    if (d.equity) addSection('Patrimonio', d.equity.accounts || [], d.equity.total || 0);
+
+    const summaryData: Record<string, any> = {
+      total_assets: Number(d.assets?.total || 0),
+      total_liabilities: Number(d.liabilities?.total || 0),
+      total_equity: Number(d.equity?.total || 0),
+    };
+
+    return { data: rows, meta: undefined, summaryData };
+  }
+
+  private adaptIncomeStatement(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const rows: any[] = [];
+
+    const addSection = (section: string, accounts: any[], total: number) => {
+      for (const a of accounts) {
+        rows.push({
+          section,
+          account_code: a.account_code || '',
+          account_name: a.account_name || '',
+          balance: Number(a.balance || 0),
+        });
+      }
+      rows.push({ section, account_code: '', account_name: `Total ${section}`, balance: Number(total || 0), is_total: true });
+    };
+
+    if (d.revenue) addSection('Ingresos', d.revenue.accounts || [], d.revenue.total || 0);
+    if (d.expenses) addSection('Gastos', d.expenses.accounts || [], d.expenses.total || 0);
+
+    if (d.net_income !== undefined) {
+      rows.push({ section: 'Resultado', account_code: '', account_name: 'Utilidad Neta', balance: Number(d.net_income || 0), is_total: true });
+    }
+
+    const summaryData: Record<string, any> = {
+      total_revenue: Number(d.revenue?.total || 0),
+      total_costs: Number(d.expenses?.total || 0),
+      net_income: Number(d.net_income || 0),
+    };
+
+    return { data: rows, meta: undefined, summaryData };
+  }
+
+  private adaptAgingReport(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+    const buckets = d.buckets || {};
+
+    // Build rows from top customers with a single total column
+    const rows: any[] = (d.top_customers || []).map((c: any) => ({
+      customer_name: c.customer_name,
+      current: 0,
+      days_1_30: 0,
+      days_31_60: 0,
+      days_61_90: 0,
+      over_90: 0,
+      total: Number(c.total || 0),
+    }));
+
+    const summaryData: Record<string, any> = {
+      current: Number(buckets.current || 0),
+      days_1_30: Number(buckets.days_1_30 || 0),
+      days_31_60: Number(buckets.days_31_60 || 0),
+      days_61_90: Number(buckets.days_61_90 || 0),
+      days_91_120: Number(buckets.days_91_120 || 0),
+      days_120_plus: Number(buckets.days_120_plus || 0),
+      total: Number(d.total || 0),
+    };
+
+    return { data: rows, isSummary: true, summaryData, meta: undefined };
+  }
+
+  /**
+   * Transforms the customer-summary flat object into metric/value/change rows.
+   */
+  private adaptCustomerSummary(raw: any): ReportAdaptedData {
+    const d = raw?.data ?? raw;
+
+    const metrics: Record<string, string> = {
+      total_customers: 'Total Clientes',
+      active_customers: 'Clientes Activos',
+      new_customers: 'Clientes Nuevos',
+      inactive_customers: 'Clientes Inactivos',
+      average_spend: 'Gasto Promedio',
+      new_customers_growth: 'Crecimiento Nuevos',
+      returning_customers: 'Clientes Recurrentes',
+      churn_rate: 'Tasa de Abandono',
+    };
+
+    const rows: any[] = [];
+    const summaryData: Record<string, any> = {};
+
+    for (const [key, label] of Object.entries(metrics)) {
+      if (d[key] !== undefined) {
+        rows.push({ metric: label, value: d[key], change: null });
+        summaryData[key] = d[key];
+      }
+    }
+
+    // Also pick up any extra keys not in the known metrics
+    for (const [key, value] of Object.entries(d)) {
+      if (!metrics[key] && typeof value !== 'object' && !Array.isArray(value)) {
+        rows.push({ metric: key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), value, change: null });
+        summaryData[key] = value;
+      }
+    }
+
+    return { data: rows, isSummary: true, summaryData, meta: undefined };
   }
 }

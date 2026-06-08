@@ -31,9 +31,9 @@
                     {{ item.applied_price_tier_name }}
                   </span>
                 }
-                @if (item.is_package_unit && item.units_per_package) {
+                @if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
                   <span class="item-package-badge">
-                    x {{ item.units_per_package }} unid/empaque
+                    Caja ×{{ item.units_per_package }}
                   </span>
                 }
               </div>
@@ -41,6 +41,11 @@
             @if (item.is_weight_product) {
               <span class="product-qty">
                 {{ item.weight }} {{ item.weight_unit || 'kg' }}
+              </span>
+            } @else if (item.is_package_unit && (item.units_per_package ?? 0) > 1) {
+              <span class="product-qty">
+                {{ item.quantity }} {{ item.quantity === 1 ? 'paq.' : 'paqs.' }}
+                = {{ item.quantity * (item.units_per_package ?? 1) }} u.
               </span>
             } @else {
               <span class="product-qty">x{{ item.quantity }}</span>

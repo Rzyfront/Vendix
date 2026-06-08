@@ -3,8 +3,9 @@ import {Component, OnInit, OnDestroy, inject,
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
-import { Observable, combineLatest } from 'rxjs';
+import { Observable, combineLatest, fromEvent, debounceTime } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -32,6 +33,11 @@ import {
   DateRangeFilterComponent
 } from '../../../components/date-range-filter/date-range-filter.component';
 import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+  StickyHeaderActionButton,
+} from '../../../../../../../shared/components/sticky-header/sticky-header.component';
+import {
   ANALYTICS_CATEGORIES,
   ANALYTICS_VIEWS,
   AnalyticsCategoryId,
@@ -43,6 +49,7 @@ import * as OverviewSelectors from '../state/overview-summary.selectors';
 
 import { EChartsOption } from 'echarts';
 import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'app-overview-summary',
@@ -60,6 +67,7 @@ import { formatChartPeriod, getDefaultStartDate, getDefaultEndDate } from '../..
     AnalyticsCategoryChipsComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
+    StickyHeaderComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -67,6 +75,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
 // Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
@@ -96,6 +106,14 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly searchTerm = signal<string>('');
 
   readonly categories = ANALYTICS_CATEGORIES;
+
+  readonly overviewTabs: StickyHeaderTab[] = [
+    { id: 'summary', label: 'Resumen General', icon: 'layout-dashboard', route: '/admin/analytics/overview' },
+  ];
+
+  readonly overviewActions: StickyHeaderActionButton[] = [
+    { id: 'view-reports', label: 'Ver Reportes', icon: 'file-text', variant: 'outline' },
+  ];
 
   private readonly categoryById = computed(() =>
     new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
@@ -146,9 +164,30 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 
   // Cached summary for template helpers
   private currentSummary: OverviewSummary | null = null;
+  // Cached trends so charts can be rebuilt on viewport changes without refetch
+  private currentTrends: OverviewTrend[] = [];
+  private currentGranularity = 'day';
+
+  // Viewport-based responsive flag for chart density (device, not container, width)
+  private static readonly MOBILE_BREAKPOINT = 768;
+  readonly isMobile = signal<boolean>(this.computeIsMobile());
+
+  private computeIsMobile(): boolean {
+    return (
+      typeof window !== 'undefined' &&
+      window.innerWidth < OverviewSummaryComponent.MOBILE_BREAKPOINT
+    );
+  }
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    // Read date range from URL query params (e.g. when navigating from reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(OverviewActions.setDateRange({ dateRange: urlRange }));
+    }
 
     // Dispatch initial loads
     this.store.dispatch(OverviewActions.loadOverviewSummary());
@@ -166,7 +205,22 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     combineLatest([this.trends$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
+        this.currentTrends = trends;
+        this.currentGranularity = granularity;
         this.updateComparativeChart(trends, granularity);
+      });
+
+    // Rebuild charts with mobile/desktop density when crossing the breakpoint.
+    fromEvent(window, 'resize')
+      .pipe(debounceTime(150), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        const mobile = this.computeIsMobile();
+        if (mobile === this.isMobile()) return;
+        this.isMobile.set(mobile);
+        if (this.currentSummary) {
+          this.updateGaugeChart(this.currentSummary.breakeven_ratio);
+        }
+        this.updateComparativeChart(this.currentTrends, this.currentGranularity);
       });
   }
 
@@ -189,6 +243,16 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   exportReport(): void {
+  }
+
+  goToReports(): void {
+    this.router.navigateByUrl('/admin/reports/overview/overview-summary');
+  }
+
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'view-reports') {
+      this.goToReports();
+    }
   }
 
   getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {
@@ -248,12 +312,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
 
   // Chart builders
   private updateGaugeChart(ratio: number): void {
+    const m = this.isMobile();
     this.gaugeChartOptions.set({
       series: [
         {
           type: 'gauge',
-          center: ['50%', '65%'],
-          radius: '90%',
+          center: ['50%', m ? '62%' : '65%'],
+          radius: m ? '72%' : '82%',
           startAngle: 180,
           endAngle: 0,
           min: 0,
@@ -261,13 +326,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           splitNumber: 3,
           pointer: {
             show: true,
-            length: '60%',
-            width: 6,
+            length: m ? '55%' : '60%',
+            width: m ? 4 : 6,
             itemStyle: {
               color: 'auto' } },
           axisLine: {
             lineStyle: {
-              width: 20,
+              width: m ? 13 : 20,
               color: [
                 [0.467, '#22c55e'], // 0-70%: green
                 [0.6, '#eab308'], // 70-90%: yellow
@@ -275,18 +340,19 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
               ] } },
           axisTick: { show: false },
           splitLine: {
-            length: 12,
+            length: m ? 8 : 12,
             lineStyle: { width: 2, color: '#999' } },
           axisLabel: {
-            distance: 25,
-            fontSize: 11,
+            // Negative distance pushes the % ticks outside the arc (cleaner look).
+            distance: m ? -16 : -26,
+            fontSize: m ? 9 : 11,
             formatter: (value: number) => `${value}%` },
           detail: {
             valueAnimation: true,
             formatter: (value: number) => `${value.toFixed(1)}%`,
-            fontSize: 20,
+            fontSize: m ? 17 : 20,
             fontWeight: 'bold',
-            offsetCenter: [0, '20%'],
+            offsetCenter: [0, m ? '24%' : '20%'],
             color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
           data: [{ value: Math.min(ratio, 150) }] },
       ] });
@@ -296,6 +362,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     trends: OverviewTrend[],
     granularity: string,
   ): void {
+    const m = this.isMobile();
 
     const style = getComputedStyle(document.documentElement);
     const borderColor =
@@ -307,9 +374,20 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
       formatChartPeriod(t.period, granularity),
     );
 
+    // Series config — avoids repeating the gradient area style for each line.
+    const seriesConfig: { name: string; color: string; values: number[] }[] = [
+      { name: 'Ventas', color: '#22c55e', values: trends.map((t) => t.sales) },
+      { name: 'Gastos', color: '#ef4444', values: trends.map((t) => t.expenses) },
+      { name: 'Impuestos', color: '#f59e0b', values: trends.map((t) => t.taxes) },
+      { name: 'Rend. Bruto', color: '#3b82f6', values: trends.map((t) => t.gross_profit) },
+      { name: 'Rend. Neto', color: '#8b5cf6', values: trends.map((t) => t.net_profit) },
+    ];
+
     this.comparativeChartOptions.set({
       tooltip: {
         trigger: 'axis',
+        confine: true,
+        textStyle: { fontSize: m ? 11 : 12 },
         formatter: (params: any) => {
           let html = `<strong>${params[0].name}</strong><br/>`;
           for (const p of params) {
@@ -318,123 +396,70 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           return html;
         } },
       legend: {
-        data: ['Ventas', 'Gastos', 'Impuestos', 'Rend. Bruto', 'Rend. Neto'],
-        bottom: 30,
-        textStyle: { color: textSecondary } },
+        data: seriesConfig.map((s) => s.name),
+        type: m ? 'scroll' : 'plain',
+        bottom: m ? 0 : 30,
+        itemWidth: m ? 12 : 25,
+        itemHeight: m ? 8 : 14,
+        itemGap: m ? 8 : 10,
+        textStyle: { color: textSecondary, fontSize: m ? 10 : 12 } },
       grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '20%',
+        left: m ? '1%' : '3%',
+        right: m ? '2%' : '4%',
+        top: m ? '6%' : '8%',
+        bottom: m ? '20%' : '18%',
         containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary } },
+        axisLabel: {
+          color: textSecondary,
+          fontSize: m ? 9 : 12,
+          hideOverlap: true } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
+          fontSize: m ? 9 : 12,
+          formatter: (value: number) => this.formatAxisCurrency(value, m) },
         splitLine: { lineStyle: { color: borderColor } } },
-      series: [
-        {
-          name: 'Ventas',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: trends.map((t) => t.sales),
+      series: seriesConfig.map((s) => ({
+        name: s.name,
+        type: 'line' as const,
+        smooth: true,
+        showSymbol: !m,
+        symbol: 'circle',
+        symbolSize: m ? 0 : 6,
+        data: s.values,
+        lineStyle: { width: m ? 1.5 : 2 },
+        itemStyle: { color: s.color },
+        areaStyle: {
+          color: {
+            type: 'linear' as const,
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: `${s.color}4D` },
+              { offset: 1, color: `${s.color}0D` },
+            ] } },
+      })) });
+  }
 
-          itemStyle: { color: '#22c55e' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#22c55e4D' },
-                { offset: 1, color: '#22c55e0D' },
-              ] } } },
-        {
-          name: 'Gastos',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: trends.map((t) => t.expenses),
-
-          itemStyle: { color: '#ef4444' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#ef44444D' },
-                { offset: 1, color: '#ef44440D' },
-              ] } } },
-        {
-          name: 'Impuestos',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: trends.map((t) => t.taxes),
-
-          itemStyle: { color: '#f59e0b' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#f59e0b4D' },
-                { offset: 1, color: '#f59e0b0D' },
-              ] } } },
-        {
-          name: 'Rend. Bruto',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: trends.map((t) => t.gross_profit),
-
-          itemStyle: { color: '#3b82f6' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#3b82f64D' },
-                { offset: 1, color: '#3b82f60D' },
-              ] } } },
-        {
-          name: 'Rend. Neto',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
-          data: trends.map((t) => t.net_profit),
-
-          itemStyle: { color: '#8b5cf6' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: '#8b5cf64D' },
-                { offset: 1, color: '#8b5cf60D' },
-              ] } } },
-      ] });
+  /** Y-axis currency formatter: compact (k/M) on mobile to save horizontal space. */
+  private formatAxisCurrency(value: number, mobile: boolean): string {
+    if (!mobile) return this.currencyService.format(Math.round(value), 0);
+    const abs = Math.abs(value);
+    if (abs >= 1_000_000) {
+      return `${this.currencyService.format(Math.round(value / 1_000_000), 0)}M`;
+    }
+    if (abs >= 1_000) {
+      return `${this.currencyService.format(Math.round(value / 1_000), 0)}k`;
+    }
+    return this.currencyService.format(Math.round(value), 0);
   }
 
 }

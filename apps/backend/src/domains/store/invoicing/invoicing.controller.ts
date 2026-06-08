@@ -9,7 +9,12 @@ import {
   Query,
   HttpCode,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../common/guards/module-flow.guard';
 import { InvoicingService } from './invoicing.service';
 import { InvoiceFlowService } from './invoice-flow/invoice-flow.service';
 import { CreditNotesService } from './credit-notes/credit-notes.service';
@@ -25,6 +30,8 @@ import {
 } from './credit-notes/dto/create-credit-note.dto';
 
 @Controller('store/invoicing')
+@UseGuards(ModuleFlowGuard)
+@RequireModuleFlow('invoicing')
 export class InvoicingController {
   constructor(
     private readonly invoicing_service: InvoicingService,

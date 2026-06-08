@@ -670,23 +670,29 @@ export class AuthService {
         throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
       }
 
-      // Phase 4 onboarding fix — `operating_scope` derives from the chosen
+      // Onboarding scope fix — `operating_scope` derives from the chosen
       // `account_type` instead of being hardcoded:
       //   - SINGLE_STORE  → STORE  (each store isolated)
       //   - MULTI_STORE_ORG → ORGANIZATION (consolidated)
-      // The DTO does not yet expose `account_type` / `operating_scope`
-      // overrides, so we honor optional fields if the caller passes them
-      // (forward-compatible). Final scope is locked later by the onboarding
-      // wizard. Partners (`is_partner=true`) are forced to STORE — but a
-      // partner organization cannot be created from this owner-registration
-      // flow (the `is_partner` flag is set later by super-admin), so the
-      // partner override is a defensive guard not expected to trigger here.
+      // Registration happens BEFORE the user picks store-vs-organization in the
+      // onboarding welcome step, so the scope is genuinely undecided here. We
+      // default to the SAFEST, "upgradeable" combination SINGLE_STORE/STORE/STORE
+      // (matches the Prisma schema defaults): STORE→ORGANIZATION is an allowed
+      // upgrade, while ORGANIZATION→STORE is the dangerous downgrade that is
+      // blocked. The onboarding wizard (`selectAppType`) is the single source of
+      // truth that locks the final scope. The DTO does not yet expose
+      // `account_type` / `operating_scope` overrides, so we honor optional fields
+      // if the caller passes them (forward-compatible). Partners
+      // (`is_partner=true`) are forced to STORE — but a partner organization
+      // cannot be created from this owner-registration flow (the `is_partner`
+      // flag is set later by super-admin), so the partner override is a
+      // defensive guard not expected to trigger here.
       const incomingAccountType = (registerOwnerDto as any).account_type;
       const accountType =
         incomingAccountType === 'SINGLE_STORE' ||
         incomingAccountType === 'MULTI_STORE_ORG'
           ? incomingAccountType
-          : 'MULTI_STORE_ORG';
+          : 'SINGLE_STORE';
 
       const requestedScope = (registerOwnerDto as any).operating_scope as
         | 'STORE'

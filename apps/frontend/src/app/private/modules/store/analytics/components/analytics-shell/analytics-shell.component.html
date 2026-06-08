@@ -4,6 +4,8 @@
     [subtitle]="category()?.description || ''"
     [icon]="category()?.icon || 'chart-bar'"
     [tabs]="tabs()"
+    [actions]="headerActions()"
+    (actionClicked)="onActionClick($event)"
     tabsAriaLabel="Navegacion de analiticas"
   ></app-sticky-header>
 

@@ -256,7 +256,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           (clicked)="onClose()"
           [disabled]="!form.valid || submitting()"
         >
-          <app-icon name="lock" [size]="16" slot="icon"></app-icon>
+          <app-icon name="lock" [size]="16" slot="icon" ></app-icon>
           @if (submitting()) {
             Cerrando...
           } @else {

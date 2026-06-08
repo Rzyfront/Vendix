@@ -137,7 +137,7 @@
           (clicked)="onUpdatePaymentMethod()"
         >
           <span class="flex items-center gap-2">
-            <app-icon name="refresh-ccw" [size]="18"></app-icon>
+            <app-icon slot="icon" name="refresh-ccw" [size]="18"></app-icon>
             Actualizar método de pago
           </span>
         </app-button>
@@ -170,7 +170,7 @@
           Procesando…
         } @else {
           <span class="flex items-center gap-2">
-            <app-icon name="credit-card" [size]="18"></app-icon>
+            <app-icon slot="icon" name="credit-card" [size]="18"></app-icon>
             Pagar ahora
           </span>
         }
@@ -265,7 +265,7 @@
       </div>
       <app-button variant="outline" size="md" (clicked)="onContactSupport()">
         <span class="flex items-center gap-2">
-          <app-icon name="message-square" [size]="16"></app-icon>
+          <app-icon slot="icon" name="message-square" [size]="16"></app-icon>
           Contactar soporte
         </span>
       </app-button>

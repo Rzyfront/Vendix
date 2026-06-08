@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   effect,
+  ElementRef,
   inject,
   signal,
   viewChild,
@@ -13,12 +14,16 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillAccountingPeriod,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   FiscalPeriodFormComponent,
   FiscalPeriodValue,
 } from '../../forms/fiscal-period-form/fiscal-period-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
 
 @Component({
   selector: 'app-fiscal-accounting-period-step',
@@ -58,6 +63,7 @@ export class FiscalAccountingPeriodStepComponent
 {
   private readonly service = inject(FiscalActivationWizardService);
   private readonly http = inject(HttpClient);
+  private readonly host = inject(ElementRef<HTMLElement>);
 
   readonly stepId: FiscalWizardStepId = 'accounting_period';
   readonly valid = signal(false);
@@ -101,30 +107,28 @@ export class FiscalAccountingPeriodStepComponent
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}${this.service.storeQuery()}`),
-      );
-      const payload = res?.data ?? res;
-      const items: any[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-      const open = items.find((period) => period?.status === 'open') ?? items[0];
-      if (open) {
-        this.existingPeriodId.set(typeof open.id === 'number' ? open.id : null);
-        this.initial.set({
-          name: open.name ?? '',
-          start_date: String(open.start_date ?? '').slice(0, 10),
-          end_date: String(open.end_date ?? '').slice(0, 10),
-        });
-      }
-    } catch {
-      // Silent: default form is fine for new configurations.
+    // Replaces the previous N+1 GET against `/accounting/fiscal-periods`.
+    // The prefill already returns the single open period (or the most recent
+    // one) — exactly what we need to seed the form. The POST in submit()
+    // is still the canonical write path.
+    const period = this.service.prefill()?.accounting_period;
+    if (!period) {
+      // No prefill or backend reported no period — keep the default form
+      // (current year) so the user can still complete a fresh setup.
+      return;
     }
+    this.existingPeriodId.set(period.id);
+    this.initial.set(this.toPeriodFormValue(period));
+  }
+
+  private toPeriodFormValue(
+    period: WizardPrefillAccountingPeriod,
+  ): Partial<FiscalPeriodValue> {
+    return {
+      name: period.name ?? '',
+      start_date: String(period.start_date ?? '').slice(0, 10),
+      end_date: String(period.end_date ?? '').slice(0, 10),
+    };
   }
 
   onValidity(v: boolean): void {
@@ -134,7 +138,10 @@ export class FiscalAccountingPeriodStepComponent
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     const form = this.form();
     form.markAllTouched();
-    if (!this.valid()) return null;
+    if (!this.valid()) {
+      focusFirstInvalid(this.host);
+      return null;
+    }
 
     this.submitting.set(true);
     this.localError.set(null);

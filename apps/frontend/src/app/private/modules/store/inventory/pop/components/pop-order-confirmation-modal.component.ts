@@ -198,7 +198,7 @@ import { CostPreviewResponse } from '../../interfaces';
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           <app-button variant="primary" (clicked)="onConfirm()">
-            <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon"></app-icon>
+            <app-icon [name]="actionType() === 'create-receive' ? 'package-check' : 'check'" [size]="16" slot="icon" ></app-icon>
             {{ actionType() === 'create-receive' ? 'Crear y Recibir' : 'Crear Orden' }}
           </app-button>
         </div>

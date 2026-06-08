@@ -120,7 +120,7 @@ describe('EcommerceReviewsService', () => {
     expect(prisma.orders.findFirst).not.toHaveBeenCalled();
   });
 
-  it('creates verified ecommerce reviews as approved after a delivered purchase', async () => {
+  it('creates verified ecommerce reviews as pending after a delivered purchase (default state, no auto-approval)', async () => {
     prisma.orders.findFirst.mockResolvedValue({ id: 1 });
     prisma.reviews.findFirst.mockResolvedValue(null);
     prisma.reviews.count.mockResolvedValue(0);
@@ -129,12 +129,14 @@ describe('EcommerceReviewsService', () => {
       first_name: 'Ana',
       last_name: 'Diaz',
     });
+    // Prisma applies @default(pending) at the DB level when the service
+    // omits `state` from the create payload, so the mock reflects that.
     prisma.reviews.create.mockResolvedValue({
       id: 55,
       product_id: 100,
       user_id: 7,
       rating: 5,
-      state: 'approved',
+      state: 'pending',
     });
 
     const result = await service.create({
@@ -143,16 +145,24 @@ describe('EcommerceReviewsService', () => {
       comment: 'Excelente producto',
     });
 
+    // The service MUST NOT force state in the create payload anymore:
+    // it relies on the schema's @default(pending). Assert the call does
+    // not include `state` so a regression that re-adds state='approved'
+    // would be caught immediately.
     expect(prisma.reviews.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         product_id: 100,
         user_id: 7,
         rating: 5,
         verified_purchase: true,
-        state: 'approved',
       }),
     });
-    expect(result.state).toBe('approved');
+    const callData =
+      prisma.reviews.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(callData).not.toHaveProperty('state');
+
+    // The result reflects the post-insert state (Prisma default).
+    expect(result.state).toBe('pending');
     expect(eventEmitter.emit).toHaveBeenCalledWith(
       'review.created',
       expect.objectContaining({

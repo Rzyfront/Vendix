@@ -444,7 +444,7 @@ import {
               [loading]="isVerifying()"
               [disabled]="isVerifying()"
             >
-              <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+              <app-icon name="refresh" [size]="16" slot="icon" ></app-icon>
               {{ verificationResult() ? 'Reintentar' : 'Verificar Ahora' }}
             </app-button>
           }

@@ -16,6 +16,7 @@ import { seedHelpArticles } from './seeds/help-articles.seed';
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
 import { seedWithholdingTax } from './seeds/withholding-tax.seed';
+import { seedFiscalRuleSets } from './seeds/fiscal-rule-sets.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
@@ -127,7 +128,13 @@ const seedModules = [
   {
     name: 'Withholding Tax',
     fn: seedWithholdingTax,
-    description: 'UVT values and withholding concepts for Colombian tax compliance',
+    description:
+      'UVT values and withholding concepts for Colombian tax compliance',
+  },
+  {
+    name: 'Fiscal Rule Sets',
+    fn: seedFiscalRuleSets,
+    description: 'Global Colombian fiscal operation rule snapshots',
   },
   {
     name: 'AI Engine Applications',

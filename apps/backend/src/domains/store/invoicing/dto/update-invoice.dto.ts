@@ -25,6 +25,11 @@ export class UpdateInvoiceDto {
   supplier_id?: number;
 
   @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  related_invoice_id?: number;
+
+  @IsOptional()
   @IsString()
   @MaxLength(255)
   customer_name?: string;
@@ -49,6 +54,11 @@ export class UpdateInvoiceDto {
   @IsString()
   @MaxLength(10)
   currency?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  withholding_amount?: number;
 
   @IsOptional()
   @IsString()

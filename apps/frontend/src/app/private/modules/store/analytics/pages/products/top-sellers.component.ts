@@ -1,6 +1,7 @@
 import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -8,10 +9,7 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
-import { ResponsiveDataViewComponent } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { TableColumn } from '../../../../../../shared/components/table/table.component';
-import { ItemListCardConfig } from '../../../../../../shared/components/item-list/item-list.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -26,6 +24,7 @@ import * as ProductsSelectors from './state/products-analytics.selectors';
 import { EChartsOption } from 'echarts';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-top-sellers',
@@ -35,7 +34,6 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
     CardComponent,
     ChartComponent,
     StatsComponent,
-    ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent,
@@ -54,6 +52,7 @@ export class TopSellersComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 topSellers$: Observable<TopSellingProduct[]> = this.store.select(
     ProductsSelectors.selectTopSellers,
   );
@@ -74,10 +73,8 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
   });
 
   topSellersChartOptions= signal<EChartsOption>({});
-  activeView = signal<'chart' | 'table'>('chart');
   exporting = signal(false);
   private chartLoaded = signal(false);
-  private tableLoaded = signal(false);
 
   readonly productsViews: AnalyticsView[] = getViewsByCategory('products').filter(
     (v) => v.key !== 'products_top_sellers'
@@ -91,50 +88,16 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
     return sorted[0]?.product_name?.substring(0, 15) || '-';
   });
 
-  tableColumns: TableColumn[] = [
-    { key: 'product_name', label: 'Producto' },
-    { key: 'sku', label: 'SKU', width: '100px' },
-    { key: 'units_sold', label: 'Unidades', align: 'right' },
-    {
-      key: 'revenue',
-      label: 'Ingresos',
-      align: 'right',
-      transform: (v) => this.currencyService.format(v)},
-    {
-      key: 'average_price',
-      label: 'Precio Promedio',
-      align: 'right',
-      transform: (v) => this.currencyService.format(v)},
-    {
-      key: 'profit_margin',
-      label: 'Margen',
-      align: 'right',
-      transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-')},
-  ];
-
-  cardConfig: ItemListCardConfig = {
-    titleKey: 'product_name',
-    subtitleKey: 'sku',
-    avatarFallbackIcon: 'package',
-    detailKeys: [
-      { key: 'units_sold', label: 'Unidades' },
-      {
-        key: 'average_price',
-        label: 'Precio Prom.',
-        transform: (v) => this.currencyService.format(v)},
-      {
-        key: 'profit_margin',
-        label: 'Margen',
-        transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-')},
-    ],
-    footerKey: 'revenue',
-    footerLabel: 'Ingresos',
-    footerTransform: (v) => this.currencyService.format(v)};
-
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
-    this.loadActiveView();
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(ProductsActions.setDateRange({ dateRange: urlRange, reload: false }));
+    }
+
+    this.loadChartData();
 
     this.topSellers$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((topSellers) => {
       this.updateChart(topSellers);
@@ -143,28 +106,14 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.chartLoaded.set(false);
-    this.tableLoaded.set(false);
     this.store.dispatch(ProductsActions.setDateRange({ dateRange: range, reload: false }));
-    this.loadActiveView();
+    this.loadChartData();
   }
 
-  setActiveView(view: 'chart' | 'table'): void {
-    this.activeView.set(view);
-    this.loadActiveView();
-  }
-
-  private loadActiveView(): void {
-    if (this.activeView() === 'chart') {
-      if (!this.chartLoaded()) {
-        this.store.dispatch(ProductsActions.loadTopSellers({ limit: 10 }));
-        this.chartLoaded.set(true);
-      }
-      return;
-    }
-
-    if (!this.tableLoaded()) {
-      this.store.dispatch(ProductsActions.loadTopSellers({ limit: 50 }));
-      this.tableLoaded.set(true);
+  private loadChartData(): void {
+    if (!this.chartLoaded()) {
+      this.store.dispatch(ProductsActions.loadTopSellers({ limit: 10 }));
+      this.chartLoaded.set(true);
     }
   }
 

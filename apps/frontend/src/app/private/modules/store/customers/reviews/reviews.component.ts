@@ -487,12 +487,27 @@ export class ReviewsComponent {
     {
       key: 'rating',
       label: 'Calificación',
-      transform: (v: any) => '\u2605'.repeat(v) + '\u2606'.repeat(5 - v),
+      // Guard de tipo: si v no es un entero entre 0 y 5, devolvemos '-'
+      // en vez de tirar TypeError al hacer .repeat() con NaN o un
+      // string. Un throw aqu\u00ed aborta el @for del template y deja la tabla
+      // entera vac\u00eda sin error visible (ese era el bug de "lista vac\u00eda").
+      transform: (v: any) => {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 0 || n > 5) return '-';
+        return '\u2605'.repeat(n) + '\u2606'.repeat(5 - n);
+      },
     },
     {
       key: 'comment',
       label: 'Comentario',
-      transform: (v: any) => (v?.length > 50 ? v.substring(0, 50) + '...' : v),
+      // Guard de tipo: si v no es string (p.ej. null/undefined, o un array
+      // con .length num\u00e9rico), devolvemos string vac\u00edo. Antes hac\u00edamos
+      // v?.length sin typeof-check, lo cual para un tipo no-string
+      // terminaba en substring() \u2192 TypeError \u2192 tabla vac\u00eda.
+      transform: (v: any) => {
+        if (typeof v !== 'string') return '';
+        return v.length > 50 ? v.substring(0, 50) + '...' : v;
+      },
     },
     {
       key: 'state',

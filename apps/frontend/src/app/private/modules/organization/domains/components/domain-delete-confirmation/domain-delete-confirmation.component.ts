@@ -118,7 +118,7 @@ import { Domain } from '../../interfaces/domain.interface';
           (clicked)="onConfirm()"
           [disabled]="!isHostnameValid"
           >
-          <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
+          <app-icon name="trash-2" [size]="16" slot="icon" ></app-icon>
           Eliminar Dominio
         </app-button>
       </div>

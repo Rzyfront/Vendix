@@ -10,7 +10,7 @@
   </button>
 
   <!-- Category chips -->
-  @for (category of categories; track category.id) {
+  @for (category of categories(); track category.id) {
     <button
       class="chip"
       [class.active]="isActive(category.id)"

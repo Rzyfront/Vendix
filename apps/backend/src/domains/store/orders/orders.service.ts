@@ -22,6 +22,7 @@ import { ScheduleValidationService } from '../settings/schedule-validation.servi
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
+import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 
 @Injectable()
 export class OrdersService {
@@ -1017,8 +1018,11 @@ export class OrdersService {
    * - Si AL MENOS UNA línea lo trae, valida que el usuario tenga el permission
    *   `store:products:apply_pricing_tier`. Si no, lanza
    *   `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)` (403).
-   * - Carga tarifas (auto-scoped por store) y productos (para resolver
-   *   `quantity × units_per_package` cuando aplica empaque real).
+   * - Carga tarifas (auto-scoped por store) y el override de empaque por
+   *   producto (para resolver `quantity × packSize` cuando aplica empaque real).
+   *
+   * El packSize sigue la cascada `override ?? tier ?? 1` resuelta por
+   * `resolveStockUnitsConsumed` (helper puro en products/services/packaging.util).
    *
    * Devuelve un array alineado por índice con `items` para que el caller
    * mapee la línea ↔ snapshot sin re-buscar.
@@ -1026,6 +1030,7 @@ export class OrdersService {
   private async resolveTierSnapshotsForItems(
     items: Array<{
       product_id?: number;
+      product_variant_id?: number;
       quantity: number;
       applied_price_tier_id?: number;
     }>,
@@ -1065,7 +1070,11 @@ export class OrdersService {
 
     const tiers = await this.prisma.price_tiers.findMany({
       where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
-      select: { id: true, name: true, is_package_unit: true },
+      select: {
+        id: true,
+        name: true,
+        units_per_package: true,
+      },
     });
     type TierRow = (typeof tiers)[number];
     const tierById = new Map<number, TierRow>(
@@ -1075,20 +1084,35 @@ export class OrdersService {
     const productIds = Array.from(
       new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
     );
-    const productsList = productIds.length
-      ? await this.prisma.products.findMany({
-          where: { id: { in: productIds } },
+
+    // Per-product packaging overrides keyed by (product_id, variant_id|null,
+    // price_tier_id). Auto-scoped relacionalmente por product.store_id.
+    const overrides = productIds.length
+      ? await this.prisma.product_price_tier_overrides.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIdsInUse) },
+          },
           select: {
-            id: true,
-            units_per_package: true,
-            package_consumes_multiple_stock: true,
+            product_id: true,
+            variant_id: true,
+            price_tier_id: true,
+            override_units_per_package: true,
           },
         })
       : [];
-    type ProductRow = (typeof productsList)[number];
-    const productById = new Map<number, ProductRow>(
-      productsList.map((p): [number, ProductRow] => [p.id, p]),
+    const overrideKey = (
+      productId: number,
+      variantId: number | null,
+      tierId: number,
+    ): string => `${productId}:${variantId ?? 'null'}:${tierId}`;
+    const overrideUnitsByKey = new Map<string, number | null>(
+      overrides.map((o): [string, number | null] => [
+        overrideKey(o.product_id, o.variant_id ?? null, o.price_tier_id),
+        o.override_units_per_package ?? null,
+      ]),
     );
+
     const assignments = productIds.length
       ? await this.prisma.product_price_tier_assignments.findMany({
           where: {
@@ -1115,15 +1139,17 @@ export class OrdersService {
       if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
         throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
-      const product = item.product_id ? productById.get(item.product_id) : null;
-      const isPackage =
-        tier.is_package_unit &&
-        product?.package_consumes_multiple_stock === true &&
-        typeof product.units_per_package === 'number' &&
-        (product.units_per_package ?? 0) > 0;
-      const stock_units_consumed = isPackage
-        ? Number(item.quantity) * Number(product!.units_per_package)
-        : null;
+      const variantId = item.product_variant_id ?? null;
+      const overrideUnits =
+        overrideUnitsByKey.get(
+          overrideKey(productId, variantId, Number(tierId)),
+        ) ?? null;
+      // packSize = override ?? tier ?? 1 (collapses to 1 when <= 1).
+      const stock_units_consumed = resolveStockUnitsConsumed(
+        Number(item.quantity),
+        tier.units_per_package,
+        overrideUnits,
+      );
       return {
         tier_id: tier.id,
         tier_name: tier.name,

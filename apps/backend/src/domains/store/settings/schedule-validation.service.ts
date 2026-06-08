@@ -1,7 +1,7 @@
 import { Injectable, ForbiddenException, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { BusinessHours } from './interfaces/store-settings.interface';
+import { BusinessHours, BusinessHoursBlock } from './interfaces/store-settings.interface';
 import { mergeStoreSettingsWithDefaults } from './defaults/default-store-settings';
 
 export interface ScheduleValidationResult {
@@ -10,6 +10,7 @@ export interface ScheduleValidationResult {
   currentTime: string;
   openTime?: string;
   closeTime?: string;
+  activeBlocks?: BusinessHoursBlock[];
   nextOpenTime?: string;
   message?: string;
 }
@@ -118,7 +119,61 @@ export class ScheduleValidationService {
       };
     }
 
-    // Verificar si está cerrado
+    // Custom mode: multiple blocks per day
+    if (todayHours.blocks && todayHours.blocks.length > 0) {
+      const allClosed = todayHours.blocks.every(
+        (b) => b.open === 'closed' || b.close === 'closed',
+      );
+      if (allClosed) {
+        const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+        return {
+          isWithinBusinessHours: false,
+          currentDay: this.getCurrentDayNameSpanish(currentDayName),
+          currentTime,
+          nextOpenTime: nextOpen,
+          activeBlocks: todayHours.blocks,
+          message: `El establecimiento está cerrado hoy (${this.getCurrentDayNameSpanish(currentDayName)}). Horario próximo: ${nextOpen}`,
+        };
+      }
+
+      let withinAnyBlock = false;
+      for (const block of todayHours.blocks) {
+        if (
+          block.open !== 'closed' &&
+          block.close !== 'closed' &&
+          this.isTimeWithinRange(currentTime, block.open, block.close)
+        ) {
+          withinAnyBlock = true;
+          break;
+        }
+      }
+
+      const blocksText = this.formatBlocks(todayHours.blocks);
+
+      if (withinAnyBlock) {
+        return {
+          isWithinBusinessHours: true,
+          currentDay: this.getCurrentDayNameSpanish(currentDayName),
+          currentTime,
+          activeBlocks: todayHours.blocks.filter(
+            (b) => b.open !== 'closed' && b.close !== 'closed',
+          ),
+          message: `Horario de atención: ${blocksText}`,
+        };
+      }
+
+      const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
+      return {
+        isWithinBusinessHours: false,
+        currentDay: this.getCurrentDayNameSpanish(currentDayName),
+        currentTime,
+        activeBlocks: todayHours.blocks,
+        nextOpenTime: nextOpen,
+        message: `El horario de atención es: ${blocksText}. Fuera de horario. Próxima apertura: ${nextOpen}`,
+      };
+    }
+
+    // Continuous mode: single open/close block (original logic)
     if (todayHours.open === 'closed' || todayHours.close === 'closed') {
       const nextOpen = this.getNextOpenDay(businessHours, day, curMinutes);
       return {
@@ -132,7 +187,6 @@ export class ScheduleValidationService {
       };
     }
 
-    // Validar horario
     const isWithin = this.isTimeWithinRange(
       currentTime,
       todayHours.open,
@@ -282,6 +336,13 @@ export class ScheduleValidationService {
     return `${hours}:${minutes}`;
   }
 
+  private formatBlocks(blocks: BusinessHoursBlock[]): string {
+    return blocks
+      .filter((b) => b.open !== 'closed' && b.close !== 'closed')
+      .map((b) => `${b.open} - ${b.close}`)
+      .join(', ');
+  }
+
   private isTimeWithinRange(
     current: string,
     open: string,
@@ -329,15 +390,27 @@ export class ScheduleValidationService {
     // First check if today opens later (before opening hour)
     const todayName = dayNames[currentDay];
     const todayHours = businessHours[todayName];
-    if (
-      todayHours &&
-      todayHours.open !== 'closed' &&
-      todayHours.close !== 'closed'
-    ) {
-      const [openH, openM] = todayHours.open.split(':').map(Number);
-      const openMinutes = openH * 60 + openM;
-      if (currentMinutes < openMinutes) {
-        return `Hoy ${todayHours.open} - ${todayHours.close}`;
+
+    if (todayHours) {
+      if (todayHours.blocks && todayHours.blocks.length > 0) {
+        for (const block of todayHours.blocks) {
+          if (block.open !== 'closed' && block.close !== 'closed') {
+            const [openH, openM] = block.open.split(':').map(Number);
+            const openMinutes = openH * 60 + openM;
+            if (currentMinutes < openMinutes) {
+              return `Hoy ${this.formatBlocks(todayHours.blocks)}`;
+            }
+          }
+        }
+      } else if (
+        todayHours.open !== 'closed' &&
+        todayHours.close !== 'closed'
+      ) {
+        const [openH, openM] = todayHours.open.split(':').map(Number);
+        const openMinutes = openH * 60 + openM;
+        if (currentMinutes < openMinutes) {
+          return `Hoy ${todayHours.open} - ${todayHours.close}`;
+        }
       }
     }
 
@@ -347,7 +420,16 @@ export class ScheduleValidationService {
       const dayName = dayNames[dayIndex];
       const hours = businessHours[dayName];
 
-      if (hours && hours.open !== 'closed' && hours.close !== 'closed') {
+      if (!hours) continue;
+
+      if (hours.blocks && hours.blocks.length > 0) {
+        const hasOpen = hours.blocks.some(
+          (b) => b.open !== 'closed' && b.close !== 'closed',
+        );
+        if (hasOpen) {
+          return `${spanishDays[dayName]} ${this.formatBlocks(hours.blocks)}`;
+        }
+      } else if (hours.open !== 'closed' && hours.close !== 'closed') {
         return `${spanishDays[dayName]} ${hours.open} - ${hours.close}`;
       }
     }

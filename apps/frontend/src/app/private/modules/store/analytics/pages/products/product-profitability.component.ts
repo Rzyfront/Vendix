@@ -1,6 +1,6 @@
 import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -25,6 +25,7 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-product-profitability',
@@ -47,6 +48,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 
   summary$: Observable<ProfitabilitySummary | null> = this.store.select(
     ProfitabilitySelectors.selectProfitabilitySummary,
@@ -100,6 +102,12 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+      this.store.dispatch(ProfitabilityActions.setProfitabilityDateRange({ dateRange: urlRange }));
+    }
 
     this.store.dispatch(ProfitabilityActions.loadProfitability());
 

@@ -214,6 +214,29 @@ export const accountingRoutes: Routes = [
           },
         ],
       },
+      // Tax sub-modules — nested under AccountingComponent so they share the
+      // module's persistent sticky-header (single router-outlet). Previously
+      // mounted as sibling top-level routes in store_admin.routes, which made
+      // their tabs navigate away from the accounting shell.
+      {
+        path: 'withholding-tax',
+        loadChildren: () =>
+          import('../withholding-tax/withholding-tax.routes').then(
+            (m) => m.withholdingTaxRoutes,
+          ),
+      },
+      {
+        path: 'exogenous',
+        loadChildren: () =>
+          import('../exogenous/exogenous.routes').then(
+            (m) => m.exogenousRoutes,
+          ),
+      },
+      {
+        path: 'ica',
+        loadChildren: () =>
+          import('../taxes/ica/ica.routes').then((m) => m.icaRoutes),
+      },
     ],
   },
 ];

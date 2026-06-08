@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke: "Displaying data lists, implementing responsive tables, creating mobile card views"
 ---
@@ -30,11 +30,59 @@ Before implementing, check the component READMEs under `apps/frontend/src/app/sh
 
 `ResponsiveDataViewComponent` is the default for admin lists. It renders `app-table` in `hidden md:block` and `app-item-list` in `block md:hidden`.
 
+## ⚠️ Mandatory Rule — Pagination on Every List
+
+**Every module that lists records MUST use server-side pagination.** No list of
+data — no matter how short — may be loaded all at once and rendered client-side.
+
+Required pieces:
+
+1. **Backend endpoint** accepts `page` and `limit` query params and returns a
+   paginated envelope using `ResponseService.paginated()`:
+   ```json
+   {
+     "success": true,
+     "message": "...",
+     "data": [ ... ],
+     "meta": { "total": 100, "page": 1, "limit": 25, "totalPages": 4,
+               "hasNextPage": true, "hasPreviousPage": false }
+   }
+   ```
+2. **Frontend service** types the response as `PaginatedApiResponse<T>` (defined
+   in the same module or imported from a shared location) so the page slice and
+   meta are surfaced to the component.
+3. **Parent component** owns:
+   - A `filters` signal `{ page, limit }` with `page` reset to `1` whenever a
+     search or filter changes.
+   - A `totalItems` signal populated from `response.meta.total`.
+   - A `totalPages` `computed()` derived from `totalItems / limit`.
+   - An `onPageChange(page)` handler that updates `filters` and reloads.
+4. **Template** renders `<app-pagination>` immediately after
+   `<app-responsive-data-view>` (or `<app-table>` / `<app-item-list>`), wired
+   to the signals above.
+
+Reference implementation: `apps/frontend/src/app/private/modules/store/price-tiers/pages/price-tiers-list-page/price-tiers-list-page.component.ts`
+
+The `PaginationComponent` (`apps/frontend/src/app/shared/components/pagination/`)
+is self-hiding when `totalPages <= 1` — no need to wrap it in `@if`.
+
+### Acceptable exceptions
+
+- **Embedded child rows** of a parent that already paginates (e.g. dispatch-note
+  items, layaway installments, audit log cards inside a settings page where the
+  backend already caps the slice to a small fixed number).
+- **Truly bounded reference data** that the backend hard-limits server-side
+  (e.g. the recent audit log in operating-scope / fiscal-scope where the
+  controller hard-codes `getRecentAuditLog(orgId, 10)`).
+
+If you think you need an exception that is not listed, document it in the
+component's `// Pagination exception:` block and call it out at PR time.
+
 ## ResponsiveDataView API
 
 Required for useful output:
 
-- `data`: records.
+- `data`: records (current page slice only).
 - `columns`: `TableColumn[]` for desktop.
 - `cardConfig`: required `ItemListCardConfig` for mobile.
 - `actions`: optional `TableAction[]`, shared across table and cards.
@@ -117,6 +165,8 @@ Current caveat: `footerStyle` exists in the interface and is used by module conf
 - Products card config: `apps/frontend/src/app/private/modules/store/products/components/product-list/product-list.component.ts`
 - Orders card config: `apps/frontend/src/app/private/modules/store/orders/components/orders-list/orders-list.component.ts`
 - Store roles card config: `apps/frontend/src/app/private/modules/store/settings/roles/components/store-roles-list.component.ts`
+- Reference pagination impl: `apps/frontend/src/app/private/modules/store/price-tiers/pages/price-tiers-list-page/price-tiers-list-page.component.ts`
+- Pagination component: `apps/frontend/src/app/shared/components/pagination/`
 - Shared components barrel: `apps/frontend/src/app/shared/components/index.ts`
 
 ## Related Skills
@@ -125,3 +175,5 @@ Current caveat: `footerStyle` exists in the interface and is used by module conf
 - `vendix-frontend-icons` - Icons used in actions, avatars, and detail fields
 - `vendix-date-timezone` - Date transforms
 - `vendix-currency-formatting` - Currency transforms
+- `vendix-backend-api` - Backend endpoint patterns including paginated responses
+

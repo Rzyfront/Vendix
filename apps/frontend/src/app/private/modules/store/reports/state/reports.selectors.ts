@@ -54,6 +54,11 @@ export const selectError = createSelector(
   (state) => state.error,
 );
 
+export const selectIsForbidden = createSelector(
+  selectReportsState,
+  (state) => state.isForbidden,
+);
+
 export const selectIsSummary = createSelector(
   selectReportsState,
   (state) => state.isSummary,

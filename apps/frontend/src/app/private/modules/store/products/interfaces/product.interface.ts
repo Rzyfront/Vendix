@@ -88,10 +88,10 @@ export interface Product {
     | 'ecommerce_domain_not_active';
   online_purchase_status_message?: string;
   final_price: number;
-  // Multi-tarifa (Phase 4): per-product tier overrides + unit-of-measure
+  // Multi-tarifa (Phase 4): per-product tier overrides.
+  // Packaging (units-per-package) now lives on the price tier / override,
+  // not on the product.
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number | null;
-  package_consumes_multiple_stock?: boolean;
   enabled_price_tier_ids?: number[];
   created_at: Date;
   updated_at: Date;
@@ -327,10 +327,8 @@ export interface CreateProductDto {
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
-  // Multi-tarifa + empaque (Phase 4)
+  // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number | null;
-  package_consumes_multiple_stock?: boolean;
   enabled_price_tier_ids?: number[];
 }
 
@@ -383,10 +381,8 @@ export interface UpdateProductDto {
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
   variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
-  // Multi-tarifa + empaque (Phase 4)
+  // Multi-tarifa (Phase 4). Packaging lives on the tier / override.
   has_multiple_price_tiers?: boolean;
-  units_per_package?: number | null;
-  package_consumes_multiple_stock?: boolean;
   enabled_price_tier_ids?: number[];
 }
 

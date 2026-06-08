@@ -53,8 +53,16 @@ export class NotificationSoundsController {
   findAll(
     @Query('is_active', new ParseBoolPipe({ optional: true }))
     isActive?: boolean,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
   ) {
-    return this.notificationSoundsService.findAll(isActive);
+    return this.notificationSoundsService.findAll({
+      isActive,
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      search,
+    });
   }
 
   @Get(':id')

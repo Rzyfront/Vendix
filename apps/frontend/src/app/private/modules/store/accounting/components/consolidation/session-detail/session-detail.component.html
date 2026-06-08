@@ -72,7 +72,7 @@
           (clicked)="onExport()"
           [loading]="export_loading()"
         >
-          <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+          <app-icon slot="icon" name="download" [size]="14" class="mr-1"></app-icon>
           Exportar
         </app-button>
       </div>
@@ -146,6 +146,16 @@
             emptyMessage="No se detectaron transacciones intercompany"
             emptyIcon="git-merge"
           ></app-responsive-data-view>
+        </div>
+
+        <div class="mt-4 flex justify-center">
+          <app-pagination
+            [currentPage]="ic_filters().page"
+            [totalPages]="ic_totalPages()"
+            [total]="ic_totalItems()"
+            [limit]="ic_filters().limit"
+            (pageChange)="onICPageChange($event)"
+          />
         </div>
       </app-card>
     }

@@ -86,7 +86,7 @@ import {
                     [disabled]="retryingPayment() || cancellingPendingChange()"
                     (clicked)="retryPayment()"
                   >
-                    <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="credit-card" [size]="16" slot="icon" ></app-icon>
                     Completar pago
                   </app-button>
                   <app-button
@@ -130,7 +130,7 @@ import {
                     [disabled]="retryingPendingChange() || cancellingPendingChange()"
                     (clicked)="retryPendingChange()"
                   >
-                    <app-icon name="credit-card" [size]="16" slot="icon"></app-icon>
+                    <app-icon name="credit-card" [size]="16" slot="icon" ></app-icon>
                     Completar pago
                   </app-button>
                   <app-button
@@ -231,7 +231,7 @@ import {
                     size="sm"
                     (clicked)="goToPlans()"
                   >
-                    <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="refresh-cw" [size]="14" slot="icon" ></app-icon>
                     Cambiar plan
                   </app-button>
                 </div>
@@ -283,7 +283,7 @@ import {
                     size="sm"
                     (clicked)="goToDunning()"
                   >
-                    <app-icon name="credit-card" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="credit-card" [size]="14" slot="icon" ></app-icon>
                     Pagar ahora
                   </app-button>
                 </div>
@@ -304,7 +304,7 @@ import {
                     size="sm"
                     (clicked)="goToDunning()"
                   >
-                    <app-icon name="headphones" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="headphones" [size]="14" slot="icon" ></app-icon>
                     Contactar soporte
                   </app-button>
                 </div>
@@ -326,7 +326,7 @@ import {
                     size="sm"
                     (clicked)="goToPlans()"
                   >
-                    <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="refresh-cw" [size]="14" slot="icon" ></app-icon>
                     Reactivar suscripción
                   </app-button>
                 </div>
@@ -348,7 +348,7 @@ import {
                     size="sm"
                     (clicked)="goToPlans()"
                   >
-                    <app-icon name="crown" [size]="14" slot="icon"></app-icon>
+                    <app-icon name="crown" [size]="14" slot="icon" ></app-icon>
                     Ver planes
                   </app-button>
                 </div>

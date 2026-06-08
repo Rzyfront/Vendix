@@ -1,0 +1,589 @@
+<div class="flex flex-col">
+  <app-sticky-header
+    title="Facturación electrónica"
+    subtitle="Configura DIAN para las facturas de suscripciones SaaS de Vendix"
+    icon="file-check"
+    variant="glass"
+    [badgeText]="badgeText()"
+    [badgeColor]="badgeColor()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  ></app-sticky-header>
+
+  @if (loadingStatus()) {
+    <div class="px-2 md:px-6 pb-6">
+      <div
+        class="bg-surface rounded-card border border-border p-6 flex items-center justify-center min-h-[200px]"
+      >
+        <div class="text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-sm text-text-secondary">
+            Cargando configuración fiscal...
+          </p>
+        </div>
+      </div>
+    </div>
+  } @else {
+    <form
+      [formGroup]="form"
+      (ngSubmit)="onSave()"
+      class="px-2 md:px-6 pb-6 space-y-6"
+    >
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <app-icon
+                name="info"
+                [size]="18"
+                customClasses="text-primary"
+              ></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                Estado fiscal SaaS
+              </h2>
+            </div>
+            <p class="text-sm text-text-secondary max-w-3xl">
+              La emisión DIAN es independiente del cobro. Si está inactiva o
+              falla, la venta de planes continúa y el cliente conserva su
+              factura SaaS normal.
+            </p>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+            <div class="rounded-md border border-border px-3 py-2 text-center">
+              <p class="text-xs text-text-secondary">Aceptadas</p>
+              <p class="text-lg font-semibold text-green-700">
+                {{ stats().accepted }}
+              </p>
+            </div>
+            <div class="rounded-md border border-border px-3 py-2 text-center">
+              <p class="text-xs text-text-secondary">Pendientes</p>
+              <p class="text-lg font-semibold text-amber-700">
+                {{ stats().pending }}
+              </p>
+            </div>
+            <div class="rounded-md border border-border px-3 py-2 text-center">
+              <p class="text-xs text-text-secondary">Errores</p>
+              <p class="text-lg font-semibold text-red-700">
+                {{ stats().errors }}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        @if (lastTest(); as test) {
+          <div
+            class="rounded-md border px-3 py-2 text-sm"
+            [class.border-green-200]="test.ok"
+            [class.bg-green-50]="test.ok"
+            [class.text-green-800]="test.ok"
+            [class.border-red-200]="!test.ok"
+            [class.bg-red-50]="!test.ok"
+            [class.text-red-800]="!test.ok"
+          >
+            Último test:
+            {{
+              test.ok ? 'OK' : 'Falló'
+            }}
+            · {{ environmentLabel(test.environment) }}
+            · {{ lastTestedAt() | date: 'short' }}
+            @if (test.message) {
+              <span>· {{ test.message }}</span>
+            }
+          </div>
+        }
+      </div>
+
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="building-2"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Entidad emisora Vendix
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+          <app-input
+            label="ID organización plataforma"
+            type="number"
+            formControlName="platform_organization_id"
+            [control]="form.get('platform_organization_id')"
+            [required]="true"
+            helperText="Organización legal que emite la factura"
+          ></app-input>
+
+          <app-input
+            label="ID entidad contable"
+            type="number"
+            formControlName="accounting_entity_id"
+            [control]="form.get('accounting_entity_id')"
+            [required]="true"
+            helperText="Entidad fiscal dueña del NIT"
+          ></app-input>
+
+          <app-input
+            label="ID resolución DIAN"
+            type="number"
+            formControlName="invoice_resolution_id"
+            [control]="form.get('invoice_resolution_id')"
+            helperText="Requerida para emitir documentos"
+          ></app-input>
+
+          <app-input
+            label="ID config DIAN"
+            type="number"
+            formControlName="dian_configuration_id"
+            [control]="form.get('dian_configuration_id')"
+            helperText="Opcional: reutiliza una configuración existente"
+          ></app-input>
+        </div>
+      </div>
+
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="shield-check"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Credenciales DIAN
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <app-input
+            label="Nombre de configuración"
+            type="text"
+            formControlName="name"
+            [control]="form.get('name')"
+            [required]="true"
+            placeholder="Vendix SaaS DIAN"
+          ></app-input>
+
+          <app-input
+            label="NIT"
+            type="text"
+            formControlName="nit"
+            [control]="form.get('nit')"
+            [required]="true"
+            placeholder="900123456"
+          ></app-input>
+
+          <app-input
+            label="DV"
+            type="text"
+            formControlName="nit_dv"
+            [control]="form.get('nit_dv')"
+            placeholder="1"
+          ></app-input>
+
+          <app-input
+            label="Software ID"
+            type="text"
+            formControlName="software_id"
+            [control]="form.get('software_id')"
+            [required]="true"
+          ></app-input>
+
+          <app-input
+            label="PIN de software"
+            type="password"
+            formControlName="software_pin"
+            [control]="form.get('software_pin')"
+            [required]="!configured()"
+            [placeholder]="configured() ? 'Configurado · dejar vacío para no cambiar' : ''"
+            helperText="Se guarda encriptado; solo diligéncialo para crear o rotar"
+          ></app-input>
+
+          <app-input
+            label="Test Set ID"
+            type="text"
+            formControlName="test_set_id"
+            [control]="form.get('test_set_id')"
+            helperText="Usado en habilitación/sandbox DIAN"
+          ></app-input>
+        </div>
+      </div>
+
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="settings"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Flujo de emisión
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+          <app-selector
+            label="Ambiente"
+            formControlName="environment"
+            [options]="environmentOptions"
+            [required]="true"
+          ></app-selector>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="flex items-center gap-2 text-sm text-text-primary">
+              <app-toggle formControlName="is_enabled"></app-toggle>
+              <span>Activar facturación DIAN</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm text-text-primary">
+              <app-toggle formControlName="auto_issue"></app-toggle>
+              <span>Emitir automáticamente al pagar</span>
+            </label>
+          </div>
+        </div>
+
+        @if (selectedEnvironment() === 'production' && isEnabled()) {
+          <div
+            class="border border-amber-300 bg-amber-50 rounded-md px-4 py-3 space-y-2"
+          >
+            <div class="flex items-start gap-2">
+              <app-icon
+                name="alert-triangle"
+                [size]="18"
+                customClasses="text-amber-600 mt-0.5"
+              ></app-icon>
+              <div class="text-sm text-amber-900">
+                <p class="font-semibold">Estás activando producción DIAN.</p>
+                <p>
+                  Para guardar producción activa, primero debe existir un test
+                  exitoso de producción reciente con esta misma configuración.
+                </p>
+              </div>
+            </div>
+            <label
+              class="flex items-center gap-2 text-sm text-amber-900 pt-1 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                class="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                formControlName="confirm_production"
+              />
+              <span>
+                Confirmo que esta configuración pertenece a producción DIAN y
+                que Vendix emitirá facturas electrónicas reales.
+              </span>
+            </label>
+            @if (
+              form.errors?.['confirm_production_required'] &&
+              form.controls.confirm_production.touched
+            ) {
+              <p class="text-xs text-red-700">
+                Debes confirmar para activar producción.
+              </p>
+            }
+          </div>
+        }
+      </div>
+
+      <div class="flex flex-col md:flex-row gap-2 md:justify-end">
+        <app-button
+          type="button"
+          variant="outline"
+          [loading]="testing()"
+          [disabled]="!configured() || testing() || saving()"
+          (clicked)="onTestConnection()"
+        >
+          <app-icon slot="icon" name="zap" [size]="16"></app-icon>
+          Probar DIAN
+        </app-button>
+
+        <app-button
+          type="submit"
+          variant="primary"
+          [loading]="saving()"
+          [disabled]="saving() || testing() || form.invalid"
+        >
+          <app-icon slot="icon" name="save" [size]="16"></app-icon>
+          {{ configured() ? 'Actualizar configuración' : 'Guardar configuración' }}
+        </app-button>
+      </div>
+    </form>
+
+    <div class="px-2 md:px-6 pb-6 space-y-6">
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="shield"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            Certificado P12
+          </h2>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-[1fr_280px_auto] gap-4 items-end">
+          <app-file-upload-dropzone
+            label="Subir certificado"
+            helperText=".p12 o .pfx"
+            accept=".p12,.pfx,application/x-pkcs12"
+            icon="upload-cloud"
+            [disabled]="uploadingCertificate() || !configured()"
+            (fileSelected)="onCertificateSelected($event)"
+            (fileRemoved)="onCertificateRemoved()"
+          ></app-file-upload-dropzone>
+
+          <app-input
+            label="Contraseña"
+            type="password"
+            [formControl]="certificatePasswordControl"
+            [control]="certificatePasswordControl"
+            [disabled]="uploadingCertificate() || !configured()"
+          ></app-input>
+
+          <app-button
+            type="button"
+            variant="primary"
+            [loading]="uploadingCertificate()"
+            [disabled]="!certificateReady() || !configured()"
+            (clicked)="onUploadCertificate()"
+          >
+            <app-icon slot="icon" name="upload" [size]="16"></app-icon>
+            Guardar P12
+          </app-button>
+        </div>
+
+        @if (status()?.dian_config?.has_certificate) {
+          <div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+            Certificado cargado
+            @if (status()?.dian_config?.certificate_expiry) {
+              · vence {{ status()?.dian_config?.certificate_expiry | date: 'mediumDate' }}
+            }
+          </div>
+        }
+      </div>
+
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-3">
+              <app-icon
+                name="file-plus"
+                [size]="18"
+                customClasses="text-text-primary"
+              ></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                Emisión manual
+              </h2>
+            </div>
+            <p class="text-sm text-text-secondary">
+              Úsalo para emitir o reemitir una factura SaaS pagada sin bloquear
+              el proceso de cobro.
+            </p>
+          </div>
+
+          <app-input
+            class="lg:w-64"
+            label="ID factura SaaS"
+            type="number"
+            [formControl]="manualInvoiceIdControl"
+            [control]="manualInvoiceIdControl"
+          ></app-input>
+
+          <app-button
+            type="button"
+            variant="outline"
+            [loading]="issuingInvoice()"
+            [disabled]="issuingInvoice() || !configured()"
+            (clicked)="onIssueManualInvoice()"
+          >
+            <app-icon slot="icon" name="send" [size]="16"></app-icon>
+            Emitir
+          </app-button>
+        </div>
+      </div>
+
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex flex-col lg:flex-row lg:items-end gap-3">
+          <div class="flex-1">
+            <div class="flex items-center gap-2 mb-3">
+              <app-icon
+                name="list-checks"
+                [size]="18"
+                customClasses="text-text-primary"
+              ></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                Registro de facturación
+              </h2>
+            </div>
+            <app-inputsearch
+              placeholder="Buscar por número, CUFE o error..."
+              [debounceTime]="500"
+              (searchChange)="onSearchChange($event)"
+            />
+          </div>
+
+          <app-selector
+            class="lg:w-56"
+            label="Estado"
+            [formControl]="statusFilterControl"
+            [options]="statusOptions"
+          ></app-selector>
+
+          <app-selector
+            class="lg:w-56"
+            label="Ambiente"
+            [formControl]="environmentFilterControl"
+            [options]="filterEnvironmentOptions"
+          ></app-selector>
+        </div>
+
+        @if (loadingTransmissions()) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando registro...</p>
+          </div>
+        } @else if (transmissions().length === 0) {
+          <app-empty-state
+            icon="file-text"
+            title="Sin transmisiones"
+            description="Cuando se paguen suscripciones con DIAN activo, aparecerán aquí."
+          ></app-empty-state>
+        } @else {
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="border-b border-border text-left text-text-secondary">
+                  <th class="py-3 pr-4 font-medium">Documento</th>
+                  <th class="py-3 pr-4 font-medium">Factura SaaS</th>
+                  <th class="py-3 pr-4 font-medium">Estado</th>
+                  <th class="py-3 pr-4 font-medium">Ambiente</th>
+                  <th class="py-3 pr-4 font-medium text-right">Total</th>
+                  <th class="py-3 pr-4 font-medium">Fecha</th>
+                  <th class="py-3 font-medium text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of transmissions(); track row.id) {
+                  <tr class="border-b border-border/70 last:border-0">
+                    <td class="py-3 pr-4">
+                      <div class="font-medium text-text-primary">
+                        {{ row.document_number }}
+                      </div>
+                      @if (row.cufe) {
+                        <div class="text-xs text-text-secondary truncate max-w-[220px]">
+                          CUFE {{ row.cufe }}
+                        </div>
+                      }
+                      @if (row.error_message) {
+                        <div class="text-xs text-red-700 truncate max-w-[260px]">
+                          {{ row.error_message }}
+                        </div>
+                      }
+                    </td>
+                    <td class="py-3 pr-4">
+                      <div class="text-text-primary">
+                        {{ row.subscription_invoice?.invoice_number ?? row.source_id }}
+                      </div>
+                      <div class="text-xs text-text-secondary">
+                        ID {{ row.source_id }}
+                      </div>
+                    </td>
+                    <td class="py-3 pr-4">
+                      <span
+                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+                        [class]="statusBadgeClasses(row.transmission_status)"
+                      >
+                        {{ statusLabel(row.transmission_status) }}
+                      </span>
+                    </td>
+                    <td class="py-3 pr-4">
+                      {{ environmentLabel(row.dian_configuration?.environment) }}
+                    </td>
+                    <td class="py-3 pr-4 text-right font-medium text-text-primary">
+                      {{ asNumber(row.subscription_invoice?.total) | currency }}
+                      <span class="text-xs text-text-secondary">
+                        {{ row.subscription_invoice?.currency }}
+                      </span>
+                    </td>
+                    <td class="py-3 pr-4 text-text-secondary">
+                      {{ row.created_at | date: 'short' }}
+                    </td>
+                    <td class="py-3 text-right">
+                      <div class="flex justify-end gap-2">
+                        @if (row.pdf_url) {
+                          <a
+                            class="inline-flex items-center justify-center rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-gray-50"
+                            [href]="row.pdf_url"
+                            target="_blank"
+                            rel="noopener"
+                          >
+                            PDF
+                          </a>
+                        }
+                        <app-button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          [loading]="retryingTransmissionId() === row.id"
+                          [disabled]="!canRetry(row)"
+                          (clicked)="onRetry(row)"
+                        >
+                          <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                          Reintentar
+                        </app-button>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+
+          <div class="pt-2 flex justify-center">
+            <app-pagination
+              [currentPage]="pagination().page"
+              [totalPages]="pagination().totalPages"
+              [total]="pagination().total"
+              [limit]="pagination().limit"
+              infoStyle="page"
+              (pageChange)="changePage($event)"
+            ></app-pagination>
+          </div>
+        }
+      </div>
+    </div>
+  }
+</div>

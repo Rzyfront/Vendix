@@ -117,19 +117,19 @@ import { environment } from '../../../../../../environments/environment';
                 style="border-top: 1px solid var(--color-border)"
               >
                 <app-button variant="ghost" size="xsm" (clicked)="openEditModal(template)">
-                  <app-icon name="pencil" [size]="12" slot="icon"></app-icon>
+                  <app-icon name="pencil" [size]="12" slot="icon" ></app-icon>
                   Editar
                 </app-button>
                 <app-button variant="ghost" size="xsm" (clicked)="openEditor(template.id)">
-                  <app-icon name="settings-2" [size]="12" slot="icon"></app-icon>
+                  <app-icon name="settings-2" [size]="12" slot="icon" ></app-icon>
                   Editor
                 </app-button>
                 <app-button variant="ghost" size="xsm" (clicked)="duplicateTemplate(template.id)">
-                  <app-icon name="copy" [size]="12" slot="icon"></app-icon>
+                  <app-icon name="copy" [size]="12" slot="icon" ></app-icon>
                   Duplicar
                 </app-button>
                 <app-button variant="ghost" size="xsm" (clicked)="confirmDeleteTemplate(template)">
-                  <app-icon name="trash-2" [size]="12" slot="icon"></app-icon>
+                  <app-icon name="trash-2" [size]="12" slot="icon" ></app-icon>
                 </app-button>
               </div>
             </div>

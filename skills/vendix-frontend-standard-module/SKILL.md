@@ -110,6 +110,26 @@ The parent page owns stats and module-level state. The child list component owns
 - Use `smallText` on stats where meaningful; it is recommended and common, but `StatsComponent` does not require it in code.
 - Do not copy old super-admin roles as the standard pattern; it is a legacy/non-standard layout.
 
+## ⚠️ Mandatory: server-side pagination on every list
+
+Every list page MUST use the `price-tiers` pagination pattern. Reference:
+`apps/frontend/src/app/private/modules/store/price-tiers/pages/price-tiers-list-page/price-tiers-list-page.component.ts`.
+
+Required:
+
+1. Backend `GET` returns the `ResponseService.paginated()` envelope with `meta.total`.
+2. Frontend service types it as `PaginatedApiResponse<T>` and exposes `data` and `meta`.
+3. Parent component owns the `filters = signal({ page, limit })`, `totalItems` and
+   `totalPages` signals, resets `page` to 1 on every search/filter change, and
+   provides `onPageChange()`.
+4. Template renders `<app-pagination>` immediately after the data view, with
+   the same `currentPage / totalPages / total / limit` inputs.
+
+The `PaginationComponent` self-hides when `totalPages <= 1`. No conditional
+wrapper needed. Full rule and exceptions are documented in
+`vendix-frontend-data-display` (see "Mandatory Rule — Pagination on Every
+List").
+
 ## When to Use `app-sticky-header` Instead
 
 Use `app-sticky-header` for form/detail pages with save/cancel actions, such as product create/edit and settings pages. List modules usually use sticky stats plus sticky search instead.

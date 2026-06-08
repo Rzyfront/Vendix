@@ -357,6 +357,11 @@ export class PosSettingsDto {
   @IsBoolean()
   enable_schedule_validation?: boolean;
 
+  @ApiProperty({ enum: ['continuous', 'custom'], example: 'continuous', required: false })
+  @IsOptional()
+  @IsIn(['continuous', 'custom'])
+  schedule_mode?: 'continuous' | 'custom';
+
   @ApiProperty({ example: false, required: false })
   @IsOptional()
   @IsBoolean()

@@ -137,7 +137,7 @@ const PAYMENT_TERM_LABELS = {
             variant="outline"
             (clicked)="saveAsDraft.emit()"
             >
-            <app-icon name="save" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="save" class="mr-2"></app-icon>
             Guardar Borrador
           </app-button>
     
@@ -146,7 +146,7 @@ const PAYMENT_TERM_LABELS = {
             (clicked)="submitOrder.emit()"
             [disabled]="!canSubmit()"
             >
-            <app-icon name="send" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="send" class="mr-2"></app-icon>
             Enviar Orden
           </app-button>
         </div>
@@ -157,7 +157,7 @@ const PAYMENT_TERM_LABELS = {
             variant="ghost"
             (clicked)="printOrder.emit()"
             >
-            <app-icon name="printer" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="printer" class="mr-2"></app-icon>
             Imprimir
           </app-button>
     
@@ -166,7 +166,7 @@ const PAYMENT_TERM_LABELS = {
             (clicked)="clearCart.emit()"
             class="text-[var(--color-destructive)]"
             >
-            <app-icon name="trash" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="trash" class="mr-2"></app-icon>
             Limpiar
           </app-button>
         </div>

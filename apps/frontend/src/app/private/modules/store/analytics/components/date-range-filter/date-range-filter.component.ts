@@ -1,4 +1,4 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, input, output, signal, inject, effect } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
@@ -8,6 +8,7 @@ import {
 } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
 type DatePreset =
   | 'today'
@@ -49,6 +50,8 @@ type DatePreset =
   `,
 })
 export class DateRangeFilterComponent {
+  private readonly dateRangeSync = inject(DateRangeSyncService);
+
   value = input<DateRangeFilter | undefined>();
   valueChange = output<DateRangeFilter>();
 
@@ -67,15 +70,16 @@ export class DateRangeFilterComponent {
   ];
 
   constructor() {
-    const initialValue = this.value();
-    if (initialValue?.preset && initialValue.preset !== 'custom') {
-      this.selectedPreset.set(initialValue.preset as DatePreset);
-    }
-
-    const range = this.getDateRange(this.selectedPreset());
-    if (range) {
-      this.selectedDate.set(range.start_date);
-    }
+    // React to external value changes (e.g., navigation from analytics to reports)
+    effect(() => {
+      const v = this.value();
+      if (v?.preset && v.preset !== 'custom') {
+        this.selectedPreset.set(v.preset as DatePreset);
+      }
+      if (v?.start_date) {
+        this.selectedDate.set(v.start_date);
+      }
+    });
   }
 
   onPresetChange(preset: string): void {
@@ -83,6 +87,7 @@ export class DateRangeFilterComponent {
     const range = this.getDateRange(preset as DatePreset);
     if (range) {
       this.selectedDate.set(range.start_date);
+      this.dateRangeSync.setDateRange(range);
       this.valueChange.emit(range);
     }
   }
@@ -94,6 +99,7 @@ export class DateRangeFilterComponent {
       end_date: date,
       preset: this.selectedPreset(),
     };
+    this.dateRangeSync.setDateRange(range);
     this.valueChange.emit(range);
   }
 

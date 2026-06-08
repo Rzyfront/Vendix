@@ -27,7 +27,7 @@
               <span class="brand-help">PNG, JPG o SVG. Máx 2MB.</span>
             </div>
             <div class="brand-actions">
-              <app-button variant="outline" size="sm" (clicked)="triggerLogoInput()">
+              <app-button variant="outline" size="sm" (clicked)="openLogoModal()">
                 <app-icon name="upload" size="14" slot="icon" />
                 <span>{{ logoPreview ? 'Cambiar' : 'Subir' }}</span>
               </app-button>
@@ -64,7 +64,7 @@
               <span class="brand-help">PNG o ICO. Máx 1MB.</span>
             </div>
             <div class="brand-actions">
-              <app-button variant="outline" size="sm" (clicked)="triggerFaviconInput()">
+              <app-button variant="outline" size="sm" (clicked)="openFaviconModal()">
                 <app-icon name="upload" size="14" slot="icon" />
                 <span>{{ faviconPreview ? 'Cambiar' : 'Subir' }}</span>
               </app-button>
@@ -127,4 +127,18 @@
       </div>
     </div>
   </div>
+
+  <!-- Image source modals (subir / URL / cámara + recorte) -->
+  <app-image-source-modal
+    [(isOpen)]="logoModalOpen"
+    [singleImage]="true"
+    [headerTitle]="'Logo'"
+    (imagesAdded)="onLogoImages($event)"
+  ></app-image-source-modal>
+  <app-image-source-modal
+    [(isOpen)]="faviconModalOpen"
+    [singleImage]="true"
+    [headerTitle]="'Favicon'"
+    (imagesAdded)="onFaviconImages($event)"
+  ></app-image-source-modal>
 </div>

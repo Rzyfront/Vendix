@@ -469,10 +469,10 @@ export class StockLevelManager {
    *
    * @param stock_units_consumed (multi-tarifa) Cuando es un número > 0, este
    *   valor se usa como la cantidad real a reservar en `stock_levels` en
-   *   lugar de `quantity`. Lo usa OrdersService cuando una tarifa
-   *   `is_package_unit` se aplica sobre un producto con
-   *   `package_consumes_multiple_stock = true`: el caller calcula
-   *   `quantity * units_per_package` y lo pasa explícito.
+   *   lugar de `quantity`. Lo usa OrdersService cuando una tarifa resuelve un
+   *   packSize > 1 (price_tiers.units_per_package o el override por producto
+   *   product_price_tier_overrides.override_units_per_package): el caller
+   *   calcula `quantity * packSize` y lo pasa explícito.
    *
    *   El método no decide la equivalencia caja/unidad — solo respeta el
    *   override numérico. Si es undefined u <= 0, comportamiento legacy

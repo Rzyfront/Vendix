@@ -117,6 +117,14 @@ export const orgAdminRoutes: Routes = [
             (m) => m.orgReportsRoutes,
           ),
       },
+      {
+        path: 'fiscal',
+        data: { fiscalApiScope: 'organization' },
+        loadChildren: () =>
+          import('../../private/modules/fiscal-operations/fiscal-operations.routes').then(
+            (m) => m.fiscalOperationsRoutes,
+          ),
+      },
       // Purchase Orders — ORG_ADMIN CRUD
       {
         path: 'purchase-orders',
@@ -167,18 +175,13 @@ export const orgAdminRoutes: Routes = [
       },
       {
         path: 'settings/fiscal/wizard',
-        canActivate: [fiscalManagementGuard],
-        loadComponent: () =>
-          import(
-            '../../private/modules/organization/settings/fiscal/wizard/fiscal-activation-wizard.component'
-          ).then((c) => c.OrganizationFiscalActivationWizardComponent),
+        redirectTo: '/admin/fiscal/wizard',
+        pathMatch: 'full',
       },
       {
         path: 'settings/fiscal',
-        loadComponent: () =>
-          import(
-            '../../private/modules/organization/settings/fiscal-management/fiscal-management.component'
-          ).then((c) => c.OrganizationFiscalManagementComponent),
+        redirectTo: '/admin/fiscal',
+        pathMatch: 'full',
       },
     ],
   },

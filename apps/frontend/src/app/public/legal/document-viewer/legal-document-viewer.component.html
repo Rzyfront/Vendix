@@ -1,0 +1,66 @@
+<div class="min-h-screen bg-gray-50 flex flex-col">
+  <!-- Header: simple Vendix brand bar -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+      <a routerLink="/" class="text-xl font-bold text-primary-600">Vendix</a>
+      <a
+        routerLink="/"
+        class="text-sm font-medium text-gray-500 hover:text-primary-600 transition-colors">
+        Volver al inicio
+      </a>
+    </div>
+  </header>
+
+  <main class="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+    @if (isLoading()) {
+      <!-- Loading state -->
+      <div class="flex flex-col items-center justify-center py-24 text-gray-400">
+        <div
+          class="w-10 h-10 border-4 border-gray-200 border-t-primary-600 rounded-full animate-spin"
+          aria-hidden="true"></div>
+        <p class="mt-4 text-sm">Cargando documento…</p>
+      </div>
+    } @else if (isEmpty()) {
+      <!-- Empty / 404 state -->
+      <div class="flex flex-col items-center justify-center py-24 text-center">
+        <h1 class="text-xl font-semibold text-gray-900">Documento no disponible</h1>
+        <p class="mt-2 text-sm text-gray-500 max-w-md">
+          No encontramos una versión activa de este documento. Vuelve a intentarlo más tarde.
+        </p>
+        <a
+          routerLink="/"
+          class="mt-6 inline-flex items-center px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition-colors">
+          Volver al inicio
+        </a>
+      </div>
+    } @else if (document(); as doc) {
+      <!-- Loaded document -->
+      <article>
+        <header class="mb-8 pb-6 border-b border-gray-200">
+          <h1 class="text-2xl sm:text-3xl font-bold text-gray-900">{{ doc.title }}</h1>
+          <div class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-500">
+            @if (doc.version) {
+              <span>Versión {{ doc.version }}</span>
+            }
+            @if (effectiveDate()) {
+              <span>Vigente desde {{ effectiveDate() }}</span>
+            }
+          </div>
+          @if (doc.description) {
+            <p class="mt-3 text-sm text-gray-600">{{ doc.description }}</p>
+          }
+        </header>
+
+        <div class="content-body" [innerHTML]="renderedContent()"></div>
+
+        <div class="mt-12 pt-6 border-t border-gray-200">
+          <a
+            routerLink="/"
+            class="text-sm font-medium text-primary-600 hover:text-primary-700 transition-colors">
+            ← Volver al inicio
+          </a>
+        </div>
+      </article>
+    }
+  </main>
+</div>

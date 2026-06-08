@@ -152,7 +152,7 @@ import { IconComponent } from '../../../../shared/components';
                       variant="primary"
                       >
                       Reenviar email de verificación
-                      <ng-container slot="icon">
+                      <ng-container slot="icon" >
                         @if (resendLoading()) {
                           <app-spinner
                             size="sm"

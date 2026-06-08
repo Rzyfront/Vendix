@@ -177,6 +177,8 @@ export class AdvancesService {
       sort_order = 'desc',
       status,
       employee_id,
+      date_from,
+      date_to,
     } = query;
 
     const skip = (page - 1) * limit;
@@ -201,6 +203,8 @@ export class AdvancesService {
       }),
       ...(status && { status: status as any }),
       ...(employee_id && { employee_id }),
+      ...(date_from && { created_at: { gte: new Date(date_from) } }),
+      ...(date_to && { created_at: { lte: new Date(date_to + 'T23:59:59.999Z') } }),
     };
 
     const [data, total] = await Promise.all([

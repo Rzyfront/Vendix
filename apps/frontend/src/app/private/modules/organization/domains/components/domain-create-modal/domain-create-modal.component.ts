@@ -7,8 +7,10 @@ import {
   DestroyRef,
   inject,
   signal,
+  computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -32,6 +34,7 @@ import {
   InputComponent,
   ButtonComponent,
   IconComponent,
+  ImageSourceModalComponent,
   SelectorComponent,
   ToggleComponent,
   ScrollableTabsComponent,
@@ -39,7 +42,11 @@ import {
   SelectorOption,
 } from '../../../../../../shared/components/index';
 import { StoreBindingPickerComponent } from '../store-binding-picker/store-binding-picker.component';
+import { ImageUploadService } from '../../../../../../shared/services';
+import { dataUrlToFile } from '../../../../../../shared/utils';
 import { environment } from '../../../../../../../environments/environment';
+
+type DomainAssetField = 'logo_url' | 'favicon';
 
 type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'integrations' | 'security' | 'performance';
 
@@ -59,6 +66,7 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
     ToggleComponent,
     ScrollableTabsComponent,
     StoreBindingPickerComponent,
+    ImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -209,16 +217,50 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
                       formControlName="store_name"
                       placeholder="Mi Tienda"
                     />
-                    <app-input
-                      label="URL del Logo"
-                      formControlName="logo_url"
-                      placeholder="https://ejemplo.com/logo.png"
-                    />
-                    <app-input
-                      label="URL del Favicon"
-                      formControlName="favicon"
-                      placeholder="https://ejemplo.com/favicon.ico"
-                    />
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="domain-asset">
+                      <label class="domain-asset__label">Logo</label>
+                      <div class="domain-asset__row">
+                        <div class="domain-asset__preview">
+                          @if (logoPreview()) {
+                            <img [src]="logoPreview()!" alt="Logo" />
+                          } @else {
+                            <app-icon name="image" [size]="20" />
+                          }
+                        </div>
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          [disabled]="uploadingAsset()"
+                          (clicked)="openAssetModal('logo_url')"
+                        >
+                          <app-icon name="upload" [size]="14" slot="icon" />
+                          {{ logoPreview() ? 'Cambiar' : 'Subir' }}
+                        </app-button>
+                      </div>
+                    </div>
+                    <div class="domain-asset">
+                      <label class="domain-asset__label">Favicon</label>
+                      <div class="domain-asset__row">
+                        <div class="domain-asset__preview">
+                          @if (faviconPreview()) {
+                            <img [src]="faviconPreview()!" alt="Favicon" />
+                          } @else {
+                            <app-icon name="feather" [size]="20" />
+                          }
+                        </div>
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          [disabled]="uploadingAsset()"
+                          (clicked)="openAssetModal('favicon')"
+                        >
+                          <app-icon name="upload" [size]="14" slot="icon" />
+                          {{ faviconPreview() ? 'Cambiar' : 'Subir' }}
+                        </app-button>
+                      </div>
+                    </div>
                   </div>
                   <div class="grid grid-cols-3 gap-4">
                     <app-input
@@ -431,16 +473,58 @@ type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'in
             [disabled]="domainForm.invalid || isSubmitting()"
             [loading]="isSubmitting()"
             >
-            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
             Crear Dominio
           </app-button>
         </div>
       </div>
     </app-modal>
+
+    <app-image-source-modal
+      [(isOpen)]="assetModalOpen"
+      [singleImage]="true"
+      [headerTitle]="assetModalTitle()"
+      (imagesAdded)="onDomainAssetImages($event)"
+    />
   `,
   styles: [`
     :host {
       display: block;
+    }
+
+    .domain-asset__label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--color-text-primary);
+    }
+
+    .domain-asset__row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .domain-asset__preview {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 56px;
+      height: 56px;
+      flex: 0 0 auto;
+      overflow: hidden;
+      border: 1px dashed var(--color-border);
+      border-radius: 10px;
+      color: var(--color-text-muted);
+      background: var(--color-surface);
+    }
+
+    .domain-asset__preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      padding: 6px;
     }
   `],
 })
@@ -462,6 +546,18 @@ export class DomainCreateModalComponent implements OnInit {
 
   readonly activeTab = signal<ConfigTabId>('branding');
   readonly selectedStoreId = signal<number | null>(null);
+
+  readonly assetModalOpen = signal(false);
+  readonly activeAssetField = signal<DomainAssetField | null>(null);
+  readonly uploadingAsset = signal(false);
+  readonly logoPreview = signal<string | null>(null);
+  readonly faviconPreview = signal<string | null>(null);
+  readonly assetModalTitle = computed<string | null>(() => {
+    const field = this.activeAssetField();
+    if (field === 'logo_url') return 'Logo';
+    if (field === 'favicon') return 'Favicon';
+    return null;
+  });
 
   readonly configTabs: ScrollableTab[] = [
     { id: 'branding', label: 'Branding', icon: 'palette' },
@@ -494,6 +590,7 @@ export class DomainCreateModalComponent implements OnInit {
 
   private domainsService: OrganizationDomainsService;
   private formBuilder: FormBuilder;
+  private readonly imageUploadService = inject(ImageUploadService);
 
   constructor(
     private fb_: FormBuilder,
@@ -621,6 +718,37 @@ export class DomainCreateModalComponent implements OnInit {
     this.domainForm.get('store_id')?.setValue(storeId);
   }
 
+  openAssetModal(field: DomainAssetField): void {
+    this.activeAssetField.set(field);
+    this.assetModalOpen.set(true);
+  }
+
+  async onDomainAssetImages(dataUrls: string[]): Promise<void> {
+    const dataUrl = dataUrls[0];
+    const field = this.activeAssetField();
+    if (!dataUrl || !field) return;
+
+    const label = field === 'logo_url' ? 'logo' : 'favicon';
+    const file = dataUrlToFile(dataUrl, `${label}.jpg`);
+
+    this.uploadingAsset.set(true);
+    try {
+      const result = await firstValueFrom(
+        this.imageUploadService.uploadFile(file, 'logos'),
+      );
+      this.domainForm.get(field)?.setValue(result.key);
+      this.domainForm.get(field)?.markAsDirty();
+      if (field === 'logo_url') {
+        this.logoPreview.set(result.url);
+      } else {
+        this.faviconPreview.set(result.url);
+      }
+    } finally {
+      this.uploadingAsset.set(false);
+      this.activeAssetField.set(null);
+    }
+  }
+
   onModalChange(isOpen: boolean): void {
     this.isOpenChange.emit(isOpen);
     if (!isOpen) {
@@ -740,6 +868,9 @@ export class DomainCreateModalComponent implements OnInit {
     });
     this.selectedStoreId.set(null);
     this.activeTab.set('branding');
+    this.logoPreview.set(null);
+    this.faviconPreview.set(null);
+    this.activeAssetField.set(null);
   }
 
   getErrorMessage(control: AbstractControl | null): string {

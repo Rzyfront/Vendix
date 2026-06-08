@@ -1,25 +1,82 @@
-import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  Component,
+  DestroyRef,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import {
+  ActivatedRoute,
+  NavigationEnd,
+  Router,
+  RouterModule,
+} from '@angular/router';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { filter, map, startWith } from 'rxjs/operators';
+
 import { OrgFiscalScopeSelectorComponent } from '../shared/components/org-fiscal-scope-selector.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderTab,
+} from '../../../../shared/components/sticky-header/sticky-header.component';
 
 /**
  * Org-scoped accounting shell.
- * Hosts read-only sub-pages consuming /api/organization/accounting/*.
+ * Owns a persistent sticky-header whose tabs centralize the read-only
+ * consolidated accounting sub-pages (/api/organization/accounting/*) under a
+ * single `<router-outlet>` — mirrors the store accounting shell, so the org
+ * sidebar can collapse "Contabilidad" to a single leaf. The fiscal-scope
+ * selector stays mounted across every tab to filter by store.
  */
 @Component({
   selector: 'vendix-org-accounting',
   standalone: true,
-  imports: [RouterModule, OrgFiscalScopeSelectorComponent],
+  imports: [RouterModule, OrgFiscalScopeSelectorComponent, StickyHeaderComponent],
   template: `
-    <div class="w-full">
+    <section class="org-accounting-shell">
+      <app-sticky-header
+        title="Contabilidad"
+        subtitle="Vista consolidada"
+        icon="book-open"
+        variant="glass"
+        [showBackButton]="true"
+        backRoute="/admin/fiscal"
+        [tabs]="tabs()"
+        [activeTab]="activeTabId()"
+        tabsAriaLabel="Secciones de contabilidad"
+        (tabChanged)="onTabChanged($event)"
+      ></app-sticky-header>
+
       <app-org-fiscal-scope-selector
         [selectedStoreId]="selectedStoreId()"
         (storeChange)="onFiscalStoreChange($event)"
       />
-      <router-outlet></router-outlet>
-    </div>
+
+      <div class="org-accounting-shell__body">
+        <router-outlet></router-outlet>
+      </div>
+    </section>
   `,
+  styles: [
+    `
+      :host {
+        display: block;
+        width: 100%;
+      }
+
+      .org-accounting-shell {
+        width: 100%;
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      .org-accounting-shell__body {
+        width: 100%;
+      }
+    `,
+  ],
 })
 export class OrgAccountingComponent {
   private readonly router = inject(Router);
@@ -27,6 +84,26 @@ export class OrgAccountingComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly selectedStoreId = signal<number | null>(null);
+
+  readonly tabs = computed<StickyHeaderTab[]>(() => TAB_DEFINITIONS);
+
+  private readonly currentUrl = toSignal(
+    this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd),
+      map((event) => event.urlAfterRedirects),
+      startWith(this.router.url),
+    ),
+    { initialValue: this.router.url },
+  );
+
+  readonly activeTabId = computed<string>(() => {
+    const url = this.currentUrl().split('?')[0];
+    const match = TAB_DEFINITIONS.find((tab) => {
+      const route = typeof tab.route === 'string' ? tab.route : '';
+      return route && (url === route || url.startsWith(`${route}/`));
+    });
+    return match?.id ?? TAB_DEFINITIONS[0]?.id ?? '';
+  });
 
   constructor() {
     this.route.queryParamMap
@@ -36,6 +113,17 @@ export class OrgAccountingComponent {
         const storeId = raw ? Number(raw) : null;
         this.selectedStoreId.set(Number.isFinite(storeId) ? storeId : null);
       });
+  }
+
+  onTabChanged(tabId: string): void {
+    const target = TAB_DEFINITIONS.find((tab) => tab.id === tabId);
+    const route = typeof target?.route === 'string' ? target.route : null;
+    if (route) {
+      const storeId = this.selectedStoreId();
+      void this.router.navigate([route], {
+        queryParams: storeId ? { store_id: storeId } : {},
+      });
+    }
   }
 
   onFiscalStoreChange(storeId: number | null): void {
@@ -51,3 +139,83 @@ export class OrgAccountingComponent {
     });
   }
 }
+
+const TAB_DEFINITIONS: StickyHeaderTab[] = [
+  {
+    id: 'chart-of-accounts',
+    label: 'Plan de Cuentas',
+    shortLabel: 'Cuentas',
+    icon: 'list-tree',
+    route: '/admin/accounting/chart-of-accounts',
+  },
+  {
+    id: 'journal-entries',
+    label: 'Asientos',
+    shortLabel: 'Asientos',
+    icon: 'book-open',
+    route: '/admin/accounting/journal-entries',
+  },
+  {
+    id: 'fiscal-periods',
+    label: 'Períodos',
+    shortLabel: 'Períodos',
+    icon: 'calendar-days',
+    route: '/admin/accounting/fiscal-periods',
+  },
+  {
+    id: 'account-mappings',
+    label: 'Mapeo de Cuentas',
+    shortLabel: 'Mapeo',
+    icon: 'shuffle',
+    route: '/admin/accounting/account-mappings',
+  },
+  {
+    id: 'cartera',
+    label: 'Cartera',
+    shortLabel: 'Cartera',
+    icon: 'wallet',
+    route: '/admin/accounting/cartera',
+  },
+  {
+    id: 'receivables',
+    label: 'Cuentas por Cobrar',
+    shortLabel: 'Por Cobrar',
+    icon: 'arrow-down-circle',
+    route: '/admin/accounting/receivables',
+  },
+  {
+    id: 'payables',
+    label: 'Cuentas por Pagar',
+    shortLabel: 'Por Pagar',
+    icon: 'arrow-up-circle',
+    route: '/admin/accounting/payables',
+  },
+  {
+    id: 'aging',
+    label: 'Vencimientos',
+    shortLabel: 'Vencim.',
+    icon: 'clock',
+    route: '/admin/accounting/aging',
+  },
+  {
+    id: 'withholding-tax',
+    label: 'Retenciones',
+    shortLabel: 'Retenc.',
+    icon: 'percent',
+    route: '/admin/accounting/withholding-tax',
+  },
+  {
+    id: 'exogenous',
+    label: 'Info Exógena',
+    shortLabel: 'Exógena',
+    icon: 'file-spreadsheet',
+    route: '/admin/accounting/exogenous',
+  },
+  {
+    id: 'ica',
+    label: 'ICA Municipal',
+    shortLabel: 'ICA',
+    icon: 'landmark',
+    route: '/admin/accounting/ica',
+  },
+];

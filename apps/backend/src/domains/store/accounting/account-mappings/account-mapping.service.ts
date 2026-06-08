@@ -97,6 +97,22 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2205',
     description: 'Proveedores',
   },
+  'support_document.accepted.expense': {
+    code: '5195',
+    description: 'Compra/Gasto soportado',
+  },
+  'support_document.accepted.vat_deductible': {
+    code: '2408',
+    description: 'IVA descontable',
+  },
+  'support_document.accepted.withholding_payable': {
+    code: '2365',
+    description: 'Retenciones por pagar',
+  },
+  'support_document.accepted.accounts_payable': {
+    code: '2205',
+    description: 'Proveedor documento soporte',
+  },
   // Purchase order payments
   'purchase_order.payment.accounts_payable': {
     code: '2205',
@@ -492,7 +508,8 @@ export class AccountMappingService {
     org_id: number,
     store_id?: number,
   ): Promise<number | undefined> {
-    const fiscalScope = await this.fiscalScopeService.requireFiscalScope(org_id);
+    const fiscalScope =
+      await this.fiscalScopeService.requireFiscalScope(org_id);
     if (fiscalScope === 'ORGANIZATION') {
       return undefined;
     }
@@ -501,7 +518,11 @@ export class AccountMappingService {
     const requestedStoreId = store_id ?? contextStoreId;
     if (requestedStoreId) {
       const store = await this.prisma.withoutScope().stores.findFirst({
-        where: { id: requestedStoreId, organization_id: org_id, is_active: true },
+        where: {
+          id: requestedStoreId,
+          organization_id: org_id,
+          is_active: true,
+        },
         select: { id: true },
       });
       if (!store) {
@@ -725,9 +746,7 @@ export class AccountMappingService {
         });
 
       const default_codes = Array.from(
-        new Set(
-          all_keys.map((key) => DEFAULT_ACCOUNT_MAPPINGS[key].code),
-        ),
+        new Set(all_keys.map((key) => DEFAULT_ACCOUNT_MAPPINGS[key].code)),
       );
 
       if (default_codes.length > 0) {

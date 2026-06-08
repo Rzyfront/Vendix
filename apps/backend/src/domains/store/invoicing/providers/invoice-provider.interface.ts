@@ -20,6 +20,20 @@ export interface InvoiceProviderAdapter {
   sendDebitNote?(debitNoteData: ProviderInvoiceData): Promise<ProviderResponse>;
 
   /**
+   * Sends a support document for acquisitions from non-obligated suppliers.
+   */
+  sendSupportDocument?(
+    supportDocumentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse>;
+
+  /**
+   * Sends an adjustment note for a support document.
+   */
+  sendSupportAdjustmentNote?(
+    supportAdjustmentData: ProviderInvoiceData,
+  ): Promise<ProviderResponse>;
+
+  /**
    * Checks the status of a previously sent document.
    */
   checkStatus(trackingId: string): Promise<StatusResponse>;

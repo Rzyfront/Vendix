@@ -274,57 +274,135 @@
           (changed)="onFieldChange()"
         ></app-setting-toggle>
       </div>
-      <div class="grid grid-cols-1 gap-3">
-        @for (day of daysOfWeek; track day.key) {
-          <div class="day-row">
-            <div class="day-row-top">
-              <span class="day-label">{{ day.label }}</span>
-              <button
-                type="button"
-                (click)="toggleDayStatus(day.key)"
-                class="day-toggle-btn"
-                [class.day-toggle-btn--close]="!isDayClosed(day.key)"
-                [class.day-toggle-btn--open]="isDayClosed(day.key)"
-              >
-                {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
-              </button>
-            </div>
-            @if (!isDayClosed(day.key)) {
-              <div class="day-times">
-                <div class="time-field">
-                  <label class="time-label">Apertura</label>
-                  <input
-                    type="time"
-                    [value]="
-                      form.get('business_hours')?.value[day.key]?.open || ''
-                    "
-                    (change)="
-                      onTimeChange(day.key, 'open', $any($event).target.value)
-                    "
-                    class="time-input"
-                  />
-                </div>
-                <span class="time-separator">—</span>
-                <div class="time-field">
-                  <label class="time-label">Cierre</label>
-                  <input
-                    type="time"
-                    [value]="
-                      form.get('business_hours')?.value[day.key]?.close || ''
-                    "
-                    (change)="
-                      onTimeChange(day.key, 'close', $any($event).target.value)
-                    "
-                    class="time-input"
-                  />
-                </div>
-              </div>
-            } @else {
-              <span class="day-closed-label">Cerrado</span>
-            }
-          </div>
-        }
+      <div class="mb-4">
+        <app-selector
+          [formControl]="scheduleModeControl"
+          label="Tipo de Horario"
+          [options]="scheduleModeOptions"
+          (valueChange)="onScheduleModeChange()"
+          size="sm"
+        ></app-selector>
+        <p class="text-[10px] text-text-muted mt-1">
+          @if (isCustomMode()) {
+            Personalizado: define múltiples bloques horarios por día
+          } @else {
+            Continuo: un solo bloque de apertura y cierre por día. Los horarios se configuran desde el módulo de configuración general.
+          }
+        </p>
       </div>
+
+      <!-- Continuous Mode -->
+      @if (!isCustomMode()) {
+        <div class="grid grid-cols-1 gap-3">
+          @for (day of daysOfWeek; track day.key) {
+            <div class="day-row">
+              <div class="day-row-top">
+                <span class="day-label">{{ day.label }}</span>
+                <button
+                  type="button"
+                  (click)="toggleDayStatus(day.key)"
+                  class="day-toggle-btn"
+                  [class.day-toggle-btn--close]="!isDayClosed(day.key)"
+                  [class.day-toggle-btn--open]="isDayClosed(day.key)"
+                >
+                  {{ isDayClosed(day.key) ? "Abrir" : "Cerrar" }}
+                </button>
+              </div>
+              @if (!isDayClosed(day.key)) {
+                <div class="day-times">
+                  <div class="time-field">
+                    <label class="time-label">Apertura</label>
+                    <input
+                      type="time"
+                      [value]="form.get('business_hours')?.value[day.key]?.open || ''"
+                      disabled
+                      class="time-input"
+                    />
+                  </div>
+                  <span class="time-separator">—</span>
+                  <div class="time-field">
+                    <label class="time-label">Cierre</label>
+                    <input
+                      type="time"
+                      [value]="form.get('business_hours')?.value[day.key]?.close || ''"
+                      disabled
+                      class="time-input"
+                    />
+                  </div>
+                </div>
+              } @else {
+                <span class="day-closed-label">Cerrado</span>
+              }
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Custom Mode (multi-block per day) -->
+      @if (isCustomMode()) {
+        <div class="grid grid-cols-1 gap-3">
+          @for (day of daysOfWeek; track day.key) {
+            <div class="day-row">
+              <div class="day-row-top">
+                <span class="day-label">{{ day.label }}</span>
+                <button
+                  type="button"
+                  (click)="toggleCustomDayStatus(day.key)"
+                  class="day-toggle-btn"
+                  [class.day-toggle-btn--close]="!isCustomDayClosed(day.key)"
+                  [class.day-toggle-btn--open]="isCustomDayClosed(day.key)"
+                >
+                  {{ isCustomDayClosed(day.key) ? "Abrir" : "Cerrar" }}
+                </button>
+              </div>
+              @if (!isCustomDayClosed(day.key)) {
+                <div class="blocks-container">
+                  @for (block of getDayBlocks(day.key); track $index) {
+                    <div class="block-row">
+                      <span class="block-label">Bloque {{ $index + 1 }}</span>
+                      <div class="time-field">
+                        <input
+                          type="time"
+                          [value]="block.open"
+                          (change)="onBlockTimeChange(day.key, $index, 'open', $any($event).target.value)"
+                          class="time-input"
+                        />
+                      </div>
+                      <span class="time-separator">—</span>
+                      <div class="time-field">
+                        <input
+                          type="time"
+                          [value]="block.close"
+                          (change)="onBlockTimeChange(day.key, $index, 'close', $any($event).target.value)"
+                          class="time-input"
+                        />
+                      </div>
+                      @if (getDayBlocks(day.key).length > 1) {
+                        <button
+                          type="button"
+                          class="remove-block-btn"
+                          (click)="removeBlock(day.key, $index)"
+                          title="Eliminar bloque"
+                        >×</button>
+                      }
+                    </div>
+                  }
+                  @if (canAddBlock(day.key)) {
+                    <button
+                      type="button"
+                      class="add-block-btn"
+                      (click)="addBlock(day.key)"
+                      title="Agregar bloque horario"
+                    >+</button>
+                  }
+                </div>
+              } @else {
+                <span class="day-closed-label">Cerrado</span>
+              }
+            </div>
+          }
+        </div>
+      }
     </div>
   </div>
   }

@@ -18,6 +18,7 @@ export { ToastService } from './toast/toast.service';
 export { DialogService } from './dialog/dialog.service';
 export { IconComponent } from './icon/icon.component';
 export { CameraComponent } from './camera/camera.component';
+export { ImageSourceModalComponent } from './image-source-modal/image-source-modal.component';
 export { IconPickerComponent } from './icon-picker/icon-picker.component';
 export { InputsearchComponent } from './inputsearch/inputsearch.component';
 export { TableComponent } from './table/table.component';

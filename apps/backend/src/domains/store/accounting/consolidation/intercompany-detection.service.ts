@@ -266,18 +266,40 @@ export class IntercompanyDetectionService {
   /**
    * Get all detected intercompany transactions for a session
    */
-  async getDetectedTransactions(session_id: number) {
-    const session = await this.getSessionWithPeriod(session_id);
+  async getDetectedTransactions(
+    session_id: number,
+    query: { page?: number; limit?: number } = {},
+  ) {
+    await this.getSessionWithPeriod(session_id);
 
-    return this.prisma.intercompany_transactions.findMany({
-      where: { session_id },
-      include: {
-        from_store: { select: { id: true, name: true } },
-        to_store: { select: { id: true, name: true } },
-        account: { select: { id: true, code: true, name: true } },
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.intercompany_transactions.findMany({
+        where: { session_id },
+        include: {
+          from_store: { select: { id: true, name: true } },
+          to_store: { select: { id: true, name: true } },
+          account: { select: { id: true, code: true, name: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.intercompany_transactions.count({ where: { session_id } }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
       },
-      orderBy: { created_at: 'desc' },
-    });
+    };
   }
 
   /**

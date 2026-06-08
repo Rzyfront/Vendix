@@ -663,10 +663,8 @@ export class PosCartService {
         is_on_sale: product.is_on_sale ?? false,
         sale_price: product.sale_price ?? null,
         track_inventory: product.track_inventory ?? true,
+        // Packaging is tier-owned now; the product only carries the flag.
         has_multiple_price_tiers: product.has_multiple_price_tiers === true,
-        units_per_package: product.units_per_package ?? null,
-        package_consumes_multiple_stock:
-          product.package_consumes_multiple_stock === true,
       },
       variant
         ? {
@@ -683,13 +681,18 @@ export class PosCartService {
             name: tier.name,
             discount_percentage: tier.discount_percentage ?? 0,
             is_package_unit: !!tier.is_package_unit,
+            // Packaging cascade source — pack size lives on the tier.
+            units_per_package: tier.units_per_package ?? null,
           }
         : null,
       tierOverrides
         .filter((o) => !tier || o.price_tier_id === tier.id)
         .map((o) => ({
           variant_id: o.variant_id ?? null,
-          override_price: Number(o.override_price),
+          override_price:
+            o.override_price != null ? Number(o.override_price) : null,
+          // Per-product/per-variant packaging override (cascade).
+          override_units_per_package: o.override_units_per_package ?? null,
         })),
       taxRate,
     );
@@ -1264,15 +1267,20 @@ export class PosCartService {
     return Number(product.stock ?? 0);
   }
 
+  /**
+   * Stock units consumed per cart line unit. Packaging is now TIER-OWNED:
+   * when the applied tier resolves a pack size > 1, each cart `quantity`
+   * counts a PACKAGE and consumes `units_per_package` stock units.
+   */
   private getRequiredStockPerUnit(
-    product: Product,
+    _product: Product,
     isPackageUnit: boolean,
     unitsPerPackage?: number | null,
   ): number {
-    if (!isPackageUnit || product.package_consumes_multiple_stock !== true) {
+    if (!isPackageUnit) {
       return 1;
     }
-    const units = Number(unitsPerPackage ?? product.units_per_package ?? 1);
+    const units = Number(unitsPerPackage ?? 1);
     return Number.isFinite(units) && units > 1 ? units : 1;
   }
 

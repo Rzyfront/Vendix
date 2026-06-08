@@ -2,7 +2,7 @@ import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { RouterModule } from '@angular/router';
+import { RouterModule, ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
 
@@ -24,6 +24,7 @@ import {
   getDefaultStartDate,
   getDefaultEndDate,
   formatChartPeriod} from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import {
   SalesTrend,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -227,6 +228,7 @@ export class SalesTrendsComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 loading = signal(true);
   exporting = signal(false);
   data = signal<SalesTrend[]>([]);
@@ -251,6 +253,13 @@ loading = signal(true);
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    // Read date range from URL query params (e.g. when navigating from Reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
+
     this.loadData();
   }
 onDateRangeChange(range: DateRangeFilter): void {
@@ -318,7 +327,6 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Ingresos',
           position: 'left',
           min: 0,
-          max: 1000000,
           splitNumber: 5,
           axisLine: { show: false },
           axisLabel: {
@@ -331,7 +339,6 @@ onDateRangeChange(range: DateRangeFilter): void {
           name: 'Órdenes',
           position: 'right',
           min: 0,
-          max: 100,
           splitNumber: 5,
           axisLine: { show: false },
           axisLabel: { color: '#6b7280' },

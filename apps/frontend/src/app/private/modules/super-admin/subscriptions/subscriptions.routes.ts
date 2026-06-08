@@ -100,6 +100,13 @@ export const SUBSCRIPTIONS_ROUTES: Routes = [
           ),
       },
       {
+        path: 'fiscal-billing',
+        loadComponent: () =>
+          import('./pages/fiscal-billing/fiscal-billing.component').then(
+            (c) => c.FiscalBillingComponent,
+          ),
+      },
+      {
         path: 'metrics',
         loadComponent: () =>
           import(

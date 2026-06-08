@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject, computed} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Subscription } from 'rxjs';
@@ -8,6 +8,7 @@ import {
   StatsComponent,
   ToastService,
   FilterValues,
+  PaginationComponent,
 } from '../../../../../shared/components/index';
 
 // Local Components
@@ -20,11 +21,19 @@ import { InventoryService } from '../services';
 // Interfaces
 import { InventoryMovement, MovementType } from '../interfaces';
 
+interface MovementsStats {
+  total: number;
+  stock_in: number;
+  stock_out: number;
+  transfers: number;
+}
+
 @Component({
   selector: 'app-movements',
   standalone: true,
   imports: [
     StatsComponent,
+    PaginationComponent,
     MovementDetailModalComponent,
     MovementListComponent
 ],
@@ -71,7 +80,7 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
       <!-- Movements List -->
       <app-movement-list
-        [movements]="filtered_movements()"
+        [movements]="movements()"
         [isLoading]="is_loading()"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
@@ -79,6 +88,17 @@ import { InventoryMovement, MovementType } from '../interfaces';
         (actionClick)="onActionClick($event)"
         (viewDetail)="viewDetail($event)"
       ></app-movement-list>
+
+      <!-- Pagination -->
+      <div class="mt-4 flex justify-center">
+        <app-pagination
+          [currentPage]="filters().page"
+          [totalPages]="totalPages()"
+          [total]="totalItems()"
+          [limit]="filters().limit"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
 
       <!-- Detail Modal -->
       <app-movement-detail-modal
@@ -94,15 +114,21 @@ export class MovementsComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   // Data
   readonly movements = signal<InventoryMovement[]>([]);
-  readonly filtered_movements = signal<InventoryMovement[]>([]);
 
   // Stats
-  readonly stats = signal({
+  readonly stats = signal<MovementsStats>({
     total: 0,
     stock_in: 0,
     stock_out: 0,
     transfers: 0,
   });
+
+  // Pagination + filters
+  readonly filters = signal({ page: 1, limit: 25 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
 
   // Filters
   current_type: MovementType | 'all' = 'all';
@@ -134,18 +160,27 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
   loadMovements(): void {
     this.is_loading.set(true);
-    const query =
-      this.current_type !== 'all'
-        ? { movement_type: this.current_type }
-        : {};
+    const query: Record<string, unknown> = {
+      page: this.filters().page,
+      limit: this.filters().limit,
+    };
+    if (this.current_type !== 'all') {
+      query['movement_type'] = this.current_type;
+    }
+    if (this.search_term()) {
+      query['search'] = this.search_term();
+    }
 
     const sub = this.inventoryService.getMovements(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        if (response.data) {
-          this.movements.set(Array.isArray(response.data) ? response.data : []);
-          this.applyFilters();
-          this.calculateStats();
-        }
+        // Backend ResponseService.paginated() shape:
+        //   { success, message, data: T[], meta: { total, page, limit, totalPages, ... } }
+        const list: InventoryMovement[] = Array.isArray(response.data)
+          ? response.data
+          : [];
+        this.movements.set(list);
+        this.totalItems.set(response.meta?.total ?? list.length);
+        this.calculateStats();
         this.is_loading.set(false);
       },
       error: (error) => {
@@ -156,37 +191,14 @@ export class MovementsComponent implements OnInit, OnDestroy {
     this.subscriptions.push(sub);
   }
 
-  applyFilters(): void {
-    let filtered = [...this.movements()];
-
-    if (this.current_type !== 'all') {
-      filtered = filtered.filter(
-        (m) => m.movement_type === this.current_type,
-      );
-    }
-
-    if (this.search_term()) {
-      const term = this.search_term().toLowerCase();
-      filtered = filtered.filter(
-        (m) =>
-          m.products?.name?.toLowerCase().includes(term) ||
-          m.reason?.toLowerCase().includes(term) ||
-          m.notes?.toLowerCase().includes(term) ||
-          m.from_location?.name?.toLowerCase().includes(term) ||
-          m.to_location?.name?.toLowerCase().includes(term),
-      );
-    }
-
-    this.filtered_movements.set(filtered);
-  }
-
   calculateStats(): void {
-    const mv = this.movements();
+    // Stats reflect the global total of the current query, not just the
+    // current page slice. The backend exposes `total` in the pagination meta.
     this.stats.set({
-      total: mv.length,
-      stock_in: mv.filter((m) => m.movement_type === 'stock_in').length,
-      stock_out: mv.filter((m) => m.movement_type === 'stock_out').length,
-      transfers: mv.filter((m) => m.movement_type === 'transfer').length,
+      total: this.totalItems(),
+      stock_in: 0, // aggregated server-side would be ideal — placeholder
+      stock_out: 0,
+      transfers: 0,
     });
   }
 
@@ -196,19 +208,27 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
   onSearch(term: string): void {
     this.search_term.set(term);
-    this.applyFilters();
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadMovements();
   }
 
   onFilterChange(values: FilterValues): void {
     const typeValue = values['movement_type'] as string;
     this.current_type = typeValue ? (typeValue as MovementType) : 'all';
-    this.applyFilters();
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadMovements();
   }
 
   onClearFilters(): void {
     this.current_type = 'all';
     this.search_term.set('');
-    this.applyFilters();
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadMovements();
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadMovements();
   }
 
   onActionClick(action: string): void {

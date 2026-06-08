@@ -4,9 +4,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import {
   PosSettings,
   BusinessHours,
+  BusinessHoursBlock,
   ScaleSettings,
   ScaleDeviceConfig,
 } from '../../../../../../../core/models/store-settings.interface';
@@ -16,7 +18,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
-  imports: [ReactiveFormsModule, SettingToggleComponent],
+  imports: [ReactiveFormsModule, SettingToggleComponent, SelectorComponent],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })
@@ -50,6 +52,7 @@ export class PosSettingsForm implements OnInit {
     allow_anonymous_sales: new FormControl<boolean | null>(null),
     anonymous_sales_as_default: new FormControl<boolean | null>(null),
     business_hours: new FormControl<Record<string, BusinessHours> | null>(null),
+    schedule_mode: new FormControl<'continuous' | 'custom'>('continuous'),
     enable_schedule_validation: new FormControl<boolean | null>(null),
     show_onscreen_keypad: new FormControl<boolean | null>(null),
     auto_print_receipt: new FormControl<boolean | null>(null),
@@ -98,6 +101,13 @@ export class PosSettingsForm implements OnInit {
     { key: 'sunday', label: 'Domingo' },
   ];
 
+  scheduleModeOptions: SelectorOption[] = [
+    { value: 'continuous', label: 'Continuo' },
+    { value: 'custom', label: 'Personalizado' },
+  ];
+
+  readonly MAX_BLOCKS_PER_DAY = 5;
+
   // Typed getters for FormControls
   get allowAnonymousSalesControl(): FormControl<boolean> {
     return this.form.get('allow_anonymous_sales') as FormControl<boolean>;
@@ -139,6 +149,14 @@ export class PosSettingsForm implements OnInit {
 
   get enableScheduleValidationControl(): FormControl<boolean> {
     return this.form.get('enable_schedule_validation') as FormControl<boolean>;
+  }
+
+  get scheduleModeControl(): FormControl<'continuous' | 'custom'> {
+    return this.form.get('schedule_mode') as FormControl<'continuous' | 'custom'>;
+  }
+
+  isCustomMode(): boolean {
+    return this.scheduleModeControl.value === 'custom';
   }
 
   get scaleEnabledControl(): FormControl<boolean> {
@@ -343,5 +361,107 @@ export class PosSettingsForm implements OnInit {
       this.form.get('business_hours')?.setValue(hours);
       this.onBusinessHoursChange();
     }
+  }
+
+  onScheduleModeChange() {
+    const mode = this.scheduleModeControl.value;
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours) return;
+
+    if (mode === 'custom') {
+      for (const day of this.daysOfWeek) {
+        const dayHours = hours[day.key];
+        if (!dayHours) continue;
+        if (dayHours.open === 'closed') {
+          hours[day.key] = { ...dayHours, blocks: [] };
+        } else {
+          hours[day.key] = {
+            ...dayHours,
+            blocks: [
+              { open: dayHours.open, close: dayHours.close },
+              { open: '14:00', close: '18:00' },
+            ],
+          };
+        }
+      }
+    } else {
+      for (const day of this.daysOfWeek) {
+        const dayHours = hours[day.key];
+        if (!dayHours) continue;
+        const { blocks, ...rest } = dayHours as BusinessHours;
+        if (blocks && blocks.length > 0) {
+          hours[day.key] = { ...rest, open: blocks[0].open, close: blocks[0].close };
+        } else {
+          hours[day.key] = { ...rest };
+        }
+      }
+    }
+
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
+  }
+
+  getDayBlocks(day: string): BusinessHoursBlock[] {
+    const hours = this.form.get('business_hours')?.value;
+    return hours?.[day]?.blocks ? [...hours[day].blocks] : [];
+  }
+
+  addBlock(day: string) {
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours?.[day]) return;
+
+    const currentBlocks = hours[day].blocks ? [...hours[day].blocks] : [];
+    if (currentBlocks.length >= this.MAX_BLOCKS_PER_DAY) return;
+
+    currentBlocks.push({ open: '09:00', close: '17:00' });
+    hours[day] = { ...hours[day], blocks: currentBlocks };
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
+  }
+
+  removeBlock(day: string, index: number) {
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours?.[day]?.blocks) return;
+
+    const currentBlocks = [...hours[day].blocks];
+    currentBlocks.splice(index, 1);
+    hours[day] = { ...hours[day], blocks: currentBlocks };
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
+  }
+
+  onBlockTimeChange(day: string, blockIndex: number, field: 'open' | 'close', value: string) {
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours?.[day]?.blocks?.[blockIndex]) return;
+
+    const currentBlocks = [...hours[day].blocks];
+    currentBlocks[blockIndex] = { ...currentBlocks[blockIndex], [field]: value };
+    hours[day] = { ...hours[day], blocks: currentBlocks };
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
+  }
+
+  isCustomDayClosed(day: string): boolean {
+    const hours = this.form.get('business_hours')?.value;
+    const blocks = hours?.[day]?.blocks;
+    return !blocks || blocks.length === 0;
+  }
+
+  toggleCustomDayStatus(day: string) {
+    const hours = { ...this.form.get('business_hours')?.value };
+    if (!hours?.[day]) return;
+
+    if (this.isCustomDayClosed(day)) {
+      hours[day] = { ...hours[day], blocks: [{ open: '08:00', close: '12:00' }, { open: '14:00', close: '18:00' }] };
+    } else {
+      hours[day] = { ...hours[day], blocks: [] };
+    }
+    this.form.get('business_hours')?.setValue(hours);
+    this.onBusinessHoursChange();
+  }
+
+  canAddBlock(day: string): boolean {
+    const blocks = this.getDayBlocks(day);
+    return blocks.length < this.MAX_BLOCKS_PER_DAY;
   }
 }

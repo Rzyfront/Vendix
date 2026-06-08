@@ -2877,6 +2877,18 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'superadmin:subscriptions:fiscal:read',
+      description: 'Ver configuración y registro de facturación DIAN SaaS',
+      path: '/api/superadmin/subscriptions/fiscal/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:fiscal:write',
+      description: 'Configurar, probar y reintentar facturación DIAN SaaS',
+      path: '/api/superadmin/subscriptions/fiscal/*',
+      method: 'POST',
+    },
+    {
       name: 'superadmin:social_sales:config:read',
       description: 'Leer configuración Meta para Social Sales',
       path: '/api/superadmin/social-sales/meta/config',
@@ -2970,6 +2982,86 @@ export async function seedPermissionsAndRoles(
       name: 'organization:withholding:write',
       description: 'Gestionar retenciones a nivel organización',
       path: '/api/organization/withholding-tax',
+      method: 'POST',
+    },
+
+    // ──── Organization Exógena (DIAN) — CRUD parity twin ────
+    {
+      name: 'organization:exogenous:read',
+      description: 'Leer reportes de información exógena a nivel organización',
+      path: '/api/organization/exogenous/reports',
+      method: 'GET',
+    },
+    {
+      name: 'organization:exogenous:write',
+      description: 'Generar reportes de información exógena a nivel organización',
+      path: '/api/organization/exogenous/reports/generate',
+      method: 'POST',
+    },
+    {
+      name: 'organization:exogenous:submit',
+      description: 'Marcar reportes de exógena como presentados a nivel organización',
+      path: '/api/organization/exogenous/reports/:id/submit',
+      method: 'POST',
+    },
+
+    // ──── Organization ICA municipal — CRUD parity twin ────
+    {
+      name: 'organization:taxes:ica:read',
+      description: 'Leer tarifas/resoluciones ICA a nivel organización',
+      path: '/api/organization/taxes/ica/rates',
+      method: 'GET',
+    },
+    {
+      name: 'organization:taxes:ica:report',
+      description: 'Generar reporte ICA consolidado a nivel organización',
+      path: '/api/organization/taxes/ica/report',
+      method: 'GET',
+    },
+
+    // ──── Organization Accounts Receivable (Cartera CxC) — CRUD parity twin ────
+    {
+      name: 'organization:accounts_receivable:read',
+      description: 'Leer cartera por cobrar consolidada a nivel organización',
+      path: '/api/organization/accounts-receivable',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounts_receivable:payment',
+      description: 'Registrar pagos de cartera por cobrar a nivel organización',
+      path: '/api/organization/accounts-receivable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_receivable:write_off',
+      description: 'Castigar (write-off) cartera por cobrar a nivel organización',
+      path: '/api/organization/accounts-receivable/:id/write-off',
+      method: 'POST',
+    },
+
+    // ──── Organization Accounts Payable (Cartera CxP) — CRUD parity twin ────
+    {
+      name: 'organization:accounts_payable:read',
+      description: 'Leer cartera por pagar consolidada a nivel organización',
+      path: '/api/organization/accounts-payable',
+      method: 'GET',
+    },
+    {
+      name: 'organization:accounts_payable:payment',
+      description: 'Registrar pagos de cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/:id/payment',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_payable:export',
+      description: 'Exportar lote bancario de cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/batch-export',
+      method: 'POST',
+    },
+    {
+      name: 'organization:accounts_payable:write_off',
+      description: 'Castigar (write-off) cartera por pagar a nivel organización',
+      path: '/api/organization/accounts-payable/:id/write-off',
       method: 'POST',
     },
     {
@@ -3130,6 +3222,155 @@ export async function seedPermissionsAndRoles(
       description: 'Eliminar asientos contables a nivel organización',
       path: '/api/organization/accounting/journal-entries/:id',
       method: 'DELETE',
+    },
+
+    // Fiscal Operations (Store)
+    {
+      name: 'store:fiscal:dashboard:read',
+      description: 'Leer dashboard de operación fiscal de tienda',
+      path: '/api/store/fiscal/overview',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:obligations:read',
+      description: 'Leer obligaciones fiscales de tienda',
+      path: '/api/store/fiscal/obligations',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:obligations:write',
+      description: 'Gestionar obligaciones fiscales de tienda',
+      path: '/api/store/fiscal/obligations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:declarations:read',
+      description: 'Leer borradores de declaraciones fiscales de tienda',
+      path: '/api/store/fiscal/declarations',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:declarations:write',
+      description: 'Gestionar borradores de declaraciones fiscales de tienda',
+      path: '/api/store/fiscal/declarations/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:close:read',
+      description: 'Leer cierres fiscales de tienda',
+      path: '/api/store/fiscal/close-sessions',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:close:write',
+      description: 'Gestionar cierres fiscales de tienda',
+      path: '/api/store/fiscal/close-sessions/*',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:evidence:read',
+      description: 'Leer evidencias fiscales de tienda',
+      path: '/api/store/fiscal/evidence',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:history:read',
+      description: 'Leer historial fiscal de tienda',
+      path: '/api/store/fiscal/history',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:evidence:write',
+      description: 'Adjuntar evidencias fiscales de tienda',
+      path: '/api/store/fiscal/evidence',
+      method: 'POST',
+    },
+    {
+      name: 'store:fiscal:rules:read',
+      description: 'Leer reglas fiscales efectivas de tienda',
+      path: '/api/store/fiscal/rules',
+      method: 'GET',
+    },
+    {
+      name: 'store:fiscal:rules:write',
+      description: 'Gestionar reglas fiscales de tienda',
+      path: '/api/store/fiscal/rules',
+      method: 'POST',
+    },
+
+    // Fiscal Operations (Organization)
+    {
+      name: 'organization:fiscal:dashboard:read',
+      description: 'Leer dashboard de operación fiscal de organización',
+      path: '/api/organization/fiscal/overview',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:obligations:read',
+      description: 'Leer obligaciones fiscales de organización',
+      path: '/api/organization/fiscal/obligations',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:obligations:write',
+      description: 'Gestionar obligaciones fiscales de organización',
+      path: '/api/organization/fiscal/obligations/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:declarations:read',
+      description: 'Leer borradores de declaraciones fiscales de organización',
+      path: '/api/organization/fiscal/declarations',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:declarations:write',
+      description:
+        'Gestionar borradores de declaraciones fiscales de organización',
+      path: '/api/organization/fiscal/declarations/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:close:read',
+      description: 'Leer cierres fiscales de organización',
+      path: '/api/organization/fiscal/close-sessions',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:close:write',
+      description: 'Gestionar cierres fiscales de organización',
+      path: '/api/organization/fiscal/close-sessions/*',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:evidence:read',
+      description: 'Leer evidencias fiscales de organización',
+      path: '/api/organization/fiscal/evidence',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:history:read',
+      description: 'Leer historial fiscal de organización',
+      path: '/api/organization/fiscal/history',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:evidence:write',
+      description: 'Adjuntar evidencias fiscales de organización',
+      path: '/api/organization/fiscal/evidence',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:rules:read',
+      description: 'Leer reglas fiscales efectivas de organización',
+      path: '/api/organization/fiscal/rules',
+      method: 'GET',
+    },
+    {
+      name: 'organization:fiscal:rules:write',
+      description: 'Gestionar reglas fiscales de organización',
+      path: '/api/organization/fiscal/rules',
+      method: 'POST',
     },
   ];
 
@@ -3343,6 +3584,20 @@ export async function seedPermissionsAndRoles(
       p.name === 'organization:invoicing:read' ||
       p.name === 'organization:invoicing:resolutions:read' ||
       p.name === 'organization:fiscal:supervise' ||
+      p.name === 'organization:fiscal:dashboard:read' ||
+      p.name === 'organization:fiscal:obligations:read' ||
+      p.name === 'organization:fiscal:declarations:read' ||
+      p.name === 'organization:fiscal:close:read' ||
+      p.name === 'organization:fiscal:evidence:read' ||
+      p.name === 'organization:fiscal:history:read' ||
+      p.name === 'organization:fiscal:rules:read' ||
+      p.name === 'store:fiscal:dashboard:read' ||
+      p.name === 'store:fiscal:obligations:read' ||
+      p.name === 'store:fiscal:declarations:read' ||
+      p.name === 'store:fiscal:close:read' ||
+      p.name === 'store:fiscal:evidence:read' ||
+      p.name === 'store:fiscal:history:read' ||
+      p.name === 'store:fiscal:rules:read' ||
       p.name === 'organization:withholding:read' ||
       p.name === 'organization:payroll:read' ||
       p.name === 'organization:payroll:settings:read' ||

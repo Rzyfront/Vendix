@@ -6,6 +6,7 @@ import {
   PriceTierLike,
   ProductPriceTierOverrideLike,
 } from './types';
+import { resolvePackSize } from './packaging.util';
 
 /**
  * PriceResolverService
@@ -66,7 +67,7 @@ export class PriceResolverService {
         appliedPriceTierId: null,
         appliedPriceTierName: null,
         isPackageUnit: false,
-        unitsPerPackage: product.units_per_package ?? null,
+        unitsPerPackage: null,
       };
     }
 
@@ -85,7 +86,7 @@ export class PriceResolverService {
         appliedPriceTierId: null,
         appliedPriceTierName: null,
         isPackageUnit: false,
-        unitsPerPackage: product.units_per_package ?? null,
+        unitsPerPackage: null,
       };
     }
 
@@ -104,7 +105,7 @@ export class PriceResolverService {
         appliedPriceTierId: null,
         appliedPriceTierName: null,
         isPackageUnit: false,
-        unitsPerPackage: product.units_per_package ?? null,
+        unitsPerPackage: null,
       };
     }
 
@@ -122,7 +123,7 @@ export class PriceResolverService {
       appliedPriceTierId: null,
       appliedPriceTierName: null,
       isPackageUnit: false,
-      unitsPerPackage: product.units_per_package ?? null,
+      unitsPerPackage: null,
     };
   }
 
@@ -169,7 +170,7 @@ export class PriceResolverService {
         appliedPriceTierId: null,
         appliedPriceTierName: null,
         isPackageUnit: false,
-        unitsPerPackage: product.units_per_package ?? null,
+        unitsPerPackage: null,
       };
     }
 
@@ -196,22 +197,40 @@ export class PriceResolverService {
       );
     }
 
+    // packSize cascade: override ?? tier ?? 1. When packSize === 1 every
+    // calculation below collapses to the legacy single-unit behavior
+    // (zero regression for non-package tiers).
+    const packSize = resolvePackSize(
+      priceTier.units_per_package,
+      overrideRow?.override_units_per_package,
+    );
+
+    // packageBase is the full-package list price used both for the rule path
+    // and as compareAt. With packSize === 1 it equals ruleBasePrice.
+    const packageBase = ruleBasePrice * packSize;
+
     let unitPrice: number;
     let source: PriceResolution['source'];
     let reason: string;
-    if (overrideRow) {
+    if (
+      overrideRow &&
+      overrideRow.override_price != null &&
+      Number(overrideRow.override_price) > 0
+    ) {
+      // Explicit override price is the price of the WHOLE PACKAGE.
       unitPrice = Number(overrideRow.override_price);
       source = 'tier_override';
-      reason = `Explicit override for tier "${priceTier.name}"`;
+      reason = `Explicit package price for tier "${priceTier.name}"`;
     } else {
+      // Apply the discount rule on the full-package base.
       const discount = Number(priceTier.discount_percentage ?? 0);
       const clampedDiscount = Math.max(0, Math.min(100, discount));
-      unitPrice = ruleBasePrice * (1 - clampedDiscount / 100);
+      unitPrice = packageBase * (1 - clampedDiscount / 100);
       source = 'tier_rule';
-      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off)`;
+      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off, x${packSize})`;
     }
 
-    const compareAtPrice = ruleBasePrice > unitPrice ? ruleBasePrice : null;
+    const compareAtPrice = packageBase > unitPrice ? packageBase : null;
 
     return {
       unitBasePrice: ruleBasePrice,
@@ -225,8 +244,8 @@ export class PriceResolverService {
       reason,
       appliedPriceTierId: priceTier.id,
       appliedPriceTierName: priceTier.name,
-      isPackageUnit: !!priceTier.is_package_unit,
-      unitsPerPackage: product.units_per_package ?? null,
+      isPackageUnit: packSize > 1,
+      unitsPerPackage: packSize > 1 ? packSize : null,
     };
   }
 }

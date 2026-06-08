@@ -93,7 +93,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
             (clicked)="resetToDefaults()"
             [disabled]="isLoading() || isSaving()"
           >
-            <app-icon name="rotate-ccw" size="16" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="rotate-ccw" size="16" class="mr-2"></app-icon>
             Restablecer
           </app-button>
         </div>
@@ -322,7 +322,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
             [loading]="isSaving()"
             variant="primary"
           >
-            <app-icon name="save" size="16" class="mr-2"></app-icon>
+            <app-icon slot="icon" name="save" size="16" class="mr-2"></app-icon>
             Guardar Cambios
           </app-button>
         </div>

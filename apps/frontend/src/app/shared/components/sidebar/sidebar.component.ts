@@ -15,6 +15,7 @@ import { IconComponent } from '../icon/icon.component';
 import { BadgeComponent } from '../badge/badge.component';
 import { ToastService } from '../toast/toast.service';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import type { FiscalArea } from '../../../core/models/fiscal-status.model';
 
 const DEFAULT_LOCKED_BADGE = 'ORG';
 const DEFAULT_LOCKED_TOOLTIP = 'Disponible en modo ORGANIZATION';
@@ -56,6 +57,29 @@ export interface MenuItem {
    * Defaults visually to 'Disponible en modo ORGANIZATION' when omitted.
    */
   lockedTooltip?: string;
+  /**
+   * Restricts this menu item to organizations whose `fiscal_scope` owns the
+   * fiscal domain in the current app:
+   * - 'STORE': only visible when fiscal management lives at store level
+   *   (STORE_ADMIN owns fiscal); ORG_ADMIN must NOT render fiscal modules.
+   * - 'ORGANIZATION': only visible when fiscal management is consolidated at
+   *   org level (ORG_ADMIN owns fiscal); STORE_ADMIN must NOT render anything fiscal.
+   * Omitted ⇒ visible regardless of fiscal_scope.
+   *
+   * Decided by `AuthFacade.fiscalScope()` (organizations.fiscal_scope), independent
+   * of `requiredOperatingScope` (operating_scope governs operational consolidation).
+   */
+  requiredFiscalScope?: 'STORE' | 'ORGANIZATION';
+  /**
+   * Hides the item until its fiscal area is activated. The item is only visible
+   * when the area is in ACTIVE/LOCKED state (read from `AuthFacade.activeFiscalAreas()`):
+   * - a concrete `FiscalArea` ('invoicing' | 'accounting' | 'payroll') gates the
+   *   item on that single area being active.
+   * - 'any' gates the item on at least one fiscal area being active.
+   * Omitted ⇒ not gated by activation (e.g. the activation/wizard entry itself,
+   * which must stay visible so the owner can activate fiscal management).
+   */
+  requiresFiscalArea?: FiscalArea | 'any';
   /**
    * Internal metadata flag set by `MenuFilterService` when the item is rendered
    * in locked state (scope mismatch + showLocked === true). Consumers should

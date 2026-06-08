@@ -66,22 +66,37 @@ export class NotificationSoundsService {
     return this.responseService.created(signed, 'Sonido creado correctamente');
   }
 
-  async findAll(isActive?: boolean) {
+  async findAll(query: { isActive?: boolean; page?: number; limit?: number; search?: string } = {}) {
     const where: Record<string, unknown> = {};
-    if (typeof isActive === 'boolean') {
-      where.is_active = isActive;
+    if (typeof query.isActive === 'boolean') {
+      where.is_active = query.isActive;
+    }
+    if (query.search) {
+      where.OR = [
+        { name: { contains: query.search, mode: 'insensitive' as const } },
+        { key: { contains: query.search, mode: 'insensitive' as const } },
+      ];
     }
 
-    const sounds = await this.globalPrisma.notification_sounds.findMany({
-      where,
-      orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
-    });
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const skip = (page - 1) * limit;
+
+    const [sounds, total] = await Promise.all([
+      this.globalPrisma.notification_sounds.findMany({
+        where,
+        orderBy: [{ sort_order: 'asc' }, { name: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      this.globalPrisma.notification_sounds.count({ where }),
+    ]);
 
     const data = await Promise.all(
       sounds.map((sound: any) => this.toSignedPayload(sound)),
     );
 
-    return this.responseService.success(data);
+    return this.responseService.paginated(data, total, page, limit);
   }
 
   async findOne(id: string) {

@@ -4,6 +4,7 @@ import {
   inject,
   signal,
   DestroyRef,
+  computed,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -35,6 +36,7 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   EmptyStateComponent,
+  PaginationComponent,
   CardComponent,
 } from '../../../../shared/components/index';
 
@@ -61,6 +63,7 @@ import {
     IconComponent,
     ButtonComponent,
     CardComponent,
+    PaginationComponent,
   ],
   templateUrl: './payment-methods.component.html',
 })
@@ -74,6 +77,11 @@ export class PaymentMethodsComponent implements OnInit {
   private readonly toastService = inject(ToastService);
 
   paymentMethods = signal<PaymentMethod[]>([]);
+  readonly filters = signal({ page: 1, limit: 25 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
   paymentMethodStats = signal<PaymentMethodStats>({
     total_methods: 0,
     active_methods: 0,
@@ -249,6 +257,7 @@ export class PaymentMethodsComponent implements OnInit {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
+        this.filters.update((f) => ({ ...f, page: 1 }));
         this.loadPaymentMethods();
       });
 
@@ -279,6 +288,8 @@ export class PaymentMethodsComponent implements OnInit {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: PaymentMethodQueryDto = {
+      page: this.filters().page,
+      limit: this.filters().limit,
       search: filters.search || undefined,
       type: filters.type || undefined,
       is_active: filters.is_active ? filters.is_active === 'true' : undefined,
@@ -288,16 +299,23 @@ export class PaymentMethodsComponent implements OnInit {
       .getPaymentMethods(query)
       .subscribe({
         next: (response) => {
-          this.paymentMethods.set(response || []);
+          this.paymentMethods.set(response.data || []);
+          this.totalItems.set(response.meta?.total ?? (response.data?.length ?? 0));
         },
         error: (error) => {
           console.error('Error loading payment methods:', error);
           this.paymentMethods.set([]);
+          this.totalItems.set(0);
         },
       })
       .add(() => {
         this.isLoading.set(false);
       });
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadPaymentMethods();
   }
 
   loadPaymentMethodStats(): void {

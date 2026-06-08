@@ -23,6 +23,8 @@ import {
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
+import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import { PriceResolverService } from '../products/services/price-resolver.service';
 import { calculateSchedule } from '../orders/utils/installment-schedule-calculator';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../settings/settings.service';
@@ -42,6 +44,25 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WompiEnvironment } from './processors/wompi/wompi.types';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { RequestContextService } from '@common/context/request-context.service';
+
+/**
+ * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
+ * persistente (tier_id/tier_name/stock_units_consumed) como los insumos de
+ * precio (discount_percentage, packaging, override_price) necesarios para
+ * recomputar server-side el precio esperado de la tarifa vía
+ * `PriceResolverService.resolveWithTier` y así validar el override manual
+ * contra el precio de tarifa — no contra el precio base del catálogo.
+ */
+type PosTierSnapshot = {
+  tier_id: number;
+  tier_name: string;
+  stock_units_consumed: number | null;
+  discount_percentage: number;
+  units_per_package: number | null;
+  is_package_unit: boolean;
+  override_price: number | null;
+  override_units_per_package: number | null;
+};
 
 @Injectable()
 export class PaymentsService {
@@ -63,6 +84,7 @@ export class PaymentsService {
     private readonly wompiClientFactory: WompiClientFactory,
     private readonly wompiProcessor: WompiProcessor,
     private readonly webhookHandler: WebhookHandlerService,
+    private readonly priceResolverService: PriceResolverService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -779,8 +801,8 @@ export class PaymentsService {
 
             // Multi-tarifa (Fase 5.5): si el item persistió stock_units_consumed
             // (>0), pasarlo como override al reservador para descontar la
-            // cantidad real de unidades de stock (caja con
-            // package_consumes_multiple_stock).
+            // cantidad real de unidades de stock (empaque por tarifa, cuando el
+            // packSize resuelto de la tarifa/override es > 1).
             const stockUnitsConsumed =
               typeof item.stock_units_consumed === 'number' &&
               item.stock_units_consumed > 0
@@ -1553,9 +1575,11 @@ export class PaymentsService {
    * - Si AL MENOS UNA línea lo trae, valida server-side el permission
    *   `store:products:apply_pricing_tier`. Bypass para super_admin / owner.
    *   Si denegado, lanza `VendixHttpException(PRICING_TIER_PERMISSION_DENIED)`.
-   * - Pre-carga tarifas (price_tiers) y productos (units_per_package,
-   *   package_consumes_multiple_stock) para computar `stock_units_consumed`
-   *   cuando aplica empaque real.
+   * - Pre-carga tarifas (price_tiers.units_per_package) y los overrides por
+   *   producto (product_price_tier_overrides.override_units_per_package) para
+   *   computar `stock_units_consumed` siguiendo la cascada de packSize
+   *   (override ?? tier ?? 1). Si packSize <= 1, no hay empaque y el snapshot
+   *   queda en null.
    * - Lenient: si la tarifa no existe en esta tienda, snapshot = null (no
    *   crashea la venta).
    *
@@ -1565,17 +1589,12 @@ export class PaymentsService {
     tx: any,
     items: Array<{
       product_id?: number;
+      product_variant_id?: number | null;
       quantity: number;
       applied_price_tier_id?: number;
     }>,
     context: ReturnType<typeof RequestContextService.getContext>,
-  ): Promise<
-    Array<{
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null>
-  > {
+  ): Promise<Array<PosTierSnapshot | null>> {
     const tierIdsInUse = new Set<number>();
     for (const item of items) {
       if (
@@ -1604,7 +1623,13 @@ export class PaymentsService {
 
     const tiers = await tx.price_tiers.findMany({
       where: { id: { in: Array.from(tierIdsInUse) }, is_active: true },
-      select: { id: true, name: true, is_package_unit: true },
+      select: {
+        id: true,
+        name: true,
+        is_package_unit: true,
+        units_per_package: true,
+        discount_percentage: true,
+      },
     });
     type TierRow = (typeof tiers)[number];
     const tierById = new Map<number, TierRow>(
@@ -1613,20 +1638,6 @@ export class PaymentsService {
 
     const productIds = Array.from(
       new Set(items.map((i) => i.product_id).filter((id): id is number => !!id)),
-    );
-    const productsList = productIds.length
-      ? await tx.products.findMany({
-          where: { id: { in: productIds } },
-          select: {
-            id: true,
-            units_per_package: true,
-            package_consumes_multiple_stock: true,
-          },
-        })
-      : [];
-    type ProductRow = (typeof productsList)[number];
-    const productById = new Map<number, ProductRow>(
-      productsList.map((p: ProductRow): [number, ProductRow] => [p.id, p]),
     );
     const assignments = productIds.length
       ? await tx.product_price_tier_assignments.findMany({
@@ -1644,6 +1655,47 @@ export class PaymentsService {
       ),
     );
 
+    // Per-product packaging overrides (override_units_per_package wins over
+    // tier.units_per_package in the packSize cascade). Keyed by
+    // product_id:variant_id:price_tier_id (variant null → "null").
+    const overrides = productIds.length
+      ? await tx.product_price_tier_overrides.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIdsInUse) },
+          },
+          select: {
+            product_id: true,
+            variant_id: true,
+            price_tier_id: true,
+            override_price: true,
+            override_units_per_package: true,
+          },
+        })
+      : [];
+    type OverrideInfo = {
+      override_price: number | null;
+      override_units_per_package: number | null;
+    };
+    const overrideByKey = new Map<string, OverrideInfo>(
+      overrides.map(
+        (o: {
+          product_id: number;
+          variant_id: number | null;
+          price_tier_id: number;
+          override_price: number | null;
+          override_units_per_package: number | null;
+        }): [string, OverrideInfo] => [
+          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
+          {
+            override_price:
+              o.override_price != null ? Number(o.override_price) : null,
+            override_units_per_package: o.override_units_per_package,
+          },
+        ],
+      ),
+    );
+
     return items.map((item) => {
       const tierId = item.applied_price_tier_id;
       if (tierId === undefined || tierId === null) return null;
@@ -1655,19 +1707,26 @@ export class PaymentsService {
       if (!productId || !allowedTierKeys.has(`${productId}:${Number(tierId)}`)) {
         throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
-      const product = item.product_id ? productById.get(item.product_id) : null;
-      const isPackage =
-        tier.is_package_unit &&
-        product?.package_consumes_multiple_stock === true &&
-        typeof product.units_per_package === 'number' &&
-        (product.units_per_package ?? 0) > 0;
-      const stock_units_consumed = isPackage
-        ? Number(item.quantity) * Number(product!.units_per_package)
-        : null;
+      const variantId = item.product_variant_id ?? null;
+      const override = overrideByKey.get(
+        `${productId}:${variantId ?? 'null'}:${Number(tierId)}`,
+      );
+      const override_units_per_package =
+        override?.override_units_per_package ?? null;
+      const stock_units_consumed = resolveStockUnitsConsumed(
+        Number(item.quantity),
+        tier?.units_per_package,
+        override_units_per_package,
+      );
       return {
         tier_id: tier.id,
         tier_name: tier.name,
         stock_units_consumed,
+        discount_percentage: Number(tier.discount_percentage ?? 0),
+        units_per_package: tier.units_per_package ?? null,
+        is_package_unit: !!tier.is_package_unit,
+        override_price: override?.override_price ?? null,
+        override_units_per_package,
       };
     });
   }
@@ -1677,11 +1736,7 @@ export class PaymentsService {
     item: any,
     dtoStoreId: number,
     user: any,
-    tierSnap?: {
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null,
+    tierSnap?: PosTierSnapshot | null,
   ): Promise<any> {
     const isCustomItem = item.item_type === 'custom' || !item.product_id;
     const lineUnits = this.getPosLineUnits(item);
@@ -1786,9 +1841,58 @@ export class PaymentsService {
       throw new BadRequestException('La variante no pertenece al producto.');
     }
 
-    const catalogUnitPrice = this.roundMoney(
-      this.resolveCatalogUnitBasePrice(product, variant),
-    );
+    // Multi-tarifa (Fase 5.5): cuando la línea trae una tarifa válida (ya
+    // verificada por `resolveTierSnapshotsForItems`), el precio esperado del
+    // catálogo ES el precio de la tarifa (override_price o
+    // base * packSize * (1 - descuento/100)) — NO el precio base unitario.
+    // Sin esto, el chequeo de override manual interpreta la tarifa como una
+    // edición de precio y bloquea la venta ("no permite editar el precio en
+    // POS"). Reusa el resolver canónico para mantener una sola fuente de verdad
+    // con el cálculo del frontend y de orders/quotations.
+    const tierBaseUnitPrice = tierSnap
+      ? this.priceResolverService.resolveWithTier({
+          product: {
+            base_price: Number(product.base_price || 0),
+            is_on_sale: !!product.is_on_sale,
+            sale_price:
+              product.sale_price != null ? Number(product.sale_price) : null,
+            track_inventory: true,
+            // Snapshot validado ⇒ la tarifa aplica; forzamos el cálculo de
+            // tarifa en vez de depender del flag (posiblemente desincronizado).
+            has_multiple_price_tiers: true,
+          },
+          variant: variant
+            ? {
+                price_override:
+                  variant.price_override != null
+                    ? Number(variant.price_override)
+                    : null,
+                is_on_sale: !!variant.is_on_sale,
+                sale_price:
+                  variant.sale_price != null
+                    ? Number(variant.sale_price)
+                    : null,
+                track_inventory_override: null,
+              }
+            : undefined,
+          priceTier: {
+            id: tierSnap.tier_id,
+            name: tierSnap.tier_name,
+            discount_percentage: tierSnap.discount_percentage,
+            is_package_unit: tierSnap.is_package_unit,
+            units_per_package: tierSnap.units_per_package,
+          },
+          tierOverrides: [
+            {
+              variant_id: item.product_variant_id ?? null,
+              override_price: tierSnap.override_price,
+              override_units_per_package: tierSnap.override_units_per_package,
+            },
+          ],
+          taxRate: 0,
+        }).unitPrice
+      : this.resolveCatalogUnitBasePrice(product, variant);
+    const catalogUnitPrice = this.roundMoney(tierBaseUnitPrice);
     const catalogTaxInfo = await this.taxes_service.calculateProductTaxes(
       product.id,
       catalogUnitPrice,
@@ -1882,11 +1986,7 @@ export class PaymentsService {
     productVariantId?: number;
     // Multi-tarifa snapshot (Fase 5.5). Resuelto previamente por
     // `resolveTierSnapshotsForItems` y alineado por índice con `dto.items`.
-    tierSnap?: {
-      tier_id: number;
-      tier_name: string;
-      stock_units_consumed: number | null;
-    } | null;
+    tierSnap?: PosTierSnapshot | null;
   }): any {
     const lineBaseTotal = this.roundMoney(
       params.unitBasePrice * params.lineUnits,

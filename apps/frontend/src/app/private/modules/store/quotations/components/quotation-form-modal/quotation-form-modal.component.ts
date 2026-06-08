@@ -491,7 +491,11 @@ export class QuotationFormModalComponent {
           applied_price_tier_name: anyItem.applied_price_tier_name_snapshot ?? null,
           has_multiple_price_tiers: anyItem.product?.has_multiple_price_tiers === true,
           enabled_price_tier_ids: anyItem.product?.enabled_price_tier_ids ?? [],
-          units_per_package: anyItem.product?.units_per_package ?? null,
+          // packSize reconstruido desde el snapshot (stock_units_consumed / quantity).
+          // El empaque ya no vive en el producto; se deriva de la tarifa aplicada.
+          units_per_package: anyItem.stock_units_consumed && item.quantity
+            ? Math.round(Number(anyItem.stock_units_consumed) / Number(item.quantity))
+            : null,
           base_price: Number(anyItem.product?.base_price ?? item.unit_price),
         }));
       });
@@ -563,7 +567,8 @@ export class QuotationFormModalComponent {
       total_price: totalPrice,
       has_multiple_price_tiers: product.has_multiple_price_tiers === true,
       enabled_price_tier_ids: product.enabled_price_tier_ids ?? [],
-      units_per_package: product.units_per_package ?? null,
+      // Sin tarifa aplicada al agregar: el packSize se resuelve en onTierChange.
+      units_per_package: null,
       base_price: Number(product.price ?? basePrice),
     }));
 
@@ -783,7 +788,8 @@ export class QuotationFormModalComponent {
       : []
     ).map((o) => ({
       variant_id: o.variant_id ?? null,
-      override_price: Number(o.override_price),
+      override_price: o.override_price == null ? null : Number(o.override_price),
+      override_units_per_package: o.override_units_per_package ?? null,
     }));
 
     const resolution = this.priceResolver.resolveWithTier(
@@ -794,7 +800,6 @@ export class QuotationFormModalComponent {
         sale_price: product?.sale_price ?? null,
         track_inventory: product?.track_inventory ?? true,
         has_multiple_price_tiers: !!group.get('has_multiple_price_tiers')?.value,
-        units_per_package: group.get('units_per_package')?.value ?? null,
       },
       undefined,
       tier
@@ -803,6 +808,7 @@ export class QuotationFormModalComponent {
             name: tier.name,
             discount_percentage: tier.discount_percentage ?? 0,
             is_package_unit: !!tier.is_package_unit,
+            units_per_package: tier.units_per_package ?? null,
           }
         : null,
       overrides,
@@ -814,6 +820,7 @@ export class QuotationFormModalComponent {
       unit_price: unitPrice,
       applied_price_tier_id: resolution.appliedPriceTierId ?? null,
       applied_price_tier_name: resolution.appliedPriceTierName ?? null,
+      units_per_package: resolution.unitsPerPackage ?? null,
     });
     this.recalculateItem(index);
   }

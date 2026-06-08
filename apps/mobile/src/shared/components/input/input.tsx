@@ -3,7 +3,7 @@ import { View, Text, TextInput, StyleSheet, type ViewStyle, type TextInputProps 
 import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
 
 interface InputProps extends TextInputProps {
-  label: string;
+  label?: string;
   error?: string;
   helperText?: string;
   rightIcon?: React.ReactNode;

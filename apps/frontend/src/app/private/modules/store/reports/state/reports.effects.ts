@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
-import { of } from 'rxjs';
-import { map, mergeMap, catchError, withLatestFrom, tap } from 'rxjs/operators';
+import { of, EMPTY } from 'rxjs';
+import { map, mergeMap, catchError, tap, withLatestFrom } from 'rxjs/operators';
 import { ReportsActions } from './reports.actions';
 import { selectSelectedReport, selectDateRange, selectFiscalPeriodId, selectReportData, selectCurrentPage, selectItemsPerPage } from './reports.selectors';
 import { ReportsDataService } from '../services/reports-data.service';
@@ -17,6 +17,20 @@ export class ReportsEffects {
   private reportExportService = inject(ReportExportService);
   private toastService = inject(ToastService);
 
+  selectReportAndLoad$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ReportsActions.selectReport),
+      map(() => ReportsActions.loadReportData()),
+    ),
+  );
+
+  reloadOnFilterChange$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(ReportsActions.setDateRange, ReportsActions.setFiscalPeriod),
+      map(() => ReportsActions.loadReportData()),
+    ),
+  );
+
   loadReportData$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ReportsActions.loadReportData),
@@ -29,7 +43,9 @@ export class ReportsEffects {
       ),
       mergeMap(([, report, dateRange, fiscalPeriodId, currentPage, itemsPerPage]) => {
         if (!report) {
-          return of(ReportsActions.loadReportDataFailure({ error: 'No hay reporte seleccionado' }));
+          // No report selected yet — shell may have set date range before child
+          // dispatched selectReport. Silently skip, selectReportAndLoad$ will retry.
+          return EMPTY;
         }
 
         return this.reportsDataService
@@ -46,13 +62,17 @@ export class ReportsEffects {
               isSummary: adapted.isSummary,
               summaryData: adapted.summaryData,
             })),
-            catchError((error) =>
-              of(
+            catchError((error) => {
+              const isForbidden = error.status === 403;
+              return of(
                 ReportsActions.loadReportDataFailure({
-                  error: error.error?.message || error.message || 'Error al cargar el reporte',
+                  error: isForbidden
+                    ? 'Sin permisos para ver este reporte'
+                    : (error.error?.message || error.message || 'Error al cargar el reporte'),
+                  isForbidden,
                 }),
-              ),
-            ),
+              );
+            }),
           );
       }),
     ),
@@ -117,7 +137,11 @@ export class ReportsEffects {
     () =>
       this.actions$.pipe(
         ofType(ReportsActions.loadReportDataFailure, ReportsActions.exportReportFailure),
-        tap(({ error }) => this.toastService.error(error)),
+        tap((action) => {
+          if (!('isForbidden' in action && action.isForbidden)) {
+            this.toastService.error(action.error);
+          }
+        }),
       ),
     { dispatch: false },
   );

@@ -10,6 +10,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalStatusResolverService } from '@common/services/fiscal-status-resolver.service';
 import { FiscalStatusMigrationService } from '@common/services/fiscal-status-migration.service';
+import { FiscalGateService } from '@common/services/fiscal-gate.service';
 
 @Module({
   providers: [
@@ -24,6 +25,7 @@ import { FiscalStatusMigrationService } from '@common/services/fiscal-status-mig
     FiscalScopeService,
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
+    FiscalGateService,
   ],
   exports: [
     GlobalPrismaService,
@@ -37,6 +39,7 @@ import { FiscalStatusMigrationService } from '@common/services/fiscal-status-mig
     FiscalScopeService,
     FiscalStatusResolverService,
     FiscalStatusMigrationService,
+    FiscalGateService,
   ],
 })
 export class PrismaModule {}

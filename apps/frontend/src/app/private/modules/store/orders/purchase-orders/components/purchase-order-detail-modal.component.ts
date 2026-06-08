@@ -116,7 +116,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
               size="xsm"
               (clicked)="onCancelOrder()"
               >
-              <app-icon name="x-circle" [size]="14" class="mr-1.5"></app-icon>
+              <app-icon slot="icon" name="x-circle" [size]="14" class="mr-1.5"></app-icon>
               Cancelar Orden
             </app-button>
           }
@@ -131,7 +131,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
               size="xsm"
               (clicked)="onEditOrder()"
               >
-              <app-icon name="edit" [size]="14" class="mr-1.5"></app-icon>
+              <app-icon slot="icon" name="edit" [size]="14" class="mr-1.5"></app-icon>
               Editar Orden
             </app-button>
           }
@@ -141,7 +141,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
               size="xsm"
               (clicked)="startReceiving()"
               >
-              <app-icon name="package" [size]="14" class="mr-1.5"></app-icon>
+              <app-icon slot="icon" name="package" [size]="14" class="mr-1.5"></app-icon>
               Recibir Todo
             </app-button>
           }

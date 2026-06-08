@@ -13,6 +13,9 @@ import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import { FiscalWizardStepId } from '../../../../core/models/fiscal-status.model';
+import {
+  WizardPrefillDefaultTaxes,
+} from '../../../../core/models/wizard-prefill.model';
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import {
   DefaultTaxesFormComponent,
@@ -91,35 +94,36 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
   }
 
   private async loadInitial(): Promise<void> {
-    try {
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}${this.service.storeQuery()}`),
-      );
-      const payload = res?.data ?? res;
-      const items: any[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-      this.existingCount.set(items.length);
-      if (items.length > 0) {
-        this.initial.set({
-          mode: 'custom',
-          taxes: items.map((item) => {
-            const rate = item?.tax_rates?.[0]?.rate ?? item?.rate ?? 0;
-            return {
-              name: item.name ?? '',
-              percentage: Number(rate) * 100,
-              type: this.guessType(item.name ?? ''),
-            };
-          }),
-        });
-      }
-    } catch {
-      // Silent: defaults mode is fine for new configurations.
+    // Replaces the previous N+1 GET against `/taxes`. The prefill payload
+    // exposes per-category rate counts (not the rate values themselves), so
+    // we seed the form with category names + an empty percentage that the
+    // user can adjust. The POST endpoints in submit() are still the write
+    // path; the canonical `/taxes` GET is no longer needed by this wizard.
+    const taxes = this.service.prefill()?.default_taxes;
+    if (!taxes) {
+      // No prefill or backend reported no taxes — defaults mode.
+      return;
     }
+    this.existingCount.set(taxes.total_categories);
+    if (taxes.total_categories > 0) {
+      this.initial.set(this.toTaxesFormValue(taxes));
+    }
+  }
+
+  private toTaxesFormValue(
+    taxes: WizardPrefillDefaultTaxes,
+  ): Partial<DefaultTaxesValue> {
+    return {
+      mode: 'custom',
+      // Prefill only carries rate *counts* per category, not the rate value
+      // itself. Seed the names with 0% so the form opens pre-populated but
+      // the user can correct percentages before continuing.
+      taxes: taxes.categories.map((category) => ({
+        name: category.name,
+        percentage: 0,
+        type: this.guessType(category.name),
+      })),
+    };
   }
 
   private guessType(name: string): TaxRow['type'] {

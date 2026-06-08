@@ -1,4 +1,5 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import { Component, inject, signal, computed, OnInit } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { RouterModule } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -9,6 +10,7 @@ import { DateRangeFilterComponent } from '../../components/date-range-filter/dat
 import { EChartsOption } from 'echarts';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'vendix-expenses-by-category',
@@ -91,7 +93,8 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
     </div>
   `,
 })
-export class ExpensesByCategoryComponent {
+export class ExpensesByCategoryComponent implements OnInit {
+  private readonly route = inject(ActivatedRoute);
   chartOptions = signal<EChartsOption>({});
   exporting = signal(false);
   dateRange = signal<DateRangeFilter>({
@@ -117,6 +120,13 @@ export class ExpensesByCategoryComponent {
 
   constructor() {
     this.buildChart();
+  }
+
+  ngOnInit(): void {
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.dateRange.set(urlRange);
+    }
   }
 
   private buildChart(): void {

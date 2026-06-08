@@ -31,7 +31,15 @@ export class MovementsService {
     });
   }
 
-  findAll(query: MovementQueryDto) {
+  async findAll(query: MovementQueryDto) {
+    const {
+      page = 1,
+      limit = 25,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
+    const skip = (page - 1) * limit;
+
     const where: any = {
       product_id: query.product_id,
       product_variant_id: query.product_variant_id,
@@ -61,19 +69,32 @@ export class MovementsService {
       ];
     }
 
-    return this.prisma.inventory_movements.findMany({
-      where,
-      include: {
-        products: true,
-        product_variants: true,
-        from_location: true,
-        to_location: true,
-        users: true,
+    const [data, total] = await Promise.all([
+      this.prisma.inventory_movements.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          products: true,
+          product_variants: true,
+          from_location: true,
+          to_location: true,
+          users: true,
+        },
+        orderBy: { [sort_by]: sort_order },
+      }),
+      this.prisma.inventory_movements.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        total_pages: Math.max(1, Math.ceil(total / limit)),
       },
-      orderBy: {
-        created_at: 'desc',
-      },
-    });
+    };
   }
 
   findByProduct(productId: number, query: MovementQueryDto) {
@@ -94,6 +115,37 @@ export class MovementsService {
     return this.findAll({
       ...query,
       user_id: userId,
+    });
+  }
+
+  // Aggregate counts across all pages — used for stats cards.
+  async findAllForStats(query: MovementQueryDto) {
+    const where: any = {
+      product_id: query.product_id,
+      product_variant_id: query.product_variant_id,
+      from_location_id: query.from_location_id,
+      to_location_id: query.to_location_id,
+      movement_type: query.movement_type,
+      user_id: query.user_id,
+    };
+    if (query.start_date || query.end_date) {
+      where.created_at = {};
+      if (query.start_date) where.created_at.gte = new Date(query.start_date);
+      if (query.end_date) where.created_at.lte = new Date(query.end_date);
+    }
+    if (query.search) {
+      where.OR = [
+        { reason: { contains: query.search } },
+        { notes: { contains: query.search } },
+        { products: { name: { contains: query.search } } },
+      ];
+    }
+    return this.prisma.inventory_movements.findMany({
+      where,
+      select: {
+        id: true,
+        movement_type: true,
+      },
     });
   }
 

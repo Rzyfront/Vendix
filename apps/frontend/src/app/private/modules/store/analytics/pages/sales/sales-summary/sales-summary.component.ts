@@ -1,6 +1,7 @@
 import {Component, OnInit, OnDestroy, inject, signal,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -25,6 +26,7 @@ import * as SalesSelectors from '../state/sales-summary.selectors';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
+import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
@@ -48,6 +50,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private readonly route = inject(ActivatedRoute);
 // Observables from store
   summary$: Observable<SalesSummary | null> = this.store.select(
     SalesSelectors.selectSummary,
@@ -90,6 +93,12 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
+
+    // Read date range from URL query params (e.g. when navigating from Reports)
+    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
+    if (urlRange) {
+      this.store.dispatch(SalesActions.setDateRange({ dateRange: urlRange }));
+    }
 
     // Dispatch initial loads
     this.store.dispatch(SalesActions.loadSalesSummary());

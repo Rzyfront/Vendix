@@ -253,7 +253,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
             <app-button variant="outline" (clicked)="currentStep.set(isCSV() ? 1 : 0)">Atras</app-button>
             <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
             <app-button variant="primary" (clicked)="executeImport()">
-              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              <app-icon name="upload" [size]="16" slot="icon" ></app-icon>
               Importar
             </app-button>
           }

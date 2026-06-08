@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { createHash } from 'crypto';
 import * as zlib from 'zlib';
 import {
   InvoiceProviderAdapter,
@@ -19,12 +18,16 @@ import { DianResponseParserService } from './dian-response-parser.service';
 import { UblInvoiceBuilder } from './xml/ubl-invoice.builder';
 import { UblCreditNoteBuilder } from './xml/ubl-credit-note.builder';
 import { UblDebitNoteBuilder } from './xml/ubl-debit-note.builder';
+import { UblSupportDocumentBuilder } from './xml/ubl-support-document.builder';
 import { UblCommonBuilder } from './xml/ubl-common.builder';
+import { DIAN_ID_TYPES } from './constants/dian-document-types';
 import {
   DianConfigDecrypted,
   DianIssuerData,
   DianCustomerData,
 } from './interfaces/dian-config.interface';
+
+type DianConfigurationType = 'invoicing' | 'support_document' | 'payroll';
 
 /**
  * DIAN Direct Provider — connects directly to DIAN web services
@@ -479,6 +482,219 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     }
   }
 
+  async sendSupportDocument(
+    support_document_data: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    const start_time = Date.now();
+    const config = await this.loadConfig('support_document');
+    this.validateCertificateExpiry(config);
+
+    try {
+      const buyer = await this.loadIssuerData(config);
+      const seller = this.buildCustomerData(support_document_data);
+      const software_security = this.buildSoftwareSecurity(
+        config,
+        support_document_data.invoice_number,
+      );
+      const taxes = this.calculateTaxAmounts(support_document_data);
+      const cuds = CufeCalculator.generate({
+        invoice_number: support_document_data.invoice_number,
+        issue_date: support_document_data.issue_date,
+        issue_time: this.issueTime(support_document_data),
+        total_before_tax: support_document_data.subtotal_amount,
+        tax_iva: taxes.iva,
+        tax_inc: taxes.inc,
+        tax_ica: taxes.ica,
+        total_amount: support_document_data.total_amount,
+        issuer_nit: config.nit,
+        customer_nit: support_document_data.customer_tax_id || '222222222222',
+        technical_key:
+          support_document_data.technical_key || config.software_pin,
+        environment: config.environment === 'production' ? '1' : '2',
+      });
+      const xml = UblSupportDocumentBuilder.buildDocument({
+        support_document_data,
+        buyer,
+        seller,
+        software_security,
+        cuds,
+        environment: config.environment,
+      });
+      const signed_xml = await this.signXml(xml, config);
+      const zip_base64 = await this.compressToZipBase64(
+        signed_xml,
+        `${support_document_data.invoice_number}.xml`,
+      );
+      const ws_credentials = await this.loadWsCredentials(config);
+      const dian_response = await this.soap_client.sendBillSync(
+        zip_base64,
+        `${support_document_data.invoice_number}.zip`,
+        config.environment,
+        ws_credentials,
+      );
+      const parsed = this.response_parser.parseApplicationResponse(
+        dian_response.raw_response,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_support_document',
+        document_type: 'support_document',
+        document_number: support_document_data.invoice_number,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        status: parsed.is_valid ? 'success' : 'error',
+        error_message: parsed.is_valid
+          ? null
+          : parsed.errors.map((e) => e.message).join('; '),
+        cufe: cuds,
+        duration_ms: Date.now() - start_time,
+      });
+
+      return {
+        success: parsed.is_valid,
+        tracking_id: parsed.document_key || cuds,
+        cuds: parsed.document_key || cuds,
+        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cuds),
+        xml_document: signed_xml,
+        message: parsed.is_valid
+          ? 'Documento soporte aceptado por la DIAN'
+          : `Documento soporte rechazado: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        provider_data: {
+          dian_status_code: parsed.status_code,
+          dian_status_description: parsed.status_description,
+          dian_errors: parsed.errors,
+          environment: config.environment,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to send support document to DIAN: ${error.message}`,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_support_document',
+        document_type: 'support_document',
+        document_number: support_document_data.invoice_number,
+        status: 'error',
+        error_message: error.message,
+        duration_ms: Date.now() - start_time,
+      });
+
+      throw error;
+    }
+  }
+
+  async sendSupportAdjustmentNote(
+    support_adjustment_data: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
+    const start_time = Date.now();
+    const config = await this.loadConfig('support_document');
+    this.validateCertificateExpiry(config);
+
+    try {
+      const buyer = await this.loadIssuerData(config);
+      const seller = this.buildCustomerData(support_adjustment_data);
+      const software_security = this.buildSoftwareSecurity(
+        config,
+        support_adjustment_data.invoice_number,
+      );
+      const taxes = this.calculateTaxAmounts(support_adjustment_data);
+      const cuds = CufeCalculator.generate({
+        invoice_number: support_adjustment_data.invoice_number,
+        issue_date: support_adjustment_data.issue_date,
+        issue_time: this.issueTime(support_adjustment_data),
+        total_before_tax: support_adjustment_data.subtotal_amount,
+        tax_iva: taxes.iva,
+        tax_inc: taxes.inc,
+        tax_ica: taxes.ica,
+        total_amount: support_adjustment_data.total_amount,
+        issuer_nit: config.nit,
+        customer_nit: support_adjustment_data.customer_tax_id || '222222222222',
+        technical_key: config.software_pin,
+        environment: config.environment === 'production' ? '1' : '2',
+      });
+
+      this.assertOriginalSupportDocumentReference(support_adjustment_data);
+
+      const xml = UblSupportDocumentBuilder.buildAdjustmentNote({
+        support_adjustment_data,
+        buyer,
+        seller,
+        software_security,
+        cuds,
+        environment: config.environment,
+        original_support_document_number:
+          support_adjustment_data.original_invoice_number ||
+          support_adjustment_data.order_reference,
+        original_support_document_cuds:
+          support_adjustment_data.original_invoice_cufe,
+        original_support_document_date:
+          support_adjustment_data.original_invoice_issue_date,
+      });
+      const signed_xml = await this.signXml(xml, config);
+      const zip_base64 = await this.compressToZipBase64(
+        signed_xml,
+        `${support_adjustment_data.invoice_number}.xml`,
+      );
+      const ws_credentials = await this.loadWsCredentials(config);
+      const dian_response = await this.soap_client.sendBillSync(
+        zip_base64,
+        `${support_adjustment_data.invoice_number}.zip`,
+        config.environment,
+        ws_credentials,
+      );
+      const parsed = this.response_parser.parseApplicationResponse(
+        dian_response.raw_response,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_support_adjustment_note',
+        document_type: 'support_adjustment_note',
+        document_number: support_adjustment_data.invoice_number,
+        request_xml: signed_xml,
+        response_xml: dian_response.raw_response,
+        status: parsed.is_valid ? 'success' : 'error',
+        error_message: parsed.is_valid
+          ? null
+          : parsed.errors.map((e) => e.message).join('; '),
+        cufe: cuds,
+        duration_ms: Date.now() - start_time,
+      });
+
+      return {
+        success: parsed.is_valid,
+        tracking_id: parsed.document_key || cuds,
+        cuds: parsed.document_key || cuds,
+        qr_code: CufeCalculator.generateQrUrl(parsed.document_key || cuds),
+        xml_document: signed_xml,
+        message: parsed.is_valid
+          ? 'Nota de ajuste de documento soporte aceptada por la DIAN'
+          : `Nota de ajuste de documento soporte rechazada: ${parsed.errors.map((e) => e.message).join(', ')}`,
+        provider_data: {
+          dian_status_code: parsed.status_code,
+          dian_status_description: parsed.status_description,
+          dian_errors: parsed.errors,
+          environment: config.environment,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to send support adjustment note to DIAN: ${error.message}`,
+      );
+
+      await this.createAuditLog(config.id, {
+        action: 'send_support_adjustment_note',
+        document_type: 'support_adjustment_note',
+        document_number: support_adjustment_data.invoice_number,
+        status: 'error',
+        error_message: error.message,
+        duration_ms: Date.now() - start_time,
+      });
+
+      throw error;
+    }
+  }
+
   async checkStatus(tracking_id: string): Promise<StatusResponse> {
     const config = await this.loadConfig();
 
@@ -574,7 +790,9 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   /**
    * Loads and decrypts the DIAN configuration for the current store.
    */
-  private async loadConfig(): Promise<DianConfigDecrypted> {
+  private async loadConfig(
+    configuration_type: DianConfigurationType = 'invoicing',
+  ): Promise<DianConfigDecrypted> {
     const context = RequestContextService.getContext();
     if (!context?.organization_id) {
       throw new Error('Organization context required for DIAN operations');
@@ -588,7 +806,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     const config = await this.prisma.dian_configurations.findFirst({
       where: {
         accounting_entity_id: accounting_entity.id,
-        configuration_type: 'invoicing',
+        configuration_type,
         operation_mode: 'own_software',
         enablement_status: { in: ['testing', 'test_set_passed', 'enabled'] },
         ...(process.env.NODE_ENV === 'production' && {
@@ -600,7 +818,7 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     if (!config) {
       throw new Error(
-        `No active DIAN configuration for fiscal entity ${accounting_entity.id}`,
+        `No active DIAN ${configuration_type} configuration for fiscal entity ${accounting_entity.id}`,
       );
     }
 
@@ -627,11 +845,50 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   private issueTime(document_data: ProviderInvoiceData): string {
     return (
       document_data.issue_time ||
-      `${new Date(`${document_data.issue_date}T00:00:00.000Z`)
-        .toISOString()
-        .split('T')[1]
-        .split('.')[0]}-05:00`
+      `${
+        new Date(`${document_data.issue_date}T00:00:00.000Z`)
+          .toISOString()
+          .split('T')[1]
+          .split('.')[0]
+      }-05:00`
     );
+  }
+
+  private buildSoftwareSecurity(
+    config: DianConfigDecrypted,
+    document_number: string,
+  ) {
+    return {
+      software_id: config.software_id,
+      software_pin: config.software_pin,
+      software_security_code: UblCommonBuilder.generateSoftwareSecurityCode(
+        config.software_id,
+        config.software_pin,
+        document_number,
+      ),
+    };
+  }
+
+  private calculateTaxAmounts(document_data: ProviderInvoiceData): {
+    iva: string;
+    ica: string;
+    inc: string;
+  } {
+    const filter = (tokens: string[]) =>
+      document_data.taxes.filter((tax) => {
+        const name = tax.tax_name.toUpperCase();
+        return tokens.some((token) => name.includes(token));
+      });
+    const total = (taxes: typeof document_data.taxes) =>
+      taxes
+        .reduce((sum, tax) => sum + parseFloat(tax.tax_amount || '0'), 0)
+        .toFixed(2);
+
+    return {
+      iva: total(filter(['IVA', 'VAT'])),
+      ica: total(filter(['ICA'])),
+      inc: total(filter(['INC', 'CONSUMO'])),
+    };
   }
 
   private assertOriginalInvoiceReference(
@@ -647,6 +904,34 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     }
   }
 
+  private assertOriginalSupportDocumentReference(
+    document_data: ProviderInvoiceData,
+  ): void {
+    const original_number =
+      document_data.original_invoice_number || document_data.order_reference;
+    if (!original_number || !document_data.original_invoice_cufe) {
+      throw new Error(
+        'DIAN support adjustment note requires the accepted original support document number and CUDS.',
+      );
+    }
+  }
+
+  /**
+   * Maps the store/organization fiscal tax regime to its DIAN code.
+   * '48' = responsable de IVA; '49' = no responsable de IVA.
+   */
+  private static mapTaxRegimeToDianCode(regime?: string): string {
+    switch (regime) {
+      case 'COMUN':
+      case 'GRAN_CONTRIBUYENTE':
+        return '48';
+      case 'SIMPLIFICADO':
+        return '49';
+      default:
+        return '48';
+    }
+  }
+
   /**
    * Loads issuer data from the fiscal accounting entity.
    */
@@ -654,34 +939,40 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
     config: DianConfigDecrypted,
   ): Promise<DianIssuerData> {
     if (!config.accounting_entity_id) {
-      throw new Error('DIAN configuration is missing fiscal accounting entity.');
+      throw new Error(
+        'DIAN configuration is missing fiscal accounting entity.',
+      );
     }
 
-    const entity = await this.prisma.withoutScope().accounting_entities.findFirst({
-      where: {
-        id: config.accounting_entity_id,
-        organization_id: config.organization_id,
-        is_active: true,
-      },
-      include: {
-        organization: {
-          include: {
-            addresses: {
-              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-              take: 1,
+    const entity = await this.prisma
+      .withoutScope()
+      .accounting_entities.findFirst({
+        where: {
+          id: config.accounting_entity_id,
+          organization_id: config.organization_id,
+          is_active: true,
+        },
+        include: {
+          organization: {
+            include: {
+              addresses: {
+                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                take: 1,
+              },
+              organization_settings: true,
+            },
+          },
+          store: {
+            include: {
+              addresses: {
+                orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
+                take: 1,
+              },
+              store_settings: true,
             },
           },
         },
-        store: {
-          include: {
-            addresses: {
-              orderBy: [{ is_primary: 'desc' }, { id: 'asc' }],
-              take: 1,
-            },
-          },
-        },
-      },
-    });
+      });
 
     if (!entity) {
       throw new Error(
@@ -696,6 +987,14 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
         ? store?.addresses?.[0]
         : organization.addresses?.[0];
 
+    const settings =
+      entity.fiscal_scope === 'STORE'
+        ? store?.store_settings?.settings
+        : organization?.organization_settings?.settings;
+    // Defensive access: settings is a Prisma Json column (untyped at runtime),
+    // so we cast to `any` only to read the optional fiscal_data sub-object.
+    const fiscalData = (settings as any)?.fiscal_data ?? {};
+
     if (!address?.municipality_code) {
       throw new Error(
         `Fiscal entity ${entity.id} requires a primary address with DIAN municipality_code.`,
@@ -704,10 +1003,13 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
 
     const legal_name =
       entity.legal_name ||
-      (entity.fiscal_scope === 'STORE' ? store?.legal_name : organization.legal_name) ||
+      (entity.fiscal_scope === 'STORE'
+        ? store?.legal_name
+        : organization.legal_name) ||
       entity.name;
 
     return {
+      document_type: '31',
       nit: config.nit,
       nit_dv: config.nit_dv || '0',
       legal_name,
@@ -716,13 +1018,19 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
       city_code: address.municipality_code,
       city_name: address.city,
       department_code: address.municipality_code.slice(0, 2),
-      department_name: address.state_province || address.municipality_code.slice(0, 2),
+      department_name:
+        address.state_province || address.municipality_code.slice(0, 2),
       country_code: address.country_code,
       postal_code: address.postal_code || undefined,
       phone: address.phone_number || organization.phone || undefined,
       email: organization.email,
-      tax_regime: '48', // Default: Responsable IVA
-      tax_scheme: 'O-15', // Default: Autorretenedor
+      tax_regime: DianDirectProvider.mapTaxRegimeToDianCode(
+        fiscalData?.tax_regime,
+      ),
+      tax_scheme:
+        typeof fiscalData?.tax_scheme === 'string' && fiscalData.tax_scheme
+          ? fiscalData.tax_scheme
+          : 'O-15',
     };
   }
 
@@ -732,13 +1040,90 @@ export class DianDirectProvider implements InvoiceProviderAdapter {
   private buildCustomerData(
     invoice_data: ProviderInvoiceData,
   ): DianCustomerData {
+    const address = this.normalizeAddress(invoice_data.customer_address);
+    const document_type = this.normalizeDocumentType(
+      invoice_data.customer_document_type,
+    );
     return {
-      document_type: invoice_data.customer_document_type || '13', // CC default
+      document_type,
       document_number: invoice_data.customer_tax_id || '222222222222',
       legal_name: invoice_data.customer_name || 'Consumidor Final',
+      address_line: address?.address_line,
+      city_code: address?.city_code,
+      city_name: address?.city_name,
+      department_code: address?.department_code,
+      department_name: address?.department_name,
+      country_code: address?.country_code,
+      postal_code: address?.postal_code,
       email: invoice_data.customer_email,
       phone: invoice_data.customer_phone,
-      tax_regime: invoice_data.customer_regime || '49', // No responsable
+      tax_regime: this.normalizePartyAccountType(
+        invoice_data.customer_regime,
+        document_type,
+      ),
+    };
+  }
+
+  private normalizeDocumentType(document_type?: string): string {
+    if (!document_type) return '13';
+    const normalized = document_type.trim().toUpperCase();
+    return DIAN_ID_TYPES[normalized] || normalized;
+  }
+
+  private normalizePartyAccountType(
+    value: string | undefined,
+    document_type: string,
+  ): string {
+    const normalized = value?.trim().toLowerCase();
+    if (normalized === '1' || normalized === '2') return normalized;
+    if (
+      normalized?.includes('no_responsable') ||
+      normalized?.includes('no responsable')
+    ) {
+      return '2';
+    }
+    if (
+      normalized?.includes('juridica') ||
+      normalized?.includes('responsable') ||
+      document_type === '31'
+    ) {
+      return '1';
+    }
+    return '2';
+  }
+
+  private normalizeAddress(address: any):
+    | {
+        address_line?: string;
+        city_code?: string;
+        city_name?: string;
+        department_code?: string;
+        department_name?: string;
+        country_code?: string;
+        postal_code?: string;
+      }
+    | undefined {
+    if (!address || typeof address !== 'object') return undefined;
+    const municipality_code =
+      address.municipality_code ||
+      address.city_code ||
+      address.municipalityCode;
+    return {
+      address_line:
+        address.address_line ||
+        address.address_line1 ||
+        address.line ||
+        address.street,
+      city_code: municipality_code,
+      city_name: address.city_name || address.city,
+      department_code:
+        address.department_code ||
+        address.state_code ||
+        (municipality_code ? String(municipality_code).slice(0, 2) : undefined),
+      department_name:
+        address.department_name || address.state_province || address.state,
+      country_code: address.country_code || 'CO',
+      postal_code: address.postal_code,
     };
   }
 

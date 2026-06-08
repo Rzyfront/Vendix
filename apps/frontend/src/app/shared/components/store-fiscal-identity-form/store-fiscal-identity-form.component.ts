@@ -33,6 +33,7 @@ interface StoreFiscalIdentityControls {
   nit_type: FormControl<StoreFiscalNitType>;
   tax_id: FormControl<string>;
   tax_id_dv: FormControl<string>;
+  person_type: FormControl<'NATURAL' | 'JURIDICA'>;
 }
 
 const NIT_TYPES: StoreFiscalNitType[] = [
@@ -111,6 +112,14 @@ const NIT_TYPES: StoreFiscalNitType[] = [
         ></app-input>
       </div>
 
+      <app-selector
+        label="Tipo de persona"
+        [formControl]="personTypeControl"
+        [options]="personTypeOptions"
+        [disabled]="disabled()"
+        placeholder="Seleccionar"
+      ></app-selector>
+
       @if (fieldError('tax_id')) {
         <p class="field-error">{{ fieldError('tax_id') }}</p>
       }
@@ -136,7 +145,7 @@ const NIT_TYPES: StoreFiscalNitType[] = [
           [loading]="disabled()"
           [showTextWhileLoading]="true"
         >
-          <app-icon name="save" [size]="15" slot="icon"></app-icon>
+          <app-icon name="save" [size]="15" slot="icon" ></app-icon>
           Guardar
         </app-button>
       </div>
@@ -233,6 +242,11 @@ export class StoreFiscalIdentityFormComponent {
     { value: 'NIT_EXTRANJERIA', label: 'NIT extranjería' },
   ];
 
+  readonly personTypeOptions: SelectorOption[] = [
+    { value: 'NATURAL', label: 'Persona Natural' },
+    { value: 'JURIDICA', label: 'Persona Jurídica' },
+  ];
+
   readonly form = new FormGroup<StoreFiscalIdentityControls>({
     legal_name: new FormControl('', {
       nonNullable: true,
@@ -249,6 +263,9 @@ export class StoreFiscalIdentityFormComponent {
     tax_id_dv: new FormControl('', {
       nonNullable: true,
       validators: [Validators.pattern(/^\d?$/)],
+    }),
+    person_type: new FormControl<'NATURAL' | 'JURIDICA'>('JURIDICA', {
+      nonNullable: true,
     }),
   });
 
@@ -268,6 +285,10 @@ export class StoreFiscalIdentityFormComponent {
     return this.form.controls.tax_id_dv;
   }
 
+  get personTypeControl(): FormControl<'NATURAL' | 'JURIDICA'> {
+    return this.form.controls.person_type;
+  }
+
   constructor() {
     this.form.statusChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -281,6 +302,7 @@ export class StoreFiscalIdentityFormComponent {
           nit_type: this.parseNitType(value?.nit_type),
           tax_id: value?.tax_id ?? value?.nit ?? '',
           tax_id_dv: value?.tax_id_dv ?? value?.nit_dv ?? '',
+          person_type: this.parsePersonType(value?.person_type),
         },
         { emitEvent: false },
       );
@@ -326,6 +348,7 @@ export class StoreFiscalIdentityFormComponent {
       nit: value.tax_id.trim(),
       tax_id_dv: value.tax_id_dv.trim() || null,
       nit_dv: value.tax_id_dv.trim() || null,
+      person_type: value.person_type,
     });
   }
 
@@ -338,5 +361,9 @@ export class StoreFiscalIdentityFormComponent {
       NIT_TYPES.includes(value as StoreFiscalNitType)
       ? (value as StoreFiscalNitType)
       : 'NIT';
+  }
+
+  private parsePersonType(value: unknown): 'NATURAL' | 'JURIDICA' {
+    return value === 'NATURAL' || value === 'JURIDICA' ? value : 'JURIDICA';
   }
 }

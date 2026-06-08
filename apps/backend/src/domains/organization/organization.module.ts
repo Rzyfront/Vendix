@@ -23,6 +23,13 @@ import { OrgPurchaseOrdersModule } from './purchase-orders/purchase-orders.modul
 import { OrgPayrollSettingsModule } from './payroll/payroll-settings.module';
 import { OrgInvoicingModule } from './invoicing/invoicing.module';
 import { OrgTaxesModule } from './taxes/taxes.module';
+// Fiscal CRUD parity twins (org-owns-fiscal) — delegate to store services
+// via OrgAccountingScopeService.runWithStoreContext.
+import { OrgWithholdingTaxModule } from './withholding-tax/org-withholding-tax.module';
+import { OrgExogenousModule } from './exogenous/org-exogenous.module';
+import { OrgIcaModule } from './taxes/org-ica.module';
+import { OrgAccountsReceivableModule } from './accounts-receivable/org-accounts-receivable.module';
+import { OrgAccountsPayableModule } from './accounts-payable/org-accounts-payable.module';
 
 @Module({
   imports: [
@@ -48,6 +55,11 @@ import { OrgTaxesModule } from './taxes/taxes.module';
     OrgPayrollSettingsModule,
     OrgInvoicingModule,
     OrgTaxesModule,
+    OrgWithholdingTaxModule,
+    OrgExogenousModule,
+    OrgIcaModule,
+    OrgAccountsReceivableModule,
+    OrgAccountsPayableModule,
   ],
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],

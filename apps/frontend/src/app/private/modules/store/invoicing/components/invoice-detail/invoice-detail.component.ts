@@ -1,7 +1,7 @@
 import { Component, inject, input, output } from '@angular/core';
 import { NgClass, DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Invoice } from '../../interfaces/invoice.interface';
+import { Invoice, InvoiceItem } from '../../interfaces/invoice.interface';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -102,7 +102,17 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 <tbody>
                   @for (item of invoice()!.items; track item) {
                     <tr class="border-b border-gray-100">
-                      <td class="py-2 px-2 text-text-primary">{{ item.product_name }}</td>
+                      <td class="py-2 px-2 text-text-primary">
+                        <span>{{ item.product_name || item.description }}</span>
+                        @if (item.applied_price_tier_name) {
+                          <span class="block text-xs text-text-secondary">Tarifa: {{ item.applied_price_tier_name }}</span>
+                        }
+                        @if (isPackageLine(item)) {
+                          <span class="block text-xs text-text-secondary">
+                            {{ item.quantity }} paq. = {{ item.stock_units_consumed }} u. (×{{ packagePerUnit(item) }})
+                          </span>
+                        }
+                      </td>
                       <td class="py-2 px-2 text-center text-text-primary">{{ item.quantity }}</td>
                       <td class="py-2 px-2 text-right text-text-primary">{{ formatCurrency(item.unit_price) }}</td>
                       <td class="py-2 px-2 text-right text-text-secondary">{{ formatCurrency(item.discount_amount) }}</td>
@@ -332,6 +342,22 @@ export class InvoiceDetailComponent {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value || 0);
+  }
+
+  /** True when the line consumed packaging stock different from its quantity. */
+  isPackageLine(item: InvoiceItem): boolean {
+    return (
+      typeof item.stock_units_consumed === 'number' &&
+      item.stock_units_consumed > 0 &&
+      item.stock_units_consumed !== item.quantity
+    );
+  }
+
+  /** Units of stock consumed per sold unit (packaging factor), rounded to 2dp. */
+  packagePerUnit(item: InvoiceItem): number {
+    const consumed = item.stock_units_consumed ?? 0;
+    const qty = item.quantity || 1;
+    return Math.round((consumed / qty) * 100) / 100;
   }
 
   onValidate(): void {

@@ -875,6 +875,33 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Brand has assigned products',
   },
+  CAT_NAME_EXISTS_001: {
+    code: 'CAT_NAME_EXISTS_001',
+    httpStatus: 409,
+    devMessage: 'Category name/slug already exists in this store',
+  },
+  BRAND_NAME_EXISTS_001: {
+    code: 'BRAND_NAME_EXISTS_001',
+    httpStatus: 409,
+    devMessage: 'Brand name/slug already exists in this store',
+  },
+
+  // Media uploads (shared)
+  MEDIA_FILE_REQUIRED_001: {
+    code: 'MEDIA_FILE_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'File is required',
+  },
+  MEDIA_FILE_TYPE_001: {
+    code: 'MEDIA_FILE_TYPE_001',
+    httpStatus: 400,
+    devMessage: 'Only image files are allowed',
+  },
+  MEDIA_UPLOAD_FAILED_001: {
+    code: 'MEDIA_UPLOAD_FAILED_001',
+    httpStatus: 400,
+    devMessage: 'Error uploading file',
+  },
 
   // Refunds
   REF_FIND_001: {
@@ -1950,6 +1977,28 @@ export const ErrorCodes = {
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 
+  // RUT Scanner (fiscal identity extraction)
+  RUT_SCAN_AI_FAIL: {
+    code: 'RUT_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI RUT document extraction failed',
+  },
+  RUT_SCAN_PARSE_FAIL: {
+    code: 'RUT_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI RUT response as valid JSON',
+  },
+  RUT_SCAN_NO_FILE: {
+    code: 'RUT_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No RUT file provided',
+  },
+  RUT_SCAN_INVALID_FILE: {
+    code: 'RUT_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+
   // Monitoring
   MON_CW_001: {
     code: 'MON_CW_001',
@@ -2331,6 +2380,11 @@ export const ErrorCodes = {
     httpStatus: 403,
     devMessage: 'Fiscal status permission denied',
   },
+  FISCAL_STATUS_INCOMPLETE: {
+    code: 'FISCAL_STATUS_INCOMPLETE',
+    httpStatus: 409,
+    devMessage: 'Fiscal area cannot be activated with incomplete required steps',
+  },
 
   // Multi-tarifa (Price Tiers)
   PRICE_TIER_FIND_001: {
@@ -2410,6 +2464,13 @@ export const ErrorCodes = {
     code: 'HELP_IMAGE_TOO_LARGE',
     httpStatus: 400,
     devMessage: 'Image file must be smaller than 10MB',
+  },
+
+  // Legal (public)
+  LEGAL_DOCUMENT_TYPE_INVALID: {
+    code: 'LEGAL_DOCUMENT_TYPE_INVALID',
+    httpStatus: 400,
+    devMessage: 'Unsupported legal document type',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

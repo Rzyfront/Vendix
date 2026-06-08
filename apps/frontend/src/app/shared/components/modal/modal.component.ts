@@ -24,10 +24,10 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
   template: `
     <!-- Modal backdrop -->
     @if (isOpen()) {
-      <div
-        class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-        (dblclick)="onWrapperClick($event)"
-      >
+        <div
+          class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
+          (click)="onWrapperClick($event)"
+        >
         <!-- Backdrop overlay: bg-only, sin backdrop-filter -->
         <div
           class="absolute inset-0 bg-black/50 transition-opacity duration-300 ease-out"

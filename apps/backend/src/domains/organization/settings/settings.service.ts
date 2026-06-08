@@ -534,6 +534,15 @@ export class SettingsService {
     );
 
     if (fiscalScope === 'ORGANIZATION') {
+      // Defensive observability: a caller passing `store_id` while the org is
+      // fiscally consolidated is a programming error (per-store fiscal data is
+      // meaningless under fiscal_scope=ORGANIZATION). We keep routing to the
+      // organization scope, but surface the mismatch instead of swallowing it.
+      if (typeof store_id === 'number') {
+        this.logger.warn(
+          `resolveFiscalDataTarget: store_id=${store_id} ignored because organization_id=${organization_id} has fiscal_scope=ORGANIZATION; routing fiscal data to organization scope.`,
+        );
+      }
       return { scope: 'organization' };
     }
 

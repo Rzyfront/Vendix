@@ -81,6 +81,7 @@ import {
   PriceTier,
   ProductPriceTierOverride,
 } from '../../../price-tiers/interfaces';
+import { resolvePackSize } from '../../../../../../shared/services/pricing/packaging.util';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
@@ -127,6 +128,10 @@ interface PriceTierOverrideRow {
   override_price: number | null;
   // Snapshot of the persisted value to detect dirty edits on save.
   initial_override_price: number | null;
+  // Per-product override of units-per-package (packaging cascade). null => inherit tier default.
+  override_units_per_package: number | null;
+  // Snapshot of the persisted units-per-package to detect dirty edits on save.
+  initial_override_units_per_package: number | null;
 }
 
 @Component({
@@ -749,13 +754,6 @@ export class ProductCreatePageComponent {
       });
     this.syncPricingTypeControlState(this.isService);
 
-    // Multi-tarifa cross-field: force package_consumes_multiple_stock off if
-    // units_per_package becomes invalid.
-    this.productForm
-      .get('units_per_package')
-      ?.valueChanges.pipe(takeUntilDestroyed())
-      .subscribe(() => this.onUnitsPerPackageChange());
-
     // Auto-cargar proveedores cuando se activa requires_booking (o al entrar en edit con el flag ya activo)
     effect(() => {
       const enabled = this.requiresBookingSig();
@@ -1034,10 +1032,8 @@ export class ProductCreatePageComponent {
         consultation_template_id: [null],
         preconsultation_template_id: [null],
         preparation_time_minutes: [null as number | null],
-        // Multi-tarifa + empaque (Phase 4)
+        // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
-        units_per_package: [null as number | null, [Validators.min(2)]],
-        package_consumes_multiple_stock: [false],
       },
       {
         validators: [saleLessThanBaseValidator()],
@@ -1199,11 +1195,8 @@ export class ProductCreatePageComponent {
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
       preparation_time_minutes: product.preparation_time_minutes || null,
-      // Multi-tarifa + empaque (Phase 4)
+      // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
-      units_per_package: product.units_per_package ?? null,
-      package_consumes_multiple_stock:
-        !!product.package_consumes_multiple_stock,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -1733,7 +1726,10 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí.
+    // Las imágenes de variantes son independientes de las imágenes principales
+    // del producto. Si marcamos imagesTouched, el backend borra TODAS las
+    // imágenes de variantes y del producto en su bloque de re-upload.
     this.isVariantImageModalOpen.set(false);
   }
 
@@ -1752,7 +1748,7 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí (ver onVariantImagesAdded).
     this.isVariantImageEditModalOpen.set(false);
     this.toastService.success('Imagen ajustada correctamente');
   }
@@ -1772,7 +1768,7 @@ export class ProductCreatePageComponent {
     variant.image_file = undefined;
     variant.image_id = undefined;
     this.generatedVariants = [...this.generatedVariants];
-    this.markImagesTouched();
+    // ⚠️ NO llamar markImagesTouched() aquí (ver onVariantImagesAdded).
     this.isVariantAiModalOpen.set(false);
     this.toastService.success('Imagen reemplazada por la versión IA');
   }
@@ -2546,21 +2542,13 @@ export class ProductCreatePageComponent {
               height: Number(formValue.dimensions.height),
             }
           : undefined,
-      // Multi-tarifa + empaque (Phase 4)
+      // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!formValue.has_multiple_price_tiers,
       enabled_price_tier_ids: !!formValue.has_multiple_price_tiers
         ? this.hasLoadedPriceTiers()
           ? this.enabledPriceTierIdsFromRows()
           : (this.product?.enabled_price_tier_ids ?? [])
         : [],
-      units_per_package:
-        formValue.units_per_package !== null &&
-        formValue.units_per_package !== undefined &&
-        Number(formValue.units_per_package) >= 2
-          ? Number(formValue.units_per_package)
-          : null,
-      package_consumes_multiple_stock:
-        !!formValue.package_consumes_multiple_stock,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
@@ -2997,13 +2985,6 @@ export class ProductCreatePageComponent {
     return !!this.productForm.get('has_multiple_price_tiers')?.value;
   }
 
-  get unitsPerPackage(): number | null {
-    const raw = this.productForm.get('units_per_package')?.value;
-    if (raw === null || raw === undefined || raw === '') return null;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 2 ? n : null;
-  }
-
   /**
    * Handler for the "Activar precios multi-tarifa" toggle. Lazy-loads the
    * tier catalog the first time it's enabled.
@@ -3025,35 +3006,6 @@ export class ProductCreatePageComponent {
       // Create mode: load tiers anyway so the user sees the catalog and the
       // help message. Overrides cannot be persisted until the product is saved.
       this.loadPriceTiersForCreateMode();
-    }
-  }
-
-  /**
-   * Handler for the "Vender por empaque..." toggle. Forces the toggle off if
-   * units_per_package is invalid.
-   */
-  onPackageConsumesMultipleStockToggle(enabled: boolean): void {
-    const ctrl = this.productForm.get('package_consumes_multiple_stock');
-    if (enabled && !this.unitsPerPackage) {
-      this.toastService.warning(
-        'Configura "Unidades por empaque" (≥ 2) antes de activar esta opción.',
-      );
-      ctrl?.setValue(false, { emitEvent: false });
-      return;
-    }
-    ctrl?.setValue(enabled, { emitEvent: false });
-  }
-
-  /**
-   * If units_per_package falls below 2, force package_consumes_multiple_stock
-   * back to false so the inconsistent state is impossible.
-   */
-  onUnitsPerPackageChange(): void {
-    if (!this.unitsPerPackage) {
-      const ctrl = this.productForm.get('package_consumes_multiple_stock');
-      if (ctrl?.value === true) {
-        ctrl.setValue(false, { emitEvent: false });
-      }
     }
   }
 
@@ -3080,9 +3032,9 @@ export class ProductCreatePageComponent {
         const baseOverrides = overrides.filter(
           (o) => o.variant_id === null || o.variant_id === undefined,
         );
-        const overrideByTierId = new Map<number, number>();
+        const overrideByTierId = new Map<number, ProductPriceTierOverride>();
         for (const o of baseOverrides) {
-          overrideByTierId.set(o.price_tier_id, Number(o.override_price));
+          overrideByTierId.set(o.price_tier_id, o);
         }
 
         const enabledSet =
@@ -3094,16 +3046,26 @@ export class ProductCreatePageComponent {
           .slice()
           .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
           .map((tier) => {
-            const existing = overrideByTierId.has(tier.id)
-              ? Number(overrideByTierId.get(tier.id))
-              : null;
+            const override = overrideByTierId.get(tier.id);
+            const existingPrice =
+              override && override.override_price !== null
+                ? Number(override.override_price)
+                : null;
+            const existingUnits =
+              override &&
+              override.override_units_per_package !== null &&
+              override.override_units_per_package !== undefined
+                ? Number(override.override_units_per_package)
+                : null;
             const enabled = enabledSet.has(tier.id);
             return {
               tier,
               enabled,
               initial_enabled: enabled,
-              override_price: existing,
-              initial_override_price: existing,
+              override_price: existingPrice,
+              initial_override_price: existingPrice,
+              override_units_per_package: existingUnits,
+              initial_override_units_per_package: existingUnits,
             };
           });
 
@@ -3138,6 +3100,8 @@ export class ProductCreatePageComponent {
             initial_enabled: true,
             override_price: null,
             initial_override_price: null,
+            override_units_per_package: null,
+            initial_override_units_per_package: null,
           }));
         this.priceTierRows.set(rows);
         this.hasLoadedPriceTiers.set(true);
@@ -3152,40 +3116,199 @@ export class ProductCreatePageComponent {
     });
   }
 
+  // ─── Multi-selector wiring (mimics Promociones) ─────────────────────────
+
+  /** All loaded tiers presented as multi-selector options (search + chips). */
+  readonly priceTierSelectorOptions = computed<MultiSelectorOption[]>(() =>
+    this.priceTierRows().map((row) => ({
+      value: row.tier.id,
+      label: row.tier.name,
+      description: this.tierOptionDescription(row.tier),
+      icon: row.tier.is_package_unit ? 'package' : undefined,
+    })),
+  );
+
+  /** Ids of the currently enabled tiers — bound to the multi-selector value. */
+  readonly selectedPriceTierIds = computed<number[]>(() =>
+    this.priceTierRows()
+      .filter((row) => row.enabled)
+      .map((row) => row.tier.id),
+  );
+
   /**
-   * Computed price suggested when no override is set: base_price * (1 - %).
-   * Returns null if the tier has no discount configured.
+   * Only the enabled tiers render configurable rows below the multi-selector.
+   * Reads `formUpdateTrigger` so the per-row price/margin/fallback recompute
+   * live when the user edits `base_price`/`cost_price` in the pricing section
+   * (those are plain reactive-form values, not signals).
    */
-  getTierFallbackPrice(tier: PriceTier): number | null {
-    const basePrice = Number(this.productForm.get('base_price')?.value || 0);
-    const discount = Number(tier.discount_percentage || 0);
-    if (basePrice <= 0) return null;
-    if (!discount) return basePrice;
-    return Number((basePrice * (1 - discount / 100)).toFixed(2));
+  readonly selectedPriceTierRows = computed<PriceTierOverrideRow[]>(() => {
+    this.formUpdateTrigger(); // re-render on form value/status changes
+    return this.priceTierRows().filter((row) => row.enabled);
+  });
+
+  private tierOptionDescription(tier: PriceTier): string | undefined {
+    const parts: string[] = [];
+    if (tier.is_default) parts.push('Por defecto');
+    if (tier.discount_percentage) parts.push(`${tier.discount_percentage}%`);
+    const pack = resolvePackSize(tier.units_per_package, null);
+    if (pack > 1) parts.push(`Empaque x${pack}`);
+    return parts.length ? parts.join(' · ') : undefined;
   }
 
-  /** Update one row's override price (called from template input). */
+  /**
+   * Multi-selector valueChange handler. Enables exactly the selected tiers and
+   * disables the rest. Deselecting a tier marks its override for removal on save
+   * (override fields are reset so the diff in syncTierOverridesForProduct issues
+   * the DELETE).
+   */
+  onPriceTiersChange(ids: (string | number)[]): void {
+    const enabledSet = new Set(ids.map((id) => Number(id)));
+    const next = this.priceTierRows().map((row) => {
+      const enabled = enabledSet.has(row.tier.id);
+      if (enabled === row.enabled) return { ...row, enabled };
+      // Deselected → drop any pending override so the row inherits the default
+      // (the DELETE is issued from the diff when it had a persisted override).
+      return enabled
+        ? { ...row, enabled }
+        : {
+            ...row,
+            enabled,
+            override_price: null,
+            override_units_per_package: null,
+          };
+    });
+    this.priceTierRows.set(next);
+  }
+
+  // ─── Pack size + price/margin helpers ───────────────────────────────────
+
+  /**
+   * Effective pack size for a row: override_units_per_package ?? tier default.
+   * A pack size > 1 means the override price is the WHOLE-PACKAGE price.
+   */
+  getRowPackSize(row: PriceTierOverrideRow): number {
+    return resolvePackSize(
+      row.tier.units_per_package,
+      row.override_units_per_package,
+    );
+  }
+
+  /** Whole-package acquisition cost = product cost_price * packSize. */
+  getRowPackageCost(row: PriceTierOverrideRow): number {
+    const cost = Number(this.productForm.get('cost_price')?.value || 0);
+    return cost * this.getRowPackSize(row);
+  }
+
+  /** True when cost_price <= 0 so margin cannot be derived (disable margin UI). */
+  get costPriceIsZero(): boolean {
+    return Number(this.productForm.get('cost_price')?.value || 0) <= 0;
+  }
+
+  /**
+   * Computed whole-package price suggested when no override is set:
+   * base_price * (1 - tier%) * packSize. Returns null if base_price is 0.
+   */
+  getTierFallbackPrice(row: PriceTierOverrideRow): number | null {
+    const basePrice = Number(this.productForm.get('base_price')?.value || 0);
+    if (basePrice <= 0) return null;
+    const discount = Number(row.tier.discount_percentage || 0);
+    const unitPrice = discount ? basePrice * (1 - discount / 100) : basePrice;
+    return Number((unitPrice * this.getRowPackSize(row)).toFixed(2));
+  }
+
+  /** Effective whole-package price used for margin display: override or fallback. */
+  getRowEffectivePrice(row: PriceTierOverrideRow): number | null {
+    if (row.override_price !== null && row.override_price !== undefined) {
+      return row.override_price;
+    }
+    return this.getTierFallbackPrice(row);
+  }
+
+  /**
+   * Margin % of a row against the whole-package cost. Returns null when the
+   * cost is non-positive or there is no resolvable price.
+   */
+  getRowMargin(row: PriceTierOverrideRow): number | null {
+    const packageCost = this.getRowPackageCost(row);
+    if (packageCost <= 0) return null;
+    const price = this.getRowEffectivePrice(row);
+    if (price === null) return null;
+    return Number((((price - packageCost) / packageCost) * 100).toFixed(2));
+  }
+
+  /** Update one row's override price (called from the price input). */
   updateTierOverridePrice(tierId: number, value: number | null): void {
+    const next = this.priceTierRows().map((row) => {
+      if (row.tier.id !== tierId) return row;
+      return { ...row, override_price: this.normalizePrice(value) };
+    });
+    this.priceTierRows.set(next);
+  }
+
+  /**
+   * BIDIRECTIONAL: editing the margin recomputes the WHOLE-PACKAGE override
+   * price. price = packageCost * (1 + margin/100), where
+   * packageCost = cost_price * packSize. No-op when cost is non-positive.
+   */
+  updateTierOverrideMargin(tierId: number, marginValue: number | null): void {
+    const next = this.priceTierRows().map((row) => {
+      if (row.tier.id !== tierId) return row;
+      const packageCost = this.getRowPackageCost(row);
+      if (packageCost <= 0) return row; // cost guard — cannot derive price
+      if (marginValue === null || marginValue === undefined) {
+        // Clearing margin clears the override → fall back to tier default.
+        return { ...row, override_price: null };
+      }
+      const margin = Number(marginValue);
+      if (!Number.isFinite(margin)) return row;
+      const price = Number((packageCost * (1 + margin / 100)).toFixed(2));
+      return { ...row, override_price: this.normalizePrice(price) };
+    });
+    this.priceTierRows.set(next);
+  }
+
+  /**
+   * Override the units-per-package for THIS product on a given tier.
+   * Empty/invalid (< 2) => inherit the tier default. Re-resolves pack size so a
+   * downstream price/margin read reflects the new packaging immediately.
+   */
+  updateTierOverrideUnits(tierId: number, value: number | null): void {
     const next = this.priceTierRows().map((row) => {
       if (row.tier.id !== tierId) return row;
       let parsed: number | null = null;
       if (value !== null && value !== undefined) {
         const n = Number(value);
-        parsed = Number.isFinite(n) && n > 0 ? n : null;
+        parsed = Number.isFinite(n) && n >= 2 ? Math.floor(n) : null;
       }
-      return { ...row, override_price: parsed };
+      return { ...row, override_units_per_package: parsed };
     });
     this.priceTierRows.set(next);
   }
 
+  private normalizePrice(value: number | null): number | null {
+    if (value === null || value === undefined) return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+
   toggleTierAssignment(tierId: number, enabled: boolean): void {
-    const next = this.priceTierRows().map((row) =>
-      row.tier.id === tierId ? { ...row, enabled } : row,
-    );
+    const next = this.priceTierRows().map((row) => {
+      if (row.tier.id !== tierId) return row;
+      // Disabling drops any pending override so the row inherits the default
+      // (and the diff in syncTierOverridesForProduct issues the DELETE).
+      return enabled
+        ? { ...row, enabled }
+        : {
+            ...row,
+            enabled,
+            override_price: null,
+            override_units_per_package: null,
+          };
+    });
     this.priceTierRows.set(next);
   }
 
-  /** Clear an override row's value (user clicked "Limpiar"). */
+  /** Clear an override row's price (user clicked "Limpiar"). */
   clearTierOverride(tierId: number): void {
     this.updateTierOverridePrice(tierId, null);
   }
@@ -3200,6 +3323,8 @@ export class ProductCreatePageComponent {
   /**
    * Compute the diff between current rows and their initial snapshot and
    * issue the corresponding PUT/DELETE calls. Resolves when all calls finish.
+   * A row is persisted when its price OR units-per-package override changed,
+   * and removed when both are cleared.
    */
   private syncTierOverridesForProduct(productId: number): Promise<void> {
     const rows = this.priceTierRows();
@@ -3208,13 +3333,20 @@ export class ProductCreatePageComponent {
     const operations: Promise<unknown>[] = [];
 
     for (const row of rows) {
-      const before = row.initial_override_price;
-      const after = row.override_price;
-      const changed = before !== after;
-      if (!changed) continue;
+      const priceChanged = row.initial_override_price !== row.override_price;
+      const unitsChanged =
+        row.initial_override_units_per_package !==
+        row.override_units_per_package;
+      if (!priceChanged && !unitsChanged) continue;
 
-      if (after === null || after === undefined) {
-        // Delete the override (variant_id omitted => base product).
+      const hasPrice =
+        row.override_price !== null && row.override_price !== undefined;
+      const hasUnits =
+        row.override_units_per_package !== null &&
+        row.override_units_per_package !== undefined;
+
+      if (!hasPrice && !hasUnits) {
+        // Nothing left to persist → delete the override (variant_id omitted).
         operations.push(
           this.priceTiersService
             .removeProductOverride(productId, row.tier.id)
@@ -3231,7 +3363,10 @@ export class ProductCreatePageComponent {
         operations.push(
           this.priceTiersService
             .upsertProductOverride(productId, row.tier.id, {
-              override_price: Number(after),
+              override_price: hasPrice ? Number(row.override_price) : undefined,
+              override_units_per_package: hasUnits
+                ? Number(row.override_units_per_package)
+                : undefined,
             })
             .toPromise()
             .catch((err) => {
@@ -3255,6 +3390,7 @@ export class ProductCreatePageComponent {
         const refreshed = this.priceTierRows().map((row) => ({
           ...row,
           initial_override_price: row.override_price,
+          initial_override_units_per_package: row.override_units_per_package,
         }));
         this.priceTierRows.set(refreshed);
       })

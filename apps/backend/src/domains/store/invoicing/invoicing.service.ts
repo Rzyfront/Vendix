@@ -18,13 +18,40 @@ const INVOICE_INCLUDE = {
     select: { id: true, first_name: true, last_name: true, email: true },
   },
   supplier: {
-    select: { id: true, name: true },
+    select: {
+      id: true,
+      name: true,
+      tax_id: true,
+      document_type: true,
+      tax_regime: true,
+      verification_digit: true,
+      addresses: {
+        select: {
+          address_line1: true,
+          address_line2: true,
+          city: true,
+          state_province: true,
+          country_code: true,
+          postal_code: true,
+          municipality_code: true,
+          phone_number: true,
+        },
+      },
+    },
   },
   created_by_user: {
     select: { id: true, first_name: true, last_name: true },
   },
   related_invoice: {
-    select: { id: true, invoice_number: true, invoice_type: true },
+    select: {
+      id: true,
+      invoice_number: true,
+      invoice_type: true,
+      accounting_entity_id: true,
+      status: true,
+      cufe: true,
+      issue_date: true,
+    },
   },
 };
 
@@ -66,6 +93,49 @@ export class InvoicingService {
     return entity.id;
   }
 
+  private async assertFiscalPeriodOpen(
+    accounting_entity_id: number,
+    issue_date: Date,
+    action: string,
+  ): Promise<void> {
+    const fiscal_date = new Date(
+      Date.UTC(
+        issue_date.getUTCFullYear(),
+        issue_date.getUTCMonth(),
+        issue_date.getUTCDate(),
+      ),
+    );
+    const closed = await this.prisma.fiscal_close_sessions.findFirst({
+      where: {
+        accounting_entity_id,
+        status: 'closed',
+        period_start: { lte: fiscal_date },
+        period_end: { gte: fiscal_date },
+      },
+      select: {
+        id: true,
+        period_year: true,
+        period_month: true,
+        closed_at: true,
+      },
+    });
+
+    if (!closed) return;
+
+    throw new VendixHttpException(
+      ErrorCodes.FISCAL_ACCOUNTING_BLOCKED,
+      `Cannot ${action} fiscal document because the fiscal period is closed.`,
+      {
+        accounting_entity_id,
+        fiscal_close_session_id: closed.id,
+        period_year: closed.period_year,
+        period_month: closed.period_month,
+        issue_date: fiscal_date.toISOString().split('T')[0],
+        closed_at: closed.closed_at,
+      },
+    );
+  }
+
   private toFiscalDocumentType(invoice_type: string) {
     if (invoice_type === 'purchase_invoice') return 'support_document';
     if (invoice_type === 'export_invoice') return 'sales_invoice';
@@ -75,6 +145,118 @@ export class InvoicingService {
       | 'debit_note'
       | 'support_document'
       | 'support_adjustment_note';
+  }
+
+  private isSupportDocumentType(invoice_type: string): boolean {
+    return (
+      invoice_type === 'purchase_invoice' ||
+      invoice_type === 'support_document' ||
+      invoice_type === 'support_adjustment_note'
+    );
+  }
+
+  private async loadSupportDocumentSupplier(dto: CreateInvoiceDto) {
+    if (!this.isSupportDocumentType(dto.invoice_type)) return null;
+    if (!dto.supplier_id) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+        'Support documents require a supplier.',
+      );
+    }
+
+    const supplier = await this.prisma.suppliers.findFirst({
+      where: { id: dto.supplier_id },
+      select: {
+        id: true,
+        name: true,
+        tax_id: true,
+        document_type: true,
+        tax_regime: true,
+        verification_digit: true,
+        addresses: {
+          select: {
+            address_line1: true,
+            address_line2: true,
+            city: true,
+            state_province: true,
+            country_code: true,
+            postal_code: true,
+            municipality_code: true,
+            phone_number: true,
+          },
+        },
+      },
+    });
+
+    if (!supplier?.tax_id) {
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_CONFIG_INCOMPLETE,
+        'Support document supplier requires tax_id.',
+        { supplier_id: dto.supplier_id },
+      );
+    }
+
+    return supplier;
+  }
+
+  private async loadSupportAdjustmentOriginal(
+    dto: CreateInvoiceDto,
+    accounting_entity_id: number,
+  ) {
+    if (dto.invoice_type !== 'support_adjustment_note') return null;
+    if (!dto.related_invoice_id) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Support adjustment notes require the original support document.',
+      );
+    }
+
+    return this.findAcceptedSupportDocumentOriginal(
+      dto.related_invoice_id,
+      accounting_entity_id,
+    );
+  }
+
+  private async findAcceptedSupportDocumentOriginal(
+    related_invoice_id: number,
+    accounting_entity_id: number,
+  ) {
+    const original = await this.prisma.invoices.findFirst({
+      where: {
+        id: related_invoice_id,
+        accounting_entity_id,
+        invoice_type: { in: ['purchase_invoice', 'support_document'] as any },
+      },
+      select: {
+        id: true,
+        invoice_number: true,
+        invoice_type: true,
+        status: true,
+        cufe: true,
+      },
+    });
+
+    if (!original) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_VALIDATE_001,
+        'Original support document was not found in this fiscal entity.',
+        { related_invoice_id },
+      );
+    }
+
+    if (original.status !== 'accepted' || !original.cufe) {
+      throw new VendixHttpException(
+        ErrorCodes.INVOICING_STATUS_002,
+        'Original support document must be accepted by DIAN before creating an adjustment note.',
+        {
+          related_invoice_id: original.id,
+          status: original.status,
+          has_cuds: Boolean(original.cufe),
+        },
+      );
+    }
+
+    return original;
   }
 
   async findAll(query: QueryInvoiceDto) {
@@ -166,6 +348,15 @@ export class InvoicingService {
     const context = this.getContext();
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
+    const issue_date = new Date(dto.issue_date);
+    await this.assertFiscalPeriodOpen(
+      accounting_entity_id,
+      issue_date,
+      'create',
+    );
+    const support_supplier = await this.loadSupportDocumentSupplier(dto);
+    const support_adjustment_original =
+      await this.loadSupportAdjustmentOriginal(dto, accounting_entity_id);
 
     // Generate invoice number from resolution
     const { invoice_number, resolution_id } =
@@ -189,16 +380,18 @@ export class InvoicingService {
         status: 'draft',
         customer_id: dto.customer_id,
         supplier_id: dto.supplier_id,
-        customer_name: dto.customer_name,
-        customer_tax_id: dto.customer_tax_id,
-        customer_address: dto.customer_address,
+        customer_name: dto.customer_name ?? support_supplier?.name,
+        customer_tax_id: dto.customer_tax_id ?? support_supplier?.tax_id,
+        customer_address: dto.customer_address ?? support_supplier?.addresses,
+        related_invoice_id: support_adjustment_original?.id,
         resolution_id,
         subtotal_amount: new Prisma.Decimal(subtotal),
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
+        withholding_amount: new Prisma.Decimal(dto.withholding_amount || 0),
         total_amount: new Prisma.Decimal(total),
         currency: dto.currency || 'COP',
-        issue_date: new Date(dto.issue_date),
+        issue_date,
         due_date: dto.due_date ? new Date(dto.due_date) : null,
         created_by_user_id: context.user_id,
         notes: dto.notes,
@@ -290,7 +483,10 @@ export class InvoicingService {
 
     const productItems = (order.order_items || []).map((item: any) => {
       const description =
-        item.description || item.product_name || item.products?.name || 'Product';
+        item.description ||
+        item.product_name ||
+        item.products?.name ||
+        'Product';
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount_amount || 0);
@@ -306,6 +502,14 @@ export class InvoicingService {
         discount_amount: new Prisma.Decimal(discount),
         tax_amount: new Prisma.Decimal(tax),
         total_amount: new Prisma.Decimal(total_amount),
+        // "Empaque por tarifa" snapshot propagated from the order line so the
+        // invoice mirrors the order PDF (tier label + packaging units consumed).
+        applied_price_tier_name:
+          item.applied_price_tier_name_snapshot ?? null,
+        stock_units_consumed:
+          typeof item.stock_units_consumed === 'number'
+            ? item.stock_units_consumed
+            : null,
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
@@ -322,6 +526,8 @@ export class InvoicingService {
               discount_amount: new Prisma.Decimal(0),
               tax_amount: new Prisma.Decimal(0),
               total_amount: new Prisma.Decimal(shippingCost),
+              applied_price_tier_name: null,
+              stock_units_consumed: null,
             },
           ]
         : productItems;
@@ -522,6 +728,30 @@ export class InvoicingService {
       throw new VendixHttpException(ErrorCodes.INVOICING_STATUS_002);
     }
 
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'update',
+    );
+
+    if (dto.issue_date) {
+      await this.assertFiscalPeriodOpen(
+        invoice.accounting_entity_id,
+        new Date(dto.issue_date),
+        'update',
+      );
+    }
+
+    if (
+      invoice.invoice_type === 'support_adjustment_note' &&
+      dto.related_invoice_id !== undefined
+    ) {
+      await this.findAcceptedSupportDocumentOriginal(
+        dto.related_invoice_id,
+        invoice.accounting_entity_id,
+      );
+    }
+
     // If items are provided, recalculate amounts and replace
     const update_data: any = {
       ...(dto.customer_id !== undefined && { customer_id: dto.customer_id }),
@@ -534,6 +764,12 @@ export class InvoicingService {
       }),
       ...(dto.customer_address !== undefined && {
         customer_address: dto.customer_address,
+      }),
+      ...(dto.related_invoice_id !== undefined && {
+        related_invoice_id: dto.related_invoice_id,
+      }),
+      ...(dto.withholding_amount !== undefined && {
+        withholding_amount: new Prisma.Decimal(dto.withholding_amount),
       }),
       ...(dto.issue_date && { issue_date: new Date(dto.issue_date) }),
       ...(dto.due_date && { due_date: new Date(dto.due_date) }),
@@ -613,6 +849,12 @@ export class InvoicingService {
         'Only draft invoices can be deleted',
       );
     }
+
+    await this.assertFiscalPeriodOpen(
+      invoice.accounting_entity_id,
+      invoice.issue_date,
+      'delete',
+    );
 
     await this.prisma.invoices.delete({
       where: { id },

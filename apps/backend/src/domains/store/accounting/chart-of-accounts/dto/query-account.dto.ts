@@ -6,6 +6,7 @@ import {
   MaxLength,
   Min,
   Max,
+  IsDateString,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
@@ -14,6 +15,14 @@ export class QueryAccountDto {
   @IsString()
   @MaxLength(100)
   search?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
 
   @IsOptional()
   @IsString()
@@ -57,4 +66,10 @@ export class QueryAccountDto {
   @IsNumber()
   @Min(0)
   offset?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number;
 }

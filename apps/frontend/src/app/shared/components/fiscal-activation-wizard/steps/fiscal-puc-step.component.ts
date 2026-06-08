@@ -20,12 +20,6 @@ import {
 } from '../../forms/puc-bootstrap-form/puc-bootstrap-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 
-interface ChartAccountPreview {
-  id: number;
-  code: string;
-  name: string;
-}
-
 @Component({
   selector: 'app-fiscal-puc-step',
   standalone: true,
@@ -39,17 +33,13 @@ interface ChartAccountPreview {
         (validityChange)="onValidity($event)"
       ></app-puc-bootstrap-form>
 
-      @if (preview().length) {
+      @if (pucExists()) {
         <div class="preview">
-          <h3>Vista previa del PUC actual</h3>
-          <ul>
-            @for (acc of preview(); track acc.id) {
-              <li>
-                <code>{{ acc.code }}</code>
-                <span>{{ acc.name }}</span>
-              </li>
-            }
-          </ul>
+          <h3>Plan de cuentas existente</h3>
+          <p>
+            Ya tienes {{ pucPostableCount() }} cuentas postables configuradas.
+            Si continúas con el modo "predeterminado" no se crearán duplicados.
+          </p>
         </div>
       }
 
@@ -77,22 +67,11 @@ interface ChartAccountPreview {
         font-weight: 700;
         color: var(--text-secondary, #475569);
       }
-      .preview ul {
-        list-style: none;
+      .preview p {
         margin: 0;
-        padding: 0;
-        display: grid;
-        gap: 0.25rem;
-      }
-      .preview li {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
         font-size: 0.85rem;
-      }
-      .preview code {
-        font-weight: 700;
-        color: var(--primary-color, #2563eb);
+        color: var(--text-secondary, #475569);
+        line-height: 1.4rem;
       }
       .step-error {
         margin: 0;
@@ -114,7 +93,13 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
     source: 'default',
     rows: [],
   });
-  readonly preview = signal<ChartAccountPreview[]>([]);
+  /**
+   * True when the chart of accounts already exists. Seeded from the prefill
+   * snapshot — no GET needed. The PUC bootstrap form has its own internal
+   * `rows` state; this signal is only a UX hint surfaced in the template.
+   */
+  readonly pucExists = signal(false);
+  readonly pucPostableCount = signal(0);
   readonly readOnlyForStore = computed(
     () =>
       this.service.userScope() === 'store' &&
@@ -133,7 +118,7 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
       const key = this.service.fiscalContextKey();
       if (key && key !== this.loadedContextKey) {
         this.loadedContextKey = key;
-        void this.loadPreview();
+        this.loadFromPrefill();
       }
     });
   }
@@ -143,33 +128,15 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
     return `${environment.apiUrl}/${this.service.userScope()}/accounting/chart-of-accounts`;
   }
 
-  private async loadPreview(): Promise<void> {
-    try {
-      // Org chart-of-accounts GET takes `?store_id=` to narrow the listing to
-      // a single store when operating_scope=STORE. Otherwise the consolidated
-      // org view is returned.
-      const storeParam = this.service.storeQuery('&');
-      const res: any = await firstValueFrom(
-        this.http.get(`${this.baseUrl()}?limit=10${storeParam}`),
-      );
-      const payload = res?.data ?? res;
-      const items: any[] = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.items)
-          ? payload.items
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : [];
-      this.preview.set(
-        items.slice(0, 10).map((a: any) => ({
-          id: a.id,
-          code: a.code ?? a.account_code ?? '',
-          name: a.name ?? a.account_name ?? '',
-        })),
-      );
-    } catch {
-      // Silent
-    }
+  private loadFromPrefill(): void {
+    // Replaces the previous N+1 GET against `/accounting/chart-of-accounts`.
+    // The prefill snapshot already reports `exists` + the postable count —
+    // that's all the template uses to render the "ya tienes N cuentas"
+    // hint. The canonical POST `/seed-default` and per-row POSTs in
+    // submit() are still the write paths.
+    const puc = this.service.prefill()?.puc;
+    this.pucExists.set(puc?.exists ?? false);
+    this.pucPostableCount.set(puc?.postable_accounts ?? 0);
   }
 
   onValidity(v: boolean): void {
@@ -185,7 +152,7 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
     this.localError.set(null);
     if (this.readOnlyForStore()) {
       const ref = {
-        count: this.preview().length,
+        count: this.pucPostableCount(),
         inherited: true,
         completed_at: new Date().toISOString(),
       };
@@ -219,8 +186,8 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
       const storeQuery = this.service.storeQuery();
 
       if (value.source === 'default') {
-        if (this.preview().length > 0) {
-          count = this.preview().length;
+        if (this.pucExists()) {
+          count = this.pucPostableCount();
         } else {
           try {
             const res: any = await firstValueFrom(
@@ -243,8 +210,12 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
             if (parsed.errorCode !== 'CHART_ALREADY_SEEDED') {
               throw error;
             }
-            await this.loadPreview();
-            count = this.preview().length;
+            // Backend says the chart is already seeded even though the
+            // prefill said otherwise (concurrent write / stale snapshot).
+            // Refresh the prefill and reuse the postable count.
+            await this.service.loadPrefill(true);
+            this.loadFromPrefill();
+            count = this.pucPostableCount();
             if (count === 0) {
               throw error;
             }
@@ -266,7 +237,8 @@ export class FiscalPucStepComponent implements FiscalWizardStepHost {
         }
       }
 
-      await this.loadPreview();
+      await this.service.loadPrefill(true);
+      this.loadFromPrefill();
       const ref = {
         source: value.source,
         count,

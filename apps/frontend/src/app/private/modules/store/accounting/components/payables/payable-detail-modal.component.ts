@@ -256,7 +256,7 @@ import {
                 size="sm"
                 (clicked)="writeOffRequested.emit(d)"
               >
-                <app-icon name="x-circle" [size]="14" slot="icon"></app-icon>
+                <app-icon name="x-circle" [size]="14" slot="icon" ></app-icon>
                 Castigar
               </app-button>
               <app-button
@@ -264,7 +264,7 @@ import {
                 size="sm"
                 (clicked)="paymentRequested.emit(d)"
               >
-                <app-icon name="banknote" [size]="14" slot="icon"></app-icon>
+                <app-icon name="banknote" [size]="14" slot="icon" ></app-icon>
                 Registrar Pago
               </app-button>
             </div>

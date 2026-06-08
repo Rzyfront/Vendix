@@ -106,7 +106,7 @@ export class UblCommonBuilder {
         'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
       )
       .att('schemeID', issuer.nit_dv)
-      .att('schemeName', '31') // NIT
+      .att('schemeName', issuer.document_type || '31') // NIT by default
       .txt(issuer.nit);
 
     const tax_level = tax_scheme.ele(UBL_NAMESPACES.CAC, 'TaxLevelCode');
@@ -133,7 +133,7 @@ export class UblCommonBuilder {
         'CO, DIAN (Dirección de Impuestos y Aduanas Nacionales)',
       )
       .att('schemeID', issuer.nit_dv)
-      .att('schemeName', '31')
+      .att('schemeName', issuer.document_type || '31')
       .txt(issuer.nit);
 
     // Contact

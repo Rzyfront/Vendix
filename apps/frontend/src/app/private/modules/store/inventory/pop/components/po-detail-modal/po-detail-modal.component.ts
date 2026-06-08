@@ -295,7 +295,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
             </h4>
             @if (canReceive()) {
               <app-button variant="primary" size="sm" (clicked)="showReceiveModal.set(true)">
-                <app-icon name="package-check" [size]="14" slot="icon"></app-icon>
+                <app-icon name="package-check" [size]="14" slot="icon" ></app-icon>
                 Recibir Mercancia
               </app-button>
             }
@@ -392,7 +392,7 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
             </h4>
             @if (canRegisterPayment()) {
               <app-button variant="primary" size="sm" (clicked)="showPaymentModal.set(true)">
-                <app-icon name="dollar-sign" [size]="14" slot="icon"></app-icon>
+                <app-icon name="dollar-sign" [size]="14" slot="icon" ></app-icon>
                 Registrar Pago
               </app-button>
             }
@@ -603,13 +603,13 @@ import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
         </app-button>
         @if (canReceive() && activeTab() === 'detail') {
           <app-button variant="primary" (clicked)="showReceiveModal.set(true)">
-            <app-icon name="package-check" [size]="14" slot="icon"></app-icon>
+            <app-icon name="package-check" [size]="14" slot="icon" ></app-icon>
             Recibir
           </app-button>
         }
         @if (canRegisterPayment() && activeTab() === 'detail') {
           <app-button variant="outline" (clicked)="showPaymentModal.set(true)">
-            <app-icon name="dollar-sign" [size]="14" slot="icon"></app-icon>
+            <app-icon name="dollar-sign" [size]="14" slot="icon" ></app-icon>
             Pagar
           </app-button>
         }

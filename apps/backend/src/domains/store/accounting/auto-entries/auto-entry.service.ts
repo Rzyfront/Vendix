@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalGateService } from '@common/services/fiscal-gate.service';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -41,6 +42,7 @@ export class AutoEntryService {
     private readonly prisma: StorePrismaService,
     private readonly account_mapping_service: AccountMappingService,
     private readonly fiscal_scope_service: FiscalScopeService,
+    private readonly fiscal_gate: FiscalGateService,
   ) {}
 
   /**
@@ -85,6 +87,21 @@ export class AutoEntryService {
       lines,
       user_id,
     } = event_data;
+
+    // Default ESTRICTO: no materializar entidades/asientos contables si el área
+    // `accounting` no está activa para la organización. Red de seguridad para
+    // orígenes que no pasen por AccountingEventsListener (que ya gatea antes).
+    const accounting_enabled = await this.fiscal_gate.isAreaEnabled(
+      organization_id,
+      store_id ?? null,
+      'accounting',
+    );
+    if (!accounting_enabled) {
+      this.logger.warn(
+        `Skipping auto-entry for ${source_type} #${source_id}: accounting area inactive for organization #${organization_id}`,
+      );
+      return null;
+    }
 
     const accounting_entity = accounting_entity_id
       ? await this.prisma.withoutScope().accounting_entities.findFirst({
@@ -208,6 +225,7 @@ export class AutoEntryService {
     // Map entry type from source_type
     const entry_type_map: Record<string, string> = {
       'invoice.validated': 'auto_invoice',
+      'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
       'expense.approved': 'auto_expense',
       'expense.paid': 'auto_expense',
@@ -315,7 +333,10 @@ export class AutoEntryService {
         }),
       });
 
-      if (source_type === 'invoice.validated') {
+      if (
+        source_type === 'invoice.validated' ||
+        source_type === 'support_document.accepted'
+      ) {
         await tx.invoices.updateMany({
           where: {
             id: source_id,
@@ -427,6 +448,86 @@ export class AutoEntryService {
       accounting_entity_id: data.accounting_entity_id,
       entry_date: new Date(),
       description: `Invoice validated #${data.invoice_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Support document acceptance: debit purchase/expense and deductible VAT,
+   * credit supplier payable and withholding payable when applicable.
+   */
+  async onSupportDocumentAccepted(data: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    subtotal: number;
+    discount_amount?: number;
+    tax_amount: number;
+    withholding_amount?: number;
+    total: number;
+    user_id?: number;
+  }) {
+    const purchase_base = Math.max(
+      0,
+      Number(data.subtotal || 0) - Number(data.discount_amount || 0),
+    );
+    const withholding = Math.max(0, Number(data.withholding_amount || 0));
+    const accounts_payable = Math.max(0, Number(data.total || 0) - withholding);
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'support_document.accepted.expense',
+        'Support Document Purchase/Expense',
+        purchase_base,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'support_document.accepted.accounts_payable',
+        'Accounts Payable',
+        0,
+        accounts_payable,
+        data.store_id,
+      ),
+    ]);
+
+    if (data.tax_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'support_document.accepted.vat_deductible',
+          'Deductible VAT',
+          data.tax_amount,
+          0,
+          data.store_id,
+        ),
+      );
+    }
+
+    if (withholding > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'support_document.accepted.withholding_payable',
+          'Withholding Payable',
+          0,
+          withholding,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'support_document.accepted',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: new Date(),
+      description: `Support document accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2678,8 +2779,9 @@ export class AutoEntryService {
       throw new Error('Missing intercompany receivable mapping');
     }
 
-    const receivableAccount =
-      await this.prisma.withoutScope().chart_of_accounts.findFirst({
+    const receivableAccount = await this.prisma
+      .withoutScope()
+      .chart_of_accounts.findFirst({
         where: {
           organization_id: data.organization_id,
           code: receivableMapping.account_code,
@@ -2696,8 +2798,9 @@ export class AutoEntryService {
       );
     }
 
-    const intercompany_transaction =
-      await this.prisma.withoutScope().intercompany_transactions.create({
+    const intercompany_transaction = await this.prisma
+      .withoutScope()
+      .intercompany_transactions.create({
         data: {
           organization_id: data.organization_id,
           origin: 'stock_transfer',

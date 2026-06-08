@@ -4,7 +4,11 @@ import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
-import type { OrganizationOperatingScope } from '../models/organization.model';
+import type {
+  OrganizationOperatingScope,
+  OrganizationFiscalScope,
+} from '../models/organization.model';
+import type { FiscalArea } from '../models/fiscal-status.model';
 
 /**
  * Service for filtering menu items based on panel_ui configuration.
@@ -98,7 +102,7 @@ export class MenuFilterService {
     Ventas: 'analytics_sales',
 
     // STORE_ADMIN - Reportes
-    Reportes: ['reports', 'accounting_reports'],
+    Reportes: 'reports',
 
     // Caja Registradora (submodule of Configuración)
     'Caja Registradora': 'settings_cash_registers',
@@ -132,6 +136,14 @@ export class MenuFilterService {
     Retenciones: 'accounting_withholding_tax',
     'Info Exógena': 'accounting_exogenous',
     'ICA Municipal': 'taxes_ica',
+    'Operación fiscal': 'fiscal_operations',
+    'Dashboard fiscal': 'fiscal_dashboard',
+    'Obligaciones fiscales': 'fiscal_obligations',
+    'Declaraciones fiscales': 'fiscal_declarations',
+    'Cierre fiscal': 'fiscal_close',
+    'Evidencias fiscales': 'fiscal_evidence',
+    'Historial fiscal': 'fiscal_history',
+    'Reglas fiscales': 'fiscal_rules',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
     // El padre "Configuración" y sus sub-items:
@@ -174,27 +186,43 @@ export class MenuFilterService {
       this.authFacade.userStoreType$,
       this.authFacade.storeSettings$,
       this.authFacade.userOrganization$,
+      this.authFacade.activeFiscalAreas$,
     ]).pipe(
-      map(([visibleModules, loginStoreType, storeSettings, organization]) => {
-        // Prefer store_settings.general.store_type (updated on save) over user.store.store_type (login snapshot)
-        const storeType = storeSettings?.general?.store_type || loginStoreType;
-        // Remove modules hidden by store type from visible list
-        const hiddenByStoreType =
-          this.storeTypeHiddenModules[storeType || ''] || [];
-        const effectiveModules =
-          hiddenByStoreType.length > 0
-            ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
-            : visibleModules;
-        const operatingScope: OrganizationOperatingScope =
-          (organization?.operating_scope as
-            | OrganizationOperatingScope
-            | undefined) ?? 'STORE';
-        return this.filterItemsRecursive(
-          menuItems,
-          effectiveModules,
-          operatingScope,
-        );
-      }),
+      map(
+        ([
+          visibleModules,
+          loginStoreType,
+          storeSettings,
+          organization,
+          activeFiscalAreas,
+        ]) => {
+          // Prefer store_settings.general.store_type (updated on save) over user.store.store_type (login snapshot)
+          const storeType = storeSettings?.general?.store_type || loginStoreType;
+          // Remove modules hidden by store type from visible list
+          const hiddenByStoreType =
+            this.storeTypeHiddenModules[storeType || ''] || [];
+          const effectiveModules =
+            hiddenByStoreType.length > 0
+              ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
+              : visibleModules;
+          const operatingScope: OrganizationOperatingScope =
+            (organization?.operating_scope as
+              | OrganizationOperatingScope
+              | undefined) ?? 'STORE';
+          // fiscal_scope defaults to operating_scope when not set (mirrors AuthFacade.fiscalScope).
+          const fiscalScope: OrganizationFiscalScope =
+            (organization?.fiscal_scope as
+              | OrganizationFiscalScope
+              | undefined) ?? operatingScope;
+          return this.filterItemsRecursive(
+            menuItems,
+            effectiveModules,
+            operatingScope,
+            fiscalScope,
+            activeFiscalAreas ?? [],
+          );
+        },
+      ),
     );
   }
 
@@ -225,6 +253,36 @@ export class MenuFilterService {
       return 'allow';
     }
     return item.showLocked ? 'lock' : 'hide';
+  }
+
+  /**
+   * Predicate: true when the item's `requiredFiscalScope` matches the active
+   * fiscal_scope. Fiscal ownership is binary — the app that does NOT own the
+   * fiscal_scope hides fiscal items outright (no locked state), so the user
+   * sees nothing fiscal in the wrong scope.
+   */
+  private matchesFiscalScope(
+    item: MenuItem,
+    fiscalScope: OrganizationFiscalScope,
+  ): boolean {
+    if (!item.requiredFiscalScope) return true;
+    return item.requiredFiscalScope === fiscalScope;
+  }
+
+  /**
+   * Predicate: true when the item's required fiscal area is activated.
+   * Operational fiscal modules stay hidden until their area reaches
+   * ACTIVE/LOCKED (present in `activeFiscalAreas`). 'any' means at least one
+   * area is active. Items without `requiresFiscalArea` (e.g. the activation
+   * entry) are always allowed so the owner can activate fiscal management.
+   */
+  private matchesFiscalArea(
+    item: MenuItem,
+    activeFiscalAreas: FiscalArea[],
+  ): boolean {
+    if (!item.requiresFiscalArea) return true;
+    if (item.requiresFiscalArea === 'any') return activeFiscalAreas.length > 0;
+    return activeFiscalAreas.includes(item.requiresFiscalArea);
   }
 
   /**
@@ -259,8 +317,22 @@ export class MenuFilterService {
     items: MenuItem[],
     visibleModules: string[],
     operatingScope: OrganizationOperatingScope,
+    fiscalScope: OrganizationFiscalScope,
+    activeFiscalAreas: FiscalArea[],
   ): MenuItem[] {
     return items.reduce((filtered: MenuItem[], item) => {
+      // Fiscal scope guard: the app that does not own the fiscal_scope must not
+      // render fiscal items at all (hide outright, no locked state).
+      if (!this.matchesFiscalScope(item, fiscalScope)) {
+        return filtered;
+      }
+      // Fiscal activation guard: operational fiscal modules stay hidden until
+      // their area is ACTIVE/LOCKED. The activation entry (no requiresFiscalArea)
+      // is always allowed so the owner can activate.
+      if (!this.matchesFiscalArea(item, activeFiscalAreas)) {
+        return filtered;
+      }
+
       // Operating scope guard:
       //   - 'hide' → drop item (legacy behavior)
       //   - 'lock' → keep item but mark `_locked` so the sidebar can render
@@ -289,6 +361,8 @@ export class MenuFilterService {
             item.children,
             visibleModules,
             operatingScope,
+            fiscalScope,
+            activeFiscalAreas,
           );
         }
 
@@ -315,6 +389,8 @@ export class MenuFilterService {
               item.children,
               visibleModules,
               operatingScope,
+              fiscalScope,
+              activeFiscalAreas,
             );
           }
 
@@ -329,6 +405,8 @@ export class MenuFilterService {
           item.children,
           visibleModules,
           operatingScope,
+          fiscalScope,
+          activeFiscalAreas,
         );
 
         if (filteredChildren.length > 0) {
@@ -401,6 +479,17 @@ export class MenuFilterService {
    * @returns true if visible, false otherwise
    */
   isMenuItemVisible(menuItem: MenuItem): boolean {
+    // Fiscal guards short-circuit visibility (hide outright when the app does
+    // not own the fiscal_scope, or when the required fiscal area is not active).
+    if (!this.matchesFiscalScope(menuItem, this.authFacade.fiscalScope())) {
+      return false;
+    }
+    if (
+      !this.matchesFiscalArea(menuItem, this.authFacade.activeFiscalAreas())
+    ) {
+      return false;
+    }
+
     // Operating scope guard short-circuits visibility:
     //   - if scope mismatches and showLocked is true, the item still renders
     //     (in locked state) so this method must report it as visible.

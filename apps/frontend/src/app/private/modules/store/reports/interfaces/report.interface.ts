@@ -1,11 +1,14 @@
 export type ReportCategoryId =
+  | 'overview'
   | 'sales'
   | 'inventory'
   | 'products'
   | 'customers'
+  | 'purchases'
+  | 'reviews'
+  | 'financial'
   | 'accounting'
-  | 'payroll'
-  | 'financial';
+  | 'payroll';
 
 export type ReportType = 'summary' | 'list' | 'nested';
 
@@ -19,6 +22,13 @@ export interface SummaryField {
 export interface SummaryLayoutConfig {
   sections?: { title: string; fields: SummaryField[] }[];
   fields: SummaryField[];
+}
+
+export interface ReportStatField {
+  key: string;
+  label: string;
+  type: 'currency' | 'number' | 'text' | 'percentage' | 'date';
+  icon: string;
 }
 
 export interface ReportDefinition {
@@ -35,10 +45,12 @@ export interface ReportDefinition {
   dataEndpoint: string;
   exportEndpoint?: string;
   fullViewRoute?: string;
+  route: string;
   type?: ReportType;
   keyMapping?: Record<string, string>;
   trackKey?: string;
   summaryLayout?: SummaryLayoutConfig;
+  stats?: ReportStatField[];
 }
 
 export interface ReportAdaptedData {
@@ -59,6 +71,8 @@ export interface ReportColumn {
 export interface ReportCategory {
   id: ReportCategoryId;
   label: string;
+  description: string;
   icon: string;
   color: string;
+  panelUiKey?: string;
 }

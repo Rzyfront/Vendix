@@ -6,3 +6,5 @@ export { OrganizationSetupStepComponent } from './steps/organization-setup-step.
 export { StoreSetupStepComponent } from './steps/store-setup-step.component';
 export { AppConfigStepComponent } from './steps/app-config-step.component';
 export { CompletionStepComponent } from './steps/completion-step.component';
+export { OnboardingFiscalSectionComponent } from './components/onboarding-fiscal-section/onboarding-fiscal-section.component';
+export type { OnboardingFiscalValue } from './components/onboarding-fiscal-section/onboarding-fiscal-section.component';

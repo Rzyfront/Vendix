@@ -319,66 +319,51 @@ export class OrganizationAdminLayoutComponent {
       ],
     },
     {
-      label: 'Contabilidad',
-      icon: 'book-open',
+      // Fiscal umbrella (ORG) — one sidebar group consolidating every fiscal
+      // surface for organizations that OWN their fiscal scope
+      // (fiscal_scope=ORGANIZATION). Each child is a leaf whose module renders
+      // its sub-sections as internal sticky-header tabs (org invoicing/payroll
+      // shells, the org accounting shell, the fiscal compliance hub). The whole
+      // group hides when STORES own fiscal. When fiscal is NOT yet activated,
+      // only "Operación fiscal" stays visible (no requiresFiscalArea) so the
+      // owner can always reach the activation wizard.
+      label: 'Fiscal',
+      icon: 'landmark',
       alwaysVisible: true,
+      requiredFiscalScope: 'ORGANIZATION',
       children: [
         {
-          label: 'Plan de Cuentas',
-          icon: '',
-          route: '/admin/accounting/chart-of-accounts',
+          label: 'Operación fiscal',
+          icon: 'clipboard-list',
+          route: '/admin/fiscal',
           alwaysVisible: true,
+          requiredFiscalScope: 'ORGANIZATION',
         },
         {
-          label: 'Asientos Contables',
-          icon: '',
-          route: '/admin/accounting/journal-entries',
+          label: 'Facturación',
+          icon: 'receipt',
+          route: '/admin/invoicing',
           alwaysVisible: true,
+          requiredFiscalScope: 'ORGANIZATION',
+          requiresFiscalArea: 'invoicing',
         },
         {
-          label: 'Periodos Fiscales',
-          icon: '',
-          route: '/admin/accounting/fiscal-periods',
+          label: 'Contabilidad',
+          icon: 'book-open',
+          route: '/admin/accounting',
           alwaysVisible: true,
+          requiredFiscalScope: 'ORGANIZATION',
+          requiresFiscalArea: 'accounting',
         },
         {
-          label: 'Mapeo de Cuentas',
-          icon: '',
-          route: '/admin/accounting/account-mappings',
+          label: 'Nómina',
+          icon: 'banknote',
+          route: '/admin/payroll',
           alwaysVisible: true,
+          requiredFiscalScope: 'ORGANIZATION',
+          requiresFiscalArea: 'payroll',
         },
       ],
-    },
-    {
-      label: 'Facturación',
-      icon: 'receipt',
-      alwaysVisible: true,
-      children: [
-        {
-          label: 'Facturas',
-          icon: '',
-          route: '/admin/invoicing/invoices',
-          alwaysVisible: true,
-        },
-        {
-          label: 'Resoluciones',
-          icon: '',
-          route: '/admin/invoicing/resolutions',
-          alwaysVisible: true,
-        },
-        {
-          label: 'Configuración DIAN',
-          icon: '',
-          route: '/admin/invoicing/dian-config',
-          alwaysVisible: true,
-        },
-      ],
-    },
-    {
-      label: 'Nómina',
-      icon: 'banknote',
-      route: '/admin/payroll',
-      alwaysVisible: true,
     },
     {
       label: 'Configuración',
@@ -398,11 +383,6 @@ export class OrganizationAdminLayoutComponent {
           label: 'Modo fiscal',
           icon: 'receipt',
           route: '/admin/settings/fiscal-scope',
-        },
-        {
-          label: 'Manejo fiscal',
-          icon: 'receipt',
-          route: '/admin/settings/fiscal',
         },
         {
           label: 'Métodos de Pago',

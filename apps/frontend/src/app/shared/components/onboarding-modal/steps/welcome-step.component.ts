@@ -445,8 +445,8 @@ import { AppConfig } from '../../../../core/services/app-config.service';
           <button
             type="button"
             class="business-type-option"
-            [class.selected]="selectedType === 'ORGANIZATION' && selectedFiscalScope === 'ORGANIZATION'"
-            (click)="onSelectType('ORGANIZATION', 'ORGANIZATION')"
+            [class.selected]="selectedType === 'ORGANIZATION'"
+            (click)="onSelectType('ORGANIZATION')"
           >
             <div class="option-header">
               <div class="option-icon-wrapper org-icon">
@@ -483,48 +483,6 @@ import { AppConfig } from '../../../../core/services/app-config.service';
               </div>
             </div>
           </button>
-
-          <button
-            type="button"
-            class="business-type-option"
-            [class.selected]="selectedType === 'ORGANIZATION' && selectedFiscalScope === 'STORE'"
-            (click)="onSelectType('ORGANIZATION', 'STORE')"
-          >
-            <div class="option-header">
-              <div class="option-icon-wrapper org-icon">
-                <app-icon
-                  name="receipt"
-                  size="24"
-                  color="#059669"
-                ></app-icon>
-              </div>
-              <div class="option-text">
-                <h4>Organización con NIT por tienda</h4>
-                <p>Inventario consolidado y facturación separada.</p>
-              </div>
-            </div>
-
-            <div class="feature-list">
-              <div class="feature-item">
-                <app-icon
-                  name="check-circle"
-                  size="14"
-                  class="feature-icon"
-                  [color]="primaryColor()"
-                ></app-icon>
-                <span>Transferencias entre tiendas</span>
-              </div>
-              <div class="feature-item">
-                <app-icon
-                  name="check-circle"
-                  size="14"
-                  class="feature-icon"
-                  [color]="primaryColor()"
-                ></app-icon>
-                <span>DIAN y reportes fiscales por NIT</span>
-              </div>
-            </div>
-          </button>
         </div>
 
         <!-- Security Footer -->
@@ -547,7 +505,6 @@ export class WelcomeStepComponent implements OnInit {
   readonly userFirstName = input<string>('Usuario');
   readonly businessTypeSelected = output<{
     type: 'STORE' | 'ORGANIZATION';
-    fiscal_scope?: 'STORE' | 'ORGANIZATION';
   }>();
   readonly selectionChanged = output<'STORE' | 'ORGANIZATION' | null>();
   readonly nextStep = output<void>();
@@ -565,7 +522,6 @@ export class WelcomeStepComponent implements OnInit {
 
   /** Currently selected business type (for two-step selection UX) */
   selectedType: 'STORE' | 'ORGANIZATION' | null = null;
-  selectedFiscalScope: 'STORE' | 'ORGANIZATION' | null = null;
 
   ngOnInit(): void {
     this.loadThemeColors();
@@ -592,21 +548,17 @@ export class WelcomeStepComponent implements OnInit {
   }
 
   /**
-   * Select a business type and automatically proceed to next step
+   * Select a business type and automatically proceed to next step.
+   *
+   * Fiscal scope is no longer chosen here: STORE maps to fiscal_scope=STORE
+   * and ORGANIZATION to consolidated fiscal_scope=ORGANIZATION on the backend
+   * by default. Optional fiscal data is captured later in a lightweight step.
    */
-  onSelectType(
-    type: 'STORE' | 'ORGANIZATION',
-    fiscal_scope?: 'STORE' | 'ORGANIZATION',
-  ): void {
+  onSelectType(type: 'STORE' | 'ORGANIZATION'): void {
     this.selectedType = type;
-    this.selectedFiscalScope =
-      fiscal_scope ?? (type === 'STORE' ? 'STORE' : 'ORGANIZATION');
     this.selectionChanged.emit(type);
     // Automatically advance when type is selected
-    this.businessTypeSelected.emit({
-      type,
-      fiscal_scope: this.selectedFiscalScope,
-    });
+    this.businessTypeSelected.emit({ type });
   }
 
   /**
@@ -614,12 +566,7 @@ export class WelcomeStepComponent implements OnInit {
    */
   onContinue(): void {
     if (this.selectedType) {
-      this.businessTypeSelected.emit({
-        type: this.selectedType,
-        fiscal_scope:
-          this.selectedFiscalScope ??
-          (this.selectedType === 'STORE' ? 'STORE' : 'ORGANIZATION'),
-      });
+      this.businessTypeSelected.emit({ type: this.selectedType });
       this.nextStep.emit();
     }
   }

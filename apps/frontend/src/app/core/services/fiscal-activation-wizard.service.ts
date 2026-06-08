@@ -10,7 +10,20 @@ import {
   FiscalStatusBlock,
   FiscalStatusReadResult,
   FiscalWizardStepId,
+  fiscalAreaHasPendingSignal,
 } from '../models/fiscal-status.model';
+import { WizardPrefill } from '../models/wizard-prefill.model';
+import { parseApiError } from '../utils/parse-api-error';
+
+/**
+ * Server-side confirmation, per area, of which wizard steps the backend
+ * considers still missing when `finalize()` rejects with
+ * `FISCAL_STATUS_INCOMPLETE`. Mirrors `details.missing_steps`
+ * (`Record<FiscalArea, FiscalWizardStepId[]>`).
+ */
+export type FinalizeMissingSteps = Partial<
+  Record<FiscalArea, FiscalWizardStepId[]>
+>;
 
 @Injectable({
   providedIn: 'root',
@@ -26,6 +39,27 @@ export class FiscalActivationWizardService {
   readonly loading = signal(false);
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
+  /**
+   * Aggregated read-only snapshot of every existing tenant source the wizard
+   * would otherwise ask the user to re-enter. Populated by {@link loadPrefill}
+   * (single GET to `/wizard-prefill`) and consumed by step components to seed
+   * their initial form values without re-hitting the canonical endpoints.
+   *
+   * `null` until the first call — components must guard reads with
+   * `?.<field>`. Step components no longer fire their own N+1 GETs; they
+   * subscribe to this signal and to {@link effectiveSatisfiedSteps} instead.
+   */
+  readonly prefill = signal<WizardPrefill | null>(null);
+  readonly prefillLoading = signal(false);
+
+  /**
+   * Populated only when the last `finalize()` failed with
+   * `FISCAL_STATUS_INCOMPLETE`. Lets the validation step highlight the exact
+   * rows the backend still rejects (server-side confirmation, layered on top
+   * of the prefill/satisfied-driven rows). Reset to `{}` on every finalize
+   * attempt so stale highlights never linger.
+   */
+  readonly finalizeMissingSteps = signal<FinalizeMissingSteps>({});
 
   /**
    * Scope of the **logged-in user**, used to decide which API surface to hit
@@ -101,6 +135,49 @@ export class FiscalActivationWizardService {
       `${Math.min(this.currentStepIndex() + 1, this.stepSequence().length)}/${this.stepSequence().length}`,
   );
 
+  /**
+   * Union of three sources of "this step is already covered":
+   *
+   * 1. `prefill.satisfied_steps` — backend preflight detected existing data
+   *    (legal_data row, dian_config, puc accounts, fiscal_period, taxes,
+   *    mappings, initial inventory transactions, payroll config flag).
+   * 2. `completedSteps()` — steps the user already marked completed inside an
+   *    in-progress wizard (fiscal_status wizard.completed_steps).
+   * 3. `fiscalAreaHasPendingSignal()` — detector signals for the current area
+   *    set, so a step that the detector already validates is treated as
+   *    satisfied even before the user touches it.
+   *
+   * Consumed by `restoreWizardFromCurrentStatus()` to position the cursor on
+   * the first unsatisfied step instead of always starting at the beginning.
+   */
+  readonly effectiveSatisfiedSteps = computed<FiscalWizardStepId[]>(() => {
+    const acc = new Set<FiscalWizardStepId>();
+    this.prefill()?.satisfied_steps?.forEach((step) => acc.add(step));
+    this.completedSteps().forEach((step) => acc.add(step));
+
+    const status = this.effectiveFiscalStatus();
+    if (status) {
+      const areas =
+        this.selectedAreas().length > 0
+          ? this.selectedAreas()
+          : (Object.keys(status) as FiscalArea[]);
+      for (const area of areas) {
+        if (fiscalAreaHasPendingSignal(area, status[area])) {
+          // Area-pending signals are coarse ("the org hits the threshold");
+          // treat the lightweight legal/identity anchors as satisfied so the
+          // wizard doesn't ask the user to retype what the detector already
+          // validated.
+          acc.add('legal_data');
+          if (area !== 'payroll') {
+            acc.add('dian_config');
+            acc.add('default_taxes');
+          }
+        }
+      }
+    }
+    return Array.from(acc);
+  });
+
   async loadStatus(): Promise<FiscalStatusReadResult> {
     this.loading.set(true);
     this.error.set(null);
@@ -121,6 +198,46 @@ export class FiscalActivationWizardService {
     }
   }
 
+  /**
+   * Single GET to `wizard-prefill` replaces the previous N+1 pattern (one
+   * per step component). Idempotent: if a prefill is already loaded for the
+   * current `targetStoreId` the cached value is returned without an HTTP
+   * roundtrip, so multiple consumers (step components reacting to the same
+   * effect) never duplicate the call.
+   */
+  async loadPrefill(force = false): Promise<WizardPrefill> {
+    const current = this.prefill();
+    if (current && !force) {
+      // Already loaded for the current store context — short-circuit.
+      return current;
+    }
+    this.prefillLoading.set(true);
+    try {
+      const query = this.storeQuery();
+      const result = await firstValueFrom(
+        this.http.get(`${this.baseUrl()}/wizard-prefill${query}`),
+      );
+      const data = this.unwrap<WizardPrefill>(result);
+      this.prefill.set(data);
+      return data;
+    } catch (error: any) {
+      this.error.set(this.messageFromError(error));
+      // Surface the error but keep the wizard usable (empty prefill is
+      // non-fatal — steps just fall back to their default empty forms).
+      throw error;
+    } finally {
+      this.prefillLoading.set(false);
+    }
+  }
+
+  /**
+   * Reposition the wizard cursor on the first step of the current
+   * `stepSequence()` that is NOT covered by `effectiveSatisfiedSteps()`.
+   *
+   * Falls back to the WIP wizard's `current_step` if no prefill is
+   * available yet, so legacy callers (e.g. fiscal-management-panel
+   * store switcher) keep working without a prefill call.
+   */
   restoreWizardFromCurrentStatus(): void {
     const status = this.effectiveFiscalStatus();
     if (!status) return;
@@ -134,9 +251,48 @@ export class FiscalActivationWizardService {
     this.selectedAreas.set(
       wizard.selected_areas?.length ? wizard.selected_areas : [wipArea],
     );
-    const currentStep = wizard.current_step || wizard.step_sequence[0];
-    const index = this.stepSequence().indexOf(currentStep);
-    this.currentStepIndex.set(index >= 0 ? index : 0);
+
+    const sequence = this.stepSequence();
+    if (sequence.length === 0) return;
+
+    const satisfied = new Set(this.effectiveSatisfiedSteps());
+    const firstUnsatisfied = sequence.find((step) => !satisfied.has(step));
+
+    if (firstUnsatisfied) {
+      const targetIndex = sequence.indexOf(firstUnsatisfied);
+      this.currentStepIndex.set(
+        targetIndex >= 0
+          ? targetIndex
+          : sequence.length - 1,
+      );
+      return;
+    }
+
+    // Every step is already satisfied: park the cursor on the last step so
+    // the user lands on the "Finalizar activación" CTA instead of a
+    // confusing blank form. If we don't have a prefill yet (legacy flow),
+    // fall back to the wizard's recorded current_step.
+    const prefill = this.prefill();
+    if (!prefill) {
+      const currentStep = wizard.current_step || wizard.step_sequence[0];
+      const index = sequence.indexOf(currentStep);
+      this.currentStepIndex.set(index >= 0 ? index : 0);
+      return;
+    }
+    this.currentStepIndex.set(sequence.length - 1);
+  }
+
+  /**
+   * Public cursor setter used by the validation step's "Volver a {paso}" CTA.
+   * Resolves the step's position inside the current `stepSequence()` and only
+   * moves the cursor when the step actually belongs to the sequence, so an
+   * out-of-scope step id is a safe no-op.
+   */
+  goToStep(step: FiscalWizardStepId): void {
+    const index = this.stepSequence().indexOf(step);
+    if (index >= 0) {
+      this.currentStepIndex.set(index);
+    }
   }
 
   async startWizard(areas: FiscalArea[]): Promise<FiscalStatusReadResult> {
@@ -197,6 +353,7 @@ export class FiscalActivationWizardService {
   async finalize(): Promise<FiscalStatusReadResult> {
     this.submitting.set(true);
     this.error.set(null);
+    this.finalizeMissingSteps.set({});
     try {
       const area = this.selectedAreas()[0] ?? 'invoicing';
       const result = await firstValueFrom(
@@ -208,9 +365,35 @@ export class FiscalActivationWizardService {
       const data = this.unwrap<FiscalStatusReadResult>(result);
       this.lastStatus.set(data);
       this.authFacade.patchFiscalStatus(data.fiscal_status);
+      // Activation succeeded: the legal-data draft is now committed server-side,
+      // so the local UX draft is stale and must be dropped for this context.
+      this.clearWizardDraft();
       return data;
     } catch (error: any) {
-      this.error.set(this.messageFromError(error));
+      // FISCAL_STATUS_INCOMPLETE carries `details.missing_steps` — capture it
+      // so the validation step can surface server-side confirmation of the
+      // exact pending steps, then set a clear, non-generic banner message.
+      const parsed = parseApiError(error);
+      if (parsed.errorCode === 'FISCAL_STATUS_INCOMPLETE') {
+        const missing = parsed.details?.missing_steps;
+        this.finalizeMissingSteps.set(
+          missing && typeof missing === 'object'
+            ? (missing as FinalizeMissingSteps)
+            : {},
+        );
+        this.error.set(
+          'No se puede activar: faltan pasos por completar.',
+        );
+        // Refresh the cached prefill in the background so the next time the
+        // user re-enters the validation step the row state reflects the
+        // current backend truth (e.g. a step they just persisted will now
+        // show as DONE). Fire-and-forget — finalize()'s caller doesn't
+        // block on this; the validation rows already trust the 409 details
+        // for this turn.
+        void this.loadPrefill(true).catch(() => undefined);
+      } else {
+        this.error.set(this.messageFromError(error));
+      }
       throw error;
     } finally {
       this.submitting.set(false);
@@ -226,6 +409,9 @@ export class FiscalActivationWizardService {
     const data = this.unwrap<FiscalStatusReadResult>(result);
     this.lastStatus.set(data);
     this.authFacade.patchFiscalStatus(data.fiscal_status);
+    // Deactivating the area resets the wizard — discard the local form draft so
+    // a future re-activation starts from prefill, not from a stale draft.
+    this.clearWizardDraft();
     return data;
   }
 
@@ -265,6 +451,57 @@ export class FiscalActivationWizardService {
   storeQuery(prefix: '?' | '&' = '?'): string {
     const context = this.storeContext();
     return context.store_id ? `${prefix}store_id=${context.store_id}` : '';
+  }
+
+  // ── Wizard form draft (localStorage) ──────────────────────
+  /**
+   * Per-context localStorage key for the in-progress legal-data form draft.
+   * Keyed by {@link fiscalContextKey} so the draft for a STORE context never
+   * leaks into an ORGANIZATION context (or another target store). The draft is
+   * a best-effort UX convenience (survives an accidental reload / navigation),
+   * NOT a source of truth — the canonical write path is still the fiscal-data
+   * PATCH in the legal-data step.
+   */
+  private draftKey(): string {
+    return `vendix:fiscal-wizard-draft:${this.fiscalContextKey()}`;
+  }
+
+  /** Persist the current legal-data form value for the active fiscal context. */
+  saveWizardDraft(value: Record<string, unknown>): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.setItem(this.draftKey(), JSON.stringify(value));
+    } catch {
+      // Quota / serialization failures are non-fatal: the draft is optional.
+    }
+  }
+
+  /**
+   * Read back a previously saved draft for the active fiscal context. Returns
+   * `null` when there is no draft, when storage is unavailable, or when the
+   * stored payload is corrupt (in which case the bad entry is cleared).
+   */
+  hydrateWizardDraft<T = Record<string, unknown>>(): T | null {
+    if (typeof localStorage === 'undefined') return null;
+    try {
+      const raw = localStorage.getItem(this.draftKey());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? (parsed as T) : null;
+    } catch {
+      this.clearWizardDraft();
+      return null;
+    }
+  }
+
+  /** Drop the saved draft for the active fiscal context. */
+  clearWizardDraft(): void {
+    if (typeof localStorage === 'undefined') return;
+    try {
+      localStorage.removeItem(this.draftKey());
+    } catch {
+      // Ignore: nothing actionable if removal fails.
+    }
   }
 
   private unwrap<T>(response: unknown): T {

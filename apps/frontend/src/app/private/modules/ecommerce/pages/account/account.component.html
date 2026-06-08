@@ -154,7 +154,7 @@
                     <div class="section-header">
                         <h2>Mis Direcciones</h2>
                         <app-button variant="ghost" size="sm" (clicked)="openAddressModal('create')" title="Agregar dirección">
-                            <app-icon name="plus" [size]="18"></app-icon>
+                            <app-icon slot="icon" name="plus" [size]="18"></app-icon>
                         </app-button>
                     </div>
 
@@ -209,14 +209,14 @@
                                     <div class="address-actions">
                                         @if (!addr.is_primary) {
                                             <app-button variant="ghost" size="sm" (clicked)="setAddressPrimary(addr.id)" title="Establecer como principal">
-                                                <app-icon name="star" [size]="18"></app-icon>
+                                                <app-icon slot="icon" name="star" [size]="18"></app-icon>
                                             </app-button>
                                         }
                                         <app-button variant="ghost" size="sm" (clicked)="openAddressModal('edit', addr)" title="Editar">
-                                            <app-icon name="edit" [size]="16"></app-icon>
+                                            <app-icon slot="icon" name="edit" [size]="16"></app-icon>
                                         </app-button>
                                         <app-button variant="outline-danger" size="sm" (clicked)="deleteAddress(addr.id)" title="Eliminar">
-                                            <app-icon name="trash" [size]="16"></app-icon>
+                                            <app-icon slot="icon" name="trash" [size]="16"></app-icon>
                                         </app-button>
                                     </div>
                                 </div>

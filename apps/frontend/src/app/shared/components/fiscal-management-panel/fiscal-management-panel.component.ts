@@ -1,6 +1,5 @@
 import { Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
 
@@ -13,6 +12,10 @@ import {
   FiscalAreaStatus,
 } from '../../../core/models/fiscal-status.model';
 import { IconComponent } from '../icon/icon.component';
+import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
+import { BadgeComponent } from '../badge/badge.component';
+import { CardComponent } from '../card/card.component';
+import { StatsComponent } from '../stats/stats.component';
 import { ConfirmationModalComponent } from '../confirmation-modal/confirmation-modal.component';
 import {
   StickyHeaderActionButton,
@@ -43,19 +46,22 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
   selector: 'app-fiscal-management-panel',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     RouterModule,
     IconComponent,
+    AlertBannerComponent,
+    BadgeComponent,
+    CardComponent,
+    StatsComponent,
     ConfirmationModalComponent,
     StickyHeaderComponent,
     StoreFiscalIdentityFormComponent,
   ],
   template: `
-    <section class="fiscal-page">
+    <section class="w-full min-h-full">
       <app-sticky-header
-        title="Manejo fiscal"
-        subtitle="Configuración"
+        title="Operación fiscal"
+        subtitle="Activa y gestiona tus áreas fiscales"
         icon="settings"
         [showBackButton]="false"
         variant="glass"
@@ -63,92 +69,194 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
         (actionClicked)="onHeaderAction($event)"
       />
 
-      <div class="fiscal-content">
-        @if (showStoreSwitcher()) {
-          <div class="store-switcher">
-            <label class="store-switcher__label" for="fiscal-store-select">Tienda fiscal</label>
-            <select
-              id="fiscal-store-select"
-              class="store-switcher__select"
-              [ngModel]="service.targetStoreId()"
-              (ngModelChange)="selectStore($event)"
-              aria-label="Tienda fiscal"
-            >
-              @for (store of storeStatuses(); track store.store_id) {
-                <option [ngValue]="store.store_id">{{ store.store_name }}</option>
-              }
-            </select>
+      <div class="mx-auto flex w-full max-w-[1120px] flex-col gap-6 pb-8">
+        <!-- Summary banner: correlates fiscal scope + activation progress + store target -->
+        <div
+          class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between"
+          role="group"
+          aria-label="Resumen de operación fiscal"
+        >
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:flex-1">
+            <app-stats
+              title="Propiedad fiscal"
+              [value]="fiscalScopeLabel()"
+              smallText="Alcance de la operación"
+              [iconName]="fiscalScopeIcon()"
+              iconBgColor="bg-blue-100"
+              iconColor="text-blue-500"
+            />
+            <app-stats
+              title="Progreso"
+              [value]="activationSummary()"
+              smallText="Áreas fiscales activas"
+              iconName="list-checks"
+              iconBgColor="bg-emerald-100"
+              iconColor="text-emerald-500"
+            />
           </div>
+
+          @if (showStoreSwitcher()) {
+            <div class="flex flex-col gap-1.5 md:w-64">
+              <label
+                class="text-xs font-bold uppercase tracking-wide text-text-secondary"
+                for="fiscal-store-select"
+              >
+                Tienda fiscal
+              </label>
+              <select
+                id="fiscal-store-select"
+                class="min-h-[2.5rem] w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                [ngModel]="service.targetStoreId()"
+                (ngModelChange)="selectStore($event)"
+                aria-label="Tienda fiscal"
+              >
+                @for (store of storeStatuses(); track store.store_id) {
+                  <option [ngValue]="store.store_id">{{ store.store_name }}</option>
+                }
+              </select>
+            </div>
+          }
+        </div>
+
+        @if (service.error()) {
+          <app-alert-banner variant="danger" icon="alert-triangle" role="alert">
+            {{ service.error() }}
+          </app-alert-banner>
         }
 
+        <!-- Step: legal identity prerequisite (only in per-store fiscal mode) -->
         @if (showFiscalIdentitySection()) {
-          <section class="fiscal-identity">
-            @if (taxIdMissing()) {
-              <div class="identity-warning" role="alert">
-                <app-icon name="alert-triangle" [size]="18" />
-                <span>
-                  El NIT propio de la tienda es obligatorio para emitir documentos fiscales en modo fiscal por tienda.
-                </span>
+          <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-identity-title">
+            <header class="flex items-start gap-3">
+              <span
+                class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
+              >
+                1
+              </span>
+              <div class="flex flex-col gap-0.5">
+                <h2 id="fiscal-step-identity-title" class="text-lg font-semibold text-text-primary">
+                  Identidad legal
+                </h2>
+                <p class="text-sm text-text-secondary">
+                  Requisito previo para emitir documentos fiscales en modo fiscal por tienda.
+                </p>
               </div>
-            }
+            </header>
 
-            @if (fiscalIdentityError()) {
-              <div class="error-banner">{{ fiscalIdentityError() }}</div>
-            }
+            <app-card [responsivePadding]="true">
+              <div class="flex flex-col gap-4">
+                @if (taxIdMissing()) {
+                  <app-alert-banner variant="warning" icon="alert-triangle" role="alert">
+                    El NIT propio de la tienda es obligatorio para emitir documentos fiscales en modo fiscal por tienda.
+                  </app-alert-banner>
+                }
 
-            <app-store-fiscal-identity-form
-              [initialValue]="fiscalData()"
-              [disabled]="fiscalIdentityDisabled()"
-              (save)="onSaveFiscalIdentity($event)"
-              (cancel)="onCancelFiscalIdentity()"
-            />
+                @if (fiscalIdentityError()) {
+                  <app-alert-banner variant="danger" icon="alert-triangle" role="alert">
+                    {{ fiscalIdentityError() }}
+                  </app-alert-banner>
+                }
+
+                <app-store-fiscal-identity-form
+                  [initialValue]="fiscalData()"
+                  [disabled]="fiscalIdentityDisabled()"
+                  (save)="onSaveFiscalIdentity($event)"
+                  (cancel)="onCancelFiscalIdentity()"
+                />
+              </div>
+            </app-card>
           </section>
         }
 
-        @if (service.error()) {
-          <div class="error-banner">{{ service.error() }}</div>
-        }
+        <!-- Step: fiscal area activation -->
+        <section class="flex flex-col gap-3" aria-labelledby="fiscal-step-areas-title">
+          <header class="flex items-start gap-3">
+            <span
+              class="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-primary-600 text-sm font-bold text-white"
+            >
+              {{ showFiscalIdentitySection() ? '2' : '1' }}
+            </span>
+            <div class="flex flex-col gap-0.5">
+              <h2 id="fiscal-step-areas-title" class="text-lg font-semibold text-text-primary">
+                Áreas fiscales
+              </h2>
+              <p class="text-sm text-text-secondary">
+                Activa, continúa o desactiva cada área según tu operación.
+              </p>
+            </div>
+          </header>
 
-        <div class="fiscal-grid">
-          @for (area of areas; track area) {
-            <article class="fiscal-card">
-              <div class="card-top">
-                <span class="area-icon">
-                  <app-icon [name]="iconFor(area)" [size]="19" />
-                </span>
-                <span class="state-badge" [class]="'state-badge--' + stateFor(area).toLowerCase()">
-                  {{ stateLabel(stateFor(area)) }}
-                </span>
-              </div>
-              <h2>{{ labels[area] }}</h2>
-              <p>{{ descriptionFor(area) }}</p>
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+            @for (area of areas; track area) {
+              <app-card customClasses="h-full">
+                <div class="flex h-full flex-col gap-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <span
+                      class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10 text-primary-600"
+                    >
+                      <app-icon [name]="iconFor(area)" [size]="19" />
+                    </span>
+                    <app-badge
+                      [variant]="
+                        stateFor(area) === 'ACTIVE' || stateFor(area) === 'LOCKED'
+                          ? 'success'
+                          : stateFor(area) === 'WIP'
+                            ? 'warning'
+                            : 'neutral'
+                      "
+                      size="sm"
+                    >
+                      {{ stateLabel(stateFor(area)) }}
+                    </app-badge>
+                  </div>
 
-              @if (statusFor(area)?.wizard?.current_step) {
-                <div class="wizard-note">
-                  Paso pendiente: {{ statusFor(area)?.wizard?.current_step }}
+                  <h3 class="text-base font-semibold text-text-primary">{{ labels[area] }}</h3>
+                  <p class="min-h-[4.25rem] text-sm leading-relaxed text-text-secondary">
+                    {{ descriptionFor(area) }}
+                  </p>
+
+                  @if (statusFor(area)?.wizard?.current_step) {
+                    <div class="text-xs leading-snug text-text-secondary">
+                      Paso pendiente: {{ statusFor(area)?.wizard?.current_step }}
+                    </div>
+                  }
+
+                  <div class="mt-auto flex items-center justify-between gap-3">
+                    @if (stateFor(area) === 'INACTIVE') {
+                      <a
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
+                        [routerLink]="['/admin/fiscal/wizard']"
+                        [queryParams]="{ areas: area, store_id: service.targetStoreId() }"
+                      >
+                        Activar
+                      </a>
+                    } @else if (stateFor(area) === 'WIP') {
+                      <a
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-primary-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-primary-700"
+                        [routerLink]="['/admin/fiscal/wizard']"
+                        [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }"
+                      >
+                        Continuar
+                      </a>
+                    } @else if (stateFor(area) === 'ACTIVE') {
+                      <button
+                        class="inline-flex min-h-[2.25rem] items-center justify-center gap-1.5 rounded-lg border border-primary-600 bg-surface px-3 py-2 text-sm font-bold text-primary-600 transition-colors hover:bg-primary-600/5"
+                        type="button"
+                        (click)="deactivate(area)"
+                      >
+                        Desactivar
+                      </button>
+                    } @else {
+                      <span class="text-xs leading-snug text-text-secondary">
+                        No se puede deshabilitar porque ya existen registros fiscales.
+                      </span>
+                    }
+                  </div>
                 </div>
-              }
-
-              <div class="card-actions">
-                @if (stateFor(area) === 'INACTIVE') {
-                  <a class="primary-btn" [routerLink]="['/admin/settings/fiscal/wizard']" [queryParams]="{ areas: area, store_id: service.targetStoreId() }">
-                    Activar
-                  </a>
-                } @else if (stateFor(area) === 'WIP') {
-                  <a class="primary-btn" [routerLink]="['/admin/settings/fiscal/wizard']" [queryParams]="{ areas: wizardAreasFor(area).join(','), store_id: service.targetStoreId() }">
-                    Continuar
-                  </a>
-                } @else if (stateFor(area) === 'ACTIVE') {
-                  <button class="secondary-btn" type="button" (click)="deactivate(area)">
-                    Desactivar
-                  </button>
-                } @else {
-                  <span class="locked-copy">No se puede deshabilitar porque ya existen registros fiscales.</span>
-                }
-              </div>
-            </article>
-          }
-        </div>
+              </app-card>
+            }
+          </div>
+        </section>
 
         @if (deactivationContext(); as ctx) {
           <app-confirmation-modal
@@ -165,203 +273,6 @@ const LOCKED_REASON_LABELS: Record<string, string> = {
       </div>
     </section>
   `,
-  styles: [
-    `
-      .fiscal-page {
-        width: 100%;
-        min-height: 100%;
-      }
-
-      .fiscal-content {
-        width: 100%;
-        max-width: 1120px;
-        margin: 0 auto;
-        padding: 0 0 2rem;
-      }
-
-      .store-switcher {
-        display: flex;
-        align-items: center;
-        gap: 0.6rem;
-        margin-bottom: 1rem;
-      }
-
-      .store-switcher__label {
-        color: var(--text-secondary, #64748b);
-        font-size: 0.78rem;
-        font-weight: 700;
-        text-transform: uppercase;
-      }
-
-      .store-switcher__select {
-        min-height: 2.25rem;
-        border: 1px solid var(--border-color, #d1d5db);
-        border-radius: 0.45rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--text-primary, #111827);
-        padding: 0.45rem 0.7rem;
-        font: inherit;
-        font-size: 0.84rem;
-      }
-
-      .fiscal-identity {
-        margin-bottom: 1rem;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
-        padding: 1rem;
-      }
-
-      .identity-warning {
-        display: flex;
-        align-items: flex-start;
-        gap: 0.6rem;
-        margin-bottom: 1rem;
-        border: 1px solid color-mix(in srgb, var(--color-warning, #f59e0b) 35%, transparent);
-        border-radius: 0.5rem;
-        background: color-mix(in srgb, var(--color-warning, #f59e0b) 10%, transparent);
-        color: var(--text-primary, #111827);
-        padding: 0.75rem;
-        font-size: 0.86rem;
-        line-height: 1.25rem;
-      }
-
-      .identity-warning app-icon {
-        flex: 0 0 auto;
-        color: var(--color-warning, #d97706);
-        margin-top: 0.1rem;
-      }
-
-      .fiscal-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 1rem;
-      }
-
-      .fiscal-card {
-        min-height: 17rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-        border: 1px solid var(--border-color, #e5e7eb);
-        border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
-        padding: 1rem;
-      }
-
-      .card-top,
-      .card-actions {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 0.75rem;
-      }
-
-      .area-icon {
-        width: 2.3rem;
-        height: 2.3rem;
-        display: grid;
-        place-items: center;
-        border-radius: 0.5rem;
-        background: color-mix(in srgb, var(--primary-color, #2563eb) 10%, transparent);
-        color: var(--primary-color, #2563eb);
-      }
-
-      h2 {
-        margin: 0;
-        font-size: 1rem;
-        color: var(--text-primary, #111827);
-      }
-
-      p {
-        margin: 0;
-        min-height: 4.25rem;
-        color: var(--text-secondary, #4b5563);
-        font-size: 0.88rem;
-        line-height: 1.35rem;
-      }
-
-      .state-badge {
-        border-radius: 999px;
-        padding: 0.25rem 0.55rem;
-        font-size: 0.72rem;
-        font-weight: 700;
-        background: #f1f5f9;
-        color: #475569;
-      }
-
-      .state-badge--active,
-      .state-badge--locked {
-        background: #dcfce7;
-        color: #166534;
-      }
-
-      .state-badge--wip {
-        background: #fef3c7;
-        color: #92400e;
-      }
-
-      .wizard-note,
-      .locked-copy {
-        color: var(--text-secondary, #64748b);
-        font-size: 0.78rem;
-        line-height: 1.15rem;
-      }
-
-      .card-actions {
-        margin-top: auto;
-      }
-
-      .primary-btn,
-      .secondary-btn {
-        min-height: 2.25rem;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 0.4rem;
-        border-radius: 0.45rem;
-        border: 1px solid var(--primary-color, #2563eb);
-        padding: 0.45rem 0.75rem;
-        font-size: 0.84rem;
-        font-weight: 700;
-        text-decoration: none;
-        cursor: pointer;
-      }
-
-      .primary-btn {
-        background: var(--primary-color, #2563eb);
-        color: #ffffff;
-      }
-
-      .secondary-btn {
-        background: var(--surface-color, #ffffff);
-        color: var(--primary-color, #2563eb);
-      }
-
-      .error-banner {
-        margin-bottom: 1rem;
-        border: 1px solid #fecaca;
-        border-radius: 0.5rem;
-        background: #fef2f2;
-        color: #991b1b;
-        padding: 0.75rem 1rem;
-        font-size: 0.87rem;
-      }
-
-      @media (max-width: 920px) {
-        .fiscal-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      @media (max-width: 640px) {
-        .store-switcher {
-          align-items: stretch;
-          flex-direction: column;
-        }
-      }
-    `,
-  ],
 })
 export class FiscalManagementPanelComponent implements OnInit {
   readonly service = inject(FiscalActivationWizardService);
@@ -405,6 +316,28 @@ export class FiscalManagementPanelComponent implements OnInit {
     const data = this.fiscalData();
     return !String(data?.tax_id ?? data?.nit ?? '').trim();
   });
+
+  // --- Read-only derived summary (scope + activation progress) ---
+  readonly fiscalScopeLabel = computed(() =>
+    this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION'
+      ? 'Por organización'
+      : 'Por tienda',
+  );
+  readonly fiscalScopeIcon = computed(() =>
+    this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION'
+      ? 'building-2'
+      : 'store',
+  );
+  readonly activeAreasCount = computed(
+    () =>
+      this.areas.filter((area) => {
+        const state = this.stateFor(area);
+        return state === 'ACTIVE' || state === 'LOCKED';
+      }).length,
+  );
+  readonly activationSummary = computed(
+    () => `${this.activeAreasCount()} de ${this.areas.length} áreas activas`,
+  );
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {

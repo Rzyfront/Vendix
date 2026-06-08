@@ -560,7 +560,7 @@ export class OrgPayrollComponent {
 
   onActionClick(action: string): void {
     if (action === 'settings') {
-      this.router.navigate(['/admin/settings/fiscal']);
+      this.router.navigate(['/admin/fiscal']);
     }
   }
 

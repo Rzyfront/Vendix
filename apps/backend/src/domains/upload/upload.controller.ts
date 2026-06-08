@@ -96,7 +96,6 @@ export class UploadController {
     const { entityType, entityId, isMainImage } = body;
     const context = RequestContextService.getContext();
     const orgId = context?.organization_id;
-    const storeId = context?.store_id;
 
     if (!file?.buffer) {
       throw new VendixHttpException(ErrorCodes.UPLOAD_FILE_001);
@@ -116,6 +115,15 @@ export class UploadController {
       throw new VendixHttpException(ErrorCodes.UPLOAD_ORG_001);
     }
 
+    // Resolve the target store for store-scoped uploads. When the client sends
+    // an explicit `storeId` (e.g. org-admin editing another store), use it as
+    // the destination INSTEAD of the session store. Otherwise fall back to the
+    // RequestContext store.
+    const storeId = body.storeId ?? context?.store_id;
+    // Ownership of an explicit `storeId` is validated lazily (only when used by
+    // a store-scoped case) to avoid an extra query for org-scoped uploads.
+    const isExplicitStore = body.storeId !== undefined;
+
     // Construir path según el tipo de entidad
     let path: string;
 
@@ -123,35 +131,35 @@ export class UploadController {
       case UploadEntityType.PRODUCTS: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildProductPath(org, store);
         break;
       }
       case UploadEntityType.CATEGORIES: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildCategoryPath(org, store);
         break;
       }
       case UploadEntityType.STORE_LOGOS: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildStoreLogoPath(org, store);
         break;
       }
       case UploadEntityType.STORE_FAVICONS: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildFaviconPath(org, store);
         break;
       }
       case UploadEntityType.MARKETING_ADS: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildMarketingAnunciosPath(org, store);
         break;
       }
@@ -164,7 +172,7 @@ export class UploadController {
       case UploadEntityType.RECEIPTS: {
         if (!storeId)
           throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_CONTEXT_001);
-        const store = await this.getStoreWithSlug(storeId);
+        const store = await this.resolveStore(storeId, org.id, isExplicitStore);
         path = this.s3PathHelper.buildReceiptPath(org, store);
         break;
       }
@@ -277,20 +285,38 @@ export class UploadController {
   }
 
   /**
-   * Helper to get store with slug for S3 path building
+   * Resolves the destination store for store-scoped uploads.
+   *
+   * Loads the store with its `organization_id`. When the store id was provided
+   * explicitly by the client (`isExplicitStore`), it ENFORCES multi-tenant
+   * ownership: the store must belong to the request's organization, otherwise
+   * a `UPLOAD_FORBIDDEN_001` (403) is thrown. This prevents an org-admin from
+   * uploading into the S3 path of a store belonging to another organization.
+   *
+   * When the store comes from the RequestContext (not explicit), ownership is
+   * already guaranteed by the tenant context bridge, so the check is skipped.
    */
-  private async getStoreWithSlug(
+  private async resolveStore(
     storeId: number,
+    organizationId: number,
+    isExplicitStore: boolean,
   ): Promise<{ id: number; slug: string }> {
     const store = await this.prisma.stores.findUnique({
       where: { id: storeId },
-      select: { id: true, slug: true },
+      select: { id: true, slug: true, organization_id: true },
     });
 
     if (!store) {
       throw new VendixHttpException(ErrorCodes.UPLOAD_STORE_001);
     }
 
-    return store;
+    if (isExplicitStore && store.organization_id !== organizationId) {
+      this.logger.warn(
+        `Upload ownership violation: store ${storeId} (org ${store.organization_id}) requested by org ${organizationId}`,
+      );
+      throw new VendixHttpException(ErrorCodes.UPLOAD_FORBIDDEN_001);
+    }
+
+    return { id: store.id, slug: store.slug };
   }
 }

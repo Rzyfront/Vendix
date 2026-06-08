@@ -2,16 +2,13 @@ import {
   CanActivate,
   ExecutionContext,
   ForbiddenException,
-  Inject,
   Injectable,
   Logger,
   SetMetadata,
 } from '@nestjs/common';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
 import { Reflector } from '@nestjs/core';
-import { StorePrismaService } from '../../prisma/services/store-prisma.service';
-import { FiscalStatusResolverService } from '../services/fiscal-status-resolver.service';
+import { FiscalArea } from '../interfaces/fiscal-status.interface';
+import { FiscalGateService } from '../services/fiscal-gate.service';
 
 export const MODULE_FLOW_KEY = 'module_flow';
 export const RequireModuleFlow = (
@@ -35,15 +32,21 @@ export const SKIP_MODULE_FLOW_KEY = 'skip_module_flow';
 export const SkipModuleFlowGuard = () =>
   SetMetadata(SKIP_MODULE_FLOW_KEY, true);
 
+/**
+ * Gatea endpoints HTTP por área fiscal maestra. Delega toda la regla
+ * (fiscal_status manda, module_flows refina, default estricto, fallback
+ * legacy) en FiscalGateService — única fuente compartida con el listener
+ * de auto-asientos. No cachea localmente: el resolver subyacente ya tiene
+ * caché de 30s con invalidación al activar/desactivar áreas, evitando el
+ * 403 fantasma de hasta 5min tras activar el wizard.
+ */
 @Injectable()
 export class ModuleFlowGuard implements CanActivate {
   private readonly logger = new Logger(ModuleFlowGuard.name);
 
   constructor(
-    private reflector: Reflector,
-    private prisma: StorePrismaService,
-    private fiscalStatusResolver: FiscalStatusResolverService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+    private readonly reflector: Reflector,
+    private readonly fiscalGate: FiscalGateService,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -69,82 +72,27 @@ export class ModuleFlowGuard implements CanActivate {
       request.organization_id ??
       request.context?.organization_id ??
       request.user?.organization_id;
-    if (!store_id && !organization_id) return true;
 
-    const cacheKey = `mflow:${organization_id ?? 'org'}:${store_id ?? 'none'}:${module}`;
-    const cached = await this.cache.get<boolean>(cacheKey);
-    if (cached !== undefined && cached !== null) {
-      if (!cached) {
-        throw new ForbiddenException(
-          `Module "${module}" is disabled for this store`,
-        );
-      }
-      return true;
-    }
+    // Sin contexto de organización no se puede resolver el área fiscal maestra;
+    // mantener el comportamiento permisivo previo para esos requests.
+    if (!organization_id) return true;
 
     try {
-      if (organization_id) {
-        try {
-          const fiscalStatus = await this.fiscalStatusResolver.getStatusBlock(
-            Number(organization_id),
-            store_id ? Number(store_id) : null,
-          );
-          if (fiscalStatus.source_exists) {
-            const state = fiscalStatus.fiscal_status[module as any]?.state;
-            const enabledByFiscalStatus =
-              state === 'ACTIVE' || state === 'LOCKED';
-            await this.cache.set(cacheKey, enabledByFiscalStatus, 300_000);
-
-            if (!enabledByFiscalStatus) {
-              throw new ForbiddenException(
-                `Fiscal area "${module}" is inactive for this tenant`,
-              );
-            }
-            return true;
-          }
-        } catch (error) {
-          if (error instanceof ForbiddenException) throw error;
-          if (!store_id) return true;
-        }
-      }
-
-      if (!store_id) return true;
-
-      const settings = await this.prisma
-        .withoutScope()
-        .store_settings.findUnique({
-          where: { store_id },
-          select: { settings: true },
-        });
-      const s = (settings?.settings as any) || {};
-
-      let enabled: boolean;
-      if (s.module_flows?.[module]) {
-        enabled = s.module_flows[module].enabled !== false;
-      } else if (module === 'accounting' && s.accounting_flows) {
-        // Legacy fallback: accounting_flows exists = module was implicitly enabled
-        enabled = true;
-      } else if (!s.module_flows) {
-        // No module_flows at all = legacy store, all modules implicitly enabled
-        enabled = true;
-      } else {
-        // module_flows exists but this specific module is not configured
-        enabled = false;
-      }
-
-      await this.cache.set(cacheKey, enabled, 300_000);
-
+      const enabled = await this.fiscalGate.isAreaEnabled(
+        Number(organization_id),
+        store_id != null ? Number(store_id) : null,
+        module as FiscalArea,
+      );
       if (!enabled) {
         throw new ForbiddenException(
-          `Module "${module}" is disabled for this store`,
+          `Fiscal area "${module}" is inactive for this tenant`,
         );
       }
       return true;
     } catch (error) {
       if (error instanceof ForbiddenException) throw error;
-
       this.logger.warn(
-        `DB error for module "${module}" store ${store_id}, no cache available — denying access`,
+        `Module flow check failed for "${module}" (org ${organization_id}) — denying access: ${(error as Error).message}`,
       );
       return false;
     }

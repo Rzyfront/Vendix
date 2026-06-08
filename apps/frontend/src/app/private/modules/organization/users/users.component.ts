@@ -29,6 +29,7 @@ import {
   ItemListCardConfig,
   EmptyStateComponent,
   OptionsDropdownComponent,
+  PaginationComponent,
   FilterConfig,
   FilterValues,
   DropdownAction} from '../../../../shared/components/index';
@@ -60,7 +61,8 @@ interface StatItem {
     ResponsiveDataViewComponent,
     InputsearchComponent,
     StatsComponent,
-    OptionsDropdownComponent
+    OptionsDropdownComponent,
+    PaginationComponent,
 ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css']})

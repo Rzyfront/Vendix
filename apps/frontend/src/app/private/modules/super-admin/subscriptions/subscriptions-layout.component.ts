@@ -33,6 +33,7 @@ export class SubscriptionsLayoutComponent {
     { id: 'payouts', route: 'payouts', label: 'Pagos', icon: 'banknote' },
     { id: 'events', route: 'events', label: 'Eventos', icon: 'activity' },
     { id: 'gateway', route: 'gateway', label: 'Pasarela', shortLabel: 'Pasarela', icon: 'shield-check' },
+    { id: 'fiscal-billing', route: 'fiscal-billing', label: 'Facturación', shortLabel: 'Fiscal', icon: 'file-check' },
     { id: 'metrics', route: 'metrics', label: 'Métricas', shortLabel: 'Métricas', icon: 'chart-line' },
   ];
 }

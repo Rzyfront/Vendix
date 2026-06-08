@@ -112,9 +112,10 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
 	                        Tarifa: {{ item.appliedPriceTierName }}
 	                      </span>
 	                    }
-	                    @if (item.isPackageUnit && item.unitsPerPackage) {
+	                    @if (item.isPackageUnit && item.unitsPerPackage > 1) {
 	                      <span class="mt-1 inline-flex w-fit rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
-	                        x {{ item.unitsPerPackage }} unid/empaque
+	                        {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+	                        = {{ item.quantity * item.unitsPerPackage }} unid (Caja ×{{ item.unitsPerPackage }})
 	                      </span>
 	                    }
 	                  </div>
@@ -192,24 +193,24 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
           [fullWidth]="true"
           (clicked)="startNewSale()"
           >
-          <app-icon name="plus" [size]="20" slot="icon"></app-icon>
+          <app-icon name="plus" [size]="20" slot="icon" ></app-icon>
           Nueva compra
         </app-button>
     
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
           <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
-            <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+            <app-icon name="printer" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Imprimir</span>
           </app-button>
     
           <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
-            <app-icon name="mail" [size]="16" slot="icon"></app-icon>
+            <app-icon name="mail" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
     
           <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading()" [loading]="creatingInvoice" title="Crear Factura">
-            <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
+            <app-icon name="file-text" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
     
@@ -217,7 +218,7 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
           <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
     
           <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
-            <app-icon name="external-link" [size]="16" slot="icon"></app-icon>
+            <app-icon name="external-link" [size]="16" slot="icon" ></app-icon>
             <span class="hidden sm:inline">Ver detalle</span>
           </app-button>
         </div>

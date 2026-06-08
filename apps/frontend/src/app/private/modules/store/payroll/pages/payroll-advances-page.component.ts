@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef, signal } from '@angular/core';
+import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 
@@ -9,6 +9,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 import { FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 
 import { AdvanceListComponent } from '../components/advances/advance-list/advance-list.component';
 import { AdvanceCreateComponent } from '../components/advances/advance-create/advance-create.component';
@@ -19,6 +20,7 @@ import { AdvanceDetailComponent } from '../components/advances/advance-detail/ad
   standalone: true,
   imports: [
     StatsComponent,
+    PaginationComponent,
     AdvanceListComponent,
     AdvanceCreateComponent,
     AdvanceDetailComponent
@@ -77,6 +79,17 @@ import { AdvanceDetailComponent } from '../components/advances/advance-detail/ad
         (quickReject)="onQuickReject($event)"
       />
 
+      <!-- Pagination -->
+      <div class="mt-4 flex justify-center">
+        <app-pagination
+          [currentPage]="filters().page"
+          [totalPages]="totalPages()"
+          [total]="totalItems()"
+          [limit]="filters().limit"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+
       <!-- Create Modal -->
       <app-advance-create
         [(isOpen)]="isCreateModalOpen"
@@ -101,7 +114,13 @@ export class PayrollAdvancesPageComponent {
   stats = signal<AdvanceStats | null>(null);
   loading = signal(false);
 
-  // Filters
+  // Filters + pagination
+  readonly filters = signal({ page: 1, limit: 10 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
+
   private searchTerm = '';
   private statusFilter = '';
 
@@ -121,7 +140,10 @@ export class PayrollAdvancesPageComponent {
 
   loadAdvances(): void {
     this.loading.set(true);
-    const query: Record<string, any> = {};
+    const query: Record<string, any> = {
+      page: this.filters().page,
+      limit: this.filters().limit,
+    };
     if (this.searchTerm) query['search'] = this.searchTerm;
     if (this.statusFilter) query['status'] = this.statusFilter;
 
@@ -130,6 +152,7 @@ export class PayrollAdvancesPageComponent {
       .subscribe({
         next: (res) => {
           this.advances.set(res.data || []);
+          this.totalItems.set(res.meta?.total ?? (res.data?.length ?? 0));
           this.loading.set(false);
         },
         error: () => {
@@ -147,11 +170,18 @@ export class PayrollAdvancesPageComponent {
 
   onSearch(term: string): void {
     this.searchTerm = term;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadAdvances();
   }
 
   onFilterChange(values: FilterValues): void {
     this.statusFilter = (values['status'] as string) || '';
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadAdvances();
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
     this.loadAdvances();
   }
 
