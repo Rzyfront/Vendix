@@ -482,7 +482,7 @@ export class OrgLocationsService {
         type: 'warehouse',
         is_central_warehouse: true,
         is_active: true,
-        is_default: false,
+        is_default: true,
       },
     });
     this.logger.log(
