@@ -82,6 +82,16 @@
         (rowClick)="onRowClick($event)"
       ></app-responsive-data-view>
     </div>
+
+    <div class="mt-4 flex justify-center">
+      <app-pagination
+        [currentPage]="filters().page"
+        [totalPages]="totalPages()"
+        [total]="totalItems()"
+        [limit]="filters().limit"
+        (pageChange)="onPageChange($event)"
+      />
+    </div>
   </app-card>
 
   @defer (when isCreateModalOpen()) {

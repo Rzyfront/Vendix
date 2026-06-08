@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 
@@ -17,10 +17,38 @@ export class NotificationSoundsAdminService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = `${environment.apiUrl}/superadmin/notification-sounds`;
 
-  list(): Observable<NotificationSoundAdmin[]> {
+  list(query: { page?: number; limit?: number; search?: string } = {}): Observable<{
+    data: NotificationSoundAdmin[];
+    meta?: { total: number; page: number; limit: number; totalPages: number };
+  }> {
+    let params = new HttpParams();
+    if (query.page != null) params = params.set('page', String(query.page));
+    if (query.limit != null) params = params.set('limit', String(query.limit));
+    if (query.search) params = params.set('search', query.search);
+
     return this.http
-      .get<ApiResponse<NotificationSoundAdmin[]>>(this.apiUrl)
-      .pipe(map((res) => res.data ?? []));
+      .get<ApiResponse<NotificationSoundAdmin[]>>(this.apiUrl, { params })
+      .pipe(
+        map((res) => {
+          if (res && Array.isArray(res.data) && (res as any).meta) {
+            return {
+              data: res.data,
+              meta: (res as any).meta as {
+                total: number;
+                page: number;
+                limit: number;
+                totalPages: number;
+              },
+            };
+          }
+          // Legacy unwrapped — fall back to a single-page envelope.
+          const data = res?.data ?? [];
+          return {
+            data,
+            meta: { total: data.length, page: 1, limit: data.length || 25, totalPages: 1 },
+          };
+        }),
+      );
   }
 
   create(

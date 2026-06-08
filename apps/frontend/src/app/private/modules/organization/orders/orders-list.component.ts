@@ -30,6 +30,7 @@ import {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  PaginationComponent,
 } from '../../../../shared/components/index';
 
 import { OrderStatsComponent } from './components/order-stats.component';
@@ -50,6 +51,7 @@ import './orders-list.component.css';
     IconComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
+    PaginationComponent,
   ],
   templateUrl: './orders-list.component.html',
 })
@@ -61,6 +63,11 @@ export class OrdersListComponent implements OnInit {
 
   readonly orders = signal<OrderListItem[]>([]);
   readonly isLoading = signal(false);
+  readonly filters = signal({ page: 1, limit: 25 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
   readonly stats = signal<OrderStats>({
     total_orders: 0,
     pending_orders: 0,
@@ -339,8 +346,8 @@ export class OrdersListComponent implements OnInit {
     this.isLoading.set(true);
 
     const queryParams: any = {
-      page: 1,
-      limit: 100,
+      page: this.filters().page,
+      limit: this.filters().limit,
     };
 
     if (this.searchTerm) queryParams.search = this.searchTerm;
@@ -358,17 +365,25 @@ export class OrdersListComponent implements OnInit {
         next: (response) => {
           if (response.success && response.data) {
             this.orders.set(response.data);
+            this.totalItems.set(response.pagination?.total ?? 0);
           } else {
             this.orders.set([]);
+            this.totalItems.set(0);
           }
           this.isLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading orders:', error);
           this.orders.set([]);
+          this.totalItems.set(0);
           this.isLoading.set(false);
         },
       });
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadOrders();
   }
 
   loadStats(): void {
@@ -411,41 +426,49 @@ export class OrdersListComponent implements OnInit {
     this.selectedDateTo = '';
     this.filterValues = {};
     this.filterForm.reset();
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onStatusChange(event: any): void {
     this.selectedStatus = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onPaymentStatusChange(event: any): void {
     this.selectedPaymentStatus = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onStoreChange(event: any): void {
     this.selectedStore = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onOrderTypeChange(event: any): void {
     this.selectedOrderType = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onDateFromChange(event: any): void {
     this.selectedDateFrom = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
   onDateToChange(event: any): void {
     this.selectedDateTo = event.target.value;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 
@@ -456,6 +479,7 @@ export class OrdersListComponent implements OnInit {
     this.selectedPaymentStatus = (values['payment_status'] as string) || '';
     this.selectedDateFrom = (values['date_from'] as string) || '';
     this.selectedDateTo = (values['date_to'] as string) || '';
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadOrders();
   }
 

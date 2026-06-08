@@ -42,5 +42,5 @@ export function dataUrlToFile(dataUrl: string, fileName = 'image.jpg'): File {
     }
   }
 
-  return new File([bytes], fileName, { type: contentType });
+  return new File([bytes.buffer as ArrayBuffer], fileName, { type: contentType });
 }

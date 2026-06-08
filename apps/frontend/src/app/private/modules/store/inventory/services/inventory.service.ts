@@ -20,6 +20,7 @@ import {
   InventoryBatch,
   ApiResponse,
   PaginatedResponse,
+  PaginatedApiResponse,
 } from '../interfaces';
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -201,11 +202,11 @@ export class InventoryService {
 
   getMovements(
     query: MovementQueryDto = {},
-  ): Observable<ApiResponse<InventoryMovement[]>> {
+  ): Observable<PaginatedApiResponse<InventoryMovement>> {
     const params = this.buildParams(query);
     return this.http
       .get<
-        ApiResponse<InventoryMovement[]>
+        PaginatedApiResponse<InventoryMovement>
       >(`${this.base_url}/movements`, { params })
       .pipe(catchError(this.handleError));
   }

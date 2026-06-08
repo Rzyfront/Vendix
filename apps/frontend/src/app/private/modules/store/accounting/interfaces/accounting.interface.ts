@@ -211,6 +211,24 @@ export interface ApiResponse<T> {
   path?: string;
 }
 
+/**
+ * Shape of a successful paginated response from the backend
+ * (ResponseService.paginated()).
+ */
+export interface PaginatedApiResponse<T> {
+  success: boolean;
+  data: T[];
+  message?: string;
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
+}
+
 // ── Bank Reconciliation ─────────────────────────────────────────
 export interface BankAccount {
   id: number;

@@ -173,15 +173,13 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
     const sub = this.inventoryService.getMovements(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        const data = (response.data ?? []) as InventoryMovement[];
-        this.movements.set(data);
-        const meta = response.meta as
-          | { pagination?: { total?: number; total_pages?: number } }
-          | undefined;
-        const total =
-          meta?.pagination?.total ??
-          (Array.isArray(response.data) ? response.data.length : 0);
-        this.totalItems.set(total);
+        // Backend ResponseService.paginated() shape:
+        //   { success, message, data: T[], meta: { total, page, limit, totalPages, ... } }
+        const list: InventoryMovement[] = Array.isArray(response.data)
+          ? response.data
+          : [];
+        this.movements.set(list);
+        this.totalItems.set(response.meta?.total ?? list.length);
         this.calculateStats();
         this.is_loading.set(false);
       },

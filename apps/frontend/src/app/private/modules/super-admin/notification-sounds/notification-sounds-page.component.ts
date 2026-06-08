@@ -16,6 +16,7 @@ import {
   InputsearchComponent,
   ResponsiveDataViewComponent,
   EmptyStateComponent,
+  PaginationComponent,
   DialogService,
   ToastService,
   TableColumn,
@@ -44,6 +45,7 @@ import { EditNotificationSoundModalComponent } from './components/edit-notificat
     InputsearchComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
+    PaginationComponent,
     CreateNotificationSoundModalComponent,
     EditNotificationSoundModalComponent,
   ],
@@ -58,6 +60,11 @@ export class NotificationSoundsPageComponent implements OnInit {
   readonly sounds = signal<NotificationSoundAdmin[]>([]);
   readonly isLoading = signal<boolean>(false);
   readonly searchTerm = signal<string>('');
+  readonly filters = signal({ page: 1, limit: 25 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
 
   readonly showCreateModal = signal<boolean>(false);
   readonly isCreating = signal<boolean>(false);
@@ -171,11 +178,16 @@ export class NotificationSoundsPageComponent implements OnInit {
   loadSounds(): void {
     this.isLoading.set(true);
     this.service
-      .list()
+      .list({
+        page: this.filters().page,
+        limit: this.filters().limit,
+        search: this.searchTerm() || undefined,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (data) => {
-          this.sounds.set(data ?? []);
+        next: (res) => {
+          this.sounds.set(res.data ?? []);
+          this.totalItems.set(res.meta?.total ?? (res.data?.length ?? 0));
           this.isLoading.set(false);
         },
         error: (err) => {
@@ -188,6 +200,13 @@ export class NotificationSoundsPageComponent implements OnInit {
 
   onSearchChange(term: string): void {
     this.searchTerm.set(term ?? '');
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadSounds();
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadSounds();
   }
 
   // ---- Preview ----

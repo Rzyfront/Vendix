@@ -82,6 +82,16 @@
         (sort)="onSortChange($event.column, $event.direction)"
       >
       </app-responsive-data-view>
+
+      <div class="mt-4 flex justify-center">
+        <app-pagination
+          [currentPage]="pagination().page"
+          [totalPages]="pagination().totalPages"
+          [total]="pagination().total"
+          [limit]="pagination().limit"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
     }
   </div>
 

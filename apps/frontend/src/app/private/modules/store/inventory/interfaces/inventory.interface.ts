@@ -483,8 +483,10 @@ export interface MovementQueryDto {
   search?: string;
   start_date?: string;
   end_date?: string;
+  page?: number;
   limit?: number;
-  offset?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
 }
 
 // ============================================================
@@ -632,4 +634,23 @@ export interface PaginatedResponse<T> {
   data: T[];
   total: number;
   has_more: boolean;
+}
+
+/**
+ * Shape of a successful paginated response from the backend
+ * (ResponseService.paginated()). The data array is the current page slice
+ * and meta carries total / page / limit / totalPages + nav flags.
+ */
+export interface PaginatedApiResponse<T> {
+  success: boolean;
+  message?: string;
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPreviousPage: boolean;
+  };
 }

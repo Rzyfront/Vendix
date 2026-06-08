@@ -14,6 +14,7 @@ import {
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { PaginationComponent } from '../../../../../shared/components/pagination/pagination.component';
 import { FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { SettlementListComponent } from '../components/settlements/settlement-list/settlement-list.component';
@@ -25,6 +26,7 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
   standalone: true,
   imports: [
     StatsComponent,
+    PaginationComponent,
     SettlementListComponent,
     SettlementCreateComponent,
     SettlementDetailComponent
@@ -85,6 +87,17 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
         (cancel)="onCancel($event)"
       ></app-settlement-list>
 
+      <!-- Pagination -->
+      <div class="mt-4 flex justify-center">
+        <app-pagination
+          [currentPage]="filters().page"
+          [totalPages]="totalPages()"
+          [total]="totalItems()"
+          [limit]="filters().limit"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+
       <!-- Create Modal -->
       <app-settlement-create
         [(isOpen)]="isCreateModalOpen"
@@ -109,7 +122,13 @@ export class PayrollSettlementsPageComponent {
   stats = signal<SettlementStats | null>(null);
   loading = signal(false);
 
-  // Filters
+  // Filters + pagination
+  readonly filters = signal({ page: 1, limit: 10 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
+
   private searchTerm = '';
   private statusFilter = '';
 
@@ -135,7 +154,10 @@ export class PayrollSettlementsPageComponent {
 
   loadSettlements(): void {
     this.loading.set(true);
-    const query: Record<string, any> = {};
+    const query: Record<string, any> = {
+      page: this.filters().page,
+      limit: this.filters().limit,
+    };
     if (this.searchTerm) query['search'] = this.searchTerm;
     if (this.statusFilter) query['status'] = this.statusFilter;
 
@@ -145,6 +167,7 @@ export class PayrollSettlementsPageComponent {
       .subscribe({
         next: (res) => {
           this.settlements.set(res.data || []);
+          this.totalItems.set(res.meta?.total ?? (res.data?.length ?? 0));
           this.loading.set(false);
         },
         error: () => {
@@ -165,11 +188,18 @@ export class PayrollSettlementsPageComponent {
 
   onSearch(term: string): void {
     this.searchTerm = term;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadSettlements();
   }
 
   onFilterChange(values: FilterValues): void {
     this.statusFilter = (values['status'] as string) || '';
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadSettlements();
+  }
+
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
     this.loadSettlements();
   }
 

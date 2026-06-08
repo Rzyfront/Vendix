@@ -84,9 +84,21 @@ export class ConsolidationController {
 
   @Get('sessions/:id/intercompany')
   @Permissions('store:accounting:consolidation:read')
-  async getDetectedTransactions(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.intercompany_service.getDetectedTransactions(id);
-    return this.response_service.success(result);
+  async getDetectedTransactions(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const result = await this.intercompany_service.getDetectedTransactions(id, {
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+    });
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Post('sessions/:id/detect')

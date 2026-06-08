@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -47,8 +48,21 @@ export class PaymentMethodsController {
     status: 200,
     description: 'Payment methods retrieved successfully',
   })
-  async findAll() {
-    return this.paymentMethodsService.findAll();
+  async findAll(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('type') type?: string,
+    @Query('is_active') is_active?: string,
+  ) {
+    return this.paymentMethodsService.findAll({
+      page: page ? Number(page) : undefined,
+      limit: limit ? Number(limit) : undefined,
+      search,
+      type,
+      is_active:
+        is_active === undefined ? undefined : is_active === 'true' || is_active === '1',
+    });
   }
 
   @Get('stats')

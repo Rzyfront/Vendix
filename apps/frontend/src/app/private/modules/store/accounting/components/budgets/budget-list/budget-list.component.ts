@@ -18,6 +18,7 @@ import {
   StatsComponent,
   ResponsiveDataViewComponent,
   OptionsDropdownComponent,
+  PaginationComponent,
   TableColumn,
   TableAction,
   ItemListCardConfig,
@@ -43,6 +44,7 @@ interface BudgetStats {
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
+    PaginationComponent,
     BudgetCreateModalComponent
 ],
   templateUrl: './budget-list.component.html',
@@ -58,20 +60,31 @@ private accounting_service = inject(AccountingService);
   search_term = signal('');
   filter_values = signal<FilterValues>({});
 
+  // Pagination state — backend paginates; we mirror the current page slice.
+  readonly filters = signal({ page: 1, limit: 20 });
+  readonly totalItems = signal(0);
+  readonly totalPages = computed(() =>
+    Math.max(1, Math.ceil(this.totalItems() / this.filters().limit)),
+  );
+
   // ✅ Migrated to model() for two-way binding (Section 2 — model API)
   readonly isCreateModalOpen = signal(false);
 
   stats = computed<BudgetStats>(() => {
-    const items = this.budgets();
+    // Stats reflect the server-side total (not just the current page slice).
     return {
-      total: items.length,
-      draft: items.filter((b) => b.status === 'draft').length,
-      active: items.filter(
-        (b) => b.status === 'active' || b.status === 'approved',
-      ).length,
-      closed: items.filter((b) => b.status === 'closed').length};
+      total: this.totalItems(),
+      draft: this._statsBreakdown().draft,
+      active: this._statsBreakdown().active,
+      closed: this._statsBreakdown().closed,
+    };
   });
 
+  /**
+   * Local post-filter on top of the server-side page.
+   * Search is not supported by the backend query DTO, so we filter the
+   * current page slice in the client. Status filter is sent server-side.
+   */
   filtered_budgets = computed(() => {
     let items = this.budgets();
     const search = this.search_term().toLowerCase();
@@ -91,6 +104,22 @@ private accounting_service = inject(AccountingService);
     }
 
     return items;
+  });
+
+  /**
+   * Approximate status breakdown from the current page slice.
+   * Backend stats endpoint would be the ideal source — placeholder until
+   * the accounting stats endpoint is wired.
+   */
+  private _statsBreakdown = computed(() => {
+    const items = this.budgets();
+    return {
+      draft: items.filter((b) => b.status === 'draft').length,
+      active: items.filter(
+        (b) => b.status === 'active' || b.status === 'approved',
+      ).length,
+      closed: items.filter((b) => b.status === 'closed').length,
+    };
   });
 
   filter_configs: FilterConfig[] = [
@@ -201,12 +230,21 @@ private accounting_service = inject(AccountingService);
   }
 loadBudgets(): void {
     this.loading.set(true);
+    const query: Record<string, unknown> = {
+      page: this.filters().page,
+      limit: this.filters().limit,
+    };
+    const statusFilter = this.filter_values()['status'] as string | undefined;
+    if (statusFilter) {
+      query['status'] = statusFilter;
+    }
     this.accounting_service
-      .getBudgets()
+      .getBudgets(query)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.budgets.set(res.data || []);
+          this.totalItems.set(res.meta?.total ?? 0);
           this.loading.set(false);
         },
         error: () => {
@@ -214,12 +252,23 @@ loadBudgets(): void {
         }});
   }
 
+  onPageChange(page: number): void {
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadBudgets();
+  }
+
   onSearchChange(term: string): void {
     this.search_term.set(term);
+    // Reset to page 1 when searching so the user sees the first match
+    // from the current page slice (search is local until the backend
+    // grows a `search` field on QueryBudgetDto).
+    this.filters.update((f) => ({ ...f, page: 1 }));
   }
 
   onFilterChange(values: FilterValues): void {
     this.filter_values.set({ ...values });
+    this.filters.update((f) => ({ ...f, page: 1 }));
+    this.loadBudgets();
   }
 
   onActionClick(action: string): void {

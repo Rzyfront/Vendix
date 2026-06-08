@@ -147,6 +147,16 @@
             emptyIcon="git-merge"
           ></app-responsive-data-view>
         </div>
+
+        <div class="mt-4 flex justify-center">
+          <app-pagination
+            [currentPage]="ic_filters().page"
+            [totalPages]="ic_totalPages()"
+            [total]="ic_totalItems()"
+            [limit]="ic_filters().limit"
+            (pageChange)="onICPageChange($event)"
+          />
+        </div>
       </app-card>
     }
 

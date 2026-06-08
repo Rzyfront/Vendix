@@ -46,7 +46,7 @@ export class SuperAdminPaymentMethodsService {
 
   getPaymentMethods(
     query?: PaymentMethodQueryDto,
-  ): Observable<PaymentMethod[]> {
+  ): Observable<{ data: PaymentMethod[]; meta?: { total: number; page: number; limit: number; totalPages: number } }> {
     this.isLoading.set(true);
     let params = new HttpParams();
     if (query) {
@@ -59,13 +59,18 @@ export class SuperAdminPaymentMethodsService {
 
     return this.http.get<any>(this.apiBaseUrl, { params }).pipe(
       map((response) => {
-        if (Array.isArray(response)) {
-          return response;
+        // Paginated envelope from ResponseService.paginated().
+        if (response && response.success && Array.isArray(response.data)) {
+          return { data: response.data, meta: response.meta };
         }
-        if (response.success && response.data) {
-          return response.data;
-        }
-        return response || [];
+        // Legacy unwrapped array — return as a single page.
+        const list: PaymentMethod[] = Array.isArray(response)
+          ? response
+          : (response?.data ?? []);
+        return {
+          data: list,
+          meta: { total: list.length, page: 1, limit: list.length || 25, totalPages: 1 },
+        };
       }),
       catchError(this.handleError),
       finalize(() => this.isLoading.set(false)),
