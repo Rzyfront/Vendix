@@ -195,6 +195,10 @@ export class CategoryFormModalComponent {
   readonly imagePreviewUrl = signal<string | null>(null);
   readonly isUploadingImage = signal(false);
   readonly isImageSourceModalOpen = signal(false);
+  // True solo si el usuario subió/quitó imagen en esta sesión de edición.
+  // Evita re-enviar la URL firmada de display (thumbnail) en el payload, que
+  // se persistía como key `thumb_...` y rompía la imagen en la siguiente lectura.
+  private readonly imageDirty = signal(false);
 
   form: FormGroup;
   private readonly categoriesService = inject(CategoriesService);
@@ -211,6 +215,7 @@ export class CategoryFormModalComponent {
       } else if (isOpen && !cat) {
         this.form.reset({ state: true, is_featured: false });
         this.imagePreviewUrl.set(null);
+        this.imageDirty.set(false);
       }
     });
   }
@@ -238,11 +243,16 @@ export class CategoryFormModalComponent {
       name: category.name ?? '',
       slug: category.slug ?? '',
       description: category.description ?? '',
-      image_url: category.image_url ?? '',
+      // El control solo lleva la KEY de S3, nunca la URL firmada de display.
+      // La firma puede superar maxLength(500) e invalidar el form (botón Guardar
+      // deshabilitado). El preview usa la URL firmada; el control queda vacío
+      // hasta que el usuario cambie la imagen (imageDirty).
+      image_url: '',
       state: category.state ? category.state === 'active' : true,
       is_featured: !!category.is_featured,
     });
     this.imagePreviewUrl.set(category.image_url ?? null);
+    this.imageDirty.set(false);
   }
 
   getError(field: string): string {
@@ -283,8 +293,12 @@ export class CategoryFormModalComponent {
     const description = (raw.description ?? '').trim();
     if (description) payload.description = description;
 
-    const imageUrl = (raw.image_url ?? '').trim();
-    if (imageUrl || this.category()) payload.image_url = imageUrl;
+    // Solo enviar image_url cuando el usuario lo cambió en esta sesión.
+    // Si no se tocó, se omite → backend preserva la imagen actual (update
+    // ignora campos undefined). Si se quitó → '' limpia la imagen.
+    if (this.imageDirty()) {
+      payload.image_url = (raw.image_url ?? '').trim();
+    }
 
     payload.state = raw.state ? 'active' : 'inactive';
 
@@ -317,6 +331,7 @@ export class CategoryFormModalComponent {
 
       this.form.patchValue({ image_url: result.key });
       this.imagePreviewUrl.set(result.url);
+      this.imageDirty.set(true);
       this.form.markAsDirty();
       this.toastService.success('Imagen cargada correctamente');
     } catch {
@@ -329,6 +344,7 @@ export class CategoryFormModalComponent {
   removeImage(): void {
     this.form.patchValue({ image_url: '' });
     this.imagePreviewUrl.set(null);
+    this.imageDirty.set(true);
     this.form.markAsDirty();
   }
 }
