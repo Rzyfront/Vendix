@@ -891,7 +891,7 @@ export class SettingsService {
     ]);
     const fiscalData = (mergeStoreSettingsWithDefaults(existing?.settings)
       .fiscal_data ?? {}) as Record<string, unknown>;
-    return {
+    const storeLevel: Record<string, unknown> = {
       ...fiscalData,
       legal_name: store?.legal_name ?? fiscalData.legal_name,
       nit: store?.tax_id ?? fiscalData.nit,
@@ -899,7 +899,59 @@ export class SettingsService {
       tax_id: store?.tax_id ?? fiscalData.tax_id,
       tax_id_dv: store?.tax_id_dv ?? fiscalData.tax_id_dv,
       nit_type: store?.nit_type ?? fiscalData.nit_type,
-    } as StoreSettings['fiscal_data'];
+    };
+
+    // Pre-fill defaults for a freshly created per-store-scope store: it has no
+    // legal identity of its own yet, so instead of an empty form we surface the
+    // organization's fiscal identity (captured at registration/onboarding) as
+    // EDITABLE defaults. Strictly read-only — never persisted here and never
+    // overrides a value the store already set. A multi-store org whose stores
+    // are distinct legal entities simply edits the default before saving.
+    const blank = (value: unknown): boolean =>
+      value === null || value === undefined || String(value).trim() === '';
+    const hasOwnIdentity =
+      !blank(storeLevel.tax_id) ||
+      !blank(storeLevel.nit) ||
+      !blank(storeLevel.legal_name);
+
+    if (!hasOwnIdentity) {
+      const [orgSettings, organization] = await Promise.all([
+        this.organizationPrisma
+          .withoutScope()
+          .organization_settings.findFirst({
+            where: { organization_id },
+            select: { settings: true },
+          }),
+        this.prisma.withoutScope().organizations.findUnique({
+          where: { id: organization_id },
+          select: { legal_name: true, tax_id: true },
+        }),
+      ]);
+      const orgFiscal = ((orgSettings?.settings as any)?.fiscal_data ??
+        {}) as Record<string, unknown>;
+      const orgLegalName = orgFiscal.legal_name ?? organization?.legal_name;
+      const orgTaxId = orgFiscal.tax_id ?? orgFiscal.nit ?? organization?.tax_id;
+      const orgTaxIdDv = orgFiscal.tax_id_dv ?? orgFiscal.nit_dv;
+      const orgNitType = orgFiscal.nit_type;
+
+      return {
+        ...storeLevel,
+        legal_name: blank(storeLevel.legal_name)
+          ? orgLegalName
+          : storeLevel.legal_name,
+        nit: blank(storeLevel.nit) ? orgTaxId : storeLevel.nit,
+        nit_dv: blank(storeLevel.nit_dv) ? orgTaxIdDv : storeLevel.nit_dv,
+        tax_id: blank(storeLevel.tax_id) ? orgTaxId : storeLevel.tax_id,
+        tax_id_dv: blank(storeLevel.tax_id_dv)
+          ? orgTaxIdDv
+          : storeLevel.tax_id_dv,
+        nit_type: blank(storeLevel.nit_type)
+          ? orgNitType
+          : storeLevel.nit_type,
+      } as StoreSettings['fiscal_data'];
+    }
+
+    return storeLevel as StoreSettings['fiscal_data'];
   }
 
   async updateFiscalData(

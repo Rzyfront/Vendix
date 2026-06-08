@@ -19,6 +19,7 @@ import {
   FiscalWizardStepId,
 } from '../../../core/models/fiscal-status.model';
 import { StickyHeaderComponent } from '../sticky-header/sticky-header.component';
+import { AlertBannerComponent } from '../alert-banner/alert-banner.component';
 import {
   StepsLineComponent,
   StepsLineItem,
@@ -43,6 +44,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
     FormsModule,
     RouterModule,
     StickyHeaderComponent,
+    AlertBannerComponent,
     StepsLineComponent,
     FiscalAreaSelectionStepComponent,
     FiscalLegalDataStepComponent,
@@ -91,6 +93,20 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
           </div>
         }
 
+        <app-alert-banner variant="info" icon="landmark" class="wizard-banner">
+          @if (service.fiscalDataOwner() === 'organization') {
+            El manejo fiscal habilita facturación, contabilidad e impuestos para
+            tu negocio. La configuración fiscal es <strong>única para toda la
+            organización</strong>: el NIT, las cuentas y la habilitación DIAN se
+            comparten en todas tus tiendas.
+          } @else {
+            El manejo fiscal habilita facturación, contabilidad e impuestos para
+            tu negocio. La configuración fiscal se define
+            <strong>por cada tienda</strong>, con su propio NIT, cuentas y
+            habilitación DIAN.
+          }
+        </app-alert-banner>
+
         <div class="wizard-shell">
           <app-steps-line
             class="step-stepper"
@@ -118,6 +134,15 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
                 <app-fiscal-area-selection-step #step />
               }
               @case ('legal_data') {
+                <app-alert-banner
+                  variant="info"
+                  icon="scan-line"
+                  class="wizard-banner"
+                >
+                  Acelera esta configuración escaneando tu RUT: leemos el
+                  documento y completamos automáticamente NIT, razón social,
+                  régimen y responsabilidades fiscales por ti.
+                </app-alert-banner>
                 <app-fiscal-legal-data-step #step />
               }
               @case ('dian_config') {
@@ -237,6 +262,14 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         display: flex;
         flex-direction: column;
         gap: 1rem;
+      }
+
+      /* Contextual explainer banners (scope + RUT scan). Block so the shared
+         <app-alert-banner> spans the column; spacing separates it from the
+         stepper / step content that follows. */
+      .wizard-banner {
+        display: block;
+        margin-bottom: 1rem;
       }
 
       /* The step stepper is the shared <app-steps-line> connector component;

@@ -14,9 +14,26 @@ export const defaultPublicRoutes: Routes = [
   {
     path: 'legal/terminos',
     loadComponent: () =>
-      import('../../public/legal/terms/terms.component').then(
-        (m) => m.TermsComponent,
-      ),
+      import(
+        '../../public/legal/document-viewer/legal-document-viewer.component'
+      ).then((m) => m.LegalDocumentViewerComponent),
+    data: { documentType: 'TERMS_OF_SERVICE' },
+  },
+  {
+    path: 'legal/privacidad',
+    loadComponent: () =>
+      import(
+        '../../public/legal/document-viewer/legal-document-viewer.component'
+      ).then((m) => m.LegalDocumentViewerComponent),
+    data: { documentType: 'PRIVACY_POLICY' },
+  },
+  {
+    path: 'legal/cookies',
+    loadComponent: () =>
+      import(
+        '../../public/legal/document-viewer/legal-document-viewer.component'
+      ).then((m) => m.LegalDocumentViewerComponent),
+    data: { documentType: 'COOKIES_POLICY' },
   },
   ...pricingRoutes,
 ];

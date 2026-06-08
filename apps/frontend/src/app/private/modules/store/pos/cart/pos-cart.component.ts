@@ -392,7 +392,9 @@ import {
                       }}{{
                         item.is_weight_product
                           ? '/' + (item.weight_unit || 'kg')
-                          : ''
+                          : isPackageLine(item)
+                            ? '/paquete'
+                            : ''
                       }}
                     </span>
                     @if (item.is_weight_product && item.weight) {
@@ -424,11 +426,12 @@ import {
                         {{ item.applied_price_tier_name }}
                       </span>
                     }
-                    @if (item.is_package_unit && item.units_per_package) {
+                    @if (isPackageLine(item)) {
                       <span
                         class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-50 text-blue-700"
+                        [title]="'Empaque de ' + item.units_per_package + ' unidades'"
                       >
-                        × {{ item.units_per_package }} unid/empaque
+                        Caja ×{{ item.units_per_package }}
                       </span>
                     }
                   </div>
@@ -491,17 +494,24 @@ import {
                         ></app-icon>
                       </button>
                     } @else {
-                      <app-quantity-control
-                        [value]="item.quantity"
-                        [min]="1"
-                        [max]="
-                          getQuantityMax(item)
-                        "
-                        [unitsPerPackage]="getRequiredStockPerUnit(item)"
-                        [editable]="true"
-                        [size]="'sm'"
-                        (valueChange)="updateQuantity(item.id, $event)"
-                      ></app-quantity-control>
+                      <div class="flex flex-col gap-0.5">
+                        <app-quantity-control
+                          [value]="item.quantity"
+                          [min]="1"
+                          [max]="
+                            getQuantityMax(item)
+                          "
+                          [unitsPerPackage]="getRequiredStockPerUnit(item)"
+                          [editable]="true"
+                          [size]="'sm'"
+                          (valueChange)="updateQuantity(item.id, $event)"
+                        ></app-quantity-control>
+                        @if (isPackageLine(item)) {
+                          <span class="text-[10px] font-medium text-blue-700 leading-none">
+                            {{ item.quantity }} {{ item.quantity === 1 ? 'paquete' : 'paquetes' }}
+                          </span>
+                        }
+                      </div>
                     }
                   </div>
                   <div class="flex shrink-0 items-center justify-end gap-2">
@@ -1110,16 +1120,27 @@ private cartService = inject(PosCartService);
         } });
   }
 
+  /**
+   * Stock units consumed per cart unit. Packaging is tier-owned: when the
+   * applied tier resolves a pack size > 1, the cart `quantity` counts PACKAGES
+   * and each package consumes `units_per_package` stock units.
+   */
   getRequiredStockPerUnit(item: CartItem): number {
-    if (
-      item.is_package_unit &&
-      item.product.package_consumes_multiple_stock === true &&
-      item.units_per_package
-    ) {
+    if (item.is_package_unit && item.units_per_package) {
       const units = Number(item.units_per_package);
       return Number.isFinite(units) && units > 1 ? units : 1;
     }
     return 1;
+  }
+
+  /** True when this line is sold by package (tier pack size > 1). */
+  isPackageLine(item: CartItem): boolean {
+    return !!item.is_package_unit && Number(item.units_per_package ?? 0) > 1;
+  }
+
+  /** Total stock units for a package line (= quantity * pack size). */
+  getTotalUnits(item: CartItem): number {
+    return item.quantity * Number(item.units_per_package ?? 1);
   }
 
   getQuantityMax(item: CartItem): number {

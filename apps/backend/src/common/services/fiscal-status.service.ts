@@ -385,7 +385,7 @@ export class FiscalStatusService {
     const dian = await client.dian_configurations.findFirst({
       where: this.tenantWhere(organization_id, store_id),
       orderBy: [{ is_default: 'desc' }, { id: 'asc' }],
-      select: { nit: true, nit_dv: true },
+      select: { nit: true, nit_dv: true, nit_type: true },
     });
 
     // Fiscal address: prefer a store address when scoped to a store, else org.
@@ -404,12 +404,50 @@ export class FiscalStatusService {
       },
     });
 
+    // Identity fields prefer the scope-aware fiscal_data JSON the dashboard
+    // writes, falling back to DIAN config (NIT/DV/type) and the organization
+    // record. DIAN owns the canonical NIT once a config exists.
+    const legal_name =
+      (typeof fiscalData?.legal_name === 'string'
+        ? fiscalData.legal_name
+        : null) ??
+      organization.legal_name ??
+      null;
+    const tax_id =
+      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
+      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
+      organization.tax_id ??
+      null;
+    const nit =
+      dian?.nit ??
+      (typeof fiscalData?.nit === 'string' ? fiscalData.nit : null) ??
+      (typeof fiscalData?.tax_id === 'string' ? fiscalData.tax_id : null) ??
+      organization.tax_id ??
+      null;
+    const nit_dv =
+      dian?.nit_dv ??
+      (typeof fiscalData?.nit_dv === 'string' ? fiscalData.nit_dv : null) ??
+      (typeof fiscalData?.tax_id_dv === 'string'
+        ? fiscalData.tax_id_dv
+        : null) ??
+      null;
+    const nit_type =
+      (dian?.nit_type ? String(dian.nit_type) : null) ??
+      (typeof fiscalData?.nit_type === 'string' ? fiscalData.nit_type : null) ??
+      null;
+    const person_type =
+      typeof fiscalData?.person_type === 'string'
+        ? fiscalData.person_type
+        : null;
+
     return {
       organization_id,
-      legal_name: organization.legal_name ?? null,
-      tax_id: organization.tax_id ?? null,
-      nit: dian?.nit ?? organization.tax_id ?? null,
-      nit_dv: dian?.nit_dv ?? null,
+      legal_name,
+      tax_id,
+      nit,
+      nit_dv,
+      nit_type,
+      person_type,
       fiscal_address: address
         ? {
             address_line1: address.address_line1 ?? null,

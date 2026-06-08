@@ -91,6 +91,17 @@ const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
   template: `
     <form [formGroup]="form" class="space-y-4">
       <!--
+        Razón social FIRST: it is the primary legal-identity field and heads
+        the form. (annotation A3 — input de razón social como primer input)
+      -->
+      <app-input
+        label="Razón social"
+        formControlName="legal_name"
+        [required]="true"
+        placeholder="Ej: Comercializadora ABC S.A.S."
+      ></app-input>
+
+      <!--
         Document identity. Type FIRST (it governs whether a DV applies and
         whether the number must be numeric), then the number, then the DV
         which only shows for NIT. (annotations A3/A4)
@@ -129,13 +140,6 @@ const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
           El dígito de verificación no coincide con el NIT.
         </p>
       }
-
-      <app-input
-        label="Razón social"
-        formControlName="legal_name"
-        [required]="true"
-        placeholder="Ej: Comercializadora ABC S.A.S."
-      ></app-input>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <app-selector

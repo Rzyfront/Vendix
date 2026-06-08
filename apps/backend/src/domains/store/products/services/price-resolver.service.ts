@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { resolvePackSize } from './packaging.util';
 
 export interface PriceResolverParams {
   product: {
@@ -7,8 +8,6 @@ export interface PriceResolverParams {
     sale_price: number | null;
     track_inventory: boolean;
     has_multiple_price_tiers?: boolean;
-    units_per_package?: number | null;
-    package_consumes_multiple_stock?: boolean;
   };
   variant?: {
     price_override: number | null;
@@ -64,11 +63,13 @@ export interface PriceResolverWithTierParams {
     name: string;
     discount_percentage: number;
     is_package_unit: boolean;
+    units_per_package: number | null;
   } | null;
-  /** Override prices for this product+tier (variant-specific or base). */
+  /** Override prices/quantities for this product+tier (variant-specific or base). */
   tierOverrides?: Array<{
     variant_id: number | null;
-    override_price: number;
+    override_price: number | null;
+    override_units_per_package?: number | null;
   }>;
   taxRate?: number;
   /** Optional quantity hint (does not affect unit price, only callers). */
@@ -267,15 +268,23 @@ export class PriceResolverService {
    *      → delegate to legacy cascade (`resolvePrice`) and report
    *      `source = 'legacy_cascade'` for traceability.
    *
-   *   b. Look for an explicit override row in `tierOverrides`:
+   *   b. Resolve the packaging cascade:
+   *      packSize = override_units_per_package ?? tier.units_per_package ?? 1.
+   *      Look for an explicit override row in `tierOverrides`:
    *      - first try the variant-specific row (when a variant is provided);
    *      - if absent fall back to the base product override (variant_id = null).
-   *      When found → `unitPrice = override_price`, `source = 'tier_override'`.
+   *      When the row carries a positive `override_price` it is treated as the
+   *      price of the WHOLE PACKAGE → `unitPrice = override_price`,
+   *      `source = 'tier_override'`.
    *
-   *   c. Otherwise apply the tier rule:
+   *   c. Otherwise apply the tier rule on the full-package base:
    *      base = variant.price_override (if > 0) or product.base_price.
-   *      unitPrice = base * (1 - discount_percentage / 100).
+   *      packageBase = base * packSize.
+   *      unitPrice = packageBase * (1 - discount_percentage / 100).
    *      `source = 'tier_rule'`.
+   *
+   *      With packSize === 1 the math is identical to the legacy single-unit
+   *      behavior (zero regression for non-package tiers).
    *
    *   d. Taxes are applied identically to the legacy cascade
    *      (`unitPrice * (1 + taxRate)`).
@@ -303,7 +312,7 @@ export class PriceResolverService {
         appliedPriceTierId: null,
         appliedPriceTierName: null,
         isPackageUnit: false,
-        unitsPerPackage: product.units_per_package ?? null,
+        unitsPerPackage: null,
       };
     }
 
@@ -317,7 +326,13 @@ export class PriceResolverService {
 
     // (b) Override lookup — variant-specific first, then product base.
     const overrides = tierOverrides ?? [];
-    let overrideRow: { variant_id: number | null; override_price: number } | undefined;
+    let overrideRow:
+      | {
+          variant_id: number | null;
+          override_price: number | null;
+          override_units_per_package?: number | null;
+        }
+      | undefined;
     if (variant) {
       overrideRow = overrides.find(
         (o) => o.variant_id !== null && o.variant_id !== undefined,
@@ -329,24 +344,39 @@ export class PriceResolverService {
       );
     }
 
+    // packSize cascade: override ?? tier ?? 1. When packSize === 1 every
+    // calculation below collapses to the legacy behavior (zero regression).
+    const packSize = resolvePackSize(
+      priceTier.units_per_package,
+      overrideRow?.override_units_per_package,
+    );
+
+    // packageBase is the full-package list price used both for the rule path
+    // and as compareAt. With packSize === 1 it equals ruleBasePrice.
+    const packageBase = ruleBasePrice * packSize;
+
     let unitPrice: number;
     let source: PriceResolutionSource;
     let reason: string;
-    if (overrideRow) {
+    if (
+      overrideRow &&
+      overrideRow.override_price != null &&
+      Number(overrideRow.override_price) > 0
+    ) {
+      // Explicit override price is the price of the WHOLE PACKAGE.
       unitPrice = Number(overrideRow.override_price);
       source = 'tier_override';
-      reason = `Explicit override for tier "${priceTier.name}"`;
+      reason = `Explicit package price for tier "${priceTier.name}"`;
     } else {
-      // (c) Apply discount rule on ruleBasePrice.
+      // (c) Apply discount rule on the full-package base.
       const discount = Number(priceTier.discount_percentage ?? 0);
       const clampedDiscount = Math.max(0, Math.min(100, discount));
-      unitPrice = ruleBasePrice * (1 - clampedDiscount / 100);
+      unitPrice = packageBase * (1 - clampedDiscount / 100);
       source = 'tier_rule';
-      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off)`;
+      reason = `Tier "${priceTier.name}" rule (${clampedDiscount}% off, x${packSize})`;
     }
 
-    const compareAtPrice =
-      ruleBasePrice > unitPrice ? ruleBasePrice : null;
+    const compareAtPrice = packageBase > unitPrice ? packageBase : null;
 
     return {
       unitBasePrice: ruleBasePrice,
@@ -360,8 +390,8 @@ export class PriceResolverService {
       reason,
       appliedPriceTierId: priceTier.id,
       appliedPriceTierName: priceTier.name,
-      isPackageUnit: !!priceTier.is_package_unit,
-      unitsPerPackage: product.units_per_package ?? null,
+      isPackageUnit: packSize > 1,
+      unitsPerPackage: packSize > 1 ? packSize : null,
     };
   }
 }

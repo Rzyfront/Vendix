@@ -16,6 +16,7 @@ import { OrdersService } from '../orders/orders.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { EmailService } from '../../../email/email.service';
 import { generateQuotationEmailHtml } from '../../../email/templates/quotation-email.template';
+import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 
 @Injectable()
 export class QuotationsService {
@@ -609,6 +610,7 @@ export class QuotationsService {
   private async resolveTierSnapshotsForItems(
     items: Array<{
       product_id?: number | null;
+      product_variant_id?: number | null;
       quantity: number;
       applied_price_tier_id?: number | null;
     }>,
@@ -646,7 +648,7 @@ export class QuotationsService {
 
     const tiers = await this.prisma.price_tiers.findMany({
       where: { id: { in: Array.from(tierIds) }, is_active: true },
-      select: { id: true, name: true, is_package_unit: true },
+      select: { id: true, name: true, is_package_unit: true, units_per_package: true },
     });
     type TierRow = (typeof tiers)[number];
     const tierById = new Map<number, TierRow>(
@@ -659,20 +661,6 @@ export class QuotationsService {
           .map((i) => i.product_id)
           .filter((id): id is number => typeof id === 'number'),
       ),
-    );
-    const productsList = productIds.length
-      ? await this.prisma.products.findMany({
-          where: { id: { in: productIds } },
-          select: {
-            id: true,
-            units_per_package: true,
-            package_consumes_multiple_stock: true,
-          },
-        })
-      : [];
-    type ProductRow = (typeof productsList)[number];
-    const productById = new Map<number, ProductRow>(
-      productsList.map((p): [number, ProductRow] => [p.id, p]),
     );
     const assignments = productIds.length
       ? await this.prisma.product_price_tier_assignments.findMany({
@@ -689,6 +677,32 @@ export class QuotationsService {
       ),
     );
 
+    // Per-product packaging overrides (override_units_per_package wins over
+    // tier.units_per_package in the packSize cascade). Keyed by
+    // product_id:variant_id:price_tier_id (variant null → "null").
+    const overrides = productIds.length
+      ? await this.prisma.product_price_tier_overrides.findMany({
+          where: {
+            product_id: { in: productIds },
+            price_tier_id: { in: Array.from(tierIds) },
+          },
+          select: {
+            product_id: true,
+            variant_id: true,
+            price_tier_id: true,
+            override_units_per_package: true,
+          },
+        })
+      : [];
+    const overrideUnitsByKey = new Map<string, number | null>(
+      overrides.map(
+        (o): [string, number | null] => [
+          `${o.product_id}:${o.variant_id ?? 'null'}:${o.price_tier_id}`,
+          o.override_units_per_package,
+        ],
+      ),
+    );
+
     return items.map((item) => {
       const tid = item.applied_price_tier_id;
       if (tid === undefined || tid === null) return null;
@@ -700,15 +714,15 @@ export class QuotationsService {
       if (!productId || !allowedTierKeys.has(`${productId}:${Number(tid)}`)) {
         throw new VendixHttpException(ErrorCodes.PRICE_TIER_NOT_ALLOWED);
       }
-      const product = item.product_id ? productById.get(item.product_id) : null;
-      const isPackage =
-        tier.is_package_unit &&
-        product?.package_consumes_multiple_stock === true &&
-        typeof product.units_per_package === 'number' &&
-        (product.units_per_package ?? 0) > 0;
-      const stock_units_consumed = isPackage
-        ? Number(item.quantity) * Number(product!.units_per_package)
-        : null;
+      const variantId = item.product_variant_id ?? null;
+      const override_units_per_package = overrideUnitsByKey.get(
+        `${productId}:${variantId ?? 'null'}:${Number(tid)}`,
+      );
+      const stock_units_consumed = resolveStockUnitsConsumed(
+        Number(item.quantity),
+        tier?.units_per_package,
+        override_units_per_package,
+      );
       return {
         tier_id: tier.id,
         tier_name: tier.name,

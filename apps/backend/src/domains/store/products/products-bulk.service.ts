@@ -71,8 +71,6 @@ export class ProductsBulkService {
     Destacado: 'is_featured',
     'Permite Cambiar Precio POS': 'allow_pos_price_override',
     'Usa Listas de Precio': 'has_multiple_price_tiers',
-    'Unidades por Empaque': 'units_per_package',
-    'Empaque Descuenta Múltiples Unidades': 'package_consumes_multiple_stock',
     'En Oferta': 'is_on_sale',
     'Precio Oferta': 'sale_price',
     Peso: 'weight',
@@ -130,11 +128,6 @@ export class ProductsBulkService {
     'multiples listas de precio': 'has_multiple_price_tiers',
     'múltiples listas de precio': 'has_multiple_price_tiers',
     'has multiple price tiers': 'has_multiple_price_tiers',
-    'unidades por empaque': 'units_per_package',
-    'units per package': 'units_per_package',
-    'empaque descuenta multiples unidades': 'package_consumes_multiple_stock',
-    'empaque descuenta múltiples unidades': 'package_consumes_multiple_stock',
-    'package consumes multiple stock': 'package_consumes_multiple_stock',
     estado: 'state',
     'codigo bodega': 'warehouse_code',
     'código bodega': 'warehouse_code',
@@ -322,7 +315,6 @@ export class ProductsBulkService {
                 'max_stock_level',
                 'reorder_point',
                 'reorder_quantity',
-                'units_per_package',
                 'consultation_template_id',
                 'preconsultation_template_id',
               ].includes(key)
@@ -722,8 +714,6 @@ export class ProductsBulkService {
         'is_featured',
         'allow_pos_price_override',
         'has_multiple_price_tiers',
-        'units_per_package',
-        'package_consumes_multiple_stock',
         'is_on_sale',
         'sale_price',
         'weight',
@@ -861,8 +851,6 @@ export class ProductsBulkService {
       'Destacado',
       'Permite Cambiar Precio POS',
       'Usa Listas de Precio',
-      'Unidades por Empaque',
-      'Empaque Descuenta Múltiples Unidades',
       'Peso',
       'En Oferta',
       'Precio Oferta',
@@ -1011,8 +999,6 @@ export class ProductsBulkService {
               Destacado: 'sí',
               'Permite Cambiar Precio POS': 'no',
               'Usa Listas de Precio': 'no',
-              'Unidades por Empaque': '',
-              'Empaque Descuenta Múltiples Unidades': 'no',
               Peso: 0.8,
               'En Oferta': 'no',
               'Precio Oferta': 0,
@@ -1033,8 +1019,6 @@ export class ProductsBulkService {
               Destacado: 'no',
               'Permite Cambiar Precio POS': 'no',
               'Usa Listas de Precio': 'no',
-              'Unidades por Empaque': 6,
-              'Empaque Descuenta Múltiples Unidades': 'sí',
               Peso: 1.05,
               'En Oferta': 'no',
               'Precio Oferta': 0,
@@ -1055,8 +1039,6 @@ export class ProductsBulkService {
               Destacado: 'no',
               'Permite Cambiar Precio POS': 'sí',
               'Usa Listas de Precio': 'sí',
-              'Unidades por Empaque': '',
-              'Empaque Descuenta Múltiples Unidades': 'no',
               Peso: 1,
               'En Oferta': 'sí',
               'Precio Oferta': 19000,
@@ -1389,13 +1371,6 @@ export class ProductsBulkService {
       product.has_multiple_price_tiers = this.normalizeNullableBooleanValue(
         product.has_multiple_price_tiers,
       );
-    }
-
-    if (product.package_consumes_multiple_stock !== undefined) {
-      product.package_consumes_multiple_stock =
-        this.normalizeNullableBooleanValue(
-          product.package_consumes_multiple_stock,
-        );
     }
 
     if (product.requires_booking !== undefined) {
@@ -1756,8 +1731,6 @@ export class ProductsBulkService {
       'consultation_template_id',
       'preconsultation_template_id',
       'has_multiple_price_tiers',
-      'units_per_package',
-      'package_consumes_multiple_stock',
     ];
 
     for (const field of newCatalogFields) {
@@ -1864,8 +1837,6 @@ export class ProductsBulkService {
       'consultation_template_id',
       'preconsultation_template_id',
       'has_multiple_price_tiers',
-      'units_per_package',
-      'package_consumes_multiple_stock',
     ];
 
     for (const field of newCatalogFields) {

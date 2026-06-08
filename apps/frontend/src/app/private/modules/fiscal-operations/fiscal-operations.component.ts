@@ -7,12 +7,22 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { map, switchMap } from 'rxjs/operators';
-import { StatsComponent } from '../../../shared/components/stats/stats.component';
-import { CurrencyPipe } from '../../../shared/pipes/currency';
+import {
+  AlertBannerComponent,
+  BadgeComponent,
+  ButtonComponent,
+  CardComponent,
+  ItemListCardConfig,
+  ResponsiveDataViewComponent,
+  StatsComponent,
+  TableAction,
+  TableColumn,
+} from '../../../shared/components/index';
+import type { BadgeVariant } from '../../../shared/components/index';
+import { CurrencyFormatService } from '../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../shared/components/toast/toast.service';
 import { formatDateOnlyUTC } from '../../../shared/utils/date.util';
 import {
@@ -42,18 +52,19 @@ type FiscalTab =
   selector: 'app-fiscal-operations',
   standalone: true,
   imports: [
-    CommonModule,
+    AlertBannerComponent,
+    BadgeComponent,
+    ButtonComponent,
+    CardComponent,
+    ResponsiveDataViewComponent,
     StatsComponent,
-    CurrencyPipe,
   ],
   template: `
     <section class="w-full space-y-4 pb-6">
-      @if (errorMessage()) {
-        <div
-          class="rounded-lg border border-error/30 bg-error/10 px-4 py-3 text-sm text-error"
-        >
-          {{ errorMessage() }}
-        </div>
+      @if (errorMessage(); as msg) {
+        <app-alert-banner variant="danger" title="Operación fiscal">
+          {{ msg }}
+        </app-alert-banner>
       }
 
       @if (activeTab() === 'dashboard') {
@@ -63,8 +74,8 @@ type FiscalTab =
             [value]="overview()?.stats?.upcoming || 0"
             smallText="obligaciones por vencer"
             iconName="calendar-clock"
-            iconBgColor="bg-primary/10"
-            iconColor="text-primary"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-500"
             [loading]="loading()"
           />
           <app-stats
@@ -72,8 +83,8 @@ type FiscalTab =
             [value]="overview()?.stats?.overdue || 0"
             smallText="vencidas"
             iconName="alert-triangle"
-            iconBgColor="bg-error/10"
-            iconColor="text-error"
+            iconBgColor="bg-red-100"
+            iconColor="text-red-500"
             [loading]="loading()"
           />
           <app-stats
@@ -81,81 +92,53 @@ type FiscalTab =
             [value]="overview()?.stats?.declarations_ready || 0"
             smallText="listas para revisar"
             iconName="file-check"
-            iconBgColor="bg-success/10"
-            iconColor="text-success"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-500"
             [loading]="loading()"
           />
           <app-stats
             title="Estimado a pagar"
-            [value]="toNumber(overview()?.stats?.estimated_amount) | currency"
+            [value]="money(overview()?.stats?.estimated_amount)"
             smallText="según obligaciones"
-            iconName="calculator"
-            iconBgColor="bg-warning/10"
-            iconColor="text-warning"
+            iconName="dollar-sign"
+            iconBgColor="bg-purple-100"
+            iconColor="text-purple-500"
             [loading]="loading()"
           />
         </div>
 
         <div class="grid gap-4 lg:grid-cols-3">
-          <div class="lg:col-span-2 rounded-lg border border-border bg-surface">
-            <div class="border-b border-border px-4 py-3">
-              <h2 class="text-sm font-semibold text-text-primary">
+          <app-card
+            class="lg:col-span-2 min-w-0"
+            [responsive]="true"
+            [padding]="false"
+            [overflow]="'auto'"
+          >
+            <div
+              class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border"
+            >
+              <h2
+                class="text-sm font-semibold text-text-primary md:text-base"
+              >
                 Próximas obligaciones
               </h2>
             </div>
-            <div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-border text-sm">
-                <thead
-                  class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-                >
-                  <tr>
-                    <th class="px-4 py-3">Tipo</th>
-                    <th class="px-4 py-3">Periodo</th>
-                    <th class="px-4 py-3">Entidad</th>
-                    <th class="px-4 py-3">Vence</th>
-                    <th class="px-4 py-3">Estado</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-border">
-                  @for (
-                    item of overview()?.next_obligations || [];
-                    track item.id
-                  ) {
-                    <tr>
-                      <td class="px-4 py-3 font-medium text-text-primary">
-                        {{ typeLabel(item.type) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ periodLabel(item) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ entityLabel(item) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ formatDate(item.due_date) }}
-                      </td>
-                      <td class="px-4 py-3">
-                        <span [class]="statusClass(item.status)">{{
-                          statusLabel(item.status)
-                        }}</span>
-                      </td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td
-                        colspan="5"
-                        class="px-4 py-8 text-center text-text-secondary"
-                      >
-                        No hay obligaciones próximas.
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              <app-responsive-data-view
+                [data]="overview()?.next_obligations || []"
+                [columns]="dashboardObligationColumns"
+                [cardConfig]="obligationCardConfig"
+                [loading]="loading()"
+                emptyTitle="Sin obligaciones próximas"
+                emptyMessage="Sin obligaciones próximas"
+                emptyDescription="No hay obligaciones próximas."
+                emptyIcon="calendar-clock"
+                [showEmptyAction]="false"
+              />
             </div>
-          </div>
+          </app-card>
 
-          <aside class="rounded-lg border border-border bg-surface p-4">
+          <app-card [responsive]="true">
             <h2 class="text-sm font-semibold text-text-primary">
               Riesgo operativo
             </h2>
@@ -174,508 +157,285 @@ type FiscalTab =
               </div>
               <div class="flex items-center justify-between gap-3">
                 <span class="text-text-secondary">Valor final aprobado</span>
-                <strong class="text-text-primary">
-                  {{ toNumber(overview()?.stats?.final_amount) | currency }}
-                </strong>
+                <strong class="text-text-primary">{{
+                  money(overview()?.stats?.final_amount)
+                }}</strong>
               </div>
             </div>
-          </aside>
+          </app-card>
         </div>
       }
 
       @if (activeTab() === 'obligations') {
-        <div class="rounded-lg border border-border bg-surface">
+        <app-card [responsive]="true" [padding]="false">
           <div
-            class="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between"
+            class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4 md:border-b md:border-border"
           >
-            <h2 class="text-sm font-semibold text-text-primary">
-              Obligaciones fiscales
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Obligaciones fiscales ({{ obligations().length }})
             </h2>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              (click)="generateCurrentMonthObligations()"
+            <app-button
+              variant="primary"
+              size="sm"
               [disabled]="working()"
+              (clicked)="generateCurrentMonthObligations()"
             >
               Generar obligaciones
-            </button>
+            </app-button>
           </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border text-sm">
-              <thead
-                class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-              >
-                <tr>
-                  <th class="px-4 py-3">Tipo</th>
-                  <th class="px-4 py-3">Periodo</th>
-                  <th class="px-4 py-3">Entidad fiscal</th>
-                  <th class="px-4 py-3">Vencimiento</th>
-                  <th class="px-4 py-3">Monto</th>
-                  <th class="px-4 py-3">Estado</th>
-                  <th class="px-4 py-3">Acción</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border">
-                @for (item of obligations(); track item.id) {
-                  <tr>
-                    <td class="px-4 py-3 font-medium text-text-primary">
-                      {{ typeLabel(item.type) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ periodLabel(item) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ entityLabel(item) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ formatDate(item.due_date) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{
-                        toNumber(item.final_amount || item.estimated_amount)
-                          | currency
-                      }}
-                    </td>
-                    <td class="px-4 py-3">
-                      <span [class]="statusClass(item.status)">{{
-                        statusLabel(item.status)
-                      }}</span>
-                    </td>
-                    <td class="px-4 py-3">
-                      <div class="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="setObligationStatus(item, 'in_progress')"
-                          [disabled]="working()"
-                        >
-                          En progreso
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="setObligationStatus(item, 'ready')"
-                          [disabled]="working()"
-                        >
-                          Lista
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="attachObligationEvidence(item)"
-                          [disabled]="working()"
-                        >
-                          Evidencia
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="setObligationStatus(item, 'approved')"
-                          [disabled]="working() || item.status !== 'ready'"
-                        >
-                          Aprobar
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="submitObligation(item)"
-                          [disabled]="
-                            working() ||
-                            (item.status !== 'ready' &&
-                              item.status !== 'approved')
-                          "
-                        >
-                          Presentar
-                        </button>
-                        <button
-                          type="button"
-                          class="btn btn-ghost btn-xs"
-                          (click)="payObligation(item)"
-                          [disabled]="working() || item.status !== 'submitted'"
-                        >
-                          Pagar
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td
-                      colspan="7"
-                      class="px-4 py-8 text-center text-text-secondary"
-                    >
-                      Genera obligaciones para el periodo actual.
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="obligations()"
+              [columns]="obligationColumns"
+              [cardConfig]="obligationCardConfig"
+              [actions]="obligationActions"
+              [loading]="loading()"
+              emptyTitle="Sin obligaciones"
+              emptyMessage="Sin obligaciones"
+              emptyDescription="Genera obligaciones para el periodo actual."
+              emptyIcon="calendar-days"
+              [showEmptyAction]="false"
+            />
           </div>
-        </div>
+        </app-card>
       }
 
       @if (activeTab() === 'declarations') {
         <div class="space-y-4">
-          <div class="rounded-lg border border-border bg-surface">
+          <app-card [responsive]="true" [padding]="false">
             <div
-              class="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between"
+              class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4 md:border-b md:border-border"
             >
-              <h2 class="text-sm font-semibold text-text-primary">
-                Borradores de declaraciones
+              <h2 class="text-sm font-semibold text-text-primary md:text-base">
+                Borradores de declaraciones ({{ declarations().length }})
               </h2>
               <div class="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  (click)="createDraft('vat')"
+                <app-button
+                  variant="outline"
+                  size="sm"
                   [disabled]="working()"
+                  (clicked)="createDraft('vat')"
                 >
                   IVA
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  (click)="createDraft('withholding')"
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
                   [disabled]="working()"
+                  (clicked)="createDraft('withholding')"
                 >
                   Retención
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-secondary btn-sm"
-                  (click)="createDraft('ica')"
+                </app-button>
+                <app-button
+                  variant="outline"
+                  size="sm"
                   [disabled]="working()"
+                  (clicked)="createDraft('ica')"
                 >
                   ICA
-                </button>
+                </app-button>
               </div>
             </div>
-            <div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-border text-sm">
-                <thead
-                  class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-                >
-                  <tr>
-                    <th class="px-4 py-3">Tipo</th>
-                    <th class="px-4 py-3">Periodo</th>
-                    <th class="px-4 py-3">Entidad</th>
-                    <th class="px-4 py-3">Total</th>
-                    <th class="px-4 py-3">Estado</th>
-                    <th class="px-4 py-3">Acción</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-border">
-                  @for (item of declarations(); track item.id) {
-                    <tr>
-                      <td class="px-4 py-3 font-medium text-text-primary">
-                        {{ declarationLabel(item.declaration_type) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ periodLabel(item) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ entityLabel(item) }}
-                      </td>
-                      <td class="px-4 py-3 text-text-secondary">
-                        {{ toNumber(item.total_payable) | currency }}
-                      </td>
-                      <td class="px-4 py-3">
-                        <span [class]="statusClass(item.status)">{{
-                          statusLabel(item.status)
-                        }}</span>
-                      </td>
-                      <td class="px-4 py-3">
-                        <div class="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs"
-                            (click)="loadDeclarationLines(item)"
-                            [disabled]="working()"
-                          >
-                            Líneas
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs"
-                            (click)="approveDeclaration(item)"
-                            [disabled]="
-                              working() ||
-                              (item.status !== 'ready' &&
-                                item.status !== 'needs_review')
-                            "
-                          >
-                            Aprobar
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs"
-                            (click)="attachDeclarationEvidence(item)"
-                            [disabled]="working()"
-                          >
-                            Evidencia
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs"
-                            (click)="submitDeclaration(item)"
-                            [disabled]="working() || item.status !== 'approved'"
-                          >
-                            Presentar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td
-                        colspan="6"
-                        class="px-4 py-8 text-center text-text-secondary"
-                      >
-                        No hay borradores creados.
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
+            <div class="px-2 pb-2 pt-3 md:p-4">
+              <app-responsive-data-view
+                [data]="declarations()"
+                [columns]="declarationColumns"
+                [cardConfig]="declarationCardConfig"
+                [actions]="declarationActions"
+                [loading]="loading()"
+                emptyTitle="Sin borradores"
+                emptyMessage="Sin borradores"
+                emptyDescription="No hay borradores creados."
+                emptyIcon="file-spreadsheet"
+                [showEmptyAction]="false"
+              />
             </div>
-          </div>
+          </app-card>
 
           @if (selectedDeclaration()) {
-            <div class="rounded-lg border border-border bg-surface">
-              <div class="border-b border-border px-4 py-3">
-                <h3 class="text-sm font-semibold text-text-primary">
+            <app-card [responsive]="true" [padding]="false">
+              <div
+                class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border"
+              >
+                <h3
+                  class="text-sm font-semibold text-text-primary md:text-base"
+                >
                   Líneas:
                   {{
                     declarationLabel(selectedDeclaration()!.declaration_type)
                   }}
                 </h3>
               </div>
-              <div class="overflow-x-auto">
-                <table class="min-w-full divide-y divide-border text-sm">
-                  <thead
-                    class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-                  >
-                    <tr>
-                      <th class="px-4 py-3">Línea</th>
-                      <th class="px-4 py-3">Fuente</th>
-                      <th class="px-4 py-3">Base</th>
-                      <th class="px-4 py-3">Impuesto</th>
-                      <th class="px-4 py-3">Retención</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-border">
-                    @for (line of declarationLines(); track line.id) {
-                      <tr>
-                        <td class="px-4 py-3">
-                          <div class="font-medium text-text-primary">
-                            {{ line.description }}
-                          </div>
-                          <div class="text-xs text-text-secondary">
-                            {{ line.line_type }}
-                          </div>
-                        </td>
-                        <td class="px-4 py-3 text-text-secondary">
-                          {{ line.source_type }}
-                        </td>
-                        <td class="px-4 py-3 text-text-secondary">
-                          {{ toNumber(line.base_amount) | currency }}
-                        </td>
-                        <td class="px-4 py-3 text-text-secondary">
-                          {{ toNumber(line.tax_amount) | currency }}
-                        </td>
-                        <td class="px-4 py-3 text-text-secondary">
-                          {{ toNumber(line.withholding_amount) | currency }}
-                        </td>
-                      </tr>
-                    } @empty {
-                      <tr>
-                        <td
-                          colspan="5"
-                          class="px-4 py-8 text-center text-text-secondary"
-                        >
-                          El borrador no tiene líneas explicativas.
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
+              <div class="px-2 pb-2 pt-3 md:p-4">
+                <app-responsive-data-view
+                  [data]="declarationLines()"
+                  [columns]="declarationLineColumns"
+                  [cardConfig]="declarationLineCardConfig"
+                  [loading]="working()"
+                  emptyTitle="Sin líneas"
+                  emptyMessage="Sin líneas"
+                  emptyDescription="El borrador no tiene líneas explicativas."
+                  emptyIcon="list-checks"
+                  [showEmptyAction]="false"
+                />
               </div>
-            </div>
+            </app-card>
           }
         </div>
       }
 
       @if (activeTab() === 'close') {
-        <div class="rounded-lg border border-border bg-surface">
-          <div
-            class="flex flex-col gap-3 border-b border-border px-4 py-3 md:flex-row md:items-center md:justify-between"
-          >
-            <h2 class="text-sm font-semibold text-text-primary">
-              Cierre fiscal mensual
-            </h2>
-            <button
-              type="button"
-              class="btn btn-secondary btn-sm"
-              (click)="createCloseSession()"
-              [disabled]="working()"
+        <div class="space-y-4">
+          <app-card [responsive]="true" [padding]="false">
+            <div
+              class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4"
             >
-              Crear cierre del mes
-            </button>
-          </div>
-          <div class="divide-y divide-border">
-            @for (session of closeSessions(); track session.id) {
-              <article class="p-4">
-                <div
-                  class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
-                >
-                  <div>
-                    <div class="flex flex-wrap items-center gap-2">
-                      <h3 class="font-medium text-text-primary">
-                        {{ periodLabel(session) }}
-                      </h3>
-                      <span [class]="statusClass(session.status)">{{
-                        statusLabel(session.status)
+              <h2 class="text-sm font-semibold text-text-primary md:text-base">
+                Cierre fiscal mensual ({{ closeSessions().length }})
+              </h2>
+              <app-button
+                variant="primary"
+                size="sm"
+                [disabled]="working()"
+                (clicked)="createCloseSession()"
+              >
+                Crear cierre del mes
+              </app-button>
+            </div>
+          </app-card>
+
+          @for (session of closeSessions(); track session.id) {
+            <app-card [responsive]="true">
+              <div
+                class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"
+              >
+                <div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h3 class="font-medium text-text-primary">
+                      {{ periodLabel(session) }}
+                    </h3>
+                    <app-badge
+                      [variant]="statusVariant(session.status)"
+                      size="sm"
+                    >
+                      {{ statusLabel(session.status) }}
+                    </app-badge>
+                  </div>
+                  <p class="mt-1 text-sm text-text-secondary">
+                    {{ entityLabel(session) }}
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="working()"
+                    (clicked)="runCloseChecks(session)"
+                  >
+                    Ejecutar checks
+                  </app-button>
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [disabled]="working()"
+                    (clicked)="attachCloseEvidence(session)"
+                  >
+                    Evidencia
+                  </app-button>
+                  <app-button
+                    variant="success"
+                    size="sm"
+                    [disabled]="working() || session.status !== 'ready'"
+                    (clicked)="approveClose(session)"
+                  >
+                    Aprobar
+                  </app-button>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [disabled]="
+                      working() ||
+                      (session.status !== 'approved' &&
+                        session.status !== 'ready')
+                    "
+                    (clicked)="closeFiscalSession(session)"
+                  >
+                    Cerrar
+                  </app-button>
+                  <app-button
+                    variant="outline-warning"
+                    size="sm"
+                    [disabled]="working() || session.status !== 'closed'"
+                    (clicked)="reopenClose(session)"
+                  >
+                    Reabrir
+                  </app-button>
+                </div>
+              </div>
+              <div class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                @for (check of session.checks || []; track check.id) {
+                  <div class="rounded-md border border-border p-3">
+                    <div class="flex items-center justify-between gap-3">
+                      <span class="text-sm font-medium text-text-primary">{{
+                        check.title
                       }}</span>
+                      <app-badge
+                        [variant]="statusVariant(check.status)"
+                        size="sm"
+                      >
+                        {{ statusLabel(check.status) }}
+                      </app-badge>
                     </div>
-                    <p class="mt-1 text-sm text-text-secondary">
-                      {{ entityLabel(session) }}
+                    <p class="mt-2 text-xs text-text-secondary">
+                      {{ check.result_summary || check.description }}
                     </p>
                   </div>
-                  <div class="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      (click)="runCloseChecks(session)"
-                      [disabled]="working()"
-                    >
-                      Ejecutar checks
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      (click)="attachCloseEvidence(session)"
-                      [disabled]="working()"
-                    >
-                      Evidencia
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      (click)="approveClose(session)"
-                      [disabled]="working() || session.status !== 'ready'"
-                    >
-                      Aprobar
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      (click)="closeFiscalSession(session)"
-                      [disabled]="
-                        working() ||
-                        (session.status !== 'approved' &&
-                          session.status !== 'ready')
-                      "
-                    >
-                      Cerrar
-                    </button>
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      (click)="reopenClose(session)"
-                      [disabled]="working() || session.status !== 'closed'"
-                    >
-                      Reabrir
-                    </button>
+                } @empty {
+                  <div
+                    class="rounded-md border border-dashed border-border p-4 text-sm text-text-secondary"
+                  >
+                    Ejecuta checks para ver el estado del cierre.
                   </div>
-                </div>
-                <div class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  @for (check of session.checks || []; track check.id) {
-                    <div class="rounded-md border border-border p-3">
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="text-sm font-medium text-text-primary">{{
-                          check.title
-                        }}</span>
-                        <span [class]="statusClass(check.status)">{{
-                          statusLabel(check.status)
-                        }}</span>
-                      </div>
-                      <p class="mt-2 text-xs text-text-secondary">
-                        {{ check.result_summary || check.description }}
-                      </p>
-                    </div>
-                  } @empty {
-                    <div
-                      class="rounded-md border border-dashed border-border p-4 text-sm text-text-secondary"
-                    >
-                      Ejecuta checks para ver el estado del cierre.
-                    </div>
-                  }
-                </div>
-              </article>
-            } @empty {
-              <div class="px-4 py-8 text-center text-text-secondary">
-                No hay sesiones de cierre creadas.
+                }
               </div>
-            }
-          </div>
+            </app-card>
+          } @empty {
+            <app-card [responsive]="true">
+              <p class="py-8 text-center text-sm text-text-secondary">
+                No hay sesiones de cierre creadas.
+              </p>
+            </app-card>
+          }
         </div>
       }
 
       @if (activeTab() === 'evidence') {
-        <div class="rounded-lg border border-border bg-surface">
-          <div class="border-b border-border px-4 py-3">
-            <h2 class="text-sm font-semibold text-text-primary">
-              Evidencias fiscales
+        <app-card [responsive]="true" [padding]="false">
+          <div class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Evidencias fiscales ({{ evidence().length }})
             </h2>
           </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border text-sm">
-              <thead
-                class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-              >
-                <tr>
-                  <th class="px-4 py-3">Tipo</th>
-                  <th class="px-4 py-3">Fuente</th>
-                  <th class="px-4 py-3">Hash</th>
-                  <th class="px-4 py-3">Fecha</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border">
-                @for (item of evidence(); track item.id) {
-                  <tr>
-                    <td class="px-4 py-3 font-medium text-text-primary">
-                      {{ evidenceLabel(item.evidence_type) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ item.source_type || 'Soporte manual' }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ item.content_hash || 'Sin hash' }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ formatDate(item.created_at) }}
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td
-                      colspan="4"
-                      class="px-4 py-8 text-center text-text-secondary"
-                    >
-                      No hay evidencias adjuntas.
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="evidence()"
+              [columns]="evidenceColumns"
+              [cardConfig]="evidenceCardConfig"
+              [loading]="loading()"
+              emptyTitle="Sin evidencias"
+              emptyMessage="Sin evidencias"
+              emptyDescription="No hay evidencias adjuntas."
+              emptyIcon="folder-open"
+              [showEmptyAction]="false"
+            />
           </div>
-        </div>
+        </app-card>
       }
 
       @if (activeTab() === 'rules') {
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           @for (rule of rules(); track rule.id || rule.rule_type + rule.year) {
-            <article class="rounded-lg border border-border bg-surface p-4">
+            <app-card [responsive]="true">
               <div class="flex items-start justify-between gap-3">
                 <div>
                   <h2 class="text-sm font-semibold text-text-primary">
@@ -686,9 +446,9 @@ type FiscalTab =
                     {{ rule.version }}
                   </p>
                 </div>
-                <span [class]="statusClass(rule.status)">{{
-                  statusLabel(rule.status)
-                }}</span>
+                <app-badge [variant]="statusVariant(rule.status)" size="sm">
+                  {{ statusLabel(rule.status) }}
+                </app-badge>
               </div>
               <dl class="mt-4 space-y-2 text-sm">
                 <div class="flex items-center justify-between gap-3">
@@ -710,94 +470,38 @@ type FiscalTab =
                   </dd>
                 </div>
               </dl>
-            </article>
+            </app-card>
           } @empty {
-            <div
-              class="rounded-lg border border-dashed border-border p-8 text-center text-text-secondary"
-            >
-              No hay reglas fiscales configuradas.
-            </div>
+            <app-card class="md:col-span-2 xl:col-span-3" [responsive]="true">
+              <p class="py-8 text-center text-sm text-text-secondary">
+                No hay reglas fiscales configuradas.
+              </p>
+            </app-card>
           }
         </div>
       }
 
       @if (activeTab() === 'history') {
-        <div class="rounded-lg border border-border bg-surface">
-          <div class="border-b border-border px-4 py-3">
-            <h2 class="text-sm font-semibold text-text-primary">
-              Historial fiscal
+        <app-card [responsive]="true" [padding]="false">
+          <div class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border">
+            <h2 class="text-sm font-semibold text-text-primary md:text-base">
+              Historial fiscal ({{ history().length }})
             </h2>
           </div>
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border text-sm">
-              <thead
-                class="bg-muted/40 text-left text-xs uppercase text-text-secondary"
-              >
-                <tr>
-                  <th class="px-4 py-3">Evento</th>
-                  <th class="px-4 py-3">Recurso</th>
-                  <th class="px-4 py-3">Entidad</th>
-                  <th class="px-4 py-3">Estado</th>
-                  <th class="px-4 py-3">Usuario</th>
-                  <th class="px-4 py-3">Fecha</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-border">
-                @for (item of history(); track item.id) {
-                  <tr>
-                    <td class="px-4 py-3">
-                      <div class="font-medium text-text-primary">
-                        {{ eventLabel(item.event_type) }}
-                      </div>
-                      <div class="text-xs text-text-secondary">
-                        {{ item.event_type }}
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ resourceLabel(item.resource_type) }} #{{
-                        item.resource_id || '-'
-                      }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ historyEntityLabel(item) }}
-                    </td>
-                    <td class="px-4 py-3">
-                      <div class="flex flex-wrap items-center gap-2">
-                        @if (item.previous_status) {
-                          <span [class]="statusClass(item.previous_status)">
-                            {{ statusLabel(item.previous_status) }}
-                          </span>
-                        }
-                        @if (item.new_status) {
-                          <span class="text-text-muted">&rarr;</span>
-                          <span [class]="statusClass(item.new_status)">
-                            {{ statusLabel(item.new_status) }}
-                          </span>
-                        }
-                      </div>
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ actorLabel(item) }}
-                    </td>
-                    <td class="px-4 py-3 text-text-secondary">
-                      {{ formatDate(item.created_at) }}
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td
-                      colspan="6"
-                      class="px-4 py-8 text-center text-text-secondary"
-                    >
-                      Todavía no hay eventos auditables para esta entidad
-                      fiscal.
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="history()"
+              [columns]="historyColumns"
+              [cardConfig]="historyCardConfig"
+              [loading]="loading()"
+              emptyTitle="Sin eventos"
+              emptyMessage="Sin eventos"
+              emptyDescription="Todavía no hay eventos auditables para esta entidad fiscal."
+              emptyIcon="clipboard-list"
+              [showEmptyAction]="false"
+            />
           </div>
-        </div>
+        </app-card>
       }
     </section>
   `,
@@ -807,6 +511,7 @@ export class FiscalOperationsComponent {
   private readonly service = inject(FiscalOperationsService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly toast = inject(ToastService);
+  private readonly currency = inject(CurrencyFormatService);
   private readonly headerActions = inject(FiscalOperationsHeaderActionsService);
 
   private readonly routeData = toSignal(
@@ -830,7 +535,162 @@ export class FiscalOperationsComponent {
   readonly working = signal(false);
   readonly errorMessage = signal<string | null>(null);
 
+  // --- ResponsiveDataView configuration -----------------------------------
+  // Status badges use a `custom` colorFn returning theme hex so both the
+  // desktop table and the mobile item-list render the soft-pill look that
+  // the old hand-rolled `statusClass()` produced (bg ~15%, full-color text).
+
+  private readonly statusBadge = {
+    type: 'custom' as const,
+    size: 'sm' as const,
+    colorFn: (value: unknown) => this.statusColor(String(value ?? '')),
+  };
+
+  readonly dashboardObligationColumns: TableColumn[] = [
+    { key: 'type', label: 'Tipo', priority: 1, transform: (_v, r) => this.typeLabel(r.type) },
+    { key: 'period_year', label: 'Periodo', priority: 2, transform: (_v, r) => this.periodLabel(r) },
+    { key: 'accounting_entity', label: 'Entidad', priority: 3, transform: (_v, r) => this.entityLabel(r) },
+    { key: 'due_date', label: 'Vence', priority: 2, transform: (v) => this.formatDate(v) },
+    { key: 'status', label: 'Estado', align: 'center', priority: 1, badgeConfig: this.statusBadge, transform: (v) => this.statusLabel(String(v ?? '')) },
+  ];
+
+  readonly obligationColumns: TableColumn[] = [
+    { key: 'type', label: 'Tipo', priority: 1, transform: (_v, r) => this.typeLabel(r.type) },
+    { key: 'period_year', label: 'Periodo', priority: 2, transform: (_v, r) => this.periodLabel(r) },
+    { key: 'accounting_entity', label: 'Entidad fiscal', priority: 3, transform: (_v, r) => this.entityLabel(r) },
+    { key: 'due_date', label: 'Vencimiento', priority: 2, transform: (v) => this.formatDate(v) },
+    { key: 'final_amount', label: 'Monto', align: 'right', priority: 2, transform: (_v, r) => this.money(r.final_amount || r.estimated_amount) },
+    { key: 'status', label: 'Estado', align: 'center', priority: 1, badgeConfig: this.statusBadge, transform: (v) => this.statusLabel(String(v ?? '')) },
+  ];
+
+  readonly obligationActions: TableAction[] = [
+    { label: 'En progreso', icon: 'edit-3', variant: 'ghost', action: (i) => this.setObligationStatus(i, 'in_progress'), disabled: () => this.working() },
+    { label: 'Lista', icon: 'check-square', variant: 'ghost', action: (i) => this.setObligationStatus(i, 'ready'), disabled: () => this.working() },
+    { label: 'Evidencia', icon: 'folder-open', variant: 'ghost', action: (i) => this.attachObligationEvidence(i), disabled: () => this.working() },
+    { label: 'Aprobar', icon: 'check-circle', variant: 'success', action: (i) => this.setObligationStatus(i, 'approved'), disabled: () => this.working(), show: (i) => i.status === 'ready' },
+    { label: 'Presentar', icon: 'file-check', variant: 'primary', action: (i) => this.submitObligation(i), disabled: () => this.working(), show: (i) => i.status === 'ready' || i.status === 'approved' },
+    { label: 'Pagar', icon: 'dollar-sign', variant: 'success', action: (i) => this.payObligation(i), disabled: () => this.working(), show: (i) => i.status === 'submitted' },
+  ];
+
+  readonly obligationCardConfig: ItemListCardConfig = {
+    titleKey: 'type',
+    titleTransform: (i) => this.typeLabel(i.type),
+    subtitleTransform: (i) => this.periodLabel(i),
+    avatarFallbackIcon: 'calendar-days',
+    avatarShape: 'square',
+    badgeKey: 'status',
+    badgeConfig: this.statusBadge,
+    badgeTransform: (v) => this.statusLabel(String(v ?? '')),
+    detailKeys: [
+      { key: 'accounting_entity', label: 'Entidad', icon: 'building-2', transform: (_v, i) => this.entityLabel(i) },
+      { key: 'due_date', label: 'Vence', icon: 'calendar-clock', transform: (v) => this.formatDate(v) },
+    ],
+    footerKey: 'final_amount',
+    footerLabel: 'Monto',
+    footerStyle: 'prominent',
+    footerTransform: (_v, i) => this.money(i.final_amount || i.estimated_amount),
+  };
+
+  readonly declarationColumns: TableColumn[] = [
+    { key: 'declaration_type', label: 'Tipo', priority: 1, transform: (v) => this.declarationLabel(String(v ?? '')) },
+    { key: 'period_year', label: 'Periodo', priority: 2, transform: (_v, r) => this.periodLabel(r) },
+    { key: 'accounting_entity', label: 'Entidad', priority: 3, transform: (_v, r) => this.entityLabel(r) },
+    { key: 'total_payable', label: 'Total', align: 'right', priority: 2, transform: (v) => this.money(v) },
+    { key: 'status', label: 'Estado', align: 'center', priority: 1, badgeConfig: this.statusBadge, transform: (v) => this.statusLabel(String(v ?? '')) },
+  ];
+
+  readonly declarationActions: TableAction[] = [
+    { label: 'Líneas', icon: 'list-checks', variant: 'ghost', action: (i) => this.loadDeclarationLines(i), disabled: () => this.working() },
+    { label: 'Aprobar', icon: 'check-circle', variant: 'success', action: (i) => this.approveDeclaration(i), disabled: () => this.working(), show: (i) => i.status === 'ready' || i.status === 'needs_review' },
+    { label: 'Evidencia', icon: 'folder-open', variant: 'ghost', action: (i) => this.attachDeclarationEvidence(i), disabled: () => this.working() },
+    { label: 'Presentar', icon: 'file-check', variant: 'primary', action: (i) => this.submitDeclaration(i), disabled: () => this.working(), show: (i) => i.status === 'approved' },
+  ];
+
+  readonly declarationCardConfig: ItemListCardConfig = {
+    titleKey: 'declaration_type',
+    titleTransform: (i) => this.declarationLabel(i.declaration_type),
+    subtitleTransform: (i) => this.periodLabel(i),
+    avatarFallbackIcon: 'file-spreadsheet',
+    avatarShape: 'square',
+    badgeKey: 'status',
+    badgeConfig: this.statusBadge,
+    badgeTransform: (v) => this.statusLabel(String(v ?? '')),
+    detailKeys: [
+      { key: 'accounting_entity', label: 'Entidad', icon: 'building-2', transform: (_v, i) => this.entityLabel(i) },
+    ],
+    footerKey: 'total_payable',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (v) => this.money(v),
+  };
+
+  readonly declarationLineColumns: TableColumn[] = [
+    { key: 'description', label: 'Línea', priority: 1 },
+    { key: 'line_type', label: 'Tipo', priority: 3 },
+    { key: 'source_type', label: 'Fuente', priority: 3 },
+    { key: 'base_amount', label: 'Base', align: 'right', priority: 2, transform: (v) => this.money(v) },
+    { key: 'tax_amount', label: 'Impuesto', align: 'right', priority: 2, transform: (v) => this.money(v) },
+    { key: 'withholding_amount', label: 'Retención', align: 'right', priority: 2, transform: (v) => this.money(v) },
+  ];
+
+  readonly declarationLineCardConfig: ItemListCardConfig = {
+    titleKey: 'description',
+    subtitleKey: 'line_type',
+    avatarFallbackIcon: 'list-checks',
+    avatarShape: 'square',
+    detailKeys: [
+      { key: 'source_type', label: 'Fuente', icon: 'file-text' },
+      { key: 'base_amount', label: 'Base', transform: (v) => this.money(v) },
+      { key: 'tax_amount', label: 'Impuesto', transform: (v) => this.money(v) },
+      { key: 'withholding_amount', label: 'Retención', transform: (v) => this.money(v) },
+    ],
+  };
+
+  readonly evidenceColumns: TableColumn[] = [
+    { key: 'evidence_type', label: 'Tipo', priority: 1, transform: (v) => this.evidenceLabel(String(v ?? '')) },
+    { key: 'source_type', label: 'Fuente', priority: 2, transform: (v) => String(v || 'Soporte manual') },
+    { key: 'content_hash', label: 'Hash', priority: 3, transform: (v) => String(v || 'Sin hash') },
+    { key: 'created_at', label: 'Fecha', priority: 2, transform: (v) => this.formatDate(v) },
+  ];
+
+  readonly evidenceCardConfig: ItemListCardConfig = {
+    titleKey: 'evidence_type',
+    titleTransform: (i) => this.evidenceLabel(i.evidence_type),
+    subtitleTransform: (i) => String(i.source_type || 'Soporte manual'),
+    avatarFallbackIcon: 'folder-open',
+    avatarShape: 'square',
+    detailKeys: [
+      { key: 'content_hash', label: 'Hash', icon: 'file-text', transform: (v) => String(v || 'Sin hash') },
+      { key: 'created_at', label: 'Fecha', icon: 'calendar-clock', transform: (v) => this.formatDate(v) },
+    ],
+  };
+
+  readonly historyColumns: TableColumn[] = [
+    { key: 'event_type', label: 'Evento', priority: 1, transform: (v) => this.eventLabel(String(v ?? '')) },
+    { key: 'resource_type', label: 'Recurso', priority: 3, transform: (_v, r) => `${this.resourceLabel(r.resource_type)} #${r.resource_id || '-'}` },
+    { key: 'accounting_entity', label: 'Entidad', priority: 3, transform: (_v, r) => this.historyEntityLabel(r) },
+    { key: 'new_status', label: 'Estado', priority: 2, transform: (_v, r) => this.statusTransitionLabel(r) },
+    { key: 'actor_user', label: 'Usuario', priority: 3, transform: (_v, r) => this.actorLabel(r) },
+    { key: 'created_at', label: 'Fecha', priority: 2, transform: (v) => this.formatDate(v) },
+  ];
+
+  readonly historyCardConfig: ItemListCardConfig = {
+    titleKey: 'event_type',
+    titleTransform: (i) => this.eventLabel(String(i.event_type ?? '')),
+    subtitleTransform: (i) => `${this.resourceLabel(i.resource_type)} #${i.resource_id || '-'}`,
+    avatarFallbackIcon: 'clipboard-list',
+    avatarShape: 'square',
+    detailKeys: [
+      { key: 'accounting_entity', label: 'Entidad', icon: 'building-2', transform: (_v, i) => this.historyEntityLabel(i) },
+      { key: 'new_status', label: 'Estado', transform: (_v, i) => this.statusTransitionLabel(i) },
+      { key: 'actor_user', label: 'Usuario', transform: (_v, i) => this.actorLabel(i) },
+      { key: 'created_at', label: 'Fecha', icon: 'calendar-clock', transform: (v) => this.formatDate(v) },
+    ],
+  };
+
   constructor() {
+    this.currency.loadCurrency();
+
     effect(() => {
       const tab = this.activeTab();
       untracked(() => {
@@ -1182,6 +1042,10 @@ export class FiscalOperationsComponent {
     return value ? formatDateOnlyUTC(value) : '-';
   }
 
+  money(value?: string | number | null): string {
+    return this.currency.format(this.toNumber(value));
+  }
+
   toNumber(value?: string | number | null): number {
     const amount = Number(value ?? 0);
     return Number.isFinite(amount) ? amount : 0;
@@ -1284,6 +1148,15 @@ export class FiscalOperationsComponent {
     return name || item.store?.name || 'Entidad fiscal';
   }
 
+  statusTransitionLabel(item: FiscalOperationEvent): string {
+    const prev = item.previous_status
+      ? this.statusLabel(item.previous_status)
+      : '';
+    const next = item.new_status ? this.statusLabel(item.new_status) : '';
+    if (prev && next) return `${prev} → ${next}`;
+    return next || prev || '-';
+  }
+
   statusLabel(status: string): string {
     const labels: Record<string, string> = {
       pending: 'Pendiente',
@@ -1309,22 +1182,38 @@ export class FiscalOperationsComponent {
     return labels[status] || status;
   }
 
-  statusClass(status: string): string {
-    const base = 'inline-flex rounded-full px-2 py-1 text-xs font-medium';
+  /** Theme hex per status group → soft-pill badge (table + item-list colorFn). */
+  statusColor(status: string): string {
+    const s = status.toLowerCase();
     if (
-      ['accepted', 'approved', 'paid', 'passed', 'active', 'ready'].includes(
-        status,
-      )
+      ['accepted', 'approved', 'paid', 'passed', 'active', 'ready'].includes(s)
     ) {
-      return `${base} bg-success/10 text-success`;
+      return '#16a34a';
     }
-    if (['rejected', 'overdue', 'failed', 'blocked'].includes(status)) {
-      return `${base} bg-error/10 text-error`;
+    if (['rejected', 'overdue', 'failed', 'blocked'].includes(s)) {
+      return '#dc2626';
     }
-    if (['warning', 'needs_review', 'submitted', 'checking'].includes(status)) {
-      return `${base} bg-warning/10 text-warning`;
+    if (['warning', 'needs_review', 'submitted', 'checking'].includes(s)) {
+      return '#d97706';
     }
-    return `${base} bg-muted text-text-secondary`;
+    return '#6b7280';
+  }
+
+  /** BadgeVariant per status group → for `<app-badge>` in close/rules tabs. */
+  statusVariant(status: string): BadgeVariant {
+    const s = status.toLowerCase();
+    if (
+      ['accepted', 'approved', 'paid', 'passed', 'active', 'ready'].includes(s)
+    ) {
+      return 'success';
+    }
+    if (['rejected', 'overdue', 'failed', 'blocked'].includes(s)) {
+      return 'error';
+    }
+    if (['warning', 'needs_review', 'submitted', 'checking'].includes(s)) {
+      return 'warning';
+    }
+    return 'neutral';
   }
 
   private loadTab(tab: FiscalTab): void {

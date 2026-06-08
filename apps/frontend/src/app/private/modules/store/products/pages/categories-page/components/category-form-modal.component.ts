@@ -36,6 +36,7 @@ import {
 } from '../../../interfaces';
 import { CategoriesService } from '../../../services/categories.service';
 import { ProductImageSourceModalComponent } from '../../../components/product-image-source-modal.component';
+import { dataUrlToFile } from '../../../../../../../shared/utils';
 
 @Component({
   selector: 'app-category-form-modal',
@@ -307,10 +308,7 @@ export class CategoryFormModalComponent {
 
     this.isUploadingImage.set(true);
     try {
-      const file = await this.dataUrlToFile(
-        dataUrl,
-        `category-image-${Date.now()}.jpg`,
-      );
+      const file = dataUrlToFile(dataUrl, `category-image-${Date.now()}.jpg`);
       const result = await firstValueFrom(
         this.categoriesService
           .uploadCategoryImage(file)
@@ -332,17 +330,5 @@ export class CategoryFormModalComponent {
     this.form.patchValue({ image_url: '' });
     this.imagePreviewUrl.set(null);
     this.form.markAsDirty();
-  }
-
-  private async dataUrlToFile(
-    dataUrl: string,
-    fileName: string,
-  ): Promise<File> {
-    const response = await fetch(dataUrl);
-    if (!response.ok) {
-      throw new Error('No se pudo preparar la imagen');
-    }
-    const blob = await response.blob();
-    return new File([blob], fileName, { type: blob.type || 'image/jpeg' });
   }
 }

@@ -7,11 +7,10 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { HttpClient } from '@angular/common/http';
 import { ModalComponent } from '../modal/modal.component';
 import { AuthService } from '../../../core/services/auth.service';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { finalize, take } from 'rxjs';
+import { finalize } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { InputComponent } from '../input/input.component';
 import {
@@ -20,13 +19,15 @@ import {
 } from '../selector/selector.component';
 import { ToastService } from '../toast/toast.service';
 import { IconComponent } from '../icon/icon.component';
+import { ImageSourceModalComponent } from '../image-source-modal/image-source-modal.component';
 import {
   CountryService,
   Country,
   Department,
   City,
 } from '../../../services/country.service';
-import { environment } from '../../../../environments/environment';
+import { ImageUploadService } from '../../services/image-upload.service';
+import { dataUrlToFile } from '../../utils/data-url.util';
 
 @Component({
   selector: 'app-profile-modal',
@@ -40,6 +41,7 @@ import { environment } from '../../../../environments/environment';
     InputComponent,
     SelectorComponent,
     IconComponent,
+    ImageSourceModalComponent,
   ],
   template: `
     <app-modal
@@ -316,7 +318,7 @@ import { environment } from '../../../../environments/environment';
           >
             <div
               class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
-              (click)="avatarInput.click()"
+              (click)="openAvatarModal()"
             >
               @if (avatarPreview() || userInfo()?.avatar_url) {
                 <img
@@ -342,18 +344,11 @@ import { environment } from '../../../../environments/environment';
                 ></app-icon>
               </div>
             </div>
-            <input
-              #avatarInput
-              type="file"
-              accept="image/*"
-              class="hidden"
-              (change)="onAvatarSelected($event)"
-            />
             <div class="flex flex-col items-center sm:items-start gap-1">
               <button
                 type="button"
                 class="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                (click)="avatarInput.click()"
+                (click)="openAvatarModal()"
                 [disabled]="uploadingAvatar()"
               >
                 {{ uploadingAvatar() ? 'Subiendo...' : 'Cambiar foto' }}
@@ -373,6 +368,12 @@ import { environment } from '../../../../environments/environment';
               }
             </div>
           </div>
+          <app-image-source-modal
+            [(isOpen)]="avatarModalOpen"
+            [singleImage]="true"
+            [headerTitle]="'Foto de perfil'"
+            (imagesAdded)="onAvatarImages($event)"
+          ></app-image-source-modal>
           <div class="border-t border-gray-100"></div>
           <!-- Información Personal -->
           <div class="space-y-3">
@@ -540,11 +541,11 @@ export class ProfileModalComponent {
   readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
-  private http = inject(HttpClient);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
   private countryService = inject(CountryService);
   private toastService = inject(ToastService);
+  private imageUploadService = inject(ImageUploadService);
 
   profileForm: FormGroup;
   passwordForm: FormGroup;
@@ -560,6 +561,7 @@ export class ProfileModalComponent {
   // Avatar upload state
   readonly avatarPreview = signal<string | null>(null);
   readonly uploadingAvatar = signal(false);
+  readonly avatarModalOpen = signal(false);
   pendingAvatarKey: string | null = null;
 
   readonly userInfo = signal<any>(null);
@@ -1047,58 +1049,40 @@ export class ProfileModalComponent {
     return (first + last).toUpperCase();
   }
 
-  onAvatarSelected(event: Event) {
-    const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
-    if (!file) return;
+  openAvatarModal() {
+    if (this.uploadingAvatar()) return;
+    this.avatarModalOpen.set(true);
+  }
 
-    // Validate file size (5MB max)
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-      this.toastService.error('La imagen no debe superar los 5MB');
-      return;
-    }
+  onAvatarImages(dataUrls: string[]) {
+    const dataUrl = dataUrls[0];
+    if (!dataUrl) return;
 
-    // Validate file type
-    const validTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      this.toastService.error('Solo se permiten imágenes JPG, PNG o WebP');
-      return;
-    }
+    // Optimistic local preview while uploading
+    this.avatarPreview.set(dataUrl);
 
-    // Show local preview immediately
-    const reader = new FileReader();
-    reader.onload = () => {
-      this.avatarPreview.set(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    const file = dataUrlToFile(dataUrl, `avatar-${Date.now()}.jpg`);
 
-    // Upload to S3
     this.uploadingAvatar.set(true);
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('entityType', 'avatars');
-
-    this.http.post<any>(`${environment.apiUrl}/upload`, formData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (response) => {
-        // Store the key for saving later
-        this.pendingAvatarKey = response.key;
-        // Use the signed URL for preview
-        this.avatarPreview.set(response.url);
-        this.uploadingAvatar.set(false);
-        this.toastService.success('Imagen cargada correctamente');
-      },
-      error: (err) => {
-        console.error('Error uploading avatar:', err);
-        this.avatarPreview.set(null);
-        this.pendingAvatarKey = null;
-        this.uploadingAvatar.set(false);
-        this.toastService.error('Error al subir la imagen');
-      },
-    });
-
-    // Reset input to allow selecting the same file again
-    input.value = '';
+    this.imageUploadService
+      .uploadFile(file, 'avatars')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => {
+          // Persist the S3 key on save; preview with the signed URL.
+          this.pendingAvatarKey = result.key;
+          this.avatarPreview.set(result.url);
+          this.uploadingAvatar.set(false);
+          this.toastService.success('Imagen cargada correctamente');
+        },
+        error: (err) => {
+          console.error('Error uploading avatar:', err);
+          this.avatarPreview.set(null);
+          this.pendingAvatarKey = null;
+          this.uploadingAvatar.set(false);
+          this.toastService.error('Error al subir la imagen');
+        },
+      });
   }
 
   removeAvatar() {

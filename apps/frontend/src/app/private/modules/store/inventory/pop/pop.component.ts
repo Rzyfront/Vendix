@@ -852,16 +852,6 @@ export class PopComponent implements OnInit, OnDestroy {
           'usa listas de precio',
         ),
       );
-      const unitsPerPackage = this.parseBulkOptionalNumber(
-        this.getBulkValue(normalizedRow, 'units_per_package', 'unidades por empaque'),
-      );
-      const packageConsumesMultipleStock = this.parseBulkOptionalBoolean(
-        this.getBulkValue(
-          normalizedRow,
-          'package_consumes_multiple_stock',
-          'empaque descuenta multiples unidades',
-        ),
-      );
       const isOnSale = this.parseBulkOptionalBoolean(
         this.getBulkValue(normalizedRow, 'en oferta', 'is_on_sale'),
       );
@@ -907,8 +897,6 @@ export class PopComponent implements OnInit, OnDestroy {
             is_featured: isFeatured,
             allow_pos_price_override: allowPosPriceOverride,
             has_multiple_price_tiers: hasMultiplePriceTiers,
-            units_per_package: unitsPerPackage,
-            package_consumes_multiple_stock: packageConsumesMultipleStock,
             brand_id: String(brand),
             category_ids: String(categories),
             is_on_sale: isOnSale,

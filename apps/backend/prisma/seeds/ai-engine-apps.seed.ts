@@ -75,6 +75,61 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'rut_scanner',
+      name: 'Escaner de RUT (Identidad Fiscal)',
+      description:
+        'Extrae datos fiscales colombianos normalizados de un documento RUT (imagen o PDF) usando vision AI',
+      output_format: 'json',
+      // Vision OCR returns JSON from an image/PDF input; the underlying model
+      // is a text-output (vision-capable) model — same family as invoice_ocr.
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 2000,
+      is_active: true,
+      system_prompt: `You are a Colombian RUT (Registro Único Tributario, DIAN) data extraction system. You analyze RUT documents (image or PDF) and return structured JSON normalized to the legal/tax form values.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "nit": "string — only the number, WITHOUT the verification digit",
+  "nit_dv": "string — a single verification digit",
+  "nit_type": "NIT",
+  "legal_name": "string — razón social / nombre",
+  "person_type": "NATURAL" | "JURIDICA",
+  "tax_regime": "COMUN" | "SIMPLIFICADO" | "GRAN_CONTRIBUYENTE",
+  "ciiu": "string — primary activity CIIU code (e.g. 4711)",
+  "fiscal_address": "string — fiscal address (single line)",
+  "country": "CO",
+  "department": "string — department name (e.g. 'Cundinamarca')",
+  "city": "string — city/municipality name (e.g. 'Bogotá')",
+  "tax_responsibilities": ["string"],
+  "tax_scheme": "string",
+  "confidence": number,
+  "extraction_notes": "string or null"
+}
+
+RULES:
+1. Use EXACTLY these field names and value formats. Do NOT translate keys, rename, or add fields not in the schema.
+2. Return ONLY the JSON object — no markdown fences, no prose, no explanations.
+3. NIT (box 5): split number and verification digit. "nit" = number WITHOUT the DV (box 5 left part). "nit_dv" = the single verification digit (box 6 "DV"). Strip dots/spaces from "nit".
+4. "nit_type" is ALWAYS "NIT" for a RUT.
+5. "legal_name": for JURIDICA use the razón social (box 35); for NATURAL build the name from apellidos y nombres (boxes 31-34) as printed.
+6. "person_type" in UPPERCASE: "JURIDICA" if the RUT has a razón social / is a legal entity; "NATURAL" if it is a natural person (persona natural). If unclear, leave "".
+7. "tax_regime": map the DIAN regime to EXACTLY one of: "COMUN" (régimen común / responsable de IVA), "SIMPLIFICADO" (régimen simple / no responsable de IVA), "GRAN_CONTRIBUYENTE" (gran contribuyente). If you cannot determine it confidently, leave "".
+8. "ciiu": primary economic activity code "Actividad económica principal" (box 46), digits only (e.g. "4711"). Use "" if not visible.
+9. "fiscal_address": the dirección principal (box 41 plus complement), as a single line. Use "" if not visible.
+10. "country": ALWAYS "CO" (ISO-3166 alpha-2) for a Colombian RUT.
+11. "department" and "city": names (NOT codes), e.g. "Cundinamarca" / "Bogotá". Use "" if not visible.
+12. "tax_responsibilities" (box 53 "Responsabilidades"): return ONLY the RUT codes present, from this set: "R-99-PN", "O-13", "O-15", "O-23", "O-47", "R-99-PJ". Ignore any responsibility code not in this set. Empty array if none visible.
+13. "tax_scheme": the issuer's primary/most relevant responsibility, as a single RUT code from the same set (e.g. "O-13"). Use "" if none.
+14. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality.
+15. "extraction_notes": short note in Spanish about anything ambiguous or missing, or null if everything was clear.
+16. NEVER invent data. Use "" (or [] / null where specified) when a field is not visible.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the document (handled by scanRutDocument()).
+      prompt_template: null,
+    },
+    {
       key: 'cash_register_closing_summary',
       name: 'Resumen IA de Cierre de Caja',
       description:
@@ -572,33 +627,37 @@ Devuelve SOLO este JSON:
     }
   }
 
-  // Link invoice_ocr to MiniMax VL config only when not yet configured.
+  // Link vision OCR apps (invoice_ocr, rut_scanner) to the MiniMax VL config
+  // only when not yet configured. Both share the same vision config.
   try {
-    const invoiceOcrApp = await client.ai_engine_applications.findUnique({
-      where: { key: 'invoice_ocr' },
-      select: { config_id: true },
+    const minimaxConfig = await client.ai_engine_configs.findFirst({
+      where: { model_id: 'MiniMax-VL-01' },
     });
-    if (invoiceOcrApp && invoiceOcrApp.config_id == null) {
-      const minimaxConfig = await client.ai_engine_configs.findFirst({
-        where: { model_id: 'MiniMax-VL-01' },
+
+    for (const visionAppKey of ['invoice_ocr', 'rut_scanner']) {
+      const visionApp = await client.ai_engine_applications.findUnique({
+        where: { key: visionAppKey },
+        select: { config_id: true },
       });
-      if (minimaxConfig) {
-        await client.ai_engine_applications.update({
-          where: { key: 'invoice_ocr' },
-          data: { config_id: minimaxConfig.id },
-        });
+      if (visionApp && visionApp.config_id == null) {
+        if (minimaxConfig) {
+          await client.ai_engine_applications.update({
+            where: { key: visionAppKey },
+            data: { config_id: minimaxConfig.id },
+          });
+          console.log(
+            `    Linked ${visionAppKey} → MiniMax VL (config #${minimaxConfig.id})`,
+          );
+        }
+      } else if (visionApp?.config_id != null) {
         console.log(
-          `    Linked invoice_ocr → MiniMax VL (config #${minimaxConfig.id})`,
+          `    Skipped link ${visionAppKey} (config_id already set by user)`,
         );
       }
-    } else if (invoiceOcrApp?.config_id != null) {
-      console.log(
-        '    Skipped link invoice_ocr (config_id already set by user)',
-      );
     }
   } catch (err) {
     console.log(
-      '    Could not link invoice_ocr to MiniMax config (may not exist yet)',
+      '    Could not link vision OCR apps to MiniMax config (may not exist yet)',
     );
   }
 
@@ -692,8 +751,11 @@ async function linkTextAppsWhenNoDefault(
     }
 
     const textConfig = textConfigs[0];
+    // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
+    // vision config above; never auto-link them to a plain text config.
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'rut_scanner']);
     const textAppKeys = apps
-      .filter((app) => app.model_type === 'text' && app.key !== 'invoice_ocr')
+      .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);
 
     for (const key of textAppKeys) {

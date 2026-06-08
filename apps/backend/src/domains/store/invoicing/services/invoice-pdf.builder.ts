@@ -62,6 +62,10 @@ export interface InvoicePdfItem {
   discount_amount: number;
   tax_amount: number;
   total_amount: number;
+  // "Empaque por tarifa" snapshot (mirrors order-pdf.builder): applied price
+  // tier label and the real stock units consumed when packaging expands qty.
+  applied_price_tier_name?: string | null;
+  stock_units_consumed?: number | null;
 }
 
 export interface InvoicePdfTax {
@@ -416,6 +420,40 @@ export class InvoicePdfBuilder {
       });
 
       doc.moveDown(0.4);
+
+      // Tier + packaging metadata sub-lines (snapshot, audit trail) — mirrors
+      // order-pdf.builder so invoices show "Empaque por tarifa" details.
+      const has_tier = !!item.applied_price_tier_name;
+      const has_package =
+        typeof item.stock_units_consumed === 'number' &&
+        item.stock_units_consumed > 0 &&
+        item.stock_units_consumed !== item.quantity;
+
+      if (has_tier || has_package) {
+        doc.font('Helvetica').fontSize(7).fillColor('#666666');
+        if (has_tier) {
+          doc.text(
+            `Tarifa: ${item.applied_price_tier_name}`,
+            col_x.description + 6,
+            doc.y,
+            { width: 219 },
+          );
+        }
+        if (has_package) {
+          const per_unit =
+            Math.round(
+              ((item.stock_units_consumed as number) / item.quantity) * 100,
+            ) / 100;
+          doc.text(
+            `× ${per_unit} unid/empaque (desconto ${item.stock_units_consumed} unid. de stock)`,
+            col_x.description + 6,
+            doc.y,
+            { width: 219 },
+          );
+        }
+        doc.font('Helvetica').fontSize(8).fillColor('#000000');
+        doc.moveDown(0.4);
+      }
     }
   }
 
