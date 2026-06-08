@@ -1171,19 +1171,7 @@ export class ProductsBulkService {
           'Disponible Ecommerce': p.available_for_ecommerce ? 'sí' : 'no',
           Destacado: p.is_featured ? 'sí' : 'no',
           'Permite Cambiar Precio POS': p.allow_pos_price_override ? 'sí' : 'no',
-          'Usa Listas de Precio': (p as any).has_multiple_price_tiers
-            ? 'sí'
-            : 'no',
-          'Unidades por Empaque':
-            (p as any).units_per_package !== null &&
-            (p as any).units_per_package !== undefined
-              ? Number((p as any).units_per_package)
-              : '',
-          'Empaque Descuenta Múltiples Unidades': (
-            p as any
-          ).package_consumes_multiple_stock
-            ? 'sí'
-            : 'no',
+          'Usa Listas de Precio': p.has_multiple_price_tiers ? 'sí' : 'no',
           Peso: p.weight ? Number(p.weight) : '',
           'En Oferta': p.is_on_sale ? 'sí' : 'no',
           'Precio Oferta': p.sale_price ? Number(p.sale_price) : 0,
