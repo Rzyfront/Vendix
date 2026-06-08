@@ -263,6 +263,23 @@ export class QuantityControlComponent {
 
     if (!isNaN(numericValue) && /^[0-9]+$/.test(stringValue)) {
       this.displayValue = numericValue;
+
+      // Immediate clamp: if the user just crossed the max threshold on this
+      // keystroke, apply the cap and emit `valueClamped` + `valueChange`
+      // synchronously. This gives the cashier instant feedback (toast +
+      // visible cap in the input) instead of waiting for blur/Enter.
+      const max = this.max();
+      if (max !== null && this.displayValue > max) {
+        this.valueClamped.emit({
+          attempted: this.displayValue,
+          max,
+          reason: 'max',
+        });
+        this.displayValue = max;
+        if (max !== this.value()) {
+          this.emitValue(max);
+        }
+      }
     }
     // If invalid characters, don't update displayValue
   }
