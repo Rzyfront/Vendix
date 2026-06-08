@@ -118,6 +118,7 @@ export class OrgDianConfigController {
       p12_buffer: file.buffer,
       password,
       expected_tax_id: config.nit,
+      expected_dv: config.nit_dv,
     });
 
     if (!validation.valid) {

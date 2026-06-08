@@ -384,6 +384,13 @@ export class FiscalActivationWizardService {
         this.error.set(
           'No se puede activar: faltan pasos por completar.',
         );
+        // Refresh the cached prefill in the background so the next time the
+        // user re-enters the validation step the row state reflects the
+        // current backend truth (e.g. a step they just persisted will now
+        // show as DONE). Fire-and-forget — finalize()'s caller doesn't
+        // block on this; the validation rows already trust the 409 details
+        // for this turn.
+        void this.loadPrefill(true).catch(() => undefined);
       } else {
         this.error.set(this.messageFromError(error));
       }

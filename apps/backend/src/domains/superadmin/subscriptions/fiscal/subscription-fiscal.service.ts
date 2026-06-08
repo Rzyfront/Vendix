@@ -231,6 +231,7 @@ export class SubscriptionFiscalService {
       p12_buffer: params.file.buffer,
       password: params.password.trim(),
       expected_tax_id: config.nit,
+      expected_dv: config.nit_dv,
     });
     if (!validation.valid) {
       throw new BadRequestException(validation.error ?? 'Invalid certificate');

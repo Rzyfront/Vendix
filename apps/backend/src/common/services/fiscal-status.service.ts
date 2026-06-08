@@ -297,12 +297,30 @@ export class FiscalStatusService {
       satisfied.add('accounting_mappings');
     }
 
-    if (sources.initial_inventory && sources.initial_inventory.configured) {
-      satisfied.add('initial_inventory');
+    // initial_inventory: prefer `costing_configured` (what the wizard step
+    // actually persists) and fall back to the legacy `configured` flag
+    // (initial_transactions > 0) for tenants that walked the older
+    // activation path. Either signal means the step is done.
+    if (sources.initial_inventory) {
+      if (
+        sources.initial_inventory.costing_configured === true ||
+        sources.initial_inventory.configured === true
+      ) {
+        satisfied.add('initial_inventory');
+      }
     }
 
-    if (sources.payroll_config && sources.payroll_config.enabled === true) {
-      satisfied.add('payroll_config');
+    // payroll_config: prefer `has_minimal` (the payroll.minimal block the
+    // wizard's payroll step persists) and fall back to the legacy
+    // `enabled` flag for tenants that explicitly set it. Either signal
+    // means the step is done.
+    if (sources.payroll_config) {
+      if (
+        sources.payroll_config.has_minimal === true ||
+        sources.payroll_config.enabled === true
+      ) {
+        satisfied.add('payroll_config');
+      }
     }
 
     return satisfied;
@@ -646,10 +664,18 @@ export class FiscalStatusService {
         ? inventory.costing_method
         : null;
 
+    // The wizard's initial-inventory step only persists the costing method
+    // — it does not create `inventory_transactions` rows (that requires at
+    // least one product, which is a separate flow). The activation guard
+    // must therefore consider the step complete when the costing method is
+    // set, otherwise the wizard would reject the activation forever.
+    const costing_configured = costing_method !== null;
+
     return {
       configured: initial_transactions > 0,
       initial_transactions,
       costing_method,
+      costing_configured,
     };
   }
 
@@ -684,10 +710,27 @@ export class FiscalStatusService {
       select: { year: true },
     });
 
+    // The wizard's payroll step persists `settings.payroll.minimal` (payment
+    // frequency + parafiscales) via PUT /payroll/settings — NOT `enabled`.
+    // The activation guard must therefore trust `has_minimal` (a `minimal`
+    // block with a real `payment_frequency`) instead of the legacy
+    // `enabled` flag, or the wizard will reject the activation even after
+    // the user picked every required value.
+    const minimal =
+      payroll.minimal && typeof payroll.minimal === 'object'
+        ? (payroll.minimal as Record<string, unknown>)
+        : null;
+    const minimalFrequency =
+      typeof minimal?.payment_frequency === 'string'
+        ? minimal.payment_frequency
+        : null;
+    const has_minimal = minimalFrequency !== null;
+
     return {
       enabled: payroll.enabled === true,
       config: payroll as Record<string, unknown>,
       defaults_year: defaults?.year ?? null,
+      has_minimal,
     };
   }
 

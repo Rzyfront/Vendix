@@ -11,7 +11,6 @@ import { ViewportScroller } from '@angular/common';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, map, of } from 'rxjs';
-import { Marked, type Tokens } from 'marked';
 
 import {
   PublicLegalService,
@@ -19,13 +18,16 @@ import {
   LegalDocumentType,
 } from '../services/public-legal.service';
 import { formatDateOnlyUTC } from '../../../shared/utils/date.util';
+import { markdownToHtml } from '../../../shared/utils/markdown.util';
 
 /**
  * Public generic legal document viewer.
  *
  * Reads the document type from the route `data.documentType`, fetches the
- * active version from the backend, and renders the markdown/HTML content with
- * marked + DomSanitizer. Heading anchors are generated so deep links such as
+ * active version from the backend, and renders the markdown content with the
+ * shared `markdownToHtml` converter (same renderer used by the Help Center)
+ * so the output is clean markdown — no `<pre>` code blocks, no dark theme.
+ * Heading anchors are injected so deep links such as
  * `/legal/terminos#pagos-y-reembolsos` (used by the checkout) scroll into view.
  */
 @Component({
@@ -34,23 +36,61 @@ import { formatDateOnlyUTC } from '../../../shared/utils/date.util';
   imports: [RouterLink],
   templateUrl: './legal-document-viewer.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  styles: [
+    `
+      .content-body {
+        font-size: 0.95rem;
+        line-height: 1.7;
+        color: var(--color-text, #374151);
+      }
+
+      :host ::ng-deep .content-body h2 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 1.75rem 0 0.75rem 0;
+        color: var(--color-text, #111827);
+        scroll-margin-top: 5rem;
+      }
+
+      :host ::ng-deep .content-body h3 {
+        font-size: 1.05rem;
+        font-weight: 600;
+        margin: 1.25rem 0 0.5rem 0;
+        color: var(--color-text, #111827);
+        scroll-margin-top: 5rem;
+      }
+
+      :host ::ng-deep .content-body ul,
+      :host ::ng-deep .content-body ol {
+        padding-left: 1.25rem;
+        margin: 0.5rem 0;
+        list-style: disc;
+      }
+
+      :host ::ng-deep .content-body li {
+        margin-bottom: 0.375rem;
+      }
+
+      :host ::ng-deep .content-body strong {
+        font-weight: 600;
+        color: var(--color-text, #111827);
+      }
+
+      :host ::ng-deep .content-body p {
+        margin: 0.75rem 0;
+      }
+
+      :host ::ng-deep .content-body a {
+        color: var(--color-primary, #2563eb);
+      }
+    `,
+  ],
 })
 export class LegalDocumentViewerComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly legalService = inject(PublicLegalService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly viewportScroller = inject(ViewportScroller);
-
-  /** marked instance configured with slugified heading IDs for anchor support. */
-  private readonly marked = new Marked({
-    renderer: {
-      heading(token: Tokens.Heading): string {
-        const text = this.parser.parseInline(token.tokens);
-        const id = LegalDocumentViewerComponent.slugify(token.text);
-        return `<h${token.depth} id="${id}">${text}</h${token.depth}>\n`;
-      },
-    },
-  });
 
   /** Document type from the route presentation metadata. */
   private readonly documentType = this.route.snapshot.data[
@@ -98,7 +138,7 @@ export class LegalDocumentViewerComponent {
     const doc = this.document();
     if (!doc?.content) return '';
     try {
-      const html = this.marked.parse(doc.content, { async: false });
+      const html = this.addHeadingIds(markdownToHtml(doc.content));
       return this.sanitizer.bypassSecurityTrustHtml(html);
     } catch (error) {
       console.error('Error rendering legal document', error);
@@ -115,6 +155,19 @@ export class LegalDocumentViewerComponent {
       // Wait for the rendered HTML to be in the DOM before scrolling.
       queueMicrotask(() => this.viewportScroller.scrollToAnchor(fragment));
     });
+  }
+
+  /**
+   * Injects slugified ids on h2/h3 produced by markdownToHtml so URL fragments
+   * (e.g. #pagos-y-reembolsos) resolve. markdownToHtml emits headings without
+   * inline markup, so the text capture (`[^<]+`) is safe.
+   */
+  private addHeadingIds(html: string): string {
+    return html.replace(
+      /<(h[23])>([^<]+)<\/\1>/g,
+      (_match, tag: string, text: string) =>
+        `<${tag} id="${LegalDocumentViewerComponent.slugify(text)}">${text}</${tag}>`,
+    );
   }
 
   /** Builds a URL-safe heading id from heading text (GFM-style slug). */

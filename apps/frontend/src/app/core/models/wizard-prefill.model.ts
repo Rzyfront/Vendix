@@ -76,6 +76,13 @@ export interface WizardPrefillAccountingMappings {
 }
 
 export interface WizardPrefillInitialInventory {
+  /**
+   * Legacy flag: true when at least one `inventory_transactions` row with
+   * `type='initial'` already exists. Kept for backward compatibility with
+   * tenants that captured an initial balance through the inventory flow
+   * itself (not the fiscal wizard). The fiscal wizard considers the step
+   * complete when `costing_configured` is true.
+   */
   configured: boolean;
   initial_transactions: number;
   /**
@@ -84,12 +91,37 @@ export interface WizardPrefillInitialInventory {
    * backend. The step maps it to the form's CostingMethod enum.
    */
   costing_method: string | null;
+  /**
+   * True when `costing_method` is set in the scope-aware settings row.
+   * This is the criterion the backend's activation guard uses — the
+   * wizard's initial-inventory step only persists the costing method,
+   * so this flag is the authoritative "is this step done from the
+   * wizard's perspective?" signal. Optional for backward compatibility
+   * with older prefill snapshots that didn't expose it (the backend
+   * falls back to the legacy `configured` flag in that case).
+   */
+  costing_configured?: boolean;
 }
 
 export interface WizardPrefillPayrollConfig {
+  /**
+   * Legacy flag: true when `settings.payroll.enabled === true`. Kept for
+   * backward compatibility with legacy tenants that explicitly wrote this
+   * flag. The fiscal wizard's payroll step persists `payroll.minimal`
+   * (frequency + parafiscales) instead, NOT `enabled`. The activation
+   * guard now trusts `has_minimal`; this field is informational.
+   */
   enabled: boolean;
   config: Record<string, unknown> | null;
   defaults_year: number | null;
+  /**
+   * True when the wizard's payroll step has persisted a `payroll.minimal`
+   * block with a real `payment_frequency` value. This is the criterion
+   * the backend's activation guard uses so a tenant that walked through
+   * the wizard and picked "Mensual + todas las parafiscales" is correctly
+   * recognized as payroll-ready. Optional for backward compatibility.
+   */
+  has_minimal?: boolean;
 }
 
 export interface WizardPrefill {

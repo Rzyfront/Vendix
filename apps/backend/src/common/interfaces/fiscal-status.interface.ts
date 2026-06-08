@@ -139,6 +139,14 @@ export interface FiscalWizardPrefillAccountingMappings {
 }
 
 export interface FiscalWizardPrefillInitialInventory {
+  /**
+   * Legacy flag: true when at least one `inventory_transactions` row with
+   * `type='initial'` already exists. Kept for backward compatibility with
+   * older tenants that already moved past the initial-balance capture.
+   * New satisfaction check should rely on `costing_configured` instead —
+   * the wizard's initial-inventory step only persists the costing method
+   * and never creates initial transactions on its own.
+   */
   configured: boolean;
   initial_transactions: number;
   /**
@@ -148,12 +156,35 @@ export interface FiscalWizardPrefillInitialInventory {
    * Raw settings value (`weighted_average`/`cpp`/`fifo`); `null` when unset.
    */
   costing_method: string | null;
+  /**
+   * True when the wizard's initial-inventory step can be considered
+   * complete from the wizard's own output: the tenant has picked a
+   * costing method in settings. This is the criterion the activation
+   * guard uses (see `deriveSatisfiedSteps`) so the wizard and the
+   * backend agree on what "configured" means.
+   */
+  costing_configured: boolean;
 }
 
 export interface FiscalWizardPrefillPayrollConfig {
+  /**
+   * Legacy flag: true when `settings.payroll.enabled === true`. Kept for
+   * backward compatibility with any legacy row that already wrote this
+   * flag. The activation guard no longer trusts it: the payroll wizard
+   * step persists `settings.payroll.minimal` (frequency + parafiscales),
+   * not `enabled`. Use `has_minimal` for the activation check.
+   */
   enabled: boolean;
   config: Record<string, unknown> | null;
   defaults_year: number | null;
+  /**
+   * True when the wizard's payroll step has persisted a `payroll.minimal`
+   * block with a real `payment_frequency` value. This is the criterion
+   * the activation guard uses so a tenant that walked through the wizard
+   * and picked "Mensual + todas las parafiscales" is correctly recognized
+   * as payroll-ready — regardless of the (unset) `enabled` flag.
+   */
+  has_minimal: boolean;
 }
 
 export interface FiscalWizardPrefill {

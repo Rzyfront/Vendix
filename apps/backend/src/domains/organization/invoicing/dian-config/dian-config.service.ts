@@ -7,6 +7,7 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreateDianConfigDto } from '../../../store/invoicing/dian-config/dto/create-dian-config.dto';
 import { UpdateDianConfigDto } from '../../../store/invoicing/dian-config/dto/update-dian-config.dto';
 import { CertificateValidationResult } from '../../../store/invoicing/dian-config/certificates/certificate-issuer.interface';
+import { certificateNitMatches } from '../../../store/invoicing/dian-config/certificates/nit-match.util';
 
 /**
  * Organization-level twin of the store DIAN config service.
@@ -264,7 +265,15 @@ export class OrgDianConfigService {
         certificate_nit: null,
       });
     }
-    if (config_nit && certificate_nit && config_nit !== certificate_nit) {
+    if (
+      config_nit &&
+      certificate_nit &&
+      !certificateNitMatches({
+        certificateTaxId: certificate_info?.tax_id,
+        nit: config.nit,
+        dv: config.nit_dv,
+      })
+    ) {
       throw new VendixHttpException(ErrorCodes.DIAN_CERT_004, undefined, {
         dian_configuration_id: id,
         expected_nit: config_nit,

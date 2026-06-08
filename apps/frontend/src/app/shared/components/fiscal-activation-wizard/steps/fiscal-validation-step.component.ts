@@ -67,13 +67,28 @@ interface ValidationRow {
       </div>
 
       @if (missingLabels().length) {
-        <p class="step-warning" role="status">
-          Faltan pasos para finalizar: {{ missingLabels().join(', ') }}
-        </p>
+        <div
+          class="step-warning"
+          role="status"
+          aria-live="polite"
+          data-testid="fiscal-validation-missing-banner"
+        >
+          <app-icon name="alert-circle" [size]="16"></app-icon>
+          <div class="step-warning__body">
+            <strong>Faltan pasos para activar las áreas seleccionadas</strong>
+            <small>
+              Toca cada paso de la lista para abrirlo y completarlo. El backend
+              no permitirá la activación hasta que los datos estén realmente
+              guardados, aunque el wizard te deje hacer clic en "Continuar".
+            </small>
+          </div>
+        </div>
       }
 
       @if (localError()) {
-        <p class="step-error" role="alert">{{ localError() }}</p>
+        <p class="step-error" role="alert" aria-live="assertive">
+          {{ localError() }}
+        </p>
       }
     </div>
   `,
@@ -177,8 +192,34 @@ interface ValidationRow {
         line-height: 1.25rem;
       }
       .step-warning {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.6rem;
+        padding: 0.85rem 1rem;
         margin: 0;
-        font-size: 0.85rem;
+        border: 1px solid #fcd34d;
+        border-radius: 0.5rem;
+        background: #fffbeb;
+        color: var(--warning-color, #92400e);
+      }
+      .step-warning__body {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .step-warning__body strong {
+        display: block;
+        font-size: 0.9rem;
+        color: var(--warning-color, #92400e);
+      }
+      .step-warning__body small {
+        display: block;
+        font-size: 0.8rem;
+        line-height: 1.35;
+        color: #78350f;
+      }
+      .step-warning app-icon {
+        flex: 0 0 auto;
         color: var(--warning-color, #92400e);
       }
       .step-error {
@@ -217,22 +258,40 @@ export class FiscalValidationStepComponent implements FiscalWizardStepHost {
     return Array.from(acc);
   });
 
+  /**
+   * Source of truth for "this step is complete" in the validation view. We do
+   * NOT trust the service-level `effectiveSatisfiedSteps()` here: that signal
+   * mixes optimistic wizard state (completedSteps, detector signals) with
+   * prefill data, and the optimistic half caused the user to see green
+   * checkmarks for steps whose real backing data was missing — only to hit
+   * `FISCAL_STATUS_INCOMPLETE` (409) on `finalize()`.
+   *
+   * Priority for the row state (highest precedence first):
+   *  1. `finalizeMissingSteps` (server-side 409 confirmation) → always PENDING.
+   *  2. `prefill.satisfied_steps` (backend read-only truth) → DONE if present.
+   *  3. `wizard.completed_steps` (in-session optimistic) → DONE as a last
+   *     resort, but only if the prefill snapshot is missing the relevant
+   *     section (legacy callers / prefill not yet loaded). The reason copy
+   *     still points at the prefill gap so the user knows to re-check.
+   */
   readonly rows = computed<ValidationRow[]>(() => {
-    // Real completion truth: union of prefill.satisfied_steps + wizard
-    // completed_steps + detector signals (the service already folds all three
-    // into effectiveSatisfiedSteps()). Using completedSteps() alone would mark
-    // prefill-satisfied steps as pending.
-    const satisfied = new Set(this.service.effectiveSatisfiedSteps());
-    const refs = this.service.stepRefs() as Record<
-      string,
-      Record<string, unknown> | undefined
-    >;
-    // Server-side confirmation: flatten missing_steps across selected areas.
+    const prefill = this.service.prefill();
+    const prefillSatisfied = new Set(prefill?.satisfied_steps ?? []);
+    const wizardCompleted = new Set(this.service.completedSteps());
+
+    // Server-side 409 confirmation, flattened across selected areas. Once the
+    // backend has explicitly said "this step is missing" we trust it over any
+    // optimistic signal — period.
     const flagged = new Set<FiscalWizardStepId>();
     const missingByArea = this.service.finalizeMissingSteps();
     (Object.keys(missingByArea) as FiscalArea[]).forEach((area) => {
       (missingByArea[area] ?? []).forEach((s) => flagged.add(s));
     });
+
+    const refs = this.service.stepRefs() as Record<
+      string,
+      Record<string, unknown> | undefined
+    >;
 
     return this.requiredSteps().map((step) => {
       const ref = refs[step];
@@ -240,7 +299,29 @@ export class FiscalValidationStepComponent implements FiscalWizardStepHost {
         ref && typeof ref['completed_at'] === 'string'
           ? (ref['completed_at'] as string).slice(0, 10)
           : null;
-      const isDone = satisfied.has(step);
+
+      // 1) Server-confirmed missing → always pending, regardless of any other
+      //    optimistic signal. This is what the user complained about: the row
+      //    looked green, finalize() rejected it, and there was no visible
+      //    reason why.
+      let isDone: boolean;
+      if (flagged.has(step)) {
+        isDone = false;
+      } else if (prefillSatisfied.has(step)) {
+        // 2) Prefill has the canonical read of the underlying tables — trust
+        //    it.
+        isDone = true;
+      } else if (prefill === null) {
+        // 3) Prefill not yet loaded (legacy flow / first load in flight):
+        //    fall back to wizard-completed to avoid an empty screen.
+        isDone = wizardCompleted.has(step);
+      } else {
+        // Prefill is loaded and the step is NOT in satisfied_steps → the
+        // real data is genuinely missing. Do NOT mark it done just because
+        // the user clicked "Continuar" inside the wizard.
+        isDone = false;
+      }
+
       return {
         step,
         label: this.stepLabels[step],
@@ -300,10 +381,25 @@ export class FiscalValidationStepComponent implements FiscalWizardStepHost {
         return 'Falta configurar los impuestos';
       case 'accounting_mappings':
         return 'Faltan los mapeos contables';
-      case 'initial_inventory':
-        return 'Falta configurar el inventario inicial';
-      case 'payroll_config':
-        return 'Falta configurar la nómina';
+      case 'initial_inventory': {
+        const inventory = prefill?.initial_inventory;
+        if (inventory?.costing_method) {
+          // The step considers itself complete (the backend agrees) — this
+          // branch only fires when the user's wizard session believes the
+          // step is done but the prefill snapshot disagrees (stale cache or
+          // the data was reset out-of-band). Tell the user the truth:
+          // "your settings don't actually have a costing method anymore".
+          return 'El método de costeo no quedó guardado. Vuelve a elegirlo.';
+        }
+        return 'Falta elegir el método de costeo del inventario';
+      }
+      case 'payroll_config': {
+        const payroll = prefill?.payroll_config;
+        if (payroll?.has_minimal) {
+          return 'La configuración mínima de nómina no quedó guardada. Vuelve a confirmar la frecuencia.';
+        }
+        return 'Falta configurar la frecuencia y parafiscales de la nómina';
+      }
       default:
         return 'Pendiente';
     }
@@ -315,6 +411,24 @@ export class FiscalValidationStepComponent implements FiscalWizardStepHost {
 
   async submit(): Promise<{ ref: Record<string, unknown> } | null> {
     if (!this.valid()) return null;
+
+    // Pre-check client-side against the prefill snapshot (the same read the
+    // backend does on `finalize()`). If we already know a step is missing in
+    // the underlying tables, do NOT call `finalize()` just to receive a 409
+    // — show the actionable banner here so the user understands which step
+    // needs attention before they can activate.
+    const prefill = this.service.prefill();
+    if (prefill) {
+      const missingHere = this.missingLabels();
+      if (missingHere.length > 0) {
+        this.localError.set(
+          `Faltan pasos por completar antes de activar: ${missingHere.join(', ')}. ` +
+            'Selecciona cada paso de la lista para abrirlo y completarlo.',
+        );
+        return null;
+      }
+    }
+
     this.submitting.set(true);
     this.localError.set(null);
     try {
@@ -326,7 +440,13 @@ export class FiscalValidationStepComponent implements FiscalWizardStepHost {
         },
       };
     } catch (e) {
-      this.localError.set(parseApiError(e).userMessage);
+      // 409 → the service has already captured `finalizeMissingSteps` and
+      // surfaced the missing-step banner. Don't override it with the raw
+      // userMessage; the validation list is the source of truth now.
+      const parsed = parseApiError(e);
+      if (parsed.errorCode !== 'FISCAL_STATUS_INCOMPLETE') {
+        this.localError.set(parsed.userMessage);
+      }
       return null;
     } finally {
       this.submitting.set(false);
