@@ -341,9 +341,15 @@ export class ProductsComponent {
       .updateProduct(product.id, { state: nextState } as UpdateProductDto)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (updatedProduct) => {
+          // Actualización optimista del signal local con la respuesta del
+          // backend (que ya trae el producto completo vía findOne). Esto evita
+          // depender de loadProducts() que puede devolver datos cacheados por
+          // el browser (bug fixeado con Cache-Control: no-store + interceptor).
+          this.products.update((list) =>
+            list.map((p) => (p.id === updatedProduct.id ? updatedProduct : p)),
+          );
           this.toastService.success(`Producto ${verb} correctamente`);
-          this.loadProducts();
           this.loadStats();
         },
         error: (error: any) => {

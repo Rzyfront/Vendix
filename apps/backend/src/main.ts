@@ -24,6 +24,26 @@ async function bootstrap() {
   );
   app.use(urlencoded({ limit: '50mb', extended: true }));
 
+  // Deshabilita la cache HTTP en endpoints privados de la API.
+  // Bug fix: el backend emitía ETag (Express por defecto) pero NO Cache-Control,
+  // lo que permitía al browser cachear GETs a /api/*. Al re-abrir un producto
+  // recién editado, el browser servía la respuesta vieja y los cambios no se
+  // veían aplicados, aunque el PATCH sí había persistido.
+  // Las rutas explícitamente públicas (sitemap.xml, robots.txt, healthcheck,
+  // imágenes S3 firmadas) ya tienen sus propios Cache-Control en sus handlers
+  // y NO empiezan con /api/, así que este middleware no las afecta.
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      res.setHeader(
+        'Cache-Control',
+        'no-store, no-cache, must-revalidate, proxy-revalidate',
+      );
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
+
   // Initialize domain configuration
   DomainConfigService.initialize();
 
@@ -138,14 +158,16 @@ async function bootstrap() {
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: [
-      'Content-Type',
-      'Authorization',
       'Accept',
+      'Authorization',
+      'Cache-Control',
+      'Content-Type',
       'Origin',
+      'Pragma',
       'X-Requested-With',
       'x-store-id',
     ],
-    exposedHeaders: ['Authorization'],
+    exposedHeaders: ['Authorization', 'Cache-Control', 'Pragma'],
   });
 
   // Swagger configuration (disabled in development to save memory and avoid SWC metadata issues)
