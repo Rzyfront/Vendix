@@ -1300,38 +1300,6 @@ export class PosCartService {
     return Math.max(0, Math.floor(availableStock / requiredStockPerUnit));
   }
 
-  /**
-   * Versión pública de `getMaxSellableQuantity` aplicada a un `CartItem` ya
-   * existente en el carrito. Usada por el flujo de confirmación de stock
-   * antes del cobro (compara `item.quantity` con este valor para detectar
-   * líneas que fueron clamp'eadas en el input de cantidad).
-   *
-   * Respeta las mismas reglas que la versión privada:
-   * - Custom items y `track_inventory === false` → 999 (no limitan).
-   * - Variantes con `track_inventory_override === false` → 999.
-   * - Package units: divide stock por `units_per_package`.
-   */
-  getMaxSellableForItem(item: CartItem): number {
-    if (
-      item.itemType === 'custom' ||
-      item.product.track_inventory === false
-    ) {
-      return 999;
-    }
-    const variant = item.variant_id
-      ? item.product.product_variants?.find(
-          (c) => Number(c.id) === Number(item.variant_id),
-        )
-      : undefined;
-    if (variant?.track_inventory_override === false) return 999;
-    return this.getMaxSellableQuantity(
-      item.product,
-      variant,
-      !!item.is_package_unit,
-      item.units_per_package ?? null,
-    );
-  }
-
   private resolveUnitPrice(product: Product, variant?: PosProductVariant): number {
     const resolution = this.priceResolver.resolve(
       {
