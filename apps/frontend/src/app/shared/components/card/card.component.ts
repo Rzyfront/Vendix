@@ -5,6 +5,9 @@ import { NgStyle } from '@angular/common';
   selector: 'app-card',
   standalone: true,
   imports: [NgStyle],
+  host: {
+    '[class.h-full]': 'fullHeight()',
+  },
   template: `
     <div [class]="cardClasses" [ngStyle]="cardStyles">
       <!-- Header -->
@@ -90,6 +93,13 @@ export class CardComponent {
    * Mobile shows transparent (no chrome). Useful for standard module list containers.
    */
   readonly responsive = input(false);
+  /**
+   * When true, the card stretches to fill its grid/flex row height and lays out
+   * its sections as a flex column so the body grows to fill remaining space.
+   * Use to align sibling cards to equal height (e.g. dashboard chart rows).
+   * Opt-in: default keeps the legacy content-driven height.
+   */
+  readonly fullHeight = input(false);
   // Optional sizing inputs. Accept any valid CSS size (px, %, rem, etc.)
   readonly width = input<string>();
   readonly height = input<string>();
@@ -130,6 +140,7 @@ export class CardComponent {
     if (shadowClass) classes.push(shadowClass);
 
     if (!this.padding()) classes.push('p-0');
+    if (this.fullHeight()) classes.push('h-full', 'flex', 'flex-col');
     if (this.animateOnLoad()) classes.push('animate-slide-up-fade-in');
     const customClasses = this.customClasses();
     if (customClasses) classes.push(customClasses);
@@ -179,11 +190,17 @@ export class CardComponent {
 
   /** Body classes with optional responsive padding */
   get bodyClasses(): string {
-    if (!this.padding()) return '';
-    if (this.responsivePadding()) {
-      return 'p-4 sm:p-6';
+    const classes: string[] = [];
+    if (this.padding()) {
+      classes.push(this.responsivePadding() ? 'p-4' : 'p-6');
+      if (this.responsivePadding()) classes.push('sm:p-6');
     }
-    return 'p-6';
+    // When the card fills its row, the body must grow to occupy the remaining
+    // height and lay out projected content as a flex column.
+    if (this.fullHeight()) {
+      classes.push('flex-1', 'min-h-0', 'flex', 'flex-col');
+    }
+    return classes.join(' ');
   }
 
   /** Footer classes with optional responsive padding */

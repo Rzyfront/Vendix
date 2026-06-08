@@ -102,6 +102,7 @@
       [padding]="false"
       overflow="hidden"
       [showHeader]="true"
+      [fullHeight]="true"
     >
       <div slot="header" class="flex flex-col">
         <span class="text-sm font-bold text-[var(--color-text-primary)]"
@@ -111,21 +112,23 @@
           >Porcentaje de ingresos destinado a gastos</span
         >
       </div>
-      <div class="px-4 pt-4 pb-3">
+      <div class="px-3 pt-3 pb-3 sm:px-4 sm:pt-4 h-full flex flex-col">
         @if (loading()) {
-          <div class="h-64 flex items-center justify-center">
+          <div class="flex-1 min-h-[200px] flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
         } @else {
-          @defer (on immediate) {
-            <app-chart [options]="gaugeChartOptions()" size="medium"></app-chart>
-          } @placeholder {
-            <div
-              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <div class="flex-1 min-h-0 h-[200px] sm:h-[230px] lg:h-auto">
+            @defer (on immediate) {
+              <app-chart [options]="gaugeChartOptions()"></app-chart>
+            } @placeholder {
+              <div
+                class="h-full bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
+          </div>
 
           <!-- Range Legend -->
           <div class="space-y-1.5">
@@ -182,6 +185,7 @@
       [padding]="false"
       overflow="hidden"
       [showHeader]="true"
+      [fullHeight]="true"
       class="lg:col-span-2"
     >
       <div slot="header" class="flex flex-col">
@@ -192,24 +196,23 @@
           >Ventas, gastos y rendimiento a lo largo del tiempo</span
         >
       </div>
-      <div class="p-4">
+      <div class="p-3 sm:p-4 h-full flex flex-col">
         @if (loadingTrends()) {
-          <div class="h-80 flex items-center justify-center">
+          <div class="flex-1 min-h-[260px] flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
         } @else {
-          @defer (on immediate) {
-            <app-chart
-              [options]="comparativeChartOptions()"
-              size="large"
-            ></app-chart>
-          } @placeholder {
-            <div
-              class="h-80 bg-surface-secondary animate-pulse rounded-xl"
-            ></div>
-          }
+          <div class="flex-1 min-h-0 h-[260px] sm:h-[340px] lg:h-auto">
+            @defer (on immediate) {
+              <app-chart [options]="comparativeChartOptions()"></app-chart>
+            } @placeholder {
+              <div
+                class="h-full bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
+          </div>
         }
       </div>
     </app-card>

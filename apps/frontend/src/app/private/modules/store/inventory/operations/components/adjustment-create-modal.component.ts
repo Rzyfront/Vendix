@@ -47,7 +47,7 @@ import {
       <!-- Steps -->
       <app-steps-line
         [steps]="steps"
-        [currentStep]="currentStep - 1"
+        [currentStep]="currentStep() - 1"
         size="md"
         primaryColor="var(--color-primary)"
         secondaryColor="var(--color-secondary)"
@@ -61,16 +61,16 @@ import {
             <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion *</label>
             <app-selector
               [options]="locations()"
-              [ngModel]="selectedLocation"
+              [ngModel]="selectedLocation()"
               placeholder="Seleccionar ubicacion"
               (ngModelChange)="onLocationChange($event)"
             ></app-selector>
           </div>
 
-          @if (selectedLocation) {
+          @if (selectedLocation()) {
             <div class="p-3 bg-primary/5 rounded-xl border border-primary/20 text-center">
               <p class="text-sm text-text-secondary">Ubicacion seleccionada</p>
-              <p class="text-lg font-bold text-primary">{{ getLocationName(selectedLocation) }}</p>
+              <p class="text-lg font-bold text-primary">{{ getLocationName(selectedLocation()) }}</p>
             </div>
           }
 
@@ -90,7 +90,7 @@ import {
           <div class="p-3 bg-surface-secondary rounded-xl border border-border flex items-center gap-3">
             <app-icon name="map-pin" [size]="18" class="text-primary"></app-icon>
             <span class="text-sm font-medium text-text-primary">
-              {{ getLocationName(selectedLocation) }}
+              {{ getLocationName(selectedLocation()) }}
             </span>
             <button type="button" (click)="goToStep(1)" class="ml-auto text-sm text-primary hover:underline">Cambiar</button>
           </div>
@@ -243,7 +243,7 @@ import {
               <app-icon name="map-pin" [size]="18" class="text-primary"></app-icon>
               <div>
                 <p class="text-xs text-text-secondary">Ubicacion</p>
-                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedLocation) }}</p>
+                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedLocation()) }}</p>
               </div>
             </div>
           </div>
@@ -400,7 +400,8 @@ import {
           <label class="flex items-start gap-3 p-3 bg-warning/5 rounded-xl border border-warning/20 cursor-pointer select-none">
             <input
               type="checkbox"
-              [(ngModel)]="confirmCreate"
+              [ngModel]="confirmCreate()"
+              (ngModelChange)="confirmCreate.set($event)"
               class="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary"
             />
             <div>
@@ -424,14 +425,14 @@ import {
           <app-button
             variant="primary"
             type="button"
-            (clicked)="goToStep(currentStep + 1)"
+            (clicked)="goToStep(currentStep() + 1)"
             [disabled]="!canAdvance()"
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 !w-full !justify-center !py-3.5 !text-base"
           >
             Continuar
             <app-icon name="arrow-right" [size]="16" class="ml-2" slot="icon" ></app-icon>
           </app-button>
-        } @else if (confirmCreate) {
+        } @else if (confirmCreate()) {
           <app-button
             variant="primary"
             type="button"
@@ -459,10 +460,10 @@ import {
 
         <!-- Secondary actions (icon-only row) -->
         <div class="flex items-center justify-center gap-6 py-1">
-          @if (currentStep > 1) {
+          @if (currentStep() > 1) {
             <button
               type="button"
-              (click)="goToStep(currentStep - 1)"
+              (click)="goToStep(currentStep() - 1)"
               class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors p-1"
             >
               <app-icon name="arrow-left" [size]="22"></app-icon>
@@ -477,7 +478,7 @@ import {
           </button>
           @if (isConfirmStep) {
             <div class="w-px h-5 bg-[var(--color-border)]"></div>
-            @if (confirmCreate) {
+            @if (confirmCreate()) {
               <button
                 type="button"
                 (click)="onSubmitDraft()"
@@ -490,7 +491,7 @@ import {
               <button
                 type="button"
                 (click)="onSubmitAndComplete()"
-                [disabled]="isSubmitting() || !confirmCreate || hasMissingType()"
+                [disabled]="isSubmitting() || !confirmCreate() || hasMissingType()"
                 class="text-[var(--color-text-tertiary)] transition-colors p-1 disabled:opacity-40"
               >
                 <app-icon name="check-circle" [size]="22"></app-icon>
@@ -516,7 +517,7 @@ export class AdjustmentCreateModalComponent {
   readonly save = output<BatchCreateAdjustmentsRequest>();
   readonly saveAndComplete = output<BatchCreateAdjustmentsRequest>();
 
-  currentStep = 1;
+  currentStep = signal(1);
   steps: StepsLineItem[] = [
     { label: 'UBICACION', completed: false },
     { label: 'PRODUCTOS', completed: false },
@@ -524,7 +525,7 @@ export class AdjustmentCreateModalComponent {
   ];
 
   // Step 1
-  selectedLocation: number | null = null;
+  selectedLocation = signal<number | null>(null);
 
   // Step 2
   @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
@@ -532,7 +533,7 @@ export class AdjustmentCreateModalComponent {
   adjustmentItems: AdjustmentItem[] = [];
 
   // Step 3
-  confirmCreate = false;
+  confirmCreate = signal(false);
 
   // Preselected product loading
   readonly isLoadingPreselectedStock = signal(false);
@@ -548,9 +549,9 @@ export class AdjustmentCreateModalComponent {
 
   get hasPreselected(): boolean { return !!this.preselectedProduct(); }
 
-  get isLocationStep(): boolean { return this.currentStep === 1; }
-  get isProductsStep(): boolean { return !this.hasPreselected && this.currentStep === 2; }
-  get isConfirmStep(): boolean { return this.hasPreselected ? this.currentStep === 2 : this.currentStep === 3; }
+  get isLocationStep(): boolean { return this.currentStep() === 1; }
+  get isProductsStep(): boolean { return !this.hasPreselected && this.currentStep() === 2; }
+  get isConfirmStep(): boolean { return this.hasPreselected ? this.currentStep() === 2 : this.currentStep() === 3; }
 
   get modalTitle(): string {
     if (this.isLocationStep) return 'Seleccionar Ubicacion';
@@ -567,18 +568,19 @@ export class AdjustmentCreateModalComponent {
   }
 
   onLocationChange(value: any): void {
-    this.selectedLocation = value ? +value : null;
+    this.selectedLocation.set(value ? +value : null);
     this.adjustmentItems = [];
     this.productSearchResults.set([]);
   }
 
   searchProducts(term: string): void {
-    if (!term || term.length < 2 || !this.selectedLocation) {
+    const locationId = this.selectedLocation();
+    if (!term || term.length < 2 || !locationId) {
       this.productSearchResults.set([]);
       return;
     }
 
-    this.inventoryService.searchAdjustableProducts(term, this.selectedLocation).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.inventoryService.searchAdjustableProducts(term, locationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
         this.productSearchResults.set(
@@ -677,8 +679,8 @@ export class AdjustmentCreateModalComponent {
   }
 
   canAdvance(): boolean {
-    if (this.currentStep === 1) {
-      return !!this.selectedLocation && !this.isLoadingPreselectedStock();
+    if (this.currentStep() === 1) {
+      return !!this.selectedLocation() && !this.isLoadingPreselectedStock();
     }
     if (this.isProductsStep) {
       return this.adjustmentItems.length > 0 && !this.hasMissingType();
@@ -687,15 +689,15 @@ export class AdjustmentCreateModalComponent {
   }
 
   goToStep(step: number): void {
-    if (step > this.currentStep && !this.canAdvance()) return;
+    if (step > this.currentStep() && !this.canAdvance()) return;
 
     // When preselected product and moving from location to next step
-    if (this.hasPreselected && this.currentStep === 1 && step === 2) {
+    if (this.hasPreselected && this.currentStep() === 1 && step === 2) {
       this.loadPreselectedProductStock();
       return;
     }
 
-    this.currentStep = step;
+    this.currentStep.set(step);
     this.steps = this.steps.map((s, i) => ({
       ...s,
       completed: i < step - 1,
@@ -706,7 +708,7 @@ export class AdjustmentCreateModalComponent {
     const product = this.preselectedProduct()!;
     this.isLoadingPreselectedStock.set(true);
 
-    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
         const match = products.find((p) => p.id === product.id);
@@ -729,7 +731,7 @@ export class AdjustmentCreateModalComponent {
         }
 
         this.isLoadingPreselectedStock.set(false);
-        this.currentStep = 2;
+        this.currentStep.set(2);
         this.steps = this.steps.map((s, i) => ({
           ...s,
           completed: i < 1,
@@ -748,7 +750,7 @@ export class AdjustmentCreateModalComponent {
           reason_code: 'INV_COUNT',
           description: '',
         }];
-        this.currentStep = 2;
+        this.currentStep.set(2);
         this.steps = this.steps.map((s, i) => ({
           ...s,
           completed: i < 1,
@@ -775,11 +777,12 @@ export class AdjustmentCreateModalComponent {
   }
 
   private buildDto(): BatchCreateAdjustmentsRequest | null {
-    if (!this.selectedLocation || this.adjustmentItems.length === 0) return null;
+    const locationId = this.selectedLocation();
+    if (!locationId || this.adjustmentItems.length === 0) return null;
     if (this.hasMissingType()) return null;
 
     return {
-      location_id: this.selectedLocation,
+      location_id: locationId,
       items: this.adjustmentItems.map((item) => ({
         product_id: item.product_id,
         type: item.type,
@@ -791,7 +794,7 @@ export class AdjustmentCreateModalComponent {
   }
 
   private resetModal(): void {
-    this.currentStep = 1;
+    this.currentStep.set(1);
     this.steps = this.hasPreselected
       ? [
           { label: 'UBICACION', completed: false },
@@ -802,11 +805,11 @@ export class AdjustmentCreateModalComponent {
           { label: 'PRODUCTOS', completed: false },
           { label: 'CONFIRMAR', completed: false },
         ];
-    this.selectedLocation = null;
+    this.selectedLocation.set(null);
     this.productSearchResults.set([]);
     this.adjustmentItems = [];
     this.productSearchRef?.clearInput();
-    this.confirmCreate = false;
+    this.confirmCreate.set(false);
     this.isLoadingPreselectedStock.set(false);
   }
 }

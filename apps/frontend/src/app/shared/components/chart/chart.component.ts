@@ -127,6 +127,12 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
     `,
   styles: [
     `
+      :host {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
       .chart-container {
         position: relative;
         height: 100%;

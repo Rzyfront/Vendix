@@ -4,7 +4,9 @@ import {
   IsString,
   IsEnum,
   IsDateString,
+  IsIn,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { movement_type_enum } from '@prisma/client';
 
@@ -65,4 +67,35 @@ export class MovementQueryDto {
   @IsString()
   @IsOptional()
   search?: string;
+
+  @ApiProperty({ description: 'Page number', required: false, default: 1 })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  page?: number = 1;
+
+  @ApiProperty({ description: 'Records per page', required: false, default: 25 })
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  limit?: number = 25;
+
+  @ApiProperty({
+    description: 'Sort by field',
+    required: false,
+    default: 'created_at',
+  })
+  @IsString()
+  @IsOptional()
+  sort_by?: string = 'created_at';
+
+  @ApiProperty({
+    description: 'Sort order',
+    required: false,
+    default: 'desc',
+    enum: ['asc', 'desc'],
+  })
+  @IsIn(['asc', 'desc'])
+  @IsOptional()
+  sort_order?: 'asc' | 'desc' = 'desc';
 }
