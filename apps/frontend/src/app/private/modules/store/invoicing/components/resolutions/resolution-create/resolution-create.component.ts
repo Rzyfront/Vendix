@@ -1,8 +1,17 @@
-import { Component, inject, input, output, signal, effect } from '@angular/core';
+import { Component, DestroyRef, inject, input, output, signal, effect } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
+import { Actions, ofType } from '@ngrx/effects';
 import { InvoiceResolution } from '../../../interfaces/invoice.interface';
-import { createResolution, updateResolution } from '../../../state/actions/invoicing.actions';
+import {
+  createResolution,
+  createResolutionFailure,
+  createResolutionSuccess,
+  updateResolution,
+  updateResolutionFailure,
+  updateResolutionSuccess,
+} from '../../../state/actions/invoicing.actions';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -132,6 +141,8 @@ export class ResolutionCreateComponent {
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private actions$ = inject(Actions);
+  private destroyRef = inject(DestroyRef);
 
   readonly isEditing = () => !!this.resolution();
 
@@ -164,6 +175,26 @@ export class ResolutionCreateComponent {
         this.resolutionForm.reset();
       }
     });
+
+    this.actions$
+      .pipe(
+        ofType(createResolutionSuccess, updateResolutionSuccess),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => {
+        this.submitting.set(false);
+        this.resolutionForm.reset();
+        this.isOpenChange.emit(false);
+      });
+
+    this.actions$
+      .pipe(
+        ofType(createResolutionFailure, updateResolutionFailure),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe(() => {
+        this.submitting.set(false);
+      });
   }
 
   onSubmit(): void {
@@ -197,10 +228,6 @@ export class ResolutionCreateComponent {
         resolution: payload,
       }));
     }
-
-    this.submitting.set(false);
-    this.resolutionForm.reset();
-    this.onClose();
   }
 
   onClose(): void {

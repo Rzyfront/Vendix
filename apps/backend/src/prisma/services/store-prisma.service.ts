@@ -94,6 +94,19 @@ export class StorePrismaService extends BasePrismaService {
     'fiscal_operation_events',
   ];
 
+  // Models whose accounting_entity_id column is NOT NULL in schema.prisma —
+  // they cannot carry legacy (null-entity) rows and Prisma rejects null filters.
+  private readonly fiscal_entity_required_models = [
+    'invoice_resolutions',
+    'fiscal_transmissions',
+    'fiscal_evidences',
+    'payroll_runs',
+    'fiscal_obligations',
+    'tax_declaration_drafts',
+    'fiscal_close_sessions',
+    'fiscal_operation_events',
+  ];
+
   private readonly fiscal_entity_models_with_store_id = [
     'invoice_resolutions',
     'accounting_entries',
@@ -651,6 +664,15 @@ export class StorePrismaService extends BasePrismaService {
     fiscal_scope: 'STORE' | 'ORGANIZATION',
     store_id?: number | null,
   ) {
+    if (this.fiscal_entity_required_models.includes(model)) {
+      // accounting_entity_id is NOT NULL on these models: no legacy rows exist
+      // and Prisma rejects `accounting_entity_id: null` filters on required fields.
+      if (!fiscal_entity_id) {
+        return { organization_id, accounting_entity_id: { in: [] } };
+      }
+      return { organization_id, accounting_entity_id: fiscal_entity_id };
+    }
+
     const legacyScope: Record<string, any> = {
       accounting_entity_id: null,
     };

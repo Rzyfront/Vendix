@@ -215,6 +215,7 @@ export class FiscalScopeService {
           organization_id: params.organization_id,
           store_id: null,
           scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
         },
       });
       if (existing) return existing;
@@ -246,6 +247,7 @@ export class FiscalScopeService {
               organization_id: params.organization_id,
               store_id: null,
               scope: 'ORGANIZATION',
+              fiscal_scope: 'ORGANIZATION',
             },
           });
           if (created) return created;
@@ -263,6 +265,7 @@ export class FiscalScopeService {
         organization_id: params.organization_id,
         store_id: params.store_id,
         scope: 'STORE',
+        fiscal_scope: 'STORE',
       },
     });
     if (existing) return existing;
@@ -312,6 +315,7 @@ export class FiscalScopeService {
             organization_id: params.organization_id,
             store_id: params.store_id,
             scope: 'STORE',
+            fiscal_scope: 'STORE',
           },
         });
         if (created) return created;
