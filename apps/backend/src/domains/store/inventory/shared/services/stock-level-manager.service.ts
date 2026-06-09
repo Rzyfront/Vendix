@@ -252,6 +252,7 @@ export class StockLevelManager {
       if (productForTracking.store_id) {
         this.eventEmitter.emit('stock.low', {
           store_id: productForTracking.store_id,
+          location_id: params.location_id,
           product_id: params.product_id,
           product_name: productForTracking.name || 'Producto',
           quantity: updated_stock.quantity_available,
