@@ -29,6 +29,7 @@ export class FinancialAnalyticsService {
             tax_name: true,
             tax_rate: true,
             tax_amount: true,
+            tax_type: true,
             is_compound: true,
           },
         },
@@ -40,6 +41,7 @@ export class FinancialAnalyticsService {
       string,
       {
         tax_name: string;
+        tax_type: string;
         tax_rate: number;
         total_tax: number;
         taxable_amount: number;
@@ -60,6 +62,7 @@ export class FinancialAnalyticsService {
         const taxName = tax.tax_name;
         const existing = taxBreakdown.get(taxName) || {
           tax_name: taxName,
+          tax_type: (tax as any).tax_type || 'iva',
           tax_rate: Number(tax.tax_rate || 0),
           total_tax: 0,
           taxable_amount: 0,

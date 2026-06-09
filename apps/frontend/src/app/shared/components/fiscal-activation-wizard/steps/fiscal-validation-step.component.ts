@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
@@ -66,7 +66,7 @@ interface ValidationRow {
         }
       </div>
 
-      @if (missingLabels().length) {
+      @if (missingLabels().length && !refreshing()) {
         <div
           class="step-warning"
           role="status"
@@ -239,14 +239,35 @@ interface ValidationRow {
     `,
   ],
 })
-export class FiscalValidationStepComponent implements FiscalWizardStepHost {
+export class FiscalValidationStepComponent
+  implements FiscalWizardStepHost, OnInit
+{
   private readonly service = inject(FiscalActivationWizardService);
 
   readonly stepId: FiscalWizardStepId = 'validation';
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
 
+  /** True while the on-enter prefill refresh is in flight. */
+  readonly refreshing = signal(false);
+
   private readonly stepLabels = FISCAL_STEP_LABELS;
+
+  /**
+   * The validation step is the wizard's final screen. Earlier steps mark
+   * themselves complete optimistically (commitStep) but only some refresh the
+   * read-only prefill snapshot, so on entry `prefill.satisfied_steps` can be
+   * stale — which rendered already-completed modules as "missing" until a
+   * manual page reload. Force a fresh prefill read on enter so the page mirrors
+   * the real backend state (same effect as reloading) without the reload.
+   */
+  ngOnInit(): void {
+    this.refreshing.set(true);
+    void this.service
+      .loadPrefill(true)
+      .catch(() => undefined)
+      .finally(() => this.refreshing.set(false));
+  }
 
   readonly requiredSteps = computed<FiscalWizardStepId[]>(() => {
     const acc = new Set<FiscalWizardStepId>();

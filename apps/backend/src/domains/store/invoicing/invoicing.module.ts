@@ -19,6 +19,7 @@ import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service
 import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-ledger.service';
 import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
+import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
     S3Module,
     InvoiceProviderModule,
     DianDirectModule,
+    WithholdingTaxModule,
   ],
   controllers: [
     DianConfigController,

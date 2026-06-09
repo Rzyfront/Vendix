@@ -154,6 +154,59 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2408',
     description: 'IVA por Pagar (reversa devolución)',
   },
+  // ── Typed fiscal tax routing (per tax_type) ───────────────────────────
+  // AutoEntryService.resolveTaxLines posts one line per fiscal type using
+  // `<event>.<tax_type>_payable`. IVA → 2408 (same as legacy vat_payable, no
+  // regression), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
+  // `vat_payable` keys above remain as fallback when no breakdown is present.
+  'invoice.validated.iva_payable': {
+    code: '2408',
+    description: 'IVA por Pagar (factura)',
+  },
+  'invoice.validated.inc_payable': {
+    code: '2436',
+    description: 'Impuesto al Consumo por Pagar (factura)',
+  },
+  'invoice.validated.ica_payable': {
+    code: '2412',
+    description: 'ICA por Pagar (factura)',
+  },
+  'payment.received.iva_payable': {
+    code: '2408',
+    description: 'IVA por Pagar (venta directa)',
+  },
+  'payment.received.inc_payable': {
+    code: '2436',
+    description: 'Impuesto al Consumo por Pagar (venta directa)',
+  },
+  'payment.received.ica_payable': {
+    code: '2412',
+    description: 'ICA por Pagar (venta directa)',
+  },
+  'credit_sale.created.iva_payable': {
+    code: '2408',
+    description: 'IVA por Pagar (venta a crédito)',
+  },
+  'credit_sale.created.inc_payable': {
+    code: '2436',
+    description: 'Impuesto al Consumo por Pagar (venta a crédito)',
+  },
+  'credit_sale.created.ica_payable': {
+    code: '2412',
+    description: 'ICA por Pagar (venta a crédito)',
+  },
+  'refund.completed.iva_payable': {
+    code: '2408',
+    description: 'IVA por Pagar (reversa devolución)',
+  },
+  'refund.completed.inc_payable': {
+    code: '2436',
+    description: 'Impuesto al Consumo por Pagar (reversa devolución)',
+  },
+  'refund.completed.ica_payable': {
+    code: '2412',
+    description: 'ICA por Pagar (reversa devolución)',
+  },
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': {
     code: '4175',
@@ -226,6 +279,36 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'withholding.applied.accounts_payable': {
     code: '2205',
     description: 'Proveedores (neto después de retención)',
+  },
+  // Withholding ENGINE (Block B) — dual-role routing by withholding_type.
+  // practiced (retenedor, tenant buys → liability credit): 2365/2367/2368.
+  //   The generic retefuente default is 236525 (Compras); per-concept
+  //   `withholding_concepts.account_code` overrides it (e.g. 236515 honorarios,
+  //   236520 servicios, 236530 arriendos).
+  // suffered (retenido, tenant sells → asset debit): 1355xx.
+  'withholding.practiced.retefuente_payable': {
+    code: '236525',
+    description: 'Retención en la Fuente por Pagar (Compras)',
+  },
+  'withholding.practiced.reteiva_payable': {
+    code: '236705',
+    description: 'IVA Retenido por Pagar (ReteIVA practicada)',
+  },
+  'withholding.practiced.reteica_payable': {
+    code: '236805',
+    description: 'ICA Retenido por Pagar (ReteICA practicada)',
+  },
+  'withholding.suffered.retefuente_receivable': {
+    code: '135510',
+    description: 'Retención en la Fuente a Favor (ReteFuente sufrida)',
+  },
+  'withholding.suffered.reteiva_receivable': {
+    code: '135515',
+    description: 'IVA Retenido a Favor (ReteIVA sufrida)',
+  },
+  'withholding.suffered.reteica_receivable': {
+    code: '135517',
+    description: 'ICA Retenido a Favor (ReteICA sufrida)',
   },
   // Settlement (Liquidación por Terminación)
   'settlement.paid.severance': {

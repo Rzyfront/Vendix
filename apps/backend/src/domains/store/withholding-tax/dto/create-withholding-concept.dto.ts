@@ -31,4 +31,12 @@ export class CreateWithholdingConceptDto {
   @IsOptional()
   @IsEnum(['gran_contribuyente', 'regimen_simple', 'persona_natural', 'any'])
   supplier_type_filter?: string = 'any';
+
+  @IsOptional()
+  @IsEnum(['retefuente', 'reteiva', 'reteica'])
+  withholding_type?: string = 'retefuente';
+
+  @IsOptional()
+  @IsString()
+  account_code?: string;
 }

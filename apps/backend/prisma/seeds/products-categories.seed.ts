@@ -105,6 +105,7 @@ export async function seedProductsAndCategories(
         data: {
           name: taxCategory.name,
           description: taxCategory.description,
+          tax_type: 'iva',
           store_id: store_id,
         },
       }));

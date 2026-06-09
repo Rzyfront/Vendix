@@ -494,6 +494,7 @@ export class FiscalCloseService {
           type: {
             in: [
               'vat_return',
+              'inc_return',
               'withholding_return',
               'reteiva_return',
               'reteica_return',

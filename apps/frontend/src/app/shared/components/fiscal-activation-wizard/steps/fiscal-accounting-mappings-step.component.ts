@@ -164,11 +164,20 @@ export class FiscalAccountingMappingsStepComponent
       mappingItems.forEach((m: any) => {
         if (m?.mapping_key) initialMap[m.mapping_key] = m.account_id ?? null;
       });
-      // Refresh the count from the actual mapping rows in case the prefill
-      // was stale (e.g. someone edited mappings between snapshots).
-      this.existingCount.set(
-        Object.values(initialMap).filter((value) => value != null).length,
-      );
+      // Seed the form with the full cascade (incl. `source: 'default'`
+      // suggestions resolved from DEFAULT_ACCOUNT_MAPPINGS) so the user sees
+      // sensible pre-filled accounts. But `existingCount` must reflect ONLY
+      // actually-persisted rows ('store'/'organization' sources). Counting the
+      // default-cascade entries made `submit()` believe the step was "already
+      // configured", skip the PUT, and never write rows — so the fiscal
+      // validation step saw mapeos as permanently incomplete (even after a
+      // reload), because the backend only counts real `is_active` rows.
+      const persistedCount = mappingItems.filter(
+        (m: any) =>
+          (m?.source === 'store' || m?.source === 'organization') &&
+          m.account_id != null,
+      ).length;
+      this.existingCount.set(persistedCount);
       this.initial.set({ mappings: initialMap });
 
       const coaPayload = coaRes?.data ?? coaRes;
@@ -289,6 +298,12 @@ export class FiscalAccountingMappingsStepComponent
           : {}),
       };
       await firstValueFrom(this.http.put(this.mappingsUrl(), body));
+
+      // Refresh the read-only prefill so `accounting_mappings` lands in
+      // `satisfied_steps` immediately (mirrors the PUC step). Without this the
+      // in-session prefill stays stale and downstream screens rely on a manual
+      // reload to reflect the just-saved mappings.
+      await this.service.loadPrefill(true).catch(() => undefined);
 
       const ref = {
         count: mappings.length,

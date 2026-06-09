@@ -30,6 +30,21 @@ export enum TaxType {
   FIXED = 'fixed',
 }
 
+/**
+ * Fiscal classification of a tax. Distinct from {@link TaxType}, which is the
+ * calculation method (percentage vs fixed amount). This is the value that routes
+ * a tax to its DIAN scheme code, its PUC account in accounting entries, and its
+ * fiscal declaration. String values mirror the Prisma `tax_type_enum`.
+ */
+export enum TaxFiscalType {
+  IVA = 'iva',
+  INC = 'inc',
+  ICA = 'ica',
+  WITHHOLDING = 'withholding',
+  RETEIVA = 'reteiva',
+  RETEICA = 'reteica',
+}
+
 // Create Tax Category DTO
 export class CreateTaxCategoryDto {
   @IsString()
@@ -43,6 +58,15 @@ export class CreateTaxCategoryDto {
 
   @IsEnum(TaxType)
   type: TaxType;
+
+  /**
+   * Fiscal classification (iva/inc/ica/...). Optional for backward compatibility
+   * with callers that predate fiscal typing; the service defaults absent values
+   * to IVA. The frontend always sends it after the tax-typing rollout.
+   */
+  @IsEnum(TaxFiscalType)
+  @IsOptional()
+  tax_type?: TaxFiscalType;
 
   @IsNumber({ maxDecimalPlaces: 4 })
   @Min(0)

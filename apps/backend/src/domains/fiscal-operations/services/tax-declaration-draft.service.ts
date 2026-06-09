@@ -7,6 +7,7 @@ import {
   Prisma,
   tax_declaration_status_enum,
   tax_declaration_type_enum,
+  withholding_type_enum,
 } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -391,6 +392,7 @@ export class TaxDeclarationDraftService {
     period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<DeclarationCalculation> {
     if (type === 'vat') return this.calculateVat(context, period);
+    if (type === 'inc') return this.calculateInc(context, period);
     if (type === 'withholding' || type === 'reteiva' || type === 'reteica') {
       return this.calculateWithholding(context, type, period);
     }
@@ -451,11 +453,13 @@ export class TaxDeclarationDraftService {
         'export_invoice',
         'credit_note',
       ].includes(invoice.invoice_type);
+      // Only IVA rows feed the VAT declaration. INC/ICA/withholding live in
+      // their own declarations now that invoice_taxes carries tax_type. Legacy
+      // untyped rows (tax_type IS NULL) default to IVA for back-compat.
       const invoiceTax =
-        invoice.invoice_taxes.reduce(
-          (sum, tax) => sum + Number(tax.tax_amount || 0),
-          0,
-        ) * sign;
+        invoice.invoice_taxes
+          .filter((tax) => ((tax as any).tax_type ?? 'iva') === 'iva')
+          .reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0) * sign;
       const invoiceBase = Number(invoice.subtotal_amount || 0) * sign;
       taxableBase += invoiceBase;
 
@@ -518,14 +522,138 @@ export class TaxDeclarationDraftService {
     };
   }
 
+  /**
+   * Impuesto Nacional al Consumo (INC) declaration. INC is a sales-side
+   * consumption tax (not deductible like IVA), so it only accrues on sale
+   * documents. Reads the typed `inc` rows from invoice_taxes using each row's
+   * own taxable_amount as the base (more precise than the invoice subtotal,
+   * since INC usually applies to a subset of lines).
+   */
+  private async calculateInc(
+    context: FiscalOperationsContext,
+    period: ReturnType<typeof resolveFiscalPeriodRange>,
+  ): Promise<DeclarationCalculation> {
+    const invoices = await this.prisma.invoices.findMany({
+      where: {
+        accounting_entity_id: context.accounting_entity_id,
+        invoice_type: {
+          in: ['sales_invoice', 'debit_note', 'credit_note', 'export_invoice'],
+        },
+        issue_date: buildDateRangeFilter(
+          period.period_start,
+          period.period_end,
+        ),
+        status: { notIn: ['cancelled', 'voided'] },
+      },
+      include: { invoice_taxes: true, supplier: true },
+      orderBy: { issue_date: 'asc' },
+    });
+
+    const requiresDianAcceptance = (invoiceType: string) =>
+      ['sales_invoice', 'debit_note', 'credit_note'].includes(invoiceType);
+    const isAcceptedForTax = (invoice: (typeof invoices)[number]) =>
+      !requiresDianAcceptance(invoice.invoice_type) ||
+      invoice.dian_status === 'accepted' ||
+      invoice.dian_status === 'not_applicable';
+    const nonAccepted = invoices.filter(
+      (invoice) => !isAcceptedForTax(invoice),
+    );
+
+    let generated = 0;
+    let taxableBase = 0;
+    const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
+
+    for (const invoice of invoices) {
+      if (!isAcceptedForTax(invoice)) continue;
+      const sign =
+        invoice.invoice_type === 'credit_note' ||
+        invoice.invoice_type === 'support_adjustment_note'
+          ? -1
+          : 1;
+
+      const incRows = invoice.invoice_taxes.filter(
+        (tax) => (tax as any).tax_type === 'inc',
+      );
+      if (incRows.length === 0) continue;
+
+      const incTax =
+        incRows.reduce((sum, tax) => sum + Number(tax.tax_amount || 0), 0) *
+        sign;
+      const incBase =
+        incRows.reduce(
+          (sum, tax) => sum + Number(tax.taxable_amount || 0),
+          0,
+        ) * sign;
+
+      generated += incTax;
+      taxableBase += incBase;
+
+      lines.push({
+        declaration_id: 0,
+        line_type: 'inc_generated',
+        source_type: 'invoice',
+        source_id: invoice.id,
+        third_party_id: invoice.customer_id ?? undefined,
+        third_party_name: invoice.customer_name ?? undefined,
+        third_party_tax_id: invoice.customer_tax_id ?? undefined,
+        description: `${invoice.invoice_type} ${invoice.invoice_number}`,
+        base_amount: incBase,
+        tax_amount: incTax,
+        metadata: {
+          dian_status: invoice.dian_status,
+          issue_date: invoice.issue_date,
+        },
+      });
+    }
+
+    return {
+      totals: {
+        gross_base_amount: taxableBase,
+        taxable_base_amount: taxableBase,
+        generated_tax_amount: generated,
+        balance_due: Math.max(generated, 0),
+        balance_favor: Math.max(generated * -1, 0),
+        total_payable: Math.max(generated, 0),
+      },
+      lines,
+      rules_snapshot: await this.resolveRulesSnapshot(
+        context,
+        'inc',
+        period.period_year,
+      ),
+      source_snapshot: {
+        invoice_count: invoices.length,
+        counted_invoice_ids: lines
+          .map((line) => line.source_id)
+          .filter((id): id is number => typeof id === 'number'),
+        skipped_invoice_ids: nonAccepted.map((invoice) => invoice.id),
+      },
+      validation_summary: {
+        warnings: nonAccepted.map((invoice) => ({
+          code: 'DIAN_NOT_ACCEPTED',
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          invoice_type: invoice.invoice_type,
+          dian_status: invoice.dian_status,
+        })),
+      },
+    };
+  }
+
   private async calculateWithholding(
     context: FiscalOperationsContext,
     type: tax_declaration_type_enum,
     period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<DeclarationCalculation> {
+    // La declaración de retención en la fuente (DIAN form 350) reporta SOLO lo
+    // que YO PRACTIQUÉ (role='practiced'). Las retenciones que me practicaron
+    // (role='suffered') son un crédito a mi favor — NO son obligación de pago
+    // mía y por tanto NO deben entrar al balance_due/total_payable de esta
+    // declaración. Se filtran de raíz aquí.
     const calculations = await this.prisma.withholding_calculations.findMany({
       where: {
         accounting_entity_id: context.accounting_entity_id,
+        role: 'practiced',
         created_at: buildDateRangeFilter(
           period.period_start,
           period.period_end,
@@ -535,7 +663,22 @@ export class TaxDeclarationDraftService {
       orderBy: { created_at: 'asc' },
     });
 
+    // Mapeo declaración -> tipo de retención. `withholding` (retefuente,
+    // form 350) corresponde al withholding_type 'retefuente'.
+    const targetWithholdingType: withholding_type_enum =
+      type === 'reteiva'
+        ? 'reteiva'
+        : type === 'reteica'
+          ? 'reteica'
+          : 'retefuente';
+
     const filtered = calculations.filter((calculation) => {
+      // Fuente confiable: el withholding_type tipado en la fila. Si está
+      // ausente (filas legacy), se cae a la heurística histórica por nombre
+      // de concepto para no perder retenciones ya registradas.
+      if (calculation.withholding_type) {
+        return calculation.withholding_type === targetWithholdingType;
+      }
       const conceptName =
         `${calculation.concept.code} ${calculation.concept.name}`.toLowerCase();
       if (type === 'reteiva') return conceptName.includes('iva');

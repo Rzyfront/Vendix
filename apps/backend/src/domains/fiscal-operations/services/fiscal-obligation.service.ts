@@ -420,6 +420,7 @@ export class FiscalObligationService {
       types.add('electronic_invoice_review');
       types.add('support_document_review');
       types.add('vat_return');
+      types.add('inc_return');
     }
 
     if (
@@ -429,6 +430,13 @@ export class FiscalObligationService {
       types.add('monthly_close');
       types.add('bank_reconciliation');
       types.add('inventory_valuation');
+      // TODO role-aware: las obligaciones de retención (withholding/reteiva/
+      // reteica_return) solo deberían generarse cuando existan retenciones
+      // role='practiced' en el periodo (lo suffered es crédito a favor, no
+      // genera obligación de pago/declaración propia). Hoy se generan de forma
+      // genérica porque condicionarlas requiere consultar
+      // withholding_calculations por role; no se añade aquí para no introducir
+      // dependencias nuevas en este servicio. Conocimiento pendiente.
       types.add('withholding_return');
       types.add('reteiva_return');
       types.add('reteica_return');

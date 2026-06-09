@@ -11,6 +11,12 @@ export interface PosCustomerAddress {
   is_primary: boolean;
 }
 
+/** Régimen tributario del cliente (clasificación fiscal "el QUIEN"). */
+export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+
+/** Tipo de persona del cliente. */
+export type PersonType = 'NATURAL' | 'JURIDICA';
+
 export interface PosCustomer {
   id: number;
   email: string;
@@ -20,6 +26,9 @@ export interface PosCustomer {
   phone?: string;
   document_type?: string;
   document_number?: string;
+  tax_regime?: TaxRegime | null;
+  person_type?: PersonType | null;
+  is_withholding_agent?: boolean;
   address?: string;
   addresses?: PosCustomerAddress[];
   created_at: Date;
@@ -35,6 +44,9 @@ export interface CreatePosCustomerRequest {
   phone?: string;
   document_type?: string;
   document_number?: string;
+  tax_regime?: TaxRegime | null;
+  person_type?: PersonType | null;
+  is_withholding_agent?: boolean;
 
   password?: string;
 }

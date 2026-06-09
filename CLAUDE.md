@@ -56,8 +56,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-zoneless-signals` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
+| Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
+| Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding chat features | `vendix-ai-chat` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
@@ -132,6 +135,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
+| Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
@@ -233,6 +237,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
 | When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations | `vendix-calculated-pricing` |
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
+| Wiring withholding (retefuente/reteiva/reteica) accounting or declarations | `vendix-tax-typing` |
 | Working across apps or shared libraries | `vendix-core` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |

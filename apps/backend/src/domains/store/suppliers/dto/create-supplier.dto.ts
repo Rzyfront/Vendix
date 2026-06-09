@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsEnum,
   IsNumber,
+  IsBoolean,
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -62,6 +63,27 @@ export class CreateSupplierDto {
   @IsString()
   @IsOptional()
   tax_id?: string;
+
+  @ApiPropertyOptional({ description: 'Tax regime (fiscal classification)' })
+  @IsOptional()
+  @IsString()
+  tax_regime?: string;
+
+  @ApiPropertyOptional({
+    description: 'Person type for withholding resolution',
+    enum: ['NATURAL', 'JURIDICA'],
+  })
+  @IsOptional()
+  @IsString()
+  person_type?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether the supplier is a self-withholder (autorretenedor)',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_self_withholder?: boolean;
 
   @ApiProperty({ description: 'Payment terms (e.g., NET30, NET60)' })
   @IsString()

@@ -3,6 +3,8 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AutoEntryService, AutoEntryLine } from './auto-entry.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
+import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
+import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 
 @Injectable()
 export class AccountingEventsListener {
@@ -78,6 +80,8 @@ export class AccountingEventsListener {
     accounting_entity_id?: number;
     subtotal_amount: number;
     tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     total_amount: number;
     user_id?: number;
   }) {
@@ -90,6 +94,8 @@ export class AccountingEventsListener {
         accounting_entity_id: event.accounting_entity_id,
         subtotal: event.subtotal_amount,
         tax_amount: event.tax_amount,
+        tax_breakdown: event.tax_breakdown,
+        withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
         user_id: event.user_id,
       });
@@ -116,6 +122,7 @@ export class AccountingEventsListener {
     discount_amount?: number;
     tax_amount: number;
     withholding_amount?: number;
+    withholding_breakdown?: WithholdingLine[];
     total_amount: number;
     supplier_id?: number;
     user_id?: number;
@@ -131,6 +138,7 @@ export class AccountingEventsListener {
         discount_amount: Number(event.discount_amount || 0),
         tax_amount: Number(event.tax_amount || 0),
         withholding_amount: Number(event.withholding_amount || 0),
+        withholding_breakdown: event.withholding_breakdown,
         total: Number(event.total_amount),
         user_id: event.user_id,
       });
@@ -155,6 +163,8 @@ export class AccountingEventsListener {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     currency: string;
     payment_method: string;
@@ -176,6 +186,8 @@ export class AccountingEventsListener {
             : undefined,
         tax_amount:
           event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        tax_breakdown: event.tax_breakdown,
+        withholding_breakdown: event.withholding_breakdown,
         discount_amount:
           event.discount_amount != null
             ? Number(event.discount_amount)
@@ -201,6 +213,8 @@ export class AccountingEventsListener {
     order_number?: string;
     subtotal_amount: number;
     tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     total_amount: number;
     user_id?: number;
@@ -214,6 +228,8 @@ export class AccountingEventsListener {
         order_number: event.order_number,
         subtotal_amount: Number(event.subtotal_amount),
         tax_amount: Number(event.tax_amount),
+        tax_breakdown: event.tax_breakdown,
+        withholding_breakdown: event.withholding_breakdown,
         discount_amount:
           event.discount_amount != null
             ? Number(event.discount_amount)
@@ -455,6 +471,7 @@ export class AccountingEventsListener {
     store_id?: number;
     amount: number;
     tax_amount?: number;
+    tax_breakdown?: TaxBreakdownItem[];
     return_type?: string;
     user_id?: number;
   }) {
@@ -467,6 +484,7 @@ export class AccountingEventsListener {
         amount: Number(event.amount),
         tax_amount:
           event.tax_amount != null ? Number(event.tax_amount) : undefined,
+        tax_breakdown: event.tax_breakdown,
         return_type: event.return_type,
         user_id: event.user_id,
       });
@@ -813,6 +831,7 @@ export class AccountingEventsListener {
     net_amount: number;
     concept_name: string;
     supplier_name: string;
+    withholding_breakdown?: WithholdingLine[];
     user_id?: number;
   }) {
     try {
@@ -826,6 +845,7 @@ export class AccountingEventsListener {
         net_amount: Number(event.net_amount),
         concept_name: event.concept_name,
         supplier_name: event.supplier_name,
+        withholding_breakdown: event.withholding_breakdown,
         user_id: event.user_id,
       });
       this.logger.log(

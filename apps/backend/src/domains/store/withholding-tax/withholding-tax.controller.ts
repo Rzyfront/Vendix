@@ -14,6 +14,7 @@ import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
   CalculateWithholdingDto,
+  PreviewWithholdingDto,
 } from './dto';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
@@ -95,6 +96,15 @@ export class WithholdingTaxController {
       dto.concept_code,
       dto.supplier_type,
     );
+    return this.response_service.success(result);
+  }
+
+  // ===== Preview (no persistence) =====
+
+  @Post('preview')
+  @Permissions('withholding:read')
+  async previewWithholding(@Body() dto: PreviewWithholdingDto) {
+    const result = await this.withholding_tax_service.previewWithholding(dto);
     return this.response_service.success(result);
   }
 

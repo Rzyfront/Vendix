@@ -4,6 +4,8 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
+import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
+import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -68,6 +70,171 @@ export class AutoEntryService {
       debit_amount,
       credit_amount,
     };
+  }
+
+  /**
+   * Build one journal line per fiscal tax type from a typed `tax_breakdown`,
+   * routing each type to its own mapping key (`<prefix>.<type>_<suffix>`, e.g.
+   * `invoice.validated.inc_payable` → 2436). This is what separates IVA, INC and
+   * ICA into distinct PUC accounts instead of collapsing everything into 2408.
+   *
+   * Resilience guarantees (so the entry always balances):
+   * - If `breakdown` is absent/empty, falls back to a single line on `legacyKey`
+   *   for the scalar `total` (back-compat with flows that don't emit a breakdown).
+   * - If a per-type mapping is missing (e.g. the Step 8 seed hasn't run yet),
+   *   falls back to `legacyKey` for that line so the amount is never dropped.
+   *
+   * @param suffix logical role of the line (`payable` for sales, `deductible` for purchases)
+   * @param side which column carries the amount (`credit` for payable, `debit` for deductible)
+   */
+  private async resolveTaxLines(params: {
+    organization_id: number;
+    store_id?: number;
+    prefix: string; // e.g. 'invoice.validated'
+    suffix: 'payable' | 'deductible';
+    side: 'credit' | 'debit';
+    total: number; // scalar fallback total
+    breakdown?: TaxBreakdownItem[];
+    legacyKey: string; // e.g. 'invoice.validated.vat_payable'
+    label: string;
+  }): Promise<(AutoEntryLine | null)[]> {
+    const {
+      organization_id,
+      store_id,
+      prefix,
+      suffix,
+      side,
+      total,
+      breakdown,
+      legacyKey,
+      label,
+    } = params;
+
+    const makeLine = (amount: number, key: string, desc: string) =>
+      this.resolveAccountLine(
+        organization_id,
+        key,
+        desc,
+        side === 'debit' ? amount : 0,
+        side === 'credit' ? amount : 0,
+        store_id,
+      );
+
+    if (breakdown && breakdown.length > 0) {
+      const out: (AutoEntryLine | null)[] = [];
+      for (const item of breakdown) {
+        const amount = Number(item.tax_amount || 0);
+        if (amount <= 0) continue;
+        const typed_key = `${prefix}.${item.tax_type}_${suffix}`;
+        const desc = `${label} (${item.tax_type.toUpperCase()})`;
+        let line = await makeLine(amount, typed_key, desc);
+        if (!line) {
+          // Per-type mapping not configured: keep the entry balanced via legacy key.
+          line = await makeLine(amount, legacyKey, desc);
+        }
+        out.push(line);
+      }
+      return out;
+    }
+
+    // No typed breakdown: single legacy line for the scalar total.
+    if (total > 0) {
+      return [await makeLine(total, legacyKey, label)];
+    }
+    return [];
+  }
+
+  /**
+   * Build one journal line per withholding line carried on a typed
+   * `withholding_breakdown` (Block B). Mirrors `resolveTaxLines`, but routes via
+   * the withholding `account_role` mapping key (`withholding.<role>.<type>_<suffix>`)
+   * and honors a per-concept PUC leaf override.
+   *
+   * Account resolution per line (mirrors how a posted line is validated later in
+   * `createAutoEntry`, which checks the `account_code` exists in
+   * `chart_of_accounts` for the org/entity):
+   *   1. PREFER `line.account_code` (raw PUC leaf from `withholding_concepts`)
+   *      when present AND it resolves to an existing chart_of_accounts account
+   *      for the org. This is the per-concept override (e.g. 236515 honorarios).
+   *   2. ELSE fall back to the dual-source mapping via
+   *      `AccountMappingService.getMapping(org, line.account_role, store_id)`,
+   *      which resolves store override → org base → DEFAULT_ACCOUNT_MAPPINGS.
+   *
+   * Side:
+   *   - practiced (retenedor) → liability credit (2365/2367/2368) → `side='credit'`
+   *   - suffered  (retenido)  → asset debit (1355xx)              → `side='debit'`
+   *
+   * Empty/undefined breakdown → returns `[]` (zero lines), guaranteeing zero
+   * regression for flows that don't carry a breakdown yet.
+   */
+  private async resolveWithholdingLines(params: {
+    organization_id: number;
+    store_id?: number;
+    breakdown?: WithholdingLine[];
+    side: 'debit' | 'credit';
+  }): Promise<(AutoEntryLine | null)[]> {
+    const { organization_id, store_id, breakdown, side } = params;
+    if (!breakdown || breakdown.length === 0) return [];
+
+    const out: (AutoEntryLine | null)[] = [];
+    for (const item of breakdown) {
+      const amount = Number(item.amount || 0);
+      if (amount <= 0) continue;
+
+      const desc = `Retención ${item.withholding_type.toUpperCase()} (${item.concept_code})`;
+
+      // 1. Per-concept PUC leaf override — only when it actually exists in the
+      //    org's chart_of_accounts (the same validation createAutoEntry applies).
+      let account_code: string | null = null;
+      if (item.account_code) {
+        const exists = await this.accountCodeExistsForOrg(
+          organization_id,
+          item.account_code,
+        );
+        if (exists) account_code = item.account_code;
+      }
+
+      // 2. Fallback to the dual-source mapping key (default leaf or override).
+      if (!account_code) {
+        const mapping = await this.account_mapping_service.getMapping(
+          organization_id,
+          item.account_role,
+          store_id,
+        );
+        account_code = mapping?.account_code ?? null;
+      }
+
+      if (!account_code) {
+        // No resolvable account: skip the line (createAutoEntry would reject it).
+        out.push(null);
+        continue;
+      }
+
+      out.push({
+        account_code,
+        description: desc,
+        debit_amount: side === 'debit' ? amount : 0,
+        credit_amount: side === 'credit' ? amount : 0,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Returns true when a raw PUC leaf code exists in `chart_of_accounts` for the
+   * organization (any of its accounting entities). Used to validate a
+   * per-concept withholding `account_code` override before preferring it over
+   * the mapping-key default.
+   */
+  private async accountCodeExistsForOrg(
+    organization_id: number,
+    code: string,
+  ): Promise<boolean> {
+    const account = await this.prisma.chart_of_accounts.findFirst({
+      where: { organization_id, code },
+      select: { id: true },
+    });
+    return !!account;
   }
 
   /**
@@ -404,16 +571,26 @@ export class AutoEntryService {
     store_id?: number;
     subtotal: number;
     tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     total: number;
     user_id?: number;
     accounting_entity_id?: number;
   }) {
+    // Caso 2 (retenido): the customer withholds part of the payment. Recognize
+    // the withholding as an asset (1355) at revenue recognition and reduce the
+    // receivable by the same amount. Empty breakdown → identical to legacy.
+    const wh_total = (data.withholding_breakdown ?? []).reduce(
+      (sum, l) => sum + Number(l.amount || 0),
+      0,
+    );
+    const accounts_receivable = Math.max(0, Number(data.total || 0) - wh_total);
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
         'invoice.validated.accounts_receivable',
         'Accounts Receivable',
-        data.total,
+        accounts_receivable,
         0,
         data.store_id,
       ),
@@ -427,18 +604,29 @@ export class AutoEntryService {
       ),
     ]);
 
-    if (data.tax_amount > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'invoice.validated.vat_payable',
-          'VAT Payable',
-          0,
-          data.tax_amount,
-          data.store_id,
-        ),
-      );
-    }
+    lines.push(
+      ...(await this.resolveTaxLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        prefix: 'invoice.validated',
+        suffix: 'payable',
+        side: 'credit',
+        total: data.tax_amount,
+        breakdown: data.tax_breakdown,
+        legacyKey: 'invoice.validated.vat_payable',
+        label: 'VAT Payable',
+      })),
+    );
+
+    // Caso 2: asset debit per withholding type (135510/135515/135517).
+    lines.push(
+      ...(await this.resolveWithholdingLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        breakdown: data.withholding_breakdown,
+        side: 'debit',
+      })),
+    );
 
     return this.createAutoEntry({
       source_type: 'invoice.validated',
@@ -466,6 +654,7 @@ export class AutoEntryService {
     discount_amount?: number;
     tax_amount: number;
     withholding_amount?: number;
+    withholding_breakdown?: WithholdingLine[];
     total: number;
     user_id?: number;
   }) {
@@ -473,7 +662,21 @@ export class AutoEntryService {
       0,
       Number(data.subtotal || 0) - Number(data.discount_amount || 0),
     );
-    const withholding = Math.max(0, Number(data.withholding_amount || 0));
+
+    // Typed breakdown (Block C1) takes precedence over the scalar amount: it
+    // splits the single 2365 credit into per-type liability lines (2365/2367/
+    // 2368) and uses its summed amount to reduce accounts payable.
+    const has_breakdown =
+      !!data.withholding_breakdown && data.withholding_breakdown.length > 0;
+    const breakdown_total = has_breakdown
+      ? data.withholding_breakdown!.reduce(
+          (sum, l) => sum + Number(l.amount || 0),
+          0,
+        )
+      : 0;
+    const withholding = has_breakdown
+      ? breakdown_total
+      : Math.max(0, Number(data.withholding_amount || 0));
     const accounts_payable = Math.max(0, Number(data.total || 0) - withholding);
     const lines: (AutoEntryLine | null)[] = await Promise.all([
       this.resolveAccountLine(
@@ -507,7 +710,18 @@ export class AutoEntryService {
       );
     }
 
-    if (withholding > 0) {
+    if (has_breakdown) {
+      // Per-type withholding credits (practiced → liability credit).
+      lines.push(
+        ...(await this.resolveWithholdingLines({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          breakdown: data.withholding_breakdown,
+          side: 'credit',
+        })),
+      );
+    } else if (withholding > 0) {
+      // Legacy scalar path (back-compat): single 2365 credit.
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
@@ -560,6 +774,8 @@ export class AutoEntryService {
     amount: number;
     subtotal_amount?: number;
     tax_amount?: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     user_id?: number;
   }) {
@@ -649,19 +865,31 @@ export class AutoEntryService {
         ),
       );
 
-      // Separate VAT line if tax > 0
-      if (tax > 0) {
-        lines.push(
-          await this.resolveAccountLine(
-            data.organization_id,
-            'payment.received.vat_payable',
-            `IVA venta directa${order_ref}`,
-            0,
-            tax,
-            data.store_id,
-          ),
-        );
-      }
+      // Separate tax lines per fiscal type (IVA→2408, INC→2436, ICA→241205)
+      lines.push(
+        ...(await this.resolveTaxLines({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          prefix: 'payment.received',
+          suffix: 'payable',
+          side: 'credit',
+          total: tax,
+          breakdown: data.tax_breakdown,
+          legacyKey: 'payment.received.vat_payable',
+          label: `IVA venta directa${order_ref}`,
+        })),
+      );
+
+      // Caso 2 (retenido) on POS-direct sale: asset 1355 debit; revenue stays
+      // gross, cash stays net-received, so debits (cash + 1355) = credits.
+      lines.push(
+        ...(await this.resolveWithholdingLines({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          breakdown: data.withholding_breakdown,
+          side: 'debit',
+        })),
+      );
     }
 
     const description = has_invoice
@@ -691,6 +919,8 @@ export class AutoEntryService {
     order_number?: string;
     subtotal_amount: number;
     tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     total_amount: number;
     user_id?: number;
@@ -698,12 +928,22 @@ export class AutoEntryService {
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
     const discount = Number(data.discount_amount || 0);
 
+    // Caso 2 (retenido): reduce receivable by withholding, recognize asset 1355.
+    const wh_total = (data.withholding_breakdown ?? []).reduce(
+      (sum, l) => sum + Number(l.amount || 0),
+      0,
+    );
+    const accounts_receivable = Math.max(
+      0,
+      Number(data.total_amount || 0) - wh_total,
+    );
+
     const lines: (AutoEntryLine | null)[] = [
       await this.resolveAccountLine(
         data.organization_id,
         'credit_sale.created.accounts_receivable',
         `CxC venta a crédito${order_ref}`,
-        data.total_amount,
+        accounts_receivable,
         0,
         data.store_id,
       ),
@@ -734,18 +974,29 @@ export class AutoEntryService {
       ),
     );
 
-    if (data.tax_amount > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'credit_sale.created.vat_payable',
-          `IVA venta a crédito${order_ref}`,
-          0,
-          data.tax_amount,
-          data.store_id,
-        ),
-      );
-    }
+    lines.push(
+      ...(await this.resolveTaxLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        prefix: 'credit_sale.created',
+        suffix: 'payable',
+        side: 'credit',
+        total: data.tax_amount,
+        breakdown: data.tax_breakdown,
+        legacyKey: 'credit_sale.created.vat_payable',
+        label: `IVA venta a crédito${order_ref}`,
+      })),
+    );
+
+    // Caso 2: asset debit per withholding type (135510/135515/135517).
+    lines.push(
+      ...(await this.resolveWithholdingLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        breakdown: data.withholding_breakdown,
+        side: 'debit',
+      })),
+    );
 
     return this.createAutoEntry({
       source_type: 'credit_sale.created',
@@ -1465,6 +1716,7 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     tax_amount?: number;
+    tax_breakdown?: TaxBreakdownItem[];
     return_type?: string;
     user_id?: number;
   }) {
@@ -1490,19 +1742,20 @@ export class AutoEntryService {
       ),
     ];
 
-    // Reverse VAT if tax was charged
-    if (tax > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'refund.completed.vat_payable',
-          'IVA (reversa devolución)',
-          tax,
-          0,
-          data.store_id,
-        ),
-      );
-    }
+    // Reverse tax per fiscal type (debit side): IVA→2408, INC→2436, ICA→241205
+    lines.push(
+      ...(await this.resolveTaxLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        prefix: 'refund.completed',
+        suffix: 'payable',
+        side: 'debit',
+        total: tax,
+        breakdown: data.tax_breakdown,
+        legacyKey: 'refund.completed.vat_payable',
+        label: 'IVA (reversa devolución)',
+      })),
+    );
 
     // Credit: Cash/Bank for the total refund amount
     lines.push(
@@ -2003,8 +2256,27 @@ export class AutoEntryService {
     net_amount: number;
     concept_name: string;
     supplier_name: string;
+    withholding_breakdown?: WithholdingLine[];
     user_id?: number;
   }) {
+    const has_breakdown =
+      !!data.withholding_breakdown && data.withholding_breakdown.length > 0;
+    const breakdown_total = has_breakdown
+      ? data.withholding_breakdown!.reduce(
+          (sum, l) => sum + Number(l.amount || 0),
+          0,
+        )
+      : 0;
+    // When a typed breakdown is present, the withheld total is the sum of its
+    // lines and the supplier net is derived from base - sum (so the entry stays
+    // balanced regardless of the scalar net_amount passed in).
+    const withheld = has_breakdown
+      ? breakdown_total
+      : Number(data.withholding_amount || 0);
+    const net_amount = has_breakdown
+      ? Math.max(0, Number(data.base_amount || 0) - withheld)
+      : data.net_amount;
+
     const lines: (AutoEntryLine | null)[] = [
       // DR: Expense / Purchase (base amount)
       await this.resolveAccountLine(
@@ -2015,25 +2287,43 @@ export class AutoEntryService {
         0,
         data.store_id,
       ),
-      // CR: Withholding payable (retention amount)
-      await this.resolveAccountLine(
-        data.organization_id,
-        'withholding.applied.withholding_payable',
-        `Retención ${data.concept_name} - ${data.supplier_name}`,
-        0,
-        data.withholding_amount,
-        data.store_id,
-      ),
-      // CR: Accounts Payable (net amount after retention)
+    ];
+
+    if (has_breakdown) {
+      // CR: per-type withholding payable (practiced → liability credit).
+      lines.push(
+        ...(await this.resolveWithholdingLines({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+          breakdown: data.withholding_breakdown,
+          side: 'credit',
+        })),
+      );
+    } else {
+      // Legacy scalar path: single 2365 credit.
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'withholding.applied.withholding_payable',
+          `Retención ${data.concept_name} - ${data.supplier_name}`,
+          0,
+          withheld,
+          data.store_id,
+        ),
+      );
+    }
+
+    // CR: Accounts Payable (net amount after retention)
+    lines.push(
       await this.resolveAccountLine(
         data.organization_id,
         'withholding.applied.accounts_payable',
         `Proveedor neto ${data.supplier_name}`,
         0,
-        data.net_amount,
+        net_amount,
         data.store_id,
       ),
-    ];
+    );
 
     return this.createAutoEntry({
       source_type: 'withholding.applied',

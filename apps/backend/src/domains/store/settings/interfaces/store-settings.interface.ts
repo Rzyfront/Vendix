@@ -22,6 +22,11 @@ export interface FiscalDataSettings {
   // Autorretenedor, 'R-99-PN', etc.). Currently hardcoded in the DIAN
   // provider; captured here for the pending provider-wiring follow-up.
   tax_scheme?: string;
+  // Withholding (retención) role flags. Absent ⇒ treated as false.
+  // is_withholding_agent: tenant retains on purchases (Caso 1, retenedor).
+  // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
+  is_withholding_agent?: boolean;
+  is_self_withholder?: boolean;
 }
 
 // ============================================================================

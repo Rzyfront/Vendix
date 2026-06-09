@@ -110,6 +110,11 @@ export interface OrganizationFiscalData {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // Withholding (retención) role flags. Absent ⇒ treated as false.
+  // is_withholding_agent: tenant retains on purchases (Caso 1, retenedor).
+  // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
+  is_withholding_agent?: boolean;
+  is_self_withholder?: boolean;
 }
 
 // ============================================================================

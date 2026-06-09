@@ -2704,13 +2704,22 @@ export class ProductCreatePageComponent {
     return 'Valor inválido';
   }
 
+  // Memoizado por referencia de product: el modal lo recibe como input signal
+  // y un objeto nuevo por lectura dispara sus effects en cada CD
+  private _adjustmentPreselected: PreselectedProduct | null = null;
+  private _adjustmentPreselectedSource: Product | null = null;
+
   get adjustmentPreselectedProduct(): PreselectedProduct | null {
     if (!this.product) return null;
-    return {
-      id: this.product.id,
-      name: this.product.name,
-      sku: this.product.sku ?? null,
-    };
+    if (this._adjustmentPreselectedSource !== this.product) {
+      this._adjustmentPreselectedSource = this.product;
+      this._adjustmentPreselected = {
+        id: this.product.id,
+        name: this.product.name,
+        sku: this.product.sku ?? null,
+      };
+    }
+    return this._adjustmentPreselected;
   }
 
   // Adjustment Modal

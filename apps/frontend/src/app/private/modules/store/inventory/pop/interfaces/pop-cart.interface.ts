@@ -3,6 +3,8 @@
  * Based on POS cart patterns but adapted for purchase orders
  */
 
+import { WithholdingLine } from '../../../withholding-tax/interfaces/withholding.interface';
+
 // ============================================================================
 // Base Entity Interfaces (defined first to avoid forward reference issues)
 // ============================================================================
@@ -167,6 +169,15 @@ export interface PopCartSummary {
   total: number;
   itemCount: number;
   totalItems: number;
+  /**
+   * Net withholding the tenant PRACTICES on the supplier (role='practiced').
+   * Reduces the net amount to pay the supplier. Sourced exclusively from the
+   * backend preview endpoint — never computed client-side. 0 when there is no
+   * supplier or no applicable withholding.
+   */
+  withholding_amount?: number;
+  /** Resolved withholding lines for display/breakdown (preview, informative). */
+  withholding_lines?: WithholdingLine[];
 }
 
 /**

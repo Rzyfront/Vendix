@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import {
   ProviderInvoiceData,
   ProviderResponse,
@@ -11,6 +12,8 @@ import {
 import { InvoiceProviderResolver } from '../providers/invoice-provider-resolver.service';
 import { InvoiceRetryQueueService } from '../services/invoice-retry-queue.service';
 import { FiscalTransmissionLedgerService } from '../services/fiscal-transmission-ledger.service';
+import { WithholdingFlowService } from '../../withholding-tax/withholding-flow.service';
+import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
 
 type InvoiceStatus =
   | 'draft'
@@ -87,7 +90,96 @@ export class InvoiceFlowService {
     private readonly retry_queue: InvoiceRetryQueueService,
     private readonly fiscal_ledger: FiscalTransmissionLedgerService,
     private readonly fiscal_gate: FiscalGateService,
+    private readonly withholdingFlow: WithholdingFlowService,
   ) {}
+
+  /**
+   * Resuelve el desglose de retenciones (Bloque C) para una factura ya aceptada,
+   * justo antes de emitir el evento contable. Degrada a `[]` ante cualquier fallo
+   * para NUNCA romper la aceptación de la factura (contrato cero-regresión).
+   *
+   * - support_document → CASO 1 practiced: el tenant compró y puede retener al
+   *   proveedor (pasivo 2365/2367/2368).
+   * - factura de venta  → CASO 2 suffered: el cliente, si es agente retenedor,
+   *   retiene al tenant (activo 1355xx).
+   *
+   * Persiste las filas `withholding_calculations` y devuelve las líneas para
+   * adjuntarlas como `withholding_breakdown` en el payload del evento.
+   */
+  private async resolveWithholdingForInvoice(
+    updated: any,
+    is_support_document: boolean,
+  ): Promise<WithholdingLine[]> {
+    try {
+      const organization_id = Number(updated.organization_id);
+      const store_id =
+        updated.store_id != null ? Number(updated.store_id) : null;
+      const accounting_entity_id =
+        updated.accounting_entity_id != null
+          ? Number(updated.accounting_entity_id)
+          : null;
+      const invoice_id = Number(updated.id);
+      const base = Number(updated.subtotal_amount);
+      const ivaAmount = Number(updated.tax_amount);
+
+      if (is_support_document) {
+        // CASO 1 — practiced (compro a proveedor).
+        const supplier_id =
+          updated.supplier_id != null ? Number(updated.supplier_id) : null;
+        const wh = await this.withholdingFlow.resolvePracticed({
+          organization_id,
+          store_id,
+          supplier_id,
+          base,
+          ivaAmount,
+        });
+        await this.withholdingFlow.persistWithholdingLines({
+          organization_id,
+          store_id,
+          accounting_entity_id,
+          invoice_id,
+          supplier_id,
+          role: 'practiced',
+          counterparty_type: wh.counterparty_type,
+          uvt_value_used: wh.uvt_value_used,
+          lines: wh.lines,
+        });
+        return wh.lines;
+      }
+
+      // CASO 2 — suffered (vendo; el cliente agente me retiene). El cliente sale
+      // directo de `invoices.customer_id` (cargado en INVOICE_INCLUDE). Si la
+      // venta es de mostrador/anónima → null → resolveSuffered devuelve [].
+      const customer_id =
+        updated.customer_id != null ? Number(updated.customer_id) : null;
+      const wh = await this.withholdingFlow.resolveSuffered({
+        organization_id,
+        store_id,
+        customer_id,
+        base,
+        ivaAmount,
+      });
+      await this.withholdingFlow.persistWithholdingLines({
+        organization_id,
+        store_id,
+        accounting_entity_id,
+        invoice_id,
+        customer_id,
+        role: 'suffered',
+        counterparty_type: wh.counterparty_type,
+        uvt_value_used: wh.uvt_value_used,
+        lines: wh.lines,
+      });
+      return wh.lines;
+    } catch (error) {
+      this.logger.error(
+        `Withholding resolution failed for invoice #${updated.id}; degrading to empty breakdown: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [];
+    }
+  }
 
   /**
    * Defensa en profundidad del gate fiscal de FACTURACIÓN.
@@ -426,6 +518,7 @@ export class InvoiceFlowService {
         tax_rate: tax.tax_rate.toString(),
         taxable_amount: tax.taxable_amount.toString(),
         tax_amount: tax.tax_amount.toString(),
+        tax_type: tax.tax_type ?? undefined,
       })),
       resolution_number: invoice.resolution?.resolution_number,
       technical_key: invoice.resolution?.technical_key || undefined,
@@ -627,6 +720,11 @@ export class InvoiceFlowService {
       await this.ensureSupportDocumentAccountsPayable(updated);
     }
 
+    const withholding_breakdown = await this.resolveWithholdingForInvoice(
+      updated,
+      is_support_document,
+    );
+
     this.event_emitter.emit(
       is_support_document ? 'support_document.accepted' : 'invoice.accepted',
       {
@@ -640,7 +738,9 @@ export class InvoiceFlowService {
         subtotal_amount: Number(updated.subtotal_amount),
         discount_amount: Number(updated.discount_amount),
         tax_amount: Number(updated.tax_amount),
+        tax_breakdown: buildTaxBreakdown(updated.invoice_taxes || []),
         withholding_amount: Number(updated.withholding_amount),
+        withholding_breakdown,
         total_amount: Number(updated.total_amount),
         supplier_id: updated.supplier_id,
         user_id: this.getContext().user_id,
@@ -707,6 +807,11 @@ export class InvoiceFlowService {
       await this.ensureSupportDocumentAccountsPayable(updated);
     }
 
+    const withholding_breakdown = await this.resolveWithholdingForInvoice(
+      updated,
+      is_support_document,
+    );
+
     this.event_emitter.emit(
       is_support_document ? 'support_document.accepted' : 'invoice.accepted',
       {
@@ -719,7 +824,9 @@ export class InvoiceFlowService {
         subtotal_amount: Number(updated.subtotal_amount),
         discount_amount: Number(updated.discount_amount),
         tax_amount: Number(updated.tax_amount),
+        tax_breakdown: buildTaxBreakdown(updated.invoice_taxes || []),
         withholding_amount: Number(updated.withholding_amount),
+        withholding_breakdown,
         total_amount: Number(updated.total_amount),
         supplier_id: updated.supplier_id,
         user_id: this.getContext().user_id,

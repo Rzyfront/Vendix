@@ -1,7 +1,14 @@
 import {Injectable, signal, DestroyRef, inject} from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
 import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
-import { map, tap, catchError } from 'rxjs/operators';
+import {
+  map,
+  tap,
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  switchMap,
+} from 'rxjs/operators';
 import {
   LotInfo,
   PreBulkData,
@@ -18,6 +25,8 @@ import {
   UpdatePopCartItemRequest,
 } from '../interfaces/pop-cart.interface';
 import { PurchaseOrder } from '../../interfaces';
+import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
+import { WithholdingPreviewResult } from '../../../withholding-tax/interfaces/withholding.interface';
 
 /**
  * Lot/Batch information for purchase order items (extended for service use)
@@ -57,12 +66,77 @@ const INITIAL_STATE: PopCartState = {
 })
 export class PopCartService {
   private destroyRef = inject(DestroyRef);
+  private withholdingService = inject(WithholdingTaxService);
   private _cartState = signal<PopCartState>(INITIAL_STATE);
   private _loading = signal<boolean>(false);
   public cartState$ = toObservable(this._cartState);
   public loading$ = toObservable(this._loading);
 
-  constructor() { }
+  constructor() {
+    this.initWithholdingPreview();
+  }
+
+  /**
+   * Reactive withholding preview (role='practiced' — the tenant withholds the
+   * SUPPLIER on a purchase). Fires the backend preview ONLY when the inputs
+   * change (supplier, base subtotal, IVA), with debounce + switchMap to avoid
+   * spamming and to cancel stale requests. Backend is the single source of
+   * truth; we only store the resolved `total_withholding`. Never throws — a
+   * failed preview leaves the total untouched (withholding 0).
+   */
+  private initWithholdingPreview(): void {
+    this.cartState$
+      .pipe(
+        map((state) => {
+          const supplierId = Number(state.supplierId ?? 0) || 0;
+          const base = Number(state.summary.subtotal ?? 0) || 0;
+          const ivaAmount = Number(state.summary.tax_amount ?? 0) || 0;
+          return { supplierId, base, ivaAmount };
+        }),
+        distinctUntilChanged(
+          (a, b) =>
+            a.supplierId === b.supplierId &&
+            a.base === b.base &&
+            a.ivaAmount === b.ivaAmount,
+        ),
+        debounceTime(300),
+        switchMap(({ supplierId, base, ivaAmount }) => {
+          // No counterparty or no base → no call, reset to 0.
+          if (supplierId <= 0 || base <= 0) {
+            return of({ lines: [], total_withholding: 0 });
+          }
+          return this.withholdingService.previewWithholding({
+            role: 'practiced',
+            supplier_id: supplierId,
+            base,
+            ivaAmount,
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((result) => this.applyWithholdingToSummary(result));
+  }
+
+  /** Patch the current summary with the backend-resolved withholding. */
+  private applyWithholdingToSummary(result: WithholdingPreviewResult): void {
+    const current = this.currentState;
+    const amount = Number(result?.total_withholding ?? 0) || 0;
+    const lines = result?.lines ?? [];
+    if (
+      (current.summary.withholding_amount ?? 0) === amount &&
+      (current.summary.withholding_lines?.length ?? 0) === lines.length
+    ) {
+      return; // No-op: avoids a redundant signal write / re-render loop.
+    }
+    this._cartState.set({
+      ...current,
+      summary: {
+        ...current.summary,
+        withholding_amount: amount,
+        withholding_lines: lines,
+      },
+    });
+  }
 
   get currentState(): PopCartState {
     return this._cartState();
@@ -520,6 +594,11 @@ export class PopCartService {
    * Calculate summary from items
    */
   private calculateSummary(items: PopCartItem[]): PopCartSummary {
+    // Preserve the last backend-resolved withholding so the line does not flash
+    // to 0 between an item change and the debounced preview recompute. The
+    // reactive preview re-fires whenever subtotal/IVA/supplier change.
+    const previousSummary = this.currentState.summary;
+
     return items.reduce(
       (acc, item) => {
         acc.subtotal += item.subtotal;
@@ -535,6 +614,8 @@ export class PopCartService {
         total: this.currentState.shippingCost,
         itemCount: 0,
         totalItems: 0,
+        withholding_amount: previousSummary?.withholding_amount ?? 0,
+        withholding_lines: previousSummary?.withholding_lines,
       },
     );
   }

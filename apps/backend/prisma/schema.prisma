@@ -28,6 +28,9 @@ model users {
   phone                      String?                      @db.VarChar(50)
   document_number            String?                      @db.VarChar(50)
   document_type              String?                      @db.VarChar(50)
+  tax_regime                 String?                      @db.VarChar(50)
+  person_type                String?                      @db.VarChar(20)
+  is_withholding_agent       Boolean                      @default(false)
   main_store_id              Int?
   addresses                  addresses[]                  @relation("user_addresses")
   api_keys                   api_keys[]
@@ -170,6 +173,7 @@ model users {
   fiscal_close_checks_resolved   fiscal_close_checks[]       @relation("fiscal_close_checks_resolved_by")
   fiscal_rule_sets_created       fiscal_rule_sets[]          @relation("fiscal_rule_sets_created_by")
   fiscal_operation_events_actor  fiscal_operation_events[]   @relation("fiscal_operation_events_actor")
+  customer_withholdings          withholding_calculations[]  @relation("customer_withholdings")
 
   @@index([email_verified])
   @@index([state])
@@ -976,14 +980,15 @@ model inventory_transactions {
 }
 
 model order_item_taxes {
-  id            Int         @id @default(autoincrement())
+  id            Int            @id @default(autoincrement())
   order_item_id Int
   tax_rate_id   Int?
-  tax_name      String      @db.VarChar(100)
-  tax_rate      Decimal     @db.Decimal(6, 5)
-  tax_amount    Decimal     @db.Decimal(12, 2)
+  tax_name      String         @db.VarChar(100)
+  tax_rate      Decimal        @db.Decimal(6, 5)
+  tax_amount    Decimal        @db.Decimal(12, 2)
+  tax_type      tax_type_enum?
   is_compound   Boolean?
-  created_at    DateTime?   @default(now()) @db.Timestamp(6)
+  created_at    DateTime?      @default(now()) @db.Timestamp(6)
   order_items   order_items @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
   tax_rates     tax_rates?  @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
@@ -1574,6 +1579,7 @@ model tax_categories {
   organization_id         Int?
   name                    String                    @db.VarChar(100)
   description             String?
+  tax_type                tax_type_enum?
   product_tax_assignments product_tax_assignments[]
   stores                  stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations           organizations?            @relation(fields: [organization_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -1762,6 +1768,8 @@ model suppliers {
   website                  String?                    @db.VarChar(255)
   tax_id                   String?                    @db.VarChar(50)
   tax_regime               String?                    @db.VarChar(50)
+  person_type              String?                    @db.VarChar(20)
+  is_self_withholder       Boolean                    @default(false)
   document_type            String?                    @db.VarChar(10)
   verification_digit       String?                    @db.VarChar(1)
   payment_terms            String?                    @db.VarChar(255)
@@ -2879,6 +2887,7 @@ enum fiscal_status_source_enum {
 
 enum fiscal_obligation_type_enum {
   vat_return
+  inc_return
   withholding_return
   reteiva_return
   reteica_return
@@ -2911,12 +2920,25 @@ enum fiscal_obligation_status_enum {
 
 enum tax_declaration_type_enum {
   vat
+  inc
   withholding
   reteiva
   reteica
   ica
   exogenous
   income_tax_precierre
+}
+
+/// Fiscal classification of a tax. Single source of truth for routing a tax
+/// to its DIAN scheme code, its PUC account in accounting entries, and its
+/// fiscal declaration. Persisted (not derived from the free-text name).
+enum tax_type_enum {
+  iva
+  inc
+  ica
+  withholding
+  reteiva
+  reteica
 }
 
 enum tax_declaration_status_enum {
@@ -4045,13 +4067,14 @@ model invoice_items {
 }
 
 model invoice_taxes {
-  id             Int     @id @default(autoincrement())
+  id             Int            @id @default(autoincrement())
   invoice_id     Int
   tax_rate_id    Int?
-  tax_name       String  @db.VarChar(100)
-  tax_rate       Decimal @db.Decimal(5, 2)
-  taxable_amount Decimal @db.Decimal(12, 2)
-  tax_amount     Decimal @db.Decimal(12, 2)
+  tax_name       String         @db.VarChar(100)
+  tax_rate       Decimal        @db.Decimal(5, 2)
+  taxable_amount Decimal        @db.Decimal(12, 2)
+  tax_amount     Decimal        @db.Decimal(12, 2)
+  tax_type       tax_type_enum?
 
   invoice   invoices   @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   tax_rates tax_rates? @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -5319,6 +5342,17 @@ enum withholding_supplier_type_enum {
   any
 }
 
+enum withholding_type_enum {
+  retefuente
+  reteiva
+  reteica
+}
+
+enum withholding_role_enum {
+  practiced
+  suffered
+}
+
 enum exogenous_report_status_enum {
   draft
   generating
@@ -5851,6 +5885,8 @@ model withholding_concepts {
   min_uvt_threshold    Decimal                        @default(0) @db.Decimal(10, 2)
   applies_to           withholding_applies_to_enum
   supplier_type_filter withholding_supplier_type_enum @default(any)
+  withholding_type     withholding_type_enum          @default(retefuente)
+  account_code         String?                        @db.VarChar(20)
   is_active            Boolean                        @default(true)
   created_at           DateTime?                      @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
@@ -5871,7 +5907,11 @@ model withholding_calculations {
   accounting_entity_id Int?
   invoice_id           Int?
   supplier_id          Int?
+  customer_id          Int?
   concept_id           Int
+  role                 withholding_role_enum  @default(practiced)
+  counterparty_type    String?                @db.VarChar(20)
+  withholding_type     withholding_type_enum?
   base_amount          Decimal   @db.Decimal(12, 2)
   withholding_rate     Decimal   @db.Decimal(7, 4)
   withholding_amount   Decimal   @db.Decimal(12, 2)
@@ -5884,10 +5924,12 @@ model withholding_calculations {
   accounting_entity accounting_entities? @relation(fields: [accounting_entity_id], references: [id], onDelete: SetNull)
   invoice           invoices?            @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   supplier          suppliers?           @relation(fields: [supplier_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  customer          users?               @relation("customer_withholdings", fields: [customer_id], references: [id], onDelete: SetNull)
   concept           withholding_concepts @relation(fields: [concept_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([organization_id, invoice_id])
   @@index([organization_id, supplier_id, year])
+  @@index([organization_id, customer_id, year])
   @@index([accounting_entity_id])
   @@index([store_id])
 }

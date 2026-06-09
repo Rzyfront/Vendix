@@ -16,6 +16,10 @@ export interface Supplier {
   mobile?: string;
   website?: string;
   tax_id?: string;
+  // Fiscal classification (Colombian withholdings — "el QUIEN")
+  tax_regime?: string;
+  person_type?: string;
+  is_self_withholder?: boolean;
   payment_terms?: string;
   currency?: string;
   lead_time_days?: number;
@@ -35,6 +39,10 @@ export interface CreateSupplierDto {
   mobile?: string;
   website?: string;
   tax_id?: string;
+  // Fiscal classification (Colombian withholdings — "el QUIEN")
+  tax_regime?: string;
+  person_type?: string;
+  is_self_withholder?: boolean;
   payment_terms?: string;
   currency?: string;
   lead_time_days?: number;

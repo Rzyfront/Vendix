@@ -77,6 +77,22 @@ export class CreateOrgSupplierDto {
   @IsString()
   tax_regime?: string;
 
+  @ApiPropertyOptional({
+    description: 'Person type for withholding resolution',
+    enum: ['NATURAL', 'JURIDICA'],
+  })
+  @IsOptional()
+  @IsString()
+  person_type?: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether the supplier is a self-withholder (autorretenedor)',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_self_withholder?: boolean;
+
   @ApiPropertyOptional({ description: 'Document type' })
   @IsOptional()
   @IsString()

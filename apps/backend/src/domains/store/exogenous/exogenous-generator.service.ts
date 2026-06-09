@@ -18,9 +18,12 @@ export class ExogenousGeneratorService {
     store_id: number | null,
     year: number,
   ): Promise<ExogenousLineData[]> {
+    // Formato 1001 = pagos y retenciones PRACTICADAS por la empresa a sus
+    // proveedores. El tercero es el PROVEEDOR. Solo role='practiced'.
     const where_clause: any = {
       organization_id,
       year,
+      role: 'practiced',
     };
     if (store_id) where_clause.store_id = store_id;
 
@@ -75,6 +78,7 @@ export class ExogenousGeneratorService {
       payment_amount: data.base,
       tax_amount: 0,
       withholding_amount: data.withholding,
+      role: 'practiced' as const,
     }));
   }
 
@@ -100,10 +104,24 @@ export class ExogenousGeneratorService {
           lt: new Date(`${year + 1}-01-01`),
         },
         status: { in: ['validated', 'accepted'] },
-        invoice_taxes: { some: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          some: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
       include: {
-        invoice_taxes: { where: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          where: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
     });
 
@@ -279,9 +297,11 @@ export class ExogenousGeneratorService {
    * Query accounting_entry_lines en cuentas 22xx
    */
   /**
-   * Formato 1003: Retenciones recibidas (practicadas por terceros a la empresa)
-   * Agrupa withholding_calculations donde la empresa es el sujeto retenido,
-   * agrupando por NIT del agente retenedor (supplier)
+   * Formato 1003: Retenciones que me PRACTICARON (role='suffered').
+   * La empresa es el sujeto retenido; el tercero NO es un proveedor sino el
+   * CLIENTE AGENTE RETENEDOR que practicó la retención. Por eso se agrupa por
+   * el identificador fiscal del customer (users.document_number), no por
+   * supplier.
    */
   async generateFormat1003(
     organization_id: number,
@@ -291,6 +311,7 @@ export class ExogenousGeneratorService {
     const where_clause: any = {
       organization_id,
       year,
+      role: 'suffered',
     };
     if (store_id) where_clause.store_id = store_id;
 
@@ -299,19 +320,22 @@ export class ExogenousGeneratorService {
     ).client.withholding_calculations.findMany({
       where: where_clause,
       include: {
-        supplier: {
-          select: { name: true, tax_id: true, verification_digit: true },
+        customer: {
+          select: {
+            first_name: true,
+            last_name: true,
+            document_number: true,
+          },
         },
         concept: { select: { code: true, name: true } },
       },
     });
 
-    // Group by supplier NIT (agente retenedor)
+    // Group by customer document_number (agente retenedor)
     const grouped = new Map<
       string,
       {
         name: string;
-        dv?: string;
         base: number;
         withholding: number;
         concept: string;
@@ -319,9 +343,12 @@ export class ExogenousGeneratorService {
     >();
 
     for (const calc of calculations) {
-      const nit = calc.supplier?.tax_id || 'SIN_NIT';
+      const nit = calc.customer?.document_number || 'SIN_NIT';
       const concept_code = calc.concept?.code || 'RTE_OTROS';
       const key = `${nit}_${concept_code}`;
+      const customerName = calc.customer
+        ? `${calc.customer.first_name ?? ''} ${calc.customer.last_name ?? ''}`.trim()
+        : '';
       const existing = grouped.get(key);
 
       if (existing) {
@@ -329,8 +356,7 @@ export class ExogenousGeneratorService {
         existing.withholding += Number(calc.withholding_amount);
       } else {
         grouped.set(key, {
-          name: calc.supplier?.name || 'Sin retenedor',
-          dv: calc.supplier?.verification_digit || undefined,
+          name: customerName || 'Sin retenedor',
           base: Number(calc.base_amount),
           withholding: Number(calc.withholding_amount),
           concept: concept_code,
@@ -341,11 +367,11 @@ export class ExogenousGeneratorService {
     return Array.from(grouped.entries()).map(([key, data]) => ({
       third_party_nit: key.split('_')[0],
       third_party_name: data.name,
-      third_party_dv: data.dv,
       concept_code: data.concept,
       payment_amount: data.base,
       tax_amount: 0,
       withholding_amount: data.withholding,
+      role: 'suffered' as const,
     }));
   }
 
@@ -385,7 +411,14 @@ export class ExogenousGeneratorService {
             tax_regime: true,
           },
         },
-        invoice_taxes: { where: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          where: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
     });
 

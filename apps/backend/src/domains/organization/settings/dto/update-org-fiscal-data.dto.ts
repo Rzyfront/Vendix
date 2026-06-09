@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -142,4 +143,22 @@ export class UpdateOrgFiscalDataDto {
   @IsString()
   @MaxLength(32)
   tax_scheme?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Whether this tenant acts as a withholding agent (retenedor) on purchases. Absent ⇒ false.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_withholding_agent?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Whether this tenant is a self-withholder (autorretenedor) and may be subject to being withheld. Absent ⇒ false.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_self_withholder?: boolean;
 }

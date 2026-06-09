@@ -134,6 +134,28 @@ export interface OrgSupplierStoreOption {
             ></app-input>
           </div>
 
+          <!-- Fiscal Classification ("el QUIEN" — Colombian withholdings) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <app-selector
+              label="Régimen Tributario"
+              formControlName="tax_regime"
+              [options]="taxRegimeOptions"
+              placeholder="Seleccionar"
+            ></app-selector>
+            <app-selector
+              label="Tipo de Persona"
+              formControlName="person_type"
+              [options]="personTypeOptions"
+              placeholder="Seleccionar"
+            ></app-selector>
+          </div>
+
+          <app-setting-toggle
+            formControlName="is_self_withholder"
+            label="¿Es autorretenedor?"
+            description="Marca si este proveedor se practica sus propias retenciones"
+          ></app-setting-toggle>
+
           <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
             <app-input
               label="Términos de Pago"
@@ -210,6 +232,18 @@ export class OrgSupplierFormModalComponent {
 
   currencyOptions: { value: string; label: string }[] = [];
 
+  // Fiscal classification options (Colombian withholdings — "el QUIEN")
+  readonly taxRegimeOptions: { value: string; label: string }[] = [
+    { value: 'COMUN', label: 'Régimen Común' },
+    { value: 'SIMPLIFICADO', label: 'Régimen Simplificado' },
+    { value: 'GRAN_CONTRIBUYENTE', label: 'Gran Contribuyente' },
+  ];
+
+  readonly personTypeOptions: { value: string; label: string }[] = [
+    { value: 'NATURAL', label: 'Persona Natural' },
+    { value: 'JURIDICA', label: 'Persona Jurídica' },
+  ];
+
   // Computed-style getter (reading the input signal each call). Kept as a
   // getter to avoid creating a separate computed for a simple template need.
   get effectiveStoreOptions(): OrgSupplierStoreOption[] {
@@ -229,6 +263,9 @@ export class OrgSupplierFormModalComponent {
     mobile: [''],
     website: [''],
     tax_id: [''],
+    tax_regime: [''],
+    person_type: [''],
+    is_self_withholder: [false],
     payment_terms: [''],
     currency: [this.currencyFormatService.currencyCode() || 'COP'],
     lead_time_days: [null],
@@ -254,6 +291,9 @@ export class OrgSupplierFormModalComponent {
           mobile: '',
           website: '',
           tax_id: '',
+          tax_regime: '',
+          person_type: '',
+          is_self_withholder: false,
           payment_terms: '',
           currency: this.currencyFormatService.currencyCode() || 'COP',
           lead_time_days: null,
@@ -291,6 +331,9 @@ export class OrgSupplierFormModalComponent {
         mobile: sup.mobile ?? '',
         website: sup.website ?? '',
         tax_id: sup.tax_id ?? sup.document_number ?? '',
+        tax_regime: sup.tax_regime ?? '',
+        person_type: sup.person_type ?? '',
+        is_self_withholder: sup.is_self_withholder ?? false,
         payment_terms: sup.payment_terms ?? '',
         currency:
           sup.currency || this.currencyFormatService.currencyCode() || 'COP',
@@ -335,6 +378,9 @@ export class OrgSupplierFormModalComponent {
       mobile: raw.mobile || undefined,
       website: raw.website || undefined,
       tax_id: raw.tax_id || undefined,
+      tax_regime: raw.tax_regime || undefined,
+      person_type: raw.person_type || undefined,
+      is_self_withholder: !!raw.is_self_withholder,
       payment_terms: raw.payment_terms || undefined,
       currency: raw.currency || undefined,
       lead_time_days:

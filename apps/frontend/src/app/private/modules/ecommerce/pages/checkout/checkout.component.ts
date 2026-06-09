@@ -32,6 +32,8 @@ import {
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
+import { phoneDigitsValidator } from '../../utils/address-validators';
 import {
   CatalogService,
   EcommerceProduct,
@@ -99,6 +101,25 @@ export class CheckoutComponent implements OnInit {
   readonly use_new_address = signal(false);
   readonly save_new_address = signal(true);
   readonly is_authenticated = signal(false);
+
+  /** Mirror of the selected country code so the template can branch reactively (zoneless). */
+  readonly selected_country_code = signal('CO');
+  /** True when Colombia is selected — drives department/city dropdowns vs free-text. */
+  readonly isColombia = computed(() => this.selected_country_code() === 'CO');
+  /** Signal mirror of address_form.validity (FormGroup.valid is not reactive in zoneless). */
+  readonly addressFormValid = signal(false);
+
+  /**
+   * Whether the user may leave the address step. Either a saved address is
+   * selected, or the new-address form is fully valid. Service-only carts skip
+   * the address step entirely. This GATES THE CONTINUE BUTTON without adding a
+   * new hard block to any other flow.
+   */
+  readonly canProceedFromAddress = computed(() => {
+    if (this.cartHasOnlyServices) return true;
+    if (!this.use_new_address()) return this.selected_address_id() != null;
+    return this.addressFormValid();
+  });
 
   address_form!: FormGroup;
   readonly notes = signal('');
@@ -272,6 +293,13 @@ export class CheckoutComponent implements OnInit {
       this.loadRecommendations();
     }
 
+    // FormGroup.valid no es reactivo en zoneless: reflejamos su estado en una
+    // signal para que `canProceedFromAddress` y el botón "Continuar" reaccionen.
+    this.address_form.statusChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.addressFormValid.set(this.address_form.valid));
+    this.addressFormValid.set(this.address_form.valid);
+
     this.checkout_service
       .getInvoicingEligibility()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -323,15 +351,26 @@ export class CheckoutComponent implements OnInit {
 
   initForm(): void {
     this.address_form = this.fb.group({
-      address_line1: ['', Validators.required],
-      address_line2: [''],
+      address_line1: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(5),
+          Validators.maxLength(150),
+        ],
+      ],
+      address_line2: ['', [Validators.maxLength(100)]],
       city: [{ value: '', disabled: true }, Validators.required],
-      state_province: [{ value: '', disabled: true }],
+      state_province: [{ value: '', disabled: true }, Validators.required],
       country_code: ['CO', Validators.required],
-      postal_code: [''],
+      postal_code: ['', [Validators.maxLength(20)]],
       phone_number: [
         '',
-        [Validators.required, Validators.pattern(/^[\d+#*\s()-]*$/)],
+        [
+          Validators.required,
+          Validators.pattern(/^[\d+#*\s()-]*$/),
+          phoneDigitsValidator(),
+        ],
       ],
     });
   }
@@ -345,32 +384,42 @@ export class CheckoutComponent implements OnInit {
     const depControl = this.address_form.get('state_province');
     const cityControl = this.address_form.get('city');
 
-    countryControl?.valueChanges.subscribe((code: string) => {
-      if (code === 'CO') {
-        this.loadDepartments();
-      } else {
-        // Clear downstream data for non-Colombia countries
-        this.departments.set([]);
-        this.cities.set([]);
-        depControl?.setValue('');
-        cityControl?.setValue('');
-        depControl?.disable({ emitEvent: false });
-        cityControl?.disable({ emitEvent: false });
-      }
-    });
-
-    depControl?.valueChanges.subscribe((depId: any) => {
-      if (depId) {
-        const numericDepId = Number(depId);
-        if (!isNaN(numericDepId)) {
-          this.loadCities(numericDepId);
+    countryControl?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((code: string) => {
+        this.selected_country_code.set(code || '');
+        if (code === 'CO') {
+          // Flujo con dropdowns (API Colombia)
+          this.cities.set([]);
+          depControl?.setValue('');
+          cityControl?.setValue('');
+          cityControl?.disable({ emitEvent: false });
+          this.loadDepartments();
+        } else {
+          // Países sin API de dep/ciudad: inputs de texto libre, requeridos.
+          this.departments.set([]);
+          this.cities.set([]);
+          depControl?.setValue('');
+          cityControl?.setValue('');
+          depControl?.enable({ emitEvent: false });
+          cityControl?.enable({ emitEvent: false });
         }
-      } else {
-        this.cities.set([]);
-        cityControl?.setValue('');
-        cityControl?.disable({ emitEvent: false });
-      }
-    });
+      });
+
+    depControl?.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((depId: any) => {
+        if (depId) {
+          const numericDepId = Number(depId);
+          if (!isNaN(numericDepId)) {
+            this.loadCities(numericDepId);
+          }
+        } else {
+          this.cities.set([]);
+          cityControl?.setValue('');
+          cityControl?.disable({ emitEvent: false });
+        }
+      });
 
     // Re-fetch shipping options when the user picks a new city. The
     // `nextStep` flow still calls loadShippingOptions on Address→Payment,
@@ -718,12 +767,14 @@ export class CheckoutComponent implements OnInit {
     // Address step (only for carts with physical items)
     if (this.step() === 1 && !this.cartHasOnlyServices) {
       if (this.use_new_address() && !this.address_form.valid) {
-        this.error_message.set('Por favor completa la dirección de envío');
+        this.error_message.set(
+          ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_REQUIRED_001'],
+        );
         this.address_form.markAllAsTouched();
         return;
       }
       if (!this.use_new_address() && !this.selected_address_id()) {
-        this.error_message.set('Por favor selecciona una dirección');
+        this.error_message.set(ERROR_MESSAGES['ECOM_CHECKOUT_ADDR_SAVED_001']);
         return;
       }
 
@@ -1226,24 +1277,41 @@ export class CheckoutComponent implements OnInit {
     return this.cities().map((c) => ({ value: c.id, label: c.name }));
   }
 
-  // Helper method for field validation errors
+  /** Maps (field, first validation error key) → client error code. */
+  private static readonly ADDRESS_ERROR_CODES: Record<
+    string,
+    Record<string, string>
+  > = {
+    address_line1: {
+      required: 'ECOM_CHECKOUT_ADDR_LINE1_001',
+      minlength: 'ECOM_CHECKOUT_ADDR_LINE1_001',
+      maxlength: 'ECOM_CHECKOUT_ADDR_LINE1_001',
+    },
+    address_line2: { maxlength: 'ECOM_CHECKOUT_ADDR_LINE2_001' },
+    state_province: { required: 'ECOM_CHECKOUT_ADDR_STATE_001' },
+    city: { required: 'ECOM_CHECKOUT_ADDR_CITY_001' },
+    country_code: { required: 'ECOM_CHECKOUT_ADDR_COUNTRY_001' },
+    postal_code: {
+      maxlength: 'ECOM_CHECKOUT_ADDR_POSTAL_001',
+      pattern: 'ECOM_CHECKOUT_ADDR_POSTAL_001',
+    },
+    phone_number: {
+      required: 'ECOM_CHECKOUT_ADDR_PHONE_001',
+      pattern: 'ECOM_CHECKOUT_ADDR_PHONE_001',
+      phoneDigits: 'ECOM_CHECKOUT_ADDR_PHONE_001',
+    },
+  };
+
+  // Helper method for field validation errors (coded messages)
   getFieldError(fieldName: string): string {
     const control = this.address_form.get(fieldName);
-    if (!control || !control.touched || !control.errors) {
+    if (!control || control.disabled || !control.touched || !control.errors) {
       return '';
     }
-
-    const errors = control.errors;
-    if (errors['required']) {
-      return 'Este campo es requerido';
-    }
-    if (errors['minlength']) {
-      return `Mínimo ${errors['minlength'].requiredLength} caracteres`;
-    }
-    if (errors['pattern']) {
-      return 'Formato inválido';
-    }
-
-    return '';
+    const map = CheckoutComponent.ADDRESS_ERROR_CODES[fieldName];
+    if (!map) return '';
+    const errorKey = Object.keys(control.errors)[0];
+    const code = map[errorKey];
+    return code ? (ERROR_MESSAGES[code] ?? '') : '';
   }
 }

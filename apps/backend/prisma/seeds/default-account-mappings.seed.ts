@@ -67,6 +67,21 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',
+  // Typed fiscal tax routing (per tax_type): IVA→2408, INC→2436, ICA→2412.
+  // Mirrors DEFAULT_ACCOUNT_MAPPINGS so AutoEntryService.resolveTaxLines posts
+  // each fiscal type to its own PUC account instead of collapsing into 2408.
+  'invoice.validated.iva_payable': '2408',
+  'invoice.validated.inc_payable': '2436',
+  'invoice.validated.ica_payable': '2412',
+  'payment.received.iva_payable': '2408',
+  'payment.received.inc_payable': '2436',
+  'payment.received.ica_payable': '2412',
+  'credit_sale.created.iva_payable': '2408',
+  'credit_sale.created.inc_payable': '2436',
+  'credit_sale.created.ica_payable': '2412',
+  'refund.completed.iva_payable': '2408',
+  'refund.completed.inc_payable': '2436',
+  'refund.completed.ica_payable': '2412',
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',
@@ -89,6 +104,15 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'withholding.applied.expense': '5195',
   'withholding.applied.withholding_payable': '2365',
   'withholding.applied.accounts_payable': '2205',
+  // Withholding ENGINE (Block B) — dual-role routing by withholding_type.
+  // Mirrors DEFAULT_ACCOUNT_MAPPINGS. practiced → liability (2365/2367/2368),
+  // suffered → asset (1355xx). Per-concept account_code overrides retefuente.
+  'withholding.practiced.retefuente_payable': '236525',
+  'withholding.practiced.reteiva_payable': '236705',
+  'withholding.practiced.reteica_payable': '236805',
+  'withholding.suffered.retefuente_receivable': '135510',
+  'withholding.suffered.reteiva_receivable': '135515',
+  'withholding.suffered.reteica_receivable': '135517',
   // Settlement (Liquidación por Terminación)
   'settlement.paid.severance': '2610',
   'settlement.paid.severance_interest': '2615',

@@ -1,5 +1,6 @@
 import { Product, PosProductVariant } from '../services/pos-product.service';
 import { PosCustomer } from '../models/customer.model';
+import { WithholdingLine } from '../../withholding-tax/interfaces/withholding.interface';
 
 export interface CartItem {
   id: string;
@@ -58,6 +59,15 @@ export interface CartSummary {
   total: number;
   itemCount: number;
   totalItems: number;
+  /**
+   * Net withholding the CUSTOMER (agente retenedor) practices on this sale
+   * (role='suffered'). Reduces the amount to collect. Sourced exclusively from
+   * the backend preview endpoint — never computed client-side. 0 when there is
+   * no customer or no applicable withholding.
+   */
+  withholdingAmount?: number;
+  /** Resolved withholding lines for display/breakdown (preview, informative). */
+  withholdingLines?: WithholdingLine[];
 }
 
 export interface PendingBooking {

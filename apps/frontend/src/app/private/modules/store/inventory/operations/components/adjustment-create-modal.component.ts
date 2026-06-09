@@ -1,4 +1,4 @@
-import {Component, input, output, inject, effect, signal, ViewChild, DestroyRef} from '@angular/core';
+import {Component, input, output, inject, effect, untracked, signal, ViewChild, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -560,9 +560,14 @@ export class AdjustmentCreateModalComponent {
   }
 
   constructor() {
+    // Reset solo en la transicion de apertura (isOpen). resetModal() lee
+    // preselectedProduct() vía hasPreselected; sin untracked el effect quedaria
+    // suscrito a ese input — que cambia de identidad en cada CD del padre
+    // (getter adjustmentPreselectedProduct) — y re-ejecutaria el reset borrando
+    // selectedLocation tras seleccionarla, dejando "Continuar" siempre disabled.
     effect(() => {
       if (this.isOpen()) {
-        this.resetModal();
+        untracked(() => this.resetModal());
       }
     });
   }

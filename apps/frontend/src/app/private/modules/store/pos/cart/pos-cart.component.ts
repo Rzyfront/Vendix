@@ -85,6 +85,24 @@ import {
               }}</span>
             </div>
 
+            <!--
+              Retención (preview). role='suffered': el cliente agente retenedor
+              nos retiene; reduce el total a cobrar. Fuente única de verdad:
+              endpoint backend /store/withholding-tax/preview. Solo se muestra
+              cuando hay retención resuelta (> 0).
+            -->
+            @if (withholdingAmount() > 0) {
+              <div class="flex justify-between text-xs text-text-secondary">
+                <span class="flex items-center gap-1">
+                  <app-icon name="minus" [size]="12" class="text-amber-600"></app-icon>
+                  Retención
+                </span>
+                <span class="font-medium text-amber-700"
+                  >-{{ formatCurrency(withholdingAmount()) }}</span
+                >
+              </div>
+            }
+
             <!-- Promotions & Coupons (hidden in quotation mode) -->
             @if (!isQuotationMode() && !isLayawayMode()) {
               <!-- Promotions Applied -->
@@ -190,9 +208,11 @@ import {
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
             >
-              <span class="font-bold text-text-primary text-base">Total</span>
+              <span class="font-bold text-text-primary text-base">{{
+                withholdingAmount() > 0 ? 'Total a cobrar' : 'Total'
+              }}</span>
               <span class="font-extrabold text-2xl text-primary tracking-tight">
-                {{ formatCurrency(summary()?.total || 0) }}
+                {{ formatCurrency(netTotal()) }}
               </span>
             </div>
 
@@ -753,6 +773,19 @@ private cartService = inject(PosCartService);
   readonly productOverrides = signal<Record<number, ProductPriceTierOverride[]>>({});
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
   readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
+  /**
+   * Net withholding the customer practices on this sale (role='suffered'),
+   * resolved server-side via the preview endpoint. Reduces the amount to
+   * collect. 0 when there is no customer or no applicable withholding.
+   */
+  readonly withholdingAmount = computed(
+    () => Number(this.summary()?.withholdingAmount ?? 0) || 0,
+  );
+  /** Total a cobrar neto = total bruto - retención sufrida (preview). */
+  readonly netTotal = computed(() => {
+    const total = Number(this.summary()?.total ?? 0) || 0;
+    return Math.max(0, total - this.withholdingAmount());
+  });
   readonly taxCategories = signal<TaxCategory[]>([]);
   readonly customItemModalOpen = signal(false);
   readonly customItemDraft = signal({

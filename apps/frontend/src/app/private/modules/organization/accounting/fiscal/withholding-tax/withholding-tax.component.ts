@@ -1,25 +1,31 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { switchMap } from 'rxjs/operators';
 import { map } from 'rxjs';
 
 import {
   AlertBannerComponent,
+  ButtonComponent,
   CardComponent,
+  DialogService,
+  IconComponent,
   InputsearchComponent,
   ItemListCardConfig,
   ResponsiveDataViewComponent,
   StatsComponent,
+  TableAction,
   TableColumn,
+  ToastService,
 } from '../../../../../../shared/components/index';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
-  WithholdingConcept,
+  OrgCreateConceptDto,
+  OrgWithholdingConcept,
   WithholdingStats,
-} from '../../../../store/withholding-tax/interfaces/withholding.interface';
+} from './interfaces/org-withholding.interface';
 import { OrgWithholdingTaxService } from './services/org-withholding-tax.service';
+import { OrgWithholdingConceptFormModalComponent } from './components/org-withholding-concept-form-modal.component';
 
 /**
  * Organization-scoped withholding-tax view.
@@ -27,16 +33,24 @@ import { OrgWithholdingTaxService } from './services/org-withholding-tax.service
  * Mirrors the store withholding-tax UX (stats + concepts table) but reads the
  * shell-synced `?store_id` from the URL and fetches through the org service so
  * the org accounting module reaches consolidated or per-store data.
+ *
+ * Adds full concept CRUD: a "Nuevo Concepto" header button plus per-row edit
+ * and delete table actions, both wired through the shared modal and refreshing
+ * the list after each mutation. Each create/update sends the fiscal-typing
+ * fields (`withholding_type`, `supplier_type_filter`, `account_code`).
  */
 @Component({
   selector: 'vendix-org-withholding-tax',
   standalone: true,
   imports: [
     AlertBannerComponent,
+    ButtonComponent,
     CardComponent,
+    IconComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
+    OrgWithholdingConceptFormModalComponent,
   ],
   template: `
     <div class="w-full overflow-x-hidden">
@@ -85,7 +99,7 @@ import { OrgWithholdingTaxService } from './services/org-withholding-tax.service
         </app-alert-banner>
       }
 
-      <app-card [responsive]="true" [padding]="false">
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
@@ -107,6 +121,10 @@ import { OrgWithholdingTaxService } from './services/org-withholding-tax.service
                 [debounceTime]="300"
                 (search)="onSearch($event)"
               />
+              <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                Nuevo Concepto
+              </app-button>
             </div>
           </div>
         </div>
@@ -116,6 +134,7 @@ import { OrgWithholdingTaxService } from './services/org-withholding-tax.service
             [data]="filteredConcepts()"
             [columns]="tableColumns"
             [cardConfig]="cardConfig"
+            [actions]="tableActions"
             [loading]="loading()"
             [sortable]="true"
             emptyTitle="Sin conceptos"
@@ -126,6 +145,14 @@ import { OrgWithholdingTaxService } from './services/org-withholding-tax.service
           />
         </div>
       </app-card>
+
+      <app-org-withholding-concept-form-modal
+        [isOpen]="isModalOpen()"
+        [concept]="selectedConcept()"
+        [isSubmitting]="isSubmitting()"
+        (cancel)="closeModal()"
+        (save)="onSaveConcept($event)"
+      ></app-org-withholding-concept-form-modal>
     </div>
   `,
 })
@@ -135,6 +162,8 @@ export class OrgWithholdingTaxComponent {
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly toast = inject(ToastService);
+  private readonly dialog = inject(DialogService);
 
   private readonly storeId = toSignal(
     this.route.queryParamMap.pipe(map((params) => params.get('store_id'))),
@@ -142,10 +171,14 @@ export class OrgWithholdingTaxComponent {
   );
 
   readonly loading = signal(true);
-  readonly concepts = signal<WithholdingConcept[]>([]);
+  readonly concepts = signal<OrgWithholdingConcept[]>([]);
   readonly stats = signal<WithholdingStats | null>(null);
   readonly errorMessage = signal<string | null>(null);
   readonly searchTerm = signal('');
+
+  readonly isModalOpen = signal(false);
+  readonly selectedConcept = signal<OrgWithholdingConcept | null>(null);
+  readonly isSubmitting = signal(false);
 
   readonly activeConceptsCount = computed(
     () => this.concepts().filter((concept) => concept.is_active).length,
@@ -173,6 +206,12 @@ export class OrgWithholdingTaxComponent {
       transform: (value) => `${(Number(value) * 100).toFixed(1)}%`,
     },
     {
+      key: 'withholding_type',
+      label: 'Tipo',
+      priority: 2,
+      transform: (value) => this.withholdingTypeLabel(value),
+    },
+    {
       key: 'min_uvt_threshold',
       label: 'Umbral UVT',
       align: 'right',
@@ -182,7 +221,7 @@ export class OrgWithholdingTaxComponent {
     {
       key: 'applies_to',
       label: 'Aplica a',
-      priority: 2,
+      priority: 3,
       cellClass: () => 'capitalize',
       defaultValue: '—',
     },
@@ -199,6 +238,21 @@ export class OrgWithholdingTaxComponent {
     },
   ];
 
+  readonly tableActions: TableAction[] = [
+    {
+      label: 'Editar',
+      icon: 'edit',
+      variant: 'info',
+      action: (item: OrgWithholdingConcept) => this.openEditModal(item),
+    },
+    {
+      label: 'Eliminar',
+      icon: 'trash-2',
+      variant: 'danger',
+      action: (item: OrgWithholdingConcept) => this.confirmDelete(item),
+    },
+  ];
+
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'code',
@@ -212,24 +266,36 @@ export class OrgWithholdingTaxComponent {
     badgeTransform: (value) => (value ? 'Activo' : 'Inactivo'),
     detailKeys: [
       { key: 'rate', label: 'Tasa', icon: 'percent', transform: (value) => `${(Number(value) * 100).toFixed(1)}%` },
+      { key: 'withholding_type', label: 'Tipo', icon: 'tag', transform: (value) => this.withholdingTypeLabel(value) },
       { key: 'min_uvt_threshold', label: 'Umbral UVT', icon: 'calculator', transform: (value) => String(value ?? 0) },
       { key: 'applies_to', label: 'Aplica a', icon: 'tag', transform: (value) => String(value || '—') },
     ],
   };
 
   constructor() {
+    // React to store_id changes from the shell-synced query param.
     this.route.queryParamMap
-      .pipe(
-        switchMap((params) => {
-          this.loading.set(true);
-          this.errorMessage.set(null);
-          const storeId = params.get('store_id');
-          const query = storeId ? { store_id: storeId } : undefined;
-          this.loadStats(query);
-          return this.service.getConcepts(query);
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.reload());
+  }
+
+  // ─── Data loading ──────────────────────────────────────────────────────────
+  private reload(): void {
+    this.loadConcepts();
+    this.loadStats();
+  }
+
+  private currentQuery(): Record<string, any> | undefined {
+    const storeId = this.storeId();
+    return storeId ? { store_id: storeId } : undefined;
+  }
+
+  private loadConcepts(): void {
+    this.loading.set(true);
+    this.errorMessage.set(null);
+    this.service
+      .getConcepts(this.currentQuery())
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.concepts.set(res?.data ?? []);
@@ -245,9 +311,9 @@ export class OrgWithholdingTaxComponent {
       });
   }
 
-  private loadStats(query?: Record<string, any>): void {
+  private loadStats(): void {
     this.service
-      .getStats(query)
+      .getStats(this.currentQuery())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => this.stats.set(res?.data ?? null),
@@ -261,5 +327,93 @@ export class OrgWithholdingTaxComponent {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(Number(value) || 0, 0);
+  }
+
+  withholdingTypeLabel(value: unknown): string {
+    switch (value) {
+      case 'retefuente':
+        return 'Retefuente';
+      case 'reteiva':
+        return 'ReteIVA';
+      case 'reteica':
+        return 'ReteICA';
+      default:
+        return '—';
+    }
+  }
+
+  // ─── Modal CRUD ──────────────────────────────────────────────────────────────
+  openCreateModal(): void {
+    this.selectedConcept.set(null);
+    this.isModalOpen.set(true);
+  }
+
+  openEditModal(concept: OrgWithholdingConcept): void {
+    this.selectedConcept.set(concept);
+    this.isModalOpen.set(true);
+  }
+
+  closeModal(): void {
+    this.isModalOpen.set(false);
+    this.selectedConcept.set(null);
+  }
+
+  onSaveConcept(payload: OrgCreateConceptDto): void {
+    this.isSubmitting.set(true);
+    const selected = this.selectedConcept();
+    const query = this.currentQuery();
+    const obs = selected
+      ? this.service.updateConcept(selected.id, payload, query)
+      : this.service.createConcept(payload, query);
+
+    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.toast.success(
+          selected
+            ? 'Concepto actualizado correctamente'
+            : 'Concepto creado correctamente',
+        );
+        this.isSubmitting.set(false);
+        this.closeModal();
+        this.reload();
+      },
+      error: (err) => {
+        this.toast.error(
+          this.errors.humanize(err, 'No se pudo guardar el concepto de retención.'),
+        );
+        this.isSubmitting.set(false);
+      },
+    });
+  }
+
+  confirmDelete(concept: OrgWithholdingConcept): void {
+    this.dialog
+      .confirm({
+        title: 'Eliminar concepto',
+        message: `¿Está seguro de que desea eliminar "${concept.name}"?`,
+        confirmText: 'Eliminar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'danger',
+      })
+      .then((confirmed) => {
+        if (confirmed) this.deleteConcept(concept);
+      });
+  }
+
+  private deleteConcept(concept: OrgWithholdingConcept): void {
+    this.service
+      .deleteConcept(concept.id, this.currentQuery())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success('Concepto eliminado correctamente');
+          this.reload();
+        },
+        error: (err) => {
+          this.toast.error(
+            this.errors.humanize(err, 'No se pudo eliminar el concepto.'),
+          );
+        },
+      });
   }
 }

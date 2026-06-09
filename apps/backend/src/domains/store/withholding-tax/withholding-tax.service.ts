@@ -6,11 +6,14 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
+import { WithholdingFlowService } from './withholding-flow.service';
 import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
+  PreviewWithholdingDto,
 } from './dto';
 import { WithholdingCertificateData } from './interfaces/withholding.interface';
+import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
 
 @Injectable()
 export class WithholdingTaxService {
@@ -19,6 +22,7 @@ export class WithholdingTaxService {
     private readonly calculator: WithholdingCalculatorService,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly withholdingFlow: WithholdingFlowService,
   ) {}
 
   // ===== Withholding Concepts CRUD =====
@@ -71,6 +75,8 @@ export class WithholdingTaxService {
         min_uvt_threshold: new Prisma.Decimal(dto.min_uvt_threshold || 0),
         applies_to: dto.applies_to as any,
         supplier_type_filter: (dto.supplier_type_filter || 'any') as any,
+        withholding_type: (dto.withholding_type || 'retefuente') as any,
+        account_code: dto.account_code ?? null,
         is_active: true,
       },
     });
@@ -88,6 +94,10 @@ export class WithholdingTaxService {
     if (dto.applies_to !== undefined) data.applies_to = dto.applies_to;
     if (dto.supplier_type_filter !== undefined)
       data.supplier_type_filter = dto.supplier_type_filter;
+    if (dto.withholding_type !== undefined)
+      data.withholding_type = dto.withholding_type;
+    if (dto.account_code !== undefined)
+      data.account_code = dto.account_code ?? null;
 
     return this.prisma.withholding_concepts.update({
       where: { id },
@@ -164,6 +174,51 @@ export class WithholdingTaxService {
       supplier_type,
       organization_id: context.organization_id!,
     });
+  }
+
+  // ===== Withholding Preview (no persistence) =====
+
+  /**
+   * Read-only preview of the withholdings applicable to an operation, delegating
+   * to the deterministic FLOW/resolver core (single source of truth). The cart
+   * (POS sale / POP purchase) consumes this to show the user the withholding
+   * that will be applied WITHOUT duplicating any legal logic.
+   *
+   * Tenant context (organization_id / store_id) is resolved from the request
+   * context exactly like the other endpoints in this service — never trusted
+   * from the client. Nothing is persisted here.
+   */
+  async previewWithholding(dto: PreviewWithholdingDto): Promise<{
+    lines: WithholdingLine[];
+    total_withholding: number;
+  }> {
+    const context = RequestContextService.getContext()!;
+
+    const resolution =
+      dto.role === 'practiced'
+        ? await this.withholdingFlow.resolvePracticed({
+            organization_id: context.organization_id!,
+            store_id: context.store_id ?? null,
+            supplier_id: dto.supplier_id ?? null,
+            base: dto.base,
+            ivaAmount: dto.ivaAmount,
+            year: dto.year,
+          })
+        : await this.withholdingFlow.resolveSuffered({
+            organization_id: context.organization_id!,
+            store_id: context.store_id ?? null,
+            customer_id: dto.customer_id ?? null,
+            base: dto.base,
+            ivaAmount: dto.ivaAmount,
+            year: dto.year,
+          });
+
+    const total_withholding = resolution.lines.reduce(
+      (sum, line) => sum + line.amount,
+      0,
+    );
+
+    return { lines: resolution.lines, total_withholding };
   }
 
   // ===== Apply Withholding to Invoice =====

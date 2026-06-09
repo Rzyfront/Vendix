@@ -8,6 +8,10 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
+  buildTaxBreakdown,
+  scaleBreakdownToTotal,
+} from 'src/common/interfaces/tax-breakdown.interface';
+import {
   RefundCalculationService,
   RefundCalculationResult,
 } from './refund-calculation.service';
@@ -224,6 +228,21 @@ export class RefundFlowService {
       .then(async (completedRefund) => {
         // 7. Emit events after transaction completes
         try {
+          // Preserve the original fiscal-type mix so the tax reversal posts
+          // proportionally against each tax's PUC account (IVA→2408, INC→2436).
+          const items = await this.prisma.order_items.findMany({
+            where: { order_id: orderId },
+            select: {
+              order_item_taxes: {
+                select: { tax_type: true, tax_amount: true },
+              },
+            },
+          });
+          const tax_breakdown = scaleBreakdownToTotal(
+            buildTaxBreakdown(items.flatMap((i) => i.order_item_taxes || [])),
+            Number(calculation.tax_refund || 0),
+          );
+
           this.eventEmitter.emit('refund.completed', {
             refund_id: completedRefund.id,
             order_id: orderId,
@@ -232,6 +251,8 @@ export class RefundFlowService {
             amount: calculation.total_refund,
             subtotal: calculation.subtotal_refund,
             tax: calculation.tax_refund,
+            tax_amount: calculation.tax_refund,
+            tax_breakdown,
             shipping: calculation.shipping_refund,
             is_full_refund: calculation.is_full_refund,
             user_id: userId,

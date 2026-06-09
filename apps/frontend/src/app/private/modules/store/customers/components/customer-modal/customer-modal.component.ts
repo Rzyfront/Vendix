@@ -6,6 +6,7 @@ import {
   ButtonComponent,
   InputComponent,
   SelectorComponent,
+  ToggleComponent,
 } from '../../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
@@ -27,6 +28,7 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
     ButtonComponent,
     InputComponent,
     SelectorComponent,
+    ToggleComponent,
   ],
   template: `
     <app-modal
@@ -103,6 +105,36 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
             customWrapperClass="mt-0"
           ></app-input>
         </div>
+
+        <!-- Información fiscal -->
+        <div class="pt-2 border-t border-[var(--color-border)]">
+          <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
+            Información fiscal
+          </h3>
+
+          <div class="grid grid-cols-2 gap-4">
+            <app-selector
+              formControlName="tax_regime"
+              label="Régimen tributario"
+              placeholder="Selecciona un régimen"
+              [options]="taxRegimeOptions"
+            ></app-selector>
+
+            <app-selector
+              formControlName="person_type"
+              label="Tipo de persona"
+              placeholder="Selecciona un tipo"
+              [options]="personTypeOptions"
+            ></app-selector>
+          </div>
+
+          <div class="flex items-center gap-3 mt-4">
+            <app-toggle
+              formControlName="is_withholding_agent"
+              label="¿Es agente retenedor?"
+            ></app-toggle>
+          </div>
+        </div>
       </form>
 
       <!-- Footer with slot -->
@@ -143,6 +175,19 @@ export class CustomerModalComponent {
   /** Acceso al catálogo completo si se necesita (placeholder, regex, etc). */
   readonly documentTypes: ReadonlyArray<DocumentTypeOption> = DOCUMENT_TYPES;
 
+  /** Opciones de régimen tributario (clasificación fiscal del cliente). */
+  readonly taxRegimeOptions = [
+    { value: 'COMUN', label: 'Régimen común' },
+    { value: 'SIMPLIFICADO', label: 'Régimen simplificado' },
+    { value: 'GRAN_CONTRIBUYENTE', label: 'Gran contribuyente' },
+  ];
+
+  /** Opciones de tipo de persona. */
+  readonly personTypeOptions = [
+    { value: 'NATURAL', label: 'Persona natural' },
+    { value: 'JURIDICA', label: 'Persona jurídica' },
+  ];
+
   /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
   readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
 
@@ -169,6 +214,9 @@ export class CustomerModalComponent {
       phone: ['', [Validators.required, Validators.minLength(7)]],
       document_type: [''],
       document_number: [''],
+      tax_regime: [''],
+      person_type: [''],
+      is_withholding_agent: [false],
     });
 
     // Bridge document_type valueChanges -> signal (Zoneless-safe reactive read).
@@ -215,6 +263,9 @@ export class CustomerModalComponent {
           phone: customer.phone,
           document_type: customer.document_type,
           document_number: customer.document_number,
+          tax_regime: customer.tax_regime ?? '',
+          person_type: customer.person_type ?? '',
+          is_withholding_agent: customer.is_withholding_agent ?? false,
         });
       }
     });

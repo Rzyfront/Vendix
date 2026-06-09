@@ -47,10 +47,19 @@ import { TaxCategory } from '../interfaces';
         </app-input>
 
         <app-selector
-          label="Tipo"
+          label="Tipo de cálculo"
           [options]="typeOptions"
           formControlName="type"
           placeholder="Seleccionar tipo"
+          [required]="true"
+        >
+        </app-selector>
+
+        <app-selector
+          label="Clasificación fiscal"
+          [options]="fiscalTypeOptions"
+          formControlName="tax_type"
+          placeholder="Seleccionar clasificación"
           [required]="true"
         >
         </app-selector>
@@ -115,6 +124,17 @@ export class TaxQuickCreateComponent {
     { value: 'fixed', label: 'Fijo' },
   ];
 
+  // Fiscal classification (tax_type): routes the tax to its PUC account,
+  // declaration and DIAN scheme. Distinct from the calculation method above.
+  fiscalTypeOptions: SelectorOption[] = [
+    { value: 'iva', label: 'IVA' },
+    { value: 'inc', label: 'Impoconsumo (INC)' },
+    { value: 'ica', label: 'ICA' },
+    { value: 'withholding', label: 'Retención' },
+    { value: 'reteiva', label: 'ReteIVA' },
+    { value: 'reteica', label: 'ReteICA' },
+  ];
+
   taxCategoryForm: FormGroup;
 
   constructor() {
@@ -128,6 +148,7 @@ export class TaxQuickCreateComponent {
         ],
       ],
       type: ['percentage', [Validators.required]],
+      tax_type: ['iva', [Validators.required]],
       rate: [0, [Validators.required, Validators.min(0), Validators.max(100)]],
       store_id: [1],
       description: ['', [Validators.maxLength(500)]],
@@ -139,6 +160,7 @@ export class TaxQuickCreateComponent {
         this.taxCategoryForm.reset({
           name: '',
           type: 'percentage',
+          tax_type: 'iva',
           rate: 0,
           store_id: 1,
           description: '',

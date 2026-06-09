@@ -88,6 +88,21 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ECOM_CHECKOUT_001: 'Error en el proceso de compra.',
   ECOM_CHECKOUT_002: 'Metodo de pago invalido.',
   ECOM_CHECKOUT_003: 'Metodo de envio invalido.',
+  // Ecommerce checkout — validación cliente de dirección de envío
+  ECOM_CHECKOUT_ADDR_REQUIRED_001:
+    'Completa la dirección de envío para continuar.',
+  ECOM_CHECKOUT_ADDR_LINE1_001:
+    'Ingresa una dirección válida (entre 5 y 150 caracteres).',
+  ECOM_CHECKOUT_ADDR_LINE2_001:
+    'El complemento de la dirección no puede superar 100 caracteres.',
+  ECOM_CHECKOUT_ADDR_STATE_001: 'Selecciona o ingresa el departamento/estado.',
+  ECOM_CHECKOUT_ADDR_CITY_001: 'Selecciona o ingresa la ciudad de envío.',
+  ECOM_CHECKOUT_ADDR_COUNTRY_001: 'Selecciona el país de envío.',
+  ECOM_CHECKOUT_ADDR_POSTAL_001: 'El código postal no es válido.',
+  ECOM_CHECKOUT_ADDR_PHONE_001:
+    'Ingresa un teléfono de contacto válido (7 a 15 dígitos).',
+  ECOM_CHECKOUT_ADDR_SAVED_001:
+    'Selecciona una dirección guardada para continuar.',
   ECOM_ACCOUNT_001: 'Cuenta no encontrada.',
   ECOM_ACCOUNT_002: 'Contrasena actual incorrecta.',
   ECOM_WISHLIST_001: 'Lista de deseos no encontrada.',

@@ -4,6 +4,7 @@ import {
   CreateTaxCategoryDto,
   UpdateTaxCategoryDto,
   TaxCategoryQueryDto,
+  TaxFiscalType,
 } from '../../store/taxes/dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -87,6 +88,7 @@ export class OrgTaxesService {
       data: {
         name: dto.name,
         description: dto.description,
+        tax_type: dto.tax_type ?? TaxFiscalType.IVA,
         organization_id: target.store_id ? null : target.organization_id,
         store_id: target.store_id,
         tax_rates: {
