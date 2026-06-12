@@ -625,6 +625,7 @@ model stores {
   organization_id             Int
   store_code                  String?                       @unique @db.VarChar(20)
   store_type                  store_type_enum               @default(physical)
+  industries                  industry_enum[]               @default([retail])
   timezone                    String?                       @db.VarChar(50)
   operating_hours             Json?
   onboarding                  Boolean                       @default(false)
@@ -3001,6 +3002,13 @@ enum store_type_enum {
   hybrid
   popup
   kiosko
+}
+
+enum industry_enum {
+  retail
+  restaurant
+  manufacturing
+  service
 }
 
 enum api_key_status_enum {
