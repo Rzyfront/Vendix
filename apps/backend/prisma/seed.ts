@@ -2,6 +2,7 @@ import { getPrismaClient, disconnectPrisma } from './seeds/shared/client';
 import { seedDefaultTemplates } from './seeds/default-templates.seed';
 import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
+import { seedVendixPlatformOrg } from './seeds/vendix-platform-org.seed';
 import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
 import { seedLegalDocuments } from './seeds/legal-documents.seed';
 import { seedUsers } from './seeds/users.seed';
@@ -64,6 +65,12 @@ const seedModules = [
     name: 'Organizations & Stores',
     fn: seedOrganizationsAndStores,
     description: 'Organizations and store instances',
+  },
+  {
+    name: 'Vendix Platform Org Bootstrap',
+    fn: seedVendixPlatformOrg,
+    description:
+      'Claim Vendix Corp as is_platform=true org with consolidated accounting entity, PUC, fiscal period, and DIAN placeholder',
   },
   {
     name: 'Legal Documents',
@@ -249,6 +256,7 @@ export * from './seeds/default-templates.seed';
 export * from './seeds/permissions-roles.seed';
 export * from './seeds/system-payment-methods.seed';
 export * from './seeds/organizations-stores.seed';
+export * from './seeds/vendix-platform-org.seed';
 export * from './seeds/legal-documents.seed';
 export * from './seeds/users.seed';
 export * from './seeds/products-categories.seed';

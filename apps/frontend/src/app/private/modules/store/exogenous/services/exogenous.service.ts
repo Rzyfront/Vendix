@@ -26,6 +26,10 @@ export class ExogenousService {
     return this.http.post(`/store/exogenous/reports/${id}/submit`, {});
   }
 
+  downloadReport(id: number, format = 'txt'): Observable<any> {
+    return this.http.get(`/store/exogenous/reports/${id}/download`, { params: { format } });
+  }
+
   validateYear(year: number): Observable<any> {
     return this.http.get(`/store/exogenous/validate/${year}`);
   }

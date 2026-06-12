@@ -39,6 +39,14 @@ export interface UpdateStockParams {
   to_location_id?: number;
   source_module?: string;
   unit_cost?: number;
+  /**
+   * Costo real del movimiento individual (e.g. costo unitario de la recepción
+   * de compra). A diferencia de `unit_cost` — que es el CPP/cost_per_unit
+   * a persistir en `stock_levels` — `movement_unit_cost` se usa solo para
+   * valorar este movimiento puntual (asiento, snapshot, cost layer) sin
+   * sobrescribir el CPP del stock.
+   */
+  movement_unit_cost?: number;
 }
 
 export interface StockUpdateResult {
@@ -308,12 +316,18 @@ export class StockLevelManager {
       organizationId,
       prisma,
     );
+    // unit_cost del snapshot = costo del movimiento individual
+    // (no el CPP del stock; ese se usa para valorar el inventario abajo).
     const unitCost =
       Number(movementCostSnapshot?.unit_cost || 0) ||
       Number(stockLevel.cost_per_unit || 0) ||
       Number(variant?.cost_price || 0) ||
       Number(product?.cost_price || 0);
-    const stockValue = Number(stockLevel.quantity_on_hand || 0) * unitCost;
+    // total_value (valor del stock post-update) usa el CPP vigente del
+    // stock_level — que ya refleja el unit_cost recién persistido si llegó.
+    // Fallback al unit_cost del movimiento solo si el CPP es 0.
+    const valuationCost = Number(stockLevel.cost_per_unit || 0) || unitCost;
+    const stockValue = Number(stockLevel.quantity_on_hand || 0) * valuationCost;
     const totalCost =
       Number(movementCostSnapshot?.total_cost || 0) ||
       Math.abs(params.quantity_change) * unitCost;
@@ -359,8 +373,10 @@ export class StockLevelManager {
     if (quantity === 0) return { unit_cost: 0, total_cost: 0 };
 
     if (params.quantity_change >= 0) {
+      // Precedencia: movement_unit_cost (costo real de la recepción) →
+      // unit_cost (CPP a persistir) → cost_per_unit existente → 0.
       const unitCost = Number(
-        params.unit_cost ?? stockLevel.cost_per_unit ?? 0,
+        params.movement_unit_cost ?? params.unit_cost ?? stockLevel.cost_per_unit ?? 0,
       );
       return { unit_cost: unitCost, total_cost: unitCost * quantity };
     }

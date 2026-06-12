@@ -126,9 +126,10 @@ model users {
   consolidation_adjustments_created consolidation_adjustments[]   @relation("consolidation_adj_created_by")
 
   // Payroll Settlements & Advances
-  settlements_approved payroll_settlements[] @relation("settlements_approved_by")
-  settlements_created  payroll_settlements[] @relation("settlements_created_by")
-  advances_approved    employee_advances[]   @relation("advance_approved_by")
+  settlements_approved      payroll_settlements[] @relation("settlements_approved_by")
+  settlements_created       payroll_settlements[] @relation("settlements_created_by")
+  advances_approved         employee_advances[]   @relation("advance_approved_by")
+  payroll_novelties_created payroll_novelties[]   @relation("payroll_novelties_created_by")
 
   // Campos de tracking de términos
   terms_accepted_version String?   @db.VarChar(20)
@@ -165,6 +166,7 @@ model users {
   fiscal_obligations_assigned    fiscal_obligations[]        @relation("fiscal_obligations_assigned_to")
   fiscal_obligations_approved    fiscal_obligations[]        @relation("fiscal_obligations_approved_by")
   fiscal_obligations_created     fiscal_obligations[]        @relation("fiscal_obligations_created_by")
+  vendor_support_documents_created vendor_support_documents[] @relation("vendor_doc_created_by")
   tax_declarations_approved      tax_declaration_drafts[]    @relation("tax_declarations_approved_by")
   tax_declarations_created       tax_declaration_drafts[]    @relation("tax_declarations_created_by")
   fiscal_close_sessions_started  fiscal_close_sessions[]     @relation("fiscal_close_sessions_started_by")
@@ -377,6 +379,7 @@ model organizations {
   fraud_blocked_at              DateTime?                         @db.Timestamp(6)
   fraud_blocked_reason          String?                           @db.Text
   chargeback_count              Int                               @default(0)
+  is_platform                   Boolean                           @default(false)
   acm_certificate_arn           String?                           @db.VarChar(2048)
   acm_cert_revision             Int                               @default(0)
   addresses                     addresses[]
@@ -409,6 +412,7 @@ model organizations {
   accounting_entities           accounting_entities[]
   employees                     employees[]
   payroll_runs                  payroll_runs[]
+  payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
   fiscal_transmissions          fiscal_transmissions[]
   fiscal_evidences              fiscal_evidences[]
@@ -465,6 +469,9 @@ model organizations {
   operating_scope_audit_log operating_scope_audit_log[]
   fiscal_scope_audit_log    fiscal_scope_audit_log[]
   fiscal_status_audit_log   fiscal_status_audit_log[]
+
+  // Inbound vendor support documents (platform-org side, step 5 of Módulo Fiscal Unificado)
+  vendor_support_documents vendor_support_documents[]
 
   // Org-scoped tax catalogue
   tax_categories tax_categories[]
@@ -656,6 +663,7 @@ model stores {
   accounting_entities         accounting_entities[]
   employee_stores             employee_stores[]
   payroll_runs                payroll_runs[]
+  payroll_novelties           payroll_novelties[]
   dian_configurations         dian_configurations[]
   fiscal_transmissions        fiscal_transmissions[]
   fiscal_evidences            fiscal_evidences[]
@@ -3449,6 +3457,29 @@ enum advance_installment_status_enum {
   cancelled
 }
 
+enum payroll_novelty_type_enum {
+  overtime_diurna
+  overtime_nocturna
+  overtime_dominical_diurna
+  overtime_dominical_nocturna
+  surcharge_nocturno
+  surcharge_dominical
+  incapacity_general
+  incapacity_laboral
+  vacation
+  leave_paid
+  leave_unpaid
+  bonus
+  commission
+  other_deduction
+}
+
+enum payroll_novelty_status_enum {
+  pending
+  applied
+  cancelled
+}
+
 // ===== BANK RECONCILIATION & ADVANCED ACCOUNTING ENUMS =====
 
 enum bank_transaction_type_enum {
@@ -4274,6 +4305,8 @@ model accounting_entries {
   intercompany_entries        intercompany_transactions[]   @relation("ic_entry")
   intercompany_counterparts   intercompany_transactions[]   @relation("ic_counterpart")
   payroll_settlements         payroll_settlements[]
+  vendor_documents_approved   vendor_support_documents[]    @relation("vendor_doc_approved_entry")
+  vendor_documents_paid       vendor_support_documents[]    @relation("vendor_doc_paid_entry")
 
   @@index([organization_id, entry_date])
   @@index([organization_id, fiscal_period_id])
@@ -4329,6 +4362,10 @@ model employees {
   arl_risk_level      Int?                     @default(1)
   severance_fund      String?                  @db.VarChar(100)
   compensation_fund   String?                  @db.VarChar(100)
+  address             String?                  @db.VarChar(255)
+  department_code     String?                  @db.VarChar(5)
+  city_code           String?                  @db.VarChar(10)
+  country_code        String?                  @default("169") @db.VarChar(4)
   created_at          DateTime?                @default(now()) @db.Timestamp(6)
   updated_at          DateTime?                @default(now()) @db.Timestamp(6)
 
@@ -4338,6 +4375,7 @@ model employees {
   payroll_items       payroll_items[]
   payroll_settlements payroll_settlements[]
   employee_advances   employee_advances[]
+  payroll_novelties   payroll_novelties[]
   service_providers   service_providers[]
 
   @@unique([organization_id, employee_code])
@@ -4399,6 +4437,7 @@ model payroll_runs {
   approved_by_user  users?              @relation("payroll_runs_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user   users?              @relation("payroll_runs_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   payroll_items     payroll_items[]
+  payroll_novelties payroll_novelties[]
 
   @@unique([organization_id, payroll_number])
   @@index([organization_id, status])
@@ -4444,6 +4483,37 @@ model payroll_items {
   @@index([employee_id])
   @@index([accounting_entity_id])
   @@index([accounting_entity_id, dian_status])
+}
+
+model payroll_novelties {
+  id                 Int                         @id @default(autoincrement())
+  organization_id    Int
+  store_id           Int?
+  employee_id        Int
+  payroll_run_id     Int?
+  novelty_type       payroll_novelty_type_enum
+  status             payroll_novelty_status_enum @default(pending)
+  date_start         DateTime                    @db.Timestamp(6)
+  date_end           DateTime?                   @db.Timestamp(6)
+  hours              Decimal?                    @db.Decimal(6, 2)
+  days               Decimal?                    @db.Decimal(5, 2)
+  percentage         Decimal?                    @db.Decimal(7, 4)
+  amount             Decimal?                    @db.Decimal(12, 2)
+  notes              String?                     @db.VarChar(255)
+  created_by_user_id Int?
+  created_at         DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?                   @default(now()) @db.Timestamp(6)
+
+  organization    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  store           stores?       @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  employee        employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  payroll_run     payroll_runs? @relation(fields: [payroll_run_id], references: [id], onDelete: SetNull)
+  created_by_user users?        @relation("payroll_novelties_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id, employee_id, status])
+  @@index([payroll_run_id])
+  @@index([organization_id, date_start])
+  @@index([store_id])
 }
 
 // ===== DIAN ELECTRONIC INVOICING =====
@@ -7443,4 +7513,47 @@ model saas_metrics_snapshot {
   metadata              Json?
 
   @@index([year_month])
+}
+
+/// Inbound vendor support documents (bills/invoices received from third-party
+/// vendors) registered by the super-admin team on the Vendix platform
+/// organization. Approval emits `expense.approved` and mark-paid emits
+/// `expense.paid` so the existing AccountingEventsListener posts the matching
+/// journal entries via AutoEntryService (steps 5 of Módulo Fiscal Unificado).
+model vendor_support_documents {
+  id                        Int                                       @id @default(autoincrement())
+  organization_id           Int
+  vendor_nit                String                                    @db.VarChar(20)
+  vendor_name               String                                    @db.VarChar(255)
+  invoice_number            String                                    @db.VarChar(100)
+  issue_date                DateTime                                  @db.Date
+  subtotal                  Decimal?                                  @db.Decimal(18, 4)
+  tax_amount                Decimal?                                  @db.Decimal(18, 4)
+  total                     Decimal                                   @db.Decimal(18, 4)
+  currency                  String                                    @default("COP") @db.VarChar(3)
+  account_code              String                                    @db.VarChar(20)
+  description               String?                                   @db.Text
+  pdf_s3_key                String?                                   @db.Text
+  status                    vendor_support_document_status_enum       @default(pending)
+  approved_journal_entry_id Int?
+  paid_journal_entry_id     Int?
+  created_by_user_id        Int?
+  created_at                DateTime?                                 @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                                 @default(now()) @db.Timestamp(6)
+
+  organization         organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  approved_journal_entry accounting_entries? @relation("vendor_doc_approved_entry", fields: [approved_journal_entry_id], references: [id], onDelete: SetNull)
+  paid_journal_entry     accounting_entries? @relation("vendor_doc_paid_entry", fields: [paid_journal_entry_id], references: [id], onDelete: SetNull)
+  created_by_user       users?             @relation("vendor_doc_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@unique([organization_id, vendor_nit, invoice_number], map: "vendor_support_documents_org_nit_invoice_key")
+  @@index([organization_id, status])
+  @@index([organization_id, issue_date])
+}
+
+enum vendor_support_document_status_enum {
+  pending
+  approved
+  paid
+  void
 }

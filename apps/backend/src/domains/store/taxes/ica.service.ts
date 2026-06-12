@@ -294,7 +294,7 @@ export class IcaService {
 
   /**
    * Parses a period string into a date range.
-   * Supports: 'YYYY-QN' (quarterly) or 'YYYY-MM' (monthly)
+   * Supports: 'YYYY-QN' (quarterly), 'YYYY-MM' (monthly) or 'YYYY' (full year)
    */
   private parsePeriod(period: string): { start: Date; end: Date } {
     // Quarterly format: '2026-Q1', '2026-Q2', etc.
@@ -318,6 +318,15 @@ export class IcaService {
       }
       const start = new Date(year, month - 1, 1);
       const end = new Date(year, month, 1);
+      return { start, end };
+    }
+
+    // Yearly format: '2026' (full year, Jan-Dec)
+    const yearly_match = period.match(/^(\d{4})$/);
+    if (yearly_match) {
+      const year = parseInt(yearly_match[1], 10);
+      const start = new Date(year, 0, 1);
+      const end = new Date(year + 1, 0, 1);
       return { start, end };
     }
 

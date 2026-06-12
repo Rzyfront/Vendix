@@ -10,6 +10,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { Prisma } from '@prisma/client';
 import { SubmitInvoiceDataDto } from './dto/submit-invoice-data.dto';
 import { InvoiceDataRequestEvent } from './interfaces/invoice-data-request-events.interface';
+import { InvoicingService } from '../invoicing.service';
+import { CreditNotesService } from '../credit-notes/credit-notes.service';
+import { InvoiceFlowService } from '../invoice-flow/invoice-flow.service';
+import { CreateCreditNoteDto } from '../credit-notes/dto/create-credit-note.dto';
+import { CreateInvoiceTaxDto } from '../dto/create-invoice.dto';
 
 interface InvoiceDataRequestCustomerData {
   first_name?: string | null;
@@ -20,6 +25,18 @@ interface InvoiceDataRequestCustomerData {
   phone?: string | null;
 }
 
+type NominativeConversionStrategy =
+  | 'updated_in_place'
+  | 'credit_note_reissue'
+  | 'issued_new'
+  | 'deferred';
+
+interface NominativeConversionResult {
+  new_invoice_id: number | null;
+  credit_note_id: number | null;
+  strategy: NominativeConversionStrategy;
+}
+
 @Injectable()
 export class InvoiceDataRequestsService {
   private readonly logger = new Logger(InvoiceDataRequestsService.name);
@@ -27,6 +44,9 @@ export class InvoiceDataRequestsService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly invoicingService: InvoicingService,
+    private readonly creditNotesService: CreditNotesService,
+    private readonly invoiceFlowService: InvoiceFlowService,
   ) {}
 
   /**
@@ -337,11 +357,20 @@ export class InvoiceDataRequestsService {
       );
     }
 
-    // Mark as processing
-    await this.prisma.invoice_data_requests.update({
-      where: { id: requestId },
+    // Mark as processing with a compare-and-swap guard: only the worker that
+    // flips 'submitted' -> 'processing' may continue. Another worker (event
+    // listener vs. admin endpoint) racing on the same request aborts silently.
+    const claimed = await this.prisma.invoice_data_requests.updateMany({
+      where: { id: requestId, status: 'submitted' },
       data: { status: 'processing', updated_at: new Date() },
     });
+
+    if (claimed.count === 0) {
+      this.logger.log(
+        `Invoice data request #${requestId} already claimed by another worker; skipping.`,
+      );
+      return null;
+    }
 
     try {
       const order = request.order;
@@ -411,48 +440,27 @@ export class InvoiceDataRequestsService {
         },
       });
 
-      // 3. Create credit note for original CF invoice (if one exists)
+      // 3. Convert the linked fiscal document(s) to a nominative invoice.
+      const conversion = await this.convertToNominativeInvoice({
+        request,
+        order,
+        customerId: customer.id,
+      });
 
-      let originalInvoice: any = null;
-      if (request.invoice_id) {
-        originalInvoice = await this.prisma.invoices.findFirst({
-          where: { id: request.invoice_id },
-          include: { invoice_items: true },
+      // The original invoice was already transmitted and is awaiting the DIAN
+      // response: it can be neither mutated nor credited yet. Revert the
+      // request to 'submitted' so it can be reprocessed later (admin endpoint).
+      if (conversion.strategy === 'deferred') {
+        const deferred = await this.prisma.invoice_data_requests.update({
+          where: { id: requestId },
+          data: { status: 'submitted', updated_at: new Date() },
         });
-      } else {
-        // Try to find invoice linked to this order
-        originalInvoice = await this.prisma.invoices.findFirst({
-          where: { order_id: order.id, invoice_type: 'sales_invoice' },
-          include: { invoice_items: true },
-          orderBy: { created_at: 'desc' },
-        });
-      }
-
-      let newInvoiceId: number | null = null;
-
-      // Note: Full credit note + new invoice creation requires InvoicingService
-      // and CreditNotesService with RequestContext. For now, we update the
-      // original invoice's customer data if it exists, or log for manual processing.
-      if (originalInvoice) {
-        // Update the original invoice with the customer's data
-        await this.prisma.invoices.update({
-          where: { id: originalInvoice.id },
-          data: {
-            customer_id: customer.id,
-            customer_name: `${request.first_name} ${request.last_name}`,
-            customer_tax_id: request.document_number,
-            updated_at: new Date(),
-          },
-        });
-        newInvoiceId = originalInvoice.id;
 
         this.logger.log(
-          `Updated invoice #${originalInvoice.id} with customer data for request #${requestId}`,
+          `Invoice data request #${requestId} deferred: original invoice for order #${order.id} is awaiting DIAN response.`,
         );
-      } else {
-        this.logger.warn(
-          `No invoice found for order #${order.id} on request #${requestId}. Customer created but invoice update pending.`,
-        );
+
+        return deferred;
       }
 
       // 4. Mark as completed
@@ -461,10 +469,14 @@ export class InvoiceDataRequestsService {
         data: {
           status: 'completed',
           processed_at: new Date(),
-          new_invoice_id: newInvoiceId,
+          new_invoice_id: conversion.new_invoice_id,
           updated_at: new Date(),
         },
       });
+
+      this.logger.log(
+        `Invoice data request #${requestId} converted via '${conversion.strategy}' (new_invoice_id: ${conversion.new_invoice_id}, credit_note_id: ${conversion.credit_note_id})`,
+      );
 
       this.eventEmitter.emit('invoice_data_request.completed', {
         store_id: storeId,
@@ -494,6 +506,198 @@ export class InvoiceDataRequestsService {
       );
 
       throw error;
+    }
+  }
+
+  /**
+   * Convert the order's fiscal documents into a nominative invoice.
+   *
+   * Decision tree by status of the original invoice linked to the order:
+   * - none                       -> issue new nominative invoice ('issued_new')
+   * - draft/validated (no CUFE)  -> update customer data in place ('updated_in_place')
+   * - sent (awaiting DIAN)       -> defer, nothing can be mutated yet ('deferred')
+   * - accepted (CUFE, immutable) -> full mirror credit note + new invoice ('credit_note_reissue')
+   * - rejected/cancelled/voided  -> issue new invoice, no credit note ('issued_new')
+   */
+  private async convertToNominativeInvoice(params: {
+    request: {
+      id: number;
+      invoice_id: number | null;
+      first_name: string | null;
+      last_name: string | null;
+      document_number: string | null;
+    };
+    order: { id: number };
+    customerId: number;
+  }): Promise<NominativeConversionResult> {
+    const { request, order, customerId } = params;
+
+    const originalInvoice = request.invoice_id
+      ? await this.prisma.invoices.findFirst({
+          where: { id: request.invoice_id },
+          include: { invoice_items: true, invoice_taxes: true },
+        })
+      : await this.prisma.invoices.findFirst({
+          where: { order_id: order.id, invoice_type: 'sales_invoice' },
+          include: { invoice_items: true, invoice_taxes: true },
+          orderBy: { created_at: 'desc' },
+        });
+
+    if (!originalInvoice) {
+      const new_invoice_id = await this.issueNominativeInvoice(order.id);
+      return { new_invoice_id, credit_note_id: null, strategy: 'issued_new' };
+    }
+
+    switch (originalInvoice.status) {
+      case 'draft':
+      case 'validated': {
+        // Not yet transmitted (no CUFE): the customer data can be fixed in place.
+        await this.prisma.invoices.update({
+          where: { id: originalInvoice.id },
+          data: {
+            customer_id: customerId,
+            customer_name: `${request.first_name} ${request.last_name}`,
+            customer_tax_id: request.document_number,
+            updated_at: new Date(),
+          },
+        });
+
+        this.logger.log(
+          `Updated invoice #${originalInvoice.id} in place with customer data for request #${request.id}`,
+        );
+
+        return {
+          new_invoice_id: originalInvoice.id,
+          credit_note_id: null,
+          strategy: 'updated_in_place',
+        };
+      }
+
+      case 'sent':
+        // Awaiting DIAN response: cannot mutate nor void until resolved.
+        return {
+          new_invoice_id: null,
+          credit_note_id: null,
+          strategy: 'deferred',
+        };
+
+      case 'accepted': {
+        // Accepted by DIAN (has CUFE): immutable. Issue a full mirror credit
+        // note and a new nominative invoice.
+        const credit_note_id =
+          await this.issueMirrorCreditNote(originalInvoice);
+        const new_invoice_id = await this.issueNominativeInvoice(order.id);
+
+        return {
+          new_invoice_id,
+          credit_note_id,
+          strategy: 'credit_note_reissue',
+        };
+      }
+
+      // rejected / cancelled / voided: original has no fiscal effect, issue a
+      // new nominative invoice without a credit note.
+      default: {
+        const new_invoice_id = await this.issueNominativeInvoice(order.id);
+        return {
+          new_invoice_id,
+          credit_note_id: null,
+          strategy: 'issued_new',
+        };
+      }
+    }
+  }
+
+  /**
+   * Issue a new nominative sales invoice from the order. `createFromOrder`
+   * already reads the latest invoice_data_request of the order to nominate the
+   * customer. Transmission to DIAN is best-effort.
+   */
+  private async issueNominativeInvoice(orderId: number): Promise<number> {
+    const invoice = await this.invoicingService.createFromOrder(orderId);
+    await this.invoiceFlowService.validate(invoice.id);
+    await this.sendBestEffort(invoice.id, 'nominative invoice');
+    return invoice.id;
+  }
+
+  /**
+   * Issue a full reversal credit note mirroring the original accepted invoice
+   * (same items and taxes). Transmission to DIAN is best-effort.
+   */
+  private async issueMirrorCreditNote(originalInvoice: {
+    id: number;
+    currency: string | null;
+    invoice_items: Array<{
+      product_id: number | null;
+      product_variant_id: number | null;
+      description: string;
+      quantity: Prisma.Decimal;
+      unit_price: Prisma.Decimal;
+      discount_amount: Prisma.Decimal | null;
+      tax_amount: Prisma.Decimal | null;
+    }>;
+    invoice_taxes: Array<{
+      tax_rate_id: number | null;
+      tax_name: string;
+      tax_rate: Prisma.Decimal;
+      taxable_amount: Prisma.Decimal;
+      tax_amount: Prisma.Decimal;
+      tax_type: string | null;
+    }>;
+  }): Promise<number> {
+    const dto: CreateCreditNoteDto = {
+      related_invoice_id: originalInvoice.id,
+      reason: 'Conversión a factura nominativa por solicitud del cliente',
+      issue_date: new Date().toISOString().split('T')[0],
+      currency: originalInvoice.currency || undefined,
+      items: (originalInvoice.invoice_items || []).map((item) => ({
+        product_id: item.product_id ?? undefined,
+        product_variant_id: item.product_variant_id ?? undefined,
+        description: item.description,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        discount_amount: Number(item.discount_amount || 0),
+        tax_amount: Number(item.tax_amount || 0),
+      })),
+      taxes: (originalInvoice.invoice_taxes || []).map((tax) => ({
+        tax_rate_id: tax.tax_rate_id ?? undefined,
+        tax_name: tax.tax_name,
+        tax_rate: Number(tax.tax_rate),
+        taxable_amount: Number(tax.taxable_amount),
+        tax_amount: Number(tax.tax_amount),
+        tax_type: (tax.tax_type ??
+          undefined) as CreateInvoiceTaxDto['tax_type'],
+      })),
+    };
+
+    const note = await this.creditNotesService.createCreditNote(dto);
+    await this.invoiceFlowService.validate(note.id);
+    await this.sendBestEffort(note.id, 'mirror credit note');
+
+    this.logger.log(
+      `Mirror credit note #${note.id} created for accepted invoice #${originalInvoice.id}`,
+    );
+
+    return note.id;
+  }
+
+  /**
+   * Best-effort DIAN transmission: if the provider fails, the document stays
+   * in 'validated' and the existing retry queue picks it up later. The data
+   * request must never fail because of a transient DIAN outage.
+   */
+  private async sendBestEffort(
+    invoiceId: number,
+    label: string,
+  ): Promise<void> {
+    try {
+      await this.invoiceFlowService.send(invoiceId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : String(error ?? 'unknown');
+      this.logger.warn(
+        `Best-effort DIAN transmission failed for ${label} #${invoiceId}: ${message}. Document stays 'validated'; the retry queue will pick it up.`,
+      );
     }
   }
 }

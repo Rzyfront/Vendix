@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
@@ -8,6 +8,10 @@ import {
   WithholdingPreviewResult,
   CreateConceptDto,
   UpdateConceptDto,
+  WithholdingCalculation,
+  WithholdingCalculationsQuery,
+  WithholdingCertificateData,
+  PaginatedApiResponse,
 } from '../interfaces/withholding.interface';
 
 @Injectable({ providedIn: 'root' })
@@ -72,8 +76,33 @@ export class WithholdingTaxService {
     return this.http.post('/store/withholding-tax/calculate', dto);
   }
 
-  getCertificate(supplierId: number, year: number): Observable<any> {
-    return this.http.get(`/store/withholding-tax/certificates/${supplierId}`, { params: { year } });
+  /**
+   * Paginated audit list of persisted withholding calculations
+   * (practiced and suffered). Server-side pagination + filters.
+   */
+  getCalculations(
+    query: WithholdingCalculationsQuery = {},
+  ): Observable<PaginatedApiResponse<WithholdingCalculation>> {
+    let params = new HttpParams();
+    Object.entries(query).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        params = params.set(key, String(value));
+      }
+    });
+    return this.http.get<PaginatedApiResponse<WithholdingCalculation>>(
+      '/store/withholding-tax/calculations',
+      { params },
+    );
+  }
+
+  getCertificate(
+    supplierId: number,
+    year: number,
+  ): Observable<{ data: WithholdingCertificateData }> {
+    return this.http.get<{ data: WithholdingCertificateData }>(
+      `/store/withholding-tax/certificates/${supplierId}`,
+      { params: { year } },
+    );
   }
 
   getStats(): Observable<any> {

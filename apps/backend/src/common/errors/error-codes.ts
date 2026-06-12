@@ -1289,6 +1289,29 @@ export const ErrorCodes = {
     devMessage: 'User with CUSTOMER role cannot be linked as employee',
   },
 
+  // Payroll novelties
+  NOV_FIND_001: {
+    code: 'NOV_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Payroll novelty not found',
+  },
+  NOV_VALIDATE_001: {
+    code: 'NOV_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Employee not found or inactive for payroll novelty',
+  },
+  NOV_VALIDATE_002: {
+    code: 'NOV_VALIDATE_002',
+    httpStatus: 400,
+    devMessage:
+      'Payroll novelty is missing the required quantity (hours/days/amount) for its type',
+  },
+  NOV_STATUS_001: {
+    code: 'NOV_STATUS_001',
+    httpStatus: 409,
+    devMessage: 'Only pending payroll novelties can be modified or deleted',
+  },
+
   // Accounting
   ACC_FIND_001: {
     code: 'ACC_FIND_001',

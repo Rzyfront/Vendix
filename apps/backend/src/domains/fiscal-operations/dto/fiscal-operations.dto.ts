@@ -73,6 +73,23 @@ export class FiscalListQueryDto {
   limit?: number = 25;
 }
 
+export class FiscalFlowStateQueryDto {
+  @Type(() => Number)
+  @IsInt()
+  year!: number;
+
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(12)
+  month!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  store_id?: number;
+}
+
 export class GenerateFiscalObligationsDto {
   @Type(() => Number)
   @IsInt()

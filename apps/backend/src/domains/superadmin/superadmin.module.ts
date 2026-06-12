@@ -23,6 +23,9 @@ import { SuperadminSubscriptionsModule } from './subscriptions/subscriptions.mod
 import { SuperadminSettingsSyncModule } from './settings-sync/settings-sync.module';
 import { SuperadminSocialSalesModule } from './social-sales/social-sales.module';
 import { NotificationSoundsModule } from './notification-sounds/notification-sounds.module';
+import { SuperadminAccountingModule } from './accounting/superadmin-accounting.module';
+import { SuperadminFiscalOperationsModule } from './fiscal-operations/superadmin-fiscal-operations.module';
+import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.module';
 
 @Module({
   imports: [
@@ -49,6 +52,9 @@ import { NotificationSoundsModule } from './notification-sounds/notification-sou
     SuperadminSettingsSyncModule,
     SuperadminSocialSalesModule,
     NotificationSoundsModule,
+    SuperadminAccountingModule,
+    SuperadminFiscalOperationsModule,
+    SuperadminInvoicingModule,
   ],
   providers: [GlobalPrismaService],
   exports: [GlobalPrismaService],

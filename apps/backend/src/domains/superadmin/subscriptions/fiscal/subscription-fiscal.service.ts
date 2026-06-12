@@ -18,6 +18,10 @@ import {
 } from '../../../store/invoicing/providers/invoice-provider.interface';
 import { ManualCertificateIssuerAdapter } from '../../../store/invoicing/dian-config/certificates/manual-certificate-issuer.adapter';
 import {
+  CreatePlatformResolutionDto,
+  ListPlatformResolutionsQueryDto,
+  PLATFORM_RESOLUTION_DOCUMENT_TYPES,
+  PlatformResolutionDocumentType,
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalQueryDto,
   UpsertSubscriptionFiscalConfigDto,
@@ -26,6 +30,7 @@ import {
 const SETTINGS_KEY = 'subscription_fiscal_billing';
 const PRODUCTION_TEST_FRESHNESS_MS = 60 * 60 * 1000;
 const DECIMAL_ZERO = new Prisma.Decimal(0);
+const PLATFORM_ORGANIZATION_ID = 1;
 
 interface SubscriptionFiscalSettings {
   is_enabled: boolean;
@@ -485,6 +490,136 @@ export class SubscriptionFiscalService {
     return this.issueForInvoice(transmission.source_id, { manual: true, source: 'retry' });
   }
 
+  /**
+   * List DIAN resolutions registered for the Vendix platform organization.
+   *
+   * Platform resolutions are scoped to `organization_id = PLATFORM_ORGANIZATION_ID`
+   * and `store_id IS NULL`. The `environment` filter is informational — the
+   * `invoice_resolutions` schema has no environment column, so the actual
+   * environment is inherited from the linked DIAN configuration on the
+   * platform fiscal settings. Filtering by environment here is best-effort: it
+   * passes through to the caller via the response metadata.
+   */
+  async listResolutions(query: ListPlatformResolutionsQueryDto) {
+    const where: Prisma.invoice_resolutionsWhereInput = {
+      organization_id: PLATFORM_ORGANIZATION_ID,
+      store_id: null,
+    };
+    if (query.document_type) {
+      where.document_type = query.document_type;
+    }
+    if (query.is_active !== undefined) {
+      where.is_active = query.is_active;
+    }
+
+    const rows = await this.prisma.withoutScope().invoice_resolutions.findMany({
+      where,
+      orderBy: [{ document_type: 'asc' }, { created_at: 'desc' }],
+    });
+
+    const settings = await this.getSettings();
+    const platformEnv = settings.environment;
+
+    // The model has no env column; surface the platform env so the UI can group.
+    const data = rows.map((row) => ({
+      ...row,
+      environment: platformEnv,
+    }));
+
+    // Apply environment filter as a no-op when it equals the platform env;
+    // when it does not match, the rows belong to a different config snapshot
+    // and we should hide them to keep UI semantics consistent.
+    const filtered = query.environment
+      ? data.filter((row) => row.environment === query.environment)
+      : data;
+
+    return filtered;
+  }
+
+  /**
+   * Create a DIAN resolution for the Vendix platform organization
+   * (`organization_id = PLATFORM_ORGANIZATION_ID`, `store_id = NULL`).
+   *
+   * Uniqueness is enforced manually because the schema unique constraint does
+   * not cover (organization_id, store_id NULL, document_type, prefix).
+   */
+  async createResolution(dto: CreatePlatformResolutionDto) {
+    if (!PLATFORM_RESOLUTION_DOCUMENT_TYPES.includes(dto.document_type)) {
+      throw new BadRequestException(
+        `document_type must be one of ${PLATFORM_RESOLUTION_DOCUMENT_TYPES.join(', ')}`,
+      );
+    }
+    if (dto.rango_inicial <= 0) {
+      throw new BadRequestException('rango_inicial must be greater than 0');
+    }
+    if (dto.rango_final <= dto.rango_inicial) {
+      throw new BadRequestException(
+        'rango_final must be strictly greater than rango_inicial',
+      );
+    }
+
+    const settings = await this.getSettings();
+    if (!settings.accounting_entity_id) {
+      throw new BadRequestException(
+        'Configure the platform fiscal accounting entity before creating resolutions',
+      );
+    }
+
+    // Manual uniqueness check: (organization_id, store_id IS NULL, document_type, prefix).
+    // Environment is not on the model — for now uniqueness ignores it because
+    // the platform uses a single DIAN config / environment at a time.
+    const duplicate = await this.prisma
+      .withoutScope()
+      .invoice_resolutions.findFirst({
+        where: {
+          organization_id: PLATFORM_ORGANIZATION_ID,
+          store_id: null,
+          document_type: dto.document_type as PlatformResolutionDocumentType,
+          prefix: dto.prefix,
+          is_active: true,
+        },
+        select: { id: true },
+      });
+    if (duplicate) {
+      throw new BadRequestException(
+        `A platform resolution with prefix "${dto.prefix}" already exists for ${dto.document_type}`,
+      );
+    }
+
+    const now = new Date();
+    const validFrom = dto.valid_from ? new Date(dto.valid_from) : now;
+    const validTo = dto.valid_to
+      ? new Date(dto.valid_to)
+      : new Date(now.getFullYear() + 2, now.getMonth(), now.getDate());
+    const resolutionDate = dto.resolution_date
+      ? new Date(dto.resolution_date)
+      : now;
+
+    const created = await this.prisma.withoutScope().invoice_resolutions.create({
+      data: {
+        organization_id: PLATFORM_ORGANIZATION_ID,
+        store_id: null,
+        accounting_entity_id: settings.accounting_entity_id,
+        document_type: dto.document_type as PlatformResolutionDocumentType,
+        resolution_number: dto.resolution_number ?? `PLATFORM-${dto.prefix}-${Date.now()}`,
+        resolution_date: resolutionDate,
+        prefix: dto.prefix,
+        range_from: dto.rango_inicial,
+        range_to: dto.rango_final,
+        current_number: dto.rango_inicial - 1,
+        valid_from: validFrom,
+        valid_to: validTo,
+        is_active: true,
+        technical_key: dto.technical_key ?? null,
+      },
+    });
+
+    return {
+      ...created,
+      environment: dto.environment,
+    };
+  }
+
   private async getSettings(): Promise<SubscriptionFiscalSettings> {
     const row = await this.prisma.withoutScope().platform_settings.findUnique({
       where: { key: SETTINGS_KEY },
@@ -637,9 +772,15 @@ export class SubscriptionFiscalService {
     resolutionId: number,
     accountingEntityId: number,
   ): Promise<void> {
+    // SaaS subscription invoices always use sales_invoice. The platform-level
+    // resolution must belong to the platform organization (org=1), platform
+    // accounting entity (store_id=null) and be active. Resolutions created via
+    // POST /superadmin/subscriptions/fiscal/resolutions live under this scope.
     const resolution = await this.prisma.withoutScope().invoice_resolutions.findFirst({
       where: {
         id: resolutionId,
+        organization_id: PLATFORM_ORGANIZATION_ID,
+        store_id: null,
         accounting_entity_id: accountingEntityId,
         document_type: 'sales_invoice',
         is_active: true,

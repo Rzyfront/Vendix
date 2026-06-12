@@ -9,6 +9,21 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
+import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
+
+/**
+ * Listing rows whose send/transmission state is an error or a pending send get
+ * their `retry_status` resolved from invoice_retry_queue (batch, no N+1).
+ */
+const RETRY_ELIGIBLE_SEND_STATUSES = ['pending', 'sending', 'sent_error'];
+const RETRY_ELIGIBLE_TRANSMISSION_STATUSES = [
+  'queued',
+  'signing',
+  'signed',
+  'submitted',
+  'rejected',
+  'error',
+];
 
 const INVOICE_INCLUDE = {
   invoice_items: true,
@@ -64,6 +79,7 @@ export class InvoicingService {
     private readonly invoice_number_generator: InvoiceNumberGenerator,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly retry_queue: InvoiceRetryQueueService,
   ) {}
 
   private getContext() {
@@ -320,8 +336,28 @@ export class InvoicingService {
       this.prisma.invoices.count({ where }),
     ]);
 
+    // Paso 13 — retry_status: resolve queue state for invoices in an error or
+    // pending-send state with ONE batch query over the page IDs (no N+1).
+    const retry_candidate_ids = data
+      .filter(
+        (invoice: any) =>
+          RETRY_ELIGIBLE_SEND_STATUSES.includes(invoice.send_status) ||
+          RETRY_ELIGIBLE_TRANSMISSION_STATUSES.includes(
+            invoice.transmission_status,
+          ),
+      )
+      .map((invoice: any) => invoice.id);
+
+    const retry_status_map =
+      await this.retry_queue.getRetryStatusByInvoiceIds(retry_candidate_ids);
+
+    const data_with_retry = data.map((invoice: any) => ({
+      ...invoice,
+      retry_status: retry_status_map.get(invoice.id) ?? null,
+    }));
+
     return {
-      data,
+      data: data_with_retry,
       meta: {
         total,
         page,

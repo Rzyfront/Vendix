@@ -20,14 +20,15 @@ import {
   StickyHeaderTab,
 } from '../../../shared/components/sticky-header/sticky-header.component';
 import { FiscalOperationsHeaderActionsService } from './services/fiscal-operations-header-actions.service';
+import { FiscalApiScope } from './interfaces/fiscal-operations.interface';
 
 type FiscalTabId =
   | 'dashboard'
+  | 'identity'
   | 'obligations'
   | 'declarations'
   | 'close'
-  | 'evidence'
-  | 'history'
+  | 'audit'
   | 'rules';
 
 interface TabDefinition {
@@ -35,7 +36,8 @@ interface TabDefinition {
   label: string;
   shortLabel: string;
   icon: string;
-  route: string;
+  /** Prefijo de ruta. El shell lo combina con la base según el scope. */
+  routeSuffix: string;
 }
 
 const TAB_DEFINITIONS: TabDefinition[] = [
@@ -44,58 +46,63 @@ const TAB_DEFINITIONS: TabDefinition[] = [
     label: 'Dashboard',
     shortLabel: 'Inicio',
     icon: 'layout-dashboard',
-    route: '/admin/fiscal/dashboard',
+    routeSuffix: 'dashboard',
+  },
+  {
+    id: 'identity',
+    label: 'Identidad',
+    shortLabel: 'Ident.',
+    icon: 'landmark',
+    routeSuffix: 'identity',
   },
   {
     id: 'obligations',
     label: 'Obligaciones',
     shortLabel: 'Oblig.',
     icon: 'calendar-days',
-    route: '/admin/fiscal/obligations',
+    routeSuffix: 'obligations',
   },
   {
     id: 'declarations',
     label: 'Declaraciones',
     shortLabel: 'Decl.',
     icon: 'file-spreadsheet',
-    route: '/admin/fiscal/declarations',
+    routeSuffix: 'declarations',
   },
   {
     id: 'close',
     label: 'Cierre',
     shortLabel: 'Cierre',
     icon: 'check-square',
-    route: '/admin/fiscal/close',
+    routeSuffix: 'close',
   },
   {
-    id: 'evidence',
-    label: 'Evidencias',
-    shortLabel: 'Evid.',
-    icon: 'folder-open',
-    route: '/admin/fiscal/evidence',
-  },
-  {
-    id: 'history',
-    label: 'Historial',
-    shortLabel: 'Hist.',
-    icon: 'clipboard-list',
-    route: '/admin/fiscal/history',
+    id: 'audit',
+    label: 'Auditoría',
+    shortLabel: 'Audit.',
+    icon: 'shield-check',
+    routeSuffix: 'audit',
   },
   {
     id: 'rules',
     label: 'Reglas',
     shortLabel: 'Reglas',
     icon: 'file-text',
-    route: '/admin/fiscal/rules',
+    routeSuffix: 'rules',
   },
 ];
+
+/** Prefijo absoluto donde el shell está montado, según el `fiscalApiScope`. */
+function basePrefixForScope(scope: FiscalApiScope): string {
+  return scope === 'platform' ? '/super-admin/fiscal' : '/admin/fiscal';
+}
 
 /**
  * Single entry-point for the fiscal module.
  *
  * Renders either the *activation layer* (`FiscalManagementPanel` +
  * wizard CTA) when no fiscal area is in ACTIVE/LOCKED state, or the
- * *operation layer* (7 fiscal tabs + sticky-header) when at least one
+ * *operation layer* (6 fiscal tabs + sticky-header) when at least one
  * area is already active. The decision is reactive — it follows the
  * `fiscalStatus` signal exposed by `AuthFacade`.
  */
@@ -125,12 +132,12 @@ const TAB_DEFINITIONS: TabDefinition[] = [
       } @else {
         <!-- Capa OPERACIÓN: el shell es dueño del sticky-header con tabs. -->
         <app-sticky-header
-          title="Operación fiscal"
-          subtitle="Operación fiscal"
+          [title]="shellTitle()"
+          [subtitle]="shellTitle()"
           icon="file-check"
           variant="glass"
           [showBackButton]="true"
-          backRoute="/admin"
+          [backRoute]="backRoute()"
           [actions]="headerActions()"
           [tabs]="stickyHeaderTabs()"
           [activeTab]="activeTabId()"
@@ -181,8 +188,12 @@ export class FiscalCoreShellComponent {
    * the store/org still needs to walk the activation wizard. The
    * signal treats a `null` fiscal status (settings never loaded) the
    * same as all-INACTIVE so the activation layer shows by default.
+   *
+   * El scope `platform` SIEMPRE opera (su bootstrap es de sistema, no
+   * requiere activación), así que se omite la capa de activación.
    */
   readonly showActivation = computed<boolean>(() => {
+    if (this.scope() === 'platform') return false;
     const active = this.activeFiscalAreas();
     if (Array.isArray(active) && active.length > 0) return false;
     const status = this.fiscalStatus();
@@ -193,16 +204,37 @@ export class FiscalCoreShellComponent {
     );
   });
 
-  readonly stickyHeaderTabs = computed<StickyHeaderTab[]>(() =>
-    TAB_DEFINITIONS.map((tab) => ({
+  /** Título del sticky-header: tenants ven "Operación fiscal", plataforma ve "Fiscal Vendix". */
+  readonly shellTitle = computed<string>(() =>
+    this.scope() === 'platform' ? 'Fiscal Vendix' : 'Operación fiscal',
+  );
+
+  /** Ruta de retorno del botón "atrás" del sticky-header. */
+  readonly backRoute = computed<string>(() =>
+    this.scope() === 'platform' ? '/super-admin/dashboard' : '/admin',
+  );
+
+  /** Scope leído del route data `fiscalApiScope` (default = 'store'). */
+  readonly scope = computed<FiscalApiScope>(() => {
+    const value = this.route.pathFromRoot
+      .map((r) => r.snapshot.data['fiscalApiScope'])
+      .find(
+        (v) => v === 'store' || v === 'organization' || v === 'platform',
+      );
+    return (value as FiscalApiScope | undefined) ?? 'store';
+  });
+
+  readonly stickyHeaderTabs = computed<StickyHeaderTab[]>(() => {
+    const base = basePrefixForScope(this.scope());
+    return TAB_DEFINITIONS.map((tab) => ({
       id: tab.id,
       label: tab.label,
       shortLabel: tab.shortLabel,
       icon: tab.icon,
-      route: tab.route,
+      route: `${base}/${tab.routeSuffix}`,
       exact: tab.id === 'dashboard',
-    })),
-  );
+    }));
+  });
 
   readonly headerActionsList = signal<StickyHeaderActionButton[]>([
     {
@@ -242,9 +274,11 @@ export class FiscalCoreShellComponent {
 
   readonly activeTabId = computed<string>(() => {
     const url = this.currentUrl();
-    const match = TAB_DEFINITIONS.find(
-      (tab) => url === tab.route || url.startsWith(`${tab.route}/`),
-    );
+    const base = basePrefixForScope(this.scope());
+    const match = TAB_DEFINITIONS.find((tab) => {
+      const route = `${base}/${tab.routeSuffix}`;
+      return url === route || url.startsWith(`${route}/`);
+    });
     return match?.id ?? 'dashboard';
   });
 
@@ -255,12 +289,19 @@ export class FiscalCoreShellComponent {
    * activation/operation chrome — otherwise navigating to `/wizard`
    * while no area is active would keep showing the inline activation
    * panel (the "clicking does nothing" bug) and stack two headers.
+   *
+   * En el scope `platform` las rutas de activación están registradas
+   * (mismas que el tenant, para compartir la base) pero la plataforma
+   * siempre opera, por lo que esta ruta es inalcanzable en flujo normal.
+   * Aún así se protege contra deep-links para evitar el bug de doble
+   * sticky-header.
    */
   readonly onChildActivationRoute = computed<boolean>(() => {
     const url = this.currentUrl();
+    const base = basePrefixForScope(this.scope());
     return (
-      url.startsWith('/admin/fiscal/wizard') ||
-      url.startsWith('/admin/fiscal/activation')
+      url.startsWith(`${base}/wizard`) ||
+      url.startsWith(`${base}/activation`)
     );
   });
 
@@ -288,6 +329,7 @@ export class FiscalCoreShellComponent {
   onTabChanged(tabId: string): void {
     const target = TAB_DEFINITIONS.find((tab) => tab.id === tabId);
     if (!target) return;
-    void this.router.navigateByUrl(target.route);
+    const base = basePrefixForScope(this.scope());
+    void this.router.navigateByUrl(`${base}/${target.routeSuffix}`);
   }
 }

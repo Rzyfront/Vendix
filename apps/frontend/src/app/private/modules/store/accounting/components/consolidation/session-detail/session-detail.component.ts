@@ -365,8 +365,12 @@ private route = inject(ActivatedRoute);
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          // Session detail may include adjustments; if backend provides them separately,
-          // this can be refactored to use a dedicated endpoint.
+          // Backend GET sessions/:id includes the session adjustments.
+          const adjustments =
+            (res.data as { adjustments?: ConsolidationAdjustment[] } | null)
+              ?.adjustments ?? [];
+          this.adjustments.set(adjustments);
+          this.adj_totalItems.set(adjustments.length);
           this.adj_loading.set(false);
         },
         error: () => this.adj_loading.set(false)});
@@ -396,6 +400,9 @@ private route = inject(ActivatedRoute);
     this.active_tab.set(tab);
     if (tab === 'drilldown' && this.drilldown_data().length === 0) {
       this.loadDrilldown();
+    }
+    if (tab === 'reports' && this.report_data() === null) {
+      this.loadReport(this.selected_report());
     }
   }
 

@@ -154,7 +154,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                               type="button"
                               (click)="onMarkInstallmentPaid(inst)"
                               [disabled]="paymentLoading"
-                              class="text-xs text-primary hover:text-primary-dark font-medium px-2 py-1 rounded hover:bg-primary/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                              class="text-xs text-primary-600 hover:text-primary-700 font-medium px-2 py-1 rounded hover:bg-primary-600/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                               Pagar
                             </button>
                           }
@@ -195,7 +195,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                         type="button"
                         (click)="onMarkInstallmentPaid(inst)"
                         [disabled]="paymentLoading"
-                        class="mt-2 w-full text-xs text-primary font-medium py-1.5 rounded border border-primary/20 hover:bg-primary/10 transition-colors text-center disabled:opacity-50 disabled:cursor-not-allowed">
+                        class="mt-2 w-full text-xs text-primary-600 font-medium py-1.5 rounded border border-primary-600/20 hover:bg-primary-600/10 transition-colors text-center disabled:opacity-50 disabled:cursor-not-allowed">
                         Pagar Cuota
                       </button>
                     }
@@ -308,8 +308,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     formControlName="notes"
                     rows="2"
                 class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
-                       text-text-primary placeholder-text-secondary focus:border-primary
-                       focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                       text-text-primary placeholder-text-secondary focus:border-primary-600
+                       focus:outline-none focus:ring-1 focus:ring-primary-600 resize-none"
                     placeholder="Notas del pago (opcional)..."
                   ></textarea>
                 </div>

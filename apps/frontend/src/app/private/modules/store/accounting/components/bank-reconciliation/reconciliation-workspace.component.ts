@@ -36,7 +36,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
     <div class="w-full">
       @if (loading()) {
         <div class="flex items-center justify-center py-24">
-          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
+          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
         </div>
       } @else if (reconciliation()) {
         <!-- Header -->
@@ -130,7 +130,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                   @for (f of bankFilters; track f.id) {
                     <button
                       class="text-[10px] font-bold uppercase px-2 py-1 rounded transition-colors"
-                      [class]="bankFilter() === f.id ? 'bg-primary text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
+                      [class]="bankFilter() === f.id ? 'bg-primary-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
                       (click)="bankFilter.set(f.id)">
                       {{ f.label }}
                     </button>
@@ -187,7 +187,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                   @for (f of accountingFilters; track f.id) {
                     <button
                       class="text-[10px] font-bold uppercase px-2 py-1 rounded transition-colors"
-                      [class]="accountingFilter() === f.id ? 'bg-primary text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
+                      [class]="accountingFilter() === f.id ? 'bg-primary-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
                       (click)="accountingFilter.set(f.id)">
                       {{ f.label }}
                     </button>

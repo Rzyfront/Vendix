@@ -1,10 +1,22 @@
-import { Component, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  TemplateRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 
-import { Invoice } from '../../interfaces/invoice.interface';
+import {
+  Invoice,
+  InvoiceRetryStatus,
+} from '../../interfaces/invoice.interface';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
 import {
   selectSearch,
@@ -29,6 +41,7 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  TooltipComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
@@ -43,7 +56,9 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent
+    CardComponent,
+    IconComponent,
+    TooltipComponent
 ],
   templateUrl: './invoice-list.component.html',
 })
@@ -57,6 +72,24 @@ export class InvoiceListComponent {
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+
+  /** Custom cell template for the DIAN retry-status chip (Paso 13). */
+  readonly retryStatusTemplate =
+    viewChild<TemplateRef<unknown>>('retryStatusTemplate');
+
+  constructor() {
+    // Wire the chip template into the column once the view resolves
+    // (same pattern as reservation-list's serviceTemplate column).
+    effect(() => {
+      const tpl = this.retryStatusTemplate();
+      if (tpl) {
+        const retryCol = this.columns.find(
+          (col) => col.key === 'retry_status',
+        );
+        if (retryCol) retryCol.template = tpl;
+      }
+    });
+  }
 
   // Observables from store for current filter values
   search$: Observable<string> = this.store.select(selectSearch);
@@ -173,6 +206,15 @@ export class InvoiceListComponent {
       },
       transform: (val: any) => this.getStatusLabel(val),
     },
+    {
+      key: 'retry_status',
+      label: 'Reintento DIAN',
+      align: 'center',
+      priority: 2,
+      // Rendered via #retryStatusTemplate (wired in the constructor
+      // effect); transform acts as plain-text fallback only.
+      transform: (val: any) => this.getRetryChipLabel(val) || '—',
+    },
   ];
 
   // Card Config for mobile
@@ -210,6 +252,21 @@ export class InvoiceListComponent {
         label: 'Tipo',
         icon: 'file-text',
         transform: (val: any) => this.getTypeLabel(val),
+      },
+      {
+        key: 'retry_status',
+        label: 'Reintento DIAN',
+        icon: 'refresh-cw',
+        transform: (val: any) => this.getRetryChipLabel(val) || '—',
+        infoIconTransform: (val: any) => this.getRetryChipIcon(val),
+        infoIconVariantTransform: (val: any) => {
+          const retry = val as InvoiceRetryStatus | null | undefined;
+          if (!retry) return undefined;
+          if (retry.status === 'failed') return 'danger';
+          if (retry.status === 'pending' || retry.status === 'processing')
+            return 'warning';
+          return undefined;
+        },
       },
     ],
   };
@@ -262,6 +319,85 @@ export class InvoiceListComponent {
       voided: 'Anulada',
     };
     return labels[status] || status;
+  }
+
+  // ── DIAN retry chip helpers (Paso 13) ─────────────────────
+
+  /** `true` when the invoice has an actionable retry state to surface. */
+  hasRetryChip(retry: InvoiceRetryStatus | null | undefined): boolean {
+    if (!retry) return false;
+    return (
+      retry.status === 'pending' ||
+      retry.status === 'processing' ||
+      retry.status === 'failed'
+    );
+  }
+
+  getRetryChipLabel(retry: InvoiceRetryStatus | null | undefined): string {
+    if (!retry) return '';
+    if (retry.status === 'pending' || retry.status === 'processing') {
+      return `Reintentando (${retry.attempts}/${retry.max_attempts})`;
+    }
+    if (retry.status === 'failed') return 'Reintentos agotados';
+    return '';
+  }
+
+  getRetryChipClass(retry: InvoiceRetryStatus | null | undefined): string {
+    if (retry?.status === 'failed') {
+      return 'bg-red-100 text-red-700';
+    }
+    return 'bg-amber-100 text-amber-700';
+  }
+
+  getRetryChipIcon(
+    retry: InvoiceRetryStatus | null | undefined,
+  ): string | undefined {
+    if (!retry) return undefined;
+    if (retry.status === 'failed') return 'alert-circle';
+    if (retry.status === 'pending' || retry.status === 'processing') {
+      return 'refresh-cw';
+    }
+    return undefined;
+  }
+
+  getRetryTooltip(retry: InvoiceRetryStatus | null | undefined): string {
+    if (!retry) return '';
+    const parts: string[] = [];
+    if (retry.last_error) {
+      parts.push(`Último error: ${retry.last_error}`);
+    }
+    if (
+      retry.next_retry_at &&
+      (retry.status === 'pending' || retry.status === 'processing')
+    ) {
+      parts.push(
+        `Próximo intento: ${this.formatRetryDateTime(retry.next_retry_at)}`,
+      );
+    }
+    if (retry.status === 'failed') {
+      parts.push(
+        `Se agotaron los ${retry.max_attempts} reintentos automáticos.`,
+      );
+    }
+    return parts.join(' · ') || 'Reintento de envío a DIAN';
+  }
+
+  /**
+   * next_retry_at is a real timestamp (the time matters: backoff of
+   * minutes/hours), so local-timezone display with explicit options is
+   * the correct pattern per vendix-date-timezone (formatDateOnlyUTC is
+   * only for date-only fields).
+   */
+  private formatRetryDateTime(value: string): string {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString('es-CO', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   }
 
   getTypeLabel(type: string): string {

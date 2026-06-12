@@ -93,7 +93,7 @@ import {
             </div>
             <div>
               <p class="text-xs text-gray-500">Saldo</p>
-              <p class="text-sm font-bold font-mono text-primary">
+              <p class="text-sm font-bold font-mono text-primary-600">
                 {{ formatCurrency(d.balance) }}
               </p>
             </div>
@@ -273,7 +273,7 @@ import {
       } @else {
         <div class="p-8 text-center text-gray-400">
           <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
           ></div>
           <p class="mt-2">Cargando detalle...</p>
         </div>

@@ -21,6 +21,20 @@ import {
 } from '../dto/fiscal-operations.dto';
 import { FiscalAuditService } from './fiscal-audit.service';
 
+export interface FiscalClosePreviewCheck {
+  check_key: string;
+  title: string;
+  blocking: boolean;
+  status: string;
+  result_summary: string | null;
+}
+
+export interface FiscalClosePreview {
+  session_id: number | null;
+  session_status: string | null;
+  checks: FiscalClosePreviewCheck[];
+}
+
 @Injectable()
 export class FiscalCloseService {
   constructor(
@@ -248,6 +262,70 @@ export class FiscalCloseService {
       },
     });
     return updated;
+  }
+
+  /**
+   * Dry-run read-only de los checks de cierre para un período mensual.
+   *
+   * - Si ya existe una sesión de cierre del período para la entidad fiscal del
+   *   contexto, devuelve sus checks PERSISTIDOS (incluyendo overrides) en lugar
+   *   de re-evaluar, para no divergir de lo que el flujo de cierre ya decidió.
+   * - Si no existe sesión, evalúa los checks en memoria sin crear sesión ni
+   *   escribir nada en la base de datos.
+   */
+  async previewChecks(
+    context: FiscalOperationsContext,
+    period_year: number,
+    period_month: number,
+  ): Promise<FiscalClosePreview> {
+    const existing = await this.prisma.fiscal_close_sessions.findFirst({
+      where: {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+        close_type: 'monthly',
+        period_year,
+        period_month,
+      },
+      orderBy: { id: 'desc' },
+      include: { checks: { orderBy: { id: 'asc' } } },
+    });
+
+    if (existing) {
+      return {
+        session_id: existing.id,
+        session_status: String(existing.status),
+        checks: existing.checks.map((check) => ({
+          check_key: check.check_key,
+          title: check.title,
+          blocking: check.blocking,
+          status: String(check.status),
+          result_summary: check.result_summary ?? null,
+        })),
+      };
+    }
+
+    const period = resolveFiscalPeriodRange({ period_year, period_month });
+    const results = await this.evaluateChecks({
+      organization_id: context.organization_id,
+      store_id: context.store_id,
+      accounting_entity_id: context.accounting_entity_id,
+      period_year,
+      period_month,
+      period_start: period.period_start,
+      period_end: period.period_end,
+    });
+
+    return {
+      session_id: null,
+      session_status: null,
+      checks: results.map((result) => ({
+        check_key: result.check_key,
+        title: result.title,
+        blocking: result.blocking,
+        status: result.status,
+        result_summary: result.result_summary,
+      })),
+    };
   }
 
   async overrideCheck(

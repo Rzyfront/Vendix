@@ -392,6 +392,7 @@ export class AutoEntryService {
     // Map entry type from source_type
     const entry_type_map: Record<string, string> = {
       'invoice.validated': 'auto_invoice',
+      'credit_note.accepted': 'auto_return',
       'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
       'expense.approved': 'auto_expense',
@@ -502,6 +503,7 @@ export class AutoEntryService {
 
       if (
         source_type === 'invoice.validated' ||
+        source_type === 'credit_note.accepted' ||
         source_type === 'support_document.accepted'
       ) {
         await tx.invoices.updateMany({
@@ -636,6 +638,76 @@ export class AutoEntryService {
       accounting_entity_id: data.accounting_entity_id,
       entry_date: new Date(),
       description: `Invoice validated #${data.invoice_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Credit note acceptance (nota crédito DIAN): mirror reversal of the sale
+   * entry posted by `onInvoiceValidated`.
+   *
+   *   DR 4175 Devoluciones en Ventas (subtotal)
+   *   DR 2408/2436/2412 tax liability per typed `tax_breakdown`
+   *   CR 1305 Cuentas por Cobrar (total)
+   *
+   * Tax routing reuses `resolveTaxLines` with `side='debit'` so each fiscal
+   * type reverses its own liability account (`credit_note.accepted.<type>_payable`).
+   * Rows without a typed mapping (or breakdown-less events) fall back to the
+   * IVA key, matching the `tax_type null → iva` contract of buildTaxBreakdown.
+   */
+  async onCreditNoteAccepted(data: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    subtotal: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    total: number;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'credit_note.accepted.sales_returns',
+        'Devoluciones en Ventas (nota crédito)',
+        data.subtotal,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'credit_note.accepted.accounts_receivable',
+        'Cuentas por Cobrar (reversa nota crédito)',
+        0,
+        data.total,
+        data.store_id,
+      ),
+    ]);
+
+    lines.push(
+      ...(await this.resolveTaxLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        prefix: 'credit_note.accepted',
+        suffix: 'payable',
+        side: 'debit',
+        total: data.tax_amount,
+        breakdown: data.tax_breakdown,
+        legacyKey: 'credit_note.accepted.iva_payable',
+        label: 'Impuesto por Pagar (reversa nota crédito)',
+      })),
+    );
+
+    return this.createAutoEntry({
+      source_type: 'credit_note.accepted',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: new Date(),
+      description: `Credit note accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3214,6 +3286,134 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Cancelación gasto #${data.expense_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== SAAS PLATFORM AUTO-ENTRIES (RNC-MF-3) =====
+  // These three handlers are dispatched by AccountingEventsListener for events
+  // emitted against the Vendix platform organization (VENDIX_ADMIN). They are
+  // intentionally decoupled from `PlatformOrgService` — the listener resolves
+  // the platform context and passes the resolved `organization_id` as
+  // `data.organization_id`. `entry_date` is sourced from the event payload so
+  // back-fills post the entry in the original fiscal period.
+
+  /**
+   * saas_refund: Vendix refunds a tenant — reverses SaaS revenue.
+   *   DR 4175 Devoluciones en Ventas (SaaS)
+   *   CR 1110 Bancos (reembolso)
+   */
+  async onSaasRefund(data: {
+    refund_event_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_refund.revenue',
+        'Devoluciones en Ventas (SaaS refund)',
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_refund.cash_bank',
+        'Bancos (reembolso SaaS)',
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_refund',
+      source_id: data.refund_event_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Reembolso SaaS #${data.refund_event_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * saas_bad_debt: Wompi declines a SaaS charge — provisions bad debt.
+   *   DR 5295 Gasto Incobrable SaaS
+   *   CR 1305 CxC SaaS (provisión)
+   */
+  async onSaasPaymentFailed(data: {
+    payment_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_bad_debt.expense',
+        'Gasto Incobrable SaaS',
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_bad_debt.receivable',
+        'CxC SaaS (provisión incobrable)',
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_bad_debt',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Provisión incobrable SaaS — Pago #${data.payment_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * saas_partner_payout: Vendix pays a partner commission batch — settles payable.
+   *   DR 2335 CxP Comisiones Partners
+   *   CR 1110 Bancos (pago)
+   */
+  async onPartnerPayoutPaid(data: {
+    batch_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_partner_payout.commissions_payable',
+        `CxP Comisiones Partners — Batch #${data.batch_id}`,
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_partner_payout.cash_bank',
+        `Bancos (pago comisiones batch #${data.batch_id})`,
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_partner_payout',
+      source_id: data.batch_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Pago comisiones partner — Batch #${data.batch_id}`,
       lines,
       user_id: data.user_id,
     });

@@ -860,15 +860,21 @@ export class BreadcrumbService {
       icon: 'file-text',
     },
     {
-      path: '/admin/accounting/account-mappings',
-      title: 'Mapeo de Cuentas',
+      path: '/admin/accounting/configuration',
+      title: 'Configuración Contable',
       parent: 'Contabilidad',
+      icon: 'settings',
+    },
+    {
+      path: '/admin/accounting/configuration/mappings',
+      title: 'Mapeo de Cuentas',
+      parent: 'Configuración Contable',
       icon: 'link',
     },
     {
-      path: '/admin/accounting/flows',
+      path: '/admin/accounting/configuration/flows',
       title: 'Flujos Contables',
-      parent: 'Contabilidad',
+      parent: 'Configuración Contable',
       icon: 'activity',
     },
     {
@@ -878,22 +884,70 @@ export class BreadcrumbService {
       icon: 'briefcase',
     },
     {
-      path: '/admin/accounting/receivables',
+      path: '/admin/accounting/cartera/receivables',
       title: 'Cuentas por Cobrar',
-      parent: 'Contabilidad',
+      parent: 'Cartera',
       icon: 'file-input',
     },
     {
-      path: '/admin/accounting/payables',
+      path: '/admin/accounting/cartera/payables',
       title: 'Cuentas por Pagar',
-      parent: 'Contabilidad',
+      parent: 'Cartera',
       icon: 'file-output',
     },
     {
-      path: '/admin/accounting/aging',
+      path: '/admin/accounting/cartera/aging',
       title: 'Cartera por Vencimiento',
-      parent: 'Contabilidad',
+      parent: 'Cartera',
       icon: 'bar-chart-2',
+    },
+    {
+      path: '/admin/accounting/taxes',
+      title: 'Impuestos',
+      parent: 'Contabilidad',
+      icon: 'percent',
+    },
+    {
+      path: '/admin/accounting/taxes/withholding',
+      title: 'Retenciones',
+      parent: 'Impuestos',
+      icon: 'percent',
+    },
+    {
+      path: '/admin/accounting/taxes/exogenous',
+      title: 'Info Exógena',
+      parent: 'Impuestos',
+      icon: 'file-text',
+    },
+    {
+      path: '/admin/accounting/taxes/ica',
+      title: 'ICA Municipal',
+      parent: 'Impuestos',
+      icon: 'landmark',
+    },
+    {
+      path: '/admin/accounting/bank-reconciliation',
+      title: 'Conciliación Bancaria',
+      parent: 'Contabilidad',
+      icon: 'landmark',
+    },
+    {
+      path: '/admin/accounting/fixed-assets',
+      title: 'Activos Fijos',
+      parent: 'Contabilidad',
+      icon: 'building',
+    },
+    {
+      path: '/admin/accounting/budgets',
+      title: 'Presupuestos',
+      parent: 'Contabilidad',
+      icon: 'wallet',
+    },
+    {
+      path: '/admin/accounting/consolidation',
+      title: 'Consolidación',
+      parent: 'Contabilidad',
+      icon: 'layers',
     },
     {
       path: '/admin/accounting/reports/trial-balance',
@@ -918,6 +972,20 @@ export class BreadcrumbService {
       title: 'Libro Mayor',
       parent: 'Reportes',
       icon: 'file-text',
+    },
+
+    // Fiscal Operations
+    {
+      path: '/admin/fiscal',
+      title: 'Operación fiscal',
+      parent: 'Fiscal',
+      icon: 'clipboard-list',
+    },
+    {
+      path: '/admin/fiscal/audit',
+      title: 'Auditoría fiscal',
+      parent: 'Operación fiscal',
+      icon: 'shield-check',
     },
 
     // Payroll

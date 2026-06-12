@@ -141,8 +141,7 @@ export class MenuFilterService {
     'Obligaciones fiscales': 'fiscal_obligations',
     'Declaraciones fiscales': 'fiscal_declarations',
     'Cierre fiscal': 'fiscal_close',
-    'Evidencias fiscales': 'fiscal_evidence',
-    'Historial fiscal': 'fiscal_history',
+    'Auditoría fiscal': 'fiscal_audit',
     'Reglas fiscales': 'fiscal_rules',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)

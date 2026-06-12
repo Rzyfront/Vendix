@@ -1,6 +1,6 @@
 @if (loading()) {
   <div class="flex items-center justify-center min-h-[400px]">
-    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
   </div>
 } @else if (budget(); as b) {
   <div class="w-full">
@@ -142,7 +142,7 @@
                         [value]="month"
                         (change)="onCellChange(idx, mi, $any($event.target).value)"
                         class="w-full text-right px-2 py-1.5 text-sm border border-border rounded-md
-                               focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary
+                               focus:outline-none focus:ring-1 focus:ring-primary-600 focus:border-primary-600
                                bg-white hover:bg-gray-50 transition-colors
                                [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min="0"

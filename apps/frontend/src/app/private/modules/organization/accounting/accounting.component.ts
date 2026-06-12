@@ -24,9 +24,14 @@ import {
  * Org-scoped accounting shell.
  * Owns a persistent sticky-header whose tabs centralize the read-only
  * consolidated accounting sub-pages (/api/organization/accounting/*) under a
- * single `<router-outlet>` — mirrors the store accounting shell, so the org
- * sidebar can collapse "Contabilidad" to a single leaf. The fiscal-scope
- * selector stays mounted across every tab to filter by store.
+ * single `<router-outlet>` — mirrors the store accounting shell, including its
+ * super-tab architecture: Configuración (mapeos), Cartera (dashboard + CxC +
+ * CxP + vencimientos) and Impuestos (retenciones / exógena / ICA) group their
+ * sub-pages with internal sub-navigation via the shared
+ * `AccountingSubTabsShellComponent`; legacy flat routes redirect to the new
+ * nested paths. The org sidebar can collapse "Contabilidad" to a single leaf,
+ * and the fiscal-scope selector stays mounted across every tab to filter by
+ * store.
  */
 @Component({
   selector: 'vendix-org-accounting',
@@ -163,11 +168,11 @@ const TAB_DEFINITIONS: StickyHeaderTab[] = [
     route: '/admin/accounting/fiscal-periods',
   },
   {
-    id: 'account-mappings',
-    label: 'Mapeo de Cuentas',
-    shortLabel: 'Mapeo',
-    icon: 'shuffle',
-    route: '/admin/accounting/account-mappings',
+    id: 'configuration',
+    label: 'Configuración',
+    shortLabel: 'Config.',
+    icon: 'settings',
+    route: '/admin/accounting/configuration',
   },
   {
     id: 'cartera',
@@ -177,45 +182,10 @@ const TAB_DEFINITIONS: StickyHeaderTab[] = [
     route: '/admin/accounting/cartera',
   },
   {
-    id: 'receivables',
-    label: 'Cuentas por Cobrar',
-    shortLabel: 'Por Cobrar',
-    icon: 'arrow-down-circle',
-    route: '/admin/accounting/receivables',
-  },
-  {
-    id: 'payables',
-    label: 'Cuentas por Pagar',
-    shortLabel: 'Por Pagar',
-    icon: 'arrow-up-circle',
-    route: '/admin/accounting/payables',
-  },
-  {
-    id: 'aging',
-    label: 'Vencimientos',
-    shortLabel: 'Vencim.',
-    icon: 'clock',
-    route: '/admin/accounting/aging',
-  },
-  {
-    id: 'withholding-tax',
-    label: 'Retenciones',
-    shortLabel: 'Retenc.',
+    id: 'taxes',
+    label: 'Impuestos',
+    shortLabel: 'Impuestos',
     icon: 'percent',
-    route: '/admin/accounting/withholding-tax',
-  },
-  {
-    id: 'exogenous',
-    label: 'Info Exógena',
-    shortLabel: 'Exógena',
-    icon: 'file-spreadsheet',
-    route: '/admin/accounting/exogenous',
-  },
-  {
-    id: 'ica',
-    label: 'ICA Municipal',
-    shortLabel: 'ICA',
-    icon: 'landmark',
-    route: '/admin/accounting/ica',
+    route: '/admin/accounting/taxes',
   },
 ];

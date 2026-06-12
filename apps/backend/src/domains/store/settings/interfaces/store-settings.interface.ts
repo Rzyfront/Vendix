@@ -18,6 +18,9 @@ export interface FiscalDataSettings {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // IVA declaration periodicity (art. 600 ET). Only meaningful when the
+  // tenant is responsable de IVA (O-48). Absent ⇒ defaults to 'bimonthly'.
+  vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
   // DIAN issuer tax scheme code ('O-13' Gran Contribuyente, 'O-15'
   // Autorretenedor, 'R-99-PN', etc.). Currently hardcoded in the DIAN
   // provider; captured here for the pending provider-wiring follow-up.

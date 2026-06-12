@@ -37,3 +37,6 @@ MIGRATION_COMPLETE.md
 GITHUB_SECRET_INSTRUCTIONS.txt
 # Linear dev cache (UUIDs, no secrets — but per-dev)
 .linear/config.json
+# Local-only planning and output artifacts
+/plans/
+/outputs/

@@ -38,14 +38,14 @@ export class ExogenousService {
     if (context.store_id) where.store_id = context.store_id;
 
     const [data, total] = await Promise.all([
-      (this.prisma as any).client.exogenous_reports.findMany({
+      (this.prisma as any).withoutScope().exogenous_reports.findMany({
         where,
         orderBy: { created_at: 'desc' },
         skip,
         take: limit,
         include: { _count: { select: { exogenous_report_lines: true } } },
       }),
-      (this.prisma as any).client.exogenous_reports.count({ where }),
+      (this.prisma as any).withoutScope().exogenous_reports.count({ where }),
     ]);
 
     return {
@@ -65,7 +65,7 @@ export class ExogenousService {
 
     const report = await (
       this.prisma as any
-    ).client.exogenous_reports.findFirst({
+    ).withoutScope().exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
       include: { _count: { select: { exogenous_report_lines: true } } },
     });
@@ -89,7 +89,7 @@ export class ExogenousService {
     // Verify report belongs to org
     const report = await (
       this.prisma as any
-    ).client.exogenous_reports.findFirst({
+    ).withoutScope().exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
       select: { id: true },
     });
@@ -101,13 +101,13 @@ export class ExogenousService {
     const skip = (page - 1) * limit;
 
     const [data, total] = await Promise.all([
-      (this.prisma as any).client.exogenous_report_lines.findMany({
+      (this.prisma as any).withoutScope().exogenous_report_lines.findMany({
         where: { report_id: id },
         orderBy: { third_party_nit: 'asc' },
         skip,
         take: limit,
       }),
-      (this.prisma as any).client.exogenous_report_lines.count({
+      (this.prisma as any).withoutScope().exogenous_report_lines.count({
         where: { report_id: id },
       }),
     ]);
@@ -131,17 +131,17 @@ export class ExogenousService {
     const store_id = context.store_id || null;
 
     // Upsert report record
-    let report = await (this.prisma as any).client.exogenous_reports.findFirst({
+    let report = await (this.prisma as any).withoutScope().exogenous_reports.findFirst({
       where: { organization_id: org_id, fiscal_year, format_code },
     });
 
     if (report) {
-      report = await (this.prisma as any).client.exogenous_reports.update({
+      report = await (this.prisma as any).withoutScope().exogenous_reports.update({
         where: { id: report.id },
         data: { status: 'generating', updated_at: new Date() },
       });
     } else {
-      report = await (this.prisma as any).client.exogenous_reports.create({
+      report = await (this.prisma as any).withoutScope().exogenous_reports.create({
         data: {
           organization_id: org_id,
           store_id,
@@ -207,6 +207,13 @@ export class ExogenousService {
             fiscal_year,
           );
           break;
+        case '2276':
+          lines = await this.generator.generateFormat2276(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
+          break;
         default:
           this.logger.warn(
             `Format ${format_code} generator not yet implemented`,
@@ -215,13 +222,13 @@ export class ExogenousService {
       }
 
       // Delete old lines and insert new ones in transaction
-      await (this.prisma as any).client.$transaction([
-        (this.prisma as any).client.exogenous_report_lines.deleteMany({
+      await (this.prisma as any).withoutScope().$transaction([
+        (this.prisma as any).withoutScope().exogenous_report_lines.deleteMany({
           where: { report_id: report.id },
         }),
         ...(lines.length > 0
           ? [
-              (this.prisma as any).client.exogenous_report_lines.createMany({
+              (this.prisma as any).withoutScope().exogenous_report_lines.createMany({
                 data: lines.map((line: any) => ({
                   report_id: report.id,
                   third_party_nit: line.third_party_nit,
@@ -243,7 +250,7 @@ export class ExogenousService {
 
       const updated_report = await (
         this.prisma as any
-      ).client.exogenous_reports.update({
+      ).withoutScope().exogenous_reports.update({
         where: { id: report.id },
         data: {
           status: 'generated',
@@ -264,7 +271,7 @@ export class ExogenousService {
         `Failed to generate format ${format_code}: ${error.message}`,
       );
 
-      await (this.prisma as any).client.exogenous_reports.update({
+      await (this.prisma as any).withoutScope().exogenous_reports.update({
         where: { id: report.id },
         data: { status: 'draft', validation_errors: { error: error.message } },
       });
@@ -288,7 +295,7 @@ export class ExogenousService {
 
     const report = await (
       this.prisma as any
-    ).client.exogenous_reports.findFirst({
+    ).withoutScope().exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
     });
 
@@ -296,7 +303,7 @@ export class ExogenousService {
       throw new VendixHttpException(ErrorCodes.EXO_REPORT_NOT_FOUND);
     }
 
-    return (this.prisma as any).client.exogenous_reports.update({
+    return (this.prisma as any).withoutScope().exogenous_reports.update({
       where: { id },
       data: {
         status: 'submitted',
@@ -316,7 +323,7 @@ export class ExogenousService {
 
     const reports = await (
       this.prisma as any
-    ).client.exogenous_reports.findMany({
+    ).withoutScope().exogenous_reports.findMany({
       where,
       select: { status: true, format_code: true },
     });
@@ -341,7 +348,7 @@ export class ExogenousService {
 
     const report = await (
       this.prisma as any
-    ).client.exogenous_reports.findFirst({
+    ).withoutScope().exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
     });
 
@@ -370,7 +377,7 @@ export class ExogenousService {
       // Generar TXT: obtener todas las lineas del reporte
       const lines = await (
         this.prisma as any
-      ).client.exogenous_report_lines.findMany({
+      ).withoutScope().exogenous_report_lines.findMany({
         where: { report_id: id },
         orderBy: { third_party_nit: 'asc' },
       });
@@ -385,7 +392,7 @@ export class ExogenousService {
       );
 
       // Guardar file_key en el reporte
-      await (this.prisma as any).client.exogenous_reports.update({
+      await (this.prisma as any).withoutScope().exogenous_reports.update({
         where: { id },
         data: { file_key, updated_at: new Date() },
       });

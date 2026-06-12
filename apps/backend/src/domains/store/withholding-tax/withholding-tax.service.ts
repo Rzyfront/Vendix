@@ -11,6 +11,7 @@ import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
   PreviewWithholdingDto,
+  CalculationsQueryDto,
 } from './dto';
 import { WithholdingCertificateData } from './interfaces/withholding.interface';
 import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
@@ -325,6 +326,62 @@ export class WithholdingTaxService {
       calculation_id: calculation.id,
       net_amount,
     };
+  }
+
+  // ===== Calculations Audit List =====
+
+  /**
+   * Paginated audit list of persisted withholding calculations. Read-only:
+   * supports the "Cálculos" tab in the Retenciones submodule so the user can
+   * audit every withholding practiced/suffered (date, concept, counterparty,
+   * invoice, base, rate and amount). Tenant scoping comes from the scoped
+   * Prisma service; the month filter is resolved as a created_at range over
+   * the requested (or current) year.
+   */
+  async findAllCalculations(query: CalculationsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.withholding_calculationsWhereInput = {};
+
+    if (query.role) where.role = query.role;
+    if (query.supplier_id) where.supplier_id = query.supplier_id;
+    if (query.concept_id) where.concept_id = query.concept_id;
+
+    if (query.month) {
+      const range_year = query.year ?? new Date().getFullYear();
+      where.created_at = {
+        gte: new Date(range_year, query.month - 1, 1),
+        lt: new Date(range_year, query.month, 1),
+      };
+    } else if (query.year) {
+      where.year = query.year;
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.withholding_calculations.findMany({
+        where,
+        include: {
+          concept: { select: { name: true, code: true } },
+          supplier: { select: { id: true, name: true, tax_id: true } },
+          customer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
+          invoice: { select: { id: true, invoice_number: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.withholding_calculations.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   // ===== Certificate Generation =====

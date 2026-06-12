@@ -18,11 +18,15 @@ import { PaystubService } from './paystubs/paystub.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { AdvancesController } from './advances/advances.controller';
 import { AdvancesService } from './advances/advances.service';
+import { NoveltiesController } from './novelties/novelties.controller';
+import { NoveltiesService } from './novelties/novelties.service';
 import { SettlementsController } from './settlements/settlements.controller';
 import { SettlementsService } from './settlements/settlements.service';
 import { SettlementCalculationService } from './settlements/settlement-calculation.service';
 import { SettlementFlowService } from './settlements/settlement-flow.service';
 import { PayrollBankExportService } from './bank-export/payroll-bank-export.service';
+import { PilaReportController } from './pila/pila-report.controller';
+import { PilaReportService } from './pila/pila-report.service';
 import { BANK_BATCH_BUILDER_REGISTRY } from './bank-export/interfaces/bank-batch-builder.interface';
 import { BancolombiaBatchBuilder } from './bank-export/builders/bancolombia-batch.builder';
 import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.builder';
@@ -40,8 +44,10 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     PayrollRunsController,
     PayrollRulesController,
     AdvancesController,
+    NoveltiesController,
     SettlementsController,
     PaystubController,
+    PilaReportController,
   ],
   providers: [
     EmployeesService,
@@ -52,11 +58,13 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     PayrollRulesService,
     DefaultPanelUIService,
     AdvancesService,
+    NoveltiesService,
     SettlementsService,
     SettlementCalculationService,
     SettlementFlowService,
     PaystubService,
     PayrollBankExportService,
+    PilaReportService,
     {
       provide: BANK_BATCH_BUILDER_REGISTRY,
       useFactory: () => [
@@ -70,6 +78,7 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     PayrollRunsService,
     PayrollRulesService,
     AdvancesService,
+    NoveltiesService,
     SettlementsService,
     PaystubService,
     PayrollBankExportService,

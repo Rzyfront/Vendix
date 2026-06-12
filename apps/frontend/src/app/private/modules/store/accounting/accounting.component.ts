@@ -15,11 +15,13 @@ import {
 } from '../../../../shared/components/sticky-header/sticky-header.component';
 
 /**
- * Accounting module shell. Owns a persistent sticky-header whose tabs centralize
- * every accounting sub-section (ledger core, cartera, taxes, reports) under a
- * single `<router-outlet>`. Tax sub-modules (retenciones / exógena / ICA) are
- * nested children in `accounting.routes.ts`, so navigating between any tab keeps
- * this header mounted — no more deep sidebar nesting.
+ * Accounting module shell. Owns a persistent sticky-header with 11 single-purpose
+ * tabs under one `<router-outlet>`. Grouped functions live in super-tabs with
+ * internal sub-navigation (see `AccountingSubTabsShellComponent`):
+ * Configuración (mapeos + flujos), Cartera (dashboard + CxC + CxP + vencimientos)
+ * and Impuestos (retenciones / exógena / tarifas ICA — lazy sub-modules mounted
+ * as children in `accounting.routes.ts`). Navigating between tabs keeps this
+ * header mounted; legacy flat routes redirect to the new nested paths.
  */
 @Component({
   selector: 'vendix-accounting',
@@ -127,18 +129,11 @@ const TAB_DEFINITIONS: StickyHeaderTab[] = [
     route: '/admin/accounting/fiscal-periods',
   },
   {
-    id: 'account-mappings',
-    label: 'Mapeo de Cuentas',
-    shortLabel: 'Mapeo',
-    icon: 'shuffle',
-    route: '/admin/accounting/account-mappings',
-  },
-  {
-    id: 'flows',
-    label: 'Flujos Contables',
-    shortLabel: 'Flujos',
-    icon: 'workflow',
-    route: '/admin/accounting/flows',
+    id: 'configuration',
+    label: 'Configuración',
+    shortLabel: 'Config.',
+    icon: 'settings',
+    route: '/admin/accounting/configuration',
   },
   {
     id: 'cartera',
@@ -148,46 +143,39 @@ const TAB_DEFINITIONS: StickyHeaderTab[] = [
     route: '/admin/accounting/cartera',
   },
   {
-    id: 'receivables',
-    label: 'Cuentas por Cobrar',
-    shortLabel: 'Por Cobrar',
-    icon: 'arrow-down-circle',
-    route: '/admin/accounting/receivables',
-  },
-  {
-    id: 'payables',
-    label: 'Cuentas por Pagar',
-    shortLabel: 'Por Pagar',
-    icon: 'arrow-up-circle',
-    route: '/admin/accounting/payables',
-  },
-  {
-    id: 'aging',
-    label: 'Vencimientos',
-    shortLabel: 'Vencim.',
-    icon: 'clock',
-    route: '/admin/accounting/aging',
-  },
-  {
-    id: 'withholding-tax',
-    label: 'Retenciones',
-    shortLabel: 'Retenc.',
+    id: 'taxes',
+    label: 'Impuestos',
+    shortLabel: 'Impuestos',
     icon: 'percent',
-    route: '/admin/accounting/withholding-tax',
+    route: '/admin/accounting/taxes',
   },
   {
-    id: 'exogenous',
-    label: 'Info Exógena',
-    shortLabel: 'Exógena',
-    icon: 'file-spreadsheet',
-    route: '/admin/accounting/exogenous',
+    id: 'bank-reconciliation',
+    label: 'Bancos',
+    shortLabel: 'Bancos',
+    icon: 'banknote',
+    route: '/admin/accounting/bank-reconciliation',
   },
   {
-    id: 'ica',
-    label: 'ICA Municipal',
-    shortLabel: 'ICA',
-    icon: 'landmark',
-    route: '/admin/accounting/ica',
+    id: 'fixed-assets',
+    label: 'Activos fijos',
+    shortLabel: 'Activos',
+    icon: 'building-2',
+    route: '/admin/accounting/fixed-assets',
+  },
+  {
+    id: 'budgets',
+    label: 'Presupuestos',
+    shortLabel: 'Presup.',
+    icon: 'piggy-bank',
+    route: '/admin/accounting/budgets',
+  },
+  {
+    id: 'consolidation',
+    label: 'Consolidación',
+    shortLabel: 'Consolid.',
+    icon: 'layers',
+    route: '/admin/accounting/consolidation',
   },
   {
     id: 'reports',

@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AutoEntryService, AutoEntryLine } from './auto-entry.service';
 import { AccountMappingService } from '../account-mappings/account-mapping.service';
 import { FiscalGateService } from '../../../../common/services/fiscal-gate.service';
+import { PlatformOrgService } from '../../../../common/services/platform-org.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 
@@ -14,6 +15,7 @@ export class AccountingEventsListener {
     private readonly auto_entry_service: AutoEntryService,
     private readonly account_mapping_service: AccountMappingService,
     private readonly fiscal_gate: FiscalGateService,
+    private readonly platform_org_service: PlatformOrgService,
   ) {}
 
   /**
@@ -87,6 +89,28 @@ export class AccountingEventsListener {
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'invoicing'))) return;
+
+      // Una nota crédito aceptada llega por el MISMO evento invoice.accepted:
+      // debe reversar la venta (DR devoluciones/impuestos, CR cartera), nunca
+      // sumar ingresos. Una nota débito aumenta el cobro como factura normal.
+      if (event.invoice_type === 'credit_note') {
+        await this.auto_entry_service.onCreditNoteAccepted({
+          invoice_id: event.invoice_id,
+          organization_id: event.organization_id,
+          store_id: event.store_id,
+          accounting_entity_id: event.accounting_entity_id,
+          subtotal: event.subtotal_amount,
+          tax_amount: event.tax_amount,
+          tax_breakdown: event.tax_breakdown,
+          total: event.total_amount,
+          user_id: event.user_id,
+        });
+        this.logger.log(
+          `Auto-entry (credit note reversal) created for invoice.accepted #${event.invoice_id}`,
+        );
+        return;
+      }
+
       await this.auto_entry_service.onInvoiceValidated({
         invoice_id: event.invoice_id,
         organization_id: event.organization_id,
@@ -1414,6 +1438,150 @@ export class AccountingEventsListener {
           error?.stack,
         );
       }
+    }
+  }
+
+  // ===== SAAS PLATFORM AUTO-ENTRY HANDLERS (RNC-MF-3) =====
+  // These three listeners post journal entries against the Vendix platform
+  // organization. The platform org is resolved via PlatformOrgService; when
+  // the platform org is not bootstrapped (null context), the listener is a
+  // no-op that logs a warning — the SaaS business flow must never fail because
+  // of a missing platform accounting target.
+  //
+  // All three handlers share the same idempotency contract as the existing
+  // SaaS succeeded handler: `source_id` is the business entity id (refund,
+  // payment, or batch) and `createAutoEntry` guards on
+  // `(source_type, source_id)` so redeliveries never produce a second entry.
+
+  private async resolvePlatformOrgForSaasEntry(): Promise<number | null> {
+    try {
+      const ctx = await this.platform_org_service.getPlatformContext();
+      return ctx?.organization_id ?? null;
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to resolve platform org for SaaS auto-entry: ${err?.message ?? err}`,
+      );
+      return null;
+    }
+  }
+
+  @OnEvent('subscription.payment.refunded')
+  async handleSaasPaymentRefunded(event: {
+    refundEventId: number;
+    amount: number;
+    entryDate: Date | string;
+    userId?: number;
+  }) {
+    try {
+      const platform_org_id = await this.resolvePlatformOrgForSaasEntry();
+      if (!platform_org_id) {
+        this.logger.warn(
+          `Skipping saas_refund auto-entry for refund=${event.refundEventId}: platform org not bootstrapped`,
+        );
+        return;
+      }
+
+      const entryDate =
+        event.entryDate instanceof Date
+          ? event.entryDate
+          : new Date(event.entryDate);
+
+      await this.auto_entry_service.onSaasRefund({
+        refund_event_id: event.refundEventId,
+        organization_id: platform_org_id,
+        amount: Number(event.amount),
+        entry_date: entryDate,
+        user_id: event.userId,
+      });
+
+      this.logger.log(
+        `Auto-entry (saas_refund) created for refund=${event.refundEventId}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for subscription.payment.refunded #${event.refundEventId}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
+  @OnEvent('subscription.payment.failed')
+  async handleSaasPaymentFailed(event: {
+    paymentId: number;
+    amount: number;
+    entryDate: Date | string;
+    userId?: number;
+  }) {
+    try {
+      const platform_org_id = await this.resolvePlatformOrgForSaasEntry();
+      if (!platform_org_id) {
+        this.logger.warn(
+          `Skipping saas_bad_debt auto-entry for payment=${event.paymentId}: platform org not bootstrapped`,
+        );
+        return;
+      }
+
+      const entryDate =
+        event.entryDate instanceof Date
+          ? event.entryDate
+          : new Date(event.entryDate);
+
+      await this.auto_entry_service.onSaasPaymentFailed({
+        payment_id: event.paymentId,
+        organization_id: platform_org_id,
+        amount: Number(event.amount),
+        entry_date: entryDate,
+        user_id: event.userId,
+      });
+
+      this.logger.log(
+        `Auto-entry (saas_bad_debt) created for payment=${event.paymentId}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for subscription.payment.failed #${event.paymentId}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
+  @OnEvent('partner_payout_batch.paid')
+  async handlePartnerPayoutPaid(event: {
+    batchId: number;
+    amount: number;
+    entryDate: Date | string;
+    userId?: number;
+  }) {
+    try {
+      const platform_org_id = await this.resolvePlatformOrgForSaasEntry();
+      if (!platform_org_id) {
+        this.logger.warn(
+          `Skipping saas_partner_payout auto-entry for batch=${event.batchId}: platform org not bootstrapped`,
+        );
+        return;
+      }
+
+      const entryDate =
+        event.entryDate instanceof Date
+          ? event.entryDate
+          : new Date(event.entryDate);
+
+      await this.auto_entry_service.onPartnerPayoutPaid({
+        batch_id: event.batchId,
+        organization_id: platform_org_id,
+        amount: Number(event.amount),
+        entry_date: entryDate,
+        user_id: event.userId,
+      });
+
+      this.logger.log(
+        `Auto-entry (saas_partner_payout) created for batch=${event.batchId}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for partner_payout_batch.paid #${event.batchId}: ${error?.message ?? error}`,
+        error?.stack,
+      );
     }
   }
 }

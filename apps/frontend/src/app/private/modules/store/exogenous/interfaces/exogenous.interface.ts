@@ -29,6 +29,20 @@ export interface ExogenousValidationError {
   detail: string;
 }
 
+export interface ExogenousValidationResult {
+  fiscal_year: number;
+  is_complete: boolean;
+  error_count: number;
+  errors: ExogenousValidationError[];
+}
+
+export interface ExogenousDownloadResult {
+  download_url: string;
+  file_key: string;
+  format_code: string;
+  fiscal_year: number;
+}
+
 export interface ExogenousStats {
   total_reports: number;
   by_status: Record<string, number>;

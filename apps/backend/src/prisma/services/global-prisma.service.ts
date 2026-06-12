@@ -663,4 +663,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get saas_metrics_snapshot() {
     return this.baseClient.saas_metrics_snapshot;
   }
+
+  // Inbound vendor support documents (super-admin step 5)
+  get vendor_support_documents() {
+    return this.baseClient.vendor_support_documents;
+  }
 }

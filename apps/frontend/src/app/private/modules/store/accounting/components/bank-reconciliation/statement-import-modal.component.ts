@@ -169,7 +169,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
         <div class="space-y-4">
           @if (importing()) {
             <div class="flex flex-col items-center py-12">
-              <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
+              <app-icon name="loader" [size]="48" class="text-primary-600 mb-4 animate-spin"></app-icon>
               <p class="text-sm text-gray-500">Importando transacciones...</p>
               <p class="text-xs text-gray-400 mt-1">Esto puede tomar unos momentos</p>
             </div>

@@ -30,6 +30,12 @@ import {
   EmployeeAdvanceSummary,
   BankExportResult,
   PayrollUpdateAvailable,
+  PayrollNovelty,
+  CreateNoveltyDto,
+  UpdateNoveltyDto,
+  QueryNoveltyDto,
+  NoveltyListResponse,
+  PilaReport,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -288,6 +294,44 @@ export class PayrollService {
 
   getEmployeeAdvanceSummary(employeeId: number): Observable<ApiResponse<EmployeeAdvanceSummary>> {
     return this.http.get<ApiResponse<EmployeeAdvanceSummary>>(this.getApiUrl(`advances/employee/${employeeId}/summary`));
+  }
+
+  // ─── Novelties ────────────────────────────────────────
+
+  getNovelties(query: QueryNoveltyDto = {}): Observable<NoveltyListResponse> {
+    const params = this.buildParams(query as Record<string, any>);
+    return this.http.get<NoveltyListResponse>(this.getApiUrl('novelties'), { params });
+  }
+
+  getNovelty(id: number): Observable<ApiResponse<PayrollNovelty>> {
+    return this.http.get<ApiResponse<PayrollNovelty>>(this.getApiUrl(`novelties/${id}`));
+  }
+
+  createNovelty(dto: CreateNoveltyDto): Observable<ApiResponse<PayrollNovelty>> {
+    return this.http.post<ApiResponse<PayrollNovelty>>(this.getApiUrl('novelties'), dto);
+  }
+
+  updateNovelty(id: number, dto: UpdateNoveltyDto): Observable<ApiResponse<PayrollNovelty>> {
+    return this.http.patch<ApiResponse<PayrollNovelty>>(this.getApiUrl(`novelties/${id}`), dto);
+  }
+
+  deleteNovelty(id: number): Observable<ApiResponse<void>> {
+    return this.http.delete<ApiResponse<void>>(this.getApiUrl(`novelties/${id}`));
+  }
+
+  // ─── PILA ─────────────────────────────────────────────
+
+  getPilaReport(year: number, month: number): Observable<ApiResponse<PilaReport>> {
+    return this.http.get<ApiResponse<PilaReport>>(this.getApiUrl('pila/report'), {
+      params: { year, month },
+    });
+  }
+
+  exportPilaCsv(year: number, month: number): Observable<Blob> {
+    return this.http.get(this.getApiUrl('pila/export'), {
+      params: { year, month },
+      responseType: 'blob',
+    });
   }
 
   // ─── Paystubs & ACH ───────────────────────────────────

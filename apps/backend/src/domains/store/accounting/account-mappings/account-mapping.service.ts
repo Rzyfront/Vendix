@@ -207,6 +207,30 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2412',
     description: 'ICA por Pagar (reversa devolución)',
   },
+  // Credit notes (nota crédito aceptada por DIAN) — reversa espejo de la venta:
+  // DR devoluciones (4175), DR pasivo de cada impuesto, CR cartera (1305).
+  // Keys propias (no reusa invoice.validated.*) para permitir override
+  // independiente de las cuentas de devolución.
+  'credit_note.accepted.sales_returns': {
+    code: '4175',
+    description: 'Devoluciones en Ventas (nota crédito)',
+  },
+  'credit_note.accepted.iva_payable': {
+    code: '2408',
+    description: 'IVA por Pagar (reversa nota crédito)',
+  },
+  'credit_note.accepted.inc_payable': {
+    code: '2436',
+    description: 'Impuesto al Consumo por Pagar (reversa nota crédito)',
+  },
+  'credit_note.accepted.ica_payable': {
+    code: '2412',
+    description: 'ICA por Pagar (reversa nota crédito)',
+  },
+  'credit_note.accepted.accounts_receivable': {
+    code: '1305',
+    description: 'Cuentas por Cobrar (reversa nota crédito)',
+  },
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': {
     code: '4175',
@@ -548,6 +572,55 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'cash_register.movement.other': {
     code: '2805',
     description: 'Otros (movimiento manual caja)',
+  },
+  // SaaS Refund (RNC-MF-3) — Reversa del ingreso cuando Vendix devuelve dinero a un tenant
+  'saas_refund.revenue': {
+    code: '4175',
+    description: 'Devoluciones en Ventas (SaaS refund)',
+  },
+  'saas_refund.cash_bank': {
+    code: '1110',
+    description: 'Bancos (reembolso SaaS)',
+  },
+  // SaaS Payment Failed (RNC-MF-3) — Provisión de incobrable cuando un cobro Wompi falla
+  'saas_bad_debt.expense': {
+    code: '5295',
+    description: 'Gasto Incobrable SaaS',
+  },
+  'saas_bad_debt.receivable': {
+    code: '1305',
+    description: 'Cuentas por Cobrar SaaS (provisión incobrable)',
+  },
+  // Partner Payout Paid (RNC-MF-3) — Pago de batch de comisiones a partner
+  'saas_partner_payout.commissions_payable': {
+    code: '2335',
+    description: 'CxP Comisiones Partners',
+  },
+  'saas_partner_payout.cash_bank': {
+    code: '1110',
+    description: 'Bancos (pago comisiones partner)',
+  },
+  // SaaS Subscription (RNC-31) — Store-cliente side: gasto admin del cliente
+  'saas_subscription_expense.expense': {
+    code: '5135',
+    description: 'Gasto suscripción SaaS Vendix (cliente)',
+  },
+  'saas_subscription_expense.cash_bank': {
+    code: '1110',
+    description: 'Pago a Vendix (suscripción) — banco del cliente',
+  },
+  // SaaS Subscription (RNC-31) — Platform side: ingreso Vendix + partner payable
+  'saas_revenue.cash_bank': {
+    code: '1110',
+    description: 'Bancos (cobro suscripción SaaS — plataforma Vendix)',
+  },
+  'saas_revenue.revenue': {
+    code: '4135',
+    description: 'Ingreso suscripción SaaS (plataforma Vendix)',
+  },
+  'saas_revenue.partner_payable': {
+    code: '2335',
+    description: 'CxP Comisión partner SaaS (plataforma Vendix)',
   },
 };
 

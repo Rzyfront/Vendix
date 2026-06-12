@@ -246,6 +246,7 @@ export class StorePrismaService extends BasePrismaService {
       'employees', // Org scoped (multi-store via employee_stores junction)
       'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
+      'payroll_novelties', // Org scoped (organization_id + optional store_id)
       'payroll_settlements', // Fiscal entity scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
@@ -520,6 +521,7 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries',
       'employees',
       'payroll_runs',
+      'payroll_novelties',
       'employee_advances',
       'bank_accounts',
       'fixed_asset_categories',
@@ -1183,6 +1185,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get payroll_settlements() {
     return this.scoped_client.payroll_settlements;
+  }
+
+  get payroll_novelties() {
+    return this.scoped_client.payroll_novelties;
   }
 
   get employee_advances() {

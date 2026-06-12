@@ -82,6 +82,13 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'refund.completed.iva_payable': '2408',
   'refund.completed.inc_payable': '2436',
   'refund.completed.ica_payable': '2412',
+  // Credit notes (nota crédito aceptada) — reversa espejo de la venta.
+  // Mirrors DEFAULT_ACCOUNT_MAPPINGS (dual-source rule).
+  'credit_note.accepted.sales_returns': '4175',
+  'credit_note.accepted.iva_payable': '2408',
+  'credit_note.accepted.inc_payable': '2436',
+  'credit_note.accepted.ica_payable': '2412',
+  'credit_note.accepted.accounts_receivable': '1305',
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',
@@ -172,6 +179,15 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'saas_revenue.cash_bank': '1110',
   'saas_revenue.revenue': '4135',
   'saas_revenue.partner_payable': '2335',
+  // SaaS Refund (RNC-MF-3) — Reversa del ingreso cuando Vendix devuelve dinero a un tenant
+  'saas_refund.revenue': '4175',
+  'saas_refund.cash_bank': '1110',
+  // SaaS Payment Failed (RNC-MF-3) — Provisión de incobrable cuando un cobro Wompi falla
+  'saas_bad_debt.expense': '5295',
+  'saas_bad_debt.receivable': '1305',
+  // Partner Payout Paid (RNC-MF-3) — Pago de batch de comisiones a partner
+  'saas_partner_payout.commissions_payable': '2335',
+  'saas_partner_payout.cash_bank': '1110',
 };
 
 /**

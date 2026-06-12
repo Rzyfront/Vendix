@@ -7,6 +7,14 @@ import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.s
  */
 const BACKOFF_MINUTES = [5, 30, 120];
 
+export interface InvoiceRetryStatus {
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  next_retry_at: Date;
+}
+
 @Injectable()
 export class InvoiceRetryQueueService {
   private readonly logger = new Logger(InvoiceRetryQueueService.name);
@@ -125,6 +133,47 @@ export class InvoiceRetryQueueService {
     this.logger.log(
       `Invoice ${item.invoice_id} retry ${new_attempts}/${item.max_attempts} failed. Next attempt at ${next_retry_at.toISOString()}`,
     );
+  }
+
+  /**
+   * Batch-resolve the latest retry-queue state for a page of invoices.
+   * Single query for all IDs (no N+1); the caller passes IDs that already
+   * went through the tenant-scoped invoice listing, so the result set is
+   * tenant-safe by construction. Invoices without a queue row are simply
+   * absent from the map (the caller maps them to retry_status = null).
+   */
+  async getRetryStatusByInvoiceIds(
+    invoice_ids: number[],
+  ): Promise<Map<number, InvoiceRetryStatus>> {
+    const result = new Map<number, InvoiceRetryStatus>();
+    if (!invoice_ids.length) return result;
+
+    const rows = await this.prisma.invoice_retry_queue.findMany({
+      where: { invoice_id: { in: invoice_ids } },
+      orderBy: { updated_at: 'desc' },
+      select: {
+        invoice_id: true,
+        status: true,
+        attempts: true,
+        max_attempts: true,
+        last_error: true,
+        next_retry_at: true,
+      },
+    });
+
+    for (const row of rows) {
+      // Rows are sorted newest-first; keep only the most recent per invoice.
+      if (result.has(row.invoice_id)) continue;
+      result.set(row.invoice_id, {
+        status: row.status,
+        attempts: row.attempts,
+        max_attempts: row.max_attempts,
+        last_error: row.last_error,
+        next_retry_at: row.next_retry_at,
+      });
+    }
+
+    return result;
   }
 
   /**

@@ -75,3 +75,30 @@
     }
   </app-card>
 </div>
+
+<!-- DIAN retry-status chip (Paso 13): rendered by the desktop table for
+     the `retry_status` column. pending/processing → ámbar "Reintentando";
+     failed → rojo "Reintentos agotados". Tooltip surfaces last_error and
+     the next scheduled retry. -->
+<ng-template #retryStatusTemplate let-item>
+  @if (hasRetryChip(item.retry_status)) {
+    <app-tooltip
+      [content]="getRetryTooltip(item.retry_status)"
+      position="top"
+      size="sm"
+    >
+      <span
+        class="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap"
+        [class]="getRetryChipClass(item.retry_status)"
+      >
+        <app-icon
+          [name]="getRetryChipIcon(item.retry_status) || 'refresh-cw'"
+          [size]="12"
+        ></app-icon>
+        {{ getRetryChipLabel(item.retry_status) }}
+      </span>
+    </app-tooltip>
+  } @else {
+    <span class="text-text-secondary">—</span>
+  }
+</ng-template>

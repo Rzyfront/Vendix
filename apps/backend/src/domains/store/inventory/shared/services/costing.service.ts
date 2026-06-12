@@ -2,6 +2,12 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
+
+export interface ScopedLocationFilter {
+  organization_id: number;
+  store_id?: number;
+}
 
 export interface CalculateCostParams {
   product_id: number;
@@ -33,11 +39,68 @@ export interface ConsumeCostParams {
 export class CostingService {
   private readonly logger = new Logger(CostingService.name);
 
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly operatingScopeService: OperatingScopeService,
+  ) {}
+
+  /**
+   * Build a scoped `inventory_locations` filter for cost aggregates based on
+   * the organization's operating scope:
+   *
+   * - STORE → constrains to the same `store_id` as the receiving location
+   *   (org-level central warehouses without a `store_id` fall back to org-level).
+   * - ORGANIZATION → constrains to the entire organization.
+   *
+   * Validates that the location belongs to the given organization. Used by
+   * `calculateCostOnReceipt` and by `getCostPreview` (purchase orders) so the
+   * weighted-average cost never aggregates stock across organizations or, in
+   * STORE scope, across sibling stores.
+   */
+  async buildScopedLocationFilter(
+    organizationId: number,
+    locationId: number,
+    tx?: any,
+  ): Promise<ScopedLocationFilter> {
+    const prisma = tx || this.prisma;
+
+    const location = await prisma.inventory_locations.findUnique({
+      where: { id: locationId },
+      select: { organization_id: true, store_id: true },
+    });
+
+    if (!location || location.organization_id !== organizationId) {
+      throw new Error(
+        `Location ${locationId} does not belong to organization ${organizationId}`,
+      );
+    }
+
+    const scope = await this.operatingScopeService.getOperatingScope(
+      organizationId,
+      tx,
+    );
+
+    if (scope === 'STORE') {
+      if (location.store_id == null) {
+        this.logger.warn(
+          `Location ${locationId} has scope STORE but store_id is null; ` +
+            `falling back to ORGANIZATION-level cost aggregate.`,
+        );
+        return { organization_id: organizationId };
+      }
+      return { organization_id: organizationId, store_id: location.store_id };
+    }
+
+    return { organization_id: organizationId };
+  }
 
   /**
    * Calculate new cost on inventory receipt and create cost layer.
    * Called when receiving a purchase order.
+   *
+   * MUST be called BEFORE the stock increment for this receipt — all
+   * stock_levels reads are pre-receipt to avoid double-counting the incoming
+   * quantity in the weighted average.
    */
   async calculateCostOnReceipt(
     params: CalculateCostParams,
@@ -58,24 +121,32 @@ export class CostingService {
     const existingQty = stockLevel?.quantity_on_hand ?? 0;
     const existingCost = Number(stockLevel?.cost_per_unit ?? 0);
 
-    // Global stock across all locations (for product-level cost_price)
-    const allStockLevels = await prisma.stock_levels.findMany({
+    // Scoped stock aggregate (multi-tenant safe): aggregate across the same
+    // store (STORE scope) or organization (ORGANIZATION scope) — never cross
+    // organizations or, in STORE scope, sibling stores.
+    const locationFilter = await this.buildScopedLocationFilter(
+      organizationId,
+      params.location_id,
+      tx,
+    );
+    const scopedStockLevels = await prisma.stock_levels.findMany({
       where: {
         product_id: params.product_id,
         product_variant_id: params.variant_id || null,
         quantity_on_hand: { gt: 0 },
+        inventory_locations: { is: locationFilter },
       },
     });
-    const globalQty = allStockLevels.reduce(
+    const scopedQty = scopedStockLevels.reduce(
       (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
       0,
     );
-    const globalValue = allStockLevels.reduce(
+    const scopedValue = scopedStockLevels.reduce(
       (sum, sl) =>
         sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
       0,
     );
-    const globalCost = globalQty > 0 ? globalValue / globalQty : 0;
+    const scopedCost = scopedQty > 0 ? scopedValue / scopedQty : 0;
 
     let newCostPerUnit: number;
 
@@ -100,17 +171,18 @@ export class CostingService {
         newCostPerUnit = params.unit_cost;
     }
 
-    // Calculate global cost per unit for product-level cost_price
-    let globalCostPerUnit: number;
+    // Calculate scoped cost per unit for product-level cost_price (within the
+    // same store/organization, never cross-tenant).
+    let scopedCostPerUnit: number;
     if (params.costing_method === 'weighted_average') {
-      globalCostPerUnit = this.calculateWeightedAverage(
-        globalQty,
-        globalCost,
+      scopedCostPerUnit = this.calculateWeightedAverage(
+        scopedQty,
+        scopedCost,
         params.quantity_received,
         params.unit_cost,
       );
     } else {
-      globalCostPerUnit = params.unit_cost;
+      scopedCostPerUnit = params.unit_cost;
     }
 
     // Always create a cost layer (useful for FIFO/LIFO, and for audit in weighted avg)
@@ -141,16 +213,17 @@ export class CostingService {
       });
     }
 
-    // Update product or variant cost_price (global weighted average across all locations)
+    // Update product or variant cost_price (scoped weighted average across
+    // same-store / same-organization locations, per operating_scope)
     if (params.variant_id) {
       await prisma.product_variants.update({
         where: { id: params.variant_id },
-        data: { cost_price: new Prisma.Decimal(globalCostPerUnit) },
+        data: { cost_price: new Prisma.Decimal(scopedCostPerUnit) },
       });
     } else {
       await prisma.products.update({
         where: { id: params.product_id },
-        data: { cost_price: new Prisma.Decimal(globalCostPerUnit) },
+        data: { cost_price: new Prisma.Decimal(scopedCostPerUnit) },
       });
     }
 

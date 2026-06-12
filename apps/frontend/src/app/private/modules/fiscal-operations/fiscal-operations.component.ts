@@ -15,11 +15,12 @@ import {
   BadgeComponent,
   ButtonComponent,
   CardComponent,
+  IconComponent,
   ItemListCardConfig,
   ResponsiveDataViewComponent,
-  StatsComponent,
   TableAction,
   TableColumn,
+  TooltipComponent,
 } from '../../../shared/components/index';
 import type { BadgeVariant } from '../../../shared/components/index';
 import { CurrencyFormatService } from '../../../shared/pipes/currency/currency.pipe';
@@ -32,21 +33,28 @@ import {
   FiscalObligation,
   FiscalOperationEvent,
   FiscalOverview,
-  FiscalRuleSet,
   TaxDeclarationDraft,
   TaxDeclarationLine,
 } from './interfaces/fiscal-operations.interface';
 import { FiscalOperationsService } from './services/fiscal-operations.service';
 import { FiscalOperationsHeaderActionsService } from './services/fiscal-operations-header-actions.service';
+import { FiscalFlowDashboardComponent } from './components/fiscal-flow-dashboard.component';
+import { FiscalRulesTabComponent } from './components/fiscal-rules-tab.component';
 
 type FiscalTab =
   | 'dashboard'
   | 'obligations'
   | 'declarations'
   | 'close'
+  // `audit` unifies the former `evidence` + `history` tabs behind an
+  // internal toggle. The legacy ids remain valid as internal aliases so
+  // old route data keeps rendering the right section.
+  | 'audit'
   | 'evidence'
   | 'history'
   | 'rules';
+
+type AuditView = 'evidence' | 'history';
 
 @Component({
   selector: 'app-fiscal-operations',
@@ -56,8 +64,11 @@ type FiscalTab =
     BadgeComponent,
     ButtonComponent,
     CardComponent,
+    FiscalFlowDashboardComponent,
+    FiscalRulesTabComponent,
+    IconComponent,
     ResponsiveDataViewComponent,
-    StatsComponent,
+    TooltipComponent,
   ],
   template: `
     <section class="w-full space-y-4 pb-6">
@@ -68,102 +79,12 @@ type FiscalTab =
       }
 
       @if (activeTab() === 'dashboard') {
-        <div class="stats-container">
-          <app-stats
-            title="Próximos vencimientos"
-            [value]="overview()?.stats?.upcoming || 0"
-            smallText="obligaciones por vencer"
-            iconName="calendar-clock"
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-500"
-            [loading]="loading()"
-          />
-          <app-stats
-            title="Pendientes críticos"
-            [value]="overview()?.stats?.overdue || 0"
-            smallText="vencidas"
-            iconName="alert-triangle"
-            iconBgColor="bg-red-100"
-            iconColor="text-red-500"
-            [loading]="loading()"
-          />
-          <app-stats
-            title="Declaraciones listas"
-            [value]="overview()?.stats?.declarations_ready || 0"
-            smallText="listas para revisar"
-            iconName="file-check"
-            iconBgColor="bg-emerald-100"
-            iconColor="text-emerald-500"
-            [loading]="loading()"
-          />
-          <app-stats
-            title="Estimado a pagar"
-            [value]="money(overview()?.stats?.estimated_amount)"
-            smallText="según obligaciones"
-            iconName="dollar-sign"
-            iconBgColor="bg-purple-100"
-            iconColor="text-purple-500"
-            [loading]="loading()"
-          />
-        </div>
-
-        <div class="grid gap-4 lg:grid-cols-3">
-          <app-card
-            class="lg:col-span-2 min-w-0"
-            [responsive]="true"
-            [padding]="false"
-            [overflow]="'auto'"
-          >
-            <div
-              class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border"
-            >
-              <h2
-                class="text-sm font-semibold text-text-primary md:text-base"
-              >
-                Próximas obligaciones
-              </h2>
-            </div>
-            <div class="px-2 pb-2 pt-3 md:p-4">
-              <app-responsive-data-view
-                [data]="overview()?.next_obligations || []"
-                [columns]="dashboardObligationColumns"
-                [cardConfig]="obligationCardConfig"
-                [loading]="loading()"
-                emptyTitle="Sin obligaciones próximas"
-                emptyMessage="Sin obligaciones próximas"
-                emptyDescription="No hay obligaciones próximas."
-                emptyIcon="calendar-clock"
-                [showEmptyAction]="false"
-              />
-            </div>
-          </app-card>
-
-          <app-card [responsive]="true">
-            <h2 class="text-sm font-semibold text-text-primary">
-              Riesgo operativo
-            </h2>
-            <div class="mt-4 space-y-3 text-sm">
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-text-secondary">Documentos rechazados</span>
-                <strong class="text-error">{{
-                  overview()?.stats?.rejected_documents || 0
-                }}</strong>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-text-secondary">Cierres abiertos</span>
-                <strong class="text-warning">{{
-                  overview()?.stats?.open_close_sessions || 0
-                }}</strong>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-text-secondary">Valor final aprobado</span>
-                <strong class="text-text-primary">{{
-                  money(overview()?.stats?.final_amount)
-                }}</strong>
-              </div>
-            </div>
-          </app-card>
-        </div>
+        <!-- Centro Fiscal: pipeline vivo del período + checklist de configuración.
+             El componente hijo carga su propio overview/flow-state/checklist. -->
+        <app-fiscal-flow-dashboard
+          [scope]="fiscalScope"
+          [reloadToken]="dashboardReload()"
+        />
       }
 
       @if (activeTab() === 'obligations') {
@@ -171,9 +92,33 @@ type FiscalTab =
           <div
             class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4 md:border-b md:border-border"
           >
-            <h2 class="text-sm font-semibold text-text-primary md:text-base">
-              Obligaciones fiscales ({{ obligations().length }})
-            </h2>
+            <div class="flex items-center gap-2">
+              <h2 class="text-sm font-semibold text-text-primary md:text-base">
+                Obligaciones fiscales ({{ obligations().length }})
+              </h2>
+              <app-tooltip
+                content="Compromisos con la DIAN (declarar, reportar o pagar) con fecha límite."
+                position="bottom"
+                size="sm"
+              >
+                <app-icon
+                  name="info"
+                  [size]="15"
+                  class="text-text-secondary"
+                />
+              </app-tooltip>
+              <app-tooltip
+                content="Estados: Pendiente → En progreso → Lista → Aprobada → Presentada → Pagada."
+                position="bottom"
+                size="sm"
+              >
+                <app-icon
+                  name="help-circle"
+                  [size]="15"
+                  class="text-text-secondary"
+                />
+              </app-tooltip>
+            </div>
             <app-button
               variant="primary"
               size="sm"
@@ -206,9 +151,24 @@ type FiscalTab =
             <div
               class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4 md:border-b md:border-border"
             >
-              <h2 class="text-sm font-semibold text-text-primary md:text-base">
-                Borradores de declaraciones ({{ declarations().length }})
-              </h2>
+              <div class="flex items-center gap-2">
+                <h2
+                  class="text-sm font-semibold text-text-primary md:text-base"
+                >
+                  Borradores de declaraciones ({{ declarations().length }})
+                </h2>
+                <app-tooltip
+                  content="Cálculo previo y editable del período; no se envía a la DIAN."
+                  position="bottom"
+                  size="sm"
+                >
+                  <app-icon
+                    name="info"
+                    [size]="15"
+                    class="text-text-secondary"
+                  />
+                </app-tooltip>
+              </div>
               <div class="flex flex-wrap gap-2">
                 <app-button
                   variant="outline"
@@ -257,14 +217,27 @@ type FiscalTab =
               <div
                 class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border"
               >
-                <h3
-                  class="text-sm font-semibold text-text-primary md:text-base"
-                >
-                  Líneas:
-                  {{
-                    declarationLabel(selectedDeclaration()!.declaration_type)
-                  }}
-                </h3>
+                <div class="flex items-center gap-2">
+                  <h3
+                    class="text-sm font-semibold text-text-primary md:text-base"
+                  >
+                    Líneas:
+                    {{
+                      declarationLabel(selectedDeclaration()!.declaration_type)
+                    }}
+                  </h3>
+                  <app-tooltip
+                    content="Cada línea explica de dónde sale cada valor del borrador."
+                    position="bottom"
+                    size="sm"
+                  >
+                    <app-icon
+                      name="info"
+                      [size]="15"
+                      class="text-text-secondary"
+                    />
+                  </app-tooltip>
+                </div>
               </div>
               <div class="px-2 pb-2 pt-3 md:p-4">
                 <app-responsive-data-view
@@ -290,9 +263,24 @@ type FiscalTab =
             <div
               class="flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-6 md:py-4"
             >
-              <h2 class="text-sm font-semibold text-text-primary md:text-base">
-                Cierre fiscal mensual ({{ closeSessions().length }})
-              </h2>
+              <div class="flex items-center gap-2">
+                <h2
+                  class="text-sm font-semibold text-text-primary md:text-base"
+                >
+                  Cierre fiscal mensual ({{ closeSessions().length }})
+                </h2>
+                <app-tooltip
+                  content="El cierre congela el período; reabrirlo queda auditado."
+                  position="bottom"
+                  size="sm"
+                >
+                  <app-icon
+                    name="info"
+                    [size]="15"
+                    class="text-text-secondary"
+                  />
+                </app-tooltip>
+              </div>
               <app-button
                 variant="primary"
                 size="sm"
@@ -326,14 +314,20 @@ type FiscalTab =
                   </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
-                  <app-button
-                    variant="outline"
+                  <app-tooltip
+                    content="Validaciones automáticas que deben pasar antes de poder cerrar."
+                    position="bottom"
                     size="sm"
-                    [disabled]="working()"
-                    (clicked)="runCloseChecks(session)"
                   >
-                    Ejecutar checks
-                  </app-button>
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [disabled]="working()"
+                      (clicked)="runCloseChecks(session)"
+                    >
+                      Ejecutar checks
+                    </app-button>
+                  </app-tooltip>
                   <app-button
                     variant="outline"
                     size="sm"
@@ -409,7 +403,49 @@ type FiscalTab =
         </div>
       }
 
-      @if (activeTab() === 'evidence') {
+      <!-- Tab Auditoría: toggle interno Evidencias ↔ Historial -->
+      @if (activeTab() === 'audit') {
+        <div class="flex">
+          <div
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-surface p-1"
+            role="tablist"
+            aria-label="Vista de auditoría"
+          >
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="auditView() === 'evidence'"
+              class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:text-sm"
+              [class]="
+                auditView() === 'evidence'
+                  ? 'bg-primary-600 text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              "
+              (click)="auditView.set('evidence')"
+            >
+              <app-icon name="folder-open" [size]="14" />
+              Evidencias
+            </button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="auditView() === 'history'"
+              class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:text-sm"
+              [class]="
+                auditView() === 'history'
+                  ? 'bg-primary-600 text-white'
+                  : 'text-text-secondary hover:text-text-primary'
+              "
+              (click)="auditView.set('history')"
+            >
+              <app-icon name="clipboard-list" [size]="14" />
+              Historial
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (showEvidence()) {
         <app-card [responsive]="true" [padding]="false">
           <div class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border">
             <h2 class="text-sm font-semibold text-text-primary md:text-base">
@@ -433,55 +469,15 @@ type FiscalTab =
       }
 
       @if (activeTab() === 'rules') {
-        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          @for (rule of rules(); track rule.id || rule.rule_type + rule.year) {
-            <app-card [responsive]="true">
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <h2 class="text-sm font-semibold text-text-primary">
-                    {{ rule.name }}
-                  </h2>
-                  <p class="mt-1 text-xs text-text-secondary">
-                    {{ rule.country_code }} · {{ rule.year }} ·
-                    {{ rule.version }}
-                  </p>
-                </div>
-                <app-badge [variant]="statusVariant(rule.status)" size="sm">
-                  {{ statusLabel(rule.status) }}
-                </app-badge>
-              </div>
-              <dl class="mt-4 space-y-2 text-sm">
-                <div class="flex items-center justify-between gap-3">
-                  <dt class="text-text-secondary">Tipo</dt>
-                  <dd class="font-medium text-text-primary">
-                    {{ rule.rule_type }}
-                  </dd>
-                </div>
-                <div class="flex items-center justify-between gap-3">
-                  <dt class="text-text-secondary">Vigencia</dt>
-                  <dd class="font-medium text-text-primary">
-                    {{ formatDate(rule.effective_from) }}
-                  </dd>
-                </div>
-                <div class="flex items-center justify-between gap-3">
-                  <dt class="text-text-secondary">Origen</dt>
-                  <dd class="font-medium text-text-primary">
-                    {{ rule.source || 'Configurada' }}
-                  </dd>
-                </div>
-              </dl>
-            </app-card>
-          } @empty {
-            <app-card class="md:col-span-2 xl:col-span-3" [responsive]="true">
-              <p class="py-8 text-center text-sm text-text-secondary">
-                No hay reglas fiscales configuradas.
-              </p>
-            </app-card>
-          }
-        </div>
+        <!-- Tab Reglas: CRUD de reglas fiscales delegado al componente hijo
+             (carga sus propios datos, igual que el Centro Fiscal). -->
+        <app-fiscal-rules-tab
+          [scope]="fiscalScope"
+          [reloadToken]="rulesReload()"
+        />
       }
 
-      @if (activeTab() === 'history') {
+      @if (showHistory()) {
         <app-card [responsive]="true" [padding]="false">
           <div class="px-4 py-3 md:px-6 md:py-4 md:border-b md:border-border">
             <h2 class="text-sm font-semibold text-text-primary md:text-base">
@@ -522,6 +518,37 @@ export class FiscalOperationsComponent {
   );
 
   readonly activeTab = computed(() => this.routeData());
+
+  /** Scope de API resuelto desde la ruta; el Centro Fiscal lo recibe como input. */
+  readonly fiscalScope = this.apiScope();
+
+  /**
+   * Token de recarga para el Centro Fiscal (tab dashboard). El hijo carga sus
+   * propios datos; al pulsar "refrescar" en el header solo incrementamos esto.
+   */
+  readonly dashboardReload = signal(0);
+
+  /** Token de recarga para el tab Reglas (el hijo carga sus propios datos). */
+  readonly rulesReload = signal(0);
+
+  /**
+   * Sub-view of the unified "Auditoría" tab. Evidencias and Historial
+   * keep their full templates/logic — the toggle only switches which
+   * section renders under the audit tab.
+   */
+  readonly auditView = signal<AuditView>('evidence');
+
+  readonly showEvidence = computed(
+    () =>
+      this.activeTab() === 'evidence' ||
+      (this.activeTab() === 'audit' && this.auditView() === 'evidence'),
+  );
+
+  readonly showHistory = computed(
+    () =>
+      this.activeTab() === 'history' ||
+      (this.activeTab() === 'audit' && this.auditView() === 'history'),
+  );
   readonly overview = signal<FiscalOverview | null>(null);
   readonly obligations = signal<FiscalObligation[]>([]);
   readonly declarations = signal<TaxDeclarationDraft[]>([]);
@@ -530,7 +557,6 @@ export class FiscalOperationsComponent {
   readonly closeSessions = signal<FiscalCloseSession[]>([]);
   readonly evidence = signal<FiscalEvidence[]>([]);
   readonly history = signal<FiscalOperationEvent[]>([]);
-  readonly rules = signal<FiscalRuleSet[]>([]);
   readonly loading = signal(false);
   readonly working = signal(false);
   readonly errorMessage = signal<string | null>(null);
@@ -545,14 +571,6 @@ export class FiscalOperationsComponent {
     size: 'sm' as const,
     colorFn: (value: unknown) => this.statusColor(String(value ?? '')),
   };
-
-  readonly dashboardObligationColumns: TableColumn[] = [
-    { key: 'type', label: 'Tipo', priority: 1, transform: (_v, r) => this.typeLabel(r.type) },
-    { key: 'period_year', label: 'Periodo', priority: 2, transform: (_v, r) => this.periodLabel(r) },
-    { key: 'accounting_entity', label: 'Entidad', priority: 3, transform: (_v, r) => this.entityLabel(r) },
-    { key: 'due_date', label: 'Vence', priority: 2, transform: (v) => this.formatDate(v) },
-    { key: 'status', label: 'Estado', align: 'center', priority: 1, badgeConfig: this.statusBadge, transform: (v) => this.statusLabel(String(v ?? '')) },
-  ];
 
   readonly obligationColumns: TableColumn[] = [
     { key: 'type', label: 'Tipo', priority: 1, transform: (_v, r) => this.typeLabel(r.type) },
@@ -694,7 +712,8 @@ export class FiscalOperationsComponent {
     effect(() => {
       const tab = this.activeTab();
       untracked(() => {
-        this.loadOverview();
+        // El dashboard (Centro Fiscal) carga su propio overview/flow-state.
+        if (tab !== 'dashboard') this.loadOverview();
         this.loadTab(tab);
       });
     });
@@ -713,6 +732,16 @@ export class FiscalOperationsComponent {
   }
 
   reloadCurrentTab(): void {
+    if (this.activeTab() === 'dashboard') {
+      // El Centro Fiscal recarga sus propios datos al cambiar el token.
+      this.dashboardReload.update((value) => value + 1);
+      return;
+    }
+    if (this.activeTab() === 'rules') {
+      // El tab Reglas también es autónomo: solo se incrementa su token.
+      this.rulesReload.update((value) => value + 1);
+      return;
+    }
     this.loadOverview();
     this.loadTab(this.activeTab());
   }
@@ -1221,9 +1250,15 @@ export class FiscalOperationsComponent {
     if (tab === 'obligations') this.loadObligations();
     if (tab === 'declarations') this.loadDeclarations();
     if (tab === 'close') this.loadCloseSessions();
+    if (tab === 'audit') {
+      // Unified audit view: preload both sections so the internal
+      // Evidencias ↔ Historial toggle is instant.
+      this.loadEvidence();
+      this.loadHistory();
+    }
     if (tab === 'evidence') this.loadEvidence();
     if (tab === 'history') this.loadHistory();
-    if (tab === 'rules') this.loadRules();
+    // El tab 'rules' carga sus propios datos en <app-fiscal-rules-tab>.
   }
 
   private loadOverview(): void {
@@ -1280,16 +1315,6 @@ export class FiscalOperationsComponent {
       });
   }
 
-  private loadRules(): void {
-    this.service
-      .listRules(this.apiScope())
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => this.rules.set(response.data || []),
-        error: () => this.handleError('No se pudieron cargar las reglas'),
-      });
-  }
-
   private loadHistory(): void {
     this.service
       .listHistory(this.apiScope(), { limit: 50 })
@@ -1322,7 +1347,12 @@ export class FiscalOperationsComponent {
   private apiScope(): FiscalApiScope {
     const routeScope = this.route.pathFromRoot
       .map((route) => route.snapshot.data['fiscalApiScope'])
-      .find((value) => value === 'store' || value === 'organization');
+      .find(
+        (value) =>
+          value === 'store' ||
+          value === 'organization' ||
+          value === 'platform',
+      );
     return (routeScope as FiscalApiScope | undefined) ?? 'store';
   }
 
