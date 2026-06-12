@@ -21,6 +21,7 @@ import {
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
+  IconComponent,
   InputComponent,
   InputsearchComponent,
   ItemListCardConfig,
@@ -29,16 +30,22 @@ import {
   ResponsiveDataViewComponent,
   SelectorComponent,
   SelectorOption,
+  SortDirection,
   SpinnerComponent,
-  StickyHeaderActionButton,
-  StickyHeaderComponent,
+  StatsComponent,
   TableAction,
   TableColumn,
   ToastService,
-  SortDirection,
 } from '../../../../../../shared/components';
-import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { getDefaultEndDate, getDefaultStartDate, toLocalDateString } from '../../../../../../shared/utils/date.util';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  getDefaultEndDate,
+  getDefaultStartDate,
+  toLocalDateString,
+} from '../../../../../../shared/utils/date.util';
 import {
   CreateManualJournalEntryDto,
   CreateManualJournalEntryLineDto,
@@ -62,6 +69,13 @@ interface ManualEntryForm {
   lines: FormArray<FormGroup<JournalLineForm>>;
 }
 
+interface JournalEntriesStats {
+  total: number;
+  totalDebit: number;
+  totalCredit: number;
+  manualCount: number;
+}
+
 const SOURCE_TYPE_OPTIONS: SelectorOption[] = [
   { value: 'all', label: 'Todos los orígenes' },
   { value: 'saas_revenue', label: 'SaaS — Revenue' },
@@ -78,10 +92,10 @@ const SOURCE_TYPE_OPTIONS: SelectorOption[] = [
     ReactiveFormsModule,
     FormsModule,
     CurrencyPipe,
-    StickyHeaderComponent,
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
+    IconComponent,
     InputComponent,
     InputsearchComponent,
     ModalComponent,
@@ -89,255 +103,9 @@ const SOURCE_TYPE_OPTIONS: SelectorOption[] = [
     ResponsiveDataViewComponent,
     SelectorComponent,
     SpinnerComponent,
+    StatsComponent,
   ],
-  template: `
-    <div class="w-full">
-      <app-sticky-header
-        title="Asientos Contables"
-        subtitle="Libro diario de la plataforma"
-        icon="book"
-        [actions]="headerActions()"
-        (actionClicked)="onHeaderAction($event)"
-      />
-
-      <div class="px-2 md:px-4 pt-2 pb-4 space-y-4">
-        <!-- Filters card -->
-        <app-card [responsive]="true" [padding]="false" customClasses="!p-0">
-          <div class="px-2 py-2 md:px-4 md:py-3 border-b border-border">
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-              <div class="md:col-span-3">
-                <app-inputsearch
-                  size="sm"
-                  placeholder="Buscar por descripción o número…"
-                  [debounceTime]="400"
-                  (searchChange)="onSearch($event)"
-                />
-              </div>
-              <div class="md:col-span-3">
-                <app-selector
-                  size="sm"
-                  variant="outline"
-                  label="Origen"
-                  [options]="sourceTypeOptions"
-                  [ngModel]="sourceTypeFilter()"
-                  (ngModelChange)="onSourceTypeChange($any($event))"
-                />
-              </div>
-              <div class="md:col-span-3">
-                <app-selector
-                  size="sm"
-                  variant="outline"
-                  label="Periodo fiscal"
-                  [options]="periodFilterOptions()"
-                  [ngModel]="periodFilter()"
-                  (ngModelChange)="onPeriodFilterChange($any($event))"
-                />
-              </div>
-              <div class="md:col-span-3">
-                <div class="grid grid-cols-2 gap-2">
-                  <app-input
-                    label="Desde"
-                    type="date"
-                    size="sm"
-                    [control]="dateRange.controls.from"
-                  />
-                  <app-input
-                    label="Hasta"
-                    type="date"
-                    size="sm"
-                    [control]="dateRange.controls.to"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          @if (loading()) {
-            <div class="p-4 md:p-6 text-center">
-              <app-spinner size="md" label="Cargando asientos…"></app-spinner>
-            </div>
-          }
-
-          @if (!loading() && entries().length === 0) {
-            <app-empty-state
-              icon="file-text"
-              title="Sin asientos"
-              description="No se encontraron asientos contables con los filtros actuales."
-              [showActionButton]="false"
-            ></app-empty-state>
-          }
-
-          @if (!loading() && entries().length > 0) {
-            <div class="px-2 pb-2 pt-2 md:p-4">
-              <app-responsive-data-view
-                [data]="entries()"
-                [columns]="columns"
-                [cardConfig]="cardConfig"
-                [actions]="actions"
-                [loading]="loading()"
-                [sortable]="true"
-                (sort)="onSort($event)"
-                (rowClick)="onRowClick($any($event))"
-              />
-              @if (pagination().totalPages > 1) {
-                <div class="mt-4 flex justify-center">
-                  <app-pagination
-                    [currentPage]="pagination().page"
-                    [totalPages]="pagination().totalPages"
-                    [total]="pagination().total"
-                    [limit]="pagination().limit"
-                    infoStyle="range"
-                    (pageChange)="onPageChange($any($event))"
-                  />
-                </div>
-              }
-            </div>
-          }
-        </app-card>
-      </div>
-    </div>
-
-    <!-- Manual entry modal -->
-    <app-modal
-      [isOpen]="modalOpen()"
-      title="Asiento manual"
-      subtitle="Crea un asiento contable con dos o más líneas balanceadas (DR = CR)"
-      size="xl-mid"
-      (closed)="closeModal()"
-    >
-      <form
-        [formGroup]="form"
-        (ngSubmit)="onSubmit()"
-        class="space-y-4"
-        autocomplete="off"
-      >
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <app-input
-            label="Fecha"
-            type="date"
-            [required]="true"
-            [control]="form.controls.entry_date"
-          />
-          <div class="md:col-span-2">
-            <app-selector
-              label="Periodo fiscal"
-              [required]="true"
-              [options]="periodOptions()"
-              [ngModel]="form.controls.fiscal_period_id.value"
-              (ngModelChange)="form.controls.fiscal_period_id.setValue($any($event))"
-            />
-          </div>
-        </div>
-
-        <app-input
-          label="Descripción"
-          placeholder="Concepto del asiento"
-          [required]="true"
-          [control]="form.controls.description"
-        />
-
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <h4 class="text-sm font-semibold text-text-primary">Líneas</h4>
-            <app-button
-              variant="outline"
-              size="sm"
-              label="+ Añadir línea"
-              (clicked)="addLine()"
-            />
-          </div>
-
-          <div formArrayName="lines" class="space-y-2">
-            @for (line of linesArray.controls; track $index; let i = $index) {
-              <div
-                [formGroupName]="i"
-                class="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border border-border bg-background"
-              >
-                <div class="col-span-12 md:col-span-3">
-                  <app-input
-                    label="Cuenta"
-                    placeholder="Ej. 110505"
-                    [required]="true"
-                    [control]="line.controls.account_code"
-                  />
-                </div>
-                <div class="col-span-12 md:col-span-4">
-                  <app-input
-                    label="Descripción"
-                    [control]="line.controls.description"
-                  />
-                </div>
-                <div class="col-span-6 md:col-span-2">
-                  <app-input
-                    label="Débito"
-                    type="number"
-                    [control]="line.controls.debit_amount"
-                  />
-                </div>
-                <div class="col-span-6 md:col-span-2">
-                  <app-input
-                    label="Crédito"
-                    type="number"
-                    [control]="line.controls.credit_amount"
-                  />
-                </div>
-                <div class="col-span-12 md:col-span-1 flex justify-end">
-                  @if (linesArray.length > 2) {
-                    <app-button
-                      variant="ghost"
-                      size="sm"
-                      label="Quitar"
-                      (clicked)="removeLine(i)"
-                    />
-                  }
-                </div>
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- Live balance indicator -->
-        <div
-          class="flex items-center justify-between rounded-lg border p-3"
-          [class.border-border]="balanced()"
-          [class.bg-surface]="balanced()"
-          [class.border-red-300]="!balanced()"
-          [class.bg-red-50]="!balanced()"
-        >
-          <div class="text-sm">
-            <span class="text-text-secondary">DR </span>
-            <span class="font-mono font-semibold">{{ totalDebit() | currency }}</span>
-            <span class="text-text-secondary"> / CR </span>
-            <span class="font-mono font-semibold">{{ totalCredit() | currency }}</span>
-          </div>
-          <div class="text-sm font-semibold" [class.text-emerald-600]="balanced()" [class.text-red-600]="!balanced()">
-            @if (balanced()) {
-              Balanceado
-            } @else {
-              Diferencia: {{ balanceDelta() | currency }}
-            }
-          </div>
-        </div>
-      </form>
-
-      <div slot="footer" class="flex items-center justify-end gap-2">
-        <app-button
-          variant="outline"
-          size="md"
-          label="Cancelar"
-          (clicked)="closeModal()"
-        />
-        <app-button
-          variant="primary"
-          size="md"
-          label="Crear asiento"
-          [loading]="saving()"
-          [disabled]="submitDisabled()"
-          (clicked)="onSubmit()"
-        />
-      </div>
-    </app-modal>
-  `,
+  templateUrl: './journal-entries.component.html',
 })
 export class JournalEntriesComponent {
   private readonly api = inject(SuperadminFiscalService);
@@ -363,6 +131,26 @@ export class JournalEntriesComponent {
     totalPages: 0,
   });
 
+  // Stats derived from the current page slice (lightweight; the dashboard
+  // KPI module already covers full-range aggregations).
+  readonly stats = computed<JournalEntriesStats>(() => {
+    const rows = this.entries();
+    let totalDebit = 0;
+    let totalCredit = 0;
+    let manualCount = 0;
+    for (const e of rows) {
+      totalDebit += Number(e.total_debit ?? 0) || 0;
+      totalCredit += Number(e.total_credit ?? 0) || 0;
+      if (e.source_type === 'manual_journal_entry') manualCount += 1;
+    }
+    return {
+      total: this.pagination().total,
+      totalDebit,
+      totalCredit,
+      manualCount,
+    };
+  });
+
   // date range is a tiny ReactiveForm for two inputs
   readonly dateRange = this.fb.group({
     from: this.fb.nonNullable.control(getDefaultStartDate()),
@@ -381,16 +169,6 @@ export class JournalEntriesComponent {
     this.periods().map((p) => ({ value: p.id, label: p.name })),
   );
 
-  // ─── Header actions ─────────────────────────────────────────────────────
-  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
-    {
-      id: 'new-entry',
-      label: 'Asiento Manual',
-      variant: 'primary',
-      icon: 'plus',
-    },
-  ]);
-
   // ─── Table config ───────────────────────────────────────────────────────
   readonly columns: TableColumn[] = [
     {
@@ -406,7 +184,7 @@ export class JournalEntriesComponent {
       sortable: true,
       width: '110px',
       priority: 1,
-      transform: (v: string) => v, // template uses DatePipe
+      transform: (v: string) => v,
     },
     {
       key: 'description',
@@ -593,9 +371,6 @@ export class JournalEntriesComponent {
   }
 
   // ─── Handlers ───────────────────────────────────────────────────────────
-  onHeaderAction(actionId: string): void {
-    if (actionId === 'new-entry') this.openModal();
-  }
   onSearch(term: string): void {
     this.searchTerm.set(term);
     this.pagination.update((p) => ({ ...p, page: 1 }));
@@ -689,6 +464,10 @@ export class JournalEntriesComponent {
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────
+  formatMoney(value: number): string {
+    return this.currencyFormat.format(value);
+  }
+
   private makeLine(): FormGroup<JournalLineForm> {
     return this.fb.group<JournalLineForm>({
       account_code: this.fb.nonNullable.control('', {

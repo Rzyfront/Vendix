@@ -17,7 +17,7 @@
       >
         <div class="text-center">
           <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
           ></div>
           <p class="mt-2 text-sm text-text-secondary">
             Cargando configuración fiscal...
@@ -40,7 +40,7 @@
               <app-icon
                 name="info"
                 [size]="18"
-                customClasses="text-primary"
+                customClasses="text-primary-600"
               ></app-icon>
               <h2
                 class="text-sm font-semibold text-text-primary uppercase tracking-wide"
@@ -135,13 +135,12 @@
             helperText="Entidad fiscal dueña del NIT"
           ></app-input>
 
-          <app-input
-            label="ID resolución DIAN"
-            type="number"
+          <app-selector
+            label="Resolución activa (factura)"
             formControlName="invoice_resolution_id"
-            [control]="form.get('invoice_resolution_id')"
-            helperText="Requerida para emitir documentos"
-          ></app-input>
+            [options]="salesInvoiceResolutionOptions()"
+            helperText="Resoluciones tipo factura del ambiente seleccionado"
+          ></app-selector>
 
           <app-input
             label="ID config DIAN"
@@ -471,7 +470,7 @@
         @if (loadingTransmissions()) {
           <div class="p-8 text-center">
             <div
-              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
             ></div>
             <p class="mt-2 text-text-secondary">Cargando registro...</p>
           </div>
@@ -584,6 +583,435 @@
           </div>
         }
       </div>
+
+      <!-- ================= Resoluciones DIAN plataforma ================= -->
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+      >
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div class="flex items-center gap-2">
+            <app-icon
+              name="file-stack"
+              [size]="18"
+              customClasses="text-text-primary"
+            ></app-icon>
+            <h2
+              class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+            >
+              Resoluciones DIAN plataforma
+            </h2>
+          </div>
+          <app-button
+            type="button"
+            variant="primary"
+            size="sm"
+            (clicked)="openResolutionModal()"
+          >
+            <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+            Nueva resolución
+          </app-button>
+        </div>
+
+        @if (loadingResolutions()) {
+          <div class="p-6 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+            ></div>
+            <p class="mt-2 text-sm text-text-secondary">
+              Cargando resoluciones...
+            </p>
+          </div>
+        } @else if (resolutions().length === 0) {
+          <app-empty-state
+            icon="file-stack"
+            title="Sin resoluciones DIAN"
+            description="Crea la primera resolución DIAN para la organización plataforma."
+          ></app-empty-state>
+        } @else {
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead>
+                <tr class="border-b border-border text-left text-text-secondary">
+                  <th class="py-2 pr-4 font-medium">Prefijo</th>
+                  <th class="py-2 pr-4 font-medium">Tipo</th>
+                  <th class="py-2 pr-4 font-medium">Rango</th>
+                  <th class="py-2 pr-4 font-medium">Vigencia</th>
+                  <th class="py-2 pr-4 font-medium text-right">Actual</th>
+                  <th class="py-2 font-medium text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of resolutions(); track row.id) {
+                  <tr class="border-b border-border/70 last:border-0">
+                    <td class="py-2 pr-4 font-medium text-text-primary">
+                      {{ row.prefix }}
+                    </td>
+                    <td class="py-2 pr-4 text-text-secondary">
+                      {{ resolutionDocTypeLabel(row.document_type) }}
+                    </td>
+                    <td class="py-2 pr-4 text-text-secondary">
+                      {{ row.range_from }} – {{ row.range_to }}
+                    </td>
+                    <td class="py-2 pr-4 text-text-secondary">
+                      @if (row.valid_from) {
+                        {{ row.valid_from | date: 'mediumDate' }}
+                      } @else {
+                        —
+                      }
+                      <span class="px-1">→</span>
+                      @if (row.valid_to) {
+                        {{ row.valid_to | date: 'mediumDate' }}
+                      } @else {
+                        —
+                      }
+                    </td>
+                    <td class="py-2 pr-4 text-right font-medium text-text-primary">
+                      {{ row.current_number }}
+                    </td>
+                    <td class="py-2 text-center">
+                      <span
+                        class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+                        [class]="
+                          row.is_active
+                            ? 'bg-green-50 text-green-700 border-green-200'
+                            : 'bg-gray-50 text-gray-600 border-gray-200'
+                        "
+                      >
+                        {{ row.is_active ? 'Activa' : 'Inactiva' }}
+                      </span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </div>
+
+      <!-- ================= Documento soporte a proveedores ================= -->
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"
+        [formGroup]="vendorSupportForm"
+      >
+        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <app-icon
+                name="receipt"
+                [size]="18"
+                customClasses="text-text-primary"
+              ></app-icon>
+              <h2
+                class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+              >
+                Documento soporte a proveedores
+              </h2>
+            </div>
+            <p class="text-sm text-text-secondary max-w-3xl">
+              Emisión electrónica de documento soporte a la DIAN para compras a
+              proveedores no obligados a facturar electrónicamente.
+            </p>
+          </div>
+
+          @if (vendorSupportConfig(); as cfg) {
+            <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
+              <div class="rounded-md border border-border px-3 py-2 text-center">
+                <p class="text-xs text-text-secondary">Aceptados</p>
+                <p class="text-lg font-semibold text-green-700">
+                  {{ cfg.stats.accepted }}
+                </p>
+              </div>
+              <div class="rounded-md border border-border px-3 py-2 text-center">
+                <p class="text-xs text-text-secondary">Pendientes</p>
+                <p class="text-lg font-semibold text-amber-700">
+                  {{ cfg.stats.pending }}
+                </p>
+              </div>
+              <div class="rounded-md border border-border px-3 py-2 text-center">
+                <p class="text-xs text-text-secondary">Errores</p>
+                <p class="text-lg font-semibold text-red-700">
+                  {{ cfg.stats.errors }}
+                </p>
+              </div>
+            </div>
+          }
+        </div>
+
+        @if (loadingVendorSupport()) {
+          <div class="p-6 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+            ></div>
+            <p class="mt-2 text-sm text-text-secondary">
+              Cargando configuración...
+            </p>
+          </div>
+        } @else {
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="flex items-center gap-2 text-sm text-text-primary">
+                <app-toggle formControlName="is_enabled"></app-toggle>
+                <span>Activar documento soporte</span>
+              </label>
+              @if (vendorSupportIsEnabled()) {
+                <label class="flex items-center gap-2 text-sm text-text-primary">
+                  <app-toggle formControlName="auto_transmit"></app-toggle>
+                  <span>Transmitir automáticamente</span>
+                </label>
+              }
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <app-selector
+                label="Ambiente"
+                formControlName="environment"
+                [options]="environmentOptions"
+              ></app-selector>
+              <app-selector
+                label="Resolución doc. soporte"
+                formControlName="invoice_resolution_id"
+                [options]="vendorSupportResolutionOptions()"
+              ></app-selector>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <app-button
+              type="button"
+              variant="primary"
+              size="sm"
+              [loading]="savingVendorSupport()"
+              [disabled]="savingVendorSupport()"
+              (clicked)="onSaveVendorSupportConfig()"
+            >
+              <app-icon slot="icon" name="save" [size]="14"></app-icon>
+              Guardar
+            </app-button>
+          </div>
+
+          <!-- Transmisiones recientes -->
+          <div class="pt-4 border-t border-border">
+            <div class="flex items-center gap-2 mb-3">
+              <app-icon
+                name="list-checks"
+                [size]="16"
+                customClasses="text-text-primary"
+              ></app-icon>
+              <h3 class="text-sm font-semibold text-text-primary">
+                Transmisiones recientes
+              </h3>
+            </div>
+
+            @if (loadingVendorSupportTransmissions()) {
+              <div class="p-6 text-center">
+                <div
+                  class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+                ></div>
+              </div>
+            } @else if (vendorSupportTransmissions().length === 0) {
+              <app-empty-state
+                icon="file-text"
+                title="Sin transmisiones"
+                description="Cuando se aprueben documentos soporte y la emisión esté activa, aparecerán aquí."
+              ></app-empty-state>
+            } @else {
+              <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                  <thead>
+                    <tr class="border-b border-border text-left text-text-secondary">
+                      <th class="py-2 pr-4 font-medium">Doc. soporte</th>
+                      <th class="py-2 pr-4 font-medium">Número</th>
+                      <th class="py-2 pr-4 font-medium">Estado DIAN</th>
+                      <th class="py-2 pr-4 font-medium">Enviado</th>
+                      <th class="py-2 pr-4 font-medium">Error</th>
+                      <th class="py-2 font-medium text-right">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of vendorSupportTransmissions(); track row.id) {
+                      <tr class="border-b border-border/70 last:border-0">
+                        <td class="py-2 pr-4">
+                          <div class="font-medium text-text-primary">
+                            #{{ row.source_id }}
+                          </div>
+                          @if (row.vendor_support_document?.vendor_name) {
+                            <div class="text-xs text-text-secondary truncate max-w-[180px]">
+                              {{ row.vendor_support_document?.vendor_name }}
+                            </div>
+                          }
+                        </td>
+                        <td class="py-2 pr-4 text-text-primary">
+                          {{ row.document_number }}
+                        </td>
+                        <td class="py-2 pr-4">
+                          <span
+                            class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
+                            [class]="statusBadgeClasses(row.transmission_status)"
+                          >
+                            {{ statusLabel(row.transmission_status) }}
+                          </span>
+                        </td>
+                        <td class="py-2 pr-4 text-text-secondary">
+                          @if (row.sent_at) {
+                            {{ row.sent_at | date: 'short' }}
+                          } @else {
+                            —
+                          }
+                        </td>
+                        <td class="py-2 pr-4 text-xs text-red-700 truncate max-w-[220px]">
+                          {{ row.error_message || '' }}
+                        </td>
+                        <td class="py-2 text-right">
+                          <app-button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            [loading]="retryingVendorSupportId() === row.id"
+                            [disabled]="!canRetryVendorSupport(row)"
+                            (clicked)="onRetryVendorSupport(row)"
+                          >
+                            <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                            Reintentar
+                          </app-button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              @if (vendorSupportPagination().totalPages > 1) {
+                <div class="pt-2 flex justify-center">
+                  <app-pagination
+                    [currentPage]="vendorSupportPagination().page"
+                    [totalPages]="vendorSupportPagination().totalPages"
+                    [total]="vendorSupportPagination().total"
+                    [limit]="vendorSupportPagination().limit"
+                    infoStyle="page"
+                    (pageChange)="changeVendorSupportPage($event)"
+                  ></app-pagination>
+                </div>
+              }
+            }
+          </div>
+        }
+      </div>
     </div>
   }
+
+  <!-- ================= Modal: nueva resolución DIAN ================= -->
+  <app-modal
+    [isOpen]="resolutionModalOpen()"
+    title="Nueva resolución DIAN"
+    subtitle="Plataforma Vendix · alcance organización"
+    size="md"
+    (closed)="closeResolutionModal()"
+  >
+    <form [formGroup]="resolutionForm" class="space-y-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-input
+          label="Prefijo"
+          type="text"
+          formControlName="prefix"
+          [control]="resolutionForm.get('prefix')"
+          [required]="true"
+          placeholder="SETP"
+          helperText="Máximo 4 caracteres"
+        ></app-input>
+
+        <app-selector
+          label="Tipo de documento"
+          formControlName="document_type"
+          [options]="documentTypeOptions"
+          [required]="true"
+        ></app-selector>
+
+        <app-selector
+          label="Ambiente"
+          formControlName="environment"
+          [options]="environmentOptions"
+          [required]="true"
+          helperText="El backend usa el ambiente del config DIAN"
+        ></app-selector>
+
+        <app-input
+          label="N° de resolución"
+          type="text"
+          formControlName="resolution_number"
+          [control]="resolutionForm.get('resolution_number')"
+        ></app-input>
+
+        <app-input
+          label="Rango inicial"
+          type="number"
+          formControlName="rango_inicial"
+          [control]="resolutionForm.get('rango_inicial')"
+          [required]="true"
+        ></app-input>
+
+        <app-input
+          label="Rango final"
+          type="number"
+          formControlName="rango_final"
+          [control]="resolutionForm.get('rango_final')"
+          [required]="true"
+        ></app-input>
+
+        <app-input
+          label="Llave técnica"
+          type="text"
+          formControlName="technical_key"
+          [control]="resolutionForm.get('technical_key')"
+        ></app-input>
+
+        <app-input
+          label="Fecha de resolución"
+          type="date"
+          formControlName="resolution_date"
+          [control]="resolutionForm.get('resolution_date')"
+        ></app-input>
+
+        <app-input
+          label="Válida desde"
+          type="date"
+          formControlName="valid_from"
+          [control]="resolutionForm.get('valid_from')"
+        ></app-input>
+
+        <app-input
+          label="Válida hasta"
+          type="date"
+          formControlName="valid_to"
+          [control]="resolutionForm.get('valid_to')"
+        ></app-input>
+      </div>
+
+      @if (resolutionForm.errors?.['rango_final_invalid']) {
+        <p class="text-xs text-red-700">
+          El rango final debe ser mayor que el rango inicial.
+        </p>
+      }
+    </form>
+
+    <div slot="footer" class="flex justify-end gap-2">
+      <app-button
+        type="button"
+        variant="outline"
+        [disabled]="savingResolution()"
+        (clicked)="closeResolutionModal()"
+      >
+        Cancelar
+      </app-button>
+      <app-button
+        type="button"
+        variant="primary"
+        [loading]="savingResolution()"
+        [disabled]="savingResolution() || resolutionFormInvalid()"
+        (clicked)="onCreateResolution()"
+      >
+        <app-icon slot="icon" name="save" [size]="16"></app-icon>
+        Crear resolución
+      </app-button>
+    </div>
+  </app-modal>
 </div>

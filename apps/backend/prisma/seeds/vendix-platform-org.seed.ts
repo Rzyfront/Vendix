@@ -6,6 +6,28 @@ import {
   FiscalStatusBlock,
 } from '../../src/common/interfaces/fiscal-status.interface';
 
+/**
+ * Splits a Colombian tax id that may carry the verification digit inline
+ * (e.g. `"900123456-7"`) into its base NIT and DV. The canonical fiscal
+ * contracts (`buildWizardPrefill`, the config checklist, DIAN UBL) read NIT
+ * and DV as SEPARATE fields, so the seed must never store the DV glued to
+ * the NIT. When no DV is present, `nit_dv` is left empty.
+ */
+function splitNitDv(taxId: string | null | undefined): {
+  nit: string;
+  nit_dv: string;
+} {
+  const raw = (taxId ?? '').trim();
+  const dashIndex = raw.lastIndexOf('-');
+  if (dashIndex > 0) {
+    return {
+      nit: raw.slice(0, dashIndex).trim(),
+      nit_dv: raw.slice(dashIndex + 1).trim(),
+    };
+  }
+  return { nit: raw, nit_dv: '' };
+}
+
 export interface SeedVendixPlatformOrgResult {
   organization_id: number;
   organization_updated: boolean;
@@ -18,6 +40,7 @@ export interface SeedVendixPlatformOrgResult {
   invoice_resolutions_created: number;
   support_dian_config_created: boolean;
   vendor_support_setting_written: boolean;
+  default_taxes_seeded: number;
 }
 
 /**
@@ -257,13 +280,18 @@ export async function seedVendixPlatformOrg(
   //    we only stub the row so foreign-key validations in the SaaS DIAN
   //    flow do not block the seed.
   let dian_config_created = false;
+  // DIAN owns the canonical NIT/DV; store them split (never DV-inline) so
+  // buildWizardPrefill resolves `nit_dv` and the identity checklist passes.
+  const { nit: dianNit, nit_dv: dianNitDv } = splitNitDv(
+    vendixOrg.tax_id ?? '900123456-7',
+  );
   const existingDian = await client.dian_configurations.findFirst({
     where: {
       organization_id: vendixOrg.id,
       accounting_entity_id: accountingEntity.id,
       configuration_type: 'invoicing',
     },
-    select: { id: true },
+    select: { id: true, nit: true, nit_dv: true },
   });
   if (!existingDian) {
     await client.dian_configurations.create({
@@ -271,7 +299,8 @@ export async function seedVendixPlatformOrg(
         organization_id: vendixOrg.id,
         accounting_entity_id: accountingEntity.id,
         name: 'Vendix S.A.S. — DIAN (pendiente configuración)',
-        nit: vendixOrg.tax_id ?? '900123456-7',
+        nit: dianNit,
+        nit_dv: dianNitDv,
         nit_type: 'NIT',
         is_default: true,
         configuration_type: 'invoicing',
@@ -283,6 +312,16 @@ export async function seedVendixPlatformOrg(
       },
     });
     dian_config_created = true;
+  } else if (
+    // Self-heal legacy rows that stored the DV glued to the NIT (or with an
+    // empty nit_dv) — without this the identity checklist stays incomplete.
+    (existingDian.nit?.includes('-') || !existingDian.nit_dv) &&
+    dianNitDv
+  ) {
+    await client.dian_configurations.update({
+      where: { id: existingDian.id },
+      data: { nit: dianNit, nit_dv: dianNitDv },
+    });
   }
 
   // 8. Bootstrap fiscal `organization_settings` for org 1 (Vendix platform).
@@ -332,6 +371,16 @@ export async function seedVendixPlatformOrg(
       vendixOrg.tax_id ?? '900123456-7',
     );
 
+  // 12. Bootstrap the Colombian default tax catalogue for org 1 (IVA 19/5/0,
+  //     Impoconsumo 8%, ICA Bogotá, Retefuente 2.5%) at ORGANIZATION scope
+  //     (store_id NULL). The fiscal config checklist requires at least one
+  //     tax category to mark `default_taxes` satisfied. Idempotent mirror of
+  //     DefaultTaxesSeederService: find-or-create category + rate by name.
+  const default_taxes_seeded = await ensurePlatformDefaultTaxes(
+    client,
+    vendixOrg.id,
+  );
+
   console.log(
     `[Platform Org] Vendix Corp id=${vendixOrg.id} (is_platform=${true}) ` +
       `entity=${accountingEntity.id} puc_accounts=${pucResult.accounts_created} ` +
@@ -339,7 +388,8 @@ export async function seedVendixPlatformOrg(
       `org_settings=${organization_settings_written} ` +
       `resolutions+=${invoice_resolutions_created} ` +
       `support_dian=${support_dian_config_created} ` +
-      `vendor_support_flag=${vendor_support_setting_written}`,
+      `vendor_support_flag=${vendor_support_setting_written} ` +
+      `default_taxes=${default_taxes_seeded}`,
   );
 
   return {
@@ -354,6 +404,7 @@ export async function seedVendixPlatformOrg(
     invoice_resolutions_created,
     support_dian_config_created,
     vendor_support_setting_written,
+    default_taxes_seeded,
   };
 }
 
@@ -416,9 +467,13 @@ async function ensurePlatformOrganizationSettings(
   // --- fiscal_data: baseline platform identity (deep-merge non-destructive) ---
   const currentFiscalData: Record<string, any> =
     (currentSettings.fiscal_data as Record<string, any> | null) ?? {};
+  const { nit: identityNit, nit_dv: identityNitDv } = splitNitDv(
+    identity.tax_id,
+  );
   const defaultFiscalData: Record<string, any> = {
     legal_name: identity.legal_name,
-    nit: identity.tax_id,
+    nit: identityNit,
+    nit_dv: identityNitDv,
     nit_type: 'NIT',
     person_type: 'JURIDICA',
     tax_regime: 'COMUN',
@@ -474,6 +529,20 @@ async function ensurePlatformOrganizationSettings(
       nextFiscalData[key] = defaultValue;
       dirty = true;
     }
+  }
+
+  // Self-heal a legacy `nit` that carries the DV inline (e.g. "900123456-7"):
+  // split it and backfill `nit_dv` so fiscal_data matches the separated
+  // contract the wizard/checklist expect. Only corrects the malformed shape;
+  // a clean NIT already split is left untouched.
+  if (
+    typeof nextFiscalData.nit === 'string' &&
+    nextFiscalData.nit.includes('-')
+  ) {
+    const { nit: healedNit, nit_dv: healedDv } = splitNitDv(nextFiscalData.nit);
+    nextFiscalData.nit = healedNit;
+    if (!nextFiscalData.nit_dv && healedDv) nextFiscalData.nit_dv = healedDv;
+    dirty = true;
   }
 
   if (!dirty) return false;
@@ -695,4 +764,126 @@ async function ensurePlatformSupportDocumentDianConfig(
     },
   });
   return true;
+}
+
+/**
+ * Seeds the Colombian default tax catalogue for the platform org at
+ * ORGANIZATION scope (store_id NULL). Idempotent mirror of
+ * `DefaultTaxesSeederService.seed({ scope: 'ORGANIZATION' })`: find-or-create
+ * each category by (organization_id, name) and its matching rate. Returns the
+ * number of categories processed. Never overwrites existing rows beyond
+ * refreshing description/tax_type/rate, so a super-admin's edits to ranges or
+ * extra categories survive a re-seed.
+ */
+async function ensurePlatformDefaultTaxes(
+  client: PrismaClient,
+  organizationId: number,
+): Promise<number> {
+  const templates: {
+    name: string;
+    description: string;
+    rate: number;
+    tax_type: 'iva' | 'inc' | 'ica' | 'withholding';
+    priority: number;
+  }[] = [
+    {
+      name: 'IVA 19%',
+      description: 'Impuesto al Valor Agregado - Tarifa general',
+      rate: 0.19,
+      tax_type: 'iva',
+      priority: 10,
+    },
+    {
+      name: 'IVA 5%',
+      description: 'Impuesto al Valor Agregado - Tarifa reducida',
+      rate: 0.05,
+      tax_type: 'iva',
+      priority: 11,
+    },
+    {
+      name: 'IVA 0%',
+      description: 'Impuesto al Valor Agregado - Exento / Tarifa cero',
+      rate: 0.0,
+      tax_type: 'iva',
+      priority: 12,
+    },
+    {
+      name: 'Impoconsumo 8%',
+      description:
+        'Impuesto Nacional al Consumo - Restaurantes/bares (8%, no descontable)',
+      rate: 0.08,
+      tax_type: 'inc',
+      priority: 15,
+    },
+    {
+      name: 'ICA Bogotá',
+      description:
+        'Impuesto de Industria y Comercio - Bogotá (tarifa común 9.66 x 1000)',
+      rate: 0.00966,
+      tax_type: 'ica',
+      priority: 20,
+    },
+    {
+      name: 'Retención en la Fuente 2.5%',
+      description: 'Retención en la fuente - Servicios generales',
+      rate: 0.025,
+      tax_type: 'withholding',
+      priority: 30,
+    },
+  ];
+
+  let processed = 0;
+  for (const template of templates) {
+    const existingCategory = await client.tax_categories.findFirst({
+      where: { name: template.name, store_id: null, organization_id: organizationId },
+      select: { id: true },
+    });
+
+    let categoryId: number;
+    if (existingCategory) {
+      const updated = await client.tax_categories.update({
+        where: { id: existingCategory.id },
+        data: { description: template.description, tax_type: template.tax_type },
+        select: { id: true },
+      });
+      categoryId = updated.id;
+    } else {
+      const created = await client.tax_categories.create({
+        data: {
+          name: template.name,
+          description: template.description,
+          tax_type: template.tax_type,
+          store_id: null,
+          organization_id: organizationId,
+        },
+        select: { id: true },
+      });
+      categoryId = created.id;
+    }
+
+    const existingRate = await client.tax_rates.findFirst({
+      where: { tax_category_id: categoryId, store_id: null, name: template.name },
+      select: { id: true },
+    });
+    if (existingRate) {
+      await client.tax_rates.update({
+        where: { id: existingRate.id },
+        data: { rate: template.rate, is_compound: false, priority: template.priority },
+      });
+    } else {
+      await client.tax_rates.create({
+        data: {
+          tax_category_id: categoryId,
+          store_id: null,
+          rate: template.rate,
+          name: template.name,
+          is_compound: false,
+          priority: template.priority,
+        },
+      });
+    }
+    processed++;
+  }
+
+  return processed;
 }

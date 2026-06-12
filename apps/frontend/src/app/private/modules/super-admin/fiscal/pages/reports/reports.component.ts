@@ -19,11 +19,14 @@ import {
   SelectorComponent,
   SelectorOption,
   SpinnerComponent,
-  StickyHeaderComponent,
+  StatsComponent,
   TableColumn,
   ToastService,
 } from '../../../../../../shared/components';
-import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import {
+  CurrencyFormatService,
+  CurrencyPipe,
+} from '../../../../../../shared/pipes/currency/currency.pipe';
 import { getDefaultEndDate, getDefaultStartDate } from '../../../../../../shared/utils/date.util';
 import {
   BalanceSheetGroup,
@@ -36,13 +39,28 @@ import { SuperadminFiscalService } from '../../services/superadmin-fiscal.servic
 
 type ReportTab = 'trial' | 'balance' | 'income' | 'ledger';
 
+interface StatCardConfig {
+  title: string;
+  value: string | number;
+  smallText: string;
+  icon: string;
+  bg: string;
+  color: string;
+}
+
+interface StatsConfig {
+  card1: StatCardConfig;
+  card2: StatCardConfig;
+  card3: StatCardConfig;
+  card4: StatCardConfig;
+}
+
 @Component({
   selector: 'app-fiscal-reports',
   standalone: true,
   imports: [
     FormsModule,
     CurrencyPipe,
-    StickyHeaderComponent,
     CardComponent,
     EmptyStateComponent,
     InputComponent,
@@ -50,242 +68,9 @@ type ReportTab = 'trial' | 'balance' | 'income' | 'ledger';
     ScrollableTabsComponent,
     SelectorComponent,
     SpinnerComponent,
+    StatsComponent,
   ],
-  template: `
-    <div class="w-full">
-      <app-sticky-header
-        title="Reportes Contables"
-        subtitle="Balance de prueba, balance general, estado de resultados y libro mayor"
-        icon="file-text"
-      />
-
-      <div class="px-2 md:px-4 pt-2 pb-4 space-y-4">
-        <app-card [responsive]="true" [padding]="false" customClasses="!p-0">
-          <div class="px-2 py-2 md:px-4 md:py-3 border-b border-border">
-            <app-scrollable-tabs
-              [tabs]="tabs"
-              [activeTab]="activeTab()"
-              size="sm"
-              ariaLabel="Secciones de reportes"
-              (tabChange)="onTabChange($any($event))"
-            />
-          </div>
-
-          <div class="p-3 md:p-4 space-y-4">
-            <!-- Filters per tab -->
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
-              @if (activeTab() !== 'balance' && activeTab() !== 'ledger') {
-                <div class="md:col-span-3">
-                  <app-input
-                    label="Desde"
-                    type="date"
-                    size="sm"
-                    [control]="range.controls.from"
-                  />
-                </div>
-                <div class="md:col-span-3">
-                  <app-input
-                    label="Hasta"
-                    type="date"
-                    size="sm"
-                    [control]="range.controls.to"
-                  />
-                </div>
-              }
-              @if (activeTab() === 'balance') {
-                <div class="md:col-span-3">
-                  <app-input
-                    label="Al"
-                    type="date"
-                    size="sm"
-                    [control]="asOfControl"
-                  />
-                </div>
-              }
-              @if (activeTab() === 'ledger') {
-                <div class="md:col-span-3">
-                  <app-selector
-                    size="sm"
-                    variant="outline"
-                    label="Cuenta"
-                    placeholder="Selecciona una cuenta…"
-                    [options]="ledgerAccountOptions()"
-                    [ngModel]="ledgerAccountCode()"
-                    (ngModelChange)="onLedgerAccountChange($any($event))"
-                  />
-                </div>
-                <div class="md:col-span-3">
-                  <app-input
-                    label="Desde"
-                    type="date"
-                    size="sm"
-                    [control]="range.controls.from"
-                  />
-                </div>
-                <div class="md:col-span-3">
-                  <app-input
-                    label="Hasta"
-                    type="date"
-                    size="sm"
-                    [control]="range.controls.to"
-                  />
-                </div>
-              }
-              <div class="md:col-span-3 flex items-end">
-                <app-selector
-                  size="sm"
-                  variant="outline"
-                  label="Vista"
-                  [options]="groupingOptions"
-                  [ngModel]="grouping()"
-                  (ngModelChange)="onGroupingChange($any($event))"
-                />
-              </div>
-            </div>
-
-            @if (loading()) {
-              <div class="py-8 text-center">
-                <app-spinner size="md" label="Generando reporte…"></app-spinner>
-              </div>
-            }
-
-            <!-- TRIAL BALANCE -->
-            @if (activeTab() === 'trial' && !loading()) {
-              <h3 class="text-sm font-semibold text-text-primary">Balance de Prueba</h3>
-              @if (trialRows().length === 0) {
-                <app-empty-state
-                  icon="file-text"
-                  title="Sin movimientos"
-                  description="No hay movimientos en el periodo seleccionado."
-                  [showActionButton]="false"
-                />
-              } @else {
-                <app-responsive-data-view
-                  [data]="trialRows()"
-                  [columns]="trialColumns"
-                  [cardConfig]="trialCard"
-                  [loading]="loading()"
-                />
-                <div class="text-right text-sm font-semibold pt-2">
-                  Σ DR {{ trialTotalDebit() | currency }} · Σ CR {{ trialTotalCredit() | currency }}
-                </div>
-              }
-            }
-
-            <!-- BALANCE SHEET -->
-            @if (activeTab() === 'balance' && !loading()) {
-              <h3 class="text-sm font-semibold text-text-primary">Balance General</h3>
-              @if (!balanceSheet()) {
-                <app-empty-state
-                  icon="file-text"
-                  title="Sin datos"
-                  description="No se pudo generar el balance general para la fecha indicada."
-                  [showActionButton]="false"
-                />
-              } @else {
-                <div class="space-y-4">
-                  @for (group of balanceGroups(); track group.account_type) {
-                    <div>
-                      <h4 class="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1">
-                        {{ group.label }}
-                      </h4>
-                      <app-responsive-data-view
-                        [data]="group.accounts"
-                        [columns]="groupColumns"
-                        [cardConfig]="groupCard"
-                        [loading]="loading()"
-                      />
-                      <div class="text-right text-sm font-semibold pt-1">
-                        Subtotal: {{ toNumber(group.total) | currency }}
-                      </div>
-                    </div>
-                  }
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-border">
-                    <div class="flex justify-between text-sm">
-                      <span class="text-text-secondary">Total activos</span>
-                      <span class="font-mono font-semibold">
-                        {{ toNumber(balanceSheet()?.total_assets) | currency }}
-                      </span>
-                    </div>
-                    <div class="flex justify-between text-sm">
-                      <span class="text-text-secondary">Total pasivo + patrimonio</span>
-                      <span class="font-mono font-semibold">
-                        {{ toNumber(balanceSheet()?.total_liabilities_equity) | currency }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              }
-            }
-
-            <!-- INCOME STATEMENT -->
-            @if (activeTab() === 'income' && !loading()) {
-              <h3 class="text-sm font-semibold text-text-primary">Estado de Resultados</h3>
-              @if (!incomeStatement()) {
-                <app-empty-state
-                  icon="file-text"
-                  title="Sin datos"
-                  description="No se pudo generar el estado de resultados para el periodo."
-                  [showActionButton]="false"
-                />
-              } @else {
-                <div class="space-y-4">
-                  @for (group of incomeGroups(); track group.account_type) {
-                    <div>
-                      <h4 class="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1">
-                        {{ group.label }}
-                      </h4>
-                      <app-responsive-data-view
-                        [data]="group.accounts"
-                        [columns]="groupColumns"
-                        [cardConfig]="groupCard"
-                        [loading]="loading()"
-                      />
-                      <div class="text-right text-sm font-semibold pt-1">
-                        Subtotal: {{ toNumber(group.total) | currency }}
-                      </div>
-                    </div>
-                  }
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2 border-t border-border">
-                    <div class="flex justify-between text-sm">
-                      <span class="text-text-secondary">Resultado neto</span>
-                      <span class="font-mono font-semibold">
-                        {{ toNumber(incomeStatement()?.net_income) | currency }}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              }
-            }
-
-            <!-- GENERAL LEDGER -->
-            @if (activeTab() === 'ledger' && !loading()) {
-              <h3 class="text-sm font-semibold text-text-primary">Libro Mayor</h3>
-              @if (!ledgerAccountCode()) {
-                <p class="text-sm text-text-secondary py-4">
-                  Selecciona una cuenta para ver su libro mayor.
-                </p>
-              } @else if (ledgerRows().length === 0) {
-                <app-empty-state
-                  icon="file-text"
-                  title="Sin movimientos"
-                  description="La cuenta no tiene movimientos en el periodo."
-                  [showActionButton]="false"
-                />
-              } @else {
-                <app-responsive-data-view
-                  [data]="ledgerRows()"
-                  [columns]="ledgerColumns"
-                  [cardConfig]="ledgerCard"
-                  [loading]="loading()"
-                />
-              }
-            }
-          </div>
-        </app-card>
-      </div>
-    </div>
-  `,
+  templateUrl: './reports.component.html',
 })
 export class ReportsComponent {
   private readonly api = inject(SuperadminFiscalService);
@@ -351,12 +136,193 @@ export class ReportsComponent {
   });
 
   readonly ledgerAccountOptions = computed<SelectorOption[]>(() => {
-    // Trial balance rows include the account code + name; reuse as a quick
-    // source for account selection without a second round-trip.
     return this.trialRows().map((r) => ({
       value: r.account_code,
       label: `${r.account_code} — ${r.account_name}`,
     }));
+  });
+
+  // ─── Title per active report ───────────────────────────────────────────
+  readonly reportTitle = computed<string>(() => {
+    switch (this.activeTab()) {
+      case 'trial':
+        return 'Balance de Prueba';
+      case 'balance':
+        return 'Balance General';
+      case 'income':
+        return 'Estado de Resultados';
+      case 'ledger':
+        return 'Libro Mayor';
+      default:
+        return 'Reportes';
+    }
+  });
+
+  // ─── Stats per active report ───────────────────────────────────────────
+  readonly statsConfig = computed<StatsConfig>(() => {
+    const tab = this.activeTab();
+    if (tab === 'trial') {
+      const rows = this.trialRows();
+      return {
+        card1: {
+          title: 'Cuentas',
+          value: rows.length,
+          smallText: 'Con movimientos en el rango',
+          icon: 'book',
+          bg: 'bg-blue-100',
+          color: 'text-blue-600',
+        },
+        card2: {
+          title: 'Σ Débito',
+          value: this.currencyFormat.format(this.trialTotalDebit()),
+          smallText: 'Total débito del rango',
+          icon: 'arrow-down-circle',
+          bg: 'bg-emerald-100',
+          color: 'text-emerald-600',
+        },
+        card3: {
+          title: 'Σ Crédito',
+          value: this.currencyFormat.format(this.trialTotalCredit()),
+          smallText: 'Total crédito del rango',
+          icon: 'arrow-up-circle',
+          bg: 'bg-amber-100',
+          color: 'text-amber-600',
+        },
+        card4: {
+          title: 'Diferencia',
+          value: this.currencyFormat.format(
+            Math.abs(this.trialTotalDebit() - this.trialTotalCredit()),
+          ),
+          smallText: 'DR − CR',
+          icon: 'scale',
+          bg: 'bg-purple-100',
+          color: 'text-purple-600',
+        },
+      };
+    }
+    if (tab === 'balance') {
+      const bs = this.balanceSheet();
+      const assets = this.toNumber(bs?.total_assets);
+      const liabEq = this.toNumber(bs?.total_liabilities_equity);
+      return {
+        card1: {
+          title: 'Activos',
+          value: this.currencyFormat.format(assets),
+          smallText: 'Total activos',
+          icon: 'wallet',
+          bg: 'bg-blue-100',
+          color: 'text-blue-600',
+        },
+        card2: {
+          title: 'Pasivos',
+          value: this.currencyFormat.format(this.toNumber(bs?.liabilities?.total)),
+          smallText: 'Obligaciones',
+          icon: 'credit-card',
+          bg: 'bg-amber-100',
+          color: 'text-amber-600',
+        },
+        card3: {
+          title: 'Patrimonio',
+          value: this.currencyFormat.format(this.toNumber(bs?.equity?.total)),
+          smallText: 'Capital + utilidades',
+          icon: 'building',
+          bg: 'bg-emerald-100',
+          color: 'text-emerald-600',
+        },
+        card4: {
+          title: 'Diferencia',
+          value: this.currencyFormat.format(Math.abs(assets - liabEq)),
+          smallText: 'A − (P + Patrim.)',
+          icon: 'scale',
+          bg: 'bg-purple-100',
+          color: 'text-purple-600',
+        },
+      };
+    }
+    if (tab === 'income') {
+      const is = this.incomeStatement();
+      return {
+        card1: {
+          title: 'Ingresos',
+          value: this.currencyFormat.format(this.toNumber(is?.total_revenue)),
+          smallText: 'Total ingresos',
+          icon: 'trending-up',
+          bg: 'bg-emerald-100',
+          color: 'text-emerald-600',
+        },
+        card2: {
+          title: 'Costos',
+          value: this.currencyFormat.format(this.toNumber(is?.total_cost)),
+          smallText: 'Costo de ventas',
+          icon: 'package',
+          bg: 'bg-amber-100',
+          color: 'text-amber-600',
+        },
+        card3: {
+          title: 'Gastos',
+          value: this.currencyFormat.format(this.toNumber(is?.total_expenses)),
+          smallText: 'Gastos operativos',
+          icon: 'trending-down',
+          bg: 'bg-red-100',
+          color: 'text-red-600',
+        },
+        card4: {
+          title: 'Resultado',
+          value: this.currencyFormat.format(this.toNumber(is?.net_income)),
+          smallText: 'Utilidad neta',
+          icon: 'dollar-sign',
+          bg: 'bg-purple-100',
+          color: 'text-purple-600',
+        },
+      };
+    }
+    // ledger
+    const rows = this.ledgerRows();
+    const totalDebit = rows.reduce(
+      (acc, r) => acc + Number(r.debit_amount ?? 0) || 0,
+      0,
+    );
+    const totalCredit = rows.reduce(
+      (acc, r) => acc + Number(r.credit_amount ?? 0) || 0,
+      0,
+    );
+    const lastBalance = rows.length
+      ? this.toNumber(rows[rows.length - 1].balance)
+      : 0;
+    return {
+      card1: {
+        title: 'Movimientos',
+        value: rows.length,
+        smallText: 'En la cuenta seleccionada',
+        icon: 'list',
+        bg: 'bg-blue-100',
+        color: 'text-blue-600',
+      },
+      card2: {
+        title: 'Σ Débito',
+        value: this.currencyFormat.format(totalDebit),
+        smallText: 'Total débito',
+        icon: 'arrow-down-circle',
+        bg: 'bg-emerald-100',
+        color: 'text-emerald-600',
+      },
+      card3: {
+        title: 'Σ Crédito',
+        value: this.currencyFormat.format(totalCredit),
+        smallText: 'Total crédito',
+        icon: 'arrow-up-circle',
+        bg: 'bg-amber-100',
+        color: 'text-amber-600',
+      },
+      card4: {
+        title: 'Saldo',
+        value: this.currencyFormat.format(lastBalance),
+        smallText: 'Final del periodo',
+        icon: 'scale',
+        bg: 'bg-purple-100',
+        color: 'text-purple-600',
+      },
+    };
   });
 
   // ─── Table configs ─────────────────────────────────────────────────────
@@ -457,6 +423,18 @@ export class ReportsComponent {
   };
 
   constructor() {
+    // React to date range changes (trial / income / ledger)
+    this.range.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.reload());
+
+    // React to "as of" changes (balance sheet)
+    this.asOfControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (this.activeTab() === 'balance') this.loadBalance();
+      });
+
     this.reload();
   }
 
@@ -492,6 +470,7 @@ export class ReportsComponent {
         // Ledger waits for an account selection; pre-warm trial rows so the
         // account selector has data.
         this.loadTrial();
+        this.loadLedger();
         break;
     }
   }

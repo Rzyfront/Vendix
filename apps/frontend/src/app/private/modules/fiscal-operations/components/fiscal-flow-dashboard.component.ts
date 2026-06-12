@@ -885,10 +885,11 @@ export class FiscalFlowDashboardComponent {
     const isPlatform = this.scope() === 'platform';
     if (isPlatform) {
       const map: Record<string, string | null> = {
-        'sales/emission': null,
-        'sales/dian': null,
+        'sales/emission': '/super-admin/subscriptions/fiscal-billing',
+        'sales/dian': '/super-admin/subscriptions/fiscal-billing',
         'sales/journal': '/super-admin/fiscal/accounting/journal-entries',
-        'purchases/support_documents': null,
+        'purchases/support_documents':
+          '/super-admin/subscriptions/fiscal-billing',
         'purchases/withholdings':
           '/super-admin/fiscal/accounting/account-mappings',
         'payroll/settlement': null,
@@ -942,11 +943,12 @@ export class FiscalFlowDashboardComponent {
     const isPlatform = this.scope() === 'platform';
     if (isPlatform) {
       // La plataforma no tiene wizard (siempre opera) ni módulos de
-      // tienda (ventas, nómina, retenciones con UVT). Solo se conserva
-      // el checklist de Contabilidad + identidad + reglas.
+      // tienda (ventas, nómina, retenciones con UVT). El centro fiscal
+      // de plataforma reusa el módulo de facturación SaaS para DIAN +
+      // resoluciones; lo demás queda en Contabilidad + identidad.
       const map: Record<string, string | null> = {
         'settings/fiscal': '/super-admin/fiscal/identity',
-        'fiscal/dian': null,
+        'fiscal/dian': '/super-admin/subscriptions/fiscal-billing',
         'accounting/chart-of-accounts':
           '/super-admin/fiscal/accounting/chart-of-accounts',
         'accounting/periods': null,
@@ -954,7 +956,8 @@ export class FiscalFlowDashboardComponent {
         'accounting/mappings':
           '/super-admin/fiscal/accounting/account-mappings',
         'fiscal/withholding': null,
-        'invoicing/resolutions': null,
+        'invoicing/resolutions':
+          '/super-admin/subscriptions/fiscal-billing',
         'fiscal/uvt': null,
         'payroll/settings': null,
       };

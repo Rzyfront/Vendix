@@ -602,7 +602,10 @@ export class VendorSupportFiscalService {
       );
     }
     const lockKey = `vendor_support_fiscal_resolution:${platform.accounting_entity_id}:${settings.invoice_resolution_id}`;
-    await tx.$queryRawUnsafe(
+    // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
+    // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
+    // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
+    await tx.$executeRawUnsafe(
       'SELECT pg_advisory_xact_lock(hashtext($1))',
       lockKey,
     );

@@ -960,7 +960,10 @@ export class SubscriptionFiscalService {
       throw new BadRequestException('A DIAN invoice resolution is required');
     }
     const lockKey = `subscription_fiscal_resolution:${settings.accounting_entity_id}:${settings.invoice_resolution_id}`;
-    await tx.$queryRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', lockKey);
+    // pg_advisory_xact_lock returns void — must use $executeRaw, not $queryRaw.
+    // Prisma's driver adapter (7.4.1) cannot map a `void` result column and
+    // throws P2010 UnsupportedNativeDataType when this runs through $queryRaw.
+    await tx.$executeRawUnsafe('SELECT pg_advisory_xact_lock(hashtext($1))', lockKey);
 
     const resolution = await tx.invoice_resolutions.findFirst({
       where: {

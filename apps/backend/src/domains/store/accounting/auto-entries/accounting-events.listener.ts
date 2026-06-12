@@ -281,7 +281,17 @@ export class AccountingEventsListener {
     user_id?: number;
   }) {
     try {
-      if (!(await this.isFlowEnabled(event.store_id, 'expenses'))) return;
+      // Pass organization_id so platform-scoped expenses (store_id null, e.g.
+      // vendor support documents) resolve the fiscal gate instead of falling
+      // back to org_id=0 and being silently skipped.
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id,
+          'expenses',
+          event.organization_id,
+        ))
+      )
+        return;
       await this.auto_entry_service.onExpenseApproved({
         expense_id: event.expense_id,
         organization_id: event.organization_id,

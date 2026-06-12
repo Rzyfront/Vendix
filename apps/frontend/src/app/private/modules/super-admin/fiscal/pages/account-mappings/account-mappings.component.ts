@@ -26,12 +26,12 @@ import {
   ResponsiveDataViewComponent,
   SelectorComponent,
   SelectorOption,
+  SortDirection,
   SpinnerComponent,
-  StickyHeaderComponent,
+  StatsComponent,
   TableAction,
   TableColumn,
   ToastService,
-  SortDirection,
 } from '../../../../../../shared/components';
 import {
   AccountMapping,
@@ -54,13 +54,19 @@ interface OverrideForm {
   account_code: FormControl<string>;
 }
 
+interface MappingStats {
+  total: number;
+  defaults: number;
+  organization: number;
+  partner: number;
+}
+
 @Component({
   selector: 'app-account-mappings',
   standalone: true,
   imports: [
     ReactiveFormsModule,
     FormsModule,
-    StickyHeaderComponent,
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
@@ -68,41 +74,88 @@ interface OverrideForm {
     ResponsiveDataViewComponent,
     SelectorComponent,
     SpinnerComponent,
+    StatsComponent,
   ],
   template: `
     <div class="w-full">
-      <app-sticky-header
-        title="Mapeos Contables"
-        subtitle="Llaves de mapeo entre eventos de plataforma y cuentas PUC"
-        icon="link"
-      />
+      <!-- Stats: sticky on mobile, static on desktop -->
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
+        @if (stats(); as s) {
+          <app-stats
+            title="Total Mapeos"
+            [value]="s.total"
+            iconName="link"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+            [clickable]="false"
+          />
+          <app-stats
+            title="Por Defecto"
+            [value]="s.defaults"
+            iconName="lock"
+            iconBgColor="bg-gray-100"
+            iconColor="text-gray-600"
+            [clickable]="false"
+          />
+          <app-stats
+            title="Organización"
+            [value]="s.organization"
+            iconName="building-2"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-600"
+            [clickable]="false"
+          />
+          <app-stats
+            title="Partner"
+            [value]="s.partner"
+            iconName="handshake"
+            iconBgColor="bg-purple-100"
+            iconColor="text-purple-600"
+            [clickable]="false"
+          />
+        }
+      </div>
 
-      <div class="px-2 md:px-4 pt-2 pb-4 space-y-4">
-        <app-card [responsive]="true" [padding]="false" customClasses="!p-0">
-          <div class="px-2 py-2 md:px-4 md:py-3 border-b border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Llaves
-                <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">
-                  ({{ mappings().length }})
-                </span>
-              </h2>
-              <div class="w-full md:w-72">
-                <app-selector
-                  size="sm"
-                  variant="outline"
-                  label="Filtrar por prefijo"
-                  [options]="prefixOptions"
-                  [ngModel]="prefixFilter()"
-                  (ngModelChange)="onPrefixChange($any($event))"
-                />
-              </div>
+      <!-- Unified container: sticky search header + data -->
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
+        <!-- Filter header (sticky on mobile) -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                 md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide
+                     md:text-lg md:font-semibold md:text-text-primary"
+            >
+              Llaves de Mapeo ({{ mappings().length }})
+            </h2>
+            <div class="w-full md:w-72">
+              <app-selector
+                size="sm"
+                variant="outline"
+                label="Filtrar por prefijo"
+                [options]="prefixOptions"
+                [ngModel]="prefixFilter()"
+                (ngModelChange)="onPrefixChange($any($event))"
+              />
             </div>
           </div>
+        </div>
 
+        <!-- Data content -->
+        <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
-              <app-spinner size="md" label="Cargando mapeos…"></app-spinner>
+              <app-spinner size="md" label="Cargando mapeos…" />
             </div>
           }
 
@@ -112,25 +165,23 @@ interface OverrideForm {
               title="Sin mapeos"
               description="No hay mapeos contables para el prefijo seleccionado."
               [showActionButton]="false"
-            ></app-empty-state>
+            />
           }
 
           @if (!loading() && mappings().length > 0) {
-            <div class="px-2 pb-2 pt-2 md:p-4">
-              <app-responsive-data-view
-                [data]="mappings()"
-                [columns]="columns"
-                [cardConfig]="cardConfig"
-                [actions]="actions"
-                [loading]="loading()"
-                [sortable]="true"
-                (sort)="onSort($event)"
-                (rowClick)="onRowClick($any($event))"
-              />
-            </div>
+            <app-responsive-data-view
+              [data]="mappings()"
+              [columns]="columns"
+              [cardConfig]="cardConfig"
+              [actions]="actions"
+              [loading]="loading()"
+              [sortable]="true"
+              (sort)="onSort($event)"
+              (rowClick)="onRowClick($any($event))"
+            />
           }
-        </app-card>
-      </div>
+        </div>
+      </app-card>
     </div>
 
     <!-- Override modal -->
@@ -157,7 +208,8 @@ interface OverrideForm {
             (ngModelChange)="form.controls.account_code.setValue($any($event))"
           />
           <p class="text-xs text-text-secondary mt-1">
-            Por defecto: {{ selectedMapping()?.account_code }} — {{ selectedMapping()?.account_name }}
+            Por defecto: {{ selectedMapping()?.account_code }} —
+            {{ selectedMapping()?.account_name }}
           </p>
         </div>
       </form>
@@ -216,6 +268,17 @@ export class AccountMappingsComponent {
     const m = this.selectedMapping();
     if (!m) return '';
     return `Llave: ${m.mapping_key}`;
+  });
+
+  // ─── Stats derivadas de la cascada (default/org/partner) ───────────────
+  readonly stats = computed<MappingStats>(() => {
+    const list = this.mappings();
+    return {
+      total: list.length,
+      defaults: list.filter((m) => (m.source ?? 'default') === 'default').length,
+      organization: list.filter((m) => m.source === 'organization').length,
+      partner: list.filter((m) => m.source === 'partner').length,
+    };
   });
 
   // ─── Form ──────────────────────────────────────────────────────────────
@@ -291,7 +354,6 @@ export class AccountMappingsComponent {
   };
 
   constructor() {
-    this.loadMappings();
     this.loadChartAccounts();
 
     effect(() => {
@@ -365,7 +427,10 @@ export class AccountMappingsComponent {
     if (!m) return;
     this.saving.set(true);
     this.api
-      .setMappingOverride(m.mapping_key, this.form.controls.account_code.value.trim())
+      .setMappingOverride(
+        m.mapping_key,
+        this.form.controls.account_code.value.trim(),
+      )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {

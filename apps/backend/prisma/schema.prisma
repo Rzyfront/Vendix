@@ -4547,12 +4547,17 @@ enum certificate_source_enum {
 /// where the DIAN config is anchored to the organization only (store_id IS NULL).
 /// When fiscal_scope=STORE, store_id is required. The DB enforces:
 ///   - CHECK dian_configurations_scope_org_chk (organization_id NOT NULL)
-///   - partial unique idx dian_configurations_store_scope_uq (store_id, nit)
-///     WHERE store_id IS NOT NULL
-///   - partial unique idx dian_configurations_org_scope_uq (organization_id, nit)
-///     WHERE store_id IS NULL
-/// These partial unique indexes cannot be represented as @@unique in Prisma,
-/// so they live in migration 20260511160000_relax_dian_store_id_for_org_scope.
+///   - partial unique idx dian_configurations_store_scope_uq
+///     (store_id, nit, configuration_type) WHERE store_id IS NOT NULL
+///   - partial unique idx dian_configurations_org_scope_uq
+///     (organization_id, nit, configuration_type) WHERE store_id IS NULL
+/// configuration_type is part of the uniqueness key so the same accounting
+/// entity may hold sibling rows for invoicing + support_document + payroll
+/// without collisions. These partial unique indexes cannot be represented as
+/// @@unique in Prisma; they live in migrations
+/// 20260511160000_relax_dian_store_id_for_org_scope (original shape) and
+/// 20260612120000_dian_configurations_uq_per_configuration_type
+/// (configuration_type added to the key).
 model dian_configurations {
   id                             Int                          @id @default(autoincrement())
   organization_id                Int
