@@ -73,7 +73,168 @@ function quantityColorFor(item: StockMovement): string {
   return colorScales.gray[700];
 }
 
-const MovementCard = ({ item, onPress }: { item: StockMovement; onPress?: () => void }) => {
+const TYPE_DETAIL_CONFIG: Record<MovementType, { icon: string; bg: string; border: string; text: string }> = {
+  stock_in:    { icon: 'trending-down', bg: colorScales.green[50], border: colorScales.green[200], text: colorScales.green[700] },
+  stock_out:   { icon: 'trending-up',   bg: colorScales.red[50],   border: colorScales.red[200],   text: colorScales.red[700] },
+  transfer:    { icon: 'truck',         bg: colorScales.amber[50], border: colorScales.amber[200], text: colorScales.amber[700] },
+  adjustment:  { icon: 'edit-2',        bg: colorScales.blue[50],  border: colorScales.blue[200],  text: colorScales.blue[700] },
+  sale:        { icon: 'shopping-bag', bg: colorScales.amber[50], border: colorScales.amber[200], text: colorScales.amber[700] },
+  return:      { icon: 'rotate-ccw',    bg: colorScales.blue[50],  border: colorScales.blue[200],  text: colorScales.blue[700] },
+  damage:      { icon: 'alert-triangle', bg: colorScales.red[50],  border: colorScales.red[200],   text: colorScales.red[700] },
+  expiration:  { icon: 'clock',         bg: colorScales.gray[100], border: colorScales.gray[200], text: colorScales.gray[600] },
+};
+
+const SOURCE_ORDER_LABELS: Record<string, string> = {
+  purchase: 'Orden de Compra',
+  sale: 'Orden de Venta',
+  transfer: 'Transferencia',
+  return: 'Devolución',
+};
+
+function MovementDetailModal({
+  movement,
+  onClose,
+}: {
+  movement: StockMovement | null;
+  onClose: () => void;
+}) {
+  if (!movement) return null;
+  const cfg = TYPE_DETAIL_CONFIG[movement.movement_type] ?? TYPE_DETAIL_CONFIG.expiration;
+  const typeLabel = MOVEMENT_TYPE_LABELS[movement.movement_type] ?? movement.movement_type;
+  const sign = signFor(movement);
+  const absQty = Math.abs(movement.quantity);
+  const isInbound = sign === '+';
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailModal}>
+          {/* Header */}
+          <View style={styles.detailHeader}>
+            <Text style={styles.detailTitle}>Detalle del Movimiento</Text>
+            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
+              <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+            </Pressable>
+          </View>
+
+          <ScrollView style={styles.detailBody} contentContainerStyle={styles.detailBodyContent} showsVerticalScrollIndicator={false}>
+            {/* Tipo */}
+            <View style={[styles.detailTypeCard, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+              <View style={[styles.detailTypeIcon, { backgroundColor: colors.background, borderColor: cfg.border }]}>
+                <Icon name={cfg.icon} size={24} color={cfg.text} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.detailTypeLabel}>Tipo de Movimiento</Text>
+                <Text style={[styles.detailTypeValue, { color: cfg.text }]}>{typeLabel}</Text>
+              </View>
+            </View>
+
+            {/* Producto */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="package" size={16} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>Producto</Text>
+              </View>
+              <View style={styles.detailInfoCard}>
+                <Text style={styles.detailInfoPrimary}>{movement.product_name || 'Producto desconocido'}</Text>
+                {movement.product_id ? <Text style={styles.detailInfoSecondary}>ID: {movement.product_id}</Text> : null}
+              </View>
+            </View>
+
+            {/* Ubicaciones */}
+            {(movement.location_name || movement.store_name) && (
+              <View style={styles.detailSection}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
+                  <Text style={styles.detailSectionTitle}>Ubicaciones</Text>
+                </View>
+                <View style={styles.detailInfoCard}>
+                  {movement.store_name ? (
+                    <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailInfoLabel}>Tienda</Text>
+                      <Text style={styles.detailInfoPrimary}>{movement.store_name}</Text>
+                    </View>
+                  ) : null}
+                  {movement.location_name ? (
+                    <View style={styles.detailInfoRow}>
+                      <Text style={styles.detailInfoLabel}>Ubicación</Text>
+                      <Text style={styles.detailInfoPrimary}>{movement.location_name}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              </View>
+            )}
+
+            {/* Cantidad */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="hash" size={16} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>Cantidad</Text>
+              </View>
+              <View style={[styles.detailQuantityCard, { backgroundColor: isInbound ? colorScales.green[50] : colorScales.red[50], borderColor: isInbound ? colorScales.green[200] : colorScales.red[200] }]}>
+                <Text style={[styles.detailQuantityValue, { color: isInbound ? colorScales.green[700] : colorScales.red[700] }]}>
+                  {sign}
+                  {absQty}
+                </Text>
+                <Text style={styles.detailQuantityUnit}>unidades</Text>
+              </View>
+            </View>
+
+            {/* Auditoría */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="users" size={16} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>Auditoría</Text>
+              </View>
+              <View style={styles.detailInfoCard}>
+                <View style={styles.detailAuditRow}>
+                  <View style={styles.detailAuditIcon}>
+                    <Icon name="user" size={16} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailInfoLabel}>Registrado por</Text>
+                    <Text style={styles.detailInfoPrimary}>{movement.user_name || 'Sistema'}</Text>
+                    <Text style={styles.detailInfoSecondary}>{formatDate(movement.created_at)}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Notas */}
+            {movement.notes ? (
+              <View style={styles.detailSection}>
+                <View style={styles.detailSectionHeader}>
+                  <Icon name="file-text" size={16} color={colorScales.gray[500]} />
+                  <Text style={styles.detailSectionTitle}>Notas</Text>
+                </View>
+                <View style={styles.detailInfoCard}>
+                  <Text style={styles.detailInfoPrimary}>{movement.notes}</Text>
+                </View>
+              </View>
+            ) : null}
+          </ScrollView>
+
+          {/* Footer */}
+          <View style={styles.detailFooter}>
+            <Pressable style={styles.detailCancelBtn} onPress={onClose}>
+              <Text style={styles.detailCancelBtnText}>Cerrar</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const MovementCard = ({
+  item,
+  onPress,
+  onShowDetail,
+}: {
+  item: StockMovement;
+  onPress?: () => void;
+  onShowDetail: (movement: StockMovement) => void;
+}) => {
   const variant = TYPE_VARIANT[item.movement_type] ?? 'default';
   const label = MOVEMENT_TYPE_LABELS[item.movement_type] ?? item.movement_type;
   const sign = signFor(item);
@@ -113,7 +274,16 @@ const MovementCard = ({ item, onPress }: { item: StockMovement; onPress?: () => 
             {absQty}
           </Text>
         </View>
-        <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
+        <View style={styles.cardFooterActions}>
+          <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
+          <Pressable
+            onPress={() => onShowDetail(item)}
+            hitSlop={6}
+            style={styles.eyeBtn}
+          >
+            <Icon name="eye" size={16} color={colors.primary} />
+          </Pressable>
+        </View>
       </View>
     </View>
   );
@@ -127,6 +297,7 @@ export default function MovementsScreen() {
   const [showFilterOptions, setShowFilterOptions] = useState(false);
   const [showFilterTypeList, setShowFilterTypeList] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const [detailMovement, setDetailMovement] = useState<StockMovement | null>(null);
   const actionsBtnRef = useRef<View>(null);
   const filterBtnRef = useRef<View>(null);
   const [actionsPos, setActionsPos] = useState({ top: 0, right: 0 });
@@ -164,6 +335,12 @@ export default function MovementsScreen() {
       router.push(`/(store-admin)/inventory/stock-detail?productId=${item.product_id}` as never);
     }
   }, [router]);
+
+  // Al pulsar el ícono de ojo en una card → abre directamente el modal de detalle
+  // (Sin popup menu intermedio, según feedback del usuario)
+  const handleShowCardActions = useCallback((movement: StockMovement) => {
+    setDetailMovement(movement);
+  }, []);
 
   const openActions = useCallback(() => {
     actionsBtnRef.current?.measureInWindow((x, y, w, h) => {
@@ -218,7 +395,13 @@ export default function MovementsScreen() {
         <FlatList
           data={movements}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <MovementCard item={item} onPress={() => handleProductPress(item)} />}
+          renderItem={({ item }) => (
+            <MovementCard
+              item={item}
+              onPress={() => handleProductPress(item)}
+              onShowDetail={setDetailMovement}
+            />
+          )}
           ListHeaderComponent={
             <View>
               <View style={styles.titleRow}>
@@ -323,6 +506,12 @@ export default function MovementsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de detalle del movimiento (estilo web) — se abre al pulsar el ojo */}
+      <MovementDetailModal
+        movement={detailMovement}
+        onClose={() => setDetailMovement(null)}
+      />
     </View>
   );
 }
@@ -399,6 +588,42 @@ const styles = StyleSheet.create({
   cardFooterLeft: { gap: 2 },
   cardFooterLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
   cardFooterValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any },
+  cardFooterActions: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  eyeBtn: { width: 32, height: 32, borderRadius: borderRadius.md, backgroundColor: colorScales.green[50], alignItems: 'center', justifyContent: 'center' },
+  cardActionBtn: { width: 36, height: 36, borderRadius: borderRadius.md, backgroundColor: colorScales.green[100], alignItems: 'center', justifyContent: 'center' },
+
+  /* Modal de detalle del movimiento (estilo web) */
+  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
+  detailModal: {
+    backgroundColor: colors.background, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 520, maxHeight: '90%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
+  detailHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[3], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100] },
+  detailTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailCloseBtn: { padding: spacing[1] },
+  detailBody: { flexGrow: 0, flexShrink: 1, maxHeight: 500 },
+  detailBodyContent: { padding: spacing[4], gap: spacing[4] },
+  detailSection: { gap: spacing[2] },
+  detailSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing[1.5] },
+  detailSectionTitle: { fontSize: 11, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailTypeCard: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], padding: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1 },
+  detailTypeIcon: { width: 48, height: 48, borderRadius: borderRadius.md, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  detailTypeLabel: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
+  detailTypeValue: { fontSize: typography.fontSize.base, fontWeight: '700' as any, marginTop: 2 },
+  detailInfoCard: { padding: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colors.background, gap: spacing[1] },
+  detailInfoRow: { gap: 2 },
+  detailInfoLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailInfoPrimary: { fontSize: typography.fontSize.sm, fontWeight: '600' as any, color: colorScales.gray[900] },
+  detailInfoSecondary: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
+  detailQuantityCard: { paddingVertical: spacing[5], paddingHorizontal: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1, alignItems: 'center', gap: spacing[1] },
+  detailQuantityValue: { fontSize: typography.fontSize['2xl'], fontWeight: '800' as any },
+  detailQuantityUnit: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
+  detailAuditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2] },
+  detailAuditIcon: { width: 32, height: 32, borderRadius: borderRadius.full, backgroundColor: colorScales.green[50], alignItems: 'center', justifyContent: 'center' },
+  detailFooter: { paddingHorizontal: spacing[4], paddingVertical: spacing[3], borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50] },
+  detailCancelBtn: { paddingVertical: 10, borderRadius: borderRadius.full, backgroundColor: colorScales.gray[900], alignItems: 'center', justifyContent: 'center' },
+  detailCancelBtnText: { fontSize: 13, fontWeight: '700' as any, color: colors.background },
 
   /* Dropdown de acciones */
   dropdownBackdrop: { flex: 1 },
@@ -415,6 +640,7 @@ const styles = StyleSheet.create({
   dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], paddingVertical: spacing[2.5], paddingHorizontal: spacing[3] },
   dropdownIconWrap: { width: 28, height: 28, borderRadius: 6, backgroundColor: colorScales.gray[100], alignItems: 'center', justifyContent: 'center' },
   dropdownItemText: { fontSize: typography.fontSize.sm, fontWeight: '500' as any, color: colorScales.gray[700] },
+  dropdownItemPrimary: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colors.primary },
 
   /* Filter popup (estilo web) */
   filterPopup: {
