@@ -557,10 +557,10 @@ async function ensurePlatformOrganizationSettings(
     where: { organization_id: organizationId },
     create: {
       organization_id: organizationId,
-      settings: nextSettings as Prisma.InputJsonValue,
+      settings: nextSettings as unknown as Prisma.InputJsonValue,
     },
     update: {
-      settings: nextSettings as Prisma.InputJsonValue,
+      settings: nextSettings as unknown as Prisma.InputJsonValue,
       updated_at: new Date(),
     },
   });

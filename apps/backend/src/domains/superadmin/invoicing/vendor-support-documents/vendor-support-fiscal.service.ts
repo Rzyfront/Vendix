@@ -20,7 +20,7 @@ import {
 const SETTINGS_KEY = 'vendor_support_fiscal';
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 
-interface VendorSupportFiscalSettings {
+export interface VendorSupportFiscalSettings {
   is_enabled: boolean;
   auto_transmit: boolean;
   environment: VendorSupportFiscalEnvironment;
