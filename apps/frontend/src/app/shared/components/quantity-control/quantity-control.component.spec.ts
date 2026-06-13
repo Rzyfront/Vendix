@@ -45,7 +45,7 @@ describe('QuantityControlComponent', () => {
     component['onBlur']();
 
     expect(clamps).toEqual([
-      { attempted: 12, max: 11, reason: 'max' },
+      { attempted: 12, limit: 11, reason: 'max' },
     ]);
     expect(changes).toEqual([11]);
     expect(component['displayValue']).toBe(11);
@@ -74,7 +74,7 @@ describe('QuantityControlComponent', () => {
     component['onBlur']();
 
     expect(clamps).toEqual([
-      { attempted: 0, max: 1, reason: 'min' },
+      { attempted: 0, limit: 1, reason: 'min' },
     ]);
     expect(changes).toEqual([1]);
   });

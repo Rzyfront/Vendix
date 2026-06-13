@@ -8,17 +8,18 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
 
 /**
  * Payload of the `valueClamped` event.
- * Emitted when the user's input was constrained to the min or max value.
+ * Emitted when the user's input was constrained to the min or max value
+ * on commit (blur / Enter / +/- buttons), not on every keystroke.
  */
 export interface QuantityClampEvent {
   /** The value the user typed (pre-clamp). */
   attempted: number;
   /**
-   * The cap the value was clamped to:
+   * The bound the value was clamped to:
    * - For `reason: 'max'`, this is the `max` input (the cap).
    * - For `reason: 'min'`, this is the `min` input (the floor, e.g. 1).
    */
-  max: number;
+  limit: number;
   /** Why the clamp was applied. */
   reason: 'max' | 'min';
 }
@@ -161,12 +162,17 @@ export class QuantityControlComponent {
   readonly valueChange = output<number>();
 
   /**
-   * Emitted when the user's input was clamped to the min or max constraint.
-   * Parents can use this to surface a warning (e.g. stock cap) without
-   * having to re-validate the value themselves.
+   * Emitted on commit (blur / Enter / +/- buttons) when the user's input
+   * was clamped to the min or max constraint. Parents can use this to
+   * surface a warning (e.g. stock cap) without re-validating the value.
+   *
+   * The event is OPT-IN: call-sites that don't bind `(valueClamped)` are
+   * unaffected. The event fires once per commit, never on keystrokes,
+   * to avoid double emissions and toast spam in the POS context.
    *
    * - `attempted`: the value the user typed (pre-clamp).
-   * - `max`: the cap the value was clamped to (the `min` value when reason is 'min').
+   * - `limit`: the bound the value was clamped to (the `min` value when
+   *   reason is 'min', the `max` value when reason is 'max').
    * - `reason`: 'max' if the user typed above max, 'min' if below min.
    */
   readonly valueClamped = output<QuantityClampEvent>();
@@ -263,25 +269,13 @@ export class QuantityControlComponent {
 
     if (!isNaN(numericValue) && /^[0-9]+$/.test(stringValue)) {
       this.displayValue = numericValue;
-
-      // Immediate clamp: if the user just crossed the max threshold on this
-      // keystroke, apply the cap and emit `valueClamped` + `valueChange`
-      // synchronously. This gives the cashier instant feedback (toast +
-      // visible cap in the input) instead of waiting for blur/Enter.
-      const max = this.max();
-      if (max !== null && this.displayValue > max) {
-        this.valueClamped.emit({
-          attempted: this.displayValue,
-          max,
-          reason: 'max',
-        });
-        this.displayValue = max;
-        if (max !== this.value()) {
-          this.emitValue(max);
-        }
-      }
     }
-    // If invalid characters, don't update displayValue
+    // If invalid characters, don't update displayValue.
+    // Clamp + valueClamped emission are deferred to commitValue()
+    // (triggered by blur / Enter / +/- buttons). This keeps the
+    // component's default behavior non-breaking for call-sites that
+    // bind [max] but do NOT bind (valueClamped) — the parent's
+    // valueChange only fires once per commit, not per keystroke.
   }
 
   onKeyDown(event: KeyboardEvent): void {
@@ -352,14 +346,14 @@ export class QuantityControlComponent {
       constrainedValue = this.min();
       clamp = {
         attempted: this.displayValue,
-        max: constrainedValue,
+        limit: constrainedValue,
         reason: 'min',
       };
     } else if (max !== null && this.displayValue > max) {
       constrainedValue = max;
       clamp = {
         attempted: this.displayValue,
-        max,
+        limit: max,
         reason: 'max',
       };
     }

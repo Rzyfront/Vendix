@@ -1046,7 +1046,7 @@ export class PosCartModalComponent {
    */
   onQuantityClamped(item: CartItem, event: QuantityClampEvent): void {
     if (event.reason !== 'max') return;
-    showStockCapToast(this.toastService, item, event.max);
+    showStockCapToast(this.toastService, item, event.limit);
   }
 
   onRemoveItem(itemId: string): void {

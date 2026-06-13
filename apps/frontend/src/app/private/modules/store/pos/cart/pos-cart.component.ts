@@ -1132,7 +1132,7 @@ private cartService = inject(PosCartService);
    */
   onQuantityClamped(item: CartItem, event: QuantityClampEvent): void {
     if (event.reason !== 'max') return;
-    showStockCapToast(this.toastService, item, event.max);
+    showStockCapToast(this.toastService, item, event.limit);
   }
 
   /**
